@@ -22,10 +22,16 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     internal sealed class LuaCsRbxModContext
     {
+        /// <summary>Detached-proxy entries tolerated before the first sweep of collected ones.</summary>
+        private const int MinimumDetachedSweepThreshold = 64;
+
         private readonly MutationEnvelope? _mutationEnvelope;
         private readonly bool _serverGeneratesMutationEnvelopes;
         private readonly Dictionary<RbxInstance, LuaValue> _proxyCache = new();
+        private readonly Dictionary<InstanceId, WeakReference<LuaCsRbxInstanceProxy>> _detachedProxies =
+            new();
         private readonly LuaTable _instanceMeta;
+        private int _detachedSweepThreshold = MinimumDetachedSweepThreshold;
 
         public LuaCsRbxModContext(LuaCsRbxApiBindings bindings, LuaCapabilities capabilities,
             string ownerModId, string originTag)
@@ -87,6 +93,7 @@ namespace CoreAI.Ai.LuaCs
             // generation and keep this chunk's connections. Mirrors the logic-slot keepState exclusion.
             ConnectionGeneration = bindings.Connections?.BeginGeneration(ownerModId) ?? 0;
             _instanceMeta = LuaCsRbxInstanceBindings.BuildInstanceMeta(this);
+            ProxyCachePruner.Attach(bindings.Registry, this);
         }
 
         internal static ActorContext ResolveActorContext(LuaCsRbxApiBindings bindings,
@@ -213,11 +220,26 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Sink storing BasePart spatial/appearance state in Roblox space (shared world).</summary>
         public IPartPropertySink PartSink => Bindings.PartSink;
 
+        /// <summary>Live instances this context holds a proxy for (registered ones only).</summary>
+        internal int ProxyCacheCount => _proxyCache.Count;
+
+        /// <summary>Weakly remembered proxies of unregistered instances, collected ones included.</summary>
+        internal int DetachedProxyCount => _detachedProxies.Count;
+
         /// <summary>
         /// Wraps an instance keeping one proxy per instance so Lua <c>==</c> and table keys behave
         /// like Roblox reference identity.
-        /// TODO: MVP5 — prune destroyed entries during the hot-reload teardown sweep.
         /// </summary>
+        /// <remarks>
+        /// WHY two tiers: a registered instance's proxy is held strongly so identity is stable for
+        /// as long as the instance lives, and the registry's <c>Unregistered</c> event moves it to
+        /// a weak tier when the instance is destroyed — a spawner mod that creates and destroys
+        /// parts all session no longer pins every dead part it ever touched. The weak tier keeps
+        /// identity for a destroyed instance while Lua still holds its proxy: deferred handlers
+        /// (<c>PlayerRemoving</c>, <c>ChildRemoved</c>) receive the destroyed instance after the
+        /// unregister, and <c>data[player] = nil</c> in a save-on-leave handler must find the key
+        /// the join handler stored.
+        /// </remarks>
         public LuaValue WrapInstance(RbxInstance instance)
         {
             if (instance == null)
@@ -230,9 +252,115 @@ namespace CoreAI.Ai.LuaCs
                 return cached;
             }
 
+            if (instance.IsDestroyed)
+            {
+                return WrapDetachedInstance(instance);
+            }
+
             LuaValue proxy = new(new LuaCsRbxInstanceProxy(instance, this, _instanceMeta));
             _proxyCache[instance] = proxy;
             return proxy;
+        }
+
+        /// <summary>
+        /// Moves the proxy of an unregistered instance from the strong cache to the weak tier.
+        /// Called from the registry's <c>Unregistered</c> event; never throws.
+        /// </summary>
+        internal void ForgetProxy(RbxInstance instance)
+        {
+            if (instance == null || !_proxyCache.TryGetValue(instance, out LuaValue cached))
+            {
+                return;
+            }
+
+            _proxyCache.Remove(instance);
+            if (TryGetInstance(cached, out LuaCsRbxInstanceProxy proxy))
+            {
+                RememberDetachedProxy(instance.Id, proxy);
+            }
+        }
+
+        private LuaValue WrapDetachedInstance(RbxInstance instance)
+        {
+            if (_detachedProxies.TryGetValue(instance.Id,
+                    out WeakReference<LuaCsRbxInstanceProxy> weakProxy)
+                && weakProxy.TryGetTarget(out LuaCsRbxInstanceProxy liveProxy)
+                && ReferenceEquals(liveProxy.Instance, instance))
+            {
+                return new LuaValue(liveProxy);
+            }
+
+            LuaCsRbxInstanceProxy created = new(instance, this, _instanceMeta);
+            RememberDetachedProxy(instance.Id, created);
+            return new LuaValue(created);
+        }
+
+        private void RememberDetachedProxy(InstanceId id, LuaCsRbxInstanceProxy proxy)
+        {
+            _detachedProxies[id] = new WeakReference<LuaCsRbxInstanceProxy>(proxy);
+            if (_detachedProxies.Count < _detachedSweepThreshold)
+            {
+                return;
+            }
+
+            List<InstanceId> collected = new();
+            foreach (KeyValuePair<InstanceId, WeakReference<LuaCsRbxInstanceProxy>> pair
+                     in _detachedProxies)
+            {
+                if (!pair.Value.TryGetTarget(out _))
+                {
+                    collected.Add(pair.Key);
+                }
+            }
+
+            for (int index = 0; index < collected.Count; index++)
+            {
+                _detachedProxies.Remove(collected[index]);
+            }
+
+            // WHY doubling: a sweep costs one pass over the tier, so sweeping again only after the
+            // survivors have doubled keeps the amortized cost per destroyed instance constant.
+            _detachedSweepThreshold = Math.Max(MinimumDetachedSweepThreshold,
+                _detachedProxies.Count * 2);
+        }
+
+        /// <summary>
+        /// Forwards <see cref="InstanceRegistry.Unregistered"/> to one context without keeping the
+        /// context alive: a context lives as long as its Lua state, and a registry that held it
+        /// strongly would keep every finished console surface alive with it.
+        /// </summary>
+        private sealed class ProxyCachePruner
+        {
+            private readonly WeakReference<LuaCsRbxModContext> _context;
+            private readonly InstanceRegistry _registry;
+
+            private ProxyCachePruner(InstanceRegistry registry, LuaCsRbxModContext context)
+            {
+                _registry = registry;
+                _context = new WeakReference<LuaCsRbxModContext>(context);
+            }
+
+            public static void Attach(InstanceRegistry registry, LuaCsRbxModContext context)
+            {
+                if (registry == null)
+                {
+                    return;
+                }
+
+                ProxyCachePruner pruner = new(registry, context);
+                registry.Unregistered += pruner.OnUnregistered;
+            }
+
+            private void OnUnregistered(InstanceRecord record)
+            {
+                if (!_context.TryGetTarget(out LuaCsRbxModContext context))
+                {
+                    _registry.Unregistered -= OnUnregistered;
+                    return;
+                }
+
+                context.ForgetProxy(record?.Instance);
+            }
         }
 
         /// <summary>
@@ -637,6 +765,18 @@ namespace CoreAI.Ai.LuaCs
                         // D6 PARENT_LOCKED message for destroyed instances.
                         RbxInstance destination = ReadOptionalInstance(
                             value, "Instance.Parent assignment");
+                        if (self is RbxPlayer)
+                        {
+                            // WHY: a Player leaves only through the leave teardown (PlayerRemoving,
+                            // character cleanup, actor release); moving it out of Players left a
+                            // ghost that GetPlayers still returned and the actor never got back.
+                            throw RbxError.BadArgument(
+                                "Player.Parent cannot be set from a script; a Player leaves only "
+                                + "through Player:Kick()",
+                                "call player:Kick() to remove a player; parent your own objects "
+                                + "into the player instead");
+                        }
+
                         if (!context.Bindings.Registry.IsWorldAclEnabled
                             && IsProtectedSingleton(self))
                         {
@@ -644,7 +784,8 @@ namespace CoreAI.Ai.LuaCs
                             // it would detach it so game:GetService stops resolving it for the world.
                             throw RbxError.BadArgument(
                                 self.ClassName + ".Parent is locked — it is a shared singleton",
-                                "services and workspace.CurrentCamera are fixed for the world's lifetime");
+                                "services, the DataModel and workspace.CurrentCamera are fixed for "
+                                + "the world's lifetime");
                         }
 
                             context.RequireReparent(self, destination);
@@ -653,7 +794,7 @@ namespace CoreAI.Ai.LuaCs
                         case "Archivable":
                             ThrowIfDestroyedForLua(self, key);
                             context.RequireWorldEditForWrite(self, "Archivable");
-                            self.Archivable = value.ToBoolean();
+                            self.Archivable = ReadBooleanValue(value, "Instance.Archivable assignment");
                             return LuaValue.Nil;
                     }
 
@@ -696,6 +837,23 @@ namespace CoreAI.Ai.LuaCs
                 if (TryWriteSpatial(context, self, key, value))
                 {
                     return LuaValue.Nil;
+                }
+
+                if (IsReadOnlyMember(self, key))
+                {
+                    throw RbxError.BadArgument(
+                        "Unable to assign property " + key + ". Property is read only",
+                        "read " + self.ClassName + "." + key + " instead; a script cannot set it");
+                }
+
+                if (key == "CurrentCamera" && self.IsA("Workspace"))
+                {
+                    context.RequireWorldEditForWrite(self, key);
+                    throw RbxError.NotImplemented(
+                        "Workspace.CurrentCamera assignment",
+                        "a later MVP",
+                        "drive the one world camera through workspace.CurrentCamera.CFrame and "
+                        + "CameraType instead of swapping it for another Camera");
                 }
 
                 RbxError knownMemberError = GetKnownUnimplementedMemberError(
@@ -933,8 +1091,8 @@ namespace CoreAI.Ai.LuaCs
                 {
                     case "CharacterAutoLoads":
                         context.RequireWorldEditForWrite(instance, "CharacterAutoLoads");
-                        // Lua truthiness, matching how Anchored/CanCollide are written.
-                        playersTarget.CharacterAutoLoads = value.ToBoolean();
+                        playersTarget.CharacterAutoLoads = ReadBooleanValue(
+                            value, "Players.CharacterAutoLoads assignment");
                         return true;
                     case "RespawnTime":
                         context.RequireWorldEditForWrite(instance, "RespawnTime");
@@ -993,7 +1151,8 @@ namespace CoreAI.Ai.LuaCs
                         return true;
                     case "UseJumpPower":
                         context.RequireWorldEditForWrite(instance, "UseJumpPower");
-                        humanoidTarget.UseJumpPower = value.ToBoolean();
+                        humanoidTarget.UseJumpPower = ReadBooleanValue(
+                            value, "Humanoid.UseJumpPower assignment");
                         context.RecordMutation(instance);
                         return true;
                     case "DisplayName":
@@ -1006,7 +1165,7 @@ namespace CoreAI.Ai.LuaCs
                     // (humanoid.Jump = true), and scripts written for Roblox spell it that way.
                     case "Jump":
                         context.RequireWorldEditForWrite(instance, "Jump");
-                        if (value.ToBoolean())
+                        if (ReadBooleanValue(value, "Humanoid.Jump assignment"))
                         {
                             humanoidTarget.RequestJump();
                         }
@@ -1165,6 +1324,18 @@ namespace CoreAI.Ai.LuaCs
             });
             Method("Destroy", (_, self) =>
             {
+                if (self is RbxPlayer)
+                {
+                    // WHY: destroying a Player bypassed the leave teardown — no PlayerRemoving, the
+                    // character stayed in the world, GetPlayers kept returning the dead Player and
+                    // its actor could never get a live one back this session.
+                    throw RbxError.BadArgument(
+                        "Player cannot be destroyed from a script; a Player leaves only through "
+                        + "Player:Kick()",
+                        "call player:Kick() instead; PlayerRemoving fires and the character is "
+                        + "cleaned up");
+                }
+
                 context.RequireDestroyTree(self, "destroy");
                 if (!context.Bindings.Registry.IsWorldAclEnabled
                     && IsProtectedSingleton(self))
@@ -1174,8 +1345,8 @@ namespace CoreAI.Ai.LuaCs
                     // against destruction too.
                     throw RbxError.BadArgument(
                         self.ClassName + " cannot be destroyed — it is a shared singleton",
-                        "services and workspace.CurrentCamera live for the world's lifetime; "
-                        + "never Destroy them");
+                        "services, the DataModel and workspace.CurrentCamera live for the world's "
+                        + "lifetime; never Destroy them");
                 }
 
                 self.Destroy();
@@ -1185,11 +1356,12 @@ namespace CoreAI.Ai.LuaCs
             {
                 // WHY: game:ClearAllChildren() must not wipe the world's services (Roblox locks
                 // them). GetChildren returns a snapshot, so destroying non-protected children while
-                // iterating is safe; protected singletons (services/Camera) are left intact.
+                // iterating is safe; protected singletons (services/Camera) are left intact, and so
+                // are Players, which leave only through Player:Kick() (see Destroy above).
                 List<RbxInstance> destroyRoots = new();
                 foreach (RbxInstance child in self.GetChildren())
                 {
-                    if (!IsProtectedSingleton(child))
+                    if (!IsProtectedSingleton(child) && !(child is RbxPlayer))
                     {
                         destroyRoots.Add(child);
                     }
@@ -1210,6 +1382,10 @@ namespace CoreAI.Ai.LuaCs
             // count proves the destroy went through an envelope.
             Method("AddItem", (ctx, self) =>
             {
+                // WHY: scheduling a destroy IS a destroy, just later — WorldEdit is the capability
+                // documented as "spawn, move, destroy", and without it a Read-tier mod could delete
+                // anything the ACL lets its actor destroy.
+                context.RequireWorldEdit("Debris:AddItem");
                 RbxDebris debris = (RbxDebris)self;
                 debris.EnsureHost(context.Bindings.Scheduler, context.Bindings.LogSink);
                 RbxInstance item;
@@ -1305,20 +1481,22 @@ namespace CoreAI.Ai.LuaCs
             // none of them run inside the per-call server-generated mutation envelope.
             Method("Create", (ctx, self) =>
             {
+                // WHY: a tween moves, recolours and resizes parts frame by frame — the same writes
+                // a property assignment gates on WorldEdit; Play/Pause/Cancel re-check it below.
+                context.RequireWorldEdit("TweenService:Create");
                 RbxTweenService tweenService = (RbxTweenService)self;
                 tweenService.EnsureHost(context.Bindings.Scheduler,
                     context.Bindings.TweenPropertyHost,
-                    context.Bindings.ResolvePlaybackStateItem);
+                    context.Bindings.ResolvePlaybackStateItem,
+                    context.Bindings.LogSink);
                 RbxInstance target =
                     ReadTargetInstance(Arg(ctx, 1), "TweenService:Create", 1);
                 RbxTweenInfo info = LuaCsRbxDatatypeBindings.ReadTweenInfo(
                     Arg(ctx, 2), "TweenService:Create", 2);
                 List<KeyValuePair<string, object>> goals =
                     ReadPropertyTable(Arg(ctx, 3));
-                RbxTween tween = tweenService.Create(target, info, goals, new TweenCaller(
-                    context.ActorContext.ActorId,
-                    context.ActorContext.Grants.IsUnrestricted,
-                    context.ActorContext.WorldId));
+                RbxTween tween = tweenService.Create(target, info, goals,
+                    CreateTweenCaller(context));
                 return context.WrapInstance(tween);
             }, "TweenService");
             Method("GetValue", (ctx, self) =>
@@ -1342,19 +1520,25 @@ namespace CoreAI.Ai.LuaCs
                     "a later MVP",
                     "interpolate manually with TweenService:GetValue over RunService.Heartbeat");
             }, "TweenService");
+            // WHY the caller-aware overloads: a tween reference can travel between actors (an
+            // ObjectValue, a module export), and whoever calls Play/Pause/Cancel must hold the
+            // write right over the target — not the actor that happened to create the tween.
             Method("Play", (_, self) =>
             {
-                ((RbxTween)self).Play();
+                context.RequireWorldEdit("Tween:Play");
+                ((RbxTween)self).Play(CreateTweenCaller(context));
                 return LuaValue.Nil;
             }, "Tween");
             Method("Pause", (_, self) =>
             {
-                ((RbxTween)self).Pause();
+                context.RequireWorldEdit("Tween:Pause");
+                ((RbxTween)self).Pause(CreateTweenCaller(context));
                 return LuaValue.Nil;
             }, "Tween");
             Method("Cancel", (_, self) =>
             {
-                ((RbxTween)self).Cancel();
+                context.RequireWorldEdit("Tween:Cancel");
+                ((RbxTween)self).Cancel(CreateTweenCaller(context));
                 return LuaValue.Nil;
             }, "Tween");
 
@@ -1500,7 +1684,7 @@ namespace CoreAI.Ai.LuaCs
             {
                 context.RequirePivotMutation(self);
                 PivotTo(context, self,
-                    ReadCFrameValue(Arg(ctx, 1), "PVInstance:PivotTo argument 1"));
+                    ReadPartCFrameValue(Arg(ctx, 1), "PVInstance:PivotTo argument 1"));
                 return LuaValue.Nil;
             }, "PVInstance");
 
@@ -1574,14 +1758,21 @@ namespace CoreAI.Ai.LuaCs
                 return ((RbxPlayer)self).DistanceFromCharacter(point);
             }, "Player");
 
+            // WHY the three Humanoid mutators authorize exactly like the property each one writes
+            // (Health, WalkToPoint, Jump) and run enveloped (IsMutatingMethod): as bare calls they
+            // let any actor kill, heal, walk or launch a character owned by another actor — and a
+            // Read-tier mod do it at all — while `humanoid.Health = 0` was refused.
             Method("TakeDamage", (ctx, self) =>
             {
+                context.RequireWorldEditForWrite(self, "Health");
                 ((RbxHumanoid)self).TakeDamage(
                     ReadDoubleValue(Arg(ctx, 1), "Humanoid:TakeDamage amount"));
+                context.RecordMutation(self);
                 return LuaValue.Nil;
             }, "Humanoid");
             Method("MoveTo", (ctx, self) =>
             {
+                context.RequireWorldEditForWrite(self, "WalkToPoint");
                 // The mirror's second argument is a part to follow; following a moving target needs
                 // the character rig, so it is refused rather than silently ignored.
                 if (Arg(ctx, 2).Type != LuaValueType.Nil)
@@ -1600,6 +1791,7 @@ namespace CoreAI.Ai.LuaCs
                     context, ((RbxHumanoid)self).GetState())), "Humanoid");
             Method("ChangeState", (ctx, self) =>
             {
+                context.RequireWorldEditForWrite(self, "Jump");
                 // WHY only Jumping: it is the one state a script can legitimately force without a
                 // rig. Anything else would be a state the machine never leaves, so it says so.
                 RbxEnumItem requested = ReadHumanoidStateItem(Arg(ctx, 1));
@@ -1678,7 +1870,10 @@ namespace CoreAI.Ai.LuaCs
                    || name == "AddTag"
                    || name == "RemoveTag"
                    || name == "PivotTo"
-                   || name == "Kick";
+                   || name == "Kick"
+                   || name == "TakeDamage"
+                   || name == "MoveTo"
+                   || name == "ChangeState";
         }
 
         private static long ReadUserId(LuaFunctionExecutionContext ctx, int index)
@@ -1722,15 +1917,43 @@ namespace CoreAI.Ai.LuaCs
                 "call instance methods with a colon, e.g. workspace:FindFirstChild(\"Part\")");
         }
 
-        /// <summary>Enforces DEV-7, including the destruction-handler tombstone exception.</summary>
-        // WHY: services (UserInputService/Lighting/Workspace/…) and the canonical Camera are
-        // world-lifetime singletons; the lifecycle bindings refuse to Clone/Destroy them so one mod
-        // cannot brick a shared service for every other mod.
+        // WHY: services (UserInputService/Lighting/Workspace/…), the canonical Camera and the
+        // DataModel itself are world-lifetime singletons; the lifecycle bindings refuse to
+        // Clone/Destroy/reparent them so one mod cannot brick a shared service for every other mod.
+        // The DataModel is listed on its own because its descriptor is not a service: without it
+        // game:Clone() duplicated the whole world and game:Destroy() tore it down in an ACL-off world.
         private static bool IsProtectedSingleton(RbxInstance instance)
         {
-            return instance.IsService || instance.ClassName == "Camera";
+            return instance.IsService || instance is RbxDataModel || instance.ClassName == "Camera";
         }
 
+        /// <summary>
+        /// Bound members a script may read but never assign, answered with the mirror's read-only
+        /// error rather than "not a valid member" (which reads like a typo).
+        /// </summary>
+        private static bool IsReadOnlyMember(RbxInstance instance, string key)
+        {
+            switch (key)
+            {
+                case "ClassName":
+                    return true;
+                case "MoveDirection":
+                case "RootPart":
+                    return instance is RbxHumanoid;
+                case "UserId":
+                    return instance is RbxPlayer;
+                case "LocalPlayer":
+                    return instance is RbxPlayers;
+                case "Instance":
+                case "TweenInfo":
+                case "PlaybackState":
+                    return instance is RbxTween;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>Enforces DEV-7, including the destruction-handler tombstone exception.</summary>
         /// <param name="memberRead">
         /// True on the <c>__index</c> path, where the member is being READ. Reads of the instance a
         /// destruction handler was handed are permitted; writes and method calls never are.
@@ -2006,7 +2229,7 @@ namespace CoreAI.Ai.LuaCs
                     return true;
                 case "WorldPivot":
                     context.RequireWorldEditForWrite(self, "WorldPivot");
-                    RbxCFrame worldPivot = ReadCFrameValue(
+                    RbxCFrame worldPivot = ReadPartCFrameValue(
                         value, "Model.WorldPivot assignment");
                     model.SetWorldPivot(in worldPivot);
                     return true;
@@ -2076,30 +2299,36 @@ namespace CoreAI.Ai.LuaCs
                 : RbxCFrame.Identity;
         }
 
+        /// <summary>
+        /// Mirror <c>PVInstance:PivotTo</c>: "transforms the PVInstance along with all of its
+        /// descendant PVInstances" — every descendant BasePart and Model moves rigidly with the
+        /// pivot, for a BasePart root exactly as for a Model root.
+        /// </summary>
         private static void PivotTo(LuaCsRbxModContext context, RbxInstance instance,
             RbxCFrame target)
         {
             IPartPropertySink sink = context.PartSink;
-            if (instance.IsA("BasePart"))
-            {
-                sink.SetCFrame(instance.Id, target);
-                context.RecordMutation(instance);
-                return;
-            }
-
-            if (!(instance is RbxModel model))
+            bool isPart = instance.IsA("BasePart");
+            RbxModel model = instance as RbxModel;
+            if (!isPart && model == null)
             {
                 throw RbxError.BadArgument(
                     "PivotTo is not available on " + instance.ClassName,
                     "call PivotTo on a BasePart or Model");
             }
 
-            RbxCFrame transform = target * GetPivot(sink, model).Inverse();
+            RbxCFrame transform = target * GetPivot(sink, instance).Inverse();
             List<RbxInstance> parts = new();
             List<RbxCFrame> partCFrames = new();
-            List<RbxModel> models = new() { model };
-            List<RbxCFrame> modelWorldPivots = new() { GetWorldPivot(sink, model) };
-            foreach (RbxInstance descendant in model.GetDescendants())
+            List<RbxModel> models = new();
+            List<RbxCFrame> modelWorldPivots = new();
+            if (model != null)
+            {
+                models.Add(model);
+                modelWorldPivots.Add(GetWorldPivot(sink, model));
+            }
+
+            foreach (RbxInstance descendant in instance.GetDescendants())
             {
                 if (descendant.IsA("BasePart"))
                 {
@@ -2112,6 +2341,14 @@ namespace CoreAI.Ai.LuaCs
                     models.Add(descendantModel);
                     modelWorldPivots.Add(GetWorldPivot(sink, descendantModel));
                 }
+            }
+
+            if (isPart)
+            {
+                // WHY the root takes the target verbatim: target * cf^-1 * cf is only equal to the
+                // target up to float error, and the part the script pivoted must land exactly there.
+                sink.SetCFrame(instance.Id, target);
+                context.RecordMutation(instance);
             }
 
             for (int partIndex = 0; partIndex < parts.Count; partIndex++)
@@ -2224,7 +2461,8 @@ namespace CoreAI.Ai.LuaCs
                     return true;
                 case "Position":
                     context.RequireWorldEditForWrite(self, "Position");
-                    sink.SetPosition(id, ReadVector3Value(value, "Part.Position assignment"));
+                    sink.SetPosition(id,
+                        ReadFiniteVector3Value(value, "Part.Position assignment"));
                     // WHY every positional assignment is noted: the mirror's Touched fires only for
                     // physical movement, so a part MOVED by a script must not report the overlap it
                     // lands in as a collision. The physics relay drops contacts for parts noted here.
@@ -2233,18 +2471,21 @@ namespace CoreAI.Ai.LuaCs
                     return true;
                 case "Size":
                     context.RequireWorldEditForWrite(self, "Size");
-                    sink.SetSize(id, ReadVector3Value(value, "Part.Size assignment"));
+                    sink.SetSize(id, ClampPartSize(
+                        ReadFiniteVector3Value(value, "Part.Size assignment")));
                     context.RecordMutation(self);
                     return true;
                 case "CFrame":
                     context.RequireWorldEditForWrite(self, "CFrame");
-                    sink.SetCFrame(id, ReadCFrameValue(value, "Part.CFrame assignment"));
+                    sink.SetCFrame(id,
+                        ReadPartCFrameValue(value, "Part.CFrame assignment"));
                     context.Bindings.WorldPhysics.NoteTeleport(id);
                     context.RecordMutation(self);
                     return true;
                 case "Orientation":
                     context.RequireWorldEditForWrite(self, "Orientation");
-                    RbxVector3 orientation = ReadVector3Value(value, "Part.Orientation assignment");
+                    RbxVector3 orientation =
+                        ReadFiniteVector3Value(value, "Part.Orientation assignment");
                     PartProperties orientationProperties = sink.GetPartPropertiesOrDefault(id);
                     RbxCFrame orientationCFrame = RbxCFrame.FromOrientation(
                         orientation.X * MathF.PI / 180f,
@@ -2259,7 +2500,8 @@ namespace CoreAI.Ai.LuaCs
                     return true;
                 case "Rotation":
                     context.RequireWorldEditForWrite(self, "Rotation");
-                    RbxVector3 rotation = ReadVector3Value(value, "Part.Rotation assignment");
+                    RbxVector3 rotation =
+                        ReadFiniteVector3Value(value, "Part.Rotation assignment");
                     PartProperties rotationProperties = sink.GetPartPropertiesOrDefault(id);
                     RbxCFrame rotationCFrame = RbxCFrame.FromEulerAnglesXYZ(
                         rotation.X * MathF.PI / 180f,
@@ -2282,12 +2524,13 @@ namespace CoreAI.Ai.LuaCs
                     return true;
                 case "Anchored":
                     context.RequireWorldEditForWrite(self, "Anchored");
-                    sink.SetAnchored(id, value.ToBoolean());
+                    sink.SetAnchored(id, ReadBooleanValue(value, "Part.Anchored assignment"));
                     context.RecordMutation(self);
                     return true;
                 case "CanCollide":
                     context.RequireWorldEditForWrite(self, "CanCollide");
-                    sink.SetCanCollide(id, value.ToBoolean());
+                    sink.SetCanCollide(id,
+                        ReadBooleanValue(value, "Part.CanCollide assignment"));
                     context.RecordMutation(self);
                     return true;
                 default:
@@ -2804,6 +3047,19 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        /// <summary>
+        /// The calling actor as the tween layer sees it, copied from the trusted context and never
+        /// from a Lua argument; the owner mod id makes the mod's unload tear its tweens down.
+        /// </summary>
+        private static TweenCaller CreateTweenCaller(LuaCsRbxModContext context)
+        {
+            return new TweenCaller(
+                context.ActorContext.ActorId,
+                context.ActorContext.Grants.IsUnrestricted,
+                context.ActorContext.WorldId,
+                context.OwnerModId);
+        }
+
         private static LuaValue WrapPlaybackState(LuaCsRbxModContext context,
             RbxTweenPlaybackState state)
         {
@@ -3040,6 +3296,120 @@ namespace CoreAI.Ai.LuaCs
                 "pass a CFrame, got " + Describe(value));
         }
 
+        /// <summary>
+        /// Reads a Vector3 for a spatial write, refusing NaN and infinite components: the engine
+        /// refuses such a pose while the registry would keep answering it, so the two diverge.
+        /// </summary>
+        private static RbxVector3 ReadFiniteVector3Value(LuaValue value, string what)
+        {
+            RbxVector3 vector = ReadVector3Value(value, what);
+            if (!IsFinite(vector))
+            {
+                throw RbxError.BadArgument(
+                    what + " expects a Vector3 with finite components, got NaN or infinity",
+                    "check the arithmetic that produced it (0/0, math.huge) before assigning");
+            }
+
+            return vector;
+        }
+
+        /// <summary>
+        /// Reads a CFrame that becomes a part's pose: finite components required, and a rotation
+        /// that is scaled, skewed or mirrored is orthonormalized as the mirror does for
+        /// <c>BasePart.CFrame</c>. An already orthonormal CFrame is kept bit-for-bit.
+        /// </summary>
+        private static RbxCFrame ReadPartCFrameValue(LuaValue value, string what)
+        {
+            RbxCFrame cframe = ReadCFrameValue(value, what);
+            if (!IsFinite(cframe))
+            {
+                throw RbxError.BadArgument(
+                    what + " expects a CFrame with finite components, got NaN or infinity",
+                    "check the arithmetic that produced it (0/0, math.huge) before assigning");
+            }
+
+            if (IsOrthonormal(cframe))
+            {
+                return cframe;
+            }
+
+            RbxCFrame orthonormal = cframe.Orthonormalize();
+            if (!IsFinite(orthonormal))
+            {
+                throw RbxError.BadArgument(
+                    what + " expects a CFrame with a usable rotation; its axes are zero or parallel",
+                    "build it with CFrame.new, CFrame.lookAt or CFrame.fromMatrix using two "
+                    + "non-zero, non-parallel axes");
+            }
+
+            return orthonormal;
+        }
+
+        private static bool IsFinite(float component)
+        {
+            return !float.IsNaN(component) && !float.IsInfinity(component);
+        }
+
+        private static bool IsFinite(RbxVector3 vector)
+        {
+            return IsFinite(vector.X) && IsFinite(vector.Y) && IsFinite(vector.Z);
+        }
+
+        private static bool IsFinite(RbxCFrame cframe)
+        {
+            return IsFinite(cframe.Position) && IsFinite(cframe.XVector)
+                                             && IsFinite(cframe.YVector)
+                                             && IsFinite(cframe.ZVector);
+        }
+
+        private static bool IsOrthonormal(RbxCFrame cframe)
+        {
+            const float tolerance = 1e-4f;
+            RbxVector3 x = cframe.XVector;
+            RbxVector3 y = cframe.YVector;
+            RbxVector3 z = cframe.ZVector;
+            return MathF.Abs(x.Dot(x) - 1f) <= tolerance
+                   && MathF.Abs(y.Dot(y) - 1f) <= tolerance
+                   && MathF.Abs(z.Dot(z) - 1f) <= tolerance
+                   && MathF.Abs(x.Dot(y)) <= tolerance
+                   && MathF.Abs(x.Dot(z)) <= tolerance
+                   && MathF.Abs(y.Dot(z)) <= tolerance
+                   && MathF.Abs(x.Cross(y).Dot(z) - 1f) <= tolerance;
+        }
+
+        /// <summary>
+        /// Mirror <c>BasePart.Size</c> bounds: each axis "as low as 0.001 and as high as 2048".
+        /// A zero or negative axis clamps up to the minimum instead of mirroring the mesh.
+        /// </summary>
+        private static RbxVector3 ClampPartSize(RbxVector3 size)
+        {
+            return new RbxVector3(ClampPartSizeAxis(size.X), ClampPartSizeAxis(size.Y),
+                ClampPartSizeAxis(size.Z));
+        }
+
+        private static float ClampPartSizeAxis(float axis)
+        {
+            const float minimum = 0.001f;
+            const float maximum = 2048f;
+            return axis < minimum ? minimum : axis > maximum ? maximum : axis;
+        }
+
+        /// <summary>
+        /// Reads a boolean property assignment. Roblox refuses a non-boolean here, and Lua
+        /// truthiness turned <c>part.Anchored = "false"</c> into true and <c>= nil</c> into false.
+        /// </summary>
+        private static bool ReadBooleanValue(LuaValue value, string what)
+        {
+            if (value.Type == LuaValueType.Boolean)
+            {
+                return value.Read<bool>();
+            }
+
+            throw RbxError.BadArgument(
+                what + " expects a boolean",
+                "pass true or false, got " + Describe(value));
+        }
+
         private static RbxColor3 ReadColor3Value(LuaValue value, string what)
         {
             if (TryUnbox(value, out RbxColor3 color))
@@ -3216,12 +3586,30 @@ namespace CoreAI.Ai.LuaCs
                     case "RespectCanCollide": return self.RespectCanCollide;
                     case "CollisionGroup": return self.CollisionGroup;
                     case "FilterDescendantsInstances":
-                        return new LuaValue(BuildFilterTable(box));
+                        return new LuaValue(BuildInstanceTable(box, self.FilterDescendantsInstances));
+                    case "ExcludeInstances":
+                        return self.ExcludeInstances == null
+                            ? LuaValue.Nil
+                            : new LuaValue(BuildInstanceTable(box, self.ExcludeInstances));
+                    case "IncludeInstances":
+                        return self.IncludeInstances == null
+                            ? LuaValue.Nil
+                            : new LuaValue(BuildInstanceTable(box, self.IncludeInstances));
                     case "AddToFilter":
                         return new LuaValue(Fn("RaycastParams:AddToFilter", inner =>
                         {
-                            SelfRaycastParams(inner).Params.AddToFilter(
-                                ReadInstanceList(Arg(inner, 1), "RaycastParams:AddToFilter"));
+                            RbxRaycastParams target = SelfRaycastParams(inner).Params;
+                            LuaValue added = Arg(inner, 1);
+                            // WHY both shapes: the mirror types the parameter `Instance | Array`,
+                            // and `params:AddToFilter(character)` is the spelling scripts use most.
+                            if (TryGetInstance(added, out LuaCsRbxInstanceProxy single))
+                            {
+                                target.AddToFilter(single.Instance);
+                                return LuaValue.Nil;
+                            }
+
+                            target.AddToFilter(
+                                ReadInstanceList(added, "RaycastParams:AddToFilter"));
                             return LuaValue.Nil;
                         }));
                     default: throw NotAValidMember(key, "RaycastParams");
@@ -3238,13 +3626,16 @@ namespace CoreAI.Ai.LuaCs
                         self.FilterType = ReadFilterType(value);
                         return LuaValue.Nil;
                     case "IgnoreWater":
-                        self.IgnoreWater = value.ToBoolean();
+                        self.IgnoreWater = ReadBooleanValue(
+                            value, "RaycastParams.IgnoreWater assignment");
                         return LuaValue.Nil;
                     case "BruteForceAllSlow":
-                        self.BruteForceAllSlow = value.ToBoolean();
+                        self.BruteForceAllSlow = ReadBooleanValue(
+                            value, "RaycastParams.BruteForceAllSlow assignment");
                         return LuaValue.Nil;
                     case "RespectCanCollide":
-                        self.RespectCanCollide = value.ToBoolean();
+                        self.RespectCanCollide = ReadBooleanValue(
+                            value, "RaycastParams.RespectCanCollide assignment");
                         return LuaValue.Nil;
                     case "CollisionGroup":
                         self.CollisionGroup = ReadStringValue(
@@ -3253,6 +3644,18 @@ namespace CoreAI.Ai.LuaCs
                     case "FilterDescendantsInstances":
                         self.SetFilterDescendantsInstances(ReadInstanceList(
                             value, "RaycastParams.FilterDescendantsInstances assignment"));
+                        return LuaValue.Nil;
+                    // WHY nil is kept distinct from {}: the mirror pins IncludeInstances = nil as
+                    // "include everything" and {} as "include nothing".
+                    case "ExcludeInstances":
+                        self.SetExcludeInstances(value.Type == LuaValueType.Nil
+                            ? null
+                            : ReadInstanceList(value, "RaycastParams.ExcludeInstances assignment"));
+                        return LuaValue.Nil;
+                    case "IncludeInstances":
+                        self.SetIncludeInstances(value.Type == LuaValueType.Nil
+                            ? null
+                            : ReadInstanceList(value, "RaycastParams.IncludeInstances assignment"));
                         return LuaValue.Nil;
                     default: throw NotAValidMember(key, "RaycastParams");
                 }
@@ -3288,12 +3691,12 @@ namespace CoreAI.Ai.LuaCs
                 "assign Enum.RaycastFilterType.Exclude or .Include, got " + Describe(value));
         }
 
-        private static LuaTable BuildFilterTable(RaycastParamsBox box)
+        private static LuaTable BuildInstanceTable(RaycastParamsBox box,
+            IReadOnlyList<RbxInstance> filter)
         {
             // WHY a fresh table: Roblox hands back an array the script may keep and mutate, and that
             // mutation must not silently re-filter a query the params are still used for.
             LuaTable table = new();
-            IReadOnlyList<RbxInstance> filter = box.Params.FilterDescendantsInstances;
             for (int index = 0; index < filter.Count; index++)
             {
                 table[index + 1] = box.Context.WrapInstance(filter[index]);

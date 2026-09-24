@@ -437,6 +437,70 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void Negative_LuaDestroyOrReparentOfOwnPlayer_IsRefusedWithAKickHint()
+        {
+            // WHY (M8-12): a Player is Owned by its actor, so the ACL let a client mod destroy or
+            // reparent its own Player — bypassing RemoveActor: no PlayerRemoving, a ghost Player in
+            // GetPlayers, the character left in the world and the actor locked out for the session.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("ghost-a");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+            RbxInstance players = harness.Bindings.Game.GetService("Players");
+            int removingCount = 0;
+            harness.Bindings.Players.PlayerRemoving.Connect(
+                (Action<object[]>)(_ => removingCount++));
+
+            harness.Stack.Runtime.LoadMod(actor, "ghost-attempt", @"
+                local me = game:GetService('Players'):GetPlayers()[1]
+                local function try(label, action)
+                    local ok, err = pcall(action)
+                    store_set(label, tostring(ok) .. '|' .. tostring(err))
+                end
+                try('destroy', function() me:Destroy() end)
+                try('reparent', function() me.Parent = workspace end)
+                try('unparent', function() me.Parent = nil end)",
+                persistToStore: false);
+            harness.Bindings.Scheduler.Advance(0d);
+
+            foreach (string label in new[] { "destroy", "reparent", "unparent" })
+            {
+                string result = harness.Store.Get("ghost-attempt", label);
+                StringAssert.StartsWith("false|", result, label + " must be refused");
+                StringAssert.Contains("BAD_ARGUMENT", result, label);
+                StringAssert.Contains("Player:Kick()", result, label);
+            }
+
+            Assert.IsFalse(player.IsDestroyed);
+            Assert.AreSame(players, player.Parent);
+            Assert.AreSame(player, harness.Bindings.Players.GetPlayerByUserId(player.UserId));
+            Assert.AreEqual(1, harness.Bindings.Players.GetPlayers().Count);
+            Assert.AreEqual(0, removingCount, "nothing left, so PlayerRemoving never fired");
+        }
+
+        [Test]
+        public void OwnPlayer_StillAcceptsChildren_LeaderstatsPattern()
+        {
+            // WHY: the twin of the Player lock — only the Player's own Parent and lifetime are
+            // locked. Parenting a script's objects INTO the Player (leaderstats) is the canonical
+            // pattern.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("stats-a");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            harness.Stack.Runtime.LoadMod(actor, "stats-mod", @"
+                local me = game:GetService('Players'):GetPlayers()[1]
+                local stats = Instance.new('Folder')
+                stats.Name = 'leaderstats'
+                stats.Parent = me
+                store_set('found', tostring(me:FindFirstChild('leaderstats') ~= nil))",
+                persistToStore: false);
+
+            Assert.AreEqual("true", harness.Store.Get("stats-mod", "found"),
+                "log: " + string.Join(" || ", harness.LogLines));
+            Assert.IsNotNull(player.FindFirstChild("leaderstats"));
+        }
+
+        [Test]
         public void PerPlayerContainers_ExistAndEmptyOnJoin()
         {
             using ProductionHarness harness = new ProductionHarness();

@@ -7,6 +7,7 @@ using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Mods.Rbx.Instances;
+using Lua;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -400,6 +401,93 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             roblox.Scheduler.Advance(0.1d);
             Assert.AreEqual("4", store.Get("m", "n"), "no Heartbeat fires after the final unload");
+        }
+
+        [Test]
+        public void ProxyCache_DestroyedInstances_ArePrunedOnUnregistered()
+        {
+            // WHY (M1-12): every instance a mod context ever wrapped stayed strongly reachable for
+            // the context's lifetime, so a spawner mod pinned every part it had ever destroyed.
+            // Counted, never GC-observed: the prune is driven by the registry's Unregistered event.
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsRbxModContext context = CreateHostContext(bindings, "prune-mod");
+            int baseline = context.ProxyCacheCount;
+            List<RbxInstance> spawned = new();
+            for (int index = 0; index < 1000; index++)
+            {
+                RbxInstance folder = bindings.Registry.Create("Folder");
+                spawned.Add(folder);
+                context.WrapInstance(folder);
+            }
+
+            Assert.AreEqual(baseline + 1000, context.ProxyCacheCount);
+
+            for (int index = 0; index < spawned.Count; index++)
+            {
+                spawned[index].Destroy();
+            }
+
+            Assert.AreEqual(baseline, context.ProxyCacheCount,
+                "every destroyed instance left the strong proxy cache");
+        }
+
+        [Test]
+        public void ProxyCache_HeldProxyOfADestroyedInstance_KeepsItsIdentity()
+        {
+            // WHY: the twin of the prune — identity must survive it while the proxy is still
+            // referenced, because deferred handlers (PlayerRemoving, ChildRemoved) receive a
+            // destroyed instance after its unregister and compare it with the one a script stored
+            // earlier.
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsRbxModContext context = CreateHostContext(bindings, "identity-mod");
+            RbxInstance folder = bindings.Registry.Create("Folder");
+            LuaValue held = context.WrapInstance(folder);
+            Assert.IsTrue(LuaCsRbxLua.TryGetInstance(held, out LuaCsRbxInstanceProxy heldProxy));
+            int baseline = context.ProxyCacheCount;
+
+            folder.Destroy();
+
+            Assert.AreEqual(baseline - 1, context.ProxyCacheCount);
+            LuaValue rewrapped = context.WrapInstance(folder);
+            Assert.IsTrue(LuaCsRbxLua.TryGetInstance(rewrapped, out LuaCsRbxInstanceProxy rewrappedProxy));
+            Assert.AreSame(heldProxy, rewrappedProxy,
+                "a destroyed instance whose proxy Lua still holds re-wraps to that same proxy");
+            Assert.AreEqual(baseline - 1, context.ProxyCacheCount,
+                "re-wrapping a destroyed instance does not pin it in the strong cache again");
+        }
+
+        [Test]
+        public void ProxyCache_DeferredChildRemoved_FindsTheTableKeyStoredBeforeTheDestroy()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildWiredStack(out LuaCsRbxApiBindings roblox, store);
+
+            stack.Runtime.LoadMod("m", @"
+                local folder = Instance.new('Folder')
+                folder.Parent = workspace
+                local part = Instance.new('Part')
+                part.Parent = folder
+                local tracked = {}
+                tracked[part] = 'payload'
+                folder.ChildRemoved:Connect(function(child)
+                    store_set('seen', tostring(tracked[child]))
+                    store_set('same', tostring(child == part))
+                end)
+                part:Destroy()");
+            roblox.Scheduler.Advance(0d);
+
+            Assert.AreEqual("payload", store.Get("m", "seen"),
+                "the destroyed child is the same table key the script stored");
+            Assert.AreEqual("true", store.Get("m", "same"));
+        }
+
+        private static LuaCsRbxModContext CreateHostContext(LuaCsRbxApiBindings bindings,
+            string modId)
+        {
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            return new LuaCsRbxModContext(bindings, LuaCapabilities.All, modId,
+                OriginTag.FromMod(modId), host);
         }
     }
 }

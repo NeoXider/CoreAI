@@ -39,6 +39,12 @@ namespace CoreAI.Mods.Rbx.Instances
     /// </para>
     /// This type lives beside the instances rather than in the datatypes assembly because its filter
     /// holds instances, and the datatypes assembly deliberately references nothing.
+    /// <para>
+    /// The two filter generations combine as one rule (OURS where the mirror is silent): a part
+    /// must pass the legacy <c>FilterDescendantsInstances</c>/<c>FilterType</c> pair, must not sit
+    /// under <see cref="ExcludeInstances"/>, and — when <see cref="IncludeInstances"/> is set — must
+    /// sit under it. Exclusion wins over inclusion, as the mirror pins.
+    /// </para>
     /// </remarks>
     public sealed class RbxRaycastParams
     {
@@ -46,10 +52,25 @@ namespace CoreAI.Mods.Rbx.Instances
         public const string DefaultCollisionGroup = "Default";
 
         private readonly List<RbxInstance> _filterDescendantsInstances = new();
+        private List<RbxInstance> _excludeInstances;
+        private List<RbxInstance> _includeInstances;
         private string _collisionGroup = DefaultCollisionGroup;
 
         /// <summary>Mirror default: an empty filter list, i.e. every part is eligible.</summary>
         public IReadOnlyList<RbxInstance> FilterDescendantsInstances => _filterDescendantsInstances;
+
+        /// <summary>
+        /// Mirror <c>RaycastParams.ExcludeInstances</c>: instances whose subtrees the query skips.
+        /// Null (the mirror default) excludes nothing.
+        /// </summary>
+        public IReadOnlyList<RbxInstance> ExcludeInstances => _excludeInstances;
+
+        /// <summary>
+        /// Mirror <c>RaycastParams.IncludeInstances</c>: when set, only these subtrees are eligible.
+        /// Null (the default) is the most permissive filter and an empty list the most restrictive,
+        /// exactly as the mirror contrasts <c>nil</c> with <c>{}</c>.
+        /// </summary>
+        public IReadOnlyList<RbxInstance> IncludeInstances => _includeInstances;
 
         /// <summary>Mirror default: <see cref="RbxRaycastFilterType.Exclude"/>.</summary>
         public RbxRaycastFilterType FilterType { get; set; } = RbxRaycastFilterType.Exclude;
@@ -102,11 +123,32 @@ namespace CoreAI.Mods.Rbx.Instances
 
             foreach (RbxInstance instance in instances)
             {
-                if (instance != null && !_filterDescendantsInstances.Contains(instance))
-                {
-                    _filterDescendantsInstances.Add(instance);
-                }
+                AddToFilter(instance);
             }
+        }
+
+        /// <summary>
+        /// Mirror <c>RaycastParams:AddToFilter(instance)</c>: the mirror types the parameter
+        /// <c>Instance | Array</c>, so a single instance appends just like a one-element list.
+        /// </summary>
+        public void AddToFilter(RbxInstance instance)
+        {
+            if (instance != null && !_filterDescendantsInstances.Contains(instance))
+            {
+                _filterDescendantsInstances.Add(instance);
+            }
+        }
+
+        /// <summary>Replaces <see cref="ExcludeInstances"/>; null clears it back to the default.</summary>
+        public void SetExcludeInstances(IEnumerable<RbxInstance> instances)
+        {
+            _excludeInstances = CopyInstanceList(instances);
+        }
+
+        /// <summary>Replaces <see cref="IncludeInstances"/>; null clears it back to "everything".</summary>
+        public void SetIncludeInstances(IEnumerable<RbxInstance> instances)
+        {
+            _includeInstances = CopyInstanceList(instances);
         }
 
         /// <summary>True when <paramref name="candidate"/> passes this filter.</summary>
@@ -122,18 +164,51 @@ namespace CoreAI.Mods.Rbx.Instances
                 return false;
             }
 
-            bool listed = false;
-            for (int index = 0; index < _filterDescendantsInstances.Count; index++)
+            bool listed = IsUnderAny(candidate, _filterDescendantsInstances);
+            if (FilterType == RbxRaycastFilterType.Include ? !listed : listed)
             {
-                RbxInstance filter = _filterDescendantsInstances[index];
-                if (ReferenceEquals(filter, candidate) || candidate.IsDescendantOf(filter))
+                return false;
+            }
+
+            if (_excludeInstances != null && IsUnderAny(candidate, _excludeInstances))
+            {
+                return false;
+            }
+
+            return _includeInstances == null || IsUnderAny(candidate, _includeInstances);
+        }
+
+        private static bool IsUnderAny(RbxInstance candidate, List<RbxInstance> roots)
+        {
+            for (int index = 0; index < roots.Count; index++)
+            {
+                RbxInstance root = roots[index];
+                if (ReferenceEquals(root, candidate) || candidate.IsDescendantOf(root))
                 {
-                    listed = true;
-                    break;
+                    return true;
                 }
             }
 
-            return FilterType == RbxRaycastFilterType.Include ? listed : !listed;
+            return false;
+        }
+
+        private static List<RbxInstance> CopyInstanceList(IEnumerable<RbxInstance> instances)
+        {
+            if (instances == null)
+            {
+                return null;
+            }
+
+            List<RbxInstance> copy = new();
+            foreach (RbxInstance instance in instances)
+            {
+                if (instance != null && !copy.Contains(instance))
+                {
+                    copy.Add(instance);
+                }
+            }
+
+            return copy;
         }
     }
 

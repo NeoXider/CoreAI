@@ -7,6 +7,7 @@ using CoreAI.Authority;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Networking;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -461,6 +462,334 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual(0, CountDebrisLogs(harness));
         }
 
+        [Test]
+        public void AddItem_ReAddedItem_KeepsItsOriginalInsertionOrderForEviction()
+        {
+            // WHY (M8-17): the documented rule is "a re-add keeps its original insertion order for
+            // cap eviction". The old queue appended a replacement node at the back and skipped the
+            // stale front node, so the re-added P0 survived and P1 was evicted instead.
+            using ProductionHarness harness = new ProductionHarness();
+            RbxDebris debris = harness.AttachDebrisHost();
+            DebrisCaller caller = harness.HostCaller();
+            List<RbxInstance> parts = new();
+            for (int index = 0; index < RbxDebris.MaxItems; index++)
+            {
+                RbxInstance part = harness.WorldPart("Evict" + index);
+                parts.Add(part);
+                debris.AddItem(part, 10d, caller);
+            }
+
+            debris.AddItem(parts[0], 20d, caller);
+            Assert.AreEqual(RbxDebris.MaxItems, debris.PendingCount, "a re-add is not a new item");
+
+            RbxInstance overflow = harness.WorldPart("EvictOverflow");
+            debris.AddItem(overflow, 10d, caller);
+
+            Assert.IsTrue(parts[0].IsDestroyed,
+                "the oldest item by ORIGINAL insertion order is evicted, even after a re-add");
+            Assert.IsFalse(parts[1].IsDestroyed, "the second-oldest item is untouched");
+            Assert.IsFalse(overflow.IsDestroyed);
+            Assert.AreEqual(RbxDebris.MaxItems, debris.PendingCount);
+            Assert.AreEqual(RbxDebris.MaxItems, debris.DeadlineHeapCount);
+            Assert.AreEqual(RbxDebris.MaxItems, debris.InsertionQueueCount);
+        }
+
+        [Test]
+        public void AddItem_ChurnAndReAdds_KeepInternalQueuesAndSchedulerCallbacksBounded()
+        {
+            // WHY (M8-09): the 1,000-item cap was measured on live entries only, while every re-add
+            // and every destroyed item left a FIFO node, a heap node and a scheduler host callback
+            // behind; 200,000 iterations grew them to 400,000 entries with PendingCount at 1.
+            using ProductionHarness harness = new ProductionHarness();
+            RbxDebris debris = harness.AttachDebrisHost();
+            DebrisCaller caller = harness.HostCaller();
+            const int iterations = 10000;
+            const int callbackBound = RbxDebris.MaxArmedTimers + 1;
+
+            for (int index = 0; index < iterations; index++)
+            {
+                RbxInstance part = harness.WorldPart("Churn");
+                debris.AddItem(part, 1e6d, caller);
+                part.Destroy();
+            }
+
+            Assert.AreEqual(0, debris.PendingCount);
+            Assert.AreEqual(0, debris.DeadlineHeapCount, "an early destroy leaves no heap node");
+            Assert.AreEqual(0, debris.InsertionQueueCount, "an early destroy leaves no FIFO node");
+            Assert.LessOrEqual(debris.ArmedTimerCount, callbackBound);
+
+            RbxInstance same = harness.WorldPart("ReAdded");
+            for (int index = 0; index < iterations; index++)
+            {
+                // WHY ever-shorter lifetimes: each re-add is due EARLIER than every armed callback,
+                // the worst case for a scheduler that cannot cancel a host callback.
+                debris.AddItem(same, 1e6d - index, caller);
+            }
+
+            Assert.AreEqual(1, debris.PendingCount);
+            Assert.AreEqual(1, debris.DeadlineHeapCount, "a re-add updates the heap in place");
+            Assert.AreEqual(1, debris.InsertionQueueCount, "a re-add keeps its one FIFO node");
+            Assert.LessOrEqual(debris.ArmedTimerCount, callbackBound,
+                "armed scheduler callbacks stay bounded however many re-adds arrive");
+
+            harness.Bindings.Scheduler.Advance(1e6d);
+
+            Assert.IsTrue(same.IsDestroyed, "the bounded timers still fire the latest deadline");
+            Assert.AreEqual(0, debris.PendingCount);
+            Assert.AreEqual(0, debris.ArmedTimerCount, "every armed callback drained");
+        }
+
+        [Test]
+        public void AddItem_ManyItemsWithOneDeadline_ShareOneSchedulerCallback()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            RbxDebris debris = harness.AttachDebrisHost();
+            DebrisCaller caller = harness.HostCaller();
+            List<RbxInstance> parts = new();
+            for (int index = 0; index < 50; index++)
+            {
+                RbxInstance part = harness.WorldPart("Shared" + index);
+                parts.Add(part);
+                debris.AddItem(part, 0.5d, caller);
+            }
+
+            Assert.AreEqual(1, debris.ArmedTimerCount,
+                "items due no earlier than an armed callback add no callback of their own");
+
+            harness.Bindings.Scheduler.Advance(0.49d);
+            Assert.IsFalse(parts[0].IsDestroyed);
+            harness.Bindings.Scheduler.Advance(0.01d);
+
+            for (int index = 0; index < parts.Count; index++)
+            {
+                Assert.IsTrue(parts[index].IsDestroyed, "Shared" + index + " fires with the batch");
+            }
+
+            Assert.AreEqual(0, debris.PendingCount);
+        }
+
+        [Test]
+        public void AddItem_LaterItemsKeepTheirOwnDeadlines_AfterTheFirstFires()
+        {
+            // WHY: the negative twin of sharing one callback — an item due later is re-armed for
+            // its own deadline, never destroyed early with the batch that fired before it.
+            using ProductionHarness harness = new ProductionHarness();
+            RbxDebris debris = harness.AttachDebrisHost();
+            DebrisCaller caller = harness.HostCaller();
+            RbxInstance early = harness.WorldPart("Early");
+            RbxInstance late = harness.WorldPart("Late");
+            debris.AddItem(early, 0.5d, caller);
+            debris.AddItem(late, 10.25d, caller);
+
+            harness.Bindings.Scheduler.Advance(0.5d);
+            Assert.IsTrue(early.IsDestroyed);
+            Assert.IsFalse(late.IsDestroyed);
+
+            harness.Bindings.Scheduler.Advance(9.5d);
+            Assert.IsFalse(late.IsDestroyed, "10 s is still before the 10.25 s lifetime");
+
+            harness.Bindings.Scheduler.Advance(0.25d);
+            Assert.IsTrue(late.IsDestroyed, "the re-armed callback fires on the frame the lifetime ends");
+        }
+
+        [Test]
+        public void AddItem_CrossOwnerDescendant_RefusedAtCallTime_SubtreeUntouched()
+        {
+            // WHY (M8-06): Debris authorized the root only, so actor B's Model containing actor A's
+            // part was refused by M:Destroy() but destroyed whole by Debris:AddItem(M, 0).
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actorB = harness.Actor("subtree-b");
+            harness.Stack.Runtime.LoadMod(actorB, "subtree-setup", @"
+                local crate = Instance.new('Model')
+                crate.Name = 'Crate'
+                crate.Parent = workspace
+                local lid = Instance.new('Part')
+                lid.Name = 'Lid'
+                lid.Parent = crate", persistToStore: false);
+
+            RbxInstance crate = harness.Registry.WorldRoot.FindFirstChild("Crate");
+            Assert.IsNotNull(crate);
+            RbxInstance lid = crate.FindFirstChild("Lid");
+            Assert.IsNotNull(lid);
+            harness.Registry.SetAccessControl(lid, "subtree-a", InstanceAccessScope.Owned, false);
+
+            harness.Stack.Runtime.LoadMod(actorB, "subtree-attempt", @"
+                local ok, err = pcall(function()
+                    return game:GetService('Debris'):AddItem(workspace:FindFirstChild('Crate'), 0)
+                end)
+                store_set('ok', tostring(ok))
+                store_set('err', tostring(err))", persistToStore: false);
+
+            Assert.AreEqual("false", harness.Store.Get("subtree-attempt", "ok"));
+            string error = harness.Store.Get("subtree-attempt", "err");
+            StringAssert.Contains("actor 'subtree-b'", error);
+            StringAssert.Contains("Owned by actor 'subtree-a'", error);
+            Assert.AreEqual(0, harness.Bindings.Debris.PendingCount);
+
+            harness.Bindings.Scheduler.Advance(10d);
+
+            Assert.IsFalse(crate.IsDestroyed);
+            Assert.IsFalse(lid.IsDestroyed, "actor A's part survives actor B's Debris call");
+            Assert.AreSame(crate, lid.Parent);
+        }
+
+        [Test]
+        public void AddItem_DescendantReownedAfterScheduling_FireDroppedWithOneLogLine()
+        {
+            // WHY (M8-06): the fire-time re-check covered the root only, so a descendant that
+            // changed hands after scheduling was destroyed with it.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actorB = harness.Actor("reown-b");
+            harness.Stack.Runtime.LoadMod(actorB, "reown-setup", @"
+                local crate = Instance.new('Model')
+                crate.Name = 'ReownCrate'
+                crate.Parent = workspace
+                local lid = Instance.new('Part')
+                lid.Name = 'ReownLid'
+                lid.Parent = crate
+                game:GetService('Debris'):AddItem(crate, 0.5)", persistToStore: false);
+
+            RbxInstance crate = harness.Registry.WorldRoot.FindFirstChild("ReownCrate");
+            Assert.IsNotNull(crate);
+            RbxInstance lid = crate.FindFirstChild("ReownLid");
+            Assert.IsNotNull(lid);
+            Assert.AreEqual(1, harness.Bindings.Debris.PendingCount);
+            harness.Registry.SetAccessControl(lid, "reown-a", InstanceAccessScope.Owned, false);
+            int debrisLogsBefore = CountDebrisLogs(harness);
+
+            harness.Bindings.Scheduler.Advance(0.5d);
+
+            Assert.IsFalse(crate.IsDestroyed);
+            Assert.IsFalse(lid.IsDestroyed);
+            Assert.AreEqual(0, harness.Bindings.Debris.PendingCount);
+            Assert.AreEqual(debrisLogsBefore + 1, CountDebrisLogs(harness));
+            StringAssert.Contains("actor 'reown-b'", LastDebrisLog(harness));
+            StringAssert.Contains("Owned by actor 'reown-a'", LastDebrisLog(harness));
+        }
+
+        [Test]
+        public void AddItem_OwnSubtree_DestroysEveryDescendant()
+        {
+            // WHY: the positive twin of the subtree walk — an actor that owns the whole subtree
+            // still gets it destroyed, children included.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("ownsub-a");
+            harness.Stack.Runtime.LoadMod(actor, "ownsub-setup", @"
+                local crate = Instance.new('Model')
+                crate.Name = 'OwnCrate'
+                crate.Parent = workspace
+                local lid = Instance.new('Part')
+                lid.Name = 'OwnLid'
+                lid.Parent = crate
+                game:GetService('Debris'):AddItem(crate, 0.5)", persistToStore: false);
+
+            RbxInstance crate = harness.Registry.WorldRoot.FindFirstChild("OwnCrate");
+            Assert.IsNotNull(crate);
+            RbxInstance lid = crate.FindFirstChild("OwnLid");
+
+            harness.Bindings.Scheduler.Advance(0.5d);
+
+            Assert.IsTrue(crate.IsDestroyed);
+            Assert.IsTrue(lid.IsDestroyed);
+        }
+
+        [Test]
+        public void AddItem_Player_IsRefusedWithAKickHint()
+        {
+            // WHY (M8-12): a Player is Owned by its actor, so the ACL let that actor schedule its
+            // own Player's destruction — which skipped PlayerRemoving and left a ghost Player.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("debris-player");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            harness.Stack.Runtime.LoadMod(actor, "debris-player-attempt", @"
+                local me = game:GetService('Players'):GetPlayers()[1]
+                local ok, err = pcall(function()
+                    return game:GetService('Debris'):AddItem(me, 0)
+                end)
+                store_set('ok', tostring(ok))
+                store_set('err', tostring(err))", persistToStore: false);
+
+            Assert.AreEqual("false", harness.Store.Get("debris-player-attempt", "ok"));
+            string error = harness.Store.Get("debris-player-attempt", "err");
+            StringAssert.Contains("BAD_ARGUMENT", error);
+            StringAssert.Contains("Player:Kick()", error);
+            Assert.AreEqual(0, harness.Bindings.Debris.PendingCount);
+
+            harness.Bindings.Scheduler.Advance(1d);
+
+            Assert.IsFalse(player.IsDestroyed);
+            Assert.AreEqual(1, harness.Bindings.Players.GetPlayers().Count);
+        }
+
+        [Test]
+        public void AddItem_NonAclWorld_ProtectedSingletonsAreRefused()
+        {
+            // WHY (M8-06): in a legacy (ACL-off) world the ACL demand returns early, so Debris
+            // destroyed Lighting or the camera that the direct Destroy path protects explicitly.
+            using ProductionHarness harness = new ProductionHarness(worldAcl: false);
+            Assert.IsFalse(harness.Registry.IsWorldAclEnabled);
+            harness.Stack.Runtime.LoadMod("legacy-singletons", @"
+                local debris = game:GetService('Debris')
+                local function try(label, target)
+                    local ok, err = pcall(function() return debris:AddItem(target, 0) end)
+                    store_set(label, tostring(ok) .. '|' .. tostring(err))
+                end
+                try('lighting', game:GetService('Lighting'))
+                try('camera', workspace.CurrentCamera)
+                try('workspace', workspace)
+                try('game', game)", Capabilities, persistToStore: false);
+
+            foreach (string label in new[] { "lighting", "camera", "workspace", "game" })
+            {
+                string result = harness.Store.Get("legacy-singletons", label);
+                StringAssert.StartsWith("false|", result, label + " must be refused");
+                StringAssert.Contains("singleton", result, label);
+            }
+
+            Assert.AreEqual(0, harness.Bindings.Debris.PendingCount);
+            RbxInstance lighting = harness.Bindings.Game.GetService("Lighting");
+            RbxInstance camera = harness.Registry.WorldRoot.FindFirstChildOfClass("Camera");
+            Assert.IsNotNull(camera);
+
+            harness.Bindings.Scheduler.Advance(1d);
+
+            Assert.IsFalse(lighting.IsDestroyed);
+            Assert.IsFalse(camera.IsDestroyed);
+            Assert.IsFalse(harness.Registry.WorldRoot.IsDestroyed);
+            Assert.IsFalse(harness.Bindings.Game.IsDestroyed);
+        }
+
+        [Test]
+        public void AddItem_ReadOnlyMod_IsRefusedForMissingWorldEdit()
+        {
+            // WHY (M8-06): AddItem skipped the WorldEdit capability, so a mod masked to Read could
+            // destroy anything its actor may destroy.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("readonly-debris");
+            harness.Stack.Runtime.LoadMod(actor, "readonly-setup", @"
+                local part = Instance.new('Part')
+                part.Name = 'ReadOnlyTarget'
+                part.Parent = workspace", persistToStore: false);
+            RbxInstance part = harness.Registry.WorldRoot.FindFirstChild("ReadOnlyTarget");
+            Assert.IsNotNull(part);
+
+            harness.Stack.Runtime.LoadMod(actor, "readonly-attempt", @"
+                local ok, err = pcall(function()
+                    return game:GetService('Debris'):AddItem(workspace:FindFirstChild('ReadOnlyTarget'), 0)
+                end)
+                store_set('ok', tostring(ok))
+                store_set('err', tostring(err))", LuaCapabilities.Read, persistToStore: false);
+
+            Assert.AreEqual("false", harness.Store.Get("readonly-attempt", "ok"));
+            StringAssert.Contains("WorldEdit", harness.Store.Get("readonly-attempt", "err"));
+            Assert.AreEqual(0, harness.Bindings.Debris.PendingCount);
+
+            harness.Bindings.Scheduler.Advance(1d);
+
+            Assert.IsFalse(part.IsDestroyed);
+        }
+
         private static int CountDebrisLogs(ProductionHarness harness)
         {
             int count = 0;
@@ -491,13 +820,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
         private sealed class ProductionHarness : IDisposable
         {
-            public ProductionHarness()
+            public ProductionHarness(bool worldAcl = true)
             {
                 LogLines = new List<string>();
                 Binder = new InMemoryInstanceBackingBinder();
                 Registry = new InstanceRegistry(
                     binder: Binder,
-                    worldAclVersion: InstanceRegistry.CurrentWorldAclVersion,
+                    worldAclVersion: worldAcl ? InstanceRegistry.CurrentWorldAclVersion : (int?)null,
                     worldId: "debris-world");
                 RbxDataModel game = DataModelBootstrap.CreateGame(Registry);
                 Bindings = new LuaCsRbxApiBindings(Registry, game, log: LogLines.Add);
@@ -533,6 +862,29 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                         ActorGrantSet.None,
                         AgentMemoryScope.Empty)
                     .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            }
+
+            /// <summary>Attaches the Debris timer host the way the first Lua AddItem does.</summary>
+            public RbxDebris AttachDebrisHost()
+            {
+                RbxDebris debris = Bindings.Debris;
+                debris.EnsureHost(Bindings.Scheduler, LogLines.Add);
+                return debris;
+            }
+
+            /// <summary>An unrestricted caller for C#-driven AddItem calls.</summary>
+            public DebrisCaller HostCaller()
+            {
+                return new DebrisCaller("debris-host", true, Registry.WorldId);
+            }
+
+            /// <summary>A world part created outside Lua (SharedWritable, no owner).</summary>
+            public RbxInstance WorldPart(string name)
+            {
+                RbxInstance part = Registry.Create("Part");
+                part.Name = name;
+                part.Parent = Registry.WorldRoot;
+                return part;
             }
 
             /// <summary>Binds an instance signal to the harness scheduler, then counts fires.</summary>

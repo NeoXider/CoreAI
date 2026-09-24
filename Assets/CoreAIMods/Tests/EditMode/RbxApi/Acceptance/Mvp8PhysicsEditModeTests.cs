@@ -202,6 +202,51 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void Filter_ExcludeInstancesWinOverIncludeInstances()
+        {
+            // WHY: the mirror pins "If an instance matches both an exclude and include filter,
+            // exclusions take priority over inclusions."
+            using ProductionHarness harness = new ProductionHarness();
+            RbxInstance zone = harness.Registry.Create("Folder");
+            zone.Parent = harness.Registry.WorldRoot;
+            RbxInstance inner = harness.Part("inner");
+            inner.Parent = zone;
+            RbxInstance sibling = harness.Part("sibling");
+            sibling.Parent = zone;
+            RbxInstance outside = harness.Part("outside");
+
+            RbxRaycastParams filter = new();
+            filter.SetIncludeInstances(new[] { zone });
+            filter.SetExcludeInstances(new[] { inner });
+
+            Assert.IsFalse(filter.Accepts(inner), "excluded and included: exclusion wins");
+            Assert.IsTrue(filter.Accepts(sibling), "included and not excluded");
+            Assert.IsFalse(filter.Accepts(outside), "outside every included subtree");
+        }
+
+        [Test]
+        public void Filter_IncludeInstancesNilIncludesEverything_EmptyIncludesNothing()
+        {
+            // WHY: the mirror contrasts `IncludeInstances = nil` (most permissive) with `= {}`
+            // (most restrictive); collapsing the two would silently flip a query.
+            using ProductionHarness harness = new ProductionHarness();
+            RbxInstance part = harness.Part("anything");
+            RbxRaycastParams filter = new();
+
+            Assert.IsNull(filter.IncludeInstances);
+            Assert.IsNull(filter.ExcludeInstances);
+            Assert.IsTrue(filter.Accepts(part));
+
+            filter.SetIncludeInstances(new RbxInstance[0]);
+            Assert.AreEqual(0, filter.IncludeInstances.Count);
+            Assert.IsFalse(filter.Accepts(part), "an empty include list includes nothing");
+
+            filter.SetIncludeInstances(null);
+            Assert.IsNull(filter.IncludeInstances);
+            Assert.IsTrue(filter.Accepts(part), "nil restores the permissive default");
+        }
+
+        [Test]
         public void Negative_CollisionGroupOtherThanDefault_IsRefused()
         {
             // Accepting a group CoreAI cannot honour would return a confidently wrong hit — the very
@@ -483,6 +528,94 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual("Part", harness.Store.Get("params-mod", "first"));
             Assert.AreEqual("true", harness.Store.Get("params-mod", "water"));
             Assert.IsTrue(harness.Port.WasQueried);
+        }
+
+        [Test]
+        public void Lua_RaycastParamsAddToFilter_AcceptsASingleInstance()
+        {
+            // WHY (M8-16): the mirror types AddToFilter's parameter `Instance | Array`, and
+            // `params:AddToFilter(character)` raised BAD_ARGUMENT because only a table was read.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("addfilter-a");
+            harness.Port.NextHit = null;
+
+            harness.Stack.Runtime.LoadMod(actor, "addfilter-mod", @"
+                local target = Instance.new('Part')
+                target.Name = 'FilteredOut'
+                target.Parent = workspace
+                local params = RaycastParams.new()
+                local ok, err = pcall(function() params:AddToFilter(target) end)
+                store_set('ok', tostring(ok))
+                store_set('err', tostring(err))
+                params:AddToFilter({target})
+                store_set('count', tostring(#params.FilterDescendantsInstances))
+                workspace:Raycast(Vector3.new(0, 0, 0), Vector3.new(0, 0, 10), params)",
+                persistToStore: false);
+
+            Assert.AreEqual("true", harness.Store.Get("addfilter-mod", "ok"),
+                harness.Store.Get("addfilter-mod", "err"));
+            Assert.AreEqual("1", harness.Store.Get("addfilter-mod", "count"),
+                "adding the same instance again as a list does not duplicate it");
+            RbxInstance target = harness.Registry.WorldRoot.FindFirstChild("FilteredOut");
+            Assert.IsNotNull(target);
+            Assert.IsNotNull(harness.Port.LastEligibility);
+            Assert.IsFalse(harness.Port.LastEligibility(target.Id),
+                "the single instance joined the exclude filter");
+        }
+
+        [Test]
+        public void Lua_RaycastParamsExcludeAndIncludeInstances_ReadWriteAndFilter()
+        {
+            // WHY (M8-16): the members the mirror recommends "for new work" answered "not a valid
+            // member", the reading a model trained on today's documentation hits first.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("mixed-a");
+            harness.Port.NextHit = null;
+
+            harness.Stack.Runtime.LoadMod(actor, "mixed-mod", @"
+                local zone = Instance.new('Folder')
+                zone.Name = 'Zone'
+                zone.Parent = workspace
+                local inner = Instance.new('Part')
+                inner.Name = 'Inner'
+                inner.Parent = zone
+                local sibling = Instance.new('Part')
+                sibling.Name = 'Sibling'
+                sibling.Parent = zone
+                local outside = Instance.new('Part')
+                outside.Name = 'Outside'
+                outside.Parent = workspace
+                local params = RaycastParams.new()
+                store_set('excludeDefault', tostring(params.ExcludeInstances == nil))
+                store_set('includeDefault', tostring(params.IncludeInstances == nil))
+                params.IncludeInstances = {zone}
+                params.ExcludeInstances = {inner}
+                store_set('includeCount', tostring(#params.IncludeInstances))
+                store_set('excludeFirst', params.ExcludeInstances[1].Name)
+                workspace:Raycast(Vector3.new(0, 0, 0), Vector3.new(0, 0, 10), params)
+                local other = RaycastParams.new()
+                other.IncludeInstances = {}
+                store_set('emptyCount', tostring(#other.IncludeInstances))
+                other.IncludeInstances = nil
+                store_set('clearedIsNil', tostring(other.IncludeInstances == nil))",
+                persistToStore: false);
+
+            Assert.AreEqual("true", harness.Store.Get("mixed-mod", "excludeDefault"));
+            Assert.AreEqual("true", harness.Store.Get("mixed-mod", "includeDefault"));
+            Assert.AreEqual("1", harness.Store.Get("mixed-mod", "includeCount"));
+            Assert.AreEqual("Inner", harness.Store.Get("mixed-mod", "excludeFirst"));
+            Assert.AreEqual("0", harness.Store.Get("mixed-mod", "emptyCount"));
+            Assert.AreEqual("true", harness.Store.Get("mixed-mod", "clearedIsNil"));
+
+            RbxInstance zone = harness.Registry.WorldRoot.FindFirstChild("Zone");
+            Assert.IsNotNull(zone);
+            Assert.IsNotNull(harness.Port.LastEligibility);
+            Assert.IsFalse(harness.Port.LastEligibility(zone.FindFirstChild("Inner").Id),
+                "exclusion wins over inclusion");
+            Assert.IsTrue(harness.Port.LastEligibility(zone.FindFirstChild("Sibling").Id));
+            Assert.IsFalse(harness.Port.LastEligibility(
+                harness.Registry.WorldRoot.FindFirstChild("Outside").Id),
+                "a part outside IncludeInstances is not eligible");
         }
 
         [Test]
