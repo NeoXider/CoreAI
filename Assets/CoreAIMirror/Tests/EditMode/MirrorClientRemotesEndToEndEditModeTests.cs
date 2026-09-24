@@ -294,6 +294,50 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
+        public void B1_07_ReliableFiresAndAnInvokeServerBeforeAdmission_ReachTheServerAfterIt_InOrder_AndTheJoinSurvives()
+        {
+            // WHY: a FireServer on a reliable remote in the round trip between connect and admission
+            // used to arrive — it followed the admission request on the ordered reliable channel and
+            // the server admits in the same call — until the A4-04 fix dropped it with the unreliable
+            // ones (B1-07). WHY an unreliable fire rides along with the unreliable channel overtaking
+            // the reliable one: it is still the client's to drop, and the join must survive both.
+            _mirror.UnreliableOvertakesReliable = true;
+            List<string> heardOnTheServer = new();
+            _server.EventReceived += message =>
+                heardOnTheServer.Add("event " + message.Payload[0] + " from " + message.SenderActorId);
+            _server.RequestReceived += (message, responder) =>
+            {
+                heardOnTheServer.Add("request " + message.Payload[0] + " from " + message.SenderActorId);
+                responder.Complete(new byte[] { 42 });
+            };
+            List<RbxNetworkResponse> answered = new();
+
+            string admitted = JoinFiringFirst(Credential, () =>
+            {
+                _client.SendEvent(ClientFire(RbxNetworkReliability.ReliableOrdered, 1));
+                _client.SendEvent(ClientFire(RbxNetworkReliability.UnreliableUnordered, 2));
+                _client.SendRequest(new RbxNetworkRequestMessage(new InstanceId(6UL),
+                    RbxNetworkDirection.ClientToServer, "remote-1", null, new byte[] { 3 }), answered.Add);
+                _client.SendEvent(ClientFire(RbxNetworkReliability.ReliableOrdered, 4));
+            });
+
+            Assert.AreEqual("remote-1", admitted);
+            Assert.IsTrue(NetworkClient.isConnected, "nothing the client fired early cost it the join");
+            CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests);
+            CollectionAssert.AreEqual(
+                new[] { "event 1 from remote-1", "request 3 from remote-1", "event 4 from remote-1" },
+                heardOnTheServer,
+                "the reliable ones reach the server after the admission, in the order they were fired");
+            Assert.AreEqual(3, _client.SendsHeldUntilAdmitted);
+            Assert.AreEqual(1, _client.UnadmittedSendsDropped, "the unreliable one is the client's to drop");
+            Assert.AreEqual(3, _client.PacketsSent);
+            Assert.AreEqual(1, answered.Count, "the InvokeServer made before the admission is answered");
+            Assert.IsTrue(answered[0].Succeeded);
+            CollectionAssert.AreEqual(new byte[] { 42 }, answered[0].Payload);
+            Assert.AreEqual(1, _server.ReadyAcknowledgements);
+        }
+
+        [Test]
         public void Negative_AnAdmittedClientThatAsksAgain_GetsNoSecondPlayer_AndIsNotDisconnected()
         {
             string admitted = Join(Credential);
@@ -635,6 +679,16 @@ namespace CoreAI.Net.Mirror.Tests
         {
             return new RbxNetworkEventMessage(remote.Id, RbxNetworkDirection.ServerToClient,
                 remote.Reliability, null, recipient, Encoding.UTF8.GetBytes(envelope));
+        }
+
+        /// <summary>
+        /// The message a client's <c>FireServer</c> hands its bridge, with a payload that starts with
+        /// <paramref name="tag"/> so the server side can tell the fires apart.
+        /// </summary>
+        private static RbxNetworkEventMessage ClientFire(RbxNetworkReliability reliability, byte tag)
+        {
+            return new RbxNetworkEventMessage(new InstanceId(5UL), RbxNetworkDirection.ClientToServer,
+                reliability, "remote-1", null, new[] { tag });
         }
 
         /// <summary>The message <c>RemoteEvent:FireAllClients(...)</c> hands the bridge.</summary>

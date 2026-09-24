@@ -78,10 +78,14 @@ namespace CoreAI.Net.Mirror
     /// is this bridge's own and not Mirror's authentication flag, so the client handlers do not
     /// require Mirror authentication: an unreliable remote that overtakes the reliable admission
     /// response is dropped and counted instead of making Mirror disconnect the joining client. The
-    /// other way round the server's handlers do require it, so a client sends nothing before its
-    /// admission is bound: a remote fired meanwhile is dropped and counted
-    /// (<see cref="UnadmittedSendsDropped"/>), because an unreliable one would overtake the admission
-    /// request and Mirror would disconnect the joining client for it.
+    /// other way round the server's handlers do require it, so a client puts nothing on the wire
+    /// before its admission is bound: an unreliable remote fired meanwhile is dropped and counted
+    /// (<see cref="UnadmittedSendsDropped"/>), because it would overtake the admission request and
+    /// Mirror would disconnect the joining client for it; a reliable remote or an InvokeServer is
+    /// held, bounded, and sent in order right after the admission is bound. An admission belongs to
+    /// the connection it was bound on: a newer connection — a reconnect made within one frame —
+    /// starts unadmitted, and what was held for a connection that closed is dropped, its calls
+    /// failed.
     /// </description></item>
     /// <item><description>
     /// <b>Broadcast.</b> A server broadcast goes to the admitted connections, not to Mirror's
@@ -118,7 +122,10 @@ namespace CoreAI.Net.Mirror
             public double DeadlineSeconds;
         }
 
-        /// <summary>A reliable envelope held for a connection that has not acknowledged readiness.</summary>
+        /// <summary>
+        /// A reliable envelope held until its connection can take it: on a server, for a connection
+        /// that has not acknowledged readiness; on a client, until this client's own admission.
+        /// </summary>
         private sealed class HeldSend
         {
             public bool IsRequest;
@@ -175,6 +182,19 @@ namespace CoreAI.Net.Mirror
         /// counted.
         /// </summary>
         public const int MaxHeldBytesPerJoiningConnection = 262144;
+
+        /// <summary>
+        /// Reliable sends a client holds at most while its admission has not arrived; the next is
+        /// dropped and counted in <see cref="AdmissionHoldOverflowDrops"/>. The server's readiness
+        /// bound, seen from the other end.
+        /// </summary>
+        public const int MaxHeldSendsUntilAdmitted = MaxHeldMessagesPerJoiningConnection;
+
+        /// <summary>
+        /// Payload bytes a client holds at most while its admission has not arrived; a send past it
+        /// is dropped and counted in <see cref="AdmissionHoldOverflowDrops"/>.
+        /// </summary>
+        public const int MaxHeldBytesUntilAdmitted = MaxHeldBytesPerJoiningConnection;
 
         /// <summary>
         /// Seconds a client waits before acknowledging readiness again on a connection whose server
@@ -254,8 +274,11 @@ namespace CoreAI.Net.Mirror
         private const string ResponseErrorCode = "REMOTE_FAILED";
         private const string PeerDisconnectedReason = "the peer disconnected";
         private const string NotConnectedReason = "the client is not connected to a server";
-        private const string NotAdmittedReason =
-            "the client has not been admitted by the server yet, so nothing was sent";
+        private const string AdmissionHoldFullReason =
+            "the client has not been admitted by the server yet and too many remotes are already "
+            + "waiting for the admission, so nothing was sent";
+        private const string HeldConnectionClosedReason =
+            "the connection closed before the server admitted this client, so the call was never sent";
         private const string PlayerNotConnectedReason =
             "the player is not connected to this server, so nothing was sent";
         private const string DisposedReason = "the network bridge was disposed before the remote answered";
@@ -271,6 +294,7 @@ namespace CoreAI.Net.Mirror
         private readonly HashSet<int> _acknowledged = new();
         private readonly List<OwedDrop> _owedDrops = new();
         private readonly HashSet<int> _tearingDown = new();
+        private readonly List<HeldSend> _heldUntilAdmitted = new();
         private readonly RbxNetworkRateLimiter _rateLimiter;
         private readonly Func<double> _clockSeconds;
         private readonly IRbxClockSource _wallClock;
@@ -278,6 +302,9 @@ namespace CoreAI.Net.Mirror
         private readonly Action<string> _log;
         private readonly bool _isServer;
         private string _admittedActorId;
+        private NetworkConnectionToServer _admittedOn;
+        private NetworkConnectionToServer _heldOn;
+        private long _heldUntilAdmittedBytes;
         private NetworkConnectionToServer _readyAcknowledgedOn;
         private NetworkConnectionToServer _anchoredOn;
         private uint _nextCorrelationId = 1u;
@@ -287,6 +314,7 @@ namespace CoreAI.Net.Mirror
         private double _serverClockFloor = double.NaN;
         private bool _clockAnchored;
         private bool _backwardAnchorPending;
+        private double _setAsideSample;
         private RbxServerClockReader _serverClock;
         private bool _anchorSent;
         private double _lastAnchorServerSeconds;
@@ -299,6 +327,7 @@ namespace CoreAI.Net.Mirror
         private bool _unheardActorLogged;
         private bool _unsentDropLogged;
         private bool _unadmittedSendLogged;
+        private bool _admissionHoldOverflowLogged;
         private bool _malformedDropLogged;
 
         /// <summary>
@@ -385,10 +414,11 @@ namespace CoreAI.Net.Mirror
         public int SupersededConnections { get; private set; }
 
         /// <summary>
-        /// On a client, the actor the server admitted this process as; null before admission and
-        /// after a disconnect. Always null on a server.
+        /// On a client, the actor the server admitted this process as on the connection it has now;
+        /// null before admission, after a disconnect, and on a newer connection until that
+        /// connection's own admission. Always null on a server.
         /// </summary>
-        public string AdmittedActorId => _admittedActorId;
+        public string AdmittedActorId => IsAdmittedOnTheLiveConnection() ? _admittedActorId : null;
 
         /// <summary>
         /// Whether <see cref="Dispose"/> ran; a composition that outlives the container owning this
@@ -401,16 +431,35 @@ namespace CoreAI.Net.Mirror
 
         /// <summary>
         /// Envelopes a client dropped instead of handing to the transport because it was not
-        /// connected; never counted as sent. Always zero on a server.
+        /// connected — fired while disconnected, or held for an admission on a connection that closed
+        /// before the admission arrived; never counted as sent. Always zero on a server.
         /// </summary>
         public int UnsentPacketsDropped { get; private set; }
 
         /// <summary>
-        /// Client-to-server remotes a client dropped instead of handing to the transport because the
-        /// server had not admitted it yet — connected, but with no admitted actor bound; never counted
-        /// as sent, never charged to the budget. Always zero on a server.
+        /// Unreliable client-to-server remotes a client dropped instead of handing to the transport
+        /// because the server had not admitted it yet — connected, but with no admission bound on
+        /// this connection; never counted as sent, never charged to the budget. A reliable remote or
+        /// an InvokeServer in that window is held instead (<see cref="SendsHeldUntilAdmitted"/>).
+        /// Always zero on a server.
         /// </summary>
         public int UnadmittedSendsDropped { get; private set; }
+
+        /// <summary>
+        /// Reliable client-to-server envelopes — a reliable remote or an InvokeServer — a client held
+        /// because the server had not admitted it yet, whether they were later sent or not; each is
+        /// charged to the budget when it is held and counted in <see cref="PacketsSent"/> when it
+        /// leaves. Always zero on a server.
+        /// </summary>
+        public int SendsHeldUntilAdmitted { get; private set; }
+
+        /// <summary>
+        /// Reliable client-to-server envelopes a client dropped because the hold for its admission
+        /// was already at <see cref="MaxHeldSendsUntilAdmitted"/> or
+        /// <see cref="MaxHeldBytesUntilAdmitted"/>; never sent, never charged, and an InvokeServer
+        /// among them failed at once. Always zero on a server.
+        /// </summary>
+        public int AdmissionHoldOverflowDrops { get; private set; }
 
         /// <summary>
         /// Connections a server closed because its world unregistered their actor outside a kick or
@@ -429,7 +478,10 @@ namespace CoreAI.Net.Mirror
         /// <summary>
         /// Clock anchors a client set aside as a single outlier: one that would move the estimate back
         /// by more than <see cref="ClockStepThresholdSeconds"/>, which a late packet does. The next
-        /// anchor that agrees with it is taken; one that agrees with the estimate is blended in.
+        /// anchor is taken when it agrees with the one set aside — carried back to the moment that one
+        /// arrived, it reads the server's clock within <see cref="ClockStepThresholdSeconds"/> of it;
+        /// one that agrees with the estimate is blended in and the outlier forgotten; one that agrees
+        /// with neither is set aside in its place.
         /// </summary>
         public int ClockAnchorsSetAside { get; private set; }
 
@@ -537,8 +589,9 @@ namespace CoreAI.Net.Mirror
         /// first anchor it steps from zero to the whole skew between the two wall clocks, which can
         /// be hours; the first anchor of every later connection replaces the estimate, as does a held
         /// one and one more than <see cref="ClockStepThresholdSeconds"/> ahead of it; one that far
-        /// behind replaces it only when the next anchor is that far behind too, and a nearer one is
-        /// blended in; and between anchors it follows the client's own wall clock, so a client whose
+        /// behind is set aside and replaces it only when the next anchor agrees with it (see
+        /// <see cref="ClockAnchorsSetAside"/>), and a nearer one is blended in; and between anchors
+        /// it follows the client's own wall clock, so a client whose
         /// clock is corrected mid-session still reads the server's time. A consumer that keeps the
         /// derived clock monotonic must treat the first synchronization as a re-base, not as time
         /// going backwards, and must hold while <see cref="IsServerClockHeld"/> says so.
@@ -714,7 +767,13 @@ namespace CoreAI.Net.Mirror
         /// readiness acknowledgement leaves from here: this is the first moment this client can
         /// route a server remote, and the server holds them until it hears so; a binding made while
         /// the client is not connected yet is acknowledged by the first <see cref="Pump"/> that
-        /// finds it connected.
+        /// finds it connected. WHY what was held leaves from here too, before the acknowledgement:
+        /// the server authenticated this connection in the same call that admitted it, so a reliable
+        /// remote queued now reaches a handler that accepts it, in the order it was fired. WHY the
+        /// admission remembers its connection: Mirror can stop and start a client within one frame,
+        /// before any frame's pump sees it stopped, and the newer connection must not speak as the
+        /// older one's actor before its own admission (B1-08); a binding made while Mirror holds no
+        /// connection at all belongs to the first one it holds next.
         /// </remarks>
         public void BindAdmittedActor(string actorId)
         {
@@ -732,17 +791,21 @@ namespace CoreAI.Net.Mirror
                     + "server must send the id it admitted this client as", nameof(actorId));
             }
 
+            ReconcileWithTheLiveConnection();
             _admittedActorId = actorId.Trim();
+            _admittedOn = NetworkClient.connection;
             _unadmittedDropLogged = false;
             _unadmittedSendLogged = false;
+            _admissionHoldOverflowLogged = false;
             _unheardActorLogged = false;
             LastDisconnectNotice = null;
+            SendHeldUntilAdmitted();
             AcknowledgeReadinessIfDue();
         }
 
         /// <summary>
-        /// Forgets the admitted actor after a disconnect, so a reconnect starts unadmitted, and fails
-        /// every request this client still waits on.
+        /// Forgets the admitted actor after a disconnect, so a reconnect starts unadmitted, fails
+        /// every request this client still waits on, and drops what was held for an admission.
         /// </summary>
         /// <remarks>
         /// WHY the requests fail here: they left on the connection that is gone, and no answer can
@@ -754,9 +817,11 @@ namespace CoreAI.Net.Mirror
         public void ForgetAdmittedActor()
         {
             _admittedActorId = null;
+            _admittedOn = null;
             _readyAcknowledgedOn = null;
             if (!_isServer)
             {
+                DiscardHeldUntilAdmitted();
                 FailAllPending(NotConnectedReason, containCompletionFailures: false);
             }
         }
@@ -957,7 +1022,8 @@ namespace CoreAI.Net.Mirror
         /// <summary>
         /// Fails every expired request, and on a server performs the drops owed from an earlier
         /// frame, drops joining connections past <see cref="ReadinessTimeoutSeconds"/> and sends the
-        /// interval's clock anchors; on a client it acknowledges readiness if a binding still owes
+        /// interval's clock anchors; on a client it forgets an admission or a hold that belongs to a
+        /// connection Mirror no longer holds, and acknowledges readiness if a binding still owes
         /// that. Call once per frame; the scene provider does.
         /// </summary>
         public void Pump()
@@ -967,6 +1033,7 @@ namespace CoreAI.Net.Mirror
                 return;
             }
 
+            ReconcileWithTheLiveConnection();
             PumpTimeouts();
             if (!_isServer)
             {
@@ -1000,11 +1067,15 @@ namespace CoreAI.Net.Mirror
         /// disconnected is documented as dropped and counted, never sent — and a drop that was
         /// still charged to the budget would answer the fire after the budget's last one with a
         /// rate-limit error, for a packet that never left. One state, one outcome. WHY a client that
-        /// is connected but not admitted yet sends nothing either: the server's handlers require
+        /// is connected but not admitted yet puts nothing on the wire: the server's handlers require
         /// Mirror authentication, and an unreliable remote leaves before the reliable admission
         /// request queued with it, so it reached the server on an unauthenticated connection and
         /// Mirror disconnected the joining client for it (A4-04); it is dropped and counted in
-        /// <see cref="UnadmittedSendsDropped"/> instead. WHY a server never puts ClientToServer on the
+        /// <see cref="UnadmittedSendsDropped"/> instead. WHY a reliable one is held rather than
+        /// dropped: on the ordered reliable channel it would have followed the admission request,
+        /// which the server answers in the same call, so it used to arrive — and a script has no
+        /// signal for "admitted" to wait on (B1-07). It is charged when held, because it leaves; one
+        /// past the hold's bound is dropped uncharged. WHY a server never puts ClientToServer on the
         /// wire: on a server that direction can only come from an actor in this process, and the wire
         /// would carry it to every remote client as though the server had fired at them — a leak,
         /// and a remote the server's own scripts never hear.
@@ -1022,15 +1093,23 @@ namespace CoreAI.Net.Mirror
                 unreliable
                     ? "fire a reliable RemoteEvent for data this large, or split it"
                     : "split the payload, or send a reference the receiver can resolve");
+            ReconcileWithTheLiveConnection();
             if (!_isServer && !NetworkClient.isConnected)
             {
                 DropUnsent();
                 return;
             }
 
-            if (!_isServer && _admittedActorId == null)
+            bool holdUntilAdmitted = !_isServer && !IsAdmittedOnTheLiveConnection();
+            if (holdUntilAdmitted && (unreliable || _disposed))
             {
                 DropUnadmittedSend();
+                return;
+            }
+
+            if (holdUntilAdmitted && !HasRoomUntilAdmitted(message.Payload))
+            {
+                DropPastTheAdmissionHold();
                 return;
             }
 
@@ -1050,6 +1129,12 @@ namespace CoreAI.Net.Mirror
             int channel = unreliable ? Channels.Unreliable : Channels.Reliable;
             if (!_isServer)
             {
+                if (holdUntilAdmitted)
+                {
+                    HoldUntilAdmitted(new HeldSend { Event = ToWire(message), Payload = message.Payload });
+                    return;
+                }
+
                 NetworkClient.Send(ToWire(message), channel);
                 CountClientSend(message.Payload);
                 return;
@@ -1074,9 +1159,12 @@ namespace CoreAI.Net.Mirror
 
         /// <inheritdoc />
         /// <remarks>
-        /// The connection, and a client's admission, are checked before the budget for the reasons
-        /// <see cref="SendEvent"/> gives: a call that never leaves is a drop, not a budget entry, and
-        /// it fails at once. On a server, a ClientToServer invocation and one addressed to a
+        /// The connection, and a client's room to hold the call until its admission, are checked
+        /// before the budget for the reasons <see cref="SendEvent"/> gives: a call that never leaves
+        /// is a drop, not a budget entry, and it fails at once. A client's call made before its
+        /// admission is held like a reliable remote and sent right after the admission; its timeout
+        /// runs from the call, held or not, and one that timed out while held is never sent. On a
+        /// server, a ClientToServer invocation and one addressed to a
         /// registered actor without a connection are answered in process, as the loopback answers
         /// them; one addressed to a player with no live connection here fails at once, because no
         /// packet leaves and nothing can answer it (A4-07).
@@ -1097,6 +1185,7 @@ namespace CoreAI.Net.Mirror
                 return;
             }
 
+            ReconcileWithTheLiveConnection();
             if (!_isServer && !NetworkClient.isConnected)
             {
                 // WHY failed now rather than at the timeout: nothing was handed to the transport,
@@ -1107,10 +1196,11 @@ namespace CoreAI.Net.Mirror
                 return;
             }
 
-            if (!_isServer && _admittedActorId == null)
+            bool holdUntilAdmitted = !_isServer && !IsAdmittedOnTheLiveConnection();
+            if (holdUntilAdmitted && !HasRoomUntilAdmitted(message.Payload))
             {
-                DropUnadmittedSend();
-                response?.Invoke(RbxNetworkResponse.Failure(NotAdmittedReason));
+                DropPastTheAdmissionHold();
+                response?.Invoke(RbxNetworkResponse.Failure(AdmissionHoldFullReason));
                 return;
             }
 
@@ -1167,6 +1257,12 @@ namespace CoreAI.Net.Mirror
 
             if (!_isServer)
             {
+                if (holdUntilAdmitted)
+                {
+                    HoldUntilAdmitted(new HeldSend { IsRequest = true, Request = wire, Payload = message.Payload });
+                    return;
+                }
+
                 NetworkClient.Send(wire);
                 CountClientSend(message.Payload);
                 return;
@@ -1198,11 +1294,13 @@ namespace CoreAI.Net.Mirror
 
         /// <summary>
         /// Fails every request whose deadline has passed, and on a client every request at all once
-        /// it is no longer connected. <see cref="Pump"/> runs this with the rest of a frame's work;
-        /// a composition calls that once per frame.
+        /// it is no longer connected or its connection was replaced, held ones included.
+        /// <see cref="Pump"/> runs this with the rest of a frame's work; a composition calls that
+        /// once per frame.
         /// </summary>
         public void PumpTimeouts()
         {
+            ReconcileWithTheLiveConnection();
             if (_pending.Count == 0)
             {
                 return;
@@ -1319,7 +1417,11 @@ namespace CoreAI.Net.Mirror
             _joining.Clear();
             _acknowledged.Clear();
             _tearingDown.Clear();
+            _heldUntilAdmitted.Clear();
+            _heldUntilAdmittedBytes = 0;
+            _heldOn = null;
             _admittedActorId = null;
+            _admittedOn = null;
             _readyAcknowledgedOn = null;
             _serverClock = null;
             EventReceived = null;
@@ -1606,7 +1708,11 @@ namespace CoreAI.Net.Mirror
         /// that stepped back, and replacing the estimate with it put every client clock seconds
         /// behind until the next anchor; two late anchors in a row are rare, a real step back
         /// repeats in every anchor, and a step back the server's scripts can see arrives held — the
-        /// server says so, and that is taken at once. WHY an anchor that is not a positive finite
+        /// server says so, and that is taken at once. WHY "agrees" compares the two samples: each is
+        /// the server's clock carried back to this machine's monotonic zero, so two anchors of one
+        /// stepped clock land within the threshold of each other however far apart they arrived,
+        /// while two packets late by different amounts do not — and the later of those is set aside
+        /// in turn, since it is the newer evidence (B1-10). WHY an anchor that is not a positive finite
         /// time, or a hold that is negative or not finite, is dropped: it would poison every clock
         /// derived from it, and a throw here would make Mirror disconnect the client.
         /// </remarks>
@@ -1632,8 +1738,10 @@ namespace CoreAI.Net.Mirror
             NetworkConnectionToServer connection = NetworkClient.connection;
             double gap = sample - _serverUnixAtMonotonicZero;
             bool newConnection = !_clockAnchored || !ReferenceEquals(_anchoredOn, connection);
+            bool agreesWithTheSetAside = _backwardAnchorPending
+                                         && Math.Abs(sample - _setAsideSample) <= ClockStepThresholdSeconds;
             if (newConnection || serverHeld || gap > ClockStepThresholdSeconds
-                || (gap < -ClockStepThresholdSeconds && _backwardAnchorPending))
+                || (gap < -ClockStepThresholdSeconds && agreesWithTheSetAside))
             {
                 _serverUnixAtMonotonicZero = sample;
                 _backwardAnchorPending = false;
@@ -1641,6 +1749,7 @@ namespace CoreAI.Net.Mirror
             else if (gap < -ClockStepThresholdSeconds)
             {
                 _backwardAnchorPending = true;
+                _setAsideSample = sample;
                 ClockAnchorsSetAside++;
                 return;
             }
@@ -1806,13 +1915,14 @@ namespace CoreAI.Net.Mirror
         /// throws, so throwing would let a wiring gap on this side kick the client on every
         /// reconnect; passing null is what the world refuses with an exception, which is the same
         /// kick one layer later. A packet here without a binding means the server sent a remote
-        /// before its admission response was processed, or this composition never bound one —
+        /// before its admission response was processed, the binding is an earlier connection's, or
+        /// this composition never bound one —
         /// either way the count and the one-time line are what an operator needs, and a flood of
         /// them is not.
         /// </remarks>
         private bool TryResolveSelf(out string actorId)
         {
-            actorId = _admittedActorId;
+            actorId = AdmittedActorId;
             if (!string.IsNullOrEmpty(actorId))
             {
                 WarnOnceIfUnheard(actorId);
@@ -2371,7 +2481,7 @@ namespace CoreAI.Net.Mirror
         /// </summary>
         private void AcknowledgeReadinessIfDue()
         {
-            if (_isServer || _disposed || _admittedActorId == null || !NetworkClient.isConnected)
+            if (_isServer || _disposed || !IsAdmittedOnTheLiveConnection() || !NetworkClient.isConnected)
             {
                 return;
             }
@@ -2759,7 +2869,8 @@ namespace CoreAI.Net.Mirror
         }
 
         /// <summary>
-        /// Drops one client-to-server envelope fired before the server admitted this client:
+        /// Drops one client-to-server envelope fired before the server admitted this client that
+        /// cannot be held for the admission — an unreliable remote, or any on a disposed bridge:
         /// counted, never sent, never charged, and said once until an admission is bound.
         /// </summary>
         private void DropUnadmittedSend()
@@ -2771,9 +2882,193 @@ namespace CoreAI.Net.Mirror
             }
 
             _unadmittedSendLogged = true;
-            _log("[CoreAI.Mirror] a remote was fired before the server admitted this client; it and "
-                 + "any that follow are dropped and counted, not sent, until the admission response "
-                 + "binds the actor");
+            _log("[CoreAI.Mirror] an unreliable remote was fired before the server admitted this "
+                 + "client; it and any that follow are dropped and counted, not sent, until the "
+                 + "admission response binds the actor (reliable remotes and InvokeServer calls are "
+                 + "held and sent right after it)");
+        }
+
+        /// <summary>
+        /// Whether this client's admission is bound on the connection Mirror holds now, or was bound
+        /// while Mirror held none; always false on a server.
+        /// </summary>
+        private bool IsAdmittedOnTheLiveConnection()
+        {
+            return !_isServer && _admittedActorId != null
+                   && (_admittedOn == null || ReferenceEquals(_admittedOn, NetworkClient.connection));
+        }
+
+        /// <summary>
+        /// On a client, forgets what belongs to a connection that is no longer Mirror's live one: the
+        /// sends held for an admission on a connection that closed, and an admission bound on an
+        /// older connection together with the requests that left on it.
+        /// </summary>
+        /// <remarks>
+        /// WHY at every client entry point and not only in the frame pump: Mirror can stop and start
+        /// a client within one frame, before any pump sees it stopped, and a send made meanwhile
+        /// must not leave on the newer connection as the older one's admitted actor — the server's
+        /// handlers require authentication, and Mirror would disconnect the joining client for it
+        /// (B1-08). WHY a binding made while Mirror held no connection takes the next one: a
+        /// composition may bind before Mirror connects, and that binding is meant for the
+        /// connection that follows. WHY the requests' completions are contained: this runs inside
+        /// a script's own FireServer and inside Mirror's admission handler, where another script's
+        /// throw must not surface.
+        /// </remarks>
+        private void ReconcileWithTheLiveConnection()
+        {
+            if (_isServer || _disposed)
+            {
+                return;
+            }
+
+            NetworkConnectionToServer live = NetworkClient.connection;
+            if (_heldUntilAdmitted.Count > 0
+                && (!NetworkClient.isConnected || !ReferenceEquals(_heldOn, live)))
+            {
+                DiscardHeldUntilAdmitted();
+            }
+
+            if (_admittedActorId == null || live == null)
+            {
+                return;
+            }
+
+            if (_admittedOn == null)
+            {
+                _admittedOn = live;
+                return;
+            }
+
+            if (ReferenceEquals(_admittedOn, live))
+            {
+                return;
+            }
+
+            _admittedActorId = null;
+            _admittedOn = null;
+            _readyAcknowledgedOn = null;
+            FailAllPending(NotConnectedReason, containCompletionFailures: true);
+        }
+
+        /// <summary>Whether the hold for this client's admission takes one more payload of this size.</summary>
+        private bool HasRoomUntilAdmitted(byte[] payload)
+        {
+            return _heldUntilAdmitted.Count < MaxHeldSendsUntilAdmitted
+                   && _heldUntilAdmittedBytes + (payload?.Length ?? 0) <= MaxHeldBytesUntilAdmitted;
+        }
+
+        /// <summary>Holds one reliable client envelope for the admission of the live connection.</summary>
+        private void HoldUntilAdmitted(HeldSend held)
+        {
+            _heldOn = NetworkClient.connection;
+            _heldUntilAdmitted.Add(held);
+            _heldUntilAdmittedBytes += held.Payload?.Length ?? 0;
+            SendsHeldUntilAdmitted++;
+        }
+
+        /// <summary>
+        /// Sends what this client held for its admission, in the order it was fired, on the
+        /// connection it was held for; a call that already failed — timed out while held — is not
+        /// sent, and a hold whose connection is gone is dropped instead.
+        /// </summary>
+        private void SendHeldUntilAdmitted()
+        {
+            if (_heldUntilAdmitted.Count == 0)
+            {
+                return;
+            }
+
+            if (!NetworkClient.isConnected || !ReferenceEquals(_heldOn, NetworkClient.connection))
+            {
+                DiscardHeldUntilAdmitted();
+                return;
+            }
+
+            HeldSend[] held = _heldUntilAdmitted.ToArray();
+            _heldUntilAdmitted.Clear();
+            _heldUntilAdmittedBytes = 0;
+            _heldOn = null;
+            for (int index = 0; index < held.Length; index++)
+            {
+                HeldSend send = held[index];
+                if (send.IsRequest)
+                {
+                    if (!_pending.ContainsKey(send.Request.CorrelationId))
+                    {
+                        continue;
+                    }
+
+                    NetworkClient.Send(send.Request);
+                }
+                else
+                {
+                    NetworkClient.Send(send.Event, Channels.Reliable);
+                }
+
+                CountClientSend(send.Payload);
+            }
+        }
+
+        /// <summary>
+        /// Drops what this client held for an admission that will not come on the connection it was
+        /// held for: counted in <see cref="UnsentPacketsDropped"/>, said once per hold, and every
+        /// InvokeServer among it failed now.
+        /// </summary>
+        private void DiscardHeldUntilAdmitted()
+        {
+            _heldOn = null;
+            _heldUntilAdmittedBytes = 0;
+            _admissionHoldOverflowLogged = false;
+            if (_heldUntilAdmitted.Count == 0)
+            {
+                return;
+            }
+
+            HeldSend[] discarded = _heldUntilAdmitted.ToArray();
+            _heldUntilAdmitted.Clear();
+            UnsentPacketsDropped += discarded.Length;
+            _log("[CoreAI.Mirror] the connection closed before the server admitted this client; the "
+                 + discarded.Length + " remotes held for the admission are dropped and counted, and "
+                 + "the InvokeServer calls among them fail");
+            for (int index = 0; index < discarded.Length; index++)
+            {
+                if (!discarded[index].IsRequest
+                    || !_pending.Remove(discarded[index].Request.CorrelationId, out PendingRequest request))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    request.Complete?.Invoke(RbxNetworkResponse.Failure(HeldConnectionClosedReason));
+                }
+                catch (Exception exception)
+                {
+                    // WHY contained: see ReconcileWithTheLiveConnection; one script's throw must not
+                    // stop the other held calls from failing.
+                    _log("[CoreAI.Mirror] a RemoteFunction completion threw while the calls held for "
+                         + "an admission were failed: " + exception.Message);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Drops one reliable client envelope past the bound of the hold for this client's admission:
+        /// counted, never sent, never charged, and said once per unadmitted stretch.
+        /// </summary>
+        private void DropPastTheAdmissionHold()
+        {
+            AdmissionHoldOverflowDrops++;
+            if (_admissionHoldOverflowLogged)
+            {
+                return;
+            }
+
+            _admissionHoldOverflowLogged = true;
+            _log("[CoreAI.Mirror] this client has not been admitted yet and already holds "
+                 + _heldUntilAdmitted.Count + " remotes (" + _heldUntilAdmittedBytes + " bytes) for "
+                 + "the admission; this remote and any that follow past the bound are dropped and "
+                 + "counted, and an InvokeServer among them fails");
         }
     }
 }
