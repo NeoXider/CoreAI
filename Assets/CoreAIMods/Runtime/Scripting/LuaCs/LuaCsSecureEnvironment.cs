@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -204,6 +205,17 @@ namespace CoreAI.Sandbox.LuaCs
                 (ctx, ct) => GuardedCoroutineResume(ctx, ct, nativeResume, liveResumeBudget));
         }
 
+        // WHY one trip source per coroutine for its whole life, and NOT linked to the resumer's token:
+        // Lua-CSharp runs a coroutine body with the token of its FIRST resume for as long as it lives (the
+        // body's VM contexts capture it; a later resume only wakes them), so a trip on any later resume has to
+        // cancel that very token for the body to see it (LuaCsCoroutineHandle.CancelGuardedRun). A link to the
+        // first resumer would outlive it: its guard's pooled source, cancelled by a trip in some later run,
+        // would then kill a healthy coroutine that merely started under it. A host cancellation of the resumer
+        // still ends the run: the child is held to its own per-resume budget, and the resumer's token is
+        // checked the moment the resume returns.
+        private static readonly ConditionalWeakTable<LuaState, CancellationTokenSource> RawCoroutineTripSources =
+            new();
+
         private static System.Threading.Tasks.ValueTask<int> GuardedCoroutineResume(
             LuaFunctionExecutionContext ctx, CancellationToken ct, LuaValue nativeResume,
             LuaCsCoroutineBudgetSettings liveResumeBudget)
@@ -245,6 +257,8 @@ namespace CoreAI.Sandbox.LuaCs
                 canResume = false;
             }
 
+            CancellationTokenSource tripSource = null;
+            LuaCsHostFunctionException tripError = null;
             if (canResume)
             {
                 long steps = 0;
@@ -266,37 +280,44 @@ namespace CoreAI.Sandbox.LuaCs
                 LuaCsAllocationBudget allocation = default;
                 allocation.Reset(LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget);
 
+                tripSource = RawCoroutineTripSources.GetOrCreateValue(coroutineState);
+                CancellationTokenSource runSource = tripSource;
                 LuaFunction hook = new("coreai_coroutine_guard", (hctx, hct) =>
                 {
-                    steps += CoroutineHookInstructionBatch;
-                    // WHY CreateBudgetTrip: the native resume this hook cuts is protected, so the mod's
-                    // `ok, err = coroutine.resume(co)` receives the exception's ErrorObject — which the
-                    // (LuaState, Exception) overload leaves nil, turning every trip into `false, nil`.
-                    // See LuaCsCoroutineHandle.CreateBudgetTrip. The memory trip's dedicated CLR type was
-                    // never observable across that protected boundary, so only its marker text is kept.
-                    if (steps > stepBudget)
+                    if (tripError == null)
                     {
-                        throw LuaCsCoroutineHandle.CreateBudgetTrip(hctx.State,
-                            $"LuaCsSecureEnvironment: EXCEEDED_COROUTINE_STEP_BUDGET ({stepBudget})");
+                        steps += CoroutineHookInstructionBatch;
+                        if (steps > stepBudget)
+                        {
+                            tripError = LuaCsCoroutineHandle.CreatePendingBudgetTrip(hctx.State,
+                                $"LuaCsSecureEnvironment: EXCEEDED_COROUTINE_STEP_BUDGET ({stepBudget})");
+                        }
+                        else if (System.Diagnostics.Stopwatch.GetTimestamp() - startTimestamp > timeoutTicks)
+                        {
+                            tripError = LuaCsCoroutineHandle.CreatePendingBudgetTrip(hctx.State,
+                                $"Lua coroutine resume exceeded {timeoutMs} ms.");
+                        }
+                        else if (allocation.IsExceeded())
+                        {
+                            // WHY only the marker text and no dedicated exception type: the resumer receives
+                            // the trip as the error value of `ok, err = coroutine.resume(co)`, a string, so a
+                            // CLR type could never be observed across that boundary.
+                            tripError = LuaCsCoroutineHandle.CreatePendingBudgetTrip(hctx.State,
+                                $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} "
+                                + $"({allocation.BudgetBytes} bytes)");
+                        }
+                        else
+                        {
+                            return new System.Threading.Tasks.ValueTask<int>(hctx.Return());
+                        }
                     }
 
-                    if (System.Diagnostics.Stopwatch.GetTimestamp() - startTimestamp > timeoutTicks)
+                    if (LuaCsCoroutineHandle.CancelGuardedRun(runSource, hct))
                     {
-                        throw LuaCsCoroutineHandle.CreateBudgetTrip(hctx.State,
-                            $"Lua coroutine resume exceeded {timeoutMs} ms.");
+                        return new System.Threading.Tasks.ValueTask<int>(hctx.Return());
                     }
 
-                    if (allocation.IsExceeded())
-                    {
-                        // WHY CreateBudgetTrip and not a dedicated exception type: the native resume this
-                        // hook cuts is protected, so the mod's `ok, err = coroutine.resume(co)` receives the
-                        // exception's ErrorObject, which the (LuaState, Exception) overload leaves nil - the
-                        // trip arrived as `false, nil`. Only the marker text survives that boundary.
-                        throw LuaCsCoroutineHandle.CreateBudgetTrip(hctx.State,
-                            $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} ({allocation.BudgetBytes} bytes)");
-                    }
-
-                    return new System.Threading.Tasks.ValueTask<int>(hctx.Return());
+                    throw LuaCsCoroutineHandle.ForeignContextTrip(tripError);
                 });
 
                 try
@@ -312,7 +333,13 @@ namespace CoreAI.Sandbox.LuaCs
 
             try
             {
-                return callerState.CallAsync(nativeResume, resumeArgs.AsSpan(), ct).GetAwaiter().GetResult();
+                LuaValue[] results = callerState.CallAsync(nativeResume, resumeArgs.AsSpan(),
+                    armed ? tripSource.Token : ct).GetAwaiter().GetResult();
+                return tripError == null ? results : EndTrippedResume(coroutineState, tripError);
+            }
+            catch (Exception) when (tripError != null)
+            {
+                return EndTrippedResume(coroutineState, tripError);
             }
             finally
             {
@@ -328,6 +355,17 @@ namespace CoreAI.Sandbox.LuaCs
                     }
                 }
             }
+        }
+
+        // WHY the thread is marked Dead here: Lua-CSharp's protected resume lets a cancellation through with the
+        // thread left Running (CoroutineCore.ResumeAsyncCore catches `when !(ex is OperationCanceledException)`),
+        // which no later resume could use and nothing would ever finish. A budget-cut coroutine is over, and its
+        // resumer gets the [false, trip line] a protected resume returns for any error the coroutine raised.
+        /// <summary>The <c>coroutine.resume</c> results of a resume whose per-resume budget tripped.</summary>
+        private static LuaValue[] EndTrippedResume(LuaState coroutineState, LuaCsHostFunctionException trip)
+        {
+            coroutineState.UnsafeSetStatus(LuaThreadStatus.Dead);
+            return new[] { new LuaValue(false), trip.ErrorObject };
         }
 
         /// <summary>Loads and runs Lua code inside a secured state with the optional execution guard.</summary>

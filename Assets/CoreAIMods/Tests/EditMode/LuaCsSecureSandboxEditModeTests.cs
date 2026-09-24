@@ -436,16 +436,26 @@ namespace CoreAI.Tests.EditMode
         [TestCase("steps")]
         [TestCase("time")]
         [Timeout(60000)]
-        public void GuardStepAndTimeTrips_PcallAndXpcallGetTheTripLine_AndTheRunStillEndsWithIt(string budget)
+        public void GuardStepAndTimeTrips_PcallAndXpcallCannotCatchThem_AndTheRunEndsWithTheTripLine(string budget)
         {
-            // WHY: the guard raised both trips over an inner exception, so pcall handed the script
-            // "System.InvalidOperationException: ..." or "System.TimeoutException: ...", and xpcall's handler and
-            // a protected coroutine.resume - both read the error value - got nil.
+            // WHY (security, W6-A): pcall and xpcall used to catch a trip. The guard hook THREW to trip, which
+            // leaves Lua-CSharp's in-hook flag set, so the next Lua frame entered was never counted again:
+            // `pcall(runaway); pcall(work)` ran `work` unguarded (20M iterations under a 20k step budget, and a
+            // `while true` in it hung the host), and xpcall ran its handler after the budget was gone. A trip
+            // now ends the run from inside any protected call, with exactly the trip's clean line (the guard
+            // once raised it over an inner exception, handing pcall "System.TimeoutException: ...").
             bool steps = budget == "steps";
             string expected = steps
                 ? "LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (20000)"
                 : "Lua exceeded 100 ms.";
-            string[] calls = { "record(pcall(runaway))", "record(xpcall(runaway, echo))" };
+            string[] calls =
+            {
+                "record(pcall(runaway))",
+                "record(xpcall(runaway, function(e) record('handler', e) return e end))",
+                "pcall(runaway)\npcall(work)",
+                "xpcall(runaway, echo)\nxpcall(work, echo)",
+                "pcall(function() pcall(runaway) end)\nwork()"
+            };
             foreach (string call in calls)
             {
                 LuaCsExecutionGuard guard = steps
@@ -455,20 +465,18 @@ namespace CoreAI.Tests.EditMode
 
                 LuaRuntimeException ended = RunRecordingChunk(
                     "local function runaway() local n = 0 for i = 1, 50000000 do n = n + 1 end return n end\n"
+                    + "local function work() local n = 0 for i = 1, 20000000 do n = n + 1 end record('work', n) end\n"
                     + call + "\n"
-                    + "local after = 0\n"
-                    + "for i = 1, 1000 do after = after + i end\n"
-                    + "return after",
+                    + "record('after')\n"
+                    + "return 1",
                     guard, rows);
 
-                CollectionAssert.AreEqual(new[] { "boolean:false|string:" + expected }, rows,
-                    call + " must hand the script exactly the trip's line");
-                AssertIsOnlyTheErrorLine(rows[0]);
-
-                // WHY the run must still end with the trip: a step or time budget stays exceeded, so the hook
-                // raises it again at its next fire after pcall returns. Catching it never lets the script go on.
-                Assert.IsNotNull(ended, call + ": catching the trip must not let the chunk run to its end");
+                CollectionAssert.IsEmpty(rows,
+                    call + " must not return to the script, run a handler or run anything after the trip: "
+                    + string.Join(" / ", rows));
+                Assert.IsNotNull(ended, call + ": the trip must end the run");
                 Assert.AreEqual(expected, ended.Message);
+                AssertIsOnlyTheErrorLine(ended.Message);
                 Assert.AreEqual(expected, ended.ErrorObject.ToString(),
                     "the error value, which a protected coroutine.resume hands its resumer, must be the same line");
                 LuaCsHostFunctionException trip = ended as LuaCsHostFunctionException;
@@ -490,6 +498,27 @@ namespace CoreAI.Tests.EditMode
             List<string> rows)
         {
             LuaCsSecureEnvironment env = new();
+            // WHY a fresh state per run: its record() writes into this call's rows and nowhere else. Reusing a
+            // state after a trip has its own test, UncaughtTrip_LeavesTheStateGuarded_* in
+            // LuaCsGuardFrameAndAllocationEditModeTests.
+            LuaState state = CreateRecordingState(env, rows);
+            try
+            {
+                env.RunChunk(state, chunk, guard);
+                return null;
+            }
+            catch (LuaRuntimeException ex)
+            {
+                return ex;
+            }
+        }
+
+        /// <summary>
+        /// A sandboxed state carrying the <c>record(...)</c> and <c>echo(...)</c> host functions described on
+        /// <see cref="RunRecordingChunk"/>.
+        /// </summary>
+        internal static LuaState CreateRecordingState(LuaCsSecureEnvironment env, List<string> rows)
+        {
             LuaCsApiRegistry registry = new();
             registry.RegisterCallback("record", (ctx, ct) =>
             {
@@ -505,19 +534,183 @@ namespace CoreAI.Tests.EditMode
             });
             registry.RegisterCallback("echo", (ctx, ct) =>
                 new System.Threading.Tasks.ValueTask<int>(ctx.Return(ctx.Arguments.ToArray())));
+            return env.Create(registry);
+        }
 
-            // WHY a fresh state per run: after a guard trip Lua-CSharp leaves the state flagged as inside its
-            // hook, and a later run on that state is not guarded at all.
-            LuaState state = env.Create(registry);
-            try
+        [Test]
+        [Timeout(30000)]
+        public void OrdinaryLuaErrors_AreStillCaughtByPcallAndXpcall_UnderTheGuard()
+        {
+            // WHY the negative twin: only budget trips became uncatchable. A script's own error(), a host
+            // function's refusal and xpcall's handler must behave exactly as before, and a run inside its budget
+            // must complete.
+            List<string> rows = new();
+            LuaRuntimeException ended = RunRecordingChunk(
+                "record(pcall(error, 'boom', 0))\n" +
+                "record(xpcall(function() error('boom', 0) end, function(e) return 'handled ' .. e end))\n" +
+                "record(pcall(string.rep, 'x', 2000000))\n" +
+                "record('after')\n" +
+                "return 1",
+                new LuaCsExecutionGuard(2_000, 200_000, 0), rows);
+
+            Assert.IsNull(ended, "a run inside its budget must complete: " + ended?.Message);
+            CollectionAssert.AreEqual(new[]
             {
-                env.RunChunk(state, chunk, guard);
-                return null;
-            }
-            catch (LuaRuntimeException ex)
+                "boolean:false|string:boom",
+                "boolean:false|string:handled boom",
+                "boolean:false|string:LuaCsSecureEnvironment: string.rep result would exceed 1000000 chars.",
+                "string:after"
+            }, rows);
+        }
+
+        [TestCase("record(pcall(runaway))", false)]
+        [TestCase("record(xpcall(runaway, function(e) record('handler', e) return e end))", false)]
+        [TestCase("pcall(runaway)\npcall(work)", false)]
+        [TestCase("record(pcall(runaway))", true)]
+        [TestCase("record(xpcall(runaway, function(e) record('handler', e) return e end))", true)]
+        [TestCase("pcall(runaway)\npcall(work)", true)]
+        [Timeout(60000)]
+        public void RawCoroutineResumeTrip_CannotBeCaughtInsideTheCoroutine_AndTheResumerGetsTheTripLine(
+            string call, bool onALaterResume)
+        {
+            // WHY: the per-resume hook a mod-created coroutine gets threw to trip, like the guard's, so a pcall
+            // inside the coroutine caught it and `pcall(runaway); pcall(work)` then ran `work` with no hook at
+            // all - neither the coroutine's (the in-hook flag stayed set) nor the resumer's guard, which never
+            // fires on another thread. The coroutine now dies with its trip, and only its resumer, which is
+            // not over any budget, receives the line from the protected coroutine.resume as before.
+            // WHY a later resume too: Lua-CSharp runs a coroutine body with the token of its FIRST resume for
+            // its whole life, so a trip that cancelled only the current resume's token would not reach it.
+            List<string> rows = new();
+            string yieldFirst = onALaterResume ? "  coroutine.yield('first')\n" : string.Empty;
+            string firstResume = onALaterResume ? "record(coroutine.resume(co))\n" : string.Empty;
+            LuaRuntimeException ended = RunRecordingChunk(
+                "local function runaway() local n = 0 for i = 1, 50000000 do n = n + 1 end return n end\n" +
+                "local function work() local n = 0 for i = 1, 20000000 do n = n + 1 end record('work', n) end\n" +
+                "local co = coroutine.create(function()\n" +
+                yieldFirst +
+                call + "\n" +
+                "  record('after')\n" +
+                "end)\n" +
+                firstResume +
+                "record(coroutine.resume(co))\n" +
+                "record(coroutine.status(co))\n" +
+                "return 1",
+                new LuaCsExecutionGuard(60_000, 5_000_000_000L, 0), rows);
+
+            Assert.IsNull(ended, "the resumer is inside its own budget and must run on: " + ended?.Message);
+            if (onALaterResume)
             {
-                return ex;
+                Assert.IsNotEmpty(rows);
+                Assert.AreEqual("boolean:true|string:first", rows[0], "the first resume stays inside its budget");
+                rows.RemoveAt(0);
             }
+
+            Assert.AreEqual(2, rows.Count, "only the resumer may record anything: " + string.Join(" / ", rows));
+            StringAssert.StartsWith(
+                "boolean:false|string:LuaCsSecureEnvironment: EXCEEDED_COROUTINE_STEP_BUDGET (500000)", rows[0]);
+            AssertIsOnlyTheErrorLine(rows[0]);
+            Assert.AreEqual("string:dead", rows[1], "a coroutine cut by its budget must be dead");
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void RawCoroutine_StartedInOneGuardedRun_SurvivesATripInALaterRun_AndResumesInTheNext()
+        {
+            // WHY: a coroutine body keeps the token of its first resume for life. Were that the guard's own
+            // token - pooled with the guard's hook and cancelled by whichever later run trips - one runaway
+            // handler would kill every healthy coroutine a sibling handler had started earlier.
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+            LuaCsExecutionGuard guard = new(60_000, 20_000, 0);
+            env.RunChunk(state,
+                "co = coroutine.create(function() for r = 1, 3 do coroutine.yield(r) end return 'done' end)\n" +
+                "assert(coroutine.resume(co))",
+                guard);
+
+            Assert.Throws<LuaCsHostFunctionException>(() => env.RunChunk(state, UnboundedLoop, guard));
+
+            LuaValue[] later = env.RunChunk(state,
+                "local ok, r = coroutine.resume(co)\n" +
+                "return tostring(ok) .. '|' .. string.format('%d', r)",
+                guard);
+            Assert.AreEqual("true|2", later[0].Read<string>());
+        }
+
+        private const string UnboundedLoop = "local n = 0\nwhile true do n = n + 1 end";
+
+        [Test]
+        [Timeout(60000)]
+        public void CoroutineHandleTrip_CannotBeCaught_EvenWhenTheNextInstructionEntersAMetamethod()
+        {
+            // WHY: a scheduler thread's hook fires on every instruction, so after a pcall had caught its trip
+            // the very next instruction usually re-tripped. Not when that instruction enters a new Lua frame
+            // itself: a CONCAT right after the pcall calls __concat, whose frame Lua-CSharp no longer counts
+            // once the throwing hook left its in-hook flag set, and 20M iterations ran under a 10k budget.
+            LuaCsSecureEnvironment env = new();
+            List<string> rows = new();
+            LuaState state = CreateRecordingState(env, rows);
+            LuaFunction body = env.RunChunk(state,
+                "return function()\n" +
+                "  local slow = setmetatable({}, { __concat = function()\n" +
+                "    local n = 0 for i = 1, 20000000 do n = n + 1 end\n" +
+                "    record('metamethod', n)\n" +
+                "    return 'x'\n" +
+                "  end })\n" +
+                "  local joined = slow .. (pcall(function() while true do end end))\n" +
+                "  record('after', joined)\n" +
+                "end")[0].Read<LuaFunction>();
+            LuaCsCoroutineHandle handle = new(state, body, budgetPerResume: 10_000, resumeTimeoutMs: 5_000,
+                totalLifetimeSteps: LuaCsCoroutineHandle.UnlimitedLifetimeSteps);
+
+            handle.Resume();
+
+            CollectionAssert.IsEmpty(rows, "nothing after the trip may run: " + string.Join(" / ", rows));
+            Assert.IsFalse(handle.LastOk);
+            StringAssert.StartsWith("LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET (10000)", handle.LastErrorText);
+            AssertIsOnlyTheErrorLine(handle.LastErrorText);
+            Assert.AreEqual(LuaCsGuardTripKind.Steps, handle.LastTrip);
+            Assert.AreEqual(LuaThreadStatus.Dead, handle.Status, "a budget-cut thread is over");
+            Assert.IsTrue(handle.IsFinished);
+            Assert.IsFalse(handle.CanResume);
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void CoroutineHandle_EachResumeKeepsItsOwnBudget_AndATripRetiresTheThread()
+        {
+            // WHY the negative twin: a trip that ends the thread for good must not turn the per-resume budget
+            // into a cumulative one. Three resumes of about 4k steps each fit a 10k budget one by one (12k
+            // together would not), and only the fourth, a runaway, is cut.
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+            LuaFunction body = env.RunChunk(state,
+                "return function()\n" +
+                "  for r = 1, 3 do\n" +
+                "    local n = 0\n" +
+                "    for i = 1, 2000 do n = n + 1 end\n" +
+                "    coroutine.yield(r)\n" +
+                "  end\n" +
+                "  while true do end\n" +
+                "end")[0].Read<LuaFunction>();
+            LuaCsCoroutineHandle handle = new(state, body, budgetPerResume: 10_000, resumeTimeoutMs: 5_000,
+                totalLifetimeSteps: LuaCsCoroutineHandle.UnlimitedLifetimeSteps);
+
+            for (int resume = 1; resume <= 3; resume++)
+            {
+                LuaValue[] yielded = handle.Resume();
+                Assert.IsTrue(handle.LastOk, "resume " + resume + " is inside its budget: " + handle.LastErrorText);
+                Assert.AreEqual(resume, (int)yielded[0].Read<double>());
+                Assert.AreEqual(LuaCsGuardTripKind.None, handle.LastTrip);
+            }
+
+            handle.Resume();
+
+            Assert.IsFalse(handle.LastOk);
+            StringAssert.StartsWith("LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET (10000)", handle.LastErrorText);
+            Assert.AreEqual(LuaCsGuardTripKind.Steps, handle.LastTrip);
+            Assert.IsTrue(handle.IsFinished);
+            Assert.Throws<System.InvalidOperationException>(() => handle.Resume(),
+                "a budget-cut thread must never run again");
         }
 
         /// <summary>

@@ -2140,6 +2140,59 @@ namespace CoreAI.Tests.EditMode
 
         [Test]
         [Timeout(30000)]
+        public void LuaCs_RunawayHandlerAfterAnEarlierTrip_IsStillCut_AndTheStreakQuarantines()
+        {
+            // WHY (security, W6-A): every handler of a mod runs on the mod's one LuaState, and the guard's
+            // hook used to throw to trip, which left Lua-CSharp's in-hook flag set on that state. After the
+            // first trip no later handler of the mod was guarded at all: a runaway handler hung the host
+            // (a frozen page on WebGL). The loop below is finite so the regression fails instead of hanging.
+            MemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                HandlerTimeoutMs = 150,
+                HandlerMaxSteps = 20_000,
+                MaxErrorsBeforeQuarantine = 2
+            });
+            stack.Runtime.LoadMod("m", @"
+                hooks_on('first', function()
+                    pcall(function() while true do end end)
+                    store_set('first', 'survived')
+                end)
+                hooks_on('later', function()
+                    local n = 0
+                    for i = 1, 50000000 do n = n + 1 end
+                    store_set('later', 'finished')
+                end)");
+            string quarantinedId = null;
+            stack.Runtime.ModQuarantined += (id, count) => quarantinedId = id;
+
+            stack.Runtime.EmitEvent("first", "");
+            stack.Runtime.Tick(0);
+            stack.Runtime.EmitEvent("later", "");
+            stack.Runtime.Tick(0);
+
+            Assert.AreEqual("", store.Get("m", "first"), "pcall must not let the first handler survive its trip");
+            Assert.AreEqual("", store.Get("m", "later"),
+                "a later runaway handler on the same mod must be cut, not run unguarded to its end");
+            IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("m");
+            Assert.AreEqual(2, errors.Count, "both cut runs must be charged as handler errors");
+            foreach (LuaModHandlerError error in errors)
+            {
+                StringAssert.StartsWith("LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (20000)", error.Error,
+                    "a handler cut by its budget must report the trip line itself");
+            }
+
+            Assert.IsTrue(stack.Runtime.ListMods()[0].Quarantined,
+                "two cut runs in a row must reach the quarantine threshold of 2");
+            Assert.AreEqual("m", quarantinedId);
+        }
+
+        [Test]
+        [Timeout(30000)]
         public void LuaCs_ForgedMemoryMarker_IsChargedAndQuarantines()
         {
             MemoryStore store = new();

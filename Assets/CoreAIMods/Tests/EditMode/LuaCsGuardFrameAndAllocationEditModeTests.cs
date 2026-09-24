@@ -429,27 +429,38 @@ namespace CoreAI.Tests.EditMode
 
         [Test]
         [Timeout(60000)]
-        public void MemoryTrip_PcallXpcallAndTheErrorValue_GetOneCleanLine_AndBothWalkersStillClassifyIt()
+        public void MemoryTrip_PcallAndXpcallCannotCatchIt_TheRunEndsWithOneCleanLine_AndBothWalkersClassifyIt()
         {
-            // WHY: the trip was raised over an inner LuaMemoryBudgetException, so pcall handed the script
-            // "CoreAI.Sandbox.LuaCs.LuaMemoryBudgetException: ..." and xpcall's handler and a protected
-            // coroutine.resume - both read the error value - got nil. The cause now travels as HostException,
-            // and the mod runtime labels a handler failure through the NEUTRAL walker, so that one must still
+            // WHY: pcall and xpcall used to catch the trip, and unlike steps and time a memory trip does not
+            // stay exceeded: once the bomb's string was garbage the script simply went on. A trip now ends
+            // the run from inside any protected call - rows stays empty, xpcall's handler never runs - and
+            // the run still ends with exactly the trip's clean line. The cause travels as HostException, and
+            // the mod runtime labels a handler failure through the NEUTRAL walker, so that one must still
             // find the trip by type as well as the guard's own.
             const string expected = "LuaCsSecureEnvironment: EXCEEDED_MEMORY_BUDGET (8388608 bytes)";
             const string bomb =
                 "local function bomb() local s = 'x' for i = 1, 26 do s = s .. s end return #s end\n";
-            string[] calls = { "record(pcall(bomb))", "record(xpcall(bomb, echo))" };
+            string[] calls =
+            {
+                "record(pcall(bomb))",
+                "record(xpcall(bomb, function(e) record('handler', e) return e end))",
+                "pcall(bomb)\nrecord('after the bomb')"
+            };
             foreach (string call in calls)
             {
                 CollectGarbage();
                 List<string> rows = new();
-                LuaCsSecureSandboxEditModeTests.RunRecordingChunk(bomb + call + "\nreturn 1",
+                LuaRuntimeException ended = LuaCsSecureSandboxEditModeTests.RunRecordingChunk(
+                    bomb + call + "\nreturn 1",
                     new LuaCsExecutionGuard(20_000, 5_000_000_000L, 8 * MB), rows);
 
-                CollectionAssert.AreEqual(new[] { "boolean:false|string:" + expected }, rows,
-                    call + " must hand the script exactly the trip's line");
-                LuaCsSecureSandboxEditModeTests.AssertIsOnlyTheErrorLine(rows[0]);
+                CollectionAssert.IsEmpty(rows,
+                    call + " must not return to the script, run a handler or run anything after the bomb: "
+                    + string.Join(" / ", rows));
+                Assert.IsNotNull(ended, call + ": the run must end with the trip");
+                Assert.AreEqual(expected, ended.Message, call);
+                Assert.IsTrue(LuaCsExecutionGuard.IsMemoryBudgetTrip(ended), call);
+                LuaCsSecureSandboxEditModeTests.AssertIsOnlyTheErrorLine(ended.Message);
             }
 
             CollectGarbage();
@@ -468,6 +479,136 @@ namespace CoreAI.Tests.EditMode
                 "the guard's classifier must still find the trip by type");
             Assert.IsTrue(ScriptExecutionErrors.IsMemoryBudgetTrip(uncaught),
                 "the engine-neutral classifier the mod runtime uses must still find the trip by type");
+        }
+
+        /// <summary>
+        /// Fifty million iterations: cut within milliseconds by any armed guard, yet finite, so a guard that
+        /// is NOT armed lets it run to its end (about a second) and the test fails instead of hanging.
+        /// </summary>
+        private const string FiniteRunaway =
+            "local n = 0\n" +
+            "for i = 1, 50000000 do n = n + 1 end\n" +
+            "return n";
+
+        [TestCase("steps")]
+        [TestCase("time")]
+        [TestCase("memory")]
+        [Timeout(60000)]
+        public void UncaughtTrip_LeavesTheStateGuarded_ALaterRunawayOnTheSameStateTripsAgain(string firstTrip)
+        {
+            // WHY (security, W6-A): the guard hook used to THROW to trip, and Lua-CSharp clears its
+            // LuaState.IsInHook flag only when a count hook returns, so after any trip every later hook on
+            // that state counted against a dummy counter and never fired. A later guarded run on the same
+            // state - the next mod event handler - then had no budget at all: 3M iterations ran under a 20k
+            // step guard, 30M ran 410 ms under a 100 ms one, and a real `while true` hung the host.
+            CollectGarbage();
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+            RecordingObserver observer = new();
+            LuaCsExecutionGuard guard;
+            string firstChunk;
+            LuaCsGuardTripKind firstKind;
+            LuaCsGuardTripKind laterKind;
+            switch (firstTrip)
+            {
+                case "steps":
+                    guard = new LuaCsExecutionGuard(60_000, 20_000, 0, guardObserver: observer);
+                    firstChunk = UnboundedArithmeticLoop;
+                    firstKind = LuaCsGuardTripKind.Steps;
+                    laterKind = LuaCsGuardTripKind.Steps;
+                    break;
+                case "time":
+                    guard = new LuaCsExecutionGuard(150, 5_000_000_000L, 0, guardObserver: observer);
+                    firstChunk = UnboundedArithmeticLoop;
+                    firstKind = LuaCsGuardTripKind.Timeout;
+                    laterKind = LuaCsGuardTripKind.Timeout;
+                    break;
+                default:
+                    guard = new LuaCsExecutionGuard(60_000, 1_000_000, 8 * MB, guardObserver: observer);
+                    firstChunk = "local s = 'x'\nfor i = 1, 26 do s = s .. s end\nreturn #s";
+                    firstKind = LuaCsGuardTripKind.Memory;
+                    laterKind = LuaCsGuardTripKind.Steps;
+                    break;
+            }
+
+            Assert.Throws<LuaCsHostFunctionException>(() => env.RunChunk(state, firstChunk, guard),
+                "the first runaway must be cut");
+            LuaCsHostFunctionException later = Assert.Throws<LuaCsHostFunctionException>(
+                () => env.RunChunk(state, FiniteRunaway, guard),
+                "a runaway on the SAME state after a trip must be cut again, not run unguarded to its end");
+
+            Assert.AreEqual(2, observer.Records.Count);
+            Assert.AreEqual(firstKind, observer.Records[0].TrippedBudget);
+            Assert.AreEqual(laterKind, observer.Records[1].TrippedBudget);
+            Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(later));
+
+            // WHY the negative twin: the state must stay usable - a run inside the budget completes as usual.
+            LuaValue[] fine = env.RunChunk(state, "local x = 0\nfor i = 1, 100 do x = x + i end\nreturn x", guard);
+            Assert.AreEqual(5050, (int)fine[0].Read<double>());
+            Assert.AreEqual(3, observer.Records.Count);
+            Assert.IsTrue(observer.Records[2].Completed);
+            Assert.AreEqual(LuaCsGuardTripKind.None, observer.Records[2].TrippedBudget);
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void TripInsideHostCodeRunningItsOwnLua_StillEndsTheRun_AndTheStateStaysGuarded()
+        {
+            // WHY: a trip can land while a host function runs Lua on the guarded state with a token of its own
+            // (the signal runner builds its body with CancellationToken.None). Cancelling the run's token cannot
+            // stop that nested call, so the hook has to throw there, which leaves Lua-CSharp's in-hook flag set;
+            // the guard must clear it, or every later run on the state is unguarded - the same hole as a
+            // throwing trip.
+            LuaCsSecureEnvironment env = new();
+            LuaCsApiRegistry registry = new();
+            registry.RegisterCallback("run_detached", (ctx, ct) =>
+            {
+                ctx.State.CallAsync(ctx.GetArgument(0), Array.Empty<LuaValue>().AsSpan(), CancellationToken.None)
+                    .GetAwaiter().GetResult();
+                return new ValueTask<int>(ctx.Return());
+            });
+            LuaState state = env.Create(registry);
+            RecordingObserver observer = new();
+            LuaCsExecutionGuard guard = new(60_000, 20_000, 0, guardObserver: observer);
+
+            LuaCsHostFunctionException tripped = Assert.Throws<LuaCsHostFunctionException>(() =>
+                env.RunChunk(state, "run_detached(function() local n = 0 while true do n = n + 1 end end)\nreturn 1",
+                    guard));
+            Assert.AreEqual("LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (20000)", tripped.Message,
+                "the caller must receive the trip itself, not the cancellation that carried it out");
+            Assert.IsInstanceOf<InvalidOperationException>(tripped.HostException);
+
+            Assert.Throws<LuaCsHostFunctionException>(() => env.RunChunk(state, FiniteRunaway, guard),
+                "the next runaway on the same state must be cut, so the guard must have cleared the hook flag");
+            Assert.AreEqual(2, observer.Records.Count);
+            Assert.AreEqual(LuaCsGuardTripKind.Steps, observer.Records[0].TrippedBudget);
+            Assert.AreEqual(LuaCsGuardTripKind.Steps, observer.Records[1].TrippedBudget);
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void AsyncExecute_TripWithACancellableCallerToken_IsReportedAsTheTrip_NotAsACancellation()
+        {
+            // WHY: a caller token that can cancel is linked into a per-run source, and the trip travels through
+            // the VM as a cancellation of it. The caller must still receive the trip, never a cancellation it
+            // did not request, and its own token must stay untouched.
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+            RecordingObserver observer = new();
+            LuaCsExecutionGuard guard = new(60_000, 20_000, 0, guardObserver: observer);
+            using CancellationTokenSource caller = new();
+
+            LuaCsHostFunctionException tripped = Assert.ThrowsAsync<LuaCsHostFunctionException>(async () =>
+                await guard.ExecuteAsync(state, state.Load(UnboundedArithmeticLoop, "linked_trip_probe"),
+                    new CountingFrameYielder(), caller.Token));
+
+            Assert.AreEqual("LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (20000)", tripped.Message);
+            Assert.IsFalse(caller.IsCancellationRequested, "a trip must never cancel the caller's own token");
+            Assert.AreEqual(LuaCsGuardTripKind.Steps, observer.Records[0].TrippedBudget);
+
+            LuaValue[] after = guard.Execute(state, state.Load("return 6 * 7", "linked_trip_after"),
+                caller.Token);
+            Assert.AreEqual(42, (int)after[0].Read<double>());
         }
 
         [Test]

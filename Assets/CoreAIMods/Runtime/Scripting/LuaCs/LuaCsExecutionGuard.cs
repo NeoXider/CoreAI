@@ -8,6 +8,7 @@ using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Scripting;
 using Lua;
 using Lua.Runtime;
+using Lua.Standard;
 
 namespace CoreAI.Sandbox.LuaCs
 {
@@ -119,6 +120,14 @@ namespace CoreAI.Sandbox.LuaCs
     /// directly in <see cref="LuaCsSecureEnvironment"/>. The allocation rule itself — a sampled suspicion
     /// that only becomes a trip once a forced collection confirms the growth is LIVE — lives in
     /// <see cref="LuaCsAllocationBudget"/>, shared with the per-resume coroutine hook.
+    /// </para>
+    /// <para>
+    /// A trip is final. The hook records it, cancels the token the run executes with and returns, so the
+    /// VM itself ends the run with a cancellation that neither <c>pcall</c> nor <c>xpcall</c> can catch,
+    /// and the state stays guarded for the next run (see <see cref="LuaCsCoroutineHandle.CancelGuardedRun"/>
+    /// for the Lua-CSharp behaviour this rests on). The caller still receives the trip itself: one
+    /// <see cref="LuaCsHostFunctionException"/> whose message is the trip line and whose
+    /// <see cref="LuaCsHostFunctionException.HostException"/> is the typed cause.
     /// </para>
     /// <para>
     /// <see cref="ExecuteAsync"/> additionally lets the hook release the host frame every
@@ -257,17 +266,28 @@ namespace CoreAI.Sandbox.LuaCs
             // run until this very call returns — a guaranteed deadlock on the single WebGL thread. The
             // yielder is a parameter of BeginGuard rather than a field precisely so that no synchronous
             // entry point can arm one.
-            GuardHook hook = BeginGuard(state, null, out Stack<GuardHook> installed);
+            GuardHook hook = BeginGuard(state, null, cancellationToken, out Stack<GuardHook> installed,
+                out CancellationToken runToken);
             bool completed = false;
             try
             {
-                LuaValue[] results = state.ExecuteAsync(closure, cancellationToken).GetAwaiter().GetResult();
+                LuaValue[] results;
+                try
+                {
+                    results = state.ExecuteAsync(closure, runToken).GetAwaiter().GetResult();
+                }
+                catch (Exception) when (hook.HasTripped)
+                {
+                    // WHY: whatever carried the trip out - the VM's LuaCanceledException, or an error a host
+                    // function built from it on the way - is only the vehicle. The caller gets the trip line
+                    // and its typed cause, as before, never a cancellation it did not ask for; the same
+                    // conversion runs in every entry point below.
+                    throw hook.TripError;
+                }
+
+                hook.ThrowIfTripped();
                 completed = true;
                 return results;
-            }
-            catch (LuaRuntimeException)
-            {
-                throw;
             }
             finally
             {
@@ -294,7 +314,9 @@ namespace CoreAI.Sandbox.LuaCs
         /// <c>LuaCanceledException</c>, but a cancellation escaping an <c>async Task</c> completes that
         /// Task as canceled rather than faulted, and Unity's runtime does not carry the original
         /// exception through that transition — the awaiter sees a plain <see cref="TaskCanceledException"/>
-        /// there while desktop .NET keeps the Lua one. Catch the base type.
+        /// there while desktop .NET keeps the Lua one. Catch the base type. A budget trip is never
+        /// reported as a cancellation, although it ends the run through one: it is converted back to its
+        /// <see cref="LuaCsHostFunctionException"/> inside this method, before it could reach that transition.
         /// </remarks>
         public async Task<LuaValue[]> ExecuteAsync(
             LuaState state,
@@ -312,11 +334,22 @@ namespace CoreAI.Sandbox.LuaCs
                 throw new ArgumentNullException(nameof(closure));
             }
 
-            GuardHook hook = BeginGuard(state, frameYielder, out Stack<GuardHook> installed);
+            GuardHook hook = BeginGuard(state, frameYielder, cancellationToken, out Stack<GuardHook> installed,
+                out CancellationToken runToken);
             bool completed = false;
             try
             {
-                LuaValue[] results = await state.ExecuteAsync(closure, cancellationToken);
+                LuaValue[] results;
+                try
+                {
+                    results = await state.ExecuteAsync(closure, runToken);
+                }
+                catch (Exception) when (hook.HasTripped)
+                {
+                    throw hook.TripError;
+                }
+
+                hook.ThrowIfTripped();
                 completed = true;
                 return results;
             }
@@ -347,18 +380,25 @@ namespace CoreAI.Sandbox.LuaCs
 
             args ??= Array.Empty<LuaValue>();
             // WHY: null yielder — see the note on the synchronous chunk overload above.
-            GuardHook hook = BeginGuard(state, null, out Stack<GuardHook> installed);
+            GuardHook hook = BeginGuard(state, null, cancellationToken, out Stack<GuardHook> installed,
+                out CancellationToken runToken);
             bool completed = false;
             try
             {
-                LuaValue[] results = state.CallAsync(new LuaValue(function), args.AsSpan(), cancellationToken)
-                    .GetAwaiter().GetResult();
+                LuaValue[] results;
+                try
+                {
+                    results = state.CallAsync(new LuaValue(function), args.AsSpan(), runToken)
+                        .GetAwaiter().GetResult();
+                }
+                catch (Exception) when (hook.HasTripped)
+                {
+                    throw hook.TripError;
+                }
+
+                hook.ThrowIfTripped();
                 completed = true;
                 return results;
-            }
-            catch (LuaRuntimeException)
-            {
-                throw;
             }
             finally
             {
@@ -377,10 +417,10 @@ namespace CoreAI.Sandbox.LuaCs
         // state/closure/function/args into a fresh display-class on EVERY guarded call (20 Hz timers/
         // events across mods), reintroducing the per-call heap churn the pooled GuardHook removes.
         private GuardHook BeginGuard(LuaState state, IScriptFrameYielder frameYielder,
-            out Stack<GuardHook> installed)
+            CancellationToken cancellationToken, out Stack<GuardHook> installed, out CancellationToken runToken)
         {
             GuardHook hook = RentHook();
-            hook.Reset(_maxSteps, _timeoutMs, _maxAllocatedBytes, frameYielder);
+            runToken = hook.Reset(_maxSteps, _timeoutMs, _maxAllocatedBytes, frameYielder, cancellationToken);
 
             installed = InstalledHooks.GetOrCreateValue(state);
             installed.Push(hook);
@@ -391,6 +431,11 @@ namespace CoreAI.Sandbox.LuaCs
         private void EndGuard(LuaState state, Stack<GuardHook> installed, GuardHook hook, bool completed)
         {
             installed.Pop();
+            if (hook.LeftInHookFlagSet)
+            {
+                ClearInHookFlag(state);
+            }
+
             try
             {
                 if (installed.Count > 0)
@@ -446,8 +491,45 @@ namespace CoreAI.Sandbox.LuaCs
 
             // WHY: the pool is process-lived, so a returned hook must not keep the caller's frame port
             // (and whatever it closes over) reachable until the hook happens to be rented again.
-            hook.ClearFrameYielder();
+            hook.Release();
             ReturnHook(hook);
+        }
+
+        // WHY debug.sethook's C# implementation and not reflection on the internal LuaState.IsInHook field:
+        // Lua-CSharp resets that flag only in a finally around a hook it calls itself, and
+        // DebugLibrary.SetHook, given a hook with the 'r' mask on the thread that is running it, calls that
+        // hook once as a "return" event and clears the flag in exactly such a finally. It is public API
+        // (the debug library itself is never opened in the sandbox), so it behaves the same under Mono and
+        // IL2CPP with no link.xml entry; EndGuard's SetHook afterwards replaces the no-op hook it installs.
+        private static readonly LuaFunction InHookFlagReset =
+            new("coreai_guard_in_hook_reset", DebugLibrary.Instance.SetHook);
+
+        private static readonly LuaFunction NoOpReturnHook =
+            new("coreai_guard_in_hook_reset_noop", (ctx, ct) => new ValueTask<int>(ctx.Return()));
+
+        /// <summary>
+        /// Clears the in-hook flag a hook that threw left set on <paramref name="state"/> (see
+        /// <see cref="LuaCsCoroutineHandle.ForeignContextTrip"/>); until then no count hook fires on it again.
+        /// Best-effort: the trip being reported must not be replaced by a failure here.
+        /// </summary>
+        private static void ClearInHookFlag(LuaState state)
+        {
+            try
+            {
+                LuaValue[] arguments = { new LuaValue(NoOpReturnHook), "r" };
+                ValueTask<LuaValue[]> reset = state.CallAsync(new LuaValue(InHookFlagReset), arguments.AsSpan(),
+                    CancellationToken.None);
+                // WHY only read when complete: both functions are synchronous C# functions, so the call has
+                // finished here and GetResult only surfaces its outcome; nothing is ever waited on (WebGL).
+                if (reset.IsCompleted)
+                {
+                    reset.GetAwaiter().GetResult();
+                }
+            }
+            catch (Exception)
+            {
+                // WHY swallowed: see the summary; the caller re-arms or clears the hook right after.
+            }
         }
 
         private static GuardHook RentHook()
@@ -484,6 +566,18 @@ namespace CoreAI.Sandbox.LuaCs
             private long _lastYieldTimestamp;
             private long _yieldedTicks;
             private LuaCsGuardTripKind _trip;
+            private LuaCsHostFunctionException _tripError;
+            private bool _leftInHookFlagSet;
+
+            // WHY two sources: a run whose caller passed no cancellable token (every mod handler, timer and
+            // mods_call) runs on _ownSource, which is pooled with the hook and replaced only after a trip has
+            // cancelled it, so the hot path still allocates nothing. Reusing it is safe because no Lua outlives
+            // the run holding its token: the threads that can outlive a run - scheduler threads and
+            // coroutine.create bodies - run on tokens of their own (LuaCsCoroutineHandle, and the per-coroutine
+            // source in LuaCsSecureEnvironment). A caller token that can cancel needs a per-run source linked
+            // to it, so both the caller and a trip can end the run.
+            private CancellationTokenSource _ownSource;
+            private CancellationTokenSource _runSource;
 
             /// <summary>Instruction steps accumulated by the current guarded execution.</summary>
             public long Steps => _steps;
@@ -493,22 +587,41 @@ namespace CoreAI.Sandbox.LuaCs
 
             /// <summary>
             /// Which guard budget tripped during the current execution, or
-            /// <see cref="LuaCsGuardTripKind.None"/>. Recorded by the hook itself at throw time so the
+            /// <see cref="LuaCsGuardTripKind.None"/>. Recorded by the hook itself at trip time so the
             /// reporter never classifies a mod's own <c>error()</c> text as a budget trip.
             /// </summary>
             public LuaCsGuardTripKind Trip => _trip;
+
+            /// <summary>
+            /// True once a budget of the current execution tripped; the run can then only end with it.
+            /// </summary>
+            public bool HasTripped => _tripError != null;
+
+            /// <summary>The error the current execution ends with once <see cref="HasTripped"/>.</summary>
+            public LuaCsHostFunctionException TripError => _tripError;
+
+            /// <summary>
+            /// True when this hook had to throw (see <see cref="LuaCsCoroutineHandle.ForeignContextTrip"/>),
+            /// which leaves Lua-CSharp's in-hook flag set on the state until the guard clears it.
+            /// </summary>
+            public bool LeftInHookFlagSet => _leftInHookFlagSet;
 
             public GuardHook()
             {
                 Function = new LuaFunction("coreai_instruction_guard", Hook);
             }
 
-            /// <summary>Re-arms a fresh per-call budget onto this reusable hook.</summary>
-            public void Reset(long maxSteps, int timeoutMs, long maxAllocatedBytes,
-                IScriptFrameYielder frameYielder)
+            /// <summary>
+            /// Re-arms a fresh per-call budget onto this reusable hook and returns the token the run must
+            /// execute with: the one a trip cancels, linked to <paramref name="callerToken"/> when that can cancel.
+            /// </summary>
+            public CancellationToken Reset(long maxSteps, int timeoutMs, long maxAllocatedBytes,
+                IScriptFrameYielder frameYielder, CancellationToken callerToken)
             {
                 _steps = 0;
                 _trip = LuaCsGuardTripKind.None;
+                _tripError = null;
+                _leftInHookFlagSet = false;
                 _maxSteps = maxSteps < 1 ? 1 : maxSteps;
                 _timeoutMs = timeoutMs < 1 ? 1 : timeoutMs;
 
@@ -525,23 +638,60 @@ namespace CoreAI.Sandbox.LuaCs
                 _frameYieldSliceTicks = (long)FrameYieldSliceMs * Stopwatch.Frequency / 1000;
                 _lastYieldTimestamp = _startTimestamp;
                 _yieldedTicks = 0;
+
+                if (_ownSource == null || _ownSource.IsCancellationRequested)
+                {
+                    _ownSource?.Dispose();
+                    _ownSource = new CancellationTokenSource();
+                }
+
+                _runSource = callerToken.CanBeCanceled
+                    ? CancellationTokenSource.CreateLinkedTokenSource(callerToken)
+                    : _ownSource;
+                return _runSource.Token;
             }
 
-            /// <summary>Drops the frame port before this hook goes back to the pool.</summary>
-            public void ClearFrameYielder()
+            /// <summary>
+            /// Drops the frame port and the per-run token link before this hook goes back to the pool.
+            /// </summary>
+            public void Release()
             {
                 _frameYielder = null;
+                if (_runSource != null && _runSource != _ownSource)
+                {
+                    _runSource.Dispose();
+                }
+
+                _runSource = null;
+            }
+
+            /// <summary>
+            /// Raises the trip when the run returned although a budget had tripped: the trip was signalled
+            /// inside host code running its own Lua and no check of the run's token followed before the end.
+            /// </summary>
+            public void ThrowIfTripped()
+            {
+                if (_tripError != null)
+                {
+                    throw _tripError;
+                }
             }
 
             private System.Threading.Tasks.ValueTask<int> Hook(LuaFunctionExecutionContext ctx, CancellationToken ct)
             {
+                // WHY first: once tripped the run is over, so no budget is read again - a memory reading could
+                // even have dropped back under the line by now.
+                if (_tripError != null)
+                {
+                    return SignalTrip(ctx, ct);
+                }
+
                 // WHY: The hook fires once per HookInstructionBatch instructions, so charge that many
                 // steps per fire — the SAME max-instruction ceiling is enforced, just checked in batches.
                 _steps += HookInstructionBatch;
                 if (_steps > _maxSteps)
                 {
-                    _trip = LuaCsGuardTripKind.Steps;
-                    throw TripError(ctx.State,
+                    return RecordTrip(ctx, ct, LuaCsGuardTripKind.Steps,
                         new InvalidOperationException(
                             $"LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS ({_maxSteps})"));
                 }
@@ -558,8 +708,8 @@ namespace CoreAI.Sandbox.LuaCs
                 long now = Stopwatch.GetTimestamp();
                 if (now - _startTimestamp - _yieldedTicks > _timeoutTicks)
                 {
-                    _trip = LuaCsGuardTripKind.Timeout;
-                    throw TripError(ctx.State, new TimeoutException($"Lua exceeded {_timeoutMs} ms."));
+                    return RecordTrip(ctx, ct, LuaCsGuardTripKind.Timeout,
+                        new TimeoutException($"Lua exceeded {_timeoutMs} ms."));
                 }
 
                 // WHY: Backstop for plain concatenation (s = s .. s), which unlike string.rep/format/
@@ -570,8 +720,7 @@ namespace CoreAI.Sandbox.LuaCs
                 // (LuaMemoryBudgetException), not message text, so a mod cannot forge the trip.
                 if (_allocation.IsExceeded())
                 {
-                    _trip = LuaCsGuardTripKind.Memory;
-                    throw TripError(ctx.State,
+                    return RecordTrip(ctx, ct, LuaCsGuardTripKind.Memory,
                         new LuaMemoryBudgetException(
                             $"LuaCsSecureEnvironment: {MemoryBudgetTripMarker} ({_allocation.BudgetBytes} bytes)"));
                 }
@@ -584,6 +733,37 @@ namespace CoreAI.Sandbox.LuaCs
                 return new System.Threading.Tasks.ValueTask<int>(ctx.Return());
             }
 
+            // WHY not LuaRuntimeException(LuaState, Exception): with the cause as InnerException, pcall handed
+            // the script the cause's ToString() ("System.TimeoutException: Lua exceeded 500 ms.") while
+            // xpcall and a protected coroutine.resume read ErrorObject, which that constructor leaves nil.
+            // No state is attached: the error is raised at the guard boundary, after the VM has unwound.
+            /// <summary>
+            /// Records the trip - <paramref name="cause"/>'s message is the line the caller receives, and
+            /// <paramref name="cause"/> itself stays reachable as
+            /// <see cref="LuaCsHostFunctionException.HostException"/> for type-based classification
+            /// (<see cref="LuaCsExecutionGuard.IsMemoryBudgetTrip"/>,
+            /// <see cref="ScriptExecutionErrors.IsMemoryBudgetTrip"/>) - and ends the run.
+            /// </summary>
+            private System.Threading.Tasks.ValueTask<int> RecordTrip(LuaFunctionExecutionContext ctx,
+                CancellationToken ct, LuaCsGuardTripKind kind, Exception cause)
+            {
+                _trip = kind;
+                _tripError = new LuaCsHostFunctionException(null, cause.Message, cause);
+                return SignalTrip(ctx, ct);
+            }
+
+            private System.Threading.Tasks.ValueTask<int> SignalTrip(LuaFunctionExecutionContext ctx,
+                CancellationToken ct)
+            {
+                if (LuaCsCoroutineHandle.CancelGuardedRun(_runSource, ct))
+                {
+                    return new System.Threading.Tasks.ValueTask<int>(ctx.Return());
+                }
+
+                _leftInHookFlagSet = true;
+                throw LuaCsCoroutineHandle.ForeignContextTrip(_tripError);
+            }
+
             // WHY: kept out of Hook so the fast path stays a plain (non-async) method returning a
             // completed ValueTask. An async Hook would build a state machine on EVERY fire — hundreds of
             // guarded calls per second across mods — while this one is entered only on the ~6 ms slice.
@@ -591,28 +771,27 @@ namespace CoreAI.Sandbox.LuaCs
                 LuaFunctionExecutionContext ctx, CancellationToken ct)
             {
                 long yieldStart = Stopwatch.GetTimestamp();
-                await _frameYielder.YieldFrameAsync(ct);
+                try
+                {
+                    await _frameYielder.YieldFrameAsync(ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    // WHY return instead of rethrow: a hook that throws leaves the state's in-hook flag set
+                    // (see LuaCsCoroutineHandle.CancelGuardedRun), while the VM checks this same token the
+                    // moment the hook returns and raises the cancellation itself, flag cleared.
+                    return ctx.Return();
+                }
+                catch (Exception)
+                {
+                    _leftInHookFlagSet = true;
+                    throw;
+                }
+
                 long resumed = Stopwatch.GetTimestamp();
                 _yieldedTicks += resumed - yieldStart;
                 _lastYieldTimestamp = resumed;
                 return ctx.Return();
-            }
-
-            // WHY not LuaRuntimeException(LuaState, Exception): with the cause as InnerException, pcall handed
-            // the script the cause's ToString() ("System.TimeoutException: Lua exceeded 500 ms.") while
-            // xpcall and a protected coroutine.resume read ErrorObject, which that constructor leaves nil -
-            // the same defect LuaCsCoroutineHandle.CreateBudgetTrip fixed for the per-resume hooks. Whether
-            // pcall can catch the trip at all is unchanged: pcall catches every Lua error, and a step or time
-            // trip stays exceeded, so the next hook fire raises it again.
-            /// <summary>
-            /// The VM error a budget trip raises: <paramref name="cause"/>'s message is the error value
-            /// every protected path receives, and <paramref name="cause"/> itself stays reachable as
-            /// <see cref="LuaCsHostFunctionException.HostException"/> for type-based classification
-            /// (<see cref="LuaCsExecutionGuard.IsMemoryBudgetTrip"/>, <see cref="ScriptExecutionErrors.IsMemoryBudgetTrip"/>).
-            /// </summary>
-            private static LuaRuntimeException TripError(LuaState state, Exception cause)
-            {
-                return new LuaCsHostFunctionException(state, cause.Message, cause);
             }
         }
     }

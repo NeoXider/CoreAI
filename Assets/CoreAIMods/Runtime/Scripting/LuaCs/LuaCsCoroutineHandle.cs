@@ -36,6 +36,10 @@ namespace CoreAI.Sandbox.LuaCs
     ///
     /// There is deliberately NO MoonSharp-style <c>AutoYieldCounter</c>/<c>YieldRequest</c> loop:
     /// Lua-CSharp has no preemptive auto-yield, so one resume already returns at exactly one yield.
+    ///
+    /// A budget trip ends the resume for good: no <c>pcall</c>/<c>xpcall</c> inside the coroutine can
+    /// catch it, and the thread is Dead afterwards. The mechanism is shared with
+    /// <see cref="LuaCsExecutionGuard"/> — see <see cref="CancelGuardedRun"/>.
     /// </summary>
     public sealed class LuaCsCoroutineHandle
     {
@@ -77,6 +81,7 @@ namespace CoreAI.Sandbox.LuaCs
         private readonly long _totalLifetimeSteps;
         private readonly long _maxAllocatedBytes;
         private readonly LuaCsCoroutineBudgetSettings _liveResumeBudget;
+        private readonly bool _isProtectedMode;
 
         private bool _killed;
         private long _consumedSteps;
@@ -136,11 +141,15 @@ namespace CoreAI.Sandbox.LuaCs
             _totalLifetimeSteps = totalLifetimeSteps > 0 ? totalLifetimeSteps : DefaultTotalLifetimeSteps;
             _maxAllocatedBytes = maxAllocatedBytes;
             _liveResumeBudget = liveResumeBudget;
+            _isProtectedMode = isProtectedMode;
 
             _coroutine = ownerState.CreateCoroutine(function, isProtectedMode);
             _callStack = new LuaStack(8);
             _cts = new CancellationTokenSource();
-            _hook = new ResumeGuardHook();
+            // WHY the handle's own source doubles as the trip source: it is already the token every resume
+            // runs with, and a tripped thread is Dead and never resumed again, so cancelling it for good
+            // costs nothing, where a separate linked source would allocate on every resume of every thread.
+            _hook = new ResumeGuardHook(_cts);
         }
 
         /// <summary>Convenience factory mirroring the constructor.</summary>
@@ -215,7 +224,7 @@ namespace CoreAI.Sandbox.LuaCs
         /// Which budget cut the most recent resume (per-resume steps, time or memory, or the lifetime
         /// step cap), or <see cref="LuaCsGuardTripKind.None"/> when it ended by yield, return, or a
         /// script error of its own. Recorded by the guard hook at
-        /// throw time — the typed counterpart of the budget text in <see cref="LastErrorText"/>, so a
+        /// trip time — the typed counterpart of the budget text in <see cref="LastErrorText"/>, so a
         /// consumer can classify a budget kill without matching message wording a script could forge.
         /// </summary>
         public LuaCsGuardTripKind LastTrip => _hook.Trip;
@@ -252,11 +261,12 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             // WHY: Re-arm a fresh per-resume budget (instruction steps + wall clock) via SetHook, mirroring
-            // LuaCsExecutionGuard. In protected mode a breach throws a LuaRuntimeException inside the VM,
-            // which Lua-CSharp turns into an [ok=false, error] result and marks the thread Dead. The hook
-            // object is built once per handle and re-armed here (like the guard's pooled GuardHook): a
-            // fresh LuaFunction + closure + Stopwatch per resume was measured heap churn on every signal
-            // handler and every task.wait loop resume.
+            // LuaCsExecutionGuard. A breach cancels this handle's token, so the VM ends the resume with a
+            // cancellation no pcall inside the thread can catch; the catch below turns it into the same
+            // [ok=false, trip line] result a protected resume reports for an error. The hook object is
+            // built once per handle and re-armed here (like the guard's pooled GuardHook): a fresh
+            // LuaFunction + closure + Stopwatch per resume was measured heap churn on every signal handler
+            // and every task.wait loop resume.
             //
             // WHY read _liveResumeBudget here instead of caching it once: a shared
             // LuaCsCoroutineBudgetSettings is exactly the object ScriptContext:SetTimeout mutates, and a
@@ -271,12 +281,17 @@ namespace CoreAI.Sandbox.LuaCs
                 _maxAllocatedBytes);
             _coroutine.SetHook(_hook.Function, string.Empty, 1);
 
-            int count;
+            int count = 0;
             try
             {
                 // WHY: Single-step drive: a well-behaved handler reaches coroutine.yield synchronously, so
                 // GetResult does not block the (single WASM) thread. A runaway is cut by the hook above.
                 count = _coroutine.ResumeAsync(_callStack, _cts.Token).GetAwaiter().GetResult();
+            }
+            catch (Exception) when (_hook.HasTripped)
+            {
+                // WHY swallowed: whatever carried the trip out (Lua-CSharp's cancellation, or an error a host
+                // function built from it) is only the vehicle; the resume's outcome is the trip, reported below.
             }
             finally
             {
@@ -291,8 +306,33 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             _consumedSteps += _hook.Steps;
+            if (_hook.HasTripped)
+            {
+                EndWithTrip(_hook.TripError);
+                if (!_isProtectedMode)
+                {
+                    throw _hook.TripError;
+                }
+
+                return _lastValues;
+            }
+
             CaptureResults(count);
             return _lastValues;
+        }
+
+        // WHY the thread is marked Dead by hand: a protected Lua-CSharp resume marks a thread Dead only for an
+        // error it catches, and it lets a cancellation through (CoroutineCore.ResumeAsyncCore catches
+        // `when !(ex is OperationCanceledException)`) with the thread left Running - neither resumable nor
+        // finished, so a scheduler would keep it forever. A budget-cut thread is over, as it was when the trip
+        // was a caught error.
+        /// <summary>Records <paramref name="trip"/> as the resume's result and retires the thread.</summary>
+        private void EndWithTrip(LuaCsHostFunctionException trip)
+        {
+            _lastOk = false;
+            _lastValues = EmptyValues;
+            _lastError = trip.ErrorObject;
+            _coroutine.UnsafeSetStatus(LuaThreadStatus.Dead);
         }
 
         /// <summary>Advances the coroutine one step with no resume arguments.</summary>
@@ -359,9 +399,10 @@ namespace CoreAI.Sandbox.LuaCs
         }
 
         /// <summary>
-        /// Builds the exception a per-resume guard hook throws to cut a runaway coroutine, carrying
-        /// <paramref name="message"/> plus a best-effort " at line N" suffix as the Lua ERROR OBJECT.
-        /// Shared with the raw <c>coroutine.resume</c> guard in <see cref="LuaCsSecureEnvironment"/>.
+        /// Builds a budget error raised as an ordinary Lua error, carrying <paramref name="message"/> plus a
+        /// best-effort " at line N" suffix as the Lua ERROR OBJECT: the per-call pattern-step refusal in
+        /// <see cref="LuaCsSecureEnvironment"/>, which a library function throws directly. A count hook never
+        /// throws it; it records <see cref="CreatePendingBudgetTrip"/> and cancels the run instead.
         /// </summary>
         /// <remarks>
         /// WHY the error-object constructor and not <c>LuaRuntimeException(LuaState, Exception)</c>:
@@ -382,6 +423,77 @@ namespace CoreAI.Sandbox.LuaCs
         internal static LuaRuntimeException CreateBudgetTrip(LuaState state, string message)
         {
             return new LuaCsHostFunctionException(state, message + DescribeCurrentLine(state), null);
+        }
+
+        /// <summary>
+        /// The trip a per-resume guard hook records instead of throwing (see <see cref="CancelGuardedRun"/>):
+        /// the same line as <see cref="CreateBudgetTrip"/>, the author line read now while the thread's
+        /// frames are live, and no state attached because it is raised later, outside the VM.
+        /// </summary>
+        internal static LuaCsHostFunctionException CreatePendingBudgetTrip(LuaState state, string message)
+        {
+            return new LuaCsHostFunctionException(null, message + DescribeCurrentLine(state), null);
+        }
+
+        // WHY a count hook signals a trip by cancelling instead of throwing - the Lua-CSharp facts it rests on
+        // (decompiled from the shipped Lua.dll):
+        // - LuaVirtualMachine.ExecutePerInstructionHook sets LuaState.IsInHook = true before it calls the count
+        //   hook and clears it only after the hook RETURNS; there is no finally. While the flag is set,
+        //   LuaVirtualMachine.MoveNext counts every frame it enters against the static DummyHookCount, so the
+        //   hook never fires again on that state, and SetHook does not clear the flag. A hook that threw
+        //   therefore disarmed every guard on the state: `pcall(runaway); pcall(work)` ran `work` unguarded,
+        //   and every later guarded run on the same state (the next mod event handler) had no budget at all.
+        // - Right after a hook returns, the same method calls ThrowIfCancellationRequested on the running
+        //   context's token, and the VM checks that token again at every JMP, FORLOOP, CALL and TAILCALL and
+        //   after every C# function returns. A cancelled token ends the run within one loop iteration, however
+        //   many host functions or protected calls sit in between.
+        // - BasicLibrary.PCall rethrows a LuaCanceledException and turns any other OperationCanceledException
+        //   into one; XPCall calls its token's ThrowIfCancellationRequested before it runs the handler;
+        //   CoroutineCore.ResumeAsyncCore catches only `!(ex is OperationCanceledException)`. So a trip that
+        //   travels as a cancellation crosses every protected boundary: a runaway never survives its budget.
+        // - Lua-CSharp completes a failed call through LightAsyncValueTaskMethodBuilder with
+        //   Task.FromException, a FAULTED task, so GetResult rethrows the cancellation as it was raised on Mono
+        //   and .NET alike, and each guard boundary turns it back into the recorded trip.
+        /// <summary>
+        /// Signals a budget trip from inside a count hook: cancels <paramref name="runSource"/>, whose token
+        /// the guarded run executes with, and reports whether the context the hook fired in reads that token.
+        /// When it does (true), the hook must RETURN NORMALLY: the VM then clears its in-hook flag and raises
+        /// the cancellation itself. When it does not (false), the hook fired inside host code that runs Lua on
+        /// this thread with a token of its own; the hook then has to throw <see cref="ForeignContextTrip"/>.
+        /// </summary>
+        /// <param name="runSource">The source whose token the guarded run was started with.</param>
+        /// <param name="hookToken">The token the VM passed to the hook: the running context's own.</param>
+        internal static bool CancelGuardedRun(CancellationTokenSource runSource, CancellationToken hookToken)
+        {
+            try
+            {
+                runSource.Cancel();
+            }
+            catch (Exception)
+            {
+                // WHY swallowed: Cancel marks the token before it runs the registered callbacks, so a callback
+                // that throws (Lua-CSharp's own coroutine registrations) cannot undo the trip; letting it escape
+                // would make this hook throw, which is exactly what must not happen.
+            }
+
+            return hookToken.IsCancellationRequested;
+        }
+
+        // WHY a throw here at all: the hook fired in Lua that host code runs on this thread with a token of its
+        // own, and cancelling the run's token cannot stop that call. Every host function that calls back into mod
+        // code passes on the token it was called with, so today this is only host-authored Lua (the signal
+        // runner's body factory, the HttpService bridge chunk). The throw leaves the in-hook flag set:
+        // LuaCsExecutionGuard clears it on its state when the run ends, and a coroutine hook's thread is dead
+        // after its trip. WHY a cancellation and not the trip's Lua error: pcall rethrows every
+        // OperationCanceledException, so not even a pcall in that code swallows the trip; the run itself still
+        // ends at the next check of its own token.
+        /// <summary>
+        /// The exception a hook throws when <see cref="CancelGuardedRun"/> returned false; its message is the
+        /// trip line.
+        /// </summary>
+        internal static OperationCanceledException ForeignContextTrip(LuaCsHostFunctionException trip)
+        {
+            return new OperationCanceledException(trip.Message);
         }
 
         /// <summary>
@@ -465,6 +577,7 @@ namespace CoreAI.Sandbox.LuaCs
 
             public readonly LuaFunction Function;
 
+            private readonly CancellationTokenSource _runSource;
             private long _steps;
             private long _stepLimit;
             private int _budget;
@@ -476,9 +589,12 @@ namespace CoreAI.Sandbox.LuaCs
             private long _nextAllocationSampleTimestamp;
             private LuaCsAllocationBudget _allocation;
             private LuaCsGuardTripKind _trip;
+            private LuaCsHostFunctionException _tripError;
 
-            public ResumeGuardHook()
+            /// <param name="runSource">The handle's source, whose token every resume runs with.</param>
+            public ResumeGuardHook(CancellationTokenSource runSource)
             {
+                _runSource = runSource;
                 Function = new LuaFunction("coreai_luacs_coroutine_guard", Hook);
             }
 
@@ -487,6 +603,14 @@ namespace CoreAI.Sandbox.LuaCs
 
             /// <summary>Which budget tripped during the current resume, or <see cref="LuaCsGuardTripKind.None"/>.</summary>
             public LuaCsGuardTripKind Trip => _trip;
+
+            /// <summary>
+            /// True once a budget of the current resume tripped; the resume can then only end with it.
+            /// </summary>
+            public bool HasTripped => _tripError != null;
+
+            /// <summary>The trip of the current resume, or null.</summary>
+            public LuaCsHostFunctionException TripError => _tripError;
 
             /// <summary>
             /// Re-arms the hook for one resume. <paramref name="lifetimeRemaining"/> is what is left of the
@@ -499,6 +623,7 @@ namespace CoreAI.Sandbox.LuaCs
             {
                 _steps = 0;
                 _trip = LuaCsGuardTripKind.None;
+                _tripError = null;
                 _budget = budget;
                 _lifetimeBinds = lifetimeRemaining < budget;
                 _stepLimit = _lifetimeBinds ? lifetimeRemaining : budget;
@@ -518,37 +643,62 @@ namespace CoreAI.Sandbox.LuaCs
 
             private ValueTask<int> Hook(LuaFunctionExecutionContext ctx, CancellationToken ct)
             {
+                // WHY first: once tripped the resume is over, so no budget is read again - a memory reading
+                // could even have dropped back under the line by now.
+                if (_tripError != null)
+                {
+                    return SignalTrip(ctx, ct);
+                }
+
                 _steps++;
                 if (_steps > _stepLimit)
                 {
                     if (_lifetimeBinds)
                     {
-                        _trip = LuaCsGuardTripKind.LifetimeSteps;
-                        throw CreateBudgetTrip(ctx.State,
+                        return RecordTrip(ctx, ct, LuaCsGuardTripKind.LifetimeSteps,
                             $"LuaCsCoroutineHandle: EXCEEDED_LIFETIME_STEP_BUDGET ({_lifetimeCap})");
                     }
 
-                    _trip = LuaCsGuardTripKind.Steps;
-                    throw CreateBudgetTrip(ctx.State,
+                    return RecordTrip(ctx, ct, LuaCsGuardTripKind.Steps,
                         $"LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET ({_budget})");
                 }
 
                 long now = Stopwatch.GetTimestamp();
                 if (now - _startTimestamp > _timeoutTicks)
                 {
-                    _trip = LuaCsGuardTripKind.Timeout;
-                    throw CreateBudgetTrip(ctx.State, $"Lua coroutine resume exceeded {_timeoutMs} ms.");
+                    return RecordTrip(ctx, ct, LuaCsGuardTripKind.Timeout,
+                        $"Lua coroutine resume exceeded {_timeoutMs} ms.");
                 }
 
-                if (now >= _nextAllocationSampleTimestamp)
+                if (now >= _nextAllocationSampleTimestamp && IsAllocationExceeded(now))
                 {
-                    SampleAllocation(ctx.State, now);
+                    return RecordTrip(ctx, ct, LuaCsGuardTripKind.Memory,
+                        $"LuaCsCoroutineHandle: {LuaCsExecutionGuard.MemoryBudgetTripMarker} "
+                        + $"({_allocation.BudgetBytes} bytes)");
                 }
 
                 return new ValueTask<int>(ctx.Return());
             }
 
-            private void SampleAllocation(LuaState state, long now)
+            private ValueTask<int> RecordTrip(LuaFunctionExecutionContext ctx, CancellationToken ct,
+                LuaCsGuardTripKind kind, string message)
+            {
+                _trip = kind;
+                _tripError = CreatePendingBudgetTrip(ctx.State, message);
+                return SignalTrip(ctx, ct);
+            }
+
+            private ValueTask<int> SignalTrip(LuaFunctionExecutionContext ctx, CancellationToken ct)
+            {
+                if (CancelGuardedRun(_runSource, ct))
+                {
+                    return new ValueTask<int>(ctx.Return());
+                }
+
+                throw ForeignContextTrip(_tripError);
+            }
+
+            private bool IsAllocationExceeded(long now)
             {
                 _nextAllocationSampleTimestamp = now + AllocationSampleIntervalTicks;
 
@@ -556,12 +706,7 @@ namespace CoreAI.Sandbox.LuaCs
                 // excluding it would let a script that holds live memory near the budget and churns
                 // garbage buy a forced collection per quarter budget of allocation, off the clock, and
                 // hold the frame far past its slice; the timeout is the one hard bound on that.
-                if (_allocation.IsExceeded())
-                {
-                    _trip = LuaCsGuardTripKind.Memory;
-                    throw CreateBudgetTrip(state,
-                        $"LuaCsCoroutineHandle: {LuaCsExecutionGuard.MemoryBudgetTripMarker} ({_allocation.BudgetBytes} bytes)");
-                }
+                return _allocation.IsExceeded();
             }
         }
     }
