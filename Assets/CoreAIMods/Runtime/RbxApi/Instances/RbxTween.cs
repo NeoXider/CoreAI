@@ -21,18 +21,24 @@ namespace CoreAI.Mods.Rbx.Instances
     }
 
     /// <summary>
-    /// Trusted caller identity for one <see cref="RbxTweenService.Create"/> call: the durable
-    /// actor id, the unrestricted flag, and the world id, copied from the trusted
-    /// <c>LuaCsRbxModContext.ActorContext</c> at the Lua boundary — never from a Lua argument,
-    /// so a script cannot start a tween as another actor.
+    /// Trusted caller identity for one <see cref="RbxTweenService.Create"/> call or one tween
+    /// control call (Play/Pause/Cancel): the durable actor id, the unrestricted flag, the world
+    /// id, and the owning mod id, copied from the trusted <c>LuaCsRbxModContext</c> at the Lua
+    /// boundary — never from a Lua argument, so a script cannot start a tween as another actor.
     /// </summary>
     public readonly struct TweenCaller
     {
         public TweenCaller(string actorId, bool isUnrestricted, string worldId)
+            : this(actorId, isUnrestricted, worldId, null)
+        {
+        }
+
+        public TweenCaller(string actorId, bool isUnrestricted, string worldId, string ownerModId)
         {
             ActorId = actorId;
             IsUnrestricted = isUnrestricted;
             WorldId = worldId;
+            OwnerModId = string.IsNullOrWhiteSpace(ownerModId) ? null : ownerModId;
         }
 
         /// <summary>Durable actor id the tween writes are attributed to.</summary>
@@ -43,6 +49,12 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>World the creating actor belongs to.</summary>
         public string WorldId { get; }
+
+        /// <summary>
+        /// Mod whose script created the tween; null for one-off consoles and host code. Recorded
+        /// as the tween's teardown owner so unloading the mod destroys its tweens.
+        /// </summary>
+        public string OwnerModId { get; }
     }
 
     /// <summary>One goal property of a tween: the member name, the goal box, and the start box
@@ -72,19 +84,31 @@ namespace CoreAI.Mods.Rbx.Instances
     /// values) but leaves the tweened properties where they are, and fires <c>Completed</c>
     /// with Cancelled; <c>Pause</c> works only from Playing, keeps progress, and fires nothing.
     /// Start values are captured at (re)start, never at creation.
+    /// <para>
+    /// Playback is counted in legs: one leg runs from the start values to the goals over
+    /// <c>TweenInfo.Time</c>. With <c>Reverses</c> every repeat is a forward leg plus a reverse
+    /// leg back to the start values (mirror <c>TweenInfo.reverses</c>: "reverse to the starting
+    /// values once it reaches its targets"), so <c>RepeatCount = 0, Reverses = true</c> plays two
+    /// legs and ends on the start values; without it every repeat is one forward leg that snaps
+    /// back to the start values first. A run ends exactly on the goals, or exactly on the start
+    /// values when it reverses.
+    /// </para>
     /// </summary>
     public sealed class RbxTween : RbxInstance
     {
         private Func<RbxTweenPlaybackState, RbxEnumItem> _stateItemResolver;
         private double _delayRemaining;
         private double _elapsed;
-        private int _iteration;
+        private long _legIndex;
 
         internal RbxTween(ClassDescriptor descriptor)
             : base(descriptor)
         {
             Name = "Tween";
-            Completed = new RbxScriptSignal("Tween.Completed");
+            // WHY a registered signal and not a free-standing field: Destroy disconnects exactly
+            // the signals held in the instance's signal table, so a field-initialised Completed
+            // kept delivering to handlers of a destroyed tween.
+            Completed = GetOrCreateSignal("Completed");
         }
 
         /// <summary>Mirror <c>Tween.Completed(playbackState)</c>: fires once per run end —
@@ -109,6 +133,9 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>Service that created this tween; routes conflict cancellation on Play.</summary>
         internal RbxTweenService Owner { get; set; }
+
+        /// <summary>Position in the service's per-actor idle list; null while not idle.</summary>
+        internal LinkedListNode<RbxTween> IdleNode { get; set; }
 
         internal bool IsInitialized => Target != null && Info != null;
 
@@ -141,13 +168,99 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         /// <summary>
-        /// Mirror <c>TweenBase:Play</c>: starts playback, resumes a paused tween from its
-        /// progress, or restarts a cancelled/finished tween for its full length. No effect on
-        /// an already-delayed or already-playing tween. Starting cancels any other active
-        /// tween on the same properties of the same instance (mirror conflict rule).
+        /// Mirror <c>TweenBase:Play</c> under the creating actor's identity. See
+        /// <see cref="Play(TweenCaller)"/>; prefer that overload wherever the calling actor is
+        /// known, so the write is authorized for whoever starts the tween.
         /// </summary>
         public void Play()
         {
+            PlayAs(Caller);
+        }
+
+        /// <summary>
+        /// Mirror <c>TweenBase:Play</c>: starts playback, resumes a paused tween from its
+        /// progress, or restarts a cancelled/finished tween for its full length. No effect on
+        /// an already-delayed or already-playing tween. Starting cancels any other active
+        /// tween on the same properties of the same instance (mirror conflict rule). The
+        /// caller's write authority over the target is checked on every start AND resume,
+        /// before any conflicting tween is cancelled, so a refused Play disturbs nothing.
+        /// </summary>
+        public void Play(TweenCaller caller)
+        {
+            PlayAs(caller);
+        }
+
+        /// <summary>Mirror <c>TweenBase:Pause</c> without a caller check (kept for C# hosts).</summary>
+        public void Pause()
+        {
+            if (!IsInitialized || PlaybackState != RbxTweenPlaybackState.Playing)
+            {
+                return;
+            }
+
+            PlaybackState = RbxTweenPlaybackState.Paused;
+        }
+
+        /// <summary>
+        /// Mirror <c>TweenBase:Pause</c>: halts playback keeping progress, so Play resumes
+        /// where it paused. Only works from Playing; any other state is a no-op (mirror:
+        /// a Delayed tween ignores Pause and still plays after its delay). A pause that would
+        /// change state requires the caller's write authority over the target.
+        /// </summary>
+        public void Pause(TweenCaller caller)
+        {
+            if (!IsInitialized || PlaybackState != RbxTweenPlaybackState.Playing)
+            {
+                return;
+            }
+
+            Owner?.AuthorizeControl(this, caller, "pause a tween");
+            Pause();
+        }
+
+        /// <summary>Mirror <c>TweenBase:Cancel</c> without a caller check (kept for C# hosts).</summary>
+        public void Cancel()
+        {
+            if (!IsInitialized || !IsActive)
+            {
+                return;
+            }
+
+            PlaybackState = RbxTweenPlaybackState.Cancelled;
+            Owner?.Deactivate(this);
+            FireCompleted();
+        }
+
+        /// <summary>
+        /// Mirror <c>TweenBase:Cancel</c>: halts playback and resets the tween variables — a
+        /// later Play takes the full duration — but leaves the tweened properties where they
+        /// are. Fires Completed with Cancelled. No-op on never-played, finished, or
+        /// already-cancelled tweens (OURS — the mirror pins the fire only for stopped playback).
+        /// A cancel that would change state requires the caller's write authority over the
+        /// target.
+        /// </summary>
+        public void Cancel(TweenCaller caller)
+        {
+            if (!IsInitialized || !IsActive)
+            {
+                return;
+            }
+
+            Owner?.AuthorizeControl(this, caller, "cancel a tween");
+            Cancel();
+        }
+
+        private void PlayAs(TweenCaller caller)
+        {
+            if (IsDestroyed)
+            {
+                throw new RbxError(RbxErrorCode.InstanceDestroyed,
+                    "Tween:Play on destroyed Tween (id " + Id.Value + "): it was destroyed, or"
+                    + " released after finishing because its actor already keeps "
+                    + RbxTweenService.MaxIdleTweensPerActor + " newer finished tweens",
+                    "create a new Tween with TweenService:Create instead of replaying a released one");
+            }
+
             if (!IsInitialized)
             {
                 throw RbxError.BadArgument(
@@ -163,25 +276,26 @@ namespace CoreAI.Mods.Rbx.Instances
                     "create a new Tween for a live instance");
             }
 
-            switch (PlaybackState)
+            if (PlaybackState == RbxTweenPlaybackState.Delayed
+                || PlaybackState == RbxTweenPlaybackState.Playing)
             {
-                case RbxTweenPlaybackState.Delayed:
-                case RbxTweenPlaybackState.Playing:
-                    return;
-                case RbxTweenPlaybackState.Paused:
-                    Owner?.CancelConflicts(this);
-                    PlaybackState = RbxTweenPlaybackState.Playing;
-                    Owner?.Activate(this);
-                    return;
-                default:
-                    break;
+                return;
+            }
+
+            if (PlaybackState == RbxTweenPlaybackState.Paused)
+            {
+                Owner?.AuthorizePlay(this, caller);
+                Owner?.CancelConflicts(this);
+                PlaybackState = RbxTweenPlaybackState.Playing;
+                Owner?.Activate(this);
+                return;
             }
 
             ITweenPropertyHost host = RequireHost();
-            Owner?.CancelConflicts(this);
-            Owner?.AuthorizePlay(this);
+            Owner?.AuthorizePlay(this, caller);
             CaptureStarts(host);
-            _iteration = 0;
+            Owner?.CancelConflicts(this);
+            _legIndex = 0;
             _elapsed = 0d;
             _delayRemaining = Info.DelayTime;
             PlaybackState = _delayRemaining > 0d
@@ -191,47 +305,16 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         /// <summary>
-        /// Mirror <c>TweenBase:Pause</c>: halts playback keeping progress, so Play resumes
-        /// where it paused. Only works from Playing; any other state is a no-op (mirror:
-        /// a Delayed tween ignores Pause and still plays after its delay).
-        /// </summary>
-        public void Pause()
-        {
-            if (!IsInitialized || PlaybackState != RbxTweenPlaybackState.Playing)
-            {
-                return;
-            }
-
-            PlaybackState = RbxTweenPlaybackState.Paused;
-        }
-
-        /// <summary>
-        /// Mirror <c>TweenBase:Cancel</c>: halts playback and resets the tween variables — a
-        /// later Play takes the full duration — but leaves the tweened properties where they
-        /// are. Fires Completed with Cancelled. No-op on never-played, finished, or
-        /// already-cancelled tweens (OURS — the mirror pins the fire only for stopped playback).
-        /// </summary>
-        public void Cancel()
-        {
-            if (!IsInitialized || !IsActive)
-            {
-                return;
-            }
-
-            PlaybackState = RbxTweenPlaybackState.Cancelled;
-            Owner?.Deactivate(this);
-            FireCompleted();
-        }
-
-        /// <summary>
         /// Advances playback by one scaled Heartbeat delta. A zero or negative delta is a
         /// no-op, so a paused world (the driver feeds delta 0) freezes the tween exactly like
-        /// task.wait. Reaching an iteration end writes the EXACT goal value, never an
-        /// approximation, so the property lands exactly on the goal.
+        /// task.wait. The run's final leg writes the EXACT end value, never an approximation.
+        /// Constant work per call whatever the duration or repeat count: crossed leg boundaries
+        /// are counted arithmetically and the remainder carries modulo the duration, so one
+        /// frame performs at most one write per goal.
         /// </summary>
         internal void Step(double deltaSeconds, ITweenPropertyHost host)
         {
-            if (!IsInitialized || deltaSeconds <= 0d)
+            if (!IsInitialized || !(deltaSeconds > 0d) || double.IsInfinity(deltaSeconds))
             {
                 return;
             }
@@ -261,36 +344,54 @@ namespace CoreAI.Mods.Rbx.Instances
             double time = Info.Time;
             if (time <= 0d)
             {
-                // WHY: a zero-duration tween is a single instant pass (OURS — the mirror does
-                // not specify repeats at zero duration, and looping them would spin forever).
-                ApplyIterationEnd(host);
+                // WHY: a zero-duration run is a single instant pass that lands where the whole
+                // run would (OURS — the mirror does not specify zero durations, and looping
+                // instantaneous repeats would never end).
+                ApplyRunEnd(host);
                 CompleteNaturally();
                 return;
             }
 
-            double remaining = deltaSeconds;
-            while (remaining > 0d)
+            double total = _elapsed + deltaSeconds;
+            if (total < time)
             {
-                double need = time - _elapsed;
-                if (remaining < need)
-                {
-                    _elapsed += remaining;
-                    ApplyAlpha(_elapsed / time, host);
-                    return;
-                }
-
-                remaining -= need;
-                _elapsed = 0d;
-                // WHY: the exact goal box, not the eased blend at alpha 1 (styles like Sine
-                // evaluate to 0.99999999999999994 there) — the property must land EXACTLY.
-                ApplyIterationEnd(host);
-                if (!AdvanceIteration(host))
-                {
-                    return;
-                }
+                _elapsed = total;
+                ApplyAlpha(total / time, host);
+                return;
             }
 
-            ApplyAlpha(_elapsed / time, host);
+            // WHY arithmetic instead of a per-boundary loop: a loop subtracted one duration per
+            // pass, so a 1e-300 s repeating tween never left the loop (the subtraction is below
+            // one ulp) and 1e-9 s cost millions of writes in one frame — C# work outside every
+            // Lua budget, freezing the host thread. The remainder modulo the duration is exact
+            // (IEEE fmod), and only the leg parity matters once a run repeats forever.
+            double remainder = total % time;
+            double crossed = Math.Round((total - remainder) / time);
+            if (!(crossed >= 1d))
+            {
+                crossed = 1d;
+            }
+
+            long totalLegs = TotalLegs(Info);
+            if (totalLegs >= 0L)
+            {
+                long remainingLegs = totalLegs - _legIndex;
+                if (crossed >= remainingLegs)
+                {
+                    ApplyRunEnd(host);
+                    CompleteNaturally();
+                    return;
+                }
+
+                _legIndex += (long)crossed;
+            }
+            else if (Info.Reverses && !double.IsInfinity(crossed) && crossed % 2d != 0d)
+            {
+                _legIndex ^= 1L;
+            }
+
+            _elapsed = remainder;
+            ApplyAlpha(remainder / time, host);
         }
 
         /// <summary>Silent drop when the target is destroyed mid-flight (OURS — the mirror
@@ -302,24 +403,45 @@ namespace CoreAI.Mods.Rbx.Instances
             Owner?.Deactivate(this);
         }
 
-        private bool AdvanceIteration(ITweenPropertyHost host)
+        /// <summary>
+        /// Stops a tween whose own instance was destroyed: it stops driving its properties at
+        /// once and fires nothing more (mirror <c>Instance:Destroy</c> disconnects all
+        /// connections).
+        /// </summary>
+        internal void StopForOwnDestruction()
         {
-            _iteration++;
-            if (Info.RepeatCount >= 0 && _iteration > Info.RepeatCount)
+            if (IsActive)
             {
-                CompleteNaturally();
-                return false;
+                PlaybackState = RbxTweenPlaybackState.Cancelled;
             }
 
-            if (!Info.Reverses)
-            {
-                // WHY: without Reverses each repeat restarts from the captured start values —
-                // the property snaps back and animates again, matching Roblox repeats.
-                ApplyStarts(host);
-            }
-
-            return true;
+            Completed.DisconnectAll();
         }
+
+        /// <summary>
+        /// Stops a tween whose step threw: it is cancelled so it never runs again, and its
+        /// Completed fires with Cancelled so a script waiting on it is not left hanging.
+        /// </summary>
+        internal void StopForFault()
+        {
+            PlaybackState = RbxTweenPlaybackState.Cancelled;
+            Owner?.Deactivate(this);
+            FireCompleted();
+        }
+
+        /// <summary>Legs in one full run; -1 when the tween repeats forever.</summary>
+        private static long TotalLegs(RbxTweenInfo info)
+        {
+            if (info.RepeatCount < 0)
+            {
+                return -1L;
+            }
+
+            long legsPerRepeat = info.Reverses ? 2L : 1L;
+            return ((long)info.RepeatCount + 1L) * legsPerRepeat;
+        }
+
+        private bool IsForwardLeg => !Info.Reverses || (_legIndex & 1L) == 0L;
 
         private void CompleteNaturally()
         {
@@ -331,7 +453,7 @@ namespace CoreAI.Mods.Rbx.Instances
         private void ApplyAlpha(double alpha, ITweenPropertyHost host)
         {
             double eased = RbxEasing.Evaluate(alpha, Info.EasingStyle, Info.EasingDirection);
-            bool forward = !Info.Reverses || (_iteration % 2) == 0;
+            bool forward = IsForwardLeg;
             for (int index = 0; index < _goals.Count; index++)
             {
                 TweenGoal goal = _goals[index];
@@ -341,26 +463,18 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
-        private void ApplyStarts(ITweenPropertyHost host)
-        {
-            for (int index = 0; index < _goals.Count; index++)
-            {
-                TweenGoal goal = _goals[index];
-                host.Write(Target, goal.PropertyName, goal.Start);
-            }
-        }
-
         /// <summary>
-        /// Writes the exact end value of the finishing iteration (the goal box forward, the
-        /// start box on a reversing leg) so the property lands exactly, never approximately.
+        /// Writes the exact end value of the whole run — the goal box, or the start box when the
+        /// run reverses — so the property lands exactly, never approximately (styles like Sine
+        /// evaluate to 0.99999999999999994 at alpha 1).
         /// </summary>
-        private void ApplyIterationEnd(ITweenPropertyHost host)
+        private void ApplyRunEnd(ITweenPropertyHost host)
         {
-            bool forward = !Info.Reverses || (_iteration % 2) == 0;
+            bool endsOnGoal = !Info.Reverses;
             for (int index = 0; index < _goals.Count; index++)
             {
                 TweenGoal goal = _goals[index];
-                host.Write(Target, goal.PropertyName, forward ? goal.Goal : goal.Start);
+                host.Write(Target, goal.PropertyName, endsOnGoal ? goal.Goal : goal.Start);
             }
         }
 
@@ -421,7 +535,15 @@ namespace CoreAI.Mods.Rbx.Instances
             float blend = (float)alpha;
             if (start is double startNumber && goal is double goalNumber)
             {
-                return startNumber + ((goalNumber - startNumber) * alpha);
+                double difference = goalNumber - startNumber;
+                if (double.IsInfinity(difference))
+                {
+                    // WHY: two finite ends far apart overflow their difference, and inf * 0
+                    // is NaN at alpha 0; the weighted form stays finite for finite ends.
+                    return (startNumber * (1d - alpha)) + (goalNumber * alpha);
+                }
+
+                return startNumber + (difference * alpha);
             }
 
             if (start is RbxVector3 startVector && goal is RbxVector3 goalVector)
