@@ -54,6 +54,10 @@ MVP4 (RBXL import/export) starts only after MVP3 is closed, verified in Unity an
       (c97e6367), datatype bindings + ownerless Connect (6cc8c54c), tweens (1d4b635f), capture robustness
       (8854bb0d, 30437d0b), replication resync (99eaa660), RbxInstance (bca443ca), registry/catalogs (d2216d38),
       binder (4b47d48d), Debris/InstanceBindings pass 1 (360c57b0). Mirror bridge fixes in progress.
-- [ ] W3 in progress: ApiBindings pass 1, InstanceBindings pass 2, Humanoid/Players, runtime quarantine + WebGL
-      ceiling, binder pass 2. Then Mirror clock (MIRROR-3), W4 ApiBindings pass 2 + ClickDetector + fillers, W5 docs.
+- [x] W3 landed: binder pass 2 (a571fbd6), Humanoid/Players (e2099108), runtime quarantine per faulting frame +
+      WebGL instance ceiling (2e9ed931), InstanceBindings pass 2 (f1b8bbb5).
+- [ ] W3 in progress: ApiBindings pass 1 (AB-1), Mirror clock/readiness/reasons (MIRROR-3).
+- [ ] W4 in progress: FILLER (M8-10, M1-23 attr, M1-29/M8-23, M1-36), CORE-C (registry admission hook, Humanoid
+      clone state, RootPart write ends MoveTo, characters non-archivable, BoundProperties drift guard). After AB-1:
+      AB-2 (ApiBindings pass 2 + ClickDetector). Then W5 docs.
 
