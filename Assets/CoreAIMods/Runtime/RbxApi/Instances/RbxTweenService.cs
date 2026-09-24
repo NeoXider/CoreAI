@@ -137,7 +137,7 @@ namespace CoreAI.Mods.Rbx.Instances
             // and Owned lets that actor (and only it) destroy its tween.
             RbxTween tween = (RbxTween)registry.Create("Tween", caller.OwnerModId, null,
                 InstanceIdAuthority.Server, caller.ActorId.Trim(), InstanceAccessScope.Owned,
-                false);
+                false, "TweenService:Create");
             tween.Owner = this;
             tween.Initialize(target, info, checkedGoals, caller, _stateItemResolver);
             tween.BindHost(_scheduler);

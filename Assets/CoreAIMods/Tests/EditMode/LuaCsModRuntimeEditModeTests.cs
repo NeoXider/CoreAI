@@ -3559,8 +3559,8 @@ namespace CoreAI.Tests.EditMode
             foreach ((string key, string created) in new[]
                      {
                          ("new", "Instance.new(\"Folder\")"),
-                         ("clone", "creating Part"),
-                         ("tween", "creating Tween")
+                         ("clone", "cloning Part"),
+                         ("tween", "TweenService:Create")
                      })
             {
                 Assert.AreEqual("false", store.Get("coded-quota", key + "_ok"), key + " must be refused");

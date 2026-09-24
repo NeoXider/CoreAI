@@ -649,7 +649,8 @@ namespace CoreAI.Mods.Rbx.Instances
             string resolvedOwnerModId = overrideOwnership ? ownerModId : sourceRecord.OwnerModId;
             string resolvedOriginTag = overrideOwnership ? originTag : sourceRecord.OriginTag;
             RbxInstance copy = Registry.Create(
-                ClassName, resolvedOwnerModId, resolvedOriginTag, authority);
+                ClassName, resolvedOwnerModId, resolvedOriginTag, authority,
+                operation: "cloning " + ClassName);
             try
             {
                 copy._name = _name;
