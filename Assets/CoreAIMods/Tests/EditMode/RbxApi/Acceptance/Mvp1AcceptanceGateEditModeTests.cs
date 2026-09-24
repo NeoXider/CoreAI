@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text.RegularExpressions;
 using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
@@ -852,6 +855,353 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 StringAssert.Contains("Touched", workaround,
                     subject + ": CanCollide advice must say the part still fires Touched");
             }
+        }
+
+        [Test]
+        public void Lua_SetAttribute_NewNonAsciiName_RaisesBadArgument_ExistingLegacyNameStaysWritable()
+        {
+            // WHY (M1-23): Instance.yaml SetAttribute allows only ASCII alphanumerics plus . - / _
+            // in a name, but scripts could create any Unicode letter, so saved worlds may already hold
+            // such names. A script may no longer create one; one a world already holds stays
+            // writable and removable. The names are escaped here so this file stays ASCII.
+            const string legacyName = "\u0421\u0438\u043B\u0430";
+            const string newName = "\u0417\u0430\u0449\u0438\u0442\u0430";
+            using HeadlessWorld headless = new HeadlessWorld();
+            RbxInstance holder = headless.Registry.Create("Part");
+            holder.Name = "LegacyHolder";
+            holder.Parent = headless.Registry.WorldRoot;
+            holder.SetAttribute(legacyName, 5d);
+
+            headless.Stack.Runtime.LoadMod("attributes", @"
+                local holder = workspace.LegacyHolder
+                local function try(label, action)
+                    local ok, err = pcall(action)
+                    store_set(label, tostring(ok) .. '|' .. tostring(err))
+                end
+                try('update', function() holder:SetAttribute('" + legacyName + @"', 6) end)
+                store_set('updated', tostring(holder:GetAttribute('" + legacyName + @"')))
+                try('remove', function() holder:SetAttribute('" + legacyName + @"', nil) end)
+                store_set('removed', tostring(holder:GetAttribute('" + legacyName + @"') == nil))
+                try('recreate', function() holder:SetAttribute('" + legacyName + @"', 7) end)
+                try('new', function() holder:SetAttribute('" + newName + @"', 1) end)
+                try('ascii', function() holder:SetAttribute('Armor_2', 1) end)",
+                persistToStore: false);
+
+            Assert.AreEqual("true|nil", headless.Store.Get("attributes", "update"),
+                "a non-ASCII name the world already holds stays writable");
+            Assert.AreEqual("6", headless.Store.Get("attributes", "updated"));
+            Assert.AreEqual("true|nil", headless.Store.Get("attributes", "remove"),
+                "and removable");
+            Assert.AreEqual("true", headless.Store.Get("attributes", "removed"));
+            string recreate = headless.Store.Get("attributes", "recreate");
+            StringAssert.StartsWith("false|", recreate,
+                "once removed, the legacy name is no longer held, so writing it again creates it");
+            StringAssert.Contains("U+0421", recreate);
+            string created = headless.Store.Get("attributes", "new");
+            StringAssert.StartsWith("false|", created, "a script cannot create a non-ASCII name");
+            StringAssert.Contains("BAD_ARGUMENT", created);
+            StringAssert.Contains("U+0417", created, "the refusal names the offending code point");
+            Assert.IsNull(holder.GetAttribute(newName), "the refused name was not created");
+            Assert.AreEqual("true|nil", headless.Store.Get("attributes", "ascii"),
+                "an ASCII name with the mirror's punctuation is still created as before");
+            Assert.AreEqual(1d, holder.GetAttribute("Armor_2"));
+        }
+
+        /// <summary>
+        /// The properties the Lua member read answers, by declaring class, written out by hand.
+        /// <see cref="BoundProperties_TheTableListsExactlyWhatTheReadDispatchAnswers"/> holds three
+        /// things equal: this list, the bindings' BoundProperties table, and the member names the
+        /// read dispatch in the bindings source answers.
+        /// </summary>
+        private static readonly (string ClassName, string[] Properties)[] ReadDispatchProperties =
+        {
+            ("Instance", new[] { "Name", "ClassName", "Parent", "Archivable" }),
+            ("Workspace", new[] { "Gravity", "CurrentCamera", "SignalBehavior" }),
+            ("Model", new[] { "PrimaryPart", "WorldPivot" }),
+            ("BasePart", new[]
+            {
+                "Shape", "Material", "MaterialVariant", "Position", "Size", "CFrame", "Orientation",
+                "Rotation", "Color", "Transparency", "Anchored", "CanCollide"
+            }),
+            ("Camera", new[] { "CFrame", "CameraType", "CameraSubject" }),
+            ("Humanoid", new[]
+            {
+                "Health", "MaxHealth", "WalkSpeed", "JumpPower", "JumpHeight", "UseJumpPower",
+                "DisplayName", "MoveDirection", "RootPart", "Jump"
+            }),
+            ("Player", new[] { "UserId", "DisplayName", "Character" }),
+            ("Players", new[] { "LocalPlayer", "CharacterAutoLoads", "RespawnTime", "MaxPlayers" }),
+            ("UserInputService", new[] { "MouseBehavior" }),
+            ("ClickDetector", new[] { "MaxActivationDistance" }),
+            ("MaterialVariant", new[]
+            {
+                "BaseMaterial", "ColorMap", "NormalMap", "RoughnessMap", "MetalnessMap", "StudsPerTile"
+            }),
+            ("ValueBase", new[] { "Value" }),
+            ("Tween", new[] { "Instance", "TweenInfo", "PlaybackState" })
+        };
+
+        /// <summary>
+        /// The members the read dispatch answers that are events, methods or callbacks: not
+        /// properties, so they stay out of BoundProperties.
+        /// </summary>
+        private static readonly string[] ReadDispatchNonProperties =
+        {
+            "ChildAdded", "ChildRemoved", "DescendantAdded", "DescendantRemoving", "Destroying",
+            "AncestryChanged", "AttributeChanged", "Changed", "TagAdded", "TagRemoved", "WaitForChild",
+            "LoadCharacterAsync", "LoadCharacter", "Loaded", "PlayerAdded", "PlayerRemoving", "Died",
+            "HealthChanged", "MoveToFinished", "Running", "Jumping", "FreeFalling", "StateChanged",
+            "Touched", "TouchEnded", "CharacterAdded", "CharacterRemoving", "OnServerEvent",
+            "OnClientEvent", "OnServerInvoke", "OnClientInvoke", "InvokeServer", "InvokeClient",
+            "InputBegan", "InputEnded", "InputChanged", "IsKeyDown", "GetKeysPressed",
+            "GetMouseLocation", "Heartbeat", "Stepped", "RenderStepped", "PreAnimation",
+            "PreSimulation", "PostSimulation", "PreRender", "MouseClick", "MouseHoverEnter",
+            "MouseHoverLeave", "Completed"
+        };
+
+        /// <summary>One instance of every class that declares a row of the BoundProperties table.</summary>
+        private static readonly string[] RepresentativeClasses =
+        {
+            "Part", "Model", "Workspace", "Camera", "Humanoid", "Player", "Players",
+            "UserInputService", "ClickDetector", "MaterialVariant", "IntValue", "Tween"
+        };
+
+        /// <summary>
+        /// WHY (M1-03): GetPropertyChangedSignal accepts a name only when the BoundProperties table
+        /// lists it, and that table was kept in step with the read dispatch by discipline alone. A
+        /// property bound in a reader but missing from the table reads fine in Lua and is refused
+        /// the moment a script watches it. This fails when a new member appears in the read dispatch
+        /// without being classified here, and when a property here is missing from the table.
+        /// </summary>
+        [Test]
+        public void BoundProperties_TheTableListsExactlyWhatTheReadDispatchAnswers()
+        {
+            List<string> fromTable = new();
+            foreach ((string className, string property) in
+                     LuaCsRbxInstanceBindings.EnumerateBoundProperties())
+            {
+                fromTable.Add(className + "." + property);
+            }
+
+            List<string> fromList = new();
+            HashSet<string> propertyNames = new(StringComparer.Ordinal);
+            foreach ((string className, string[] properties) in ReadDispatchProperties)
+            {
+                foreach (string property in properties)
+                {
+                    fromList.Add(className + "." + property);
+                    propertyNames.Add(property);
+                }
+            }
+
+            fromTable.Sort(StringComparer.Ordinal);
+            fromList.Sort(StringComparer.Ordinal);
+            CollectionAssert.AreEqual(fromList, fromTable,
+                "every property the read dispatch answers must be in BoundProperties under its "
+                + "declaring class, and the table must list nothing the dispatch does not answer");
+
+            HashSet<string> nonPropertyNames = new(ReadDispatchNonProperties, StringComparer.Ordinal);
+            HashSet<string> answered = ReadDispatchMemberNames();
+            List<string> unclassified = new();
+            foreach (string member in answered)
+            {
+                if (!propertyNames.Contains(member) && !nonPropertyNames.Contains(member))
+                {
+                    unclassified.Add(member);
+                }
+            }
+
+            unclassified.Sort(StringComparer.Ordinal);
+            CollectionAssert.IsEmpty(unclassified,
+                "the read dispatch answers members this guard has not classified; a property goes "
+                + "into BoundProperties and ReadDispatchProperties, anything else into "
+                + "ReadDispatchNonProperties");
+
+            List<string> stale = new();
+            foreach (string member in propertyNames)
+            {
+                if (!answered.Contains(member))
+                {
+                    stale.Add(member);
+                }
+            }
+
+            foreach (string member in nonPropertyNames)
+            {
+                if (!answered.Contains(member))
+                {
+                    stale.Add(member);
+                }
+            }
+
+            stale.Sort(StringComparer.Ordinal);
+            CollectionAssert.IsEmpty(stale,
+                "these names are no longer answered by the read dispatch, so the lists above are stale");
+        }
+
+        [Test]
+        public void BoundProperties_EveryEntryReadsThroughLua_AndGetPropertyChangedSignalAcceptsIt()
+        {
+            using HeadlessWorld headless = new HeadlessWorld();
+            headless.Bindings.Players.EnsureActor(headless.Registry, "probe-actor");
+            ClassCatalog catalog = headless.Registry.Catalog;
+            IReadOnlyList<(string ClassName, string Property)> table =
+                LuaCsRbxInstanceBindings.EnumerateBoundProperties();
+
+            System.Text.StringBuilder probes = new();
+            int expectedProbes = 0;
+            HashSet<string> coveredRows = new(StringComparer.Ordinal);
+            foreach (string representative in RepresentativeClasses)
+            {
+                foreach ((string className, string property) in table)
+                {
+                    if (!ClassIsA(catalog, representative, className))
+                    {
+                        continue;
+                    }
+
+                    coveredRows.Add(className);
+                    probes.Append("probe('").Append(representative).Append("', '")
+                        .Append(property).Append("')\n");
+                    expectedProbes++;
+                }
+            }
+
+            for (int index = 0; index < table.Count; index++)
+            {
+                Assert.IsTrue(coveredRows.Contains(table[index].ClassName),
+                    "BoundProperties row '" + table[index].ClassName + "' has no representative "
+                    + "instance here; add one to RepresentativeClasses and to the probe script");
+            }
+
+            headless.Stack.Runtime.LoadMod("probe", @"
+                local part = Instance.new('Part')
+                part.Parent = workspace
+                local reps = {
+                    Part = part,
+                    Model = Instance.new('Model'),
+                    Workspace = workspace,
+                    Camera = workspace.CurrentCamera,
+                    Humanoid = Instance.new('Humanoid'),
+                    Player = game:GetService('Players'):GetPlayers()[1],
+                    Players = game:GetService('Players'),
+                    UserInputService = game:GetService('UserInputService'),
+                    ClickDetector = Instance.new('ClickDetector'),
+                    MaterialVariant = Instance.new('MaterialVariant'),
+                    IntValue = Instance.new('IntValue'),
+                    Tween = game:GetService('TweenService'):Create(
+                        part, TweenInfo.new(1), {Transparency = 1}),
+                }
+                local failures = {}
+                local probed = 0
+                local function probe(label, name)
+                    probed = probed + 1
+                    local target = reps[label]
+                    if target == nil then
+                        table.insert(failures, label .. ': no representative instance')
+                        return
+                    end
+                    local readOk, value = pcall(function() return target[name] end)
+                    if not readOk then
+                        table.insert(failures, label .. '.' .. name .. ' read: ' .. tostring(value))
+                        return
+                    end
+                    if type(value) == 'function' then
+                        table.insert(failures, label .. '.' .. name .. ' reads as a method')
+                        return
+                    end
+                    local signalOk, connect = pcall(function() return value.Connect end)
+                    if signalOk and type(connect) == 'function' then
+                        table.insert(failures, label .. '.' .. name .. ' reads as an event')
+                        return
+                    end
+                    local watchOk, watchErr = pcall(function()
+                        return target:GetPropertyChangedSignal(name)
+                    end)
+                    if not watchOk then
+                        table.insert(failures, label .. '.' .. name
+                            .. ' GetPropertyChangedSignal: ' .. tostring(watchErr))
+                    end
+                end
+" + probes + @"
+                store_set('failures', table.concat(failures, '\n'))
+                store_set('probed', tostring(probed))", persistToStore: false);
+
+            Assert.AreEqual(expectedProbes.ToString(), headless.Store.Get("probe", "probed"),
+                "every table entry must have been probed on a representative instance");
+            Assert.AreEqual("", headless.Store.Get("probe", "failures"));
+        }
+
+        /// <summary>
+        /// The member names the Lua read dispatch answers, read from the bindings source: the case
+        /// labels and name comparisons of <c>Instance.__index</c> and of every <c>TryRead*</c>
+        /// reader it consults.
+        /// </summary>
+        private static HashSet<string> ReadDispatchMemberNames()
+        {
+            string path = Path.Combine(Directory.GetCurrentDirectory(), "Assets", "CoreAIMods",
+                "Runtime", "Scripting", "LuaCs", "LuaCsRbxInstanceBindings.cs");
+            Assert.IsTrue(File.Exists(path), "bindings source not found at " + path);
+            string source = File.ReadAllText(path);
+
+            List<string> regions = new();
+            int indexStart = source.IndexOf("Fn(\"Instance.__index\"", StringComparison.Ordinal);
+            Assert.GreaterOrEqual(indexStart, 0, "Instance.__index not found in the bindings source");
+            int indexEnd = source.IndexOf("meta[Metamethods.NewIndex]", indexStart,
+                StringComparison.Ordinal);
+            Assert.Greater(indexEnd, indexStart, "Instance.__newindex not found after __index");
+            regions.Add(source.Substring(indexStart, indexEnd - indexStart));
+
+            MatchCollection readers = Regex.Matches(source, @"private static bool TryRead\w+\(");
+            Assert.Greater(readers.Count, 0, "no TryRead* readers found in the bindings source");
+            foreach (Match reader in readers)
+            {
+                // WHY the class-member indentation marks the end: every reader is a member of the
+                // bindings class, so its closing brace is the first line holding only eight spaces
+                // and a brace.
+                int end = source.IndexOf("\n        }", reader.Index, StringComparison.Ordinal);
+                Assert.Greater(end, reader.Index, "unterminated reader at " + reader.Index);
+                regions.Add(source.Substring(reader.Index, end - reader.Index));
+            }
+
+            HashSet<string> names = new(StringComparer.Ordinal);
+            foreach (string region in regions)
+            {
+                foreach (Match label in Regex.Matches(region, "case\\s+\"(\\w+)\""))
+                {
+                    names.Add(label.Groups[1].Value);
+                }
+
+                foreach (Match comparison in Regex.Matches(region,
+                             "\\b(?:key|member)\\s*==\\s*\"(\\w+)\""))
+                {
+                    names.Add(comparison.Groups[1].Value);
+                }
+            }
+
+            return names;
+        }
+
+        /// <summary>True when <paramref name="className"/> is or inherits <paramref name="ancestor"/>.</summary>
+        private static bool ClassIsA(ClassCatalog catalog, string className, string ancestor)
+        {
+            string current = className;
+            while (current != null)
+            {
+                if (string.Equals(current, ancestor, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
+                if (!catalog.TryGet(current, out ClassDescriptor descriptor))
+                {
+                    return false;
+                }
+
+                current = descriptor.BaseClassName;
+            }
+
+            return false;
         }
 
         /// <summary>

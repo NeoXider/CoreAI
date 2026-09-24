@@ -1718,8 +1718,17 @@ namespace CoreAI.Ai.LuaCs
             Method("SetAttribute", (ctx, self) =>
             {
                 context.RequireMetadataMutation(self, "set attribute");
-                self.SetAttribute(
-                    ReadString(ctx, 1, "Instance:SetAttribute", 1), AttributeFromLua(Arg(ctx, 2)));
+                string attributeName = ReadString(ctx, 1, "Instance:SetAttribute", 1);
+                object attributeValue = AttributeFromLua(Arg(ctx, 2));
+                // WHY the mirror's ASCII rule only for a name this call creates: a world saved
+                // before the rule may hold a non-ASCII name, and its scripts must still be able to
+                // update and remove it; only a script creating a new one is refused.
+                if (attributeValue != null && self.GetAttribute(attributeName) == null)
+                {
+                    AttributeContract.ValidateNewName(attributeName);
+                }
+
+                self.SetAttribute(attributeName, attributeValue);
                 return LuaValue.Nil;
             });
             Method("GetAttributes", (_, self) =>
@@ -2130,6 +2139,25 @@ namespace CoreAI.Ai.LuaCs
         private static HashSet<string> Names(params string[] names)
         {
             return new HashSet<string>(names, StringComparer.Ordinal);
+        }
+
+        /// <summary>
+        /// Every (declaring class, property) pair GetPropertyChangedSignal accepts as a bound
+        /// property, in table order. The drift guard in the acceptance tests compares it with what
+        /// the Lua member read actually answers.
+        /// </summary>
+        internal static IReadOnlyList<(string ClassName, string Property)> EnumerateBoundProperties()
+        {
+            List<(string ClassName, string Property)> pairs = new();
+            for (int index = 0; index < BoundProperties.Length; index++)
+            {
+                foreach (string property in BoundProperties[index].Properties)
+                {
+                    pairs.Add((BoundProperties[index].ClassName, property));
+                }
+            }
+
+            return pairs;
         }
 
         /// <summary>
@@ -2653,8 +2681,12 @@ namespace CoreAI.Ai.LuaCs
                 PartProperties rootBefore = sink.GetPartPropertiesOrDefault(instance.Id);
                 sink.SetCFrame(instance.Id, target);
                 context.RecordMutation(instance);
-                NotifyPartChanges(instance, "CFrame", in rootBefore,
-                    sink.GetPartPropertiesOrDefault(instance.Id));
+                PartProperties rootAfter = sink.GetPartPropertiesOrDefault(instance.Id);
+                NotifyPartChanges(instance, "CFrame", in rootBefore, in rootAfter);
+                if (rootBefore.CFrame != rootAfter.CFrame)
+                {
+                    EndWalksOfMovedRootPart(instance);
+                }
             }
 
             if (isCamera)
@@ -2669,8 +2701,12 @@ namespace CoreAI.Ai.LuaCs
                 PartProperties partBefore = partsBefore[partIndex];
                 sink.SetCFrame(part.Id, transform * partBefore.CFrame);
                 context.RecordMutation(part);
-                NotifyPartChanges(part, "CFrame", in partBefore,
-                    sink.GetPartPropertiesOrDefault(part.Id));
+                PartProperties partAfter = sink.GetPartPropertiesOrDefault(part.Id);
+                NotifyPartChanges(part, "CFrame", in partBefore, in partAfter);
+                if (partBefore.CFrame != partAfter.CFrame)
+                {
+                    EndWalksOfMovedRootPart(part);
+                }
             }
 
             for (int modelIndex = 0; modelIndex < models.Count; modelIndex++)
@@ -2860,8 +2896,52 @@ namespace CoreAI.Ai.LuaCs
             }
 
             context.RecordMutation(self);
-            NotifyPartChanges(self, key, in before, sink.GetPartPropertiesOrDefault(id));
+            PartProperties after = sink.GetPartPropertiesOrDefault(id);
+            NotifyPartChanges(self, key, in before, in after);
+            if (before.CFrame != after.CFrame)
+            {
+                EndWalksOfMovedRootPart(self);
+            }
+
             return true;
+        }
+
+        /// <summary>
+        /// Ends the MoveTo of every Humanoid whose RootPart is <paramref name="part"/>, after a script
+        /// changed that part's CFrame — by CFrame, Position, Orientation, Rotation or a PivotTo that
+        /// carried it (Humanoid.yaml MoveTo: the walk "ends if ... a script changes the CFrame
+        /// property of the humanoid's RootPart").
+        /// </summary>
+        /// <remarks>
+        /// WHY only a part named HumanoidRootPart, and only its siblings are asked: the character
+        /// pipeline (LuaCsRbxApiBindings.ResolveRootPart) only ever hands a Humanoid the sibling
+        /// BasePart of that name as its RootPart, and the name check keeps every other part write —
+        /// a script moving a hundred parts of a building each frame — from scanning its siblings at
+        /// all. A host that calls RbxHumanoid.AttachHost itself with a differently named part is not
+        /// covered.
+        /// </remarks>
+        private static void EndWalksOfMovedRootPart(RbxInstance part)
+        {
+            if (!string.Equals(part.Name, RbxCharacterFactory.RootPartName, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            RbxInstance character = part.Parent;
+            if (character == null || character.IsDestroyed)
+            {
+                return;
+            }
+
+            IReadOnlyList<RbxInstance> siblings = character.GetChildren();
+            for (int index = 0; index < siblings.Count; index++)
+            {
+                if (siblings[index] is RbxHumanoid humanoid
+                    && ReferenceEquals(humanoid.RootPart, part))
+                {
+                    humanoid.EndWalkForScriptedRootPartMove();
+                }
+            }
         }
 
         /// <summary>

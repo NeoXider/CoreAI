@@ -639,6 +639,82 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("registered instances quota reached (limit 1)", refused.Message);
         }
 
+        /// <summary>
+        /// WHY: the quota refusal used to be thrown from inside the registry's Registered multicast
+        /// and cleaned up with Destroy, so a subscriber added after the runtime never heard Registered
+        /// for the refused record yet heard its Unregistered. The runtime now refuses through a
+        /// registry admission, before the record exists for anyone.
+        /// </summary>
+        [Test]
+        public void LuaCs_RegisteredInstanceQuota_ARefusedCreationIsNeverAnnouncedToALaterSubscriber()
+        {
+            LuaCsRbxApiBindings rbxApi = new();
+            InstanceRegistry registry = rbxApi.Registry;
+            RecordingRegistrationAdmission earlier = new();
+            registry.AddRegistrationAdmission(earlier);
+            LuaCsModRuntime runtime = new(rbxApi: rbxApi, maxRegisteredInstancesPerActor: 1);
+            List<InstanceRecord> registered = new();
+            List<InstanceRecord> unregistered = new();
+            registry.Registered += record => registered.Add(record);
+            registry.Unregistered += record => unregistered.Add(record);
+
+            RbxInstance admitted = registry.Create("Folder");
+
+            Assert.AreEqual(1, registered.Count, "the positive twin: an admitted creation is announced");
+            Assert.AreSame(admitted, registered[0].Instance);
+            int liveBeforeRefusal = registry.Count;
+
+            InvalidOperationException refused = Assert.Throws<InvalidOperationException>(
+                () => registry.Create("Folder"));
+
+            Assert.AreEqual(
+                "Instance.new: actor 'host/system' cannot register instance '"
+                + earlier.Admitted[1].Id.Value
+                + "': registered instances quota reached (limit 1).",
+                refused.Message,
+                "the refusal text is unchanged by the move to an admission");
+            Assert.IsNull(refused.InnerException, "nothing was built, so there is no cleanup to fail");
+            Assert.AreEqual(1, registered.Count, "the refused record is never announced");
+            Assert.IsEmpty(unregistered,
+                "a record that was never registered must never be unregistered");
+            Assert.AreEqual(liveBeforeRefusal, registry.Count);
+            Assert.IsFalse(registry.TryGetRecord(earlier.Admitted[1].Id, out InstanceRecord _),
+                "the registry holds no record of the refused creation");
+            CollectionAssert.AreEqual(new[] { earlier.Admitted[1] }, earlier.Revoked,
+                "a check installed before the runtime is told the record it admitted will never exist");
+
+            admitted.Destroy();
+            Assert.AreEqual(1, unregistered.Count, "an admitted record is unregistered exactly once");
+            Assert.DoesNotThrow(() => registry.Create("Folder"),
+                "destroying the admitted record frees its slot, and the refusal consumed none");
+
+            Assert.AreEqual(2, registry.RegistrationAdmissionCount);
+            runtime.ShutdownWithoutPersistence();
+            Assert.AreEqual(1, registry.RegistrationAdmissionCount,
+                "a stopped runtime removes its own admission and leaves the other one installed");
+            Assert.DoesNotThrow(() => registry.Create("Folder"),
+                "a stopped runtime no longer bounds the world");
+        }
+
+        /// <summary>An admission check that admits everything and records what it was told.</summary>
+        private sealed class RecordingRegistrationAdmission : IInstanceRegistrationAdmission
+        {
+            public List<InstanceRecord> Admitted { get; } = new();
+
+            public List<InstanceRecord> Revoked { get; } = new();
+
+            public string Admit(InstanceRecord record)
+            {
+                Admitted.Add(record);
+                return null;
+            }
+
+            public void Revoke(InstanceRecord record)
+            {
+                Revoked.Add(record);
+            }
+        }
+
         [Test]
         public void LuaCs_EmergencyInstanceCeiling_InjectedValueIsEnforcedAndCanOnlyLowerTheCeiling()
         {

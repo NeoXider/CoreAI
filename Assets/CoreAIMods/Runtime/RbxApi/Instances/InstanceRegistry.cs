@@ -12,6 +12,29 @@ namespace CoreAI.Mods.Rbx.Instances
     }
 
     /// <summary>
+    /// Pre-registration admission check installed with
+    /// <see cref="InstanceRegistry.AddRegistrationAdmission"/>. Every installed check is asked, in
+    /// installation order, before a new record is added to the registry or announced through
+    /// <see cref="InstanceRegistry.Registered"/>; the first refusal aborts the registration, so a
+    /// refused instance is never registered, announced, or destroyed.
+    /// </summary>
+    public interface IInstanceRegistrationAdmission
+    {
+        /// <summary>
+        /// Returns null to admit <paramref name="record"/> (reserving whatever the check accounts for),
+        /// or the refusal text the creation fails with. The record is complete but not yet reachable
+        /// through the registry. An implementation must not create or destroy instances.
+        /// </summary>
+        string Admit(InstanceRecord record);
+
+        /// <summary>
+        /// Undoes an admission this check granted: a check installed after it refused the same record,
+        /// or threw, so the record will never be registered and never raise Unregistered.
+        /// </summary>
+        void Revoke(InstanceRecord record);
+    }
+
+    /// <summary>
     /// Which side of the replication boundary a registry sits on: the server that owns the truth,
     /// or a client copy that only ever receives it.
     /// </summary>
@@ -138,6 +161,8 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private RbxInstance _worldRoot;
         private RbxInstance _sceneRoot;
+        private IInstanceRegistrationAdmission[] _registrationAdmissions =
+            Array.Empty<IInstanceRegistrationAdmission>();
         private MutationEnvelopeScope _mutationEnvelopeScope;
         private ReplicationApplyScope _replicationApplyScope;
         private readonly List<PendingRevisionAdvance> _pendingRevisionAdvances = new();
@@ -333,9 +358,68 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
+        /// <summary>
+        /// Raised once a new record is live in the registry. Never raised for a creation an
+        /// <see cref="IInstanceRegistrationAdmission"/> refused.
+        /// </summary>
         public event Action<InstanceRecord> Registered;
 
         public event Action<InstanceRecord> Unregistered;
+
+        /// <summary>
+        /// Installs a pre-registration admission check for every later creation path
+        /// (<see cref="Create"/>, <see cref="CreateScripted"/>, <see cref="RestoreInstance"/>). Checks
+        /// run in installation order; installing one check twice asks it twice.
+        /// </summary>
+        /// <remarks>
+        /// WHY a list of checks rather than a settable delegate: more than one owner may bound the
+        /// same world (a runtime per registry today, a host policy tomorrow), and a second owner
+        /// assigning a delegate would silently switch the first one's limit off.
+        /// WHY a refusal is decided here and not in a <see cref="Registered"/> subscriber: a throw
+        /// from inside that multicast skips every subscriber after the thrower, so those subscribers
+        /// never saw the record registered yet still received its Unregistered from the cleanup.
+        /// </remarks>
+        public void AddRegistrationAdmission(IInstanceRegistrationAdmission admission)
+        {
+            if (admission == null)
+            {
+                throw new ArgumentNullException(nameof(admission));
+            }
+
+            IInstanceRegistrationAdmission[] current = _registrationAdmissions;
+            IInstanceRegistrationAdmission[] next = new IInstanceRegistrationAdmission[current.Length + 1];
+            Array.Copy(current, next, current.Length);
+            next[current.Length] = admission;
+            _registrationAdmissions = next;
+        }
+
+        /// <summary>
+        /// Removes the most recently installed occurrence of <paramref name="admission"/>; returns
+        /// false when it is not installed.
+        /// </summary>
+        public bool RemoveRegistrationAdmission(IInstanceRegistrationAdmission admission)
+        {
+            IInstanceRegistrationAdmission[] current = _registrationAdmissions;
+            for (int index = current.Length - 1; index >= 0; index--)
+            {
+                if (!ReferenceEquals(current[index], admission))
+                {
+                    continue;
+                }
+
+                IInstanceRegistrationAdmission[] next =
+                    new IInstanceRegistrationAdmission[current.Length - 1];
+                Array.Copy(current, 0, next, 0, index);
+                Array.Copy(current, index + 1, next, index, current.Length - index - 1);
+                _registrationAdmissions = next;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>How many admission checks are installed.</summary>
+        public int RegistrationAdmissionCount => _registrationAdmissions.Length;
 
         /// <summary>
         /// One instance's revision moved forward: the instance, its new revision, and the member that
@@ -1020,6 +1104,21 @@ namespace CoreAI.Mods.Rbx.Instances
                     : DefaultAccessScope(instance, resolvedOwnerActorId));
             InstanceRecord record = new(id, instance, ownerModId, originTag, resolvedOwnerActorId,
                 resolvedAccessScope, isRuntimeInfrastructure);
+            // WHY checked before admission rather than left to _byId.Add: admission is the last step
+            // that may fail, so a check that reserved something for this record never has to be
+            // revoked because the add after it threw.
+            if (_byId.ContainsKey(id))
+            {
+                throw RbxError.BadArgument("InstanceId " + id.Value + " is already registered",
+                    "restore into an empty registry or destroy the conflicting instance first");
+            }
+
+            string refusal = AdmitRegistration(record);
+            if (refusal != null)
+            {
+                throw new InvalidOperationException(refusal);
+            }
+
             _byId.Add(id, record);
             if (instance is RbxModel model)
             {
@@ -1028,6 +1127,60 @@ namespace CoreAI.Mods.Rbx.Instances
 
             Registered?.Invoke(record);
             return instance;
+        }
+
+        /// <summary>
+        /// Asks every installed <see cref="IInstanceRegistrationAdmission"/> about
+        /// <paramref name="record"/>; returns null when all admit it, or the first refusal after
+        /// revoking the checks that had already admitted it. A check that throws is revoked the same
+        /// way and its exception propagates.
+        /// </summary>
+        private string AdmitRegistration(InstanceRecord record)
+        {
+            IInstanceRegistrationAdmission[] admissions = _registrationAdmissions;
+            int admitted = 0;
+            try
+            {
+                for (; admitted < admissions.Length; admitted++)
+                {
+                    string refusal = admissions[admitted].Admit(record);
+                    if (refusal != null)
+                    {
+                        RevokeAdmissions(admissions, admitted, record);
+                        return refusal;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                RevokeAdmissions(admissions, admitted, record);
+                throw;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Revokes the first <paramref name="count"/> admissions, newest first. A revoke that throws is
+        /// reported through <see cref="Diagnostics"/> so the refusal that caused it still surfaces.
+        /// </summary>
+        private void RevokeAdmissions(IInstanceRegistrationAdmission[] admissions, int count,
+            InstanceRecord record)
+        {
+            for (int index = count - 1; index >= 0; index--)
+            {
+                try
+                {
+                    admissions[index].Revoke(record);
+                }
+                catch (Exception exception)
+                {
+                    ReportDiagnostic("[CoreAI.RbxApi] registration admission "
+                                     + admissions[index].GetType().FullName
+                                     + " threw while revoking instance id " + record.Id.Value
+                                     + " (class=" + record.Instance.ClassName + "): " + exception);
+                }
+            }
         }
 
         private string ResolveOwnerActorId(string ownerModId, string originTag, string ownerActorId)

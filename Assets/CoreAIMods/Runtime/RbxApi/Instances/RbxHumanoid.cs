@@ -559,7 +559,9 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>
         /// Mirror <c>Humanoid:MoveTo(location)</c>: walks toward a point and reports the outcome
-        /// through <see cref="MoveToFinished"/> — reached within eight seconds, or false at eight.
+        /// through <see cref="MoveToFinished"/> — reached within eight seconds, or false at eight,
+        /// or false as soon as a script moves the <see cref="RootPart"/>
+        /// (<see cref="EndWalkForScriptedRootPartMove"/>).
         /// </summary>
         public void MoveTo(RbxVector3 location)
         {
@@ -571,6 +573,29 @@ namespace CoreAI.Mods.Rbx.Instances
             _walkTarget = location;
             _walkElapsed = 0d;
             _motor.MoveTo(location);
+        }
+
+        /// <summary>
+        /// Ends the walk in progress, if any, because a script moved this Humanoid's
+        /// <see cref="RootPart"/>: Humanoid.yaml MoveTo "ends if ... a script changes the CFrame
+        /// property of the humanoid's RootPart". Fires <see cref="MoveToFinished"/> with false and
+        /// returns whether a walk was ended.
+        /// </summary>
+        /// <remarks>
+        /// WHY false (OURS): the mirror lists the teleport among the ways a walk ends but names no
+        /// value for it, and its MoveToFinished text reserves true for a goal that was reached. A
+        /// script awaiting MoveToFinished still hears once that the walk is over instead of waiting
+        /// for a timeout that the ended walk no longer runs.
+        /// </remarks>
+        internal bool EndWalkForScriptedRootPartMove()
+        {
+            if (!_walkTarget.HasValue)
+            {
+                return false;
+            }
+
+            FinishWalk(reached: false);
+            return true;
         }
 
         /// <summary>
@@ -616,6 +641,39 @@ namespace CoreAI.Mods.Rbx.Instances
             {
                 FinishWalk(reached: false);
             }
+        }
+
+        /// <summary>
+        /// Clone carries the Humanoid's scripted state (R6.5): MaxHealth, Health, WalkSpeed,
+        /// JumpPower, JumpHeight, UseJumpPower and DisplayName. Silent, like every clone copy — no
+        /// Changed, no HealthChanged, no revision.
+        /// </summary>
+        /// <remarks>
+        /// WHY Health is copied as it is, 0 included, while the death is not: Clone copies
+        /// properties (Instance.yaml), Health is one and the Dead state is not. The copy starts with
+        /// no parent, so by the class rule a Humanoid at 0 outside the Workspace is not dead yet; a
+        /// clone of a corpse therefore dies, and fires its own Died, on its first Heartbeat inside
+        /// the Workspace instead of arriving already dead with a Died no listener could hear.
+        /// WHY the copy's WalkSpeed is pushed to its motor: a host listening for new Humanoids (the
+        /// character pipeline does) attaches the copy's motor at the default speed the moment the
+        /// copy is registered, before this runs, and that motor otherwise keeps the default until a
+        /// rebuild the copy may never get.
+        /// </remarks>
+        protected internal override void CopyCustomStateTo(RbxInstance copy)
+        {
+            if (!(copy is RbxHumanoid humanoidCopy))
+            {
+                return;
+            }
+
+            humanoidCopy._maxHealth = _maxHealth;
+            humanoidCopy._health = _health;
+            humanoidCopy._walkSpeed = _walkSpeed;
+            humanoidCopy._jumpPower = _jumpPower;
+            humanoidCopy._jumpHeight = _jumpHeight;
+            humanoidCopy._useJumpPower = _useJumpPower;
+            humanoidCopy._displayName = _displayName;
+            humanoidCopy._motor.SetWalkSpeed(humanoidCopy._walkSpeed);
         }
 
         private void BindSignals(ModScheduler scheduler)

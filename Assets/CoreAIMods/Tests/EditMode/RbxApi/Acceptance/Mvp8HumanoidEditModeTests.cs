@@ -9,6 +9,7 @@ using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Spatial;
 using NUnit.Framework;
 using UnityEngine;
@@ -1077,6 +1078,198 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual(RbxErrorCode.BadArgument, damage.Code);
             Assert.AreEqual(100d, humanoid.Health, 1e-9d, "a refused write changes nothing");
             Assert.AreEqual(100d, humanoid.MaxHealth, 1e-9d);
+        }
+
+        [Test]
+        public void Clone_KeepsTheTemplatesHealthMovementParametersAndDisplayName()
+        {
+            // WHY: RbxHumanoid copied no state into a clone, so the common NPC-spawner idiom — a
+            // configured template in ReplicatedStorage, cloned per spawn — produced 100-health,
+            // 16-speed humanoids with no name, whatever the template said.
+            using ProductionHarness harness = new ProductionHarness();
+            Dictionary<RbxHumanoid, FakeCharacterMotor> motors = new();
+            harness.Bindings.AttachCharacterMotorFactory(humanoid =>
+            {
+                FakeCharacterMotor motor = new();
+                motors[humanoid] = motor;
+                return motor;
+            });
+            RbxHumanoid template =
+                harness.Humanoid(harness.Bindings.Game.GetService("ReplicatedStorage"));
+            template.Name = "GuardTemplate";
+            template.MaxHealth = 250d;
+            template.Health = 180d;
+            template.WalkSpeed = 24d;
+            template.JumpPower = 70d;
+            template.JumpHeight = 11d;
+            template.UseJumpPower = false;
+            template.DisplayName = "Guard";
+
+            RbxHumanoid copy = (RbxHumanoid)template.Clone();
+
+            Assert.IsNotNull(copy);
+            Assert.AreNotSame(template, copy);
+            Assert.AreEqual(250d, copy.MaxHealth, 1e-9d);
+            Assert.AreEqual(180d, copy.Health, 1e-9d);
+            Assert.AreEqual(24d, copy.WalkSpeed, 1e-9d);
+            Assert.AreEqual(70d, copy.JumpPower, 1e-9d);
+            Assert.AreEqual(11d, copy.JumpHeight, 1e-9d);
+            Assert.IsFalse(copy.UseJumpPower);
+            Assert.AreEqual("Guard", copy.DisplayName);
+            Assert.IsTrue(motors.ContainsKey(copy), "precondition: the copy was given its own motor");
+            Assert.AreEqual(24d, motors[copy].WalkSpeed, 1e-9d,
+                "the copy's motor walks at the copied speed, not the default it was built with");
+
+            copy.Parent = harness.Registry.WorldRoot;
+            harness.Bindings.Scheduler.Advance(0.1d);
+
+            Assert.IsFalse(copy.IsDead);
+            Assert.AreEqual(180d, copy.Health, 1e-9d, "entering the world changes nothing copied");
+            Assert.AreEqual(250d, template.MaxHealth, 1e-9d, "the template keeps its own state");
+        }
+
+        [Test]
+        public void Clone_OfADeadHumanoid_KeepsHealthZero_AndDiesOnItsFirstHeartbeatInTheWorkspace()
+        {
+            // WHY: Clone copies the Health property, so a clone of a corpse has 0 health, but not the
+            // Dead state. By the class's Died rule a Humanoid at 0 outside the Workspace is not dead
+            // yet; the unparented copy dies, and fires its own Died, once it is simulated inside.
+            using ProductionHarness harness = new ProductionHarness();
+            RbxHumanoid corpse = harness.Humanoid();
+            corpse.MaxHealth = 120d;
+            corpse.Health = 0d;
+            harness.Bindings.Scheduler.Advance(0d);
+            Assert.IsTrue(corpse.IsDead, "precondition: the source died inside the Workspace");
+
+            RbxHumanoid copy = (RbxHumanoid)corpse.Clone();
+            int died = 0;
+            harness.Connect(copy.Died, _ => died++);
+
+            Assert.AreEqual(0d, copy.Health, 1e-9d, "Clone copies the Health property, 0 included");
+            Assert.AreEqual(120d, copy.MaxHealth, 1e-9d);
+            Assert.IsFalse(copy.IsDead, "the unparented copy is outside the Workspace, so not dead yet");
+            Assert.AreNotEqual(RbxHumanoidState.Dead, copy.GetState());
+
+            copy.Parent = harness.Registry.WorldRoot;
+            harness.Bindings.Scheduler.Advance(0.1d);
+            harness.Bindings.Scheduler.Advance(0.1d);
+
+            Assert.IsTrue(copy.IsDead, "a copy at 0 health dies once it is simulated in the Workspace");
+            Assert.AreEqual(RbxHumanoidState.Dead, copy.GetState());
+            Assert.AreEqual(1, died, "the copy's own Died fires once");
+        }
+
+        [Test]
+        public void MoveTo_EndsFalse_WhenAScriptMovesTheRootPart_ByCFramePositionOrPivotTo()
+        {
+            // WHY (M8-18): Humanoid.yaml MoveTo ends when "a script changes the CFrame property of the
+            // humanoid's RootPart". A teleported NPC kept walking toward the old goal from its new
+            // spot, and a script waiting on MoveToFinished heard nothing until the timeout.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("teleport");
+
+            harness.Stack.Runtime.LoadMod(actor, "teleport-mod", @"
+                local function spawnWalker(name)
+                    local npc = Instance.new('Model')
+                    npc.Name = name
+                    local root = Instance.new('Part')
+                    root.Name = 'HumanoidRootPart'
+                    root.Parent = npc
+                    local torso = Instance.new('Part')
+                    torso.Name = 'Torso'
+                    torso.Parent = npc
+                    local h = Instance.new('Humanoid')
+                    h.Parent = npc
+                    npc.Parent = workspace
+                    store_set(name .. '.bound', tostring(h.RootPart == root))
+                    h.MoveToFinished:Connect(function(reached)
+                        store_set(name .. '.finished',
+                            (store_get(name .. '.finished') or '') .. tostring(reached) .. ';')
+                    end)
+                    h:MoveTo(Vector3.new(100, 0, 0))
+                    return npc, root, torso
+                end
+
+                local _, cframeRoot = spawnWalker('ByCFrame')
+                cframeRoot.CFrame = CFrame.new(0, 10, 0)
+                local _, positionRoot = spawnWalker('ByPosition')
+                positionRoot.Position = Vector3.new(3, 4, 5)
+                local pivotNpc = spawnWalker('ByPivotTo')
+                pivotNpc:PivotTo(CFrame.new(20, 5, 0))
+                local _, _, torso = spawnWalker('ByTorso')
+                torso.Position = Vector3.new(7, 8, 9)
+                local _, sameRoot = spawnWalker('BySameCFrame')
+                sameRoot.CFrame = sameRoot.CFrame",
+                persistToStore: false);
+            harness.Bindings.Scheduler.Advance(0d);
+
+            foreach (string walker in new[] { "ByCFrame", "ByPosition", "ByPivotTo", "ByTorso", "BySameCFrame" })
+            {
+                Assert.AreEqual("true", harness.Store.Get("teleport-mod", walker + ".bound"),
+                    walker + ": precondition, the Humanoid's RootPart is its sibling HumanoidRootPart; log: "
+                    + string.Join(" || ", harness.LogLines));
+            }
+
+            Assert.AreEqual("false;", harness.Store.Get("teleport-mod", "ByCFrame.finished"),
+                "writing the RootPart's CFrame ends the walk, unreached");
+            Assert.AreEqual("false;", harness.Store.Get("teleport-mod", "ByPosition.finished"),
+                "writing Position changes the CFrame too");
+            Assert.AreEqual("false;", harness.Store.Get("teleport-mod", "ByPivotTo.finished"),
+                "pivoting the character carries its RootPart");
+            Assert.AreEqual("", harness.Store.Get("teleport-mod", "ByTorso.finished"),
+                "the negative twin: moving another part of the character is not moving its RootPart");
+            Assert.AreEqual("", harness.Store.Get("teleport-mod", "BySameCFrame.finished"),
+                "writing the CFrame the RootPart already has changes nothing");
+
+            harness.Bindings.Scheduler.Advance(RbxHumanoid.MoveToTimeoutSeconds + 0.5d);
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("false;", harness.Store.Get("teleport-mod", "ByCFrame.finished"),
+                "an ended walk has no timeout left to report a second time");
+            Assert.AreEqual("false;", harness.Store.Get("teleport-mod", "ByPivotTo.finished"));
+            Assert.AreEqual("false;", harness.Store.Get("teleport-mod", "ByTorso.finished"),
+                "the untouched walk kept running until the mirror's eight-second timeout");
+            Assert.AreEqual("false;", harness.Store.Get("teleport-mod", "BySameCFrame.finished"));
+        }
+
+        [Test]
+        public void Character_IsNotArchivable_SoCloneIsNil_UntilAScriptSetsArchivableTrue()
+        {
+            // WHY: Roblox spawns a character Model with Archivable false, so character:Clone() is nil
+            // and every avatar-copy script sets Archivable = true first. Ours was archivable, so a
+            // script relying on the nil (or on Clone skipping characters inside a cloned folder)
+            // copied a whole character.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("avatar");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+            harness.Bindings.Scheduler.Advance(1d / 60d);
+            Assert.IsNotNull(player.Character, "precondition: the join spawned a character");
+            Assert.IsFalse(player.Character.Archivable);
+            Assert.IsTrue(player.Character.FindFirstChild("HumanoidRootPart").Archivable,
+                "only the character Model is non-archivable; its parts are copied once it is");
+
+            harness.Stack.Runtime.LoadMod(actor, "avatar-copy", @"
+                local character = game:GetService('Players'):GetPlayers()[1].Character
+                store_set('archivable', tostring(character.Archivable))
+                store_set('refused', tostring(character:Clone() == nil))
+                character.Archivable = true
+                local copy = character:Clone()
+                store_set('copied', tostring(copy ~= nil))
+                if copy ~= nil then
+                    copy.Name = 'AvatarCopy'
+                    store_set('humanoid', tostring(copy:FindFirstChildOfClass('Humanoid') ~= nil))
+                    store_set('root', tostring(copy:FindFirstChild('HumanoidRootPart') ~= nil))
+                end",
+                persistToStore: false);
+
+            Assert.AreEqual("false", harness.Store.Get("avatar-copy", "archivable"),
+                "log: " + string.Join(" || ", harness.LogLines));
+            Assert.AreEqual("true", harness.Store.Get("avatar-copy", "refused"),
+                "Clone of a non-archivable instance returns nil");
+            Assert.AreEqual("true", harness.Store.Get("avatar-copy", "copied"),
+                "after Archivable = true the same call returns a copy");
+            Assert.AreEqual("true", harness.Store.Get("avatar-copy", "humanoid"));
+            Assert.AreEqual("true", harness.Store.Get("avatar-copy", "root"));
         }
 
         /// <summary>

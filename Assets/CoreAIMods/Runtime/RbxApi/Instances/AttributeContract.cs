@@ -47,9 +47,9 @@ namespace CoreAI.Mods.Rbx.Instances
         /// </summary>
         public static void ValidateNewName(string attributeName)
         {
-            // TODO: M1-23 — call this from the Lua SetAttribute binding when the call creates a name
-            // (a non-nil value for a name the instance does not hold yet); restore and replication
-            // must keep going through ValidateName.
+            // WHY only here: the Lua SetAttribute binding calls this when a script creates a name (a
+            // non-nil value for a name the instance does not hold yet); restore and replication keep
+            // going through ValidateName, so a world saved with an older name still loads.
             ValidateNameCore(attributeName, true);
         }
 

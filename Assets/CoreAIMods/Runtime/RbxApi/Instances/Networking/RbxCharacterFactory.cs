@@ -75,7 +75,13 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             try
             {
                 character.Name = player.Name;
-    
+                // WHY: Roblox spawns a character Model with Archivable false, so character:Clone()
+                // returns nil (Instance.yaml Clone) until a script sets Archivable = true first, the
+                // idiom every avatar-copy script opens with. Only the root Model carries the flag, as
+                // in Roblox; its parts stay archivable so that idiom copies the whole rig. The
+                // mirror states no default for a character, so this one is the engine's observed one.
+                character.Archivable = false;
+
                 RbxInstance rootPart = registry.Create(
                     "Part",
                     ownerActorId: actorId,

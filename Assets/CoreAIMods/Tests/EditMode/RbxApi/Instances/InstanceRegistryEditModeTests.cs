@@ -576,5 +576,177 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             Assert.Throws<RbxError>(() => registry.Create("Object"));
             Assert.Throws<RbxError>(() => registry.Create("FormFactorPart"));
         }
+
+        /// <summary>
+        /// WHY: a quota refusal used to be thrown from inside the Registered multicast, so a
+        /// subscriber registered after the refusing one never heard Registered for the record and
+        /// still heard its Unregistered from the cleanup. An admission decides before anything is
+        /// added or announced.
+        /// </summary>
+        [Test]
+        public void RegistrationAdmission_ARefusal_RegistersAndAnnouncesNothing_AndThrowsTheRefusalText()
+        {
+            InstanceRegistry registry = new();
+            List<string> calls = new();
+            RecordingAdmission admission = new(registry, calls, "quota", "Folder");
+            registry.AddRegistrationAdmission(admission);
+            List<InstanceRecord> registered = new();
+            List<InstanceRecord> unregistered = new();
+            registry.Registered += record => registered.Add(record);
+            registry.Unregistered += record => unregistered.Add(record);
+
+            System.InvalidOperationException refusal =
+                Assert.Throws<System.InvalidOperationException>(() => registry.Create("Folder"));
+
+            Assert.AreEqual("quota refuses Folder", refusal.Message,
+                "the admission's text is the creation's error, unwrapped");
+            Assert.IsEmpty(registered, "a refused record is never announced");
+            Assert.IsEmpty(unregistered, "a record never registered is never unregistered either");
+            Assert.AreEqual(0, registry.Count, "a refused record is never added");
+            Assert.IsEmpty(admission.Revoked, "the refusing check itself is not revoked");
+
+            RbxInstance part = registry.Create("Part");
+
+            Assert.AreEqual(1, registered.Count, "an admitted creation is announced once");
+            Assert.AreSame(part, registered[0].Instance);
+            Assert.AreEqual(1, admission.Admitted.Count);
+            Assert.AreSame(registered[0], admission.Admitted[0],
+                "the record the check admitted is the record the registry keeps");
+            CollectionAssert.AreEqual(new[] { false, false }, admission.ReachableWhenAsked,
+                "a check is asked before the record can be looked up");
+            Assert.IsTrue(registry.TryGet(part.Id, out RbxInstance resolved));
+            Assert.AreSame(part, resolved);
+            Assert.IsEmpty(unregistered);
+        }
+
+        [Test]
+        public void RegistrationAdmission_ALaterRefusalOrThrow_RevokesEveryEarlierAdmission_NewestFirst()
+        {
+            InstanceRegistry registry = new();
+            List<string> calls = new();
+            RecordingAdmission first = new(registry, calls, "first");
+            RecordingAdmission second = new(registry, calls, "second");
+            RecordingAdmission refusing = new(registry, calls, "refusing", "Folder");
+            registry.AddRegistrationAdmission(first);
+            registry.AddRegistrationAdmission(second);
+            registry.AddRegistrationAdmission(refusing);
+
+            Assert.Throws<System.InvalidOperationException>(() => registry.Create("Folder"));
+
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    "first admits Folder", "second admits Folder", "refusing refuses Folder",
+                    "second revokes Folder", "first revokes Folder"
+                },
+                calls,
+                "every check that already admitted the record is told it will never be registered");
+            Assert.AreSame(first.Admitted[0], first.Revoked[0]);
+            Assert.AreSame(second.Admitted[0], second.Revoked[0]);
+            Assert.AreEqual(0, registry.Count);
+
+            calls.Clear();
+            Assert.IsTrue(registry.RemoveRegistrationAdmission(refusing));
+            RecordingAdmission throwing = new(registry, calls, "throwing", "Model", throws: true);
+            registry.AddRegistrationAdmission(throwing);
+
+            System.InvalidOperationException bug =
+                Assert.Throws<System.InvalidOperationException>(() => registry.Create("Model"));
+
+            Assert.AreEqual("throwing threw for Model", bug.Message,
+                "a check's own failure propagates as it was thrown");
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    "first admits Model", "second admits Model", "throwing throws for Model",
+                    "second revokes Model", "first revokes Model"
+                },
+                calls);
+            Assert.AreEqual(0, registry.Count);
+        }
+
+        [Test]
+        public void RegistrationAdmission_GuardsRestoreToo_AndARemovedCheckIsNoLongerAsked()
+        {
+            InstanceRegistry registry = new();
+            List<string> calls = new();
+            RecordingAdmission refusing = new(registry, calls, "restore", "Folder");
+            registry.AddRegistrationAdmission(refusing);
+            InstanceId restoredId = new(500UL);
+
+            Assert.Throws<System.InvalidOperationException>(
+                () => registry.RestoreInstance("Folder", restoredId));
+            Assert.IsFalse(registry.TryGet(restoredId, out RbxInstance _),
+                "a refused restore leaves no record under the snapshot's id");
+
+            Assert.AreEqual(1, registry.RegistrationAdmissionCount);
+            Assert.IsTrue(registry.RemoveRegistrationAdmission(refusing));
+            Assert.AreEqual(0, registry.RegistrationAdmissionCount);
+            Assert.IsFalse(registry.RemoveRegistrationAdmission(refusing),
+                "removing a check that is not installed reports false");
+
+            calls.Clear();
+            RbxInstance restored = registry.RestoreInstance("Folder", restoredId);
+
+            Assert.AreEqual(restoredId, restored.Id);
+            Assert.IsEmpty(calls, "a removed check is never asked again");
+            Assert.Throws<System.ArgumentNullException>(() => registry.AddRegistrationAdmission(null));
+        }
+
+        /// <summary>
+        /// An admission check that logs every call into a shared list, refuses one class, and can
+        /// throw instead of answering.
+        /// </summary>
+        private sealed class RecordingAdmission : IInstanceRegistrationAdmission
+        {
+            private readonly InstanceRegistry _registry;
+            private readonly List<string> _calls;
+            private readonly string _name;
+            private readonly string _refusedClassName;
+            private readonly bool _throws;
+
+            public RecordingAdmission(InstanceRegistry registry, List<string> calls, string name,
+                string refusedClassName = null, bool throws = false)
+            {
+                _registry = registry;
+                _calls = calls;
+                _name = name;
+                _refusedClassName = refusedClassName;
+                _throws = throws;
+            }
+
+            public List<InstanceRecord> Admitted { get; } = new();
+
+            public List<InstanceRecord> Revoked { get; } = new();
+
+            public List<bool> ReachableWhenAsked { get; } = new();
+
+            public string Admit(InstanceRecord record)
+            {
+                string className = record.Instance.ClassName;
+                ReachableWhenAsked.Add(_registry.TryGetRecord(record.Id, out InstanceRecord _));
+                if (className == _refusedClassName)
+                {
+                    if (_throws)
+                    {
+                        _calls.Add(_name + " throws for " + className);
+                        throw new System.InvalidOperationException(_name + " threw for " + className);
+                    }
+
+                    _calls.Add(_name + " refuses " + className);
+                    return _name + " refuses " + className;
+                }
+
+                _calls.Add(_name + " admits " + className);
+                Admitted.Add(record);
+                return null;
+            }
+
+            public void Revoke(InstanceRecord record)
+            {
+                _calls.Add(_name + " revokes " + record.Instance.ClassName);
+                Revoked.Add(record);
+            }
+        }
     }
 }

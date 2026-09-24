@@ -194,6 +194,30 @@ namespace CoreAI.Ai.LuaCs
             public object Fn;
         }
 
+        /// <summary>
+        /// The registry admission that charges each new record to its quota actor, or refuses the
+        /// creation with the quota or ceiling text before the record is added or announced.
+        /// </summary>
+        private sealed class InstanceQuotaAdmission : IInstanceRegistrationAdmission
+        {
+            private readonly LuaCsModRuntime _runtime;
+
+            public InstanceQuotaAdmission(LuaCsModRuntime runtime)
+            {
+                _runtime = runtime;
+            }
+
+            public string Admit(InstanceRecord record)
+            {
+                return _runtime.ChargeRegisteredInstance(record);
+            }
+
+            public void Revoke(InstanceRecord record)
+            {
+                _runtime.ReleaseRegisteredInstance(record);
+            }
+        }
+
         private sealed class Mod
         {
             public readonly object EventGate = new();
@@ -266,6 +290,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly Dictionary<InstanceId, string> _quotaActorByInstanceId = new();
         private readonly Dictionary<string, int> _registeredInstancesByActor =
             new(StringComparer.Ordinal);
+        private readonly InstanceQuotaAdmission _instanceQuotaAdmission;
 
         private readonly Queue<LuaModHandlerError> _recentHandlerErrors = new();
         private readonly Queue<LuaModReport> _recentReports = new();
@@ -502,7 +527,8 @@ namespace CoreAI.Ai.LuaCs
                     _rbxApi.Scheduler.HostFaulted += OnSchedulerHostFaulted;
                 }
 
-                _rbxApi.Registry.Registered += OnInstanceRegistered;
+                _instanceQuotaAdmission = new InstanceQuotaAdmission(this);
+                _rbxApi.Registry.AddRegistrationAdmission(_instanceQuotaAdmission);
                 _rbxApi.Registry.Unregistered += OnInstanceUnregistered;
                 SeedRegisteredInstanceCounts(_rbxApi.Registry);
             }
@@ -1110,13 +1136,13 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>
         /// Charges every record already live when this runtime attaches to <paramref name="registry"/>
-        /// to the bucket <see cref="OnInstanceRegistered"/> would have charged it to.
+        /// to the bucket <see cref="ChargeRegisteredInstance"/> would have charged it to.
         /// </summary>
         /// <remarks>
         /// WHY: a world load registers the whole restored tree while it stages, before the session's
         /// runtime exists. Without this pass none of those records counted toward the per-actor quota
         /// or the emergency ceiling, so every save/load cycle handed each actor a fresh quota.
-        /// WHY nothing is refused or destroyed here, unlike <see cref="OnInstanceRegistered"/>: these
+        /// WHY nothing is refused or destroyed here, unlike <see cref="ChargeRegisteredInstance"/>: these
         /// records are the loaded world, not a creation request. An over-quota world stays whole, and
         /// only the next creation of an actor at or over its quota is refused.
         /// </remarks>
@@ -1169,39 +1195,12 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Charges a newly registered record to its actor, or destroys it and refuses the creation with
-        /// the quota or ceiling text when <see cref="ChargeRegisteredInstance"/> rejects it.
-        /// </summary>
-        private void OnInstanceRegistered(InstanceRecord record)
-        {
-            // TODO: this refusal is thrown from inside the InstanceRegistry.Registered multicast, so a
-            // subscriber added after this runtime misses Registered for the refused record and still
-            // receives its Unregistered. No Registered subscriber can move its throw past the rest of the
-            // multicast; the fix is a pre-registration admission hook on InstanceRegistry, evaluated
-            // before the record is added or announced and wired to ChargeRegisteredInstance.
-            string rejection = ChargeRegisteredInstance(record);
-            if (rejection == null)
-            {
-                return;
-            }
-
-            Exception cleanupError = null;
-            try
-            {
-                record.Instance.Destroy();
-            }
-            catch (Exception ex)
-            {
-                cleanupError = ex;
-            }
-
-            throw new InvalidOperationException(rejection, cleanupError);
-        }
-
-        /// <summary>
-        /// Charges <paramref name="record"/> to its quota actor and returns null, or returns the refusal
-        /// text and charges nothing when the runtime's emergency ceiling or the actor's quota is full.
-        /// Runtime infrastructure is admitted uncharged, and a record already charged is not charged twice.
+        /// The registry admission body (<see cref="InstanceQuotaAdmission"/>): charges
+        /// <paramref name="record"/> to its quota actor and returns null, or returns the refusal text and
+        /// charges nothing when the runtime's emergency ceiling or the actor's quota is full. The
+        /// registry then throws that text as an <see cref="InvalidOperationException"/> before the
+        /// record is added or announced. Runtime infrastructure is admitted uncharged, and a record
+        /// already charged is not charged twice.
         /// </summary>
         private string ChargeRegisteredInstance(InstanceRecord record)
         {
@@ -1241,6 +1240,15 @@ namespace CoreAI.Ai.LuaCs
         }
 
         private void OnInstanceUnregistered(InstanceRecord record)
+        {
+            ReleaseRegisteredInstance(record);
+        }
+
+        /// <summary>
+        /// Releases the charge <paramref name="record"/> holds, if any: on its Unregistered, or when a
+        /// later registry admission refused a record this runtime had already admitted.
+        /// </summary>
+        private void ReleaseRegisteredInstance(InstanceRecord record)
         {
             lock (_instanceQuotaGate)
             {
@@ -2007,7 +2015,7 @@ namespace CoreAI.Ai.LuaCs
                 _rbxApi.Scheduler.ThreadFaulted -= OnSchedulerThreadFaulted;
                 _rbxApi.Scheduler.ThreadResumeSucceeded -= OnSchedulerThreadResumeSucceeded;
                 _rbxApi.Scheduler.HostFaulted -= OnSchedulerHostFaulted;
-                _rbxApi.Registry.Registered -= OnInstanceRegistered;
+                _rbxApi.Registry.RemoveRegistrationAdmission(_instanceQuotaAdmission);
                 _rbxApi.Registry.Unregistered -= OnInstanceUnregistered;
             }
 
