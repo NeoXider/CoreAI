@@ -193,10 +193,15 @@ namespace CoreAI.Sandbox.LuaCs
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested)
                     {
-                        // WHY rethrown as it is: the run that called this function was stopped (its guard
-                        // tripped or its thread was killed) while mod code this function ran on its behalf
-                        // was still going. As a Lua error it would be catchable by a pcall of the stopped
-                        // run; as a cancellation it crosses every protected boundary, as the guard's own does.
+                        // WHY rethrown as it is: the run that called this function was stopped from outside
+                        // (its thread killed, its load chunk stopped) while mod code this function ran on
+                        // its behalf, such as a mods_call export, was still going. Lua cannot tell the two
+                        // apart, as the VM ends a stopped run as soon as a pcall returns, and a guard trip is
+                        // reported as the trip either way. The C# code driving the run can: rethrown, the
+                        // run ends with the same cancellation as a stop that landed in its own code, so a
+                        // stopped LoadMod fails with an OperationCanceledException; converted below, it
+                        // would end as this function's error, "mods_call: The operation was cancelled ...",
+                        // which blames the function for the stop (B2-08).
                         throw;
                     }
                     catch (Exception ex)
@@ -280,6 +285,7 @@ namespace CoreAI.Sandbox.LuaCs
         /// unwrapped from <see cref="TargetInvocationException"/>) is returned unchanged, as the
         /// callback path already rethrows it, so its own error value and budget-trip cause survive.
         /// An argument of the wrong type reads as Lua's own "bad argument #n to 'name' (x expected,
+        /// got y)", any other value a host function failed to read as "bad value in 'name' (x expected,
         /// got y)", and a message that already starts with the function's name is not prefixed again.
         /// </summary>
         private static LuaRuntimeException ToLuaRuntimeException(LuaState state, string name, Exception ex)
@@ -296,7 +302,10 @@ namespace CoreAI.Sandbox.LuaCs
 
             if (LuaCsBadArgumentException.TryDescribeReadFailure(ex, out string readFailure))
             {
-                return new LuaCsHostFunctionException(state, $"bad argument to '{name}' ({readFailure})", ex);
+                // WHY "bad value" and not "bad argument": the failed read may be of a table field or a
+                // returned value, and the arguments may all have the right type. A read that is known to be
+                // an argument's goes through the typed paths and reads "bad argument #n" above (B2-12).
+                return new LuaCsHostFunctionException(state, $"bad value in '{name}' ({readFailure})", ex);
             }
 
             string message = ex.Message;
@@ -388,8 +397,8 @@ namespace CoreAI.Sandbox.LuaCs
         }
 
         /// <summary>
-        /// Reads a failed <see cref="LuaValue.Read{T}"/> inside a host function back as Lua's
-        /// "x expected, got y"; false for any other exception.
+        /// Reads a failed <see cref="LuaValue.Read{T}"/> inside a host function (of an argument, a table
+        /// field or any other value) back as Lua's "x expected, got y"; false for any other exception.
         /// </summary>
         /// <remarks>
         /// WHY the engine's message is parsed: Lua-CSharp raises a plain

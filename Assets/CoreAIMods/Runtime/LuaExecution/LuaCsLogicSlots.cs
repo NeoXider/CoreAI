@@ -47,6 +47,15 @@ namespace CoreAI.Ai.LuaCs
 
             /// <summary>Id of the mod whose registry defined this override; null/empty for ownerless surfaces.</summary>
             public string OwnerModId;
+
+            /// <summary>
+            /// Id of the mod whose script last took this override out of its slot, by a <c>logic_define</c>
+            /// over it or a <c>logic_reset</c> of it; null while it is installed or when host code removed it.
+            /// </summary>
+            public string DisplacedByModId;
+
+            /// <summary>The state of the script that last took this override out of its slot; see <see cref="DisplacedByModId"/>.</summary>
+            public IScriptState DisplacedByState;
         }
 
         /// <summary>
@@ -67,6 +76,11 @@ namespace CoreAI.Ai.LuaCs
             /// <summary>Slot name to the override installed at capture time.</summary>
             internal Dictionary<string, OverrideEntry> Entries { get; }
         }
+
+        // WHY one nil and not no value: a typed host function without a result returns one nil, and
+        // logic_reset answers the same way; with no value at all, tostring(logic_reset(name)) would fail
+        // for want of an argument.
+        private static readonly object[] ResetResult = { null };
 
         private readonly object _gate = new();
         private readonly HashSet<string> _declared = new(StringComparer.Ordinal);
@@ -263,7 +277,13 @@ namespace CoreAI.Ai.LuaCs
                 return ScriptCallResult.Return(defined);
             });
 
-            registry.Register("logic_reset", new Action<string>(Reset));
+            // WHY a var-args callback like logic_define: the reset records which mod's script removed the
+            // formula and from which state, so a failed build can put back what its own chunk reset.
+            registry.RegisterVarArgs("logic_reset", call =>
+            {
+                ResetFromScript(call.GetString(0), call.State, owner);
+                return ScriptCallResult.Return(ResetResult);
+            });
             registry.Register("logic_list", new Func<List<object>>(ListSlots));
         }
 
@@ -296,6 +316,7 @@ namespace CoreAI.Ai.LuaCs
                 throw new ArgumentException("logic_define: second argument must be a function.");
             }
 
+            IScriptState ownerState = ResolveOwnerState(state);
             lock (_gate)
             {
                 if (!_declared.Contains(slot))
@@ -304,12 +325,46 @@ namespace CoreAI.Ai.LuaCs
                         $"logic_define: slot '{slot}' is not declared by the game. Use logic_list().");
                 }
 
-                IScriptState ownerState = _stateResolver?.Invoke(state) ?? state;
+                if (_overrides.TryGetValue(slot, out OverrideEntry replaced))
+                {
+                    MarkDisplaced(replaced, ownerModId, ownerState);
+                }
+
                 _overrides[slot] = new OverrideEntry
                     { Fn = fn, State = ownerState, OwnerModId = ownerModId };
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// <c>logic_reset(name)</c> called by a script of <paramref name="ownerModId"/>: removes the slot's
+        /// override like <see cref="Reset"/> and records who removed it (see <see cref="RestoreAfterFailedBuild"/>).
+        /// </summary>
+        private void ResetFromScript(string name, IScriptState state, string ownerModId)
+        {
+            string slot = Normalize(name);
+            IScriptState resetterState = ResolveOwnerState(state);
+            lock (_gate)
+            {
+                if (_overrides.TryGetValue(slot, out OverrideEntry removed))
+                {
+                    _overrides.Remove(slot);
+                    MarkDisplaced(removed, ownerModId, resetterState);
+                }
+            }
+        }
+
+        /// <summary>The state a formula defined or reset from <paramref name="state"/> is recorded against.</summary>
+        private IScriptState ResolveOwnerState(IScriptState state)
+        {
+            return _stateResolver?.Invoke(state) ?? state;
+        }
+
+        private static void MarkDisplaced(OverrideEntry entry, string byModId, IScriptState byState)
+        {
+            entry.DisplacedByModId = byModId;
+            entry.DisplacedByState = byState;
         }
 
         /// <summary>
@@ -376,7 +431,7 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>
         /// Undoes what the chunk of a failed build of <paramref name="modId"/> did to the overrides since
         /// <paramref name="snapshot"/>: a formula the candidate state (<paramref name="candidateState"/>)
-        /// defined is removed, and a formula it replaced or reset is put back while
+        /// defined is removed, and a formula it replaced or reset, whichever mod owns it, is put back while
         /// <paramref name="isOwnerLive"/> still reports its owning mod loaded (ownerless formulas always
         /// are). Changes made by any other code during the build are left alone. Returns the number of
         /// slots changed.
@@ -386,10 +441,11 @@ namespace CoreAI.Ai.LuaCs
         /// while the chunk is still running, so a chunk that failed after it left a mod that never
         /// loaded answering the game's formula calls, and a failed reload replaced the formulas of the
         /// mod it promised to leave untouched (A2-04).
-        /// WHY a formula that vanished since the capture is put back only when it belonged to the
-        /// candidate's own mod id: <c>logic_reset</c> records no caller, and a reload chunk resetting its
-        /// own mod's formulas is the change a failed reload must undo. Another mod's formula that vanished
-        /// during the build was reset by that mod's code or its unload, and stays removed.
+        /// WHY a formula that vanished since the capture is put back only when the candidate's own script
+        /// took it out (<see cref="OverrideEntry.DisplacedByModId"/>): <c>logic_reset</c> has no owner check,
+        /// so a chunk may reset any mod's formula, and a mod that never loaded must not leave another live
+        /// mod's formula reverted to vanilla (B2-03). A formula removed by anything else during the build
+        /// (its own mod's code, its unload, a fail-open reset, host code) stays removed.
         /// </remarks>
         internal int RestoreAfterFailedBuild(OverrideSnapshot snapshot, string modId,
             IScriptState candidateState, Func<string, bool> isOwnerLive)
@@ -437,16 +493,18 @@ namespace CoreAI.Ai.LuaCs
                                               && !ReferenceEquals(current, before)
                                               && string.Equals(current.OwnerModId, owner, StringComparison.Ordinal)
                                               && SameUnderlyingState(current.State, candidateState);
-                    bool ownFormulaRemoved = current == null
-                                             && before != null
-                                             && string.Equals(before.OwnerModId, owner, StringComparison.Ordinal);
-                    if (!definedByCandidate && !ownFormulaRemoved)
+                    bool removedByCandidate = current == null
+                                              && before != null
+                                              && string.Equals(before.DisplacedByModId, owner, StringComparison.Ordinal)
+                                              && SameUnderlyingState(before.DisplacedByState, candidateState);
+                    if (!definedByCandidate && !removedByCandidate)
                     {
                         continue;
                     }
 
                     if (before != null && ownerLive[before.OwnerModId ?? ""])
                     {
+                        MarkDisplaced(before, null, null);
                         _overrides[slot] = before;
                         changed++;
                     }

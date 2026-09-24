@@ -258,7 +258,7 @@ namespace CoreAI.Scripting.LuaCs
 
             if (targetType == typeof(string))
             {
-                return value.Read<string>();
+                return ReadStringArgument(value);
             }
 
             if (targetType == typeof(bool))
@@ -293,6 +293,22 @@ namespace CoreAI.Scripting.LuaCs
 
             object obj = value.Read<object>();
             return obj == null || targetType.IsInstanceOfType(obj) ? obj : Convert.ChangeType(obj, targetType);
+        }
+
+        /// <summary>
+        /// Reads a script argument given for a string parameter: a string as it is, a number as the text
+        /// Lua's <c>tostring</c> gives it; any other kind throws the engine's conversion failure.
+        /// </summary>
+        /// <remarks>
+        /// WHY a number is accepted: Lua itself coerces a number where its library expects a string
+        /// (<c>luaL_checklstring</c>), so <c>store_set(7, 8)</c> must store "7" = "8" rather than fail with
+        /// an error real Lua never raises (B2-12). WHY <see cref="LuaValue.ToString()"/>: it is the
+        /// engine's own formatting behind <c>tostring</c>, so the text is exactly what
+        /// <c>tostring(n)</c> gives the script for the same number.
+        /// </remarks>
+        internal static string ReadStringArgument(LuaValue value)
+        {
+            return value.Type == LuaValueType.Number ? value.ToString() : value.Read<string>();
         }
 
         private static bool IsNumericType(Type type)

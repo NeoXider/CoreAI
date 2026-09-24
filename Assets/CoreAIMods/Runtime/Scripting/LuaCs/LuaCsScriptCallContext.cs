@@ -8,7 +8,8 @@ namespace CoreAI.Scripting.LuaCs
     /// <summary>
     /// Lua-CSharp adapter for <see cref="ScriptCallContext"/> wrapping one
     /// <see cref="LuaFunctionExecutionContext"/>. Typed accessors mirror the typed-delegate coercion:
-    /// nil/absent maps to null/0/false; a wrong non-nil kind raises Lua's own
+    /// nil/absent maps to null/0/false; a number read as a string becomes the text Lua's <c>tostring</c>
+    /// gives it, as Lua's own library coerces it; any other wrong non-nil kind raises Lua's own
     /// "bad argument #n (x expected, got y)" error (<see cref="LuaCsBadArgumentException"/>), never the
     /// engine's CLR conversion text.
     /// </summary>
@@ -58,6 +59,11 @@ namespace CoreAI.Scripting.LuaCs
             if (value.Type == LuaValueType.Nil)
             {
                 return null;
+            }
+
+            if (value.Type == LuaValueType.Number)
+            {
+                return LuaCsValueMarshaller.ReadStringArgument(value);
             }
 
             return value.TryRead(out string text)

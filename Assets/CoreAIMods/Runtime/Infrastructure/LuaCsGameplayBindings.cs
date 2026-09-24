@@ -107,8 +107,7 @@ namespace CoreAI.Ai.LuaCs
             _full = full;
             _input = input;
             _roblox = rbxApi;
-            _logicSlots = new LuaCsLogicSlots(
-                stateResolver: state => ResolveLogicOwnerState(state));
+            _logicSlots = new LuaCsLogicSlots(stateResolver: ResolveLogicOwnerState);
             _rbxHttp = rbxApi == null
                 ? null
                 : new LuaCsRbxHttpServiceAdapter(
@@ -119,17 +118,29 @@ namespace CoreAI.Ai.LuaCs
             _registerWorldEditBuildBindings = registerWorldEditBuildBindings;
         }
 
-        private IScriptState ResolveLogicOwnerState(IScriptState fallbackState)
+        /// <summary>
+        /// The state a logic-slot formula defined or reset from <paramref name="callingState"/> is recorded
+        /// against: the main state of the mod whose code is running, never the thread it runs on.
+        /// </summary>
+        /// <remarks>
+        /// WHY the main thread, on every stack: each mod runs in a state of its own, and a scheduler thread,
+        /// a signal handler and a <c>coroutine.create</c> body all run on a child thread of that state.
+        /// Recorded as the owner, a child thread matched neither the mod's state nor the build candidate's,
+        /// so on a stack without RbxApi a failed first load left a formula defined inside a coroutine
+        /// installed and a successful reload cleared its own fresh one (B2-05).
+        /// WHY the running code's state and not the owner of the running scheduler thread: an export that
+        /// mods_call runs executes on its own mod's state while the calling thread belongs to the caller.
+        /// </remarks>
+        private static IScriptState ResolveLogicOwnerState(IScriptState callingState)
         {
-            if (_roblox == null)
+            if (!(callingState is CoreAI.Scripting.LuaCs.LuaCsScriptState luaState))
             {
-                return fallbackState;
+                return callingState;
             }
 
-            Lua.LuaState fallback = CoreAI.Scripting.LuaCs.LuaCsScriptState.Unwrap(fallbackState);
-            Lua.LuaState owner = _roblox.ResolveSchedulerOwnerState(fallback);
-            return ReferenceEquals(fallback, owner)
-                ? fallbackState
+            Lua.LuaState owner = luaState.State.MainThread ?? luaState.State;
+            return ReferenceEquals(luaState.State, owner)
+                ? callingState
                 : new CoreAI.Scripting.LuaCs.LuaCsScriptState(owner);
         }
 

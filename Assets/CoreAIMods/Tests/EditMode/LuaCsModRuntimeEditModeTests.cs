@@ -3283,6 +3283,109 @@ namespace CoreAI.Tests.EditMode
                 "and drops the formula the new version no longer defines");
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void LuaCs_LogicSlots_FailedFirstLoad_PutsBackAnotherLiveModsFormulaItsChunkReset(bool withRbxApi)
+        {
+            // WHY (B2-03): logic_reset has no owner check, so a chunk may reset any mod's formula, and the
+            // A2-04 rollback put back only what the failed chunk had replaced: a mod that never loaded left
+            // another live mod's formula reverted to vanilla.
+            LuaCsModStack stack = BuildLogicSlotStack(withRbxApi);
+            LuaCsLogicSlots slots = stack.GameplayBindings.LogicSlots;
+            slots.DeclareSlot("loot");
+            slots.DeclareSlot("dmg");
+            slots.DeclareSlot("crit");
+            stack.Runtime.LoadMod("owner", @"
+                logic_define('loot', function() return 7 end)
+                logic_define('dmg', function() return 3 end)
+                logic_define('crit', function() return 2 end)");
+
+            Assert.Catch(() => stack.Runtime.LoadMod("never-loaded", @"
+                logic_reset('loot')
+                logic_define('dmg', function() return 999 end)
+                logic_define('crit', function() return 999 end)
+                logic_reset('crit')
+                error('the first load fails')"));
+
+            Assert.IsFalse(stack.Runtime.IsLoaded("never-loaded"), "precondition: the load failed");
+            Assert.IsTrue(slots.TryInvokeNumber("loot", out double loot),
+                "the live mod's formula that the failed load reset must be back: " + slots.LastError);
+            Assert.AreEqual(7d, loot);
+            Assert.IsTrue(slots.TryInvokeNumber("dmg", out double damage), slots.LastError);
+            Assert.AreEqual(3d, damage, "the live mod's formula that the failed load replaced is back");
+            Assert.IsTrue(slots.TryInvokeNumber("crit", out double crit),
+                "the live mod's formula that the failed load replaced and then reset must be back: "
+                + slots.LastError);
+            Assert.AreEqual(2d, crit);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void LuaCs_LogicSlots_AResetBySuccessfulLoadOrByTheOwningModsOwnCode_Stands(bool withRbxApi)
+        {
+            // WHY: the negative twins of the test above. A load that succeeds keeps its reset, and a formula
+            // its owning mod's own code resets while another mod's load runs stays reset when that load
+            // fails: only what the failed chunk's own script took out is put back.
+            LuaCsModStack stack = BuildLogicSlotStack(withRbxApi);
+            LuaCsLogicSlots slots = stack.GameplayBindings.LogicSlots;
+            slots.DeclareSlot("loot");
+            slots.DeclareSlot("dmg");
+            stack.Runtime.LoadMod("owner", @"
+                logic_define('loot', function() return 7 end)
+                logic_define('dmg', function() return 3 end)
+                mods_export('drop_dmg', function() logic_reset('dmg') end)");
+
+            stack.Runtime.LoadMod("resetter", "logic_reset('loot')");
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("resetter"), "precondition: the load succeeded");
+            Assert.IsFalse(slots.IsOverridden("loot"), "a load that succeeds keeps the reset its chunk made");
+
+            Assert.Catch(() => stack.Runtime.LoadMod("never-loaded", @"
+                mods_call('owner', 'drop_dmg')
+                error('the first load fails')"));
+
+            Assert.IsFalse(stack.Runtime.IsLoaded("never-loaded"), "precondition: the load failed");
+            Assert.IsFalse(slots.IsOverridden("dmg"),
+                "the owning mod's own reset stands, although the load it ran during failed");
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void LuaCs_LogicSlots_AFormulaDefinedInsideACoroutine_BelongsToTheModThatDefinedIt(bool withRbxApi)
+        {
+            // WHY (B2-05): on a stack without RbxApi a formula defined in a coroutine.create body recorded
+            // the coroutine's thread as its owner state, which matched neither the mod's state nor the build
+            // candidate's: a failed first load left the formula installed, and a successful reload cleared
+            // the fresh formula its own chunk had just defined.
+            LuaCsModStack stack = BuildLogicSlotStack(withRbxApi);
+            LuaCsLogicSlots slots = stack.GameplayBindings.LogicSlots;
+            slots.DeclareSlot("dmg");
+
+            string DefineInsideACoroutine(int value)
+            {
+                return @"
+                    local co = coroutine.create(function()
+                        logic_define('dmg', function() return " + InvariantText(value) + @" end)
+                    end)
+                    local ok, err = coroutine.resume(co)
+                    assert(ok, tostring(err))";
+            }
+
+            Assert.Catch(() => stack.Runtime.LoadMod("never-loaded",
+                DefineInsideACoroutine(100) + "\nerror('the first load fails')"));
+
+            Assert.IsFalse(stack.Runtime.IsLoaded("never-loaded"), "precondition: the load failed");
+            Assert.IsFalse(slots.IsOverridden("dmg"),
+                "a mod that never loaded must not leave a formula it defined inside a coroutine");
+
+            stack.Runtime.LoadMod("kept", "logic_define('dmg', function() return 1 end)");
+            stack.Runtime.ReloadMod("kept", DefineInsideACoroutine(2));
+
+            Assert.IsTrue(slots.TryInvokeNumber("dmg", out double reloaded),
+                "a reload that succeeds keeps the formula its chunk defined inside a coroutine: " + slots.LastError);
+            Assert.AreEqual(2d, reloaded);
+        }
+
         [Test]
         public void LuaCs_M2_08_AHealthyTimerDoesNotForgiveAFrameInWhichASchedulerHandlerFaulted()
         {
@@ -3395,8 +3498,84 @@ namespace CoreAI.Tests.EditMode
 
             string error = store.Get("raw-read", "err");
             LuaCsSecureSandboxEditModeTests.AssertIsOnlyTheErrorLine(error);
-            Assert.AreEqual("bad argument to 'raw_read' (string expected, got table)", error);
+            Assert.AreEqual("bad value in 'raw_read' (string expected, got table)", error);
             Assert.AreEqual("4", store.Get("raw-read", "length"), "the negative twin: a string argument reads");
+        }
+
+        [Test]
+        public void LuaCs_HostFunctionFailingToReadATableField_ReportsABadValue_NotABadArgument()
+        {
+            // WHY (B2-12): every failed Read inside a host function read "bad argument to 'fn' (...)", also
+            // when each argument had the right type and the value that failed was a field of a table.
+            MemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                AdditionalGameplayBindings = (registry, capabilities) =>
+                    registry.RegisterCallback("config_name", (ctx, ct) =>
+                    {
+                        string name = ctx.GetArgument(0).Read<Lua.LuaTable>()["name"].Read<string>();
+                        return new ValueTask<int>(ctx.Return(name.Length));
+                    })
+            });
+            stack.Runtime.LoadMod("field-read", "local ok, err = pcall(config_name, { name = {} })\n"
+                                                + "store_set('err', tostring(err))\n"
+                                                + "store_set('length', tostring(config_name({ name = 'four' })))");
+
+            string error = store.Get("field-read", "err");
+            LuaCsSecureSandboxEditModeTests.AssertIsOnlyTheErrorLine(error);
+            Assert.AreEqual("bad value in 'config_name' (string expected, got table)", error);
+            Assert.AreEqual("4", store.Get("field-read", "length"), "the negative twin: a string field reads");
+        }
+
+        [Test]
+        public void LuaCs_ModApiStringParameters_TakeANumberAsLuaDoes_AndStillRefuseOtherKinds()
+        {
+            // WHY (B2-12): Lua coerces a number where its library expects a string, yet the mod API refused
+            // one with "bad argument #1 to 'store_set' (string expected, got number)", an error real Lua
+            // never raises. A boolean or a table is still refused, as Lua refuses it.
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(store);
+            stack.Runtime.LoadMod("coerce", @"
+                local function grab(key, ok, err)
+                    store_set(key .. '_ok', tostring(ok))
+                    store_set(key .. '_err', tostring(err))
+                end
+                grab('numbers', pcall(store_set, 7, 8))
+                grab('fraction', pcall(store_set, 'half', 0.5))
+                store_set('half_tostring', tostring(0.5))
+                grab('large', pcall(store_set, 'large', 2^53))
+                store_set('large_tostring', tostring(2^53))
+                grab('event', pcall(hooks_on, 42, function() store_set('fired', 'yes') end))
+                grab('typed_boolean', pcall(store_set, true, 'v'))
+                grab('varargs_boolean', pcall(hooks_on, true, function() end))");
+
+            foreach (string key in new[] { "numbers", "fraction", "large", "event" })
+            {
+                Assert.AreEqual("true", store.Get("coerce", key + "_ok"),
+                    key + " must be accepted: " + store.Get("coerce", key + "_err"));
+            }
+
+            Assert.AreEqual("8", store.Get("coerce", "7"), "store_set(7, 8) stores \"7\" = \"8\", as Lua would");
+            Assert.AreEqual("0.5", store.Get("coerce", "half"));
+            Assert.AreEqual(store.Get("coerce", "half_tostring"), store.Get("coerce", "half"),
+                "a number becomes exactly the text tostring gives it");
+            Assert.AreEqual(store.Get("coerce", "large_tostring"), store.Get("coerce", "large"),
+                "a number becomes exactly the text tostring gives it");
+
+            stack.Runtime.EmitEvent("42", "");
+            stack.Runtime.Tick(1d / 60d);
+            Assert.AreEqual("yes", store.Get("coerce", "fired"), "hooks_on(42, fn) listens to the event \"42\"");
+
+            Assert.AreEqual("false", store.Get("coerce", "typed_boolean_ok"));
+            Assert.AreEqual("bad argument #1 to 'store_set' (string expected, got boolean)",
+                store.Get("coerce", "typed_boolean_err"));
+            Assert.AreEqual("false", store.Get("coerce", "varargs_boolean_ok"));
+            Assert.AreEqual("bad argument #1 to 'hooks_on' (string expected, got boolean)",
+                store.Get("coerce", "varargs_boolean_err"));
         }
 #endif
 
@@ -3476,6 +3655,48 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual("0", store.Get("stopped", "spins"),
                 "the export must end at its first check after its calling thread was killed");
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void LuaCs_ALoadStoppedWhileItsChunkIsInsideAnExportCall_FailsWithTheSameCancellationAsInItsOwnCode()
+        {
+            // WHY (B2-08): a host function that runs mod code for its caller rethrows the caller's
+            // cancellation. Converted into the function's own error instead, a load whose chunk was stopped
+            // while inside mods_call failed with "mods_call: The operation was cancelled ...", a Lua error
+            // that blames the function, where the same stop anywhere else in the chunk fails as a
+            // cancellation.
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = new MemoryStore(),
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = bindings,
+                AdditionalGameplayBindings = (registry, capabilities) =>
+                    registry.Register("stop_threads_of",
+                        new Func<string, int>(modId => bindings.Scheduler.KillOwnedBy(modId)))
+            });
+            stack.Runtime.LoadMod("stopper", @"
+                mods_export('stop', function(victim)
+                    stop_threads_of(victim)
+                    for i = 1, 2000000 do end
+                end)");
+
+            Exception inOwnCode = Assert.Catch(() => stack.Runtime.LoadMod("stopped-in-own-code", @"
+                stop_threads_of('stopped-in-own-code')
+                for i = 1, 2000000 do end"));
+            Exception inExport = Assert.Catch(() => stack.Runtime.LoadMod("stopped-in-export",
+                "mods_call('stopper', 'stop', 'stopped-in-export')"));
+
+            Assert.IsInstanceOf<OperationCanceledException>(inOwnCode,
+                "precondition: a load stopped in its own code fails as a cancellation: " + inOwnCode);
+            Assert.IsInstanceOf<OperationCanceledException>(inExport,
+                "a load stopped inside an export call must fail as the same cancellation: " + inExport);
+            StringAssert.DoesNotContain("mods_call", inExport.Message,
+                "the stop must not be reported as a failure of mods_call");
+            Assert.IsFalse(stack.Runtime.IsLoaded("stopped-in-export"));
         }
 
         private static IDictionary QuotaAttribution(LuaCsModRuntime runtime)
