@@ -532,6 +532,24 @@ namespace CoreAI.Sandbox.LuaCs
             }
         }
 
+        /// <summary>
+        /// The allocation budget (bytes; <c>&lt;= 0</c> when disabled) of the innermost guarded run now executing
+        /// on <paramref name="state"/>; false when no guarded run is active on it. A mod's raw
+        /// <c>coroutine.resume</c> holds the resumed body to the budget of the run that resumes it.
+        /// </summary>
+        internal static bool TryGetRunAllocationBudget(LuaState state, out long maxAllocatedBytes)
+        {
+            if (state != null && InstalledHooks.TryGetValue(state, out Stack<GuardHook> installed)
+                              && installed.Count > 0)
+            {
+                maxAllocatedBytes = installed.Peek().MaxAllocatedBytes;
+                return true;
+            }
+
+            maxAllocatedBytes = 0;
+            return false;
+        }
+
         private static GuardHook RentHook()
         {
             Stack<GuardHook> pool = _hookPool;
@@ -584,6 +602,9 @@ namespace CoreAI.Sandbox.LuaCs
 
             /// <summary>Wall-clock <see cref="Stopwatch"/> ticks elapsed since <see cref="Reset"/>.</summary>
             public long ElapsedTicks => Stopwatch.GetTimestamp() - _startTimestamp;
+
+            /// <summary>The allocation budget of the current execution; <c>&lt;= 0</c> when disabled.</summary>
+            public long MaxAllocatedBytes => _allocation.BudgetBytes;
 
             /// <summary>
             /// Which guard budget tripped during the current execution, or

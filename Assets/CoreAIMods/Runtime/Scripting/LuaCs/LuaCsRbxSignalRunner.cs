@@ -158,9 +158,11 @@ namespace CoreAI.Ai.LuaCs
         {
             if (!_hasPending)
             {
-                // WHY: a mod that captured coroutine.running() inside a handler can coroutine.resume the
-                // parked runner later. That resume must be a no-op: nothing is replayed, and the Lua loop
-                // simply parks again.
+                // WHY a no-op and not an error: the loop may only ever run an armed handler, so a resume with
+                // nothing armed replays nothing and the Lua loop simply parks again. Mod code cannot cause
+                // one - the sandbox's coroutine.resume refuses this runner's thread, as it refuses every
+                // LuaCsCoroutineHandle's (LuaCsSecureEnvironment.SchedulerThreadResumeRefusal) - so this only
+                // keeps a host-side resume without Arm harmless.
                 return ctx.Return();
             }
 

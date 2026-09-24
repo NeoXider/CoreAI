@@ -736,6 +736,118 @@ namespace CoreAI.Tests.EditMode
                 engine.Marshaller.ToHostValue(asyncResults[0]),
                 "the asynchronous chunk entry must return the same values as the synchronous one");
         }
+
+        #region A2-09 (FX-RT-A): a raw coroutine.resume is held to the resumer's allocation budget
+
+        /// <summary>
+        /// A coroutine.create body that keeps about 80 MB alive (forty 1M-char strings, two bytes a char),
+        /// recording each string it built, then the resumer's protected resume of it.
+        /// </summary>
+        private const string EightyMegabyteCoroutine =
+            "local co = coroutine.create(function()\n" +
+            "  local kept = {}\n" +
+            "  for i = 1, 40 do\n" +
+            "    kept[i] = string.rep('x', 1000000) .. i\n" +
+            "    record('built', i)\n" +
+            "  end\n" +
+            "  return #kept\n" +
+            "end)\n" +
+            "record('resume', coroutine.resume(co))\n";
+
+        /// <summary>
+        /// Runs <see cref="EightyMegabyteCoroutine"/> with a resumer held to <paramref name="budgetBytes"/>:
+        /// the guarded chunk itself, or the thread of a coroutine handle. Returns how many strings the body
+        /// built and every error line the run produced (the resume's, then the resumer's own).
+        /// </summary>
+        private static int RunEightyMegabyteCoroutine(string resumer, long budgetBytes, List<string> lines)
+        {
+            LuaCsSecureEnvironment env = new();
+            List<string> rows = new();
+            LuaState state = LuaCsSecureSandboxEditModeTests.CreateRecordingState(env, rows);
+            if (resumer == "guarded chunk")
+            {
+                try
+                {
+                    env.RunChunk(state, EightyMegabyteCoroutine,
+                        new LuaCsExecutionGuard(60_000, 50_000_000, budgetBytes));
+                }
+                catch (LuaCsHostFunctionException ex)
+                {
+                    lines.Add(ex.Message);
+                }
+            }
+            else
+            {
+                LuaFunction body = env.RunChunk(state, "return function()\n" + EightyMegabyteCoroutine + "end")[0]
+                    .Read<LuaFunction>();
+                LuaCsCoroutineHandle handle = new(state, body, budgetPerResume: 1_000_000, resumeTimeoutMs: 60_000,
+                    totalLifetimeSteps: LuaCsCoroutineHandle.UnlimitedLifetimeSteps, maxAllocatedBytes: budgetBytes);
+                handle.Resume();
+                if (!handle.LastOk)
+                {
+                    lines.Add(handle.LastErrorText);
+                }
+            }
+
+            int built = 0;
+            foreach (string row in rows)
+            {
+                if (row.StartsWith("string:built|number:", StringComparison.Ordinal))
+                {
+                    built++;
+                }
+                else
+                {
+                    lines.Insert(0, row);
+                }
+            }
+
+            return built;
+        }
+
+        [TestCase("guarded chunk")]
+        [TestCase("coroutine handle")]
+        [Timeout(120000)]
+        public void RawCoroutineResume_IsHeldToTheAllocationBudgetOfTheRunThatResumesIt(string resumer)
+        {
+            // WHY (A2-09): the raw coroutine.resume hook armed a fixed 256 MB, so a mod held to 16 MB (its
+            // HandlerMaxAllocatedBytes, which reaches its handlers through the guard and its task threads through
+            // their handles) kept all 80 MB alive inside coroutine.create. The body is now cut at the resumer's
+            // 16 MB. Its locals stay reachable through the dead coroutine the resumer still holds, so the
+            // resumer's own budget may end its run too; either way no line may name more than 16 MB.
+            CollectGarbage();
+            List<string> lines = new();
+
+            int built = RunEightyMegabyteCoroutine(resumer, 16 * MB, lines);
+
+            Assert.Less(built, 24, "the body must be cut near 16 MB, not keep 40 strings (80 MB): "
+                                   + string.Join(" / ", lines));
+            Assert.IsNotEmpty(lines, "the cut must be reported");
+            string budgetLine = LuaCsExecutionGuard.MemoryBudgetTripMarker + " (" + 16 * MB + " bytes)";
+            foreach (string line in lines)
+            {
+                StringAssert.Contains(budgetLine, line, "every trip is the resumer's 16 MB budget");
+            }
+        }
+
+        [Test]
+        [Timeout(120000)]
+        public void RawCoroutineResume_UnderAResumerWithTheDefaultBudget_KeepsItsEightyMegabytes()
+        {
+            // WHY the negative twin: the budget comes from the resumer, it is not a new fixed 16 MB. Under the
+            // default 256 MB the same body runs to the end.
+            CollectGarbage();
+            List<string> lines = new();
+
+            int built = RunEightyMegabyteCoroutine("guarded chunk", LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget,
+                lines);
+
+            Assert.AreEqual(40, built, string.Join(" / ", lines));
+            CollectionAssert.AreEqual(new[] { "string:resume|boolean:true|number:40" }, lines);
+            CollectGarbage();
+        }
+
+        #endregion
     }
 }
 #endif

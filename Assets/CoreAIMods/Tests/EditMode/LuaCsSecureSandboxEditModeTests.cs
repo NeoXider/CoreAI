@@ -1180,6 +1180,320 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("done", result[3].Read<string>());
             Assert.AreEqual("dead", result[4].Read<string>());
         }
+
+        #region A2 (FX-RT-A): a handle's thread is not raw-resumable; calls back into Lua are depth-capped
+
+        private static readonly string RefusedResumeRow =
+            "boolean:false|string:" + LuaCsSecureEnvironment.SchedulerThreadResumeRefusal;
+
+        /// <summary>
+        /// Builds a <see cref="LuaCsCoroutineHandle"/> over <paramref name="body"/> (a chunk returning the
+        /// thread's function) and resumes it once, so it is parked at its first <c>coroutine.yield</c>.
+        /// </summary>
+        private static LuaCsCoroutineHandle ParkedHandle(LuaCsSecureEnvironment env, LuaState state, string body)
+        {
+            LuaFunction function = env.RunChunk(state, body)[0].Read<LuaFunction>();
+            LuaCsCoroutineHandle handle = new(state, function, budgetPerResume: 10_000, resumeTimeoutMs: 5_000,
+                totalLifetimeSteps: LuaCsCoroutineHandle.UnlimitedLifetimeSteps);
+            handle.Resume();
+            Assert.IsTrue(handle.LastOk, handle.LastErrorText);
+            Assert.AreEqual(LuaThreadStatus.Suspended, handle.Status);
+            return handle;
+        }
+
+        [Test]
+        [Timeout(30000)]
+        public void RawCoroutineResume_OfACoroutineHandlesThread_IsRefused_AndOnlyTheHandleResumesIt()
+        {
+            // WHY (A2-01): a coroutine.running() value taken inside a task thread let the mod resume that thread
+            // with coroutine.resume. It then ran with the handle's token under a hook that cancelled another one,
+            // so a budget trip there was swallowed by xpcall. The resume is refused before it touches the thread,
+            // and the handle still drives it: the value the handle passes is what coroutine.yield receives.
+            LuaCsSecureEnvironment env = new();
+            List<string> rows = new();
+            LuaState state = CreateRecordingState(env, rows);
+            LuaCsCoroutineHandle handle = ParkedHandle(env, state,
+                "return function()\n" +
+                "  record(coroutine.resume(coroutine.running()))\n" +
+                "  victim = coroutine.running()\n" +
+                "  local got = coroutine.yield('parked')\n" +
+                "  record('resumed', got)\n" +
+                "  coroutine.yield('again')\n" +
+                "end");
+            Assert.AreEqual(new[] { RefusedResumeRow }, rows.ToArray(),
+                "resuming its own running thread is refused with the same line");
+            rows.Clear();
+
+            env.RunChunk(state,
+                "record(coroutine.resume(victim, 'raw'))\n" +
+                "record(coroutine.status(victim))\n" +
+                "local co = coroutine.create(function(a) return a * 2 end)\n" +
+                "record(coroutine.resume(co, 21))",
+                new LuaCsExecutionGuard(10_000, 5_000_000, 0));
+
+            CollectionAssert.AreEqual(new[] { RefusedResumeRow, "string:suspended", "boolean:true|number:42" }, rows,
+                "the handle's thread is refused and untouched; a coroutine.create thread still resumes");
+            AssertIsOnlyTheErrorLine(LuaCsSecureEnvironment.SchedulerThreadResumeRefusal);
+            rows.Clear();
+
+            LuaValue[] yielded = handle.Resume(new LuaValue("handle"));
+
+            Assert.IsTrue(handle.LastOk, handle.LastErrorText);
+            CollectionAssert.AreEqual(new[] { "string:resumed|string:handle" }, rows);
+            Assert.AreEqual("again", yielded[0].Read<string>());
+        }
+
+        [TestCase("in the xpcall handler",
+            "  xpcall(function() while true do end end, function(e)\n" +
+            "    local n = 0 for i = 1, 30000000 do n = n + 1 end\n" +
+            "    record('work', n)\n" +
+            "    return e\n" +
+            "  end)\n")]
+        [TestCase("in a later frame",
+            "  xpcall(function() while true do end end, function(e) return e end)\n" +
+            "  local function work() local n = 0 for i = 1, 30000000 do n = n + 1 end record('work', n) end\n" +
+            "  work()\n")]
+        [Timeout(60000)]
+        public void RawCoroutineResume_OfAHandlesThreadThatWouldTrip_CannotRunWorkUnguarded(string where,
+            string afterTheYield)
+        {
+            // WHY (A2-01): through coroutine.resume the runaway below tripped a hook that could only throw, and
+            // xpcall, whose own token was not the cancelled one, caught it and ran 30M iterations of work with no
+            // hook at all. WHY gated: on a build that lets a raw resume of a handle's thread through, that trip
+            // also corrupts the thread and a later kill crashes the test host from a Lua-CSharp continuation
+            // (A2-02), so the thread that would trip is only resumed after a harmless one was refused.
+            LuaCsSecureEnvironment env = new();
+            List<string> rows = new();
+            LuaState state = CreateRecordingState(env, rows);
+            LuaCsExecutionGuard guard = new(60_000, 5_000_000_000L, 0);
+            ParkedHandle(env, state,
+                "return function() probe = coroutine.running() coroutine.yield() record('probe ran') end");
+            env.RunChunk(state, "record(coroutine.resume(probe))", guard);
+            Assert.AreEqual(new[] { RefusedResumeRow }, rows.ToArray(),
+                "gate: a raw resume of a handle's thread must be refused before the one that would trip is tried");
+            rows.Clear();
+
+            LuaCsCoroutineHandle victim = ParkedHandle(env, state,
+                "return function()\n" +
+                "  victim = coroutine.running()\n" +
+                "  coroutine.yield()\n" +
+                afterTheYield +
+                "  record('end of body')\n" +
+                "end");
+            env.RunChunk(state, "record(coroutine.resume(victim))\nrecord(coroutine.status(victim))", guard);
+
+            CollectionAssert.AreEqual(new[] { RefusedResumeRow, "string:suspended" }, rows, where);
+            rows.Clear();
+
+            victim.Resume();
+
+            CollectionAssert.IsEmpty(rows, "the handle's own trip must end the thread before any work " + where);
+            Assert.IsFalse(victim.LastOk);
+            StringAssert.StartsWith("LuaCsCoroutineHandle: EXCEEDED_RESUME_STEP_BUDGET (10000)", victim.LastErrorText);
+            Assert.AreEqual(LuaCsGuardTripKind.Steps, victim.LastTrip);
+            Assert.AreEqual(LuaThreadStatus.Dead, victim.Status);
+        }
+
+        /// <summary>
+        /// Global depth bookkeeping shared by the C-stack shapes: <c>enter()</c> counts one Lua level and fails
+        /// with "mod cap" at <paramref name="modCap"/>, like a mod's own recursion guard.
+        /// </summary>
+        private static string CStackPrelude(int modCap)
+        {
+            return "depth = 0 maxDepth = 0\n" +
+                   "local function enter()\n" +
+                   "  depth = depth + 1\n" +
+                   "  if depth > maxDepth then maxDepth = depth end\n" +
+                   "  if depth >= " + modCap + " then error('mod cap', 0) end\n" +
+                   "end\n";
+        }
+
+        [TestCase("table.sort", 200,
+            "local function cmp(a, b) enter() table.sort({3, 1, 2}, cmp) depth = depth - 1 return a < b end\n" +
+            "record(pcall(table.sort, {3, 1, 2}, cmp))")]
+        [TestCase("string.format", 200,
+            "local o = setmetatable({}, {})\n" +
+            "getmetatable(o).__tostring = function(x) enter() local r = string.format('%s', x) depth = depth - 1 return r end\n" +
+            "record(pcall(string.format, '%s', o))")]
+        [TestCase("tostring", 200,
+            "local o = setmetatable({}, {})\n" +
+            "getmetatable(o).__tostring = function(x) enter() local r = tostring(x) depth = depth - 1 return r end\n" +
+            "record(pcall(tostring, o))")]
+        [TestCase("print", 200,
+            "local o = setmetatable({}, {})\n" +
+            "getmetatable(o).__tostring = function(x) enter() print(x) depth = depth - 1 return 'x' end\n" +
+            "record(pcall(print, o))")]
+        [TestCase("string.gsub", 201,
+            "local function g() enter() local r = (string.gsub('a', 'a', g)) depth = depth - 1 return r end\n" +
+            "record(pcall(g))")]
+        [TestCase("string.gsub", 200,
+            "local t = setmetatable({}, {})\n" +
+            "getmetatable(t).__index = function() enter() local r = (string.gsub('a', 'a', t)) depth = depth - 1 return r end\n" +
+            "record(pcall(string.gsub, 'a', 'a', t))")]
+        [TestCase("pairs", 200,
+            "local o = setmetatable({}, {})\n" +
+            "getmetatable(o).__pairs = function() enter() local a, b, c = pairs(o) depth = depth - 1 return a, b, c end\n" +
+            "record(pcall(pairs, o))")]
+        [TestCase("ipairs", 200,
+            "local o = setmetatable({}, {})\n" +
+            "getmetatable(o).__ipairs = function() enter() local a, b, c = ipairs(o) depth = depth - 1 return a, b, c end\n" +
+            "record(pcall(ipairs, o))")]
+        [TestCase("coroutine.resume", 201,
+            "local function f()\n" +
+            "  enter()\n" +
+            "  local ok, e = coroutine.resume(coroutine.create(f))\n" +
+            "  depth = depth - 1\n" +
+            "  if not ok then error(e, 0) end\n" +
+            "end\n" +
+            "record(pcall(f))")]
+        [Timeout(120000)]
+        public void CallsBackIntoLua_NestedPastTheCStackLimit_FailFastWithOneCatchableLine(string boundary,
+            int deepestLuaLevel, string shape)
+        {
+            // WHY (A2-05): each of these calls runs Lua as a nested VM call on the .NET stack, and an error
+            // raised N levels deep unwinds in about N squared with no instruction running, so no budget hook
+            // fires: a comparator re-entering table.sort 1,000 deep took 8.1 s to fail under a 10 s budget, a
+            // __tostring re-entering string.format 7.4 s, and unbounded the recursion ran for a minute. The
+            // library stops the nesting at MaxCCallDepth with Luau's error, which pcall catches like any other.
+            // A resume continues its resumer's count, and a function that recurses before its first library call
+            // reaches one Lua level more than the count.
+            // WHY the reference run: the unwind left at the cap is intrinsic to Lua-CSharp (about 200 squared) and
+            // its wall time depends on the host, so the capped run is timed against the same shape failing on its
+            // own at 150 levels on the same host. Capped, the ratio is about (200/150)^2 = 1.8; uncapped at 1,000
+            // it was about (1000/150)^2 = 44.
+            List<string> reference = new();
+            System.Diagnostics.Stopwatch referenceClock = System.Diagnostics.Stopwatch.StartNew();
+            Assert.IsNull(RunRecordingChunk(CStackPrelude(150) + shape, new LuaCsExecutionGuard(60_000, 50_000_000, 0),
+                reference));
+            referenceClock.Stop();
+            Assert.AreEqual(new[] { "boolean:false|string:mod cap" }, reference.ToArray(),
+                "the reference run fails on the mod's own cap, below the C-stack limit");
+
+            List<string> rows = new();
+            System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+            LuaRuntimeException ended = RunRecordingChunk(
+                CStackPrelude(1000) + shape + "\nrecord(maxDepth)",
+                new LuaCsExecutionGuard(60_000, 50_000_000, 0), rows);
+            clock.Stop();
+
+            Assert.IsNull(ended, "the error is an ordinary one that pcall catches: " + ended?.Message);
+            Assert.AreEqual(2, rows.Count, string.Join(" / ", rows));
+            string expectedLine = LuaCsSecureEnvironment.CStackOverflowMessage + " (" + boundary + ": more than "
+                                  + LuaCsSecureEnvironment.MaxCCallDepth
+                                  + " nested calls from library functions back into Lua)";
+            Assert.AreEqual("boolean:false|string:" + expectedLine, rows[0]);
+            AssertIsOnlyTheErrorLine(expectedLine);
+            Assert.AreEqual("number:" + deepestLuaLevel, rows[1],
+                "the nesting stops at the limit, not at the mod's own cap of 1,000");
+            Assert.Less(clock.ElapsedMilliseconds, 4 * referenceClock.ElapsedMilliseconds + 250,
+                "the capped nesting must unwind about as fast as 150 levels do (" + referenceClock.ElapsedMilliseconds
+                + " ms), not quadratically in the mod's own depth");
+        }
+
+        private const string NestSort =
+            "local function nest(n)\n" +
+            "  if n == 0 then return 0 end\n" +
+            "  local deepest, done = 0, false\n" +
+            "  table.sort({2, 1}, function(a, b)\n" +
+            "    if not done then done = true deepest = nest(n - 1) + 1 end\n" +
+            "    return a < b\n" +
+            "  end)\n" +
+            "  return deepest\n" +
+            "end\n";
+
+        [Test]
+        [Timeout(60000)]
+        public void CallsBackIntoLua_UpToTheCStackLimitSucceed_OneMoreIsRefused_AndARefusalReleasesEveryLevel()
+        {
+            // WHY the negative twin: the cap must cost legitimate code nothing below Luau's own limit, and a
+            // refused call must give back every level the calls under it held, or the thread would lose depth
+            // with each caught refusal until nothing could call back into Lua at all.
+            List<string> rows = new();
+            int max = LuaCsSecureEnvironment.MaxCCallDepth;
+            LuaRuntimeException ended = RunRecordingChunk(
+                NestSort +
+                "local function chain(n)\n" +
+                "  if n == 0 then return 0 end\n" +
+                "  local ok, v = coroutine.resume(coroutine.create(chain), n - 1)\n" +
+                "  if not ok then error(v, 0) end\n" +
+                "  return v + 1\n" +
+                "end\n" +
+                "record(pcall(nest, " + max + "))\n" +
+                "record(pcall(nest, " + (max + 1) + "))\n" +
+                "record(pcall(nest, " + max + "))\n" +
+                "record(pcall(chain, " + max + "))\n" +
+                "record(pcall(chain, " + (max + 1) + "))\n" +
+                "record(pcall(chain, " + max + "))",
+                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows);
+
+            Assert.IsNull(ended, ended?.Message);
+            Assert.AreEqual(6, rows.Count, string.Join(" / ", rows));
+            Assert.AreEqual("boolean:true|number:" + max, rows[0], max + " nested table.sort calls are allowed");
+            StringAssert.StartsWith("boolean:false|string:" + LuaCsSecureEnvironment.CStackOverflowMessage
+                                    + " (table.sort:", rows[1]);
+            Assert.AreEqual("boolean:true|number:" + max, rows[2], "the refusal released every level");
+            Assert.AreEqual("boolean:true|number:" + max, rows[3], max + " nested resumes are allowed");
+            StringAssert.StartsWith("boolean:false|string:" + LuaCsSecureEnvironment.CStackOverflowMessage
+                                    + " (coroutine.resume:", rows[4]);
+            Assert.AreEqual("boolean:true|number:" + max, rows[5]);
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void CallsBackIntoLua_ASuspendedCoroutineHoldsItsLevelsOnItsOwnThreadOnly()
+        {
+            // WHY: the count is per Lua thread, not per .NET thread. A coroutine that yields inside a table.sort
+            // comparator keeps that call open while it is suspended; a shared count would charge it to every
+            // other thread, which on Unity's single main thread means every other mod.
+            List<string> rows = new();
+            int max = LuaCsSecureEnvironment.MaxCCallDepth;
+            LuaRuntimeException ended = RunRecordingChunk(
+                NestSort +
+                "local co = coroutine.create(function()\n" +
+                "  local yielded = false\n" +
+                "  table.sort({2, 1}, function(a, b)\n" +
+                "    if not yielded then yielded = true coroutine.yield('inside sort') end\n" +
+                "    return a < b\n" +
+                "  end)\n" +
+                "  return nest(" + (max - 1) + ")\n" +
+                "end)\n" +
+                "record(coroutine.resume(co))\n" +
+                "record(pcall(nest, " + max + "))\n" +
+                "record(coroutine.resume(co))",
+                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows);
+
+            Assert.IsNull(ended, ended?.Message);
+            CollectionAssert.AreEqual(new[]
+            {
+                "boolean:true|string:inside sort",
+                "boolean:true|number:" + max,
+                "boolean:true|number:" + (max - 1)
+            }, rows, "the suspended sort neither limits the main thread nor stays counted once it finished");
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void DeepLuaRecursion_AndMetamethodsTheVmRunsItself_AreNotLimitedByTheCStackCap()
+        {
+            // WHY the negative twin: plain Lua calls and the metamethods the VM dispatches in its own loop do
+            // not nest .NET calls, so they keep Lua-CSharp's own, far deeper limits.
+            List<string> rows = new();
+            LuaRuntimeException ended = RunRecordingChunk(
+                "local function f(n) if n == 0 then return 0 end return 1 + f(n - 1) end\n" +
+                "record(f(5000))\n" +
+                "local o = setmetatable({}, {})\n" +
+                "getmetatable(o).__index = function(t, k) if k == 0 then return 0 end return t[k - 1] + 1 end\n" +
+                "record(o[5000])\n" +
+                "local mt = {}\n" +
+                "mt.__lt = function(a, b) if a.n == 0 then return true end return setmetatable({n = a.n - 1}, mt) < b end\n" +
+                "record(setmetatable({n = 5000}, mt) < setmetatable({n = 0}, mt))",
+                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows);
+
+            Assert.IsNull(ended, ended?.Message);
+            CollectionAssert.AreEqual(new[] { "number:5000", "number:5000", "boolean:true" }, rows);
+        }
+
+        #endregion
     }
 }
 #endif

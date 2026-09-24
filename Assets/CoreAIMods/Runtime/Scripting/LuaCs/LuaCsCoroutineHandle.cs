@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Lua;
@@ -71,6 +72,17 @@ namespace CoreAI.Sandbox.LuaCs
         public const long DefaultMaxAllocatedBytesPerResume = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget;
 
         private static readonly LuaValue[] EmptyValues = Array.Empty<LuaValue>();
+
+        // WHY a registry of every handle's thread: a handle is the ONLY thing that may resume its thread. The
+        // body runs with the token of its first resume for life (the handle's own source), so a mod that took
+        // coroutine.running() inside a task thread and resumed it with the sandbox's coroutine.resume ran that
+        // body under a raw-resume hook whose trip cancelled a source the body never reads. The hook then had to
+        // throw (ForeignContextTrip), which xpcall swallowed: its handler and every later frame ran unguarded
+        // (audit A2-01, 60M iterations), and the thread, marked Dead with live registrations on the handle's
+        // token, crashed the .NET process from a Lua-CSharp continuation when the scheduler later killed it
+        // (A2-02). The sandbox refuses such a resume by looking the thread up here. The value holds no
+        // reference to its key, so an entry goes away with the thread without relying on ephemeron support.
+        private static readonly ConditionalWeakTable<LuaState, HandleThread> HandleThreads = new();
 
         private readonly LuaState _coroutine;
         private readonly LuaStack _callStack;
@@ -144,6 +156,7 @@ namespace CoreAI.Sandbox.LuaCs
             _isProtectedMode = isProtectedMode;
 
             _coroutine = ownerState.CreateCoroutine(function, isProtectedMode);
+            HandleThreads.Add(_coroutine, new HandleThread(maxAllocatedBytes));
             _callStack = new LuaStack(8);
             _cts = new CancellationTokenSource();
             // WHY the handle's own source doubles as the trip source: it is already the token every resume
@@ -193,6 +206,32 @@ namespace CoreAI.Sandbox.LuaCs
 
         /// <summary>Live heap growth one resume may add; <c>&lt;= 0</c> when the check is disabled.</summary>
         public long MaxAllocatedBytes => _maxAllocatedBytes;
+
+        /// <summary>
+        /// True when <paramref name="state"/> is the thread of a <see cref="LuaCsCoroutineHandle"/> (a task
+        /// thread, a signal runner, a mod's main chunk, any coroutine built through the script engine). Only
+        /// that handle may resume it; the sandbox's <c>coroutine.resume</c> refuses it.
+        /// </summary>
+        internal static bool IsHandleThread(LuaState state)
+        {
+            return state != null && HandleThreads.TryGetValue(state, out HandleThread _);
+        }
+
+        /// <summary>
+        /// The per-resume allocation budget (<see cref="MaxAllocatedBytes"/>) of the handle whose thread
+        /// <paramref name="state"/> is; false when it is no handle's thread.
+        /// </summary>
+        internal static bool TryGetHandleAllocationBudget(LuaState state, out long maxAllocatedBytes)
+        {
+            if (state != null && HandleThreads.TryGetValue(state, out HandleThread thread))
+            {
+                maxAllocatedBytes = thread.MaxAllocatedBytes;
+                return true;
+            }
+
+            maxAllocatedBytes = 0;
+            return false;
+        }
 
         /// <summary>
         /// Restarts the consumed-step count. Only a pooled signal runner calls this, at the moment it is
@@ -480,13 +519,17 @@ namespace CoreAI.Sandbox.LuaCs
         }
 
         // WHY a throw here at all: the hook fired in Lua that host code runs on this thread with a token of its
-        // own, and cancelling the run's token cannot stop that call. Every host function that calls back into mod
-        // code passes on the token it was called with, so today this is only host-authored Lua (the signal
-        // runner's body factory, the HttpService bridge chunk). The throw leaves the in-hook flag set:
+        // own, and cancelling the run's token cannot stop that call. The throw leaves the in-hook flag set:
         // LuaCsExecutionGuard clears it on its state when the run ends, and a coroutine hook's thread is dead
         // after its trip. WHY a cancellation and not the trip's Lua error: pcall rethrows every
-        // OperationCanceledException, so not even a pcall in that code swallows the trip; the run itself still
-        // ends at the next check of its own token.
+        // OperationCanceledException. xpcall does NOT: it checks only its own token, which in a foreign context
+        // is not the cancelled one, and then runs its handler with the in-hook flag still set - unguarded, as is
+        // every frame after it until the run's own token is checked (audit A2-01: 60M iterations in a handler).
+        // So no mod code may ever run in a foreign context, and none can: every host function that calls back
+        // into mod code passes on the token it was called with, and the sandbox's coroutine.resume refuses a
+        // handle's thread (see HandleThreads), the one way mod code used to run with a token (the handle's) other
+        // than the one its hook cancelled (the raw resume's). What remains is host-authored Lua that runs no mod
+        // code and has no xpcall (the signal runner's body factory, the HttpService bridge chunk).
         /// <summary>
         /// The exception a hook throws when <see cref="CancelGuardedRun"/> returned false; its message is the
         /// trip line.
@@ -552,6 +595,18 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             _lastValues = values;
+        }
+
+        /// <summary>What <see cref="HandleThreads"/> records about a handle's thread.</summary>
+        private sealed class HandleThread
+        {
+            /// <summary>The handle's <see cref="LuaCsCoroutineHandle.MaxAllocatedBytes"/>.</summary>
+            public readonly long MaxAllocatedBytes;
+
+            public HandleThread(long maxAllocatedBytes)
+            {
+                MaxAllocatedBytes = maxAllocatedBytes;
+            }
         }
 
         /// <summary>

@@ -1473,7 +1473,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Lua_M2_02_NativeResumeOfATaskThread_FaultsOnlyItsModWhenTheWaitExpires()
+        public void Lua_M2_02_NativeResumeOfATaskThread_IsRefused_AndItsWaitStillResumesItOnlyForItsMod()
         {
             LuaCsRbxApiBindings bindings = new();
             MemoryStore store = new();
@@ -1488,29 +1488,37 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     beats = beats + 1
                     store_set('beats', tostring(beats))
                 end)");
-            // WHY this shape: a native coroutine.resume finishes the task thread outside the scheduler
-            // while its task.wait is still queued; when the wait expires the scheduler finds it dead.
+            // WHY this shape: a native coroutine.resume used to finish the task thread outside the scheduler
+            // while its task.wait was still queued, so the scheduler found it dead when the wait expired
+            // (M2-02), and the same resume let a budget trip escape the thread's guard (A2-01). The resume is
+            // refused now: the thread stays the scheduler's, and its wait resumes it on schedule.
             stack.Runtime.LoadMod("resumer", @"
                 local co
                 task.spawn(function()
                     co = coroutine.running()
                     task.wait(0.5)
+                    store_set('woke', 'yes')
                 end)
-                coroutine.resume(co)
+                local ok, err = coroutine.resume(co)
+                store_set('resume', tostring(ok) .. '|' .. tostring(err))
                 store_set('status', coroutine.status(co))");
 
-            Assert.AreEqual("dead", store.Get("resumer", "status"));
+            Assert.AreEqual("false|" + LuaCsSecureEnvironment.SchedulerThreadResumeRefusal,
+                store.Get("resumer", "resume"), "the script sees a failed resume with the fix hint");
+            Assert.AreEqual("suspended", store.Get("resumer", "status"), "the refused resume must not touch the thread");
+            Assert.AreEqual("", store.Get("resumer", "woke"));
             Assert.DoesNotThrow(() => bindings.Scheduler.Advance(0.5d),
-                "resuming a thread that died elsewhere is that mod's fault, not a frame abort");
+                "a refused resume must not turn into a frame abort");
 
             Assert.AreEqual("1", store.Get("healthy", "beats"));
-            CollectionAssert.AreEqual(new[] { "resumer:BadArgument" }, faults);
-            IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("resumer");
-            Assert.AreEqual(1, errors.Count);
-            StringAssert.Contains("dead thread", errors[0].Error);
+            Assert.AreEqual("yes", store.Get("resumer", "woke"), "the wait still resumes the thread when it expires");
+            CollectionAssert.IsEmpty(faults, "nothing is faulted, the resumer mod included");
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("resumer"));
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("healthy"));
 
             Assert.DoesNotThrow(() => bindings.Scheduler.Advance(0.5d));
-            Assert.AreEqual(1, faults.Count, "the dead thread is reported once and then forgotten");
+            Assert.AreEqual("2", store.Get("healthy", "beats"));
+            CollectionAssert.IsEmpty(faults);
         }
 
         [Test]
@@ -2148,5 +2156,145 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.AreEqual("Late", store.Get("m", "result"), "the live child that appears later is returned");
             Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("m"));
         }
+
+        #region A2 (FX-RT-A): a task thread is never raw-resumable; a raw resume keeps the mod's memory budget
+
+        [TestCase("unload")]
+        [TestCase("task.cancel")]
+        [TestCase("task.spawn")]
+        [Timeout(60000)]
+        public void Lua_A2_01_RawResumeOfATaskThreadThatWouldTrip_IsRefused_AndTheThreadStillEndsSafely(string end)
+        {
+            // WHY (A2-01, A2-02): coroutine.resume of a parked task thread (its coroutine.running() value) ran it
+            // with the thread's own token under a hook that cancelled another one, so the runaway below tripped a
+            // hook that had to throw, xpcall caught that, and its handler ran 60M iterations unguarded. The
+            // thread was then marked dead with live registrations, and ending it later crashed the .NET process
+            // from a Lua-CSharp continuation. WHY gated: on a build that lets such a resume through, that crash
+            // would take the test host with it, so the chunk resumes the thread that would trip only after a raw
+            // resume of a harmless one was refused, and the thread is only ended once the refusal was asserted.
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            int killedThreads = -1;
+            stack.Runtime.ModTearingDown += (string modId, LuaModTeardownReason reason) =>
+            {
+                killedThreads = bindings.KillAllScheduledOwnedBy(modId);
+            };
+
+            stack.Runtime.LoadMod("m", @"
+                local probe, victim
+                task.spawn(function()
+                    probe = coroutine.running()
+                    coroutine.yield()
+                    store_set('probe_ran', 'yes')
+                end)
+                local handle = task.spawn(function()
+                    victim = coroutine.running()
+                    coroutine.yield()
+                    xpcall(function() while true do end end, function(e)
+                        local n = 0
+                        for i = 1, 30000000 do n = n + 1 end
+                        store_set('handler_done', tostring(n))
+                    end)
+                    store_set('after_xpcall', 'yes')
+                end)
+                local ok, err = coroutine.resume(probe)
+                store_set('probe', tostring(ok) .. '|' .. tostring(err))
+                if not ok then
+                    ok, err = coroutine.resume(victim)
+                    store_set('victim', tostring(ok) .. '|' .. tostring(err))
+                    store_set('victim_status', coroutine.status(victim))
+                end
+                hooks_on('end_victim', function(_, how)
+                    if how == 'task.cancel' then task.cancel(handle) else task.spawn(handle) end
+                end)");
+
+            string refused = "false|" + LuaCsSecureEnvironment.SchedulerThreadResumeRefusal;
+            Assert.AreEqual(refused, store.Get("m", "probe"), "gate: a raw resume of a harmless task thread is refused");
+            Assert.AreEqual("", store.Get("m", "probe_ran"));
+            Assert.AreEqual(refused, store.Get("m", "victim"));
+            Assert.AreEqual("suspended", store.Get("m", "victim_status"), "the refused resume leaves the thread parked");
+            Assert.AreEqual("", store.Get("m", "handler_done"));
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("m"));
+
+            if (end == "unload")
+            {
+                Assert.DoesNotThrow(() => stack.Runtime.UnloadMod("m"));
+                Assert.AreEqual(2, killedThreads, "unloading kills both parked threads");
+                Assert.DoesNotThrow(() => bindings.Scheduler.Advance(0d));
+                Assert.AreEqual(0, bindings.Scheduler.LiveThreadCount);
+            }
+            else
+            {
+                int liveBefore = bindings.Scheduler.LiveThreadCount;
+                stack.Runtime.EmitEvent("end_victim", end);
+                Assert.DoesNotThrow(() => stack.Runtime.Tick(0d));
+                Assert.DoesNotThrow(() => bindings.Scheduler.Advance(0d));
+                Assert.AreEqual(liveBefore - 1, bindings.Scheduler.LiveThreadCount,
+                    "the thread ended by " + end + " is gone; the parked probe thread stays");
+            }
+
+            Assert.AreEqual("", store.Get("m", "handler_done"), "no xpcall handler may run after a budget trip");
+            Assert.AreEqual("", store.Get("m", "after_xpcall"));
+            if (end == "task.spawn")
+            {
+                // WHY: resumed the scheduler's way the thread runs with its own token, so its own budget trip
+                // travels as the cancellation xpcall cannot catch, and the mod is told about the runaway.
+                IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("m");
+                Assert.IsTrue(errors.Any(error => error.Error.Contains("EXCEEDED_RESUME_STEP_BUDGET")),
+                    "errors: " + string.Join(" || ", errors.Select(error => error.Error)));
+            }
+        }
+
+        [Test]
+        [Timeout(120000)]
+        public void Lua_A2_09_RawCoroutineOfAModHeldTo16Mb_CannotKeep80MbAlive()
+        {
+            // WHY (A2-09): the raw coroutine.resume hook armed a fixed 256 MB, so a mod whose
+            // HandlerMaxAllocatedBytes is 16 MB kept 80 MB alive inside coroutine.create and its load succeeded.
+            // The body now gets the budget of the thread that resumes it, the mod's 16 MB; what it built stays
+            // reachable through the dead coroutine, so the main chunk's own 16 MB budget ends the load as well.
+            System.GC.Collect();
+            System.GC.WaitForPendingFinalizers();
+            System.GC.Collect();
+            const long megabyte = 1024 * 1024;
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = bindings,
+                HandlerMaxAllocatedBytes = 16 * megabyte
+            });
+
+            System.Exception error = Assert.Catch<System.Exception>(() => stack.Runtime.LoadMod("m", @"
+                local co = coroutine.create(function()
+                    local kept = {}
+                    for i = 1, 40 do
+                        kept[i] = string.rep('x', 1000000) .. i
+                        store_set('built', tostring(i))
+                    end
+                    return #kept
+                end)
+                local ok, err = coroutine.resume(co)
+                store_set('resume', tostring(ok) .. '|' .. tostring(err))"));
+
+            int built = int.Parse(store.Get("m", "built"), CultureInfo.InvariantCulture);
+            Assert.Less(built, 24, "the body must be cut near 16 MB, not keep 40 strings (80 MB)");
+            StringAssert.Contains(LuaCsExecutionGuard.MemoryBudgetTripMarker + " (" + 16 * megabyte + " bytes)",
+                error.Message);
+            string resume = store.Get("m", "resume");
+            if (resume.Length > 0)
+            {
+                StringAssert.Contains("(" + 16 * megabyte + " bytes)", resume);
+            }
+
+            System.GC.Collect();
+        }
+
+        #endregion
     }
 }
