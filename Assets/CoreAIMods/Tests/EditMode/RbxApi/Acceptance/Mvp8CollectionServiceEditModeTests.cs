@@ -9,6 +9,8 @@ using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Instances;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools.Constraints;
+using Is = UnityEngine.TestTools.Constraints.Is;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 {
@@ -476,9 +478,238 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 service.GetInstanceAddedSignal("k"), service.GetInstanceRemovedSignal("k"));
         }
 
+        [Test]
+        public void TagGlobals_FollowTheLastHolderOutOfTheDataModelAndBackIn()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("pool-a");
+            harness.Stack.Runtime.LoadMod(actor, "pool-setup", @"
+                local cs = game:GetService('CollectionService')
+                cs.TagAdded:Connect(function(tag)
+                    store_set('added_n', tostring((tonumber(store_get('added_n')) or 0) + 1))
+                end)
+                cs.TagRemoved:Connect(function(tag)
+                    store_set('removed_n', tostring((tonumber(store_get('removed_n')) or 0) + 1))
+                    store_set('removed_tag', tag)
+                end)
+                store_set('added_n', '0')
+                store_set('removed_n', '0')
+                local coin = Instance.new('Part')
+                coin.Name = 'Coin'
+                coin.Parent = workspace
+                cs:AddTag(coin, 'Coin')
+                coin.Parent = nil
+                store_set('all', table.concat(cs:GetAllTags(), ','))
+                store_set('still_tagged', tostring(cs:HasTag(coin, 'Coin')))",
+                persistToStore: false);
+
+            harness.Bindings.Scheduler.Advance(0d);
+
+            // WHY: CollectionService.yaml — TagRemoved fires "when the last instance bearing a given
+            // tag leaves the DataModel" and GetAllTags drops the tag at that moment; a pooled coin
+            // parented to nil keeps its tag but is no longer in the place.
+            Assert.AreEqual("1", harness.Store.Get("pool-setup", "added_n"));
+            Assert.AreEqual("1", harness.Store.Get("pool-setup", "removed_n"),
+                "the last holder leaving the DataModel ends the tag's use");
+            Assert.AreEqual("Coin", harness.Store.Get("pool-setup", "removed_tag"));
+            Assert.AreEqual("", harness.Store.Get("pool-setup", "all"));
+            Assert.AreEqual("true", harness.Store.Get("pool-setup", "still_tagged"));
+
+            RbxInstance coin = SingleHolder(harness, "Coin");
+            coin.Parent = harness.Registry.WorldRoot;
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("2", harness.Store.Get("pool-setup", "added_n"),
+                "the tag is in use again once its holder re-enters the DataModel");
+            Assert.AreEqual("1", harness.Store.Get("pool-setup", "removed_n"));
+            CollectionAssert.AreEqual(new[] { "Coin" }, harness.Bindings.CollectionService.GetAllTags());
+        }
+
+        [Test]
+        public void Negative_OutOfTreeHolders_MoveNeitherTagGlobalNorGetAllTags()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("nil-a");
+            harness.Stack.Runtime.LoadMod(actor, "nil-setup", @"
+                local cs = game:GetService('CollectionService')
+                cs.TagAdded:Connect(function(tag)
+                    store_set('added_n', tostring((tonumber(store_get('added_n')) or 0) + 1))
+                end)
+                cs.TagRemoved:Connect(function(tag)
+                    store_set('removed_n', tostring((tonumber(store_get('removed_n')) or 0) + 1))
+                end)
+                store_set('added_n', '0')
+                store_set('removed_n', '0')
+                local pooled = Instance.new('Part')
+                pooled.Name = 'Pooled'
+                cs:AddTag(pooled, 'Coin')
+                local dropped = Instance.new('Part')
+                dropped.Name = 'Dropped'
+                cs:AddTag(dropped, 'Coin')
+                cs:RemoveTag(dropped, 'Coin')
+                local doomed = Instance.new('Part')
+                doomed.Name = 'Doomed'
+                cs:AddTag(doomed, 'Gem')
+                doomed:Destroy()
+                store_set('all', table.concat(cs:GetAllTags(), ','))",
+                persistToStore: false);
+
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("0", harness.Store.Get("nil-setup", "added_n"),
+                "tagging a nil-parented instance puts no tag in the place");
+            Assert.AreEqual("0", harness.Store.Get("nil-setup", "removed_n"),
+                "untagging or destroying a nil-parented holder takes no tag out of the place");
+            Assert.AreEqual("", harness.Store.Get("nil-setup", "all"));
+            Assert.AreEqual(1, harness.Registry.Tags.GetTagged("Coin").Count,
+                "the pooled part still carries its tag while parented to nil");
+
+            SingleHolder(harness, "Coin").Parent = harness.Registry.WorldRoot;
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("1", harness.Store.Get("nil-setup", "added_n"),
+                "the tag enters use when its first holder enters the DataModel");
+            Assert.AreEqual("0", harness.Store.Get("nil-setup", "removed_n"));
+        }
+
+        [Test]
+        public void Negative_TagRemovedGlobal_WaitsForTheLastHolderInTheDataModel()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("last-a");
+            harness.Stack.Runtime.LoadMod(actor, "last-setup", @"
+                local cs = game:GetService('CollectionService')
+                cs.TagRemoved:Connect(function(tag)
+                    store_set('removed_n', tostring((tonumber(store_get('removed_n')) or 0) + 1))
+                end)
+                store_set('removed_n', '0')
+                local first = Instance.new('Part')
+                first.Name = 'CoinA'
+                first.Parent = workspace
+                cs:AddTag(first, 'Coin')
+                local second = Instance.new('Part')
+                second.Name = 'CoinB'
+                second.Parent = workspace
+                cs:AddTag(second, 'Coin')
+                local box = Instance.new('Folder')
+                box.Name = 'Box'
+                box.Parent = workspace
+                first.Parent = nil
+                second.Parent = box
+                store_set('all', table.concat(cs:GetAllTags(), ','))",
+                persistToStore: false);
+
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("0", harness.Store.Get("last-setup", "removed_n"),
+                "one holder leaving while another stays, and a move inside the tree, end nothing");
+            Assert.AreEqual("Coin", harness.Store.Get("last-setup", "all"));
+
+            RbxInstance second = harness.Registry.WorldRoot.FindFirstChild("CoinB", true);
+            Assert.IsNotNull(second);
+            Assert.AreEqual("Box", second.Parent.Name);
+            second.Parent = null;
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("1", harness.Store.Get("last-setup", "removed_n"));
+            Assert.AreEqual(0, harness.Bindings.CollectionService.GetAllTags().Count);
+        }
+
+        [Test]
+        public void TagsAppliedBeforeTheBindingsAttach_CountOnlyTheirInTreeHolders()
+        {
+            using ProductionHarness harness = new ProductionHarness(registry =>
+            {
+                RbxInstance placed = registry.Create("Part");
+                placed.Name = "Placed";
+                placed.Parent = registry.WorldRoot;
+                placed.AddTag("Checkpoint");
+                RbxInstance stored = registry.Create("Part");
+                stored.Name = "Stored";
+                stored.AddTag("Spare");
+            });
+            RbxCollectionService service = harness.Bindings.CollectionService;
+            CollectionAssert.AreEqual(new[] { "Checkpoint" }, service.GetAllTags(),
+                "a nil-parented holder puts no tag in the place, attached late or not");
+
+            ActorContext actor = harness.Actor("seed-a");
+            harness.Stack.Runtime.LoadMod(actor, "seed-watch", @"
+                local cs = game:GetService('CollectionService')
+                cs.TagRemoved:Connect(function(tag)
+                    store_set('removed_n', tostring((tonumber(store_get('removed_n')) or 0) + 1))
+                    store_set('removed_tag', tag)
+                end)
+                store_set('removed_n', '0')",
+                persistToStore: false);
+
+            RbxInstance placedPart = harness.Registry.WorldRoot.FindFirstChild("Placed");
+            Assert.IsNotNull(placedPart);
+            placedPart.RemoveTag("Checkpoint");
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("1", harness.Store.Get("seed-watch", "removed_n"),
+                "a holder placed before the service attached still counts, so losing its tag ends "
+                + "the tag's use");
+            Assert.AreEqual("Checkpoint", harness.Store.Get("seed-watch", "removed_tag"));
+            Assert.AreEqual(0, service.GetAllTags().Count);
+        }
+
+        [Test]
+        public void GetService_RepeatedCalls_ResolveTheOneTreeServiceWithoutAllocating()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            RbxDataModel game = harness.Bindings.Game;
+            RbxInstance treeService = game.FindFirstChildOfClass("CollectionService");
+            Assert.IsNotNull(treeService);
+
+            for (int repeat = 0; repeat < 3; repeat++)
+            {
+                Assert.AreSame(treeService, game.GetService("CollectionService"));
+                Assert.AreSame(treeService, game.FindService("CollectionService"));
+            }
+
+            RbxInstance storage = game.FindFirstChildOfClass("ReplicatedStorage");
+            Assert.IsNotNull(storage);
+            Assert.AreSame(storage, game.GetService("ReplicatedStorage"),
+                "a tree service the catalog does not pre-register still resolves to its child");
+
+            int collectionServices = 0;
+            foreach (RbxInstance child in game.GetChildren())
+            {
+                if (child.ClassName == "CollectionService")
+                {
+                    collectionServices++;
+                }
+            }
+
+            Assert.AreEqual(1, collectionServices, "resolving a service never creates a second one");
+
+            // WHY: GetService runs at the top of nearly every script and inside hot handlers, and it
+            // used to copy the DataModel's child list on every call (M1-36).
+            Assert.That(() =>
+            {
+                for (int call = 0; call < 100; call++)
+                {
+                    game.GetService("CollectionService");
+                }
+            }, Is.Not.AllocatingGCMemory(), "a repeated GetService must not allocate");
+        }
+
+        private static RbxInstance SingleHolder(ProductionHarness harness, string tag)
+        {
+            IReadOnlyList<InstanceId> holders = harness.Registry.Tags.GetTagged(tag);
+            Assert.AreEqual(1, holders.Count, "exactly one instance should carry " + tag);
+            Assert.IsTrue(harness.Registry.TryGet(holders[0], out RbxInstance holder));
+            return holder;
+        }
+
         private sealed class ProductionHarness : IDisposable
         {
-            public ProductionHarness()
+            /// <summary>
+            /// Builds the production stack; <paramref name="seedWorld"/> runs on the bootstrapped
+            /// world before the bindings attach, like a world restored before its mods load.
+            /// </summary>
+            public ProductionHarness(Action<InstanceRegistry> seedWorld = null)
             {
                 LogLines = new List<string>();
                 Binder = new InMemoryInstanceBackingBinder();
@@ -487,6 +718,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     worldAclVersion: InstanceRegistry.CurrentWorldAclVersion,
                     worldId: "tags-world");
                 RbxDataModel game = DataModelBootstrap.CreateGame(Registry);
+                seedWorld?.Invoke(Registry);
                 Bindings = new LuaCsRbxApiBindings(Registry, game, log: LogLines.Add);
                 Store = new MemoryStore();
                 Stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions

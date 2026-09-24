@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using CoreAI.Mods.Rbx.Datatypes;
 
 namespace CoreAI.Mods.Rbx.Spatial
@@ -43,8 +44,9 @@ namespace CoreAI.Mods.Rbx.Spatial
             if (_configured && !ScaleMath.Approximately(_metersPerStud, metersPerStud))
             {
                 throw new InvalidOperationException(
-                    $"RbxSpace scale is already configured to {_metersPerStud} m/stud for this " +
-                    "session; changing it mid-session would mis-scale every live instance.");
+                    "RbxSpace scale is already configured to "
+                    + _metersPerStud.ToString(CultureInfo.InvariantCulture) + " m/stud for this "
+                    + "session; changing it mid-session would mis-scale every live instance.");
             }
 
             _metersPerStud = metersPerStud;

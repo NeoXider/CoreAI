@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace CoreAI.Mods.Rbx.Datatypes
 {
@@ -65,7 +66,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
             {
                 throw RbxApiStubException.BadArgument(
                     "NextNumber interval is empty.",
-                    $"pass max >= min (got min={min}, max={max})");
+                    EmptyIntervalFix(min, max));
             }
 
             return min + (max - min) * NextNumber();
@@ -78,7 +79,7 @@ namespace CoreAI.Mods.Rbx.Datatypes
             {
                 throw RbxApiStubException.BadArgument(
                     "NextInteger interval is empty.",
-                    $"pass max >= min (got min={min}, max={max})");
+                    EmptyIntervalFix(min, max));
             }
 
             ulong range = unchecked((ulong)(max - min)) + 1UL;
@@ -127,6 +128,16 @@ namespace CoreAI.Mods.Rbx.Datatypes
                 int j = (int)NextInteger(0, i);
                 (list[i], list[j]) = (list[j], list[i]);
             }
+        }
+
+        /// <summary>
+        /// The self-repair hint for an empty interval. Invariant culture: the numbers are read
+        /// back by scripts and models, so a host locale must not turn 1.5 into "1,5".
+        /// </summary>
+        private static string EmptyIntervalFix(object min, object max)
+        {
+            return string.Format(CultureInfo.InvariantCulture,
+                "pass max >= min (got min={0}, max={1})", min, max);
         }
 
         private ulong NextUInt64()

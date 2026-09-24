@@ -6,16 +6,18 @@ namespace CoreAI.Mods.Rbx.Instances
 {
     /// <summary>
     /// Roblox CollectionService: tag-based instance collections over <see cref="InstanceTagStore"/>
-    /// (R6.8). No storage of its own — every query and transition resolves through the registry
-    /// tag store, so Instance:AddTag/RemoveTag and CollectionService:AddTag/RemoveTag share one
-    /// substrate and one signal layer. Mirror-pinned semantics: GetTagged returns DataModel
-    /// descendants only with no ordering promise; a duplicate AddTag does nothing and fires
-    /// nothing ("doing nothing if the tag is already applied to that instance"); the per-tag
-    /// added/removed signals fire only on later changes, never for instances that already carry
-    /// the tag ("thus won't fire the event if they already are in the DataModel"); TagAdded
-    /// fires only when the added tag is the only occurrence in the place, TagRemoved only when
-    /// the removed tag is used nowhere afterwards. First/last-use is tracked at store level
-    /// (OURS — the mirror does not say whether out-of-tree holders count as "in the place").
+    /// (R6.8). Tags live only in the registry tag store, so Instance:AddTag/RemoveTag and
+    /// CollectionService:AddTag/RemoveTag share one substrate and one signal layer; the service
+    /// keeps nothing but a per-tag count of holders inside the DataModel. Mirror-pinned semantics:
+    /// GetTagged returns DataModel descendants only with no ordering promise; a duplicate AddTag
+    /// does nothing and fires nothing ("doing nothing if the tag is already applied to that
+    /// instance"); the per-tag added/removed signals fire only on later changes, never for
+    /// instances that already carry the tag ("thus won't fire the event if they already are in
+    /// the DataModel"). TagAdded, TagRemoved and GetAllTags count only instances inside the
+    /// DataModel (CollectionService.yaml): TagAdded fires when a tag goes from no holder in the
+    /// DataModel to one — AddTag on an in-tree instance, or a tagged instance entering the tree —
+    /// and TagRemoved when the last holder in the DataModel loses the tag or leaves the tree. An
+    /// instance parented to nil keeps its tags but counts toward none of the three.
     /// Deprecated GetCollection/ItemAdded/ItemRemoved are absent, not stubbed.
     /// </summary>
     public sealed class RbxCollectionService : RbxInstance
@@ -23,6 +25,8 @@ namespace CoreAI.Mods.Rbx.Instances
         private readonly Dictionary<string, RbxScriptSignal> _addedSignals =
             new(StringComparer.Ordinal);
         private readonly Dictionary<string, RbxScriptSignal> _removedSignals =
+            new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> _inTreeHolderCounts =
             new(StringComparer.Ordinal);
         private readonly RbxScriptSignal _tagAdded;
         private readonly RbxScriptSignal _tagRemoved;
@@ -38,14 +42,17 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         /// <summary>
-        /// Mirror TagAdded: fires with the tag string when a tag is added to an instance and the
-        /// added tag is the only occurrence of that tag in the place.
+        /// Mirror TagAdded: fires with the tag string when the tag goes from being carried by no
+        /// instance inside the DataModel to being carried by one — AddTag on an in-tree instance,
+        /// or a tagged instance entering the tree. Once per tag lifetime, not once per instance;
+        /// tagging a nil-parented instance fires nothing until it enters the tree.
         /// </summary>
         public RbxScriptSignal TagAdded => _tagAdded;
 
         /// <summary>
-        /// Mirror TagRemoved: fires with the tag string when a tag is removed from an instance
-        /// and the removed tag is no longer used anywhere in the place.
+        /// Mirror TagRemoved: fires with the tag string when the last instance inside the
+        /// DataModel that carries the tag has it removed or leaves the tree (parented to nil or
+        /// destroyed), so no instance in the DataModel carries it any more.
         /// </summary>
         public RbxScriptSignal TagRemoved => _tagRemoved;
 
@@ -137,7 +144,11 @@ namespace CoreAI.Mods.Rbx.Instances
             return result;
         }
 
-        /// <summary>Every tag currently held by any instance, sorted.</summary>
+        /// <summary>
+        /// Every tag carried by at least one instance inside the DataModel, sorted (the mirror
+        /// promises no order). A tag held only by nil-parented instances is absent, and a tag
+        /// leaves the result as soon as its last holder in the DataModel leaves the tree.
+        /// </summary>
         public IReadOnlyList<string> GetAllTags()
         {
             InstanceRegistry registry = Registry;
@@ -148,7 +159,18 @@ namespace CoreAI.Mods.Rbx.Instances
                     "resolve it via game:GetService(\"CollectionService\")");
             }
 
-            return registry.Tags.GetAllTags();
+            Dictionary<string, int> counts = _inTreeHolderCounts;
+            if (!ReferenceEquals(_subscribedRegistry, registry))
+            {
+                // WHY: the running counts are kept current only by the registry subscriptions, so
+                // a service that is not subscribed to this registry counts the tree afresh.
+                counts = new Dictionary<string, int>(StringComparer.Ordinal);
+                CountInTreeHolders(registry, counts);
+            }
+
+            List<string> result = new(counts.Keys);
+            result.Sort(StringComparer.Ordinal);
+            return result;
         }
 
         /// <summary>
@@ -207,6 +229,10 @@ namespace CoreAI.Mods.Rbx.Instances
                 registry.TagRemoved += OnRegistryTagRemoved;
                 registry.SceneMembershipChanged += OnSceneMembershipChanged;
                 _subscribedRegistry = registry;
+                // WHY: tags applied before this subscription (a world built or restored before
+                // the bindings attached) raised no event here, so the counts start from the tree
+                // as it stands and the subscriptions keep them current from now on.
+                CountInTreeHolders(registry, _inTreeHolderCounts);
             }
 
             _scheduler = scheduler;
@@ -234,6 +260,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 _subscribedRegistry.TagRemoved -= OnRegistryTagRemoved;
                 _subscribedRegistry.SceneMembershipChanged -= OnSceneMembershipChanged;
                 _subscribedRegistry = null;
+                _inTreeHolderCounts.Clear();
             }
 
             _scheduler = null;
@@ -241,13 +268,20 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private void OnRegistryTagAdded(RbxInstance instance, string tag, bool isFirstPlaceUse)
         {
-            if (isFirstPlaceUse)
+            // WHY the store-wide first-use flag is ignored: the mirror counts only instances
+            // inside the DataModel, so tagging a nil-parented instance (a pooled coin) changes
+            // neither the placewide signal nor the per-tag one until that instance enters the tree.
+            if (!IsInTree(instance))
+            {
+                return;
+            }
+
+            if (AddInTreeHolder(tag))
             {
                 _tagAdded.Fire(tag);
             }
 
-            if (IsInTree(instance)
-                && _addedSignals.TryGetValue(tag, out RbxScriptSignal signal))
+            if (_addedSignals.TryGetValue(tag, out RbxScriptSignal signal))
             {
                 signal.Fire(instance);
             }
@@ -255,13 +289,19 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private void OnRegistryTagRemoved(RbxInstance instance, string tag, bool isLastPlaceUse)
         {
-            if (isLastPlaceUse)
+            // WHY: a holder outside the DataModel was already uncounted when it left the tree (the
+            // destroy sweep's tag clearing lands here after the detach), so it moves nothing.
+            if (!IsInTree(instance))
+            {
+                return;
+            }
+
+            if (RemoveInTreeHolder(tag))
             {
                 _tagRemoved.Fire(tag);
             }
 
-            if (IsInTree(instance)
-                && _removedSignals.TryGetValue(tag, out RbxScriptSignal signal))
+            if (_removedSignals.TryGetValue(tag, out RbxScriptSignal signal))
             {
                 signal.Fire(instance);
             }
@@ -271,8 +311,8 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             // WHY: DescendantAdded/Removing fire for within-tree moves too and cannot tell a
             // boundary crossing at fire time; the registry membership flip is the exact enter/exit
-            // signal, so only these transitions fire the per-tag signals (usage — and therefore
-            // the globals — is unchanged by a move).
+            // signal, so only these transitions fire the per-tag signals and move the in-DataModel
+            // counts behind TagAdded/TagRemoved (a move within the tree changes neither).
             List<RbxInstance> nodes = new() { root };
             if (!root.IsDestroyed)
             {
@@ -293,15 +333,83 @@ namespace CoreAI.Mods.Rbx.Instances
                     string tag = tags[tagIndex];
                     if (entered)
                     {
+                        if (AddInTreeHolder(tag))
+                        {
+                            _tagAdded.Fire(tag);
+                        }
+
                         if (_addedSignals.TryGetValue(tag, out RbxScriptSignal added))
                         {
                             added.Fire(nodes[nodeIndex]);
                         }
                     }
-                    else if (_removedSignals.TryGetValue(tag, out RbxScriptSignal removed))
+                    else
                     {
-                        removed.Fire(nodes[nodeIndex]);
+                        if (RemoveInTreeHolder(tag))
+                        {
+                            _tagRemoved.Fire(tag);
+                        }
+
+                        if (_removedSignals.TryGetValue(tag, out RbxScriptSignal removed))
+                        {
+                            removed.Fire(nodes[nodeIndex]);
+                        }
                     }
+                }
+            }
+        }
+
+        /// <summary>Counts one more holder of the tag inside the DataModel; true when it is the
+        /// first.</summary>
+        private bool AddInTreeHolder(string tag)
+        {
+            _inTreeHolderCounts.TryGetValue(tag, out int count);
+            _inTreeHolderCounts[tag] = count + 1;
+            return count == 0;
+        }
+
+        /// <summary>Counts one fewer holder of the tag inside the DataModel; true when it was the
+        /// last.</summary>
+        private bool RemoveInTreeHolder(string tag)
+        {
+            if (!_inTreeHolderCounts.TryGetValue(tag, out int count))
+            {
+                return false;
+            }
+
+            if (count <= 1)
+            {
+                _inTreeHolderCounts.Remove(tag);
+                return true;
+            }
+
+            _inTreeHolderCounts[tag] = count - 1;
+            return false;
+        }
+
+        /// <summary>Fills <paramref name="counts"/> with the number of live holders of each tag
+        /// inside the DataModel; tags no in-tree instance carries are left out.</summary>
+        private static void CountInTreeHolders(InstanceRegistry registry, Dictionary<string, int> counts)
+        {
+            counts.Clear();
+            IReadOnlyList<string> tags = registry.Tags.GetAllTags();
+            for (int tagIndex = 0; tagIndex < tags.Count; tagIndex++)
+            {
+                IReadOnlyList<InstanceId> holders = registry.Tags.GetTagged(tags[tagIndex]);
+                int inTree = 0;
+                for (int holderIndex = 0; holderIndex < holders.Count; holderIndex++)
+                {
+                    if (registry.TryGet(holders[holderIndex], out RbxInstance holder)
+                        && !holder.IsDestroyed
+                        && registry.IsInScene(holder))
+                    {
+                        inTree++;
+                    }
+                }
+
+                if (inTree > 0)
+                {
+                    counts.Add(tags[tagIndex], inTree);
                 }
             }
         }

@@ -1,6 +1,12 @@
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Instances;
+#if UNITY_5_3_OR_NEWER
+using CoreAI.Mods.Rbx.Spatial;
+#endif
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
@@ -145,6 +151,112 @@ namespace CoreAI.Tests.EditMode.RbxApi.Datatypes
             CollectionAssert.AreEquivalent(Enumerable.Range(1, 20).ToList(), first);
             CollectionAssert.AreNotEqual(Enumerable.Range(1, 20).ToList(), first,
                 "20 elements shuffling to identity would indicate a broken generator");
+        }
+
+        [Test]
+        public void EmptyIntervalErrorText_IsCultureInvariant()
+        {
+            RbxRandom rng = new(1);
+            RbxApiStubException numberError = null;
+            RbxApiStubException integerError = null;
+            RunUnderCommaDecimalCulture(() =>
+            {
+                numberError = Assert.Throws<RbxApiStubException>(() => rng.NextNumber(2.5, 1.5));
+                integerError = Assert.Throws<RbxApiStubException>(() => rng.NextInteger(-3, -5));
+            });
+
+            StringAssert.Contains("got min=2.5, max=1.5", numberError.Message,
+                "the self-repair numbers must read the same under every host locale");
+            StringAssert.DoesNotContain("2,5", numberError.Message);
+            StringAssert.Contains("got min=-3, max=-5", integerError.Message);
+        }
+
+        [Test]
+        public void RaycastLengthRefusalText_IsCultureInvariant()
+        {
+            RbxWorldPhysics physics = new(new InstanceRegistry());
+            RbxError error = null;
+            RunUnderCommaDecimalCulture(() =>
+            {
+                error = Assert.Throws<RbxError>(() => physics.Raycast(
+                    new RbxVector3(0f, 0f, 0f), new RbxVector3(15000.5f, 0f, 0f), null));
+            });
+
+            Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
+            StringAssert.Contains("direction length 15000.5 studs", error.RawMessage,
+                "the refused length must read the same under every host locale");
+            StringAssert.Contains("maximum of 15000 studs", error.RawMessage);
+            StringAssert.DoesNotContain("15000,5", error.RawMessage);
+        }
+
+#if UNITY_5_3_OR_NEWER
+        [Test]
+        public void RbxSpaceScaleConflictText_IsCultureInvariant()
+        {
+            RbxSpace.ResetForTests();
+            try
+            {
+                RbxSpace.Configure(1.5f);
+                InvalidOperationException error = null;
+                RunUnderCommaDecimalCulture(() =>
+                {
+                    error = Assert.Throws<InvalidOperationException>(() => RbxSpace.Configure(0.28f));
+                });
+
+                StringAssert.Contains("configured to 1.5 m/stud", error.Message,
+                    "the configured scale must read the same under every host locale");
+                StringAssert.DoesNotContain("1,5", error.Message);
+            }
+            finally
+            {
+                RbxSpace.ResetForTests();
+            }
+        }
+#endif
+
+        /// <summary>
+        /// Runs <paramref name="action"/> with a current culture whose decimal separator is a
+        /// comma and restores the previous culture afterwards, whatever the action does.
+        /// </summary>
+        private static void RunUnderCommaDecimalCulture(Action action)
+        {
+            CultureInfo saved = CultureInfo.CurrentCulture;
+            try
+            {
+                CultureInfo.CurrentCulture = CommaDecimalCulture();
+                Assert.AreEqual(",", CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator,
+                    "the check is only meaningful under a comma-decimal culture");
+                action();
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = saved;
+            }
+        }
+
+        /// <summary>
+        /// de-DE where the runtime carries culture data; otherwise a clone of the invariant
+        /// culture with a comma decimal separator, so the check never silently runs under '.'.
+        /// </summary>
+        private static CultureInfo CommaDecimalCulture()
+        {
+            try
+            {
+                CultureInfo german = CultureInfo.GetCultureInfo("de-DE");
+                if (german.NumberFormat.NumberDecimalSeparator == ",")
+                {
+                    return german;
+                }
+            }
+            catch (CultureNotFoundException)
+            {
+                // WHY: a runtime in invariant-globalization mode has no de-DE data; the clone
+                // below still yields a comma culture.
+            }
+
+            CultureInfo comma = (CultureInfo)new CultureInfo("").Clone();
+            comma.NumberFormat.NumberDecimalSeparator = ",";
+            return comma;
         }
     }
 }

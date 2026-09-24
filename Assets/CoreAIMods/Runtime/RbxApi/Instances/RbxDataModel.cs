@@ -1,5 +1,3 @@
-using System;
-
 namespace CoreAI.Mods.Rbx.Instances
 {
     /// <summary>
@@ -46,14 +44,14 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private void RegisterTreeService(string serviceName)
         {
-            foreach (RbxInstance child in GetChildren())
+            // WHY FindFirstChildOfClass rather than a walk over GetChildren: this runs on every
+            // GetService/FindService, and GetChildren copies the child list on each call. The class
+            // catalog maps one class name to one descriptor, so the first child of the requested
+            // class is the service child or there is none.
+            RbxInstance child = FindFirstChildOfClass(serviceName);
+            if (child != null && child.Descriptor.IsService)
             {
-                if (string.Equals(child.ClassName, serviceName, StringComparison.Ordinal)
-                    && child.Descriptor.IsService)
-                {
-                    Services.Register(serviceName, child);
-                    return;
-                }
+                Services.Register(serviceName, child);
             }
         }
 

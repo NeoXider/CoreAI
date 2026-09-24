@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using CoreAI.Mods.Rbx.Datatypes;
 
 namespace CoreAI.Mods.Rbx.Instances
@@ -201,9 +202,10 @@ namespace CoreAI.Mods.Rbx.Instances
             if (length > MaxRayLengthStuds)
             {
                 throw RbxError.BadArgument(
-                    "WorldRoot:Raycast direction length " + length.ToString("0.###")
-                    + " studs exceeds the maximum of " + MaxRayLengthStuds.ToString("0")
-                    + " studs",
+                    "WorldRoot:Raycast direction length "
+                    + length.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " studs exceeds the maximum of "
+                    + MaxRayLengthStuds.ToString("0", CultureInfo.InvariantCulture) + " studs",
                     "shorten the direction vector; its length is the range that gets tested");
             }
 

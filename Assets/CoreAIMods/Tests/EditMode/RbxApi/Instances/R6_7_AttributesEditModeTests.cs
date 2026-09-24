@@ -78,6 +78,87 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         }
 
         [Test]
+        public void R6_7_NonAsciiAttributeName_IsRefusedForANewName()
+        {
+            // WHY escapes: the subject is non-ASCII input, and escapes keep the source ASCII so the
+            // English-only prose guard has nothing to excuse. The four cover a Cyrillic word, an
+            // Arabic-Indic digit, a Latin-1 letter and a full-width Latin letter; char.IsLetterOrDigit
+            // accepts every one of them, the mirror rule none.
+            string[] nonAsciiNames =
+            {
+                "\u0417\u0434\u043E\u0440\u043E\u0432\u044C\u0435",
+                "Level\u0663",
+                "Caf\u00E9",
+                "\uFF28\uFF50"
+            };
+            foreach (string name in nonAsciiNames)
+            {
+                RbxError error = Assert.Throws<RbxError>(() => AttributeContract.ValidateNewName(name),
+                    "a new attribute name must use ASCII letters and digits only: " + name);
+                Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
+                StringAssert.Contains("non-ASCII", error.RawMessage);
+                StringAssert.Contains("ASCII letters", error.Message);
+            }
+
+            RbxError cyrillic = Assert.Throws<RbxError>(
+                () => AttributeContract.ValidateNewName(nonAsciiNames[0]));
+            StringAssert.Contains("(U+0417)", cyrillic.RawMessage,
+                "the first offending character is named by code point, readable in any log font");
+        }
+
+        [Test]
+        public void R6_7_NewNameRule_KeepsEveryOtherLimitAndAcceptsAsciiNames()
+        {
+            Assert.DoesNotThrow(() => AttributeContract.ValidateNewName("ok.name-with/underscore_1"));
+            Assert.DoesNotThrow(() => AttributeContract.ValidateNewName("Health"));
+            Assert.DoesNotThrow(() => AttributeContract.ValidateNewName(new string('a', 100)));
+            Assert.Throws<RbxError>(() => AttributeContract.ValidateNewName(null));
+            Assert.Throws<RbxError>(() => AttributeContract.ValidateNewName(""));
+            Assert.Throws<RbxError>(() => AttributeContract.ValidateNewName("has space"));
+            Assert.Throws<RbxError>(() => AttributeContract.ValidateNewName("bang!"));
+            Assert.Throws<RbxError>(() => AttributeContract.ValidateNewName(new string('a', 101)));
+            RbxError reserved = Assert.Throws<RbxError>(
+                () => AttributeContract.ValidateNewName("RBXInternal"));
+            StringAssert.Contains("RBX", reserved.RawMessage);
+        }
+
+        [Test]
+        public void R6_7_NonAsciiAttributeName_FromAnOlderWorldPackage_StillRestoresReadsAndSaves()
+        {
+            // WHY a hand-built node: it is exactly what a package saved before the ASCII rule holds,
+            // independent of whether today's SetAttribute would still create the name.
+            string legacyName = "\u0417\u0434\u043E\u0440\u043E\u0432\u044C\u0435";
+            InstanceTreeSnapshot snapshot = new();
+            InstanceSnapshot node = new()
+            {
+                Id = 1UL,
+                ClassName = "Folder",
+                Name = "LegacyStats",
+                Archivable = true
+            };
+            node.Attributes.Add(new AttributeSnapshot
+            {
+                Name = legacyName,
+                Kind = AttributeValueKind.Number,
+                NumberValue = 100d
+            });
+            snapshot.Instances.Add(node);
+
+            Assert.DoesNotThrow(() => AttributeContract.ValidateName(legacyName),
+                "the stored-name rule must keep accepting what older packages hold");
+
+            InstanceRegistry target = new();
+            RbxInstance restored = null;
+            Assert.DoesNotThrow(() => restored = InstanceTreeSerializer.Restore(snapshot, target, "local"),
+                "an older world holding a non-ASCII attribute name must still load");
+
+            Assert.AreEqual(100d, restored.GetAttribute(legacyName));
+            InstanceTreeSnapshot saved = InstanceTreeSerializer.Capture(restored);
+            Assert.AreEqual(legacyName, saved.Instances[0].Attributes[0].Name,
+                "a restored world must save again with the name it was loaded with");
+        }
+
+        [Test]
         public void R6_7_UnsupportedValueTypesAreRejectedNamingTheType()
         {
             RbxError error = Assert.Throws<RbxError>(() => _part.SetAttribute("Bad", new object()));
