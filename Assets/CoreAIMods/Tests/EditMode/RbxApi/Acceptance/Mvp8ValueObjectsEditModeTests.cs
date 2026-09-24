@@ -320,6 +320,39 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void Clone_ObjectValueAndPrimaryPartPointAtTheCopiedTargets_OutsideTargetsAreKept()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("clone-a");
+            harness.Stack.Runtime.LoadMod(actor, "clone-refs", @"
+                local outside = Instance.new('Part'); outside.Name = 'Outside'; outside.Parent = workspace
+                local rig = Instance.new('Model'); rig.Name = 'Rig'
+                local root = Instance.new('Part'); root.Name = 'Root'; root.Parent = rig
+                local toRoot = Instance.new('ObjectValue'); toRoot.Name = 'ToRoot'
+                toRoot.Value = root; toRoot.Parent = rig
+                local toOutside = Instance.new('ObjectValue'); toOutside.Name = 'ToOutside'
+                toOutside.Value = outside; toOutside.Parent = rig
+                rig.PrimaryPart = root
+                rig.Parent = workspace
+                local copy = rig:Clone()
+                copy.Name = 'RigCopy'
+                copy.Parent = workspace
+                store_set('inner', tostring(copy.ToRoot.Value == copy.Root))
+                store_set('primary', tostring(copy.PrimaryPart == copy.Root))
+                store_set('outside', tostring(copy.ToOutside.Value == outside))
+                store_set('source', tostring(rig.ToRoot.Value == root and rig.PrimaryPart == root))",
+                persistToStore: false);
+
+            Assert.AreEqual("true", harness.Store.Get("clone-refs", "inner"),
+                "Instance.yaml Clone: an ObjectValue whose target was cloned too points at the copy");
+            Assert.AreEqual("true", harness.Store.Get("clone-refs", "primary"),
+                "a cloned model's PrimaryPart is its own copied part, so PivotTo moves the clone");
+            Assert.AreEqual("true", harness.Store.Get("clone-refs", "outside"),
+                "a target that was not cloned keeps the same value");
+            Assert.AreEqual("true", harness.Store.Get("clone-refs", "source"));
+        }
+
+        [Test]
         public void DatatypeValues_RoundTripThroughLua_WithDefaults()
         {
             using ProductionHarness harness = new ProductionHarness();

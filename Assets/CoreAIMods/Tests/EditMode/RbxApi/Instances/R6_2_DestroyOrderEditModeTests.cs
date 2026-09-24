@@ -152,6 +152,56 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
                 "Destroying fires on the instance before its children are torn down (D6 step 4).");
         }
 
+        [Test]
+        public void Destroy_DescendantAncestryChangedHandlerSeesTheDestroyedRootAndANilParent()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+
+            stack.Runtime.LoadMod("m", @"
+                local model = Instance.new('Model')
+                model.Parent = workspace
+                local arm = Instance.new('Part')
+                arm.Parent = model
+                local deliveries = ''
+                arm.AncestryChanged:Connect(function(child, parent)
+                    deliveries = deliveries .. tostring(rawequal(child, model)) .. ':'
+                        .. tostring(parent == nil) .. ';'
+                    store_set('deliveries', deliveries)
+                end)
+                model:Destroy()");
+
+            roblox.Scheduler.Advance(0d);
+
+            StringAssert.StartsWith("true:true;", store.Get("m", "deliveries"),
+                "Instance.yaml AncestryChanged: a descendant's handler receives the instance whose "
+                + "Parent changed (the destroyed model) and its new parent (nil), so the cleanup idiom "
+                + "'if parent == nil' runs when an ancestor is destroyed.");
+        }
+
+        [Test]
+        public void Destroy_ParentPropertySignalHandlerCanReadItsOwnTombstoneParent()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+
+            stack.Runtime.LoadMod("m", @"
+                local part = Instance.new('Part')
+                part.Parent = workspace
+                part:GetPropertyChangedSignal('Parent'):Connect(function()
+                    store_set('parent', tostring(part.Parent))
+                end)
+                part:Destroy()");
+
+            roblox.Scheduler.Advance(0d);
+
+            Assert.AreEqual("nil", store.Get("m", "parent"),
+                "the Parent change a Destroy makes is queued as a destruction notification, so the "
+                + "handler may read its own instance's Parent instead of dying with INSTANCE_DESTROYED.");
+        }
+
         private static LuaCsModStack BuildStack(LuaCsRbxApiBindings roblox, MemoryStore store)
         {
             return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions

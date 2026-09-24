@@ -6,7 +6,8 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>Attributes per R6.7 (§5.1.8 item 7): set/get/enumerate, nil removes, name
-    /// validation verbatim, unsupported types rejected with BAD_ARGUMENT.</summary>
+    /// validation verbatim, unsupported types rejected with BAD_ARGUMENT, and the per-instance
+    /// attribute limit a saved world keeps.</summary>
     [TestFixture]
     public sealed class R6_7_AttributesEditModeTests
     {
@@ -98,6 +99,43 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             Assert.AreEqual(new RbxVector2(4f, 5f), _part.GetAttribute("Screen"));
             Assert.AreEqual(RbxColor3.FromRGB(255f, 0f, 0f), _part.GetAttribute("Tint"));
             Assert.AreEqual(new RbxUDim(0.5f, 8), _part.GetAttribute("Pad"));
+        }
+
+        [Test]
+        public void R6_7_AddingAnAttributeBeyondTheWorldPackageLimit_RaisesBadArgument()
+        {
+            int limit = InstanceTreeSerializer.MaximumAttributesPerInstance;
+            for (int index = 0; index < limit; index++)
+            {
+                _part.SetAttribute("A" + index, index);
+            }
+
+            RbxError error = Assert.Throws<RbxError>(() => _part.SetAttribute("OneTooMany", 1),
+                "a saved world holds at most " + limit + " attributes per instance, so the live "
+                + "instance must refuse the next one instead of producing a world that cannot be saved");
+
+            Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
+            StringAssert.Contains("OneTooMany", error.RawMessage);
+            Assert.AreEqual(limit, _part.GetAttributes().Count);
+            Assert.IsNull(_part.GetAttribute("OneTooMany"));
+        }
+
+        [Test]
+        public void R6_7_AtTheLimit_ReplacingOrRemovingAnAttributeStillWorks()
+        {
+            int limit = InstanceTreeSerializer.MaximumAttributesPerInstance;
+            for (int index = 0; index < limit; index++)
+            {
+                _part.SetAttribute("A" + index, index);
+            }
+
+            Assert.DoesNotThrow(() => _part.SetAttribute("A0", "replaced"),
+                "replacing an existing attribute does not add one");
+            Assert.AreEqual("replaced", _part.GetAttribute("A0"));
+            Assert.DoesNotThrow(() => _part.SetAttribute("A1", null));
+            Assert.DoesNotThrow(() => _part.SetAttribute("Fresh", true),
+                "removing one attribute frees a slot for a new one");
+            Assert.AreEqual(limit, _part.GetAttributes().Count);
         }
     }
 }

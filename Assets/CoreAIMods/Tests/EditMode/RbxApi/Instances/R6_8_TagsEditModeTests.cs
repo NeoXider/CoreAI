@@ -5,7 +5,7 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>Tags per R6.8 (§5.1.8 item 8): add/remove/has/list on Instance plus the
-    /// CollectionService GetTagged substrate.</summary>
+    /// CollectionService GetTagged substrate, and the per-instance tag limit a saved world keeps.</summary>
     [TestFixture]
     public sealed class R6_8_TagsEditModeTests
     {
@@ -64,6 +64,44 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             RbxInstance part = _registry.Create("Part");
             RbxError error = Assert.Throws<RbxError>(() => part.AddTag(""));
             Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
+        }
+
+        [Test]
+        public void R6_8_AddingATagBeyondTheWorldPackageLimit_RaisesBadArgument()
+        {
+            RbxInstance part = _registry.Create("Part");
+            int limit = InstanceTreeSerializer.MaximumTagsPerInstance;
+            for (int index = 0; index < limit; index++)
+            {
+                part.AddTag("T" + index);
+            }
+
+            RbxError error = Assert.Throws<RbxError>(() => part.AddTag("OneTooMany"),
+                "a saved world holds at most " + limit + " tags per instance, so the live instance "
+                + "must refuse the next one instead of producing a world that cannot be saved");
+
+            Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
+            StringAssert.Contains("OneTooMany", error.RawMessage);
+            Assert.AreEqual(limit, part.GetTags().Count);
+            Assert.IsFalse(part.HasTag("OneTooMany"));
+            Assert.AreEqual(0, _registry.Tags.GetTagged("OneTooMany").Count);
+        }
+
+        [Test]
+        public void R6_8_AtTheLimit_ReAddingAHeldTagStaysIdempotent_AndRemovingOneFreesASlot()
+        {
+            RbxInstance part = _registry.Create("Part");
+            int limit = InstanceTreeSerializer.MaximumTagsPerInstance;
+            for (int index = 0; index < limit; index++)
+            {
+                part.AddTag("T" + index);
+            }
+
+            Assert.DoesNotThrow(() => part.AddTag("T0"), "re-adding a tag the instance holds adds nothing");
+            part.RemoveTag("T1");
+            Assert.DoesNotThrow(() => part.AddTag("Fresh"));
+            Assert.AreEqual(limit, part.GetTags().Count);
+            Assert.IsTrue(part.HasTag("Fresh"));
         }
     }
 }

@@ -18,22 +18,24 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         /// <summary>
-        /// Mirror <c>Changed</c>: "Fires whenever the Value is changed". The mirror is silent
-        /// on assigning the SAME value again, so this slice pins OURS: an equal assignment is
-        /// not a change — nothing fires, no revision advances (same guard as
+        /// Mirror <c>Changed</c>: "Fires whenever the Value is changed", with the new value. It
+        /// replaces <see cref="RbxInstance.Changed"/>: a Name or Parent change does not fire it
+        /// (Object.yaml), only that property's <c>GetPropertyChangedSignal</c> does. The mirror is
+        /// silent on assigning the SAME value again, so this slice pins OURS: an equal assignment
+        /// is not a change — nothing fires, no revision advances (same guard as
         /// <c>Name</c>/<c>Archivable</c>).
         /// </summary>
-        public RbxScriptSignal Changed => GetOrCreateSignal("Changed");
+        public new RbxScriptSignal Changed => GetOrCreateSignal("Changed");
 
         /// <summary>Fires <see cref="Changed"/> and the property signal after a real change.</summary>
         protected void FireValueChanged(object newValue)
         {
             Registry?.AdvanceRevision(Id, ReplicationMembers.Value);
             FireSignal("Changed", newValue);
-            FireSignal("GetPropertyChangedSignal(Value)");
+            NotifyPropertyChanged(ReplicationMembers.Value);
         }
 
-        /// <summary>Copies the payload into a <see cref="RbxInstance.Clone"/> copy.</summary>
+        /// <summary>Copies the payload into a <see cref="RbxInstance.Clone()"/> copy.</summary>
         protected internal override void CopyCustomStateTo(RbxInstance copy)
         {
             if (copy is RbxValueBase valueCopy)
@@ -111,8 +113,9 @@ namespace CoreAI.Mods.Rbx.Instances
 
     /// <summary>
     /// Mirror <c>NumberValue</c>: a double-precision float (serializable). Non-finite values are
-    /// held in memory and rejected at save time by the world package ("non-finite values are
-    /// rejected"). Default 0 (OURS — the mirror does not specify defaults).
+    /// held in memory; a world capture saves 0 in their place and records a non-finite-value
+    /// diagnostic, so saves and autosaves never fail on them. Default 0 (OURS — the mirror does
+    /// not specify defaults).
     /// </summary>
     public sealed class RbxNumberValue : RbxValueBase
     {
@@ -271,8 +274,8 @@ namespace CoreAI.Mods.Rbx.Instances
     /// <summary>
     /// Mirror <c>ObjectValue</c>: a reference to another instance, or nil (serializable as the
     /// target id; 0 means nil). A package whose target id is outside the package is rejected.
-    /// Default nil. Clone copies the reference as-is (OURS — Studio remaps references covered
-    /// by the duplicate; the engine-free Clone has no duplicate set to remap against).
+    /// Default nil. Clone follows the mirror's reference rule: a target cloned in the same call
+    /// becomes the target's copy, any other target is kept as-is.
     /// </summary>
     public sealed class RbxObjectValue : RbxValueBase
     {
@@ -309,6 +312,11 @@ namespace CoreAI.Mods.Rbx.Instances
         protected override void CopyValueTo(RbxValueBase copy)
         {
             ((RbxObjectValue)copy).SetValueSilent(_value);
+        }
+
+        private protected override void RemapClonedReferences(in CloneReferenceMap map)
+        {
+            _value = map.Resolve(_value);
         }
 
         internal void SetValueSilent(RbxInstance value)

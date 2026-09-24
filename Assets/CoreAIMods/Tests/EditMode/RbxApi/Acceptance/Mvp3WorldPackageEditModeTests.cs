@@ -1315,14 +1315,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             InstanceRegistry registry = new();
             RbxInstance root = registry.Create("Folder");
             RbxInstance parent = root;
-            for (int depth = 1; depth <= InstanceTreeSerializer.MaximumSnapshotDepth; depth++)
+            for (int depth = 1; depth < InstanceTreeSerializer.MaximumSnapshotDepth; depth++)
             {
                 RbxInstance child = registry.Create("Folder");
                 child.Parent = parent;
                 parent = child;
             }
 
-            Assert.Throws<RbxError>(() => InstanceTreeSerializer.Capture(root));
+            Assert.DoesNotThrow(() => InstanceTreeSerializer.Capture(root),
+                "a live tree at the depth cap must stay capturable");
+            RbxInstance tooDeep = registry.Create("Folder");
+            Assert.Throws<RbxError>(() => tooDeep.Parent = parent,
+                "the live tree refuses the parenting that capture could not serialize");
+            Assert.IsNull(tooDeep.Parent);
         }
 
         [Test]

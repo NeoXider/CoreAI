@@ -8,8 +8,9 @@ using UnityEngine;
 namespace CoreAI.Tests.EditMode.RbxApi.Instances
 {
     /// <summary>Clone per R6.5/D8 (§5.1.8 item 5): deep copy, Archivable rules, fresh ids,
-    /// attributes and tags copy, clone parent is nil, and (finding 3) BasePart backing state
-    /// copies through the IInstanceBackingBinder.CopyBackingState seam.</summary>
+    /// attributes and tags copy, clone parent is nil, (finding 3) BasePart backing state
+    /// copies through the IInstanceBackingBinder.CopyBackingState seam, reference properties
+    /// follow the mirror's clone rule, and the DataModel and services are never copied.</summary>
     [TestFixture]
     public sealed class R6_5_CloneEditModeTests
     {
@@ -190,6 +191,197 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             Assert.AreEqual(2, _registry.GetLiveInstances().Count);
             Assert.IsFalse(model.IsDestroyed);
             Assert.IsFalse(part.IsDestroyed);
+        }
+
+        [Test]
+        public void R6_5_CloneRemapsPrimaryPartToTheCopiedPart()
+        {
+            RbxModel model = (RbxModel)_registry.Create("Model");
+            RbxInstance root = _registry.Create("Part");
+            RbxInstance other = _registry.Create("Part");
+            root.Name = "Root";
+            other.Name = "Other";
+            root.Parent = model;
+            other.Parent = model;
+            model.SetPrimaryPart(root);
+
+            RbxModel copy = (RbxModel)model.Clone();
+
+            Assert.IsNotNull(copy.PrimaryPart,
+                "Instance.yaml Clone: a reference to an instance that was also cloned points at its copy");
+            Assert.AreSame(copy.FindFirstChild("Root"), copy.PrimaryPart);
+            Assert.AreSame(root, model.PrimaryPart, "the source keeps its own PrimaryPart");
+        }
+
+        [Test]
+        public void R6_5_PrimaryPartThatWasNotCloned_KeepsTheSameValue()
+        {
+            RbxModel model = (RbxModel)_registry.Create("Model");
+            RbxInstance root = _registry.Create("Part");
+            root.Parent = model;
+            root.Archivable = false;
+            model.SetPrimaryPart(root);
+
+            RbxModel copy = (RbxModel)model.Clone();
+
+            Assert.AreEqual(0, copy.GetChildren().Count);
+            Assert.AreSame(root, copy.PrimaryPart,
+                "Instance.yaml Clone: a reference to an instance that was not cloned keeps the same value");
+        }
+
+        [Test]
+        public void R6_5_CloneKeepsAnExplicitWorldPivot()
+        {
+            RbxModel model = (RbxModel)_registry.Create("Model");
+            RbxCFrame pivot = RbxCFrame.FromPosition(new RbxVector3(1f, 2f, 3f));
+            model.SetWorldPivot(pivot);
+
+            RbxModel copy = (RbxModel)model.Clone();
+
+            Assert.IsTrue(copy.HasStoredWorldPivot,
+                "a clone that forgets the stored pivot pivots around its bounding box instead");
+            Assert.AreEqual(pivot, copy.StoredWorldPivot);
+        }
+
+        [Test]
+        public void R6_5_CloneOfAModelWithoutAStoredPivotOrPrimaryPart_StaysUnset()
+        {
+            RbxModel model = (RbxModel)_registry.Create("Model");
+            RbxInstance part = _registry.Create("Part");
+            part.Parent = model;
+
+            RbxModel copy = (RbxModel)model.Clone();
+
+            Assert.IsFalse(copy.HasStoredWorldPivot);
+            Assert.IsNull(copy.PrimaryPart);
+        }
+
+        [Test]
+        public void R6_5_CloneRemapsObjectValuesInsideTheClonedSubtree_AndKeepsOutsideReferences()
+        {
+            RbxInstance folder = _registry.Create("Folder");
+            RbxInstance inner = _registry.Create("Part");
+            RbxInstance outside = _registry.Create("Part");
+            inner.Name = "Inner";
+            inner.Parent = folder;
+            RbxObjectValue toInner = NamedObjectValue("ToInner", folder, inner);
+            RbxObjectValue toRoot = NamedObjectValue("ToRoot", folder, folder);
+            NamedObjectValue("ToOutside", folder, outside);
+            NamedObjectValue("Empty", folder, null);
+
+            RbxInstance copy = folder.Clone();
+
+            Assert.AreSame(copy.FindFirstChild("Inner"), ObjectValueTarget(copy, "ToInner"),
+                "Instance.yaml Clone: a reference to an instance that was also cloned points at its copy");
+            Assert.AreSame(copy, ObjectValueTarget(copy, "ToRoot"));
+            Assert.AreSame(outside, ObjectValueTarget(copy, "ToOutside"),
+                "a reference to an instance that was not cloned keeps the same value");
+            Assert.IsNull(ObjectValueTarget(copy, "Empty"));
+            Assert.AreSame(inner, toInner.Value, "the source keeps pointing at its own target");
+            Assert.AreSame(folder, toRoot.Value);
+        }
+
+        [Test]
+        public void R6_5_ObjectValuePointingAtItself_ClonePointsAtTheCopy()
+        {
+            RbxObjectValue value = (RbxObjectValue)_registry.Create("ObjectValue");
+            value.Value = value;
+
+            RbxObjectValue copy = (RbxObjectValue)value.Clone();
+
+            Assert.AreSame(copy, copy.Value);
+            Assert.AreSame(value, value.Value);
+        }
+
+        [Test]
+        public void Clone_OfTheDataModelOrAService_ReturnsNull_AndCreatesNoRecords()
+        {
+            RbxDataModel game = DataModelBootstrap.CreateGame(_registry);
+            int recordsBefore = _registry.Count;
+
+            Assert.IsNull(game.Clone(), "a second DataModel would duplicate every service");
+            Assert.IsNull(_registry.WorldRoot.Clone());
+            Assert.IsNull(game.FindFirstChild("Lighting").Clone("mod_a", OriginTag.FromMod("mod_a")));
+            Assert.AreEqual(recordsBefore, _registry.Count);
+        }
+
+        [Test]
+        public void Clone_SkipsAServiceParentedBelowTheClonedRoot()
+        {
+            RbxInstance folder = _registry.Create("Folder");
+            RbxInstance service = _registry.Create("ReplicatedStorage");
+            RbxInstance part = _registry.Create("Part");
+            service.Parent = folder;
+            part.Parent = folder;
+
+            RbxInstance copy = folder.Clone();
+
+            Assert.AreEqual(1, copy.GetChildren().Count, "a service below the cloned root is not copied");
+            Assert.AreEqual("Part", copy.GetChildren()[0].ClassName);
+        }
+
+        [Test]
+        public void Clone_CreatesCopiesInPreorder_AndParentsEachUnderItsOwnParentsCopy()
+        {
+            RbxInstance model = _registry.Create("Model");
+            RbxInstance a = _registry.Create("Folder");
+            RbxInstance a1 = _registry.Create("Part");
+            RbxInstance b = _registry.Create("Part");
+            a.Name = "A";
+            a1.Name = "A1";
+            b.Name = "B";
+            a.Parent = model;
+            a1.Parent = a;
+            b.Parent = model;
+
+            RbxInstance copy = model.Clone();
+
+            RbxInstance copyA = copy.FindFirstChild("A");
+            RbxInstance copyA1 = copyA.FindFirstChild("A1");
+            RbxInstance copyB = copy.FindFirstChild("B");
+            Assert.AreSame(copyA, copy.GetChildren()[0], "sibling order survives the copy");
+            Assert.AreSame(copyB, copy.GetChildren()[1]);
+            Assert.Less(copy.Id.Value, copyA.Id.Value, "copies are created in preorder");
+            Assert.Less(copyA.Id.Value, copyA1.Id.Value);
+            Assert.Less(copyA1.Id.Value, copyB.Id.Value);
+        }
+
+        [Test]
+        public void Clone_FailureDeepInTheSubtree_DestroysEveryCopyMadeSoFar()
+        {
+            RbxInstance model = _registry.Create("Model");
+            RbxInstance folder = _registry.Create("Folder");
+            RbxInstance first = _registry.Create("Part");
+            RbxInstance failing = _registry.Create("Part");
+            RbxInstance after = _registry.Create("Part");
+            folder.Parent = model;
+            first.Parent = folder;
+            failing.Parent = folder;
+            after.Parent = model;
+            int liveBefore = _registry.GetLiveInstances().Count;
+            _binder.FailForSource = failing.Id;
+
+            Assert.Throws<InvalidOperationException>(() => model.Clone());
+
+            Assert.AreEqual(liveBefore, _registry.GetLiveInstances().Count,
+                "the copies of Model, Folder, First and the failing part itself are all destroyed");
+            Assert.IsFalse(model.IsDestroyed);
+            Assert.IsFalse(failing.IsDestroyed);
+            Assert.AreEqual(2, model.GetChildren().Count);
+        }
+
+        private RbxObjectValue NamedObjectValue(string name, RbxInstance parent, RbxInstance target)
+        {
+            RbxObjectValue value = (RbxObjectValue)_registry.Create("ObjectValue");
+            value.Name = name;
+            value.Value = target;
+            value.Parent = parent;
+            return value;
+        }
+
+        private static RbxInstance ObjectValueTarget(RbxInstance root, string name)
+        {
+            return ((RbxObjectValue)root.FindFirstChild(name)).Value;
         }
 
         /// <summary>Test double standing in for InstanceGameObjectBinder: stores BasePart state
