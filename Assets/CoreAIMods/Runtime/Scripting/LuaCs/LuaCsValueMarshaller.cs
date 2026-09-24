@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using CoreAI.Scripting;
 using Lua;
 
@@ -268,27 +269,27 @@ namespace CoreAI.Scripting.LuaCs
 
             if (targetType == typeof(double))
             {
-                return value.Read<double>();
+                return ReadNumberArgument(value);
             }
 
             if (targetType == typeof(float))
             {
-                return (float)value.Read<double>();
+                return (float)ReadNumberArgument(value);
             }
 
             if (targetType == typeof(int))
             {
-                return Convert.ToInt32(value.Read<double>());
+                return (int)ReadIntegerArgument(value, int.MinValue, int.MaxValue);
             }
 
             if (targetType == typeof(long))
             {
-                return Convert.ToInt64(value.Read<double>());
+                return ReadIntegerArgument(value, long.MinValue, long.MaxValue);
             }
 
             if (targetType.IsEnum)
             {
-                return Enum.ToObject(targetType, Convert.ToInt32(value.Read<double>()));
+                return Enum.ToObject(targetType, (int)ReadIntegerArgument(value, int.MinValue, int.MaxValue));
             }
 
             object obj = value.Read<object>();
@@ -296,19 +297,413 @@ namespace CoreAI.Scripting.LuaCs
         }
 
         /// <summary>
-        /// Reads a script argument given for a string parameter: a string as it is, a number as the text
-        /// Lua's <c>tostring</c> gives it; any other kind throws the engine's conversion failure.
+        /// Reads a script argument given for a string parameter by <see cref="TryCoerceString"/>; any other
+        /// kind throws the engine's conversion failure, which the caller words as Lua's "bad argument".
         /// </summary>
-        /// <remarks>
-        /// WHY a number is accepted: Lua itself coerces a number where its library expects a string
-        /// (<c>luaL_checklstring</c>), so <c>store_set(7, 8)</c> must store "7" = "8" rather than fail with
-        /// an error real Lua never raises (B2-12). WHY <see cref="LuaValue.ToString()"/>: it is the
-        /// engine's own formatting behind <c>tostring</c>, so the text is exactly what
-        /// <c>tostring(n)</c> gives the script for the same number.
-        /// </remarks>
         internal static string ReadStringArgument(LuaValue value)
         {
-            return value.Type == LuaValueType.Number ? value.ToString() : value.Read<string>();
+            return TryCoerceString(value, out string text) ? text : value.Read<string>();
+        }
+
+        // ---- Argument coercion: the one rule set every script surface reads parameters by ----------
+
+        /// <summary>
+        /// Luau's string-parameter rule (<c>luaL_checklstring</c> over <c>lua_tolstring</c>): a string as it
+        /// is and a number as the text <c>tostring</c> gives it. Every other kind, a boolean included, is
+        /// false: Luau converts only numbers, and the caller refuses the rest with its own error text.
+        /// </summary>
+        /// <remarks>
+        /// WHY a number is accepted: Luau and Roblox convert it (<c>store_set(7, 8)</c> stores "7",
+        /// <c>player:Kick(42)</c> kicks with "42", <c>part.Name = 5</c> names the part "5"), so a script
+        /// that relies on it must behave the same here (B2-12, RBX-COERCE). WHY
+        /// <see cref="LuaValue.ToString()"/>: it is the VM's own formatting behind <c>tostring</c>, so the
+        /// text is exactly what <c>tostring(n)</c> gives the script for the same number.
+        /// </remarks>
+        internal static bool TryCoerceString(LuaValue value, out string text)
+        {
+            switch (value.Type)
+            {
+                case LuaValueType.String:
+                    text = value.Read<string>();
+                    return true;
+                case LuaValueType.Number:
+                    text = value.ToString();
+                    return true;
+                default:
+                    text = null;
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Luau's number-parameter rule (<c>luaL_checknumber</c> over <c>lua_tonumberx</c>): a number as it
+        /// is and a string <c>tonumber</c> would accept (<see cref="TryParseNumber"/>). Every other kind is
+        /// false. NaN and infinities pass through; a member that refuses them checks the number itself.
+        /// </summary>
+        internal static bool TryCoerceNumber(LuaValue value, out double number)
+        {
+            if (value.Type == LuaValueType.Number)
+            {
+                number = value.Read<double>();
+                return true;
+            }
+
+            if (value.Type == LuaValueType.String)
+            {
+                return TryParseNumber(value.Read<string>(), out number);
+            }
+
+            number = 0d;
+            return false;
+        }
+
+        /// <summary>
+        /// Luau's integer-parameter rule (<c>luaL_checkinteger</c>): <see cref="TryCoerceNumber"/>, then the
+        /// fraction truncated toward zero, as Luau's <c>(int)</c> cast does. NaN and a value outside
+        /// [<paramref name="minimum"/>, <paramref name="maximum"/>] are false: the cast is undefined in C
+        /// for them, so they are refused instead of wrapping to an arbitrary integer.
+        /// </summary>
+        internal static bool TryCoerceInteger(LuaValue value, long minimum, long maximum, out long integer)
+        {
+            integer = 0L;
+            if (!TryCoerceNumber(value, out double number) || double.IsNaN(number))
+            {
+                return false;
+            }
+
+            double truncated = Math.Truncate(number);
+            // WHY 2^63 as a literal bound: (double)long.MaxValue rounds up to 2^63, which no long holds.
+            if (truncated < -9223372036854775808d || truncated >= 9223372036854775808d)
+            {
+                return false;
+            }
+
+            long whole = (long)truncated;
+            if (whole < minimum || whole > maximum)
+            {
+                return false;
+            }
+
+            integer = whole;
+            return true;
+        }
+
+        /// <summary>
+        /// Parses a string the way Luau's <c>tonumber</c> does (<c>luaO_str2d</c>: C <c>strtod</c>, then a
+        /// base-16 retry): optional surrounding C whitespace and sign; a decimal with optional point and
+        /// exponent (<c>"5"</c>, <c>".5"</c>, <c>"1e3"</c>); a <c>0x</c> hexadecimal with optional fraction
+        /// and binary exponent (<c>" 0x10 "</c>, <c>"0x1p4"</c>); <c>inf</c>, <c>infinity</c> or <c>nan</c>
+        /// in any case. An out-of-range decimal becomes an infinity, as <c>strtod</c> answers it.
+        /// </summary>
+        internal static bool TryParseNumber(string text, out double number)
+        {
+            number = 0d;
+            if (text == null)
+            {
+                return false;
+            }
+
+            int start = 0;
+            int end = text.Length;
+            while (start < end && IsCSpace(text[start]))
+            {
+                start++;
+            }
+
+            while (end > start && IsCSpace(text[end - 1]))
+            {
+                end--;
+            }
+
+            if (start == end)
+            {
+                return false;
+            }
+
+            bool negative = text[start] == '-';
+            if (negative || text[start] == '+')
+            {
+                start++;
+            }
+
+            double magnitude;
+            if (end - start >= 2 && text[start] == '0' && (text[start + 1] == 'x' || text[start + 1] == 'X'))
+            {
+                if (!TryParseHexadecimal(text, start + 2, end, out magnitude))
+                {
+                    return false;
+                }
+            }
+            else if (!TryParseNamedNumber(text, start, end, out magnitude)
+                     && !TryParseDecimal(text, start, end, out magnitude))
+            {
+                return false;
+            }
+
+            number = negative ? -magnitude : magnitude;
+            return true;
+        }
+
+        private static double ReadNumberArgument(LuaValue value)
+        {
+            if (TryCoerceNumber(value, out double number))
+            {
+                return number;
+            }
+
+            throw new ArgumentException("number expected");
+        }
+
+        private static long ReadIntegerArgument(LuaValue value, long minimum, long maximum)
+        {
+            if (TryCoerceInteger(value, minimum, maximum, out long integer))
+            {
+                return integer;
+            }
+
+            throw new ArgumentException("number has no integer representation");
+        }
+
+        /// <summary>C's <c>isspace</c> in the "C" locale, which <c>strtod</c> and Luau skip.</summary>
+        private static bool IsCSpace(char c)
+        {
+            return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
+        }
+
+        private static bool TryParseNamedNumber(string text, int start, int end, out double magnitude)
+        {
+            magnitude = 0d;
+            int length = end - start;
+            if (length == 3 && string.Compare(text, start, "inf", 0, 3, StringComparison.OrdinalIgnoreCase) == 0
+                || length == 8
+                && string.Compare(text, start, "infinity", 0, 8, StringComparison.OrdinalIgnoreCase) == 0)
+            {
+                magnitude = double.PositiveInfinity;
+                return true;
+            }
+
+            if (length < 3 || string.Compare(text, start, "nan", 0, 3, StringComparison.OrdinalIgnoreCase) != 0)
+            {
+                return false;
+            }
+
+            // WHY "nan(chars)" too: strtod takes an optional parenthesised payload of letters, digits
+            // and underscores after "nan", and Luau's tonumber accepts whatever strtod consumed.
+            if (length > 3)
+            {
+                if (text[start + 3] != '(' || text[end - 1] != ')')
+                {
+                    return false;
+                }
+
+                for (int index = start + 4; index < end - 1; index++)
+                {
+                    char c = text[index];
+                    if (!(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_'))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            magnitude = double.NaN;
+            return true;
+        }
+
+        private static bool TryParseDecimal(string text, int start, int end, out double magnitude)
+        {
+            magnitude = 0d;
+            int index = start;
+            int digits = 0;
+            while (index < end && text[index] >= '0' && text[index] <= '9')
+            {
+                index++;
+                digits++;
+            }
+
+            if (index < end && text[index] == '.')
+            {
+                index++;
+                while (index < end && text[index] >= '0' && text[index] <= '9')
+                {
+                    index++;
+                    digits++;
+                }
+            }
+
+            if (digits == 0)
+            {
+                return false;
+            }
+
+            if (index < end && (text[index] == 'e' || text[index] == 'E'))
+            {
+                index++;
+                if (index < end && (text[index] == '+' || text[index] == '-'))
+                {
+                    index++;
+                }
+
+                int exponentDigits = 0;
+                while (index < end && text[index] >= '0' && text[index] <= '9')
+                {
+                    index++;
+                    exponentDigits++;
+                }
+
+                if (exponentDigits == 0)
+                {
+                    return false;
+                }
+            }
+
+            if (index != end)
+            {
+                return false;
+            }
+
+            if (double.TryParse(text.Substring(start, end - start),
+                    NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent,
+                    CultureInfo.InvariantCulture, out magnitude))
+            {
+                return true;
+            }
+
+            // WHY: the grammar above already matched, so the only failure left is an exponent too large
+            // for a double, which Mono's parser refuses and strtod answers with HUGE_VAL.
+            magnitude = double.PositiveInfinity;
+            return true;
+        }
+
+        private static bool TryParseHexadecimal(string text, int start, int end, out double magnitude)
+        {
+            magnitude = 0d;
+            ulong mantissa = 0UL;
+            int binaryExponent = 0;
+            bool anyDigit = false;
+            bool droppedNonZero = false;
+            int index = start;
+            bool inFraction = false;
+            while (index < end)
+            {
+                char c = text[index];
+                if (c == '.' && !inFraction)
+                {
+                    inFraction = true;
+                    index++;
+                    continue;
+                }
+
+                int digit = HexDigit(c);
+                if (digit < 0)
+                {
+                    break;
+                }
+
+                anyDigit = true;
+                // WHY 2^56: sixteen times it plus a digit stays below 2^63, so the long-to-double conversion
+                // below is exact hardware rounding; later digits only scale the value or set the sticky bit.
+                if (mantissa < 1UL << 56)
+                {
+                    mantissa = mantissa * 16UL + (ulong)digit;
+                    if (inFraction)
+                    {
+                        binaryExponent -= 4;
+                    }
+                }
+                else
+                {
+                    droppedNonZero |= digit != 0;
+                    if (!inFraction)
+                    {
+                        binaryExponent += 4;
+                    }
+                }
+
+                index++;
+            }
+
+            if (!anyDigit)
+            {
+                return false;
+            }
+
+            if (index < end && (text[index] == 'p' || text[index] == 'P'))
+            {
+                index++;
+                bool negativeExponent = index < end && text[index] == '-';
+                if (index < end && (text[index] == '+' || text[index] == '-'))
+                {
+                    index++;
+                }
+
+                int exponent = 0;
+                int exponentDigits = 0;
+                while (index < end && text[index] >= '0' && text[index] <= '9')
+                {
+                    exponent = Math.Min(exponent * 10 + (text[index] - '0'), 100000);
+                    index++;
+                    exponentDigits++;
+                }
+
+                if (exponentDigits == 0)
+                {
+                    return false;
+                }
+
+                binaryExponent += negativeExponent ? -exponent : exponent;
+            }
+
+            if (index != end)
+            {
+                return false;
+            }
+
+            if (droppedNonZero)
+            {
+                mantissa |= 1UL;
+            }
+
+            magnitude = ScaleByPowerOfTwo((long)mantissa, binaryExponent);
+            return true;
+        }
+
+        private static int HexDigit(char c)
+        {
+            if (c >= '0' && c <= '9')
+            {
+                return c - '0';
+            }
+
+            if (c >= 'a' && c <= 'f')
+            {
+                return c - 'a' + 10;
+            }
+
+            if (c >= 'A' && c <= 'F')
+            {
+                return c - 'A' + 10;
+            }
+
+            return -1;
+        }
+
+        private static double ScaleByPowerOfTwo(long mantissa, int exponent)
+        {
+            double value = mantissa;
+            while (exponent > 1000)
+            {
+                value *= Math.Pow(2d, 1000);
+                exponent -= 1000;
+            }
+
+            while (exponent < -1000)
+            {
+                value *= Math.Pow(2d, -1000);
+                exponent += 1000;
+            }
+
+            return value * Math.Pow(2d, exponent);
         }
 
         private static bool IsNumericType(Type type)

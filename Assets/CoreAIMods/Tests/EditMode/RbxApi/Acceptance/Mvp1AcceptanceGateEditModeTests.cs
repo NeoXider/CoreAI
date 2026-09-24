@@ -675,8 +675,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [Test]
         public void MethodArgumentErrors_NumberArgumentsWithoutSelf_PropertyWritesNameTheProperty()
         {
-            // WHY (M1-07): readers named `index + 1`, counting self, so `p:SetAttribute(5, true)`
+            // WHY (M1-07): readers named `index + 1`, counting self, so `p:SetAttribute(true, true)`
             // blamed argument 2 — the value — and a property write named an argument it has none of.
+            // The mistakes are booleans: a number is a valid string argument (RBX-COERCE).
             _world.Stack.Runtime.LoadMod("positions", @"
                 local p = Instance.new('Part')
                 p.Parent = workspace
@@ -685,13 +686,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     local ok, err = pcall(action)
                     store_set(label, tostring(ok) .. '|' .. tostring(err))
                 end
-                try('findFirstChild', function() return p:FindFirstChild(5) end)
-                try('setAttribute', function() p:SetAttribute(5, true) end)
+                try('findFirstChild', function() return p:FindFirstChild(true) end)
+                try('setAttribute', function() p:SetAttribute(true, true) end)
                 try('addTagInstance', function() tags:AddTag(5, 'x') end)
-                try('addTagName', function() tags:AddTag(p, 5) end)
+                try('addTagName', function() tags:AddTag(p, true) end)
                 try('bindToClose', function() game:BindToClose('later') end)
                 try('debris', function() game:GetService('Debris'):AddItem(p, 'soon') end)
-                try('name', function() p.Name = 5 end)
+                try('name', function() p.Name = true end)
                 try('position', function() p.Position = 'up' end)");
 
             (string Label, string Expected)[] cases =
@@ -702,7 +703,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 ("addTagName", "CollectionService:AddTag expects a string at argument 2"),
                 ("bindToClose", "game:BindToClose expects a function at argument 1"),
                 ("debris", "Debris:AddItem expects a number at argument 2"),
-                ("name", "Part.Name expects a string, got number"),
+                ("name", "Part.Name expects a string, got boolean"),
                 ("position", "Part.Position expects a Vector3, got string")
             };
             foreach ((string label, string expected) in cases)

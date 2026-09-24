@@ -255,9 +255,11 @@ namespace CoreAI.Ai.LuaCs
         public static LuaValue BuildRandomGlobal()
         {
             LuaTable t = new();
-            t["new"] = Fn("Random.new", ctx => Arg(ctx, 0).Type == LuaValueType.Number
-                ? Wrap(new RbxRandom(ClampRandomSeed(ReadDouble(ctx, 0, "Random.new"))))
-                : Wrap(new RbxRandom()));
+            // WHY nil and not "not a number" picks the unseeded generator: the seed is an optional
+            // number, so "7" seeds like 7 and a table is refused instead of silently ignored.
+            t["new"] = Fn("Random.new", ctx => Arg(ctx, 0).Type == LuaValueType.Nil
+                ? Wrap(new RbxRandom())
+                : Wrap(new RbxRandom(ClampRandomSeed(ReadDouble(ctx, 0, "Random.new", 1)))));
             return new LuaValue(t);
         }
 
@@ -419,14 +421,13 @@ namespace CoreAI.Ai.LuaCs
                 return RbxTweenInfo.DefaultTime;
             }
 
-            if (value.Type != LuaValueType.Number)
+            if (!TryCoerceNumber(value, out double time))
             {
                 throw RbxError.BadArgument(
                     "TweenInfo.new expects a number for time at argument 1",
                     "pass a duration in seconds, got " + Describe(value) + " at argument 1");
             }
 
-            double time = value.Read<double>();
             if (double.IsNaN(time) || double.IsInfinity(time))
             {
                 throw RbxError.BadArgument(
@@ -444,14 +445,13 @@ namespace CoreAI.Ai.LuaCs
                 return RbxTweenInfo.DefaultDelayTime;
             }
 
-            if (value.Type != LuaValueType.Number)
+            if (!TryCoerceNumber(value, out double delay))
             {
                 throw RbxError.BadArgument(
                     "TweenInfo.new expects a number for delayTime at argument 6",
                     "pass a delay in seconds, got " + Describe(value) + " at argument 6");
             }
 
-            double delay = value.Read<double>();
             if (double.IsNaN(delay) || double.IsInfinity(delay))
             {
                 throw RbxError.BadArgument(
@@ -513,14 +513,13 @@ namespace CoreAI.Ai.LuaCs
                 return RbxTweenInfo.DefaultRepeatCount;
             }
 
-            if (value.Type != LuaValueType.Number)
+            if (!TryCoerceNumber(value, out double count))
             {
                 throw RbxError.BadArgument(
                     "TweenInfo.new expects a number for repeatCount at argument 4",
                     "pass an integer repeat count, got " + Describe(value) + " at argument 4");
             }
 
-            double count = value.Read<double>();
             if (double.IsNaN(count) || double.IsInfinity(count)
                 || count != Math.Floor(count) || count > int.MaxValue || count < int.MinValue)
             {
@@ -602,26 +601,25 @@ namespace CoreAI.Ai.LuaCs
             meta[Metamethods.Sub] = Fn("Vector3.__sub", ctx => Wrap(
                 ReadVector3(ctx, 0, "Vector3 -") - ReadVector3(ctx, 1, "Vector3 -")));
             meta[Metamethods.Unm] = Fn("Vector3.__unm", ctx => Wrap(-Self3(ctx)));
+            // WHY a numeric string is a scalar operand: Roblox's Vector3 is Luau's native vector,
+            // whose arithmetic converts the other operand with luaV_tonumber, so v * "2" doubles v.
             meta[Metamethods.Mul] = Fn("Vector3.__mul", ctx =>
             {
-                LuaValue a = Arg(ctx, 0);
-                LuaValue b = Arg(ctx, 1);
-                if (a.Type == LuaValueType.Number)
+                if (TryCoerceNumber(Arg(ctx, 0), out double leftScalar))
                 {
-                    return Wrap((float)a.Read<double>() * ReadVector3(ctx, 1, "Vector3 *"));
+                    return Wrap((float)leftScalar * ReadVector3(ctx, 1, "Vector3 *"));
                 }
 
                 RbxVector3 left = ReadVector3(ctx, 0, "Vector3 *");
-                return b.Type == LuaValueType.Number
-                    ? Wrap(left * (float)b.Read<double>())
+                return TryCoerceNumber(Arg(ctx, 1), out double rightScalar)
+                    ? Wrap(left * (float)rightScalar)
                     : Wrap(left * ReadVector3(ctx, 1, "Vector3 *"));
             });
             meta[Metamethods.Div] = Fn("Vector3.__div", ctx =>
             {
                 RbxVector3 left = ReadVector3(ctx, 0, "Vector3 /");
-                LuaValue b = Arg(ctx, 1);
-                return b.Type == LuaValueType.Number
-                    ? Wrap(left / (float)b.Read<double>())
+                return TryCoerceNumber(Arg(ctx, 1), out double scalar)
+                    ? Wrap(left / (float)scalar)
                     : Wrap(left / ReadVector3(ctx, 1, "Vector3 /"));
             });
             meta[Metamethods.Eq] = Fn("Vector3.__eq", ctx =>

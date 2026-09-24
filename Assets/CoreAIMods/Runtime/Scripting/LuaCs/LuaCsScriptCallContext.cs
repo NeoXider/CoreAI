@@ -7,9 +7,11 @@ namespace CoreAI.Scripting.LuaCs
 {
     /// <summary>
     /// Lua-CSharp adapter for <see cref="ScriptCallContext"/> wrapping one
-    /// <see cref="LuaFunctionExecutionContext"/>. Typed accessors mirror the typed-delegate coercion:
+    /// <see cref="LuaFunctionExecutionContext"/>. Typed accessors follow the one argument rule set of
+    /// <see cref="LuaCsValueMarshaller"/>, which the typed-delegate path and the Rbx surface share:
     /// nil/absent maps to null/0/false; a number read as a string becomes the text Lua's <c>tostring</c>
-    /// gives it, as Lua's own library coerces it; any other wrong non-nil kind raises Lua's own
+    /// gives it and a numeric string read as a number is converted like <c>tonumber</c>, as Luau's own
+    /// library coerces them; any other wrong non-nil kind (a boolean included) raises Lua's own
     /// "bad argument #n (x expected, got y)" error (<see cref="LuaCsBadArgumentException"/>), never the
     /// engine's CLR conversion text.
     /// </summary>
@@ -61,12 +63,7 @@ namespace CoreAI.Scripting.LuaCs
                 return null;
             }
 
-            if (value.Type == LuaValueType.Number)
-            {
-                return LuaCsValueMarshaller.ReadStringArgument(value);
-            }
-
-            return value.TryRead(out string text)
+            return LuaCsValueMarshaller.TryCoerceString(value, out string text)
                 ? text
                 : throw LuaCsBadArgumentException.TypeMismatch(index + 1, "string", value);
         }
@@ -80,7 +77,7 @@ namespace CoreAI.Scripting.LuaCs
                 return 0d;
             }
 
-            return value.TryRead(out double number)
+            return LuaCsValueMarshaller.TryCoerceNumber(value, out double number)
                 ? number
                 : throw LuaCsBadArgumentException.TypeMismatch(index + 1, "number", value);
         }

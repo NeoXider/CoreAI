@@ -148,10 +148,10 @@ namespace CoreAI.Tests.EditMode
             IScriptState state = engine.CreateState();
             registry.ApplyTo(state);
 
-            // WHY: int parameters historically round via Convert.ToInt32 (4.6 -> 5), part of the locked
-            // coercion behavior.
+            // WHY: an int parameter truncates toward zero (4.6 -> 4) like Luau's luaL_checkinteger; it used
+            // to round through Convert.ToInt32 (4.6 -> 5), which no Roblox script sees (RBX-COERCE).
             object[] results = engine.RunChunk(state, "return add(2, 3) + echo_int(4.6)");
-            Assert.AreEqual(10d, engine.Marshaller.ToHostValue(results[0]));
+            Assert.AreEqual(9d, engine.Marshaller.ToHostValue(results[0]));
         }
 
         [Test]

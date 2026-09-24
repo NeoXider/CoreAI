@@ -537,12 +537,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
-        public void Negative_Kick_WithANumberMessage_IsRefusedLikeEveryOtherStringArgument()
+        public void Kick_WithANumberMessage_KicksWithTheTextTostringGivesIt()
         {
-            // WHY pinned: Roblox turns a number into a string for a string parameter, but no string
-            // parameter of this surface does (FindFirstChild(5), SetAttribute(5, v), AddTag(p, 5) and
-            // Part.Name = 5 are all BAD_ARGUMENT). Kick follows that one rule instead of being the
-            // only method that accepts a number where a string is expected.
+            // WHY (RBX-COERCE): this test used to pin Kick(42) as BAD_ARGUMENT, a deviation: Roblox reads
+            // a string parameter the way Luau's luaL_checklstring does, so a number becomes its tostring
+            // text. A script written for Roblox that kicks with a numeric code must kick here too.
             NoticeTransportBridge bridge = new(RbxNetworkTopology.Host);
             using ProductionHarness harness = new ProductionHarness(networkBridge: bridge);
             ActorContext actor = harness.Actor("kick-number");
@@ -550,15 +549,50 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             harness.Stack.Runtime.LoadMod(actor, "kick-number-mod", @"
                 local me = game:GetService('Players'):GetPlayerByUserId(" + player.UserId + @")
+                store_set('expected', tostring(42))
                 local ok, err = pcall(function() return me:Kick(42) end)
                 store_set('ok', tostring(ok))
                 store_set('err', tostring(err))",
                 persistToStore: false);
 
-            Assert.AreEqual("false", harness.Store.Get("kick-number-mod", "ok"),
+            Assert.AreEqual("true", harness.Store.Get("kick-number-mod", "ok"),
+                harness.Store.Get("kick-number-mod", "err") + " | log: " + string.Join(" || ", harness.LogLines));
+            Assert.AreEqual(1, bridge.Kicks.Count, "the number message kicks like a string one");
+            Assert.AreEqual(harness.Store.Get("kick-number-mod", "expected"), bridge.Kicks[0].Value,
+                "the message is exactly the text tostring(42) gives the script");
+            Assert.AreEqual("42", bridge.Kicks[0].Value);
+            Assert.IsTrue(player.IsDestroyed);
+        }
+
+        [Test]
+        public void Negative_Kick_WithABooleanOrFunctionMessage_IsStillRefusedBeforeAnythingIsKicked()
+        {
+            // WHY: the negative twin of the number coercion. Luau converts only numbers to strings, so a
+            // boolean or a function stays a BAD_ARGUMENT and nobody is kicked.
+            NoticeTransportBridge bridge = new(RbxNetworkTopology.Host);
+            using ProductionHarness harness = new ProductionHarness(networkBridge: bridge);
+            ActorContext actor = harness.Actor("kick-boolean");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            harness.Stack.Runtime.LoadMod(actor, "kick-boolean-mod", @"
+                local me = game:GetService('Players'):GetPlayerByUserId(" + player.UserId + @")
+                local okBoolean, errBoolean = pcall(function() return me:Kick(true) end)
+                store_set('ok_boolean', tostring(okBoolean))
+                store_set('err_boolean', tostring(errBoolean))
+                local okFunction, errFunction = pcall(function() return me:Kick(function() end) end)
+                store_set('ok_function', tostring(okFunction))
+                store_set('err_function', tostring(errFunction))",
+                persistToStore: false);
+
+            Assert.AreEqual("false", harness.Store.Get("kick-boolean-mod", "ok_boolean"),
                 "log: " + string.Join(" || ", harness.LogLines));
             StringAssert.Contains("Player:Kick expects a string at argument 1",
-                harness.Store.Get("kick-number-mod", "err"));
+                harness.Store.Get("kick-boolean-mod", "err_boolean"));
+            StringAssert.Contains("got boolean at argument 1",
+                harness.Store.Get("kick-boolean-mod", "err_boolean"));
+            Assert.AreEqual("false", harness.Store.Get("kick-boolean-mod", "ok_function"));
+            StringAssert.Contains("got function at argument 1",
+                harness.Store.Get("kick-boolean-mod", "err_function"));
             CollectionAssert.IsEmpty(bridge.Kicks);
             CollectionAssert.IsEmpty(bridge.EndedConnections);
             Assert.IsFalse(player.IsDestroyed);

@@ -1,9 +1,9 @@
 using System;
-using System.Globalization;
 using System.Threading.Tasks;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Sandbox.LuaCs;
+using CoreAI.Scripting.LuaCs;
 using Lua;
 using Lua.Runtime;
 
@@ -66,7 +66,10 @@ namespace CoreAI.Ai.LuaCs
     /// Shared plumbing for the Roblox Lua surface: guarded host functions that convert
     /// <see cref="RbxError"/>/<see cref="RbxApiStubException"/> into Lua errors preserving the
     /// §5.2.7 machine-parsable message verbatim, plus typed argument readers whose BAD_ARGUMENT
-    /// fixes name the expected type and position.
+    /// fixes name the expected type and position. Every reader converts by the one rule set of
+    /// <see cref="LuaCsValueMarshaller"/> (the mod-core surface reads by it too): a number for a
+    /// string, a numeric string for a number, an item's Name or Value for an Enum of an instance
+    /// member; a boolean is never converted.
     /// </summary>
     internal static class LuaCsRbxLua
     {
@@ -275,12 +278,19 @@ namespace CoreAI.Ai.LuaCs
             return ReadFloatOr(ctx, index, fallback, "function", index + 1);
         }
 
-        /// <summary>
-        /// Optional number with Luau's argument coercion: nil (or absent) yields
-        /// <paramref name="fallback"/>, a number is used as is, a numeric string is converted like
-        /// <c>tonumber</c>, and anything else is a BAD_ARGUMENT naming the position.
-        /// </summary>
+        /// <summary>Optional number read by <see cref="ReadDoubleOr"/>, narrowed to a float.</summary>
         public static float ReadFloatOr(LuaFunctionExecutionContext ctx, int index, float fallback,
+            string what, int argumentNumber)
+        {
+            return (float)ReadDoubleOr(ctx, index, fallback, what, argumentNumber);
+        }
+
+        /// <summary>
+        /// Optional number with Luau's argument coercion (<c>luaL_optnumber</c>): nil (or absent)
+        /// yields <paramref name="fallback"/>, a number is used as is, a numeric string is converted
+        /// like <c>tonumber</c>, and anything else is a BAD_ARGUMENT naming the position.
+        /// </summary>
+        public static double ReadDoubleOr(LuaFunctionExecutionContext ctx, int index, double fallback,
             string what, int argumentNumber)
         {
             LuaValue value = Arg(ctx, index);
@@ -291,7 +301,7 @@ namespace CoreAI.Ai.LuaCs
 
             if (TryCoerceNumber(value, out double number))
             {
-                return (float)number;
+                return number;
             }
 
             throw ExpectedArgument(what, "a number", value, argumentNumber);
@@ -302,17 +312,20 @@ namespace CoreAI.Ai.LuaCs
             return ReadDouble(ctx, index, what, index + 1);
         }
 
-        /// <summary>Reads a number at VM slot <paramref name="index"/>, naming <paramref name="argumentNumber"/> in errors.</summary>
+        /// <summary>
+        /// Reads a number at VM slot <paramref name="index"/>, naming <paramref name="argumentNumber"/>
+        /// in errors; a numeric string is converted like <c>tonumber</c> (<see cref="TryCoerceNumber"/>).
+        /// </summary>
         public static double ReadDouble(LuaFunctionExecutionContext ctx, int index, string what,
             int argumentNumber)
         {
             LuaValue value = Arg(ctx, index);
-            if (value.Type != LuaValueType.Number)
+            if (!TryCoerceNumber(value, out double number))
             {
                 throw ExpectedArgument(what, "a number", value, argumentNumber);
             }
 
-            return value.Read<double>();
+            return number;
         }
 
         public static string ReadString(LuaFunctionExecutionContext ctx, int index, string what)
@@ -320,17 +333,20 @@ namespace CoreAI.Ai.LuaCs
             return ReadString(ctx, index, what, index + 1);
         }
 
-        /// <summary>Reads a string at VM slot <paramref name="index"/>, naming <paramref name="argumentNumber"/> in errors.</summary>
+        /// <summary>
+        /// Reads a string at VM slot <paramref name="index"/>, naming <paramref name="argumentNumber"/>
+        /// in errors; a number becomes the text <c>tostring</c> gives it (<see cref="TryCoerceString"/>).
+        /// </summary>
         public static string ReadString(LuaFunctionExecutionContext ctx, int index, string what,
             int argumentNumber)
         {
             LuaValue value = Arg(ctx, index);
-            if (value.Type != LuaValueType.String)
+            if (!TryCoerceString(value, out string text))
             {
                 throw ExpectedArgument(what, "a string", value, argumentNumber);
             }
 
-            return value.Read<string>();
+            return text;
         }
 
         public static RbxVector3 ReadVector3(LuaFunctionExecutionContext ctx, int index, string what)
@@ -399,15 +415,18 @@ namespace CoreAI.Ai.LuaCs
                 "assign " + expected + " to " + target);
         }
 
-        /// <summary>Reads the value of a property write as a string or raises <see cref="PropertyAssignmentError"/>.</summary>
+        /// <summary>
+        /// Reads the value of a property write as a string (a number becomes the text
+        /// <c>tostring</c> gives it, as Roblox converts it) or raises <see cref="PropertyAssignmentError"/>.
+        /// </summary>
         public static string ReadAssignedString(LuaValue value, string ownerName, string property)
         {
-            if (value.Type != LuaValueType.String)
+            if (!TryCoerceString(value, out string text))
             {
                 throw PropertyAssignmentError(ownerName, property, "a string", value);
             }
 
-            return value.Read<string>();
+            return text;
         }
 
         /// <summary>
@@ -439,67 +458,129 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Luau's number-argument coercion: a number as is, or a string <c>tonumber</c> would accept
-        /// (decimal with optional exponent, or 0x hexadecimal, surrounding whitespace allowed).
+        /// Luau's number-argument coercion, shared with the mod-core surface: a number as is, or a
+        /// string <c>tonumber</c> would accept (<see cref="LuaCsValueMarshaller.TryCoerceNumber"/>).
         /// </summary>
         public static bool TryCoerceNumber(LuaValue value, out double number)
         {
-            if (value.Type == LuaValueType.Number)
-            {
-                number = value.Read<double>();
-                return true;
-            }
-
-            if (value.Type == LuaValueType.String)
-            {
-                return TryParseLuaNumber(value.Read<string>(), out number);
-            }
-
-            number = 0d;
-            return false;
+            return LuaCsValueMarshaller.TryCoerceNumber(value, out number);
         }
 
-        private static bool TryParseLuaNumber(string text, out double number)
+        /// <summary>
+        /// Luau's string-argument coercion, shared with the mod-core surface: a string as is, or a
+        /// number as the text <c>tostring</c> gives it (<see cref="LuaCsValueMarshaller.TryCoerceString"/>).
+        /// </summary>
+        public static bool TryCoerceString(LuaValue value, out string text)
         {
-            number = 0d;
-            string trimmed = text?.Trim();
-            if (string.IsNullOrEmpty(trimmed))
+            return LuaCsValueMarshaller.TryCoerceString(value, out text);
+        }
+
+        // ---- Enum coercion ------------------------------------------------------------------
+
+        /// <summary>
+        /// Roblox's coercion for an Enum-typed instance member (a property write or a method
+        /// argument): an item of <paramref name="enumName"/> as is, a string naming one of its items
+        /// (or a registered alias), or a whole number equal to an item's Value. Anything else, an
+        /// item of another enum or a numeric string included, is false.
+        /// </summary>
+        /// <param name="enums">The world's registry, so a converted item is the interned one
+        /// <c>Enum.X.Y</c> answers; null accepts only an item.</param>
+        public static bool TryCoerceEnumItem(LuaValue value, RbxEnumRegistry enums, string enumName,
+            out RbxEnumItem item)
+        {
+            if (TryUnbox(value, out RbxEnumItem boxed))
+            {
+                item = boxed.EnumType != null && boxed.EnumType.Name == enumName ? boxed : null;
+                return item != null;
+            }
+
+            item = null;
+            if (enums == null || !enums.TryGet(enumName, out RbxEnum enumType))
             {
                 return false;
             }
 
-            int start = trimmed[0] == '-' || trimmed[0] == '+' ? 1 : 0;
-            bool negative = trimmed[0] == '-';
-            if (trimmed.Length > start + 2 && trimmed[start] == '0'
-                                           && (trimmed[start + 1] == 'x' || trimmed[start + 1] == 'X'))
+            if (value.Type == LuaValueType.String)
             {
-                if (!ulong.TryParse(trimmed.Substring(start + 2), NumberStyles.AllowHexSpecifier,
-                        CultureInfo.InvariantCulture, out ulong hex))
-                {
-                    return false;
-                }
-
-                number = negative ? -(double)hex : hex;
-                return true;
+                return enumType.TryGetItem(value.Read<string>(), out item);
             }
 
-            // WHY: double.TryParse also accepts "Infinity", "NaN" and culture symbols, none of which
-            // tonumber turns into a number, so only digits, a point and an exponent get through.
-            for (int index = start; index < trimmed.Length; index++)
+            if (value.Type == LuaValueType.Number)
             {
-                char c = trimmed[index];
-                bool allowed = (c >= '0' && c <= '9') || c == '.' || c == 'e' || c == 'E'
-                               || ((c == '+' || c == '-') && index > start
-                                                          && (trimmed[index - 1] == 'e'
-                                                              || trimmed[index - 1] == 'E'));
-                if (!allowed)
-                {
-                    return false;
-                }
+                double number = value.Read<double>();
+                // WHY whole numbers only: every item Value is an int, so a fraction names no item,
+                // exactly as Enum.X:FromValue answers nil for it.
+                return number == Math.Floor(number) && number >= int.MinValue && number <= int.MaxValue
+                       && enumType.TryGetItemByValue((int)number, out item);
             }
 
-            return double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture,
-                out number);
+            return false;
+        }
+
+        /// <summary>
+        /// Reads an Enum-typed method argument by <see cref="TryCoerceEnumItem"/>, or raises a
+        /// BAD_ARGUMENT naming the position and, for a string or number, the value that named no item.
+        /// </summary>
+        public static RbxEnumItem ReadEnumArgument(LuaFunctionExecutionContext ctx, int index,
+            RbxEnumRegistry enums, string enumName, string what, int argumentNumber)
+        {
+            LuaValue value = Arg(ctx, index);
+            if (TryCoerceEnumItem(value, enums, enumName, out RbxEnumItem item))
+            {
+                return item;
+            }
+
+            string expected = "an Enum." + enumName + " item";
+            throw RbxError.BadArgument(
+                what + " expects " + expected + " at argument " + argumentNumber,
+                "pass " + expected + ", its Name or its Value, got " + DescribeEnumCandidate(value)
+                + " at argument " + argumentNumber);
+        }
+
+        /// <summary>
+        /// Reads the value of an Enum-typed property write by <see cref="TryCoerceEnumItem"/>, or
+        /// raises the property-shaped BAD_ARGUMENT, which names the property and the refused value:
+        /// <c>Part.Material expects an Enum.Material item, got string "Plastik"</c>.
+        /// </summary>
+        public static RbxEnumItem ReadAssignedEnumItem(LuaValue value, RbxEnumRegistry enums,
+            string enumName, string ownerName, string property)
+        {
+            if (TryCoerceEnumItem(value, enums, enumName, out RbxEnumItem item))
+            {
+                return item;
+            }
+
+            string target = ownerName + "." + property;
+            string expected = "an Enum." + enumName + " item";
+            throw RbxError.BadArgument(
+                target + " expects " + expected + ", got " + DescribeEnumCandidate(value),
+                "assign " + expected + ", its Name or its Value to " + target);
+        }
+
+        /// <summary>
+        /// <see cref="Describe"/>, plus the text itself for a string or number, so a refused
+        /// <c>"Plastik"</c> or <c>999</c> names the value that matched no item.
+        /// </summary>
+        private static string DescribeEnumCandidate(LuaValue value)
+        {
+            if (value.Type == LuaValueType.String)
+            {
+                string text = value.Read<string>();
+                char[] shown = (text.Length > 64 ? text.Substring(0, 64) : text).ToCharArray();
+                // WHY: the §5.2.7 error is one line, so a control character from the script's
+                // string must not split it.
+                for (int index = 0; index < shown.Length; index++)
+                {
+                    if (char.IsControl(shown[index]))
+                    {
+                        shown[index] = ' ';
+                    }
+                }
+
+                return "string \"" + new string(shown) + (text.Length > 64 ? "..." : "") + "\"";
+            }
+
+            return value.Type == LuaValueType.Number ? "number " + value : Describe(value);
         }
 
         /// <summary>Human name for BAD_ARGUMENT fixes ("got string at argument 2").</summary>

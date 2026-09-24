@@ -10,6 +10,8 @@ using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.WorldPackages;
+using CoreAI.Scripting.LuaCs;
+using Lua;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -134,7 +136,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 local r1, e1 = pcall(function() i.Value = 'nope' end)
                 local r2, e2 = pcall(function() i.Value = 0/0 end)
                 local r3, e3 = pcall(function() n.Value = true end)
-                local r4, e4 = pcall(function() s.Value = 5 end)
+                local r4, e4 = pcall(function() s.Value = true end)
                 local r5, e5 = pcall(function() b.Value = 1 end)
                 store_set('r1', tostring(r1)); store_set('e1', tostring(e1))
                 store_set('r2', tostring(r2)); store_set('e2', tostring(e2))
@@ -151,7 +153,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
 
             // WHY: a build that wrote through on mistyped assignment (or fired Changed there)
-            // fails here: canonical values and revisions must be exactly as before.
+            // fails here: canonical values and revisions must be exactly as before. StringValue is
+            // mistyped with a boolean: a number is converted like Roblox converts it (see
+            // RuleTable_RbxSurface_PropertyWritesAndArguments_ConvertLikeRoblox).
             Assert.AreEqual(7L, ((RbxIntValue)harness.Registry.WorldRoot.FindFirstChild("MInt")).Value);
             Assert.AreEqual(1.5d, ((RbxNumberValue)harness.Registry.WorldRoot.FindFirstChild("MNum")).Value);
             Assert.AreEqual("ok", ((RbxStringValue)harness.Registry.WorldRoot.FindFirstChild("MStr")).Value);
@@ -749,6 +753,348 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual(0, fires);
             Assert.IsTrue(harness.Registry.TryGetRecord(value.Id, out InstanceRecord after));
             Assert.AreEqual(revisionBefore, after.Revision);
+        }
+
+        // ---- RBX-COERCE: the argument/property coercion rule table ---------------------------
+        // WHY one table for both surfaces: a script written for Roblox must run here unchanged, and
+        // Roblox reads a parameter the way Luau's luaL_checklstring/luaL_checknumber do (a number for a
+        // string, a numeric string for a number, never a boolean) while an Enum member of an instance
+        // also takes the item's Name or Value. The mod-core surface (typed delegates such as store_set,
+        // var-args such as hooks_every) reads by the same LuaCsValueMarshaller rules as the Rbx surface.
+
+        [TestCase("5", 5d)]
+        [TestCase(" 0x10 ", 16d)]
+        [TestCase("1e3", 1000d)]
+        [TestCase("\t-2.5\n", -2.5d)]
+        [TestCase(".5", 0.5d)]
+        [TestCase("5.", 5d)]
+        [TestCase("+7", 7d)]
+        [TestCase("-0x10", -16d)]
+        [TestCase("0X1f", 31d)]
+        [TestCase("0x1p4", 16d)]
+        [TestCase("0x.8", 0.5d)]
+        [TestCase("0x1P-2", 0.25d)]
+        [TestCase("1E-2", 0.01d)]
+        [TestCase("inf", double.PositiveInfinity)]
+        [TestCase("-Infinity", double.NegativeInfinity)]
+        [TestCase("1e999", double.PositiveInfinity)]
+        public void RuleTable_NumberParameter_TakesWhatLuauTonumberAccepts_OnBothSurfaces(string text,
+            double expected)
+        {
+            LuaValue value = text;
+
+            Assert.IsTrue(LuaCsRbxLua.TryCoerceNumber(value, out double rbx),
+                "Rbx surface refused '" + text + "', which Luau's lua_tonumberx converts");
+            Assert.AreEqual(expected, rbx, "Rbx surface");
+            Assert.AreEqual(expected, (double)LuaCsValueMarshaller.CoerceArgument(value, typeof(double)),
+                "mod-core surface");
+        }
+
+        [TestCase("nan")]
+        [TestCase("NaN")]
+        [TestCase("-nan")]
+        [TestCase("nan(1)")]
+        public void RuleTable_NumberParameter_TakesNaNSpellings_AsStrtodDoes_OnBothSurfaces(string text)
+        {
+            LuaValue value = text;
+
+            Assert.IsTrue(LuaCsRbxLua.TryCoerceNumber(value, out double rbx), "Rbx surface refused " + text);
+            Assert.IsTrue(double.IsNaN(rbx), "Rbx surface");
+            Assert.IsTrue(double.IsNaN((double)LuaCsValueMarshaller.CoerceArgument(value, typeof(double))),
+                "mod-core surface");
+        }
+
+        [TestCase("")]
+        [TestCase("   ")]
+        [TestCase("abc")]
+        [TestCase("1e")]
+        [TestCase("1e+")]
+        [TestCase("0x")]
+        [TestCase("0x1p")]
+        [TestCase("5x")]
+        [TestCase("1 2")]
+        [TestCase("--5")]
+        [TestCase("+-5")]
+        [TestCase("infin")]
+        [TestCase("nan(")]
+        [TestCase("1_000")]
+        [TestCase("0b101")]
+        [TestCase(".")]
+        [TestCase("e5")]
+        [TestCase("\u00A05")]
+        [TestCase("5\u0085")]
+        public void RuleTable_NumberParameter_RefusesAStringTonumberRefuses_OnBothSurfaces(string text)
+        {
+            LuaValue value = text;
+
+            Assert.IsFalse(LuaCsRbxLua.TryCoerceNumber(value, out _), "Rbx surface accepted '" + text + "'");
+            Assert.Catch(() => LuaCsValueMarshaller.CoerceArgument(value, typeof(double)),
+                "mod-core surface accepted '" + text + "'");
+        }
+
+        [Test]
+        public void RuleTable_StringParameter_TakesANumberAsItsTostringText_AndNothingElse_OnBothSurfaces()
+        {
+            LuaValue five = 5d;
+            LuaValue quarter = 0.25d;
+            LuaValue flag = true;
+
+            Assert.AreEqual("5", LuaCsRbxLua.ReadAssignedString(five, "Folder", "Name"));
+            Assert.AreEqual("5", LuaCsValueMarshaller.CoerceArgument(five, typeof(string)));
+            Assert.AreEqual(quarter.ToString(), LuaCsRbxLua.ReadAssignedString(quarter, "Folder", "Name"),
+                "the text is exactly what tostring gives the script");
+            Assert.AreEqual(quarter.ToString(), LuaCsValueMarshaller.CoerceArgument(quarter, typeof(string)));
+
+            RbxError refused = Assert.Throws<RbxError>(
+                () => LuaCsRbxLua.ReadAssignedString(flag, "Folder", "Name"));
+            Assert.AreEqual("Folder.Name expects a string, got boolean", refused.RawMessage);
+            Assert.Catch(() => LuaCsValueMarshaller.CoerceArgument(flag, typeof(string)),
+                "Luau converts only numbers to strings, so a boolean stays a bad argument");
+        }
+
+        [Test]
+        public void RuleTable_IntegerParameter_TruncatesTowardZero_AndRefusesNoIntegerRepresentation()
+        {
+            // WHY truncation: Luau's luaL_checkinteger casts with (int), which drops the fraction toward
+            // zero; the old Convert.ToInt32 rounded 2.7 to 3 (and 2.5 to 2, banker's rounding).
+            LuaValue positive = 2.7d;
+            LuaValue negative = -2.7d;
+            LuaValue text = "3";
+            LuaValue fractionText = "4.9";
+
+            Assert.AreEqual(2, LuaCsValueMarshaller.CoerceArgument(positive, typeof(int)));
+            Assert.AreEqual(-2, LuaCsValueMarshaller.CoerceArgument(negative, typeof(int)));
+            Assert.AreEqual(3, LuaCsValueMarshaller.CoerceArgument(text, typeof(int)));
+            Assert.AreEqual(4L, LuaCsValueMarshaller.CoerceArgument(fractionText, typeof(long)));
+            Assert.AreEqual(int.MaxValue,
+                LuaCsValueMarshaller.CoerceArgument((LuaValue)2147483647d, typeof(int)));
+
+            foreach (LuaValue refused in new LuaValue[] { 2147483648d, double.NaN, 1e300, true, "three" })
+            {
+                Assert.Catch(() => LuaCsValueMarshaller.CoerceArgument(refused, typeof(int)),
+                    refused + " has no int representation");
+            }
+
+            Assert.Catch(() => LuaCsValueMarshaller.CoerceArgument((LuaValue)1e300, typeof(long)));
+        }
+
+        [Test]
+        public void RuleTable_BooleanParameter_IsNeverConverted_AndAnOmittedOneIsFalse()
+        {
+            Assert.AreEqual(false, LuaCsValueMarshaller.CoerceArgument(LuaValue.Nil, typeof(bool)));
+            Assert.AreEqual(true, LuaCsValueMarshaller.CoerceArgument((LuaValue)true, typeof(bool)));
+            Assert.Catch(() => LuaCsValueMarshaller.CoerceArgument((LuaValue)"true", typeof(bool)));
+            Assert.Catch(() => LuaCsValueMarshaller.CoerceArgument((LuaValue)1d, typeof(bool)));
+
+            LuaValue text = "true";
+            RbxError refused = Assert.Throws<RbxError>(
+                () => LuaCsRbxLua.ReadAssignedBoolean(text, "Part", "Anchored"));
+            Assert.AreEqual("Part.Anchored expects a boolean, got string", refused.RawMessage);
+        }
+
+        [Test]
+        public void RuleTable_RbxSurface_PropertyWritesAndArguments_ConvertLikeRoblox()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            InMemoryInputSource keys = new();
+            harness.Bindings.UserInputService.AttachInputSource(keys);
+            keys.PressKey(101);
+            ActorContext actor = harness.Actor("coerce-a");
+            harness.Stack.Runtime.LoadMod(actor, "coerce", @"
+                local function row(label, action)
+                    local ok, value = pcall(action)
+                    store_set(label, tostring(ok) .. '|' .. tostring(value))
+                end
+                local tween = game:GetService('TweenService')
+                local uis = game:GetService('UserInputService')
+                local linear, inward = Enum.EasingStyle.Linear, Enum.EasingDirection.In
+                local root = Instance.new('Folder'); root.Name = 'CoerceRoot'; root.Parent = workspace
+                local five = Instance.new('Folder'); five.Name = '5'; five.Parent = root
+                local half = Instance.new('Folder'); half.Name = tostring(0.5); half.Parent = root
+                local part = Instance.new('Part'); part.Parent = root
+                local sv = Instance.new('StringValue'); sv.Parent = root
+                local nv = Instance.new('NumberValue'); nv.Parent = root
+                local iv = Instance.new('IntValue'); iv.Parent = root
+                local bv = Instance.new('BoolValue'); bv.Parent = root
+
+                row('str_arg_number', function() return root:FindFirstChild(5) == five end)
+                row('str_arg_fraction', function() return root:FindFirstChild(0.5) == half end)
+                row('str_arg_attribute', function() root:SetAttribute(7, 'seven') return root:GetAttribute('7') end)
+                row('str_arg_member_key', function() return root[5] == five end)
+                row('str_arg_boolean', function() return root:FindFirstChild(true) end)
+                row('str_arg_table', function() return root:FindFirstChild({}) end)
+                row('str_arg_function', function() return root:FindFirstChild(function() end) end)
+                row('str_arg_nil', function() return root:FindFirstChild(nil) end)
+
+                row('str_prop_number', function() sv.Name = 12 return sv.Name end)
+                row('str_prop_value', function() sv.Value = 42 return sv.Value end)
+                row('str_prop_fraction', function() sv.Value = 0.25 return sv.Value == tostring(0.25) end)
+                row('str_prop_boolean', function() sv.Name = true end)
+                row('str_prop_nil', function() sv.Name = nil end)
+                row('str_prop_table', function() sv.Value = {} end)
+
+                row('num_arg_string', function() return tween:GetValue('0.5', linear, inward) end)
+                row('num_arg_hex', function() return Random.new(1):NextInteger(' 0x10 ', ' 0x10 ') end)
+                row('num_arg_exponent', function() return Random.new(1):NextInteger('1e3', '1e3') end)
+                row('num_arg_infinity', function() return tween:GetValue('inf', linear, inward) end)
+                row('num_arg_text', function() return tween:GetValue('half', linear, inward) end)
+                row('num_arg_empty', function() return tween:GetValue('', linear, inward) end)
+                row('num_arg_boolean', function() return tween:GetValue(true, linear, inward) end)
+                row('num_arg_table', function() return tween:GetValue({}, linear, inward) end)
+
+                row('num_prop_string', function() nv.Value = '2.5' return nv.Value end)
+                row('num_prop_hex', function() nv.Value = ' 0x10 ' return nv.Value end)
+                row('num_prop_transparency', function() part.Transparency = '0.5' return part.Transparency end)
+                row('num_prop_text', function() nv.Value = 'lots' end)
+                row('num_prop_boolean', function() nv.Value = true end)
+
+                row('int_prop_string', function() iv.Value = '3' return iv.Value end)
+                row('int_prop_half', function() iv.Value = '2.5' return iv.Value end)
+                row('int_arg_fraction', function() return Random.new(1):NextInteger(2.7, 2.7) end)
+                row('int_arg_fraction_string', function() return Random.new(1):NextInteger('-2.7', '-2.7') end)
+                row('int_arg_huge', function() return Random.new(1):NextInteger(1, 1e300) end)
+                row('int_prop_nan', function() iv.Value = 'nan' end)
+
+                row('bool_prop_string', function() part.Anchored = 'true' end)
+                row('bool_prop_number', function() bv.Value = 1 end)
+                row('bool_prop_nil', function() part.Archivable = nil end)
+                row('bool_arg_omitted', function()
+                    local a, b = Vector2.new(1, 0), Vector2.new(0, -1)
+                    return a:Angle(b) == a:Angle(b, false)
+                end)
+                row('bool_arg_string', function() return Vector2.new(1, 0):Angle(Vector2.new(0, -1), 'true') end)
+
+                row('enum_prop_name', function() part.Material = 'Wood' return part.Material == Enum.Material.Wood end)
+                row('enum_prop_value', function() part.Material = 816 return part.Material == Enum.Material.Concrete end)
+                row('enum_prop_shape_name', function() part.Shape = 'Cylinder' return part.Shape == Enum.PartType.Cylinder end)
+                row('enum_prop_shape_value', function() part.Shape = 0 return part.Shape == Enum.PartType.Ball end)
+                row('enum_prop_unknown_name', function() part.Material = 'Plastik' end)
+                row('enum_prop_numeric_string', function() part.Material = '256' end)
+                row('enum_prop_fraction', function() part.Material = 256.5 end)
+                row('enum_prop_unknown_value', function() part.Material = 1 end)
+                row('enum_prop_other_enum', function() part.Material = Enum.PartType.Ball end)
+                row('enum_prop_boolean', function() part.Material = true end)
+                row('enum_prop_kept', function() return part.Material == Enum.Material.Concrete end)
+
+                row('enum_arg_names', function() return tween:GetValue(0.5, 'Linear', 'In') end)
+                row('enum_arg_values', function() return tween:GetValue(0.5, 0, 0) end)
+                row('enum_arg_key_name', function() return uis:IsKeyDown('E') end)
+                row('enum_arg_key_value', function() return uis:IsKeyDown(101) end)
+                row('enum_arg_unknown', function() return tween:GetValue(0.5, 'Quadratic', 'In') end)
+                row('enum_arg_boolean', function() return uis:IsKeyDown(true) end)
+
+                row('core_str_number', function() store_set(5, 'five') return store_get('5') end)
+                row('core_str_boolean', function() store_set(true, 'x') end)
+                row('core_num_hex', function() return hooks_every(' 0x10 ', function() end) ~= nil end)
+                row('core_num_infinity', function() return hooks_every('inf', function() end) ~= nil end)
+                row('core_num_boolean', function() hooks_every(true, function() end) end)",
+                persistToStore: false);
+
+            (string Label, string Expected)[] accepted =
+            {
+                ("str_arg_number", "true|true"),
+                ("str_arg_fraction", "true|true"),
+                ("str_arg_attribute", "true|seven"),
+                ("str_arg_member_key", "true|true"),
+                ("str_prop_number", "true|12"),
+                ("str_prop_value", "true|42"),
+                ("str_prop_fraction", "true|true"),
+                ("num_arg_string", "true|0.5"),
+                ("num_arg_hex", "true|16"),
+                ("num_arg_exponent", "true|1000"),
+                ("num_prop_string", "true|2.5"),
+                ("num_prop_hex", "true|16"),
+                ("num_prop_transparency", "true|0.5"),
+                ("int_prop_string", "true|3"),
+                ("int_prop_half", "true|3"),
+                ("int_arg_fraction", "true|2"),
+                ("int_arg_fraction_string", "true|-2"),
+                ("bool_arg_omitted", "true|true"),
+                ("enum_prop_name", "true|true"),
+                ("enum_prop_value", "true|true"),
+                ("enum_prop_shape_name", "true|true"),
+                ("enum_prop_shape_value", "true|true"),
+                ("enum_prop_kept", "true|true"),
+                ("enum_arg_names", "true|0.5"),
+                ("enum_arg_values", "true|0.5"),
+                ("enum_arg_key_name", "true|true"),
+                ("enum_arg_key_value", "true|true"),
+                ("core_str_number", "true|five"),
+                ("core_num_hex", "true|true"),
+                ("core_num_infinity", "true|true")
+            };
+            List<string> mismatches = new();
+            foreach ((string label, string expected) in accepted)
+            {
+                string outcome = harness.Store.Get("coerce", label);
+                if (outcome != expected)
+                {
+                    mismatches.Add(label + ": expected '" + expected + "', got '" + outcome + "'");
+                }
+            }
+
+            (string Label, string Expected)[] refused =
+            {
+                ("str_arg_boolean", "Instance:FindFirstChild expects a string at argument 1"),
+                ("str_arg_boolean", "got boolean at argument 1"),
+                ("str_arg_table", "got table at argument 1"),
+                ("str_arg_function", "got function at argument 1"),
+                ("str_arg_nil", "got nil at argument 1"),
+                ("str_prop_boolean", "StringValue.Name expects a string, got boolean"),
+                ("str_prop_nil", "StringValue.Name expects a string, got nil"),
+                ("str_prop_table", "StringValue.Value expects a string, got table"),
+                ("num_arg_infinity", "TweenService:GetValue expects a finite alpha at argument 1"),
+                ("num_arg_text", "TweenService:GetValue expects a number at argument 1"),
+                ("num_arg_text", "got string at argument 1"),
+                ("num_arg_empty", "TweenService:GetValue expects a number at argument 1"),
+                ("num_arg_boolean", "got boolean at argument 1"),
+                ("num_arg_table", "got table at argument 1"),
+                ("num_prop_text", "NumberValue.Value expects a number, got string"),
+                ("num_prop_boolean", "NumberValue.Value expects a number, got boolean"),
+                ("int_arg_huge", "Random:NextInteger expects a finite whole number"),
+                ("int_prop_nan", "IntValue.Value expects a finite number"),
+                ("bool_prop_string", "Part.Anchored expects a boolean, got string"),
+                ("bool_prop_number", "BoolValue.Value expects a boolean, got number"),
+                ("bool_prop_nil", "Part.Archivable expects a boolean, got nil"),
+                ("bool_arg_string", "Vector2:Angle expects a boolean at argument 2"),
+                ("enum_prop_unknown_name", "Part.Material expects an Enum.Material item, got string \"Plastik\""),
+                ("enum_prop_numeric_string", "Part.Material expects an Enum.Material item, got string \"256\""),
+                ("enum_prop_fraction", "Part.Material expects an Enum.Material item, got number 256.5"),
+                ("enum_prop_unknown_value", "Part.Material expects an Enum.Material item, got number 1"),
+                ("enum_prop_other_enum", "Part.Material expects an Enum.Material item, got EnumItem"),
+                ("enum_prop_boolean", "Part.Material expects an Enum.Material item, got boolean"),
+                ("enum_arg_unknown", "TweenService:GetValue expects an Enum.EasingStyle item at argument 2"),
+                ("enum_arg_unknown", "got string \"Quadratic\" at argument 2"),
+                ("enum_arg_boolean", "UserInputService:IsKeyDown expects an Enum.KeyCode item at argument 1"),
+                ("core_str_boolean", "bad argument #1 to 'store_set' (string expected, got boolean)"),
+                ("core_num_boolean", "bad argument #1 to 'hooks_every' (number expected, got boolean)")
+            };
+            foreach ((string label, string expected) in refused)
+            {
+                string outcome = harness.Store.Get("coerce", label);
+                if (!outcome.StartsWith("false|", StringComparison.Ordinal)
+                    || !outcome.Contains(expected))
+                {
+                    mismatches.Add(label + ": expected a refusal containing '" + expected + "', got '"
+                                   + outcome + "'");
+                }
+            }
+
+            // WHY every row before failing: one run then shows the whole table's state, not the first row.
+            Assert.IsEmpty(mismatches, string.Join("\n", mismatches));
+
+            RbxInstance part = null;
+            foreach (RbxInstance child in harness.Registry.WorldRoot.FindFirstChild("CoerceRoot").GetChildren())
+            {
+                if (child.ClassName == "Part")
+                {
+                    part = child;
+                }
+            }
+
+            Assert.IsNotNull(part);
+            Assert.AreEqual("Concrete", harness.Bindings.PartSink.GetPartPropertiesOrDefault(part.Id).Material.Name,
+                "a refused Material write leaves the last converted one in place");
         }
 
         private sealed class ProductionHarness : IDisposable

@@ -2593,7 +2593,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 local ok1, err1 = pcall(function() return workspace:WaitForChild() end)
                 store_set('nil_ok', tostring(ok1))
                 store_set('nil_err', tostring(err1))
-                local ok2, err2 = pcall(function() return workspace:WaitForChild('Child', '5') end)
+                local ok2, err2 = pcall(function() return workspace:WaitForChild('Child', 'soon') end)
                 store_set('text_ok', tostring(ok2))
                 store_set('text_err', tostring(err2))
                 local ok3, err3 = pcall(function() return workspace:WaitForChild('Child', 0/0) end)

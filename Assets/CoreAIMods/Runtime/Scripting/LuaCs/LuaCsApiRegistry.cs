@@ -387,8 +387,9 @@ namespace CoreAI.Sandbox.LuaCs
         {
             string expected = ExpectedTypeName(Nullable.GetUnderlyingType(parameterType) ?? parameterType);
             // WHY a separate reason for a number: the value had the right Lua type and was refused for
-            // its value (an int parameter given 1e300 or NaN), which Lua words this way.
-            if (expected == "number" && actual.Type == LuaValueType.Number)
+            // its value (an int parameter given 1e300 or NaN), which Lua words this way. A numeric string
+            // converts to a number first (LuaCsValueMarshaller.TryCoerceNumber), so "1e300" reads the same.
+            if (expected == "number" && LuaCsValueMarshaller.TryCoerceNumber(actual, out _))
             {
                 return new LuaCsBadArgumentException(argumentNumber, "number has no integer representation");
             }

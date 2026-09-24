@@ -740,7 +740,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 assert(Enum.KeyCode:FromValue(0) == Enum.KeyCode.None)
                 assert(rawequal(Enum.KeyCode.Unknown, Enum.KeyCode.None))
                 store_set('unknownAlias', tostring(Enum.KeyCode.Unknown))
-                local ok, err = pcall(function() return Enum.Material:FromName(5) end)
+                assert(Enum.Material:FromName(5) == nil)
+                assert(Enum.KeyCode:FromValue('97') == Enum.KeyCode.A)
+                local ok, err = pcall(function() return Enum.Material:FromName(true) end)
                 store_set('fromNameError', tostring(ok) .. '|' .. tostring(err))");
 
             AssertNumbers(new[] { Math.PI / 2d, -Math.PI / 2d, Math.PI / 2d, 3d * Math.PI / 4d },
@@ -754,6 +756,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             string fromNameError = store.Get(modId, "fromNameError");
             StringAssert.StartsWith("false|", fromNameError);
             StringAssert.Contains("Enum:FromName expects a string at argument 1", fromNameError);
+            StringAssert.Contains("got boolean at argument 1", fromNameError,
+                "a number names the item its tostring text names (none here); a boolean is refused");
         }
 
         [Test]
@@ -857,7 +861,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.AreEqual("Crate", LuaCsRbxLua.ReadAssignedString("Crate", "Part", "Name"));
             LuaValue numericText = "7";
             Assert.AreEqual(7d, LuaCsRbxLua.ReadAssignedNumber(numericText, "Part", "Transparency"));
-            Assert.Throws<RbxError>(() => LuaCsRbxLua.ReadAssignedString(number, "Part", "Name"));
+            Assert.AreEqual("5", LuaCsRbxLua.ReadAssignedString(number, "Part", "Name"),
+                "RBX-COERCE: a number assigned to a string property becomes its tostring text, as in Roblox");
+            RbxError boolean = Assert.Throws<RbxError>(
+                () => LuaCsRbxLua.ReadAssignedString(true, "Part", "Name"));
+            Assert.AreEqual("Part.Name expects a string, got boolean", boolean.RawMessage);
         }
 
         [Test]

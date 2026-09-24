@@ -1457,20 +1457,8 @@ namespace CoreAI.Ai.LuaCs
                 RbxDebris debris = (RbxDebris)self;
                 debris.EnsureHost(context.Bindings.Scheduler, context.Bindings.LogSink);
                 RbxInstance item = ReadTargetInstance(Arg(ctx, 1), "Debris:AddItem", 1);
-                LuaValue lifetimeValue = Arg(ctx, 2);
-                double lifetime;
-                if (lifetimeValue.Type == LuaValueType.Nil)
-                {
-                    lifetime = RbxDebris.DefaultLifetimeSeconds;
-                }
-                else if (lifetimeValue.Type == LuaValueType.Number)
-                {
-                    lifetime = lifetimeValue.Read<double>();
-                }
-                else
-                {
-                    throw ExpectedArgument("Debris:AddItem", "a number", lifetimeValue, 2);
-                }
+                double lifetime = ReadDoubleOr(
+                    ctx, 2, RbxDebris.DefaultLifetimeSeconds, "Debris:AddItem", 2);
 
                 // WHY: the caller identity is copied from the trusted ActorContext issued at mod
                 // load — never from a Lua argument — so a script cannot schedule destruction as
@@ -1564,8 +1552,8 @@ namespace CoreAI.Ai.LuaCs
                         "pass an interpolation value between 0 and 1 at argument 1");
                 }
 
-                RbxEasingStyle style = ReadEasingStyle(Arg(ctx, 2));
-                RbxEasingDirection direction = ReadEasingDirection(Arg(ctx, 3));
+                RbxEasingStyle style = ReadEasingStyle(ctx, context.Bindings.Enums);
+                RbxEasingDirection direction = ReadEasingDirection(ctx, context.Bindings.Enums);
                 return RbxTweenService.GetValue(alpha, style, direction);
             }, "TweenService");
             Method("SmoothDamp", (_, _) =>
@@ -1864,7 +1852,8 @@ namespace CoreAI.Ai.LuaCs
                 context.RequireWorldEditForWrite(self, "Jump");
                 // WHY only Jumping: it is the one state a script can legitimately force without a
                 // rig. Anything else would be a state the machine never leaves, so it says so.
-                RbxEnumItem requested = ReadHumanoidStateItem(Arg(ctx, 1));
+                RbxEnumItem requested = ReadEnumArgument(
+                    ctx, 1, context.Bindings.Enums, "HumanoidStateType", "Humanoid:ChangeState", 1);
                 if (requested.Value != (int)RbxHumanoidState.Jumping)
                 {
                     throw new RbxApiStubException(
@@ -3050,13 +3039,14 @@ namespace CoreAI.Ai.LuaCs
                 case "Shape":
                     context.RequireWorldEditForWrite(self, "Shape");
                     RbxPartShape shape = (RbxPartShape)ReadAssignedEnumItem(
-                        value, className, "Shape", "PartType").Value;
+                        value, context.Bindings.Enums, "PartType", className, "Shape").Value;
                     before = sink.GetPartPropertiesOrDefault(id);
                     sink.SetShape(id, shape);
                     break;
                 case "Material":
                     context.RequireWorldEditForWrite(self, "Material");
-                    RbxMaterialId material = ReadAssignedMaterial(value, className, "Material");
+                    RbxMaterialId material = ReadAssignedMaterial(
+                        value, context.Bindings.Enums, className, "Material");
                     before = sink.GetPartPropertiesOrDefault(id);
                     sink.SetMaterial(id, in material);
                     break;
@@ -3290,10 +3280,10 @@ namespace CoreAI.Ai.LuaCs
             return LuaValue.Nil;
         }
 
-        private static RbxMaterialId ReadAssignedMaterial(LuaValue value, string ownerName,
-            string property)
+        private static RbxMaterialId ReadAssignedMaterial(LuaValue value, RbxEnumRegistry enums,
+            string ownerName, string property)
         {
-            RbxEnumItem item = ReadAssignedEnumItem(value, ownerName, property, "Material");
+            RbxEnumItem item = ReadAssignedEnumItem(value, enums, "Material", ownerName, property);
             return new RbxMaterialId(item.Name, item.Value);
         }
 
@@ -3328,13 +3318,13 @@ namespace CoreAI.Ai.LuaCs
                         : LuaValue.Nil;
                     return true;
                 case "IsKeyDown":
-                    value = GetUserInputMethods(service).IsKeyDown;
+                    value = GetUserInputMethods(service, context.Bindings.Enums).IsKeyDown;
                     return true;
                 case "GetKeysPressed":
-                    value = GetUserInputMethods(service).GetKeysPressed;
+                    value = GetUserInputMethods(service, context.Bindings.Enums).GetKeysPressed;
                     return true;
                 case "GetMouseLocation":
-                    value = GetUserInputMethods(service).GetMouseLocation;
+                    value = GetUserInputMethods(service, context.Bindings.Enums).GetMouseLocation;
                     return true;
                 default:
                     value = LuaValue.Nil;
@@ -3355,13 +3345,18 @@ namespace CoreAI.Ai.LuaCs
             public LuaValue GetMouseLocation;
         }
 
-        private static UserInputMethods GetUserInputMethods(RbxUserInputService service)
+        /// <summary>The cached UserInputService method closures of <paramref name="service"/>.</summary>
+        private static UserInputMethods GetUserInputMethods(RbxUserInputService service,
+            RbxEnumRegistry enums)
         {
+            // WHY the registry is captured on first use: a service belongs to one world, whose
+            // bindings own one registry, so every later reader of the cached methods passes the same.
             return InputMethodCache.GetValue(service, s => new UserInputMethods
             {
                 IsKeyDown = new LuaValue(Fn("UserInputService.IsKeyDown", ctx =>
                 {
-                    RbxEnumItem keyCode = ReadKeyCodeArg(ctx, 1, "UserInputService:IsKeyDown");
+                    RbxEnumItem keyCode = ReadEnumArgument(
+                        ctx, 1, enums, "KeyCode", "UserInputService:IsKeyDown", 1);
                     return s.IsKeyDown(keyCode.Value);
                 })),
                 GetKeysPressed = new LuaValue(Fn("UserInputService.GetKeysPressed", _ =>
@@ -3393,22 +3388,9 @@ namespace CoreAI.Ai.LuaCs
 
             context.RequireWorldEditForWrite(self, "MouseBehavior");
             service.MouseBehavior = ReadAssignedEnumItem(
-                value, self.ClassName, "MouseBehavior", "MouseBehavior");
+                value, context.Bindings.Enums, "MouseBehavior", self.ClassName, "MouseBehavior");
             context.RecordMutation(self);
             return true;
-        }
-
-        /// <summary>An Enum.KeyCode method argument; <paramref name="index"/> is both the VM slot
-        /// and the author's argument number, since slot 0 is self.</summary>
-        private static RbxEnumItem ReadKeyCodeArg(LuaFunctionExecutionContext ctx, int index,
-            string what)
-        {
-            if (TryUnbox(Arg(ctx, index), out RbxEnumItem item) && item.EnumType.Name == "KeyCode")
-            {
-                return item;
-            }
-
-            throw ExpectedArgument(what, "an Enum.KeyCode item", Arg(ctx, index), index);
         }
 
         // ---- RunService (per-frame game-loop signals over the host Step pump) ----------------
@@ -3565,7 +3547,8 @@ namespace CoreAI.Ai.LuaCs
             {
                 case "BaseMaterial":
                     context.RequireWorldEditForWrite(self, "BaseMaterial");
-                    variant.BaseMaterial = ReadAssignedMaterial(value, self.ClassName, "BaseMaterial");
+                    variant.BaseMaterial = ReadAssignedMaterial(
+                        value, context.Bindings.Enums, self.ClassName, "BaseMaterial");
                     break;
                 case "ColorMap":
                     context.RequireWorldEditForWrite(self, "ColorMap");
@@ -3856,9 +3839,11 @@ namespace CoreAI.Ai.LuaCs
                 "pass a tweenable goal value for '" + propertyName + "'");
         }
 
-        private static RbxEasingStyle ReadEasingStyle(LuaValue value)
+        private static RbxEasingStyle ReadEasingStyle(LuaFunctionExecutionContext ctx,
+            RbxEnumRegistry enums)
         {
-            RbxEnumItem item = ReadEasingItem(value, "EasingStyle", 2);
+            RbxEnumItem item = ReadEnumArgument(
+                ctx, 2, enums, "EasingStyle", "TweenService:GetValue", 2);
             if (Enum.TryParse(item.Name, out RbxEasingStyle style)
                 && Enum.IsDefined(typeof(RbxEasingStyle), style))
             {
@@ -3870,9 +3855,11 @@ namespace CoreAI.Ai.LuaCs
                 "use one of Enum.EasingStyle:GetEnumItems()");
         }
 
-        private static RbxEasingDirection ReadEasingDirection(LuaValue value)
+        private static RbxEasingDirection ReadEasingDirection(LuaFunctionExecutionContext ctx,
+            RbxEnumRegistry enums)
         {
-            RbxEnumItem item = ReadEasingItem(value, "EasingDirection", 3);
+            RbxEnumItem item = ReadEnumArgument(
+                ctx, 3, enums, "EasingDirection", "TweenService:GetValue", 3);
             if (Enum.TryParse(item.Name, out RbxEasingDirection direction)
                 && Enum.IsDefined(typeof(RbxEasingDirection), direction))
             {
@@ -3882,21 +3869,6 @@ namespace CoreAI.Ai.LuaCs
             throw RbxError.BadArgument(
                 "got an unknown Enum.EasingDirection item '" + item.Name + "' at argument 3",
                 "use one of Enum.EasingDirection:GetEnumItems()");
-        }
-
-        private static RbxEnumItem ReadEasingItem(LuaValue value, string enumName,
-            int argumentNumber)
-        {
-            if (TryUnbox(value, out RbxEnumItem item) && item.EnumType != null
-                && item.EnumType.Name == enumName)
-            {
-                return item;
-            }
-
-            throw RbxError.BadArgument(
-                "expects Enum." + enumName + " at argument " + argumentNumber,
-                "pass Enum." + enumName + ".Quad, got " + Describe(value)
-                + " at argument " + argumentNumber);
         }
 
         // ---- Camera (workspace.CurrentCamera over the camera rig) ---------------------------
@@ -3956,7 +3928,7 @@ namespace CoreAI.Ai.LuaCs
                 case "CameraType":
                     context.RequireWorldEditForWrite(self, "CameraType");
                     RbxEnumItem cameraType = ReadAssignedEnumItem(
-                        value, self.ClassName, "CameraType", "CameraType");
+                        value, context.Bindings.Enums, "CameraType", self.ClassName, "CameraType");
                     RbxEnumItem previousType = context.Bindings.CameraTypeItem;
                     context.Bindings.CameraTypeItem = cameraType;
                     context.RecordMutation(self);
@@ -4005,19 +3977,6 @@ namespace CoreAI.Ai.LuaCs
         // PropertyAssignmentError instead of a position the author never typed (M1-07). The owner
         // name is the instance's ClassName, read on the failure path only.
 
-        private static RbxEnumItem ReadAssignedEnumItem(LuaValue value, string ownerName,
-            string property, string enumName)
-        {
-            if (TryUnbox(value, out RbxEnumItem item) && item.EnumType != null
-                && item.EnumType.Name == enumName)
-            {
-                return item;
-            }
-
-            throw PropertyAssignmentError(ownerName, property, "an Enum." + enumName + " item",
-                value);
-        }
-
         private static RbxVector3 ReadAssignedVector3(LuaValue value, string ownerName,
             string property)
         {
@@ -4056,7 +4015,10 @@ namespace CoreAI.Ai.LuaCs
             return (float)ReadAssignedNumber(value, ownerName, property);
         }
 
-        /// <summary>Nil or empty clears to no override (null); otherwise the variant name.</summary>
+        /// <summary>
+        /// Nil or empty clears to no override (null); otherwise the variant name, a number converted
+        /// to its <c>tostring</c> text like every string property.
+        /// </summary>
         private static string ReadAssignedOptionalString(LuaValue value, string ownerName,
             string property)
         {
@@ -4065,9 +4027,8 @@ namespace CoreAI.Ai.LuaCs
                 return null;
             }
 
-            if (value.Type == LuaValueType.String)
+            if (TryCoerceString(value, out string text))
             {
-                string text = value.Read<string>();
                 return string.IsNullOrEmpty(text) ? null : text;
             }
 
@@ -4264,18 +4225,6 @@ namespace CoreAI.Ai.LuaCs
             throw RbxError.BadArgument(
                 "Humanoid:GetState cannot resolve Enum.HumanoidStateType." + state,
                 "use the default enum registry, which ships HumanoidStateType with Humanoid");
-        }
-
-        private static RbxEnumItem ReadHumanoidStateItem(LuaValue value)
-        {
-            if (TryUnbox(value, out RbxEnumItem item)
-                && string.Equals(item.EnumType.Name, "HumanoidStateType", StringComparison.Ordinal))
-            {
-                return item;
-            }
-
-            throw ExpectedArgument("Humanoid:ChangeState", "an Enum.HumanoidStateType item",
-                value, 1);
         }
 
         private static RbxError NotAValidMember(string key, string typeName)
