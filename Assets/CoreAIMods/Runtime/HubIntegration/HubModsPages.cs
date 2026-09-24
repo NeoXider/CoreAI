@@ -675,7 +675,8 @@ namespace CoreAI.Ai.Hub
                 else if (result.Success)
                 {
                     _status.text = "World loaded successfully. Active mods started: "
-                        + result.ActiveModsStarted + ".";
+                        + result.ActiveModsStarted + "."
+                        + (result.BackupWarning.Length > 0 ? " " + result.BackupWarning : "");
                     _status.style.color = HubModWidgets.Accent;
                     if (result.StartupSelectionPersisted)
                     {

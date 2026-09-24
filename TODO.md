@@ -582,11 +582,22 @@ contexts) is next and not started. This section records everything landed up to 
       state; if it is, capture it from the live Workspace.
 - [ ] **Autosave the live state on quit and periodically.** Only AI mutations and loads write autosaves, so manual
       play since the last one is lost on a crash.
-- [ ] **Package byte limits are reachable from Lua** — about 80 `StringValue`s at the 200,000-character cap exceed
-      the 16 MiB entry limit, and the WebGL byte/text budgets are not bounded at the source. Pick a policy (a source
-      cap, or a capture diagnostic) so a script cannot build a world that cannot be saved.
-- [ ] **Verify that a lone UTF-16 surrogate** reaching a name or string from Lua cannot break the strict UTF-8
-      `WritePackage` (a test that writes one through `Instance.Name` and `StringValue.Value`).
+- [ ] **Package byte limits are reachable from Lua** — about 84 `StringValue`s at the 200,000-character cap exceed
+      the 16 MiB entry limit, and the WebGL byte/text budgets are not bounded at the source. *Partly fixed:* such a
+      world no longer locks itself — the store reports `PackageCannotBeEncoded`, and `forget` and a player-confirmed
+      load run without the backup they cannot get and say so (`backup_warning` / `RbxWorldLoadResult.BackupWarning`),
+      while other mutations stay refused
+      (`ConfirmedBackup_WorldOverTheEntryLimit_RunsForgetWithoutBackupAndSaysSo_AndRefusesExecuteLua`,
+      `WorldLoad_OutgoingWorldThatCannotBeEncoded_LoadsWithoutSafetyAutosave_ButADurabilityFailureRefuses`).
+      *Still open:* the source-side aggregate bound — pick a policy (an aggregate text cap enforced at the write, or a
+      capture diagnostic) so a script cannot build a world that cannot be saved in the first place; today the way
+      out is a confirmed load, or a running mod that removes the oversized content (gated `execute_lua` stays refused).
+- [x] **A lone UTF-16 surrogate** reaching a name or string from Lua broke the strict UTF-8 `WritePackage` at write
+      time and locked every gated tool. Capture replaces it with U+FFFD (`ill-formed-text` diagnostic) and the writer
+      replaces any left over; tests write one from Lua through `Instance.Name`, `StringValue.Value`, a string
+      attribute and a tag, then run a gated `execute_lua` and `forget`
+      (`ConfirmedBackup_LoneSurrogateWrittenFromLua_IsSavedAsReplacementCharacter_AndGatedMutationsRun`). The
+      Lua-to-CLR boundary still accepts lone surrogates in the live world (by design: only the payload is adjusted).
 - [ ] **Test isolation:** `FileLuaModSourceStore` has no root parameter, so DI tests still write mod sources into the
       real `persistentDataPath`; PlayMode compositions with `applicationIsPlayingProvider => true` and a null
       `storeId` read the shared `Saves/Startup`. The Hub's startup metadata read does not validate the package.

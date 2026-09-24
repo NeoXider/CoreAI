@@ -75,6 +75,8 @@ script wrote:
 | non-finite camera `CFrame` | identity, reported on the Workspace camera | `non-finite-value` | `CFrame` |
 | an attribute with a non-finite component | omitted | `non-finite-value` | `Attributes.<name>` |
 | `ClickDetector.MaxActivationDistance < 0`, `MaterialVariant.StudsPerTile <= 0` | `32` / `1` | `out-of-range` | the property |
+| a lone UTF-16 surrogate (half an emoji cut by `string.sub`) in a name, origin/owner field, value payload, string attribute, tag, MaterialVariant map, Humanoid `DisplayName` or Part `MaterialVariant` | U+FFFD in its place (a tag that becomes a duplicate is dropped) | `ill-formed-text` | the member (`Name`, `Value`, `Tags`, `Attributes.<name>`, …) |
+| a lone UTF-16 surrogate in a mod source | U+FFFD in its place; `model_id` is `0` | `ill-formed-text` | `Mods/<id>/source` |
 
 `member` is an optional manifest key; entries that carry one name the instance in `model_id` and
 write `dropped_primary_part_id` as `"0"`. No `format_version` bump was needed: such entries only
@@ -139,6 +141,17 @@ and gains nothing — runs without its pre-mutation backup until the world is un
 while every other gated mutation stays refused. A bare `LuaCsModRuntime` composition without the world
 session gets only the store's refusal, which is logged: its 257th mod runs without a persisted source
 (see `TODO.md`).
+
+The writer never throws on a lone surrogate either: text that did not come through capture (mod
+manifests, settings, a hand-built payload) has it replaced with U+FFFD before the strict UTF-8 encode;
+the reader still refuses invalid UTF-8 bytes. A world that captures but still cannot be encoded — its
+`world.json` past the 16 MiB entry limit, or past the WebGL write budget — gets a failed
+`RbxWorldPackageWriteResult` with `PackageCannotBeEncoded` set, as opposed to an I/O or durability
+failure. The gate treats it like a world past the mod limit: `forget` and the safety autosave of a
+confirmed load run without the backup they can never get, and say so (`backup_warning` in the
+`manage_mods` result, `RbxWorldLoadResult.BackupWarning` for a load, shown in the Hub); every other
+gated mutation stays refused, and a durability failure still refuses everything. A world past the mod
+limit can be replaced by a confirmed load the same way.
 
 The hierarchy validator and capture traversal are iterative and linear. Capture checks depth/count
 before accepting each node. The writer preflights

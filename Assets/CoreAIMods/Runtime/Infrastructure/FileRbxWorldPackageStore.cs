@@ -19,13 +19,30 @@ namespace CoreAI.Mods.WorldPackages
     public sealed class RbxWorldPackageWriteResult
     {
         internal RbxWorldPackageWriteResult(bool success, string path, string error)
+            : this(success, path, error, false)
+        {
+        }
+
+        internal RbxWorldPackageWriteResult(
+            bool success,
+            string path,
+            string error,
+            bool packageCannotBeEncoded)
         {
             Success = success;
             Path = path ?? "";
             Error = error ?? "";
+            PackageCannotBeEncoded = !success && packageCannotBeEncoded;
         }
 
         public bool Success { get; }
+
+        /// <summary>
+        /// True when the write failed because the payload itself cannot be encoded (a world-package
+        /// format limit, a platform encoding budget, or text the encoder refuses), so retrying the
+        /// same world can never succeed. False for a success and for every durability or I/O failure.
+        /// </summary>
+        public bool PackageCannotBeEncoded { get; }
 
         public string Path { get; }
 
@@ -746,7 +763,7 @@ namespace CoreAI.Mods.WorldPackages
                 }
                 catch (Exception ex)
                 {
-                    return new RbxWorldPackageWriteResult(false, path, ex.Message);
+                    return new RbxWorldPackageWriteResult(false, path, ex.Message, IsEncodingFailure(ex));
                 }
 
                 if (slotBytes + bytes.LongLength > _maximumManualSlotBytes)
@@ -892,11 +909,26 @@ namespace CoreAI.Mods.WorldPackages
             await _mutationGate.WaitAsync(cancellationToken);
             try
             {
-                string safeTrigger = SanitizeTrigger(trigger);
-                string timestamp = NormalizeUtc(_utcNow()).ToString(
-                    "yyyyMMdd'T'HHmmssfff'Z'", System.Globalization.CultureInfo.InvariantCulture);
-                _fileSystem.CreateDirectory(_autoDirectory);
-                string path = AllocateUniqueAutoPath(timestamp, safeTrigger);
+                string path;
+                try
+                {
+                    string safeTrigger = SanitizeTrigger(trigger);
+                    string timestamp = NormalizeUtc(_utcNow()).ToString(
+                        "yyyyMMdd'T'HHmmssfff'Z'", System.Globalization.CultureInfo.InvariantCulture);
+                    _fileSystem.CreateDirectory(_autoDirectory);
+                    path = AllocateUniqueAutoPath(timestamp, safeTrigger);
+                }
+                catch (Exception ex)
+                {
+                    // WHY a result and not a throw: every other autosave failure is a result, as in
+                    // CreateManualAsync, and a caller that checks only the result must see this one.
+                    return new RbxWorldPackageWriteResult(
+                        false,
+                        _autoDirectory,
+                        "The autosave was not written: the autosave folder could not be prepared ("
+                        + ex.Message + ").");
+                }
+
                 return await WriteCreateOnceAsync(path, payload, true, cancellationToken);
             }
             finally
@@ -957,7 +989,7 @@ namespace CoreAI.Mods.WorldPackages
                 names.Add(Path.GetFileName(path));
             }
 
-            names.Sort(StringComparer.Ordinal);
+            names.Sort(CompareAutoFileNames);
             return names;
         }
 
@@ -987,7 +1019,7 @@ namespace CoreAI.Mods.WorldPackages
                 infos.Add(new RbxAutoSaveInfo(fileName, trigger, timestamp, size));
             }
 
-            infos.Sort((a, b) => string.CompareOrdinal(a.FileName, b.FileName));
+            infos.Sort((a, b) => CompareAutoFileNames(a.FileName, b.FileName));
             return infos;
         }
 
@@ -1051,7 +1083,22 @@ namespace CoreAI.Mods.WorldPackages
                     _fileSystem.CreateDirectory(directory);
                 }
 
-                byte[] bytes = rawBytes ?? await EncodeForStoreAsync(payload, cancellationToken);
+                byte[] bytes = rawBytes;
+                if (bytes == null)
+                {
+                    try
+                    {
+                        bytes = await EncodeForStoreAsync(payload, cancellationToken);
+                    }
+                    catch (Exception ex) when (IsEncodingFailure(ex))
+                    {
+                        // WHY typed: nothing was written, and the same world fails the same way on
+                        // every retry; the pre-mutation gate lets the actions that can shrink or
+                        // replace such a world run without the backup it can never get.
+                        return new RbxWorldPackageWriteResult(false, path, ex.Message, true);
+                    }
+                }
+
                 await _fileSystem.WriteAllBytesCreateNewAsync(
                     temporaryPath,
                     bytes,
@@ -1184,6 +1231,15 @@ namespace CoreAI.Mods.WorldPackages
             byte[] bytes = await _fileSystem.ReadAllBytesAsync(path, cancellationToken);
             await UniTask.Yield(PlayerLoopTiming.Update, cancellationToken);
             return RbxWorldPackageSerializer.ReadPackage(bytes);
+        }
+
+        /// <summary>
+        /// True for a failure of the payload itself (format limit, WebGL budget, text the encoder
+        /// refuses), as opposed to a cancellation or an I/O or durability failure.
+        /// </summary>
+        private static bool IsEncodingFailure(Exception exception)
+        {
+            return exception is RbxWorldPackageException || exception is EncoderFallbackException;
         }
 
         private static async UniTask<byte[]> EncodeForStoreAsync(
@@ -1370,7 +1426,8 @@ namespace CoreAI.Mods.WorldPackages
                 }
             }
 
-            paths.Sort(StringComparer.Ordinal);
+            paths.Sort((left, right) => CompareAutoFileNames(
+                Path.GetFileName(left), Path.GetFileName(right)));
             int removeCount = paths.Count - (_autoBackupCapacity - 1);
             for (int index = 0; index < removeCount; index++)
             {
@@ -1698,10 +1755,100 @@ namespace CoreAI.Mods.WorldPackages
                 "");
         }
 
+        /// <summary>
+        /// Creation order of two autosave file names: timestamp, then the numeric sequence, then the
+        /// ordinal name. A name outside the autosave pattern compares by its ordinal name.
+        /// </summary>
+        /// <remarks>
+        /// WHY the sequence is compared as a number: after a backwards clock step every new autosave
+        /// shares the newest existing timestamp (see <see cref="AllocateUniqueAutoPath"/>), so the
+        /// sequence can pass 9999, and "10000" sorts before "9999" as text.
+        /// </remarks>
+        internal static int CompareAutoFileNames(string left, string right)
+        {
+            if (TrySplitAutoFileName(left, out string leftStamp, out long leftSequence)
+                && TrySplitAutoFileName(right, out string rightStamp, out long rightSequence))
+            {
+                int byStamp = string.CompareOrdinal(leftStamp, rightStamp);
+                if (byStamp != 0)
+                {
+                    return byStamp;
+                }
+
+                int bySequence = leftSequence.CompareTo(rightSequence);
+                if (bySequence != 0)
+                {
+                    return bySequence;
+                }
+            }
+
+            return string.CompareOrdinal(left, right);
+        }
+
+        private static bool TrySplitAutoFileName(string fileName, out string stamp, out long sequence)
+        {
+            stamp = null;
+            sequence = 0L;
+            if (string.IsNullOrEmpty(fileName))
+            {
+                return false;
+            }
+
+            int stampEnd = fileName.IndexOf('-');
+            if (stampEnd <= 0 || !IsAutoTimestamp(fileName.Substring(0, stampEnd)))
+            {
+                return false;
+            }
+
+            int sequenceEnd = fileName.IndexOf('-', stampEnd + 1);
+            if (sequenceEnd <= stampEnd + 1
+                || !long.TryParse(
+                    fileName.Substring(stampEnd + 1, sequenceEnd - stampEnd - 1),
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out sequence))
+            {
+                return false;
+            }
+
+            stamp = fileName.Substring(0, stampEnd);
+            return true;
+        }
+
+        private static bool IsAutoTimestamp(string text)
+        {
+            return DateTime.TryParseExact(
+                text,
+                "yyyyMMdd'T'HHmmssfff'Z'",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out DateTime _);
+        }
+
         private string AllocateUniqueAutoPath(string timestamp, string trigger)
         {
-            string prefix = timestamp + "-";
             IReadOnlyList<string> existingPaths = _fileSystem.GetFiles(_autoDirectory, Extension);
+            // WHY never older than the newest existing name: the ring rotates the oldest name first,
+            // so after a backwards clock step the autosave just written sorted before the ring and
+            // was the next one rotated out, while stale autosaves from the future survived. Taking
+            // the newest existing timestamp keeps name order equal to creation order.
+            foreach (string existingPath in existingPaths)
+            {
+                string existingName = Path.GetFileNameWithoutExtension(existingPath);
+                int stampEnd = existingName.IndexOf('-');
+                if (stampEnd != timestamp.Length)
+                {
+                    continue;
+                }
+
+                string existingStamp = existingName.Substring(0, stampEnd);
+                if (string.CompareOrdinal(existingStamp, timestamp) > 0 && IsAutoTimestamp(existingStamp))
+                {
+                    timestamp = existingStamp;
+                }
+            }
+
+            string prefix = timestamp + "-";
             int sequence = 0;
             foreach (string existingPath in existingPaths)
             {

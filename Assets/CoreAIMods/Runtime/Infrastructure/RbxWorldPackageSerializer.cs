@@ -54,6 +54,15 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>Diagnostic reason for a PrimaryPart that is retained but not inside its Model.</summary>
         private const string NotDescendantReason = "not-descendant";
 
+        /// <summary>
+        /// Diagnostic reason for a text member whose lone UTF-16 surrogate the payload replaced with
+        /// U+FFFD; the entry names the instance (<c>model_id</c>, 0 for a mod source) and the member.
+        /// </summary>
+        private const string IllFormedTextReason = "ill-formed-text";
+
+        /// <summary>The replacement for every lone UTF-16 surrogate the writer meets.</summary>
+        private const char ReplacementCharacter = '\uFFFD';
+
         /// <summary>Captures the supported world-owned DataModel projection plus settings and mods.</summary>
         public static RbxWorldPackagePayload Capture(RbxWorldPackageCaptureContext context)
         {
@@ -106,6 +115,12 @@ namespace CoreAI.Mods.WorldPackages
                 }
 
                 PartProperties finite = ProjectFinitePartState(id, properties, diagnostics);
+                if (TryReplaceLoneSurrogates(finite.MaterialVariant, out string wellFormedVariant))
+                {
+                    finite.MaterialVariant = wellFormedVariant;
+                    diagnostics.Add(IllFormedTextDiagnostic(id.Value, "MaterialVariant"));
+                }
+
                 parts.Add(id, ProjectMaterialVariantReference(
                     id, finite, retainedVariantNames, excludedVariantNames, diagnostics));
             }
@@ -123,7 +138,7 @@ namespace CoreAI.Mods.WorldPackages
             RbxCFrame? cameraCFrame = context.CameraRig != null
                 ? ProjectFiniteCameraCFrame(context.CameraRig.GetCFrame(), tree, diagnostics)
                 : (RbxCFrame?)null;
-            IReadOnlyList<RbxWorldModSource> mods = CaptureMods(context.ModSourceStore);
+            IReadOnlyList<RbxWorldModSource> mods = CaptureMods(context.ModSourceStore, diagnostics);
             RbxWorldPackagePayload payload = new(
                 capturedAtUtc,
                 CloneSettings(settings),
@@ -166,7 +181,7 @@ namespace CoreAI.Mods.WorldPackages
                     excludedIds.Add(node.Id);
                     if (string.Equals(node.ClassName, "MaterialVariant", StringComparison.Ordinal))
                     {
-                        excludedVariantNames?.Add(node.Name);
+                        excludedVariantNames?.Add(ReplaceLoneSurrogates(node.Name));
                     }
 
                     continue;
@@ -241,7 +256,218 @@ namespace CoreAI.Mods.WorldPackages
             InstanceTreeSerializer.ReplaceOutOfRangeValues(projectedTree, (instanceId, member) =>
                 diagnostics?.Add(new RbxWorldPackageDiagnostic(
                     instanceId, 0UL, OutOfRangeReason, member)));
+            ReplaceIllFormedText(projectedTree, diagnostics);
             return projectedTree;
+        }
+
+        /// <summary>
+        /// Replaces, in <paramref name="tree"/> only, every lone UTF-16 surrogate in the text the
+        /// package writes with U+FFFD and records one <c>ill-formed-text</c> diagnostic per member.
+        /// A tag or attribute that becomes a duplicate of an earlier one is dropped.
+        /// </summary>
+        /// <remarks>
+        /// WHY: Lua strings are byte strings, and cutting a character in half (<c>string.sub</c> on
+        /// the first byte of an emoji) hands the CLR a lone surrogate. UTF-8 cannot encode it, so the
+        /// strict writer threw after a successful capture, and every save, every confirmed
+        /// pre-mutation autosave and therefore every gated tool was refused. The live instance keeps
+        /// what the script wrote, as for the non-finite projection.
+        /// </remarks>
+        private static void ReplaceIllFormedText(
+            InstanceTreeSnapshot tree,
+            List<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            foreach (InstanceSnapshot node in tree.Instances)
+            {
+                if (node == null)
+                {
+                    continue;
+                }
+
+                node.Name = ReplaceMember(node.Id, "Name", node.Name, diagnostics);
+                node.OriginTag = ReplaceMember(node.Id, "OriginTag", node.OriginTag, diagnostics);
+                node.OwnerActorId = ReplaceMember(node.Id, "OwnerActorId", node.OwnerActorId, diagnostics);
+                if (node.Value != null)
+                {
+                    node.Value.StringValue = ReplaceMember(
+                        node.Id, "Value", node.Value.StringValue, diagnostics);
+                }
+
+                if (node.MaterialVariant != null)
+                {
+                    MaterialVariantSnapshot variant = node.MaterialVariant;
+                    variant.ColorMap = ReplaceMember(node.Id, "ColorMap", variant.ColorMap, diagnostics);
+                    variant.NormalMap = ReplaceMember(node.Id, "NormalMap", variant.NormalMap, diagnostics);
+                    variant.RoughnessMap = ReplaceMember(
+                        node.Id, "RoughnessMap", variant.RoughnessMap, diagnostics);
+                    variant.MetalnessMap = ReplaceMember(
+                        node.Id, "MetalnessMap", variant.MetalnessMap, diagnostics);
+                }
+
+                if (node.Humanoid != null)
+                {
+                    node.Humanoid.DisplayName = ReplaceMember(
+                        node.Id, "DisplayName", node.Humanoid.DisplayName, diagnostics);
+                }
+
+                if (node.Tags != null)
+                {
+                    ReplaceIllFormedTags(node, diagnostics);
+                }
+
+                if (node.Attributes != null)
+                {
+                    ReplaceIllFormedAttributes(node, diagnostics);
+                }
+            }
+        }
+
+        private static void ReplaceIllFormedTags(
+            InstanceSnapshot node,
+            List<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            HashSet<string> seen = null;
+            int index = 0;
+            while (index < node.Tags.Count)
+            {
+                if (TryReplaceLoneSurrogates(node.Tags[index], out string wellFormed))
+                {
+                    diagnostics?.Add(IllFormedTextDiagnostic(node.Id, "Tags"));
+                    seen ??= new HashSet<string>(node.Tags, StringComparer.Ordinal);
+                    if (seen.Contains(wellFormed))
+                    {
+                        node.Tags.RemoveAt(index);
+                        continue;
+                    }
+
+                    seen.Add(wellFormed);
+                    node.Tags[index] = wellFormed;
+                }
+
+                index++;
+            }
+        }
+
+        private static void ReplaceIllFormedAttributes(
+            InstanceSnapshot node,
+            List<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            HashSet<string> seen = null;
+            int index = 0;
+            while (index < node.Attributes.Count)
+            {
+                AttributeSnapshot attribute = node.Attributes[index];
+                if (attribute == null)
+                {
+                    index++;
+                    continue;
+                }
+
+                bool nameReplaced = TryReplaceLoneSurrogates(attribute.Name, out string wellFormedName);
+                string member = InstanceTreeSerializer.AttributeMemberPrefix + wellFormedName;
+                if (nameReplaced)
+                {
+                    diagnostics?.Add(IllFormedTextDiagnostic(node.Id, member));
+                    if (seen == null)
+                    {
+                        seen = new HashSet<string>(StringComparer.Ordinal);
+                        foreach (AttributeSnapshot other in node.Attributes)
+                        {
+                            if (other?.Name != null)
+                            {
+                                seen.Add(other.Name);
+                            }
+                        }
+                    }
+
+                    if (seen.Contains(wellFormedName))
+                    {
+                        node.Attributes.RemoveAt(index);
+                        continue;
+                    }
+
+                    seen.Add(wellFormedName);
+                    attribute.Name = wellFormedName;
+                }
+
+                if (TryReplaceLoneSurrogates(attribute.StringValue, out string wellFormedValue))
+                {
+                    attribute.StringValue = wellFormedValue;
+                    if (!nameReplaced)
+                    {
+                        diagnostics?.Add(IllFormedTextDiagnostic(node.Id, member));
+                    }
+                }
+
+                index++;
+            }
+        }
+
+        private static string ReplaceMember(
+            ulong instanceId,
+            string member,
+            string value,
+            List<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            if (!TryReplaceLoneSurrogates(value, out string wellFormed))
+            {
+                return value;
+            }
+
+            diagnostics?.Add(IllFormedTextDiagnostic(instanceId, member));
+            return wellFormed;
+        }
+
+        private static RbxWorldPackageDiagnostic IllFormedTextDiagnostic(ulong instanceId, string member)
+        {
+            return new RbxWorldPackageDiagnostic(instanceId, 0UL, IllFormedTextReason, member);
+        }
+
+        /// <summary>
+        /// Returns <paramref name="value"/> with every lone UTF-16 surrogate replaced by U+FFFD, or the
+        /// same instance when it is null or already well-formed.
+        /// </summary>
+        internal static string ReplaceLoneSurrogates(string value)
+        {
+            return TryReplaceLoneSurrogates(value, out string wellFormed) ? wellFormed : value;
+        }
+
+        /// <summary>True, with the replaced text, when <paramref name="value"/> holds a lone surrogate.</summary>
+        private static bool TryReplaceLoneSurrogates(string value, out string wellFormed)
+        {
+            wellFormed = value;
+            if (value == null)
+            {
+                return false;
+            }
+
+            char[] buffer = null;
+            for (int index = 0; index < value.Length; index++)
+            {
+                char current = value[index];
+                if (!char.IsSurrogate(current))
+                {
+                    continue;
+                }
+
+                if (char.IsHighSurrogate(current)
+                    && index + 1 < value.Length
+                    && char.IsLowSurrogate(value[index + 1]))
+                {
+                    index++;
+                    continue;
+                }
+
+                buffer ??= value.ToCharArray();
+                buffer[index] = ReplacementCharacter;
+            }
+
+            if (buffer == null)
+            {
+                return false;
+            }
+
+            wellFormed = new string(buffer);
+            return true;
         }
 
         /// <summary>True when <paramref name="descendantId"/> sits below <paramref name="ancestorId"/> in the retained tree.</summary>
@@ -463,7 +689,7 @@ namespace CoreAI.Mods.WorldPackages
                 RbxWorldModSource mod = payload.Mods[index];
                 PackageModIndexDto modIndex = manifest.Mods[index];
                 byte[] modManifestBytes = SerializeJson(mod.Manifest);
-                int sourceByteCount = StrictUtf8.GetByteCount(mod.Source);
+                int sourceByteCount = StrictUtf8.GetByteCount(ReplaceLoneSurrogates(mod.Source));
                 ValidateWritableEntry(modIndex.ManifestEntry, modManifestBytes.LongLength);
                 ValidateWritableEntry(modIndex.SourceEntry, sourceByteCount);
                 expandedBytes += modManifestBytes.LongLength + sourceByteCount;
@@ -486,7 +712,10 @@ namespace CoreAI.Mods.WorldPackages
                     RbxWorldModSource mod = payload.Mods[index];
                     PackageModIndexDto modIndex = manifest.Mods[index];
                     WriteEntry(archive, modIndex.ManifestEntry, SerializeJson(mod.Manifest));
-                    WriteEntry(archive, modIndex.SourceEntry, StrictUtf8.GetBytes(mod.Source));
+                    WriteEntry(
+                        archive,
+                        modIndex.SourceEntry,
+                        StrictUtf8.GetBytes(ReplaceLoneSurrogates(mod.Source)));
                 }
             }
 
@@ -613,7 +842,9 @@ namespace CoreAI.Mods.WorldPackages
             }
         }
 
-        private static IReadOnlyList<RbxWorldModSource> CaptureMods(ILuaModSourceStore sourceStore)
+        private static IReadOnlyList<RbxWorldModSource> CaptureMods(
+            ILuaModSourceStore sourceStore,
+            List<RbxWorldPackageDiagnostic> diagnostics)
         {
             if (sourceStore == null)
             {
@@ -674,6 +905,12 @@ namespace CoreAI.Mods.WorldPackages
                     // WHY: only a hand-edited store holds such an order, every reader takes it for no
                     // order, and a package that carried it would be refused on read.
                     captured.LoadOrder = 0;
+                }
+
+                if (TryReplaceLoneSurrogates(source, out string wellFormedSource))
+                {
+                    diagnostics.Add(IllFormedTextDiagnostic(0UL, "Mods/" + captured.Id + "/source"));
+                    source = wellFormedSource;
                 }
 
                 mods.Add(new RbxWorldModSource(captured, source));
@@ -1634,7 +1871,12 @@ namespace CoreAI.Mods.WorldPackages
         private static byte[] SerializeJson(object value)
         {
             string json = JsonConvert.SerializeObject(value, CreateJsonSettings());
-            return StrictUtf8.GetBytes(json);
+            // WHY a second replacement over the whole text: a payload that did not come through
+            // Capture (settings, mod manifests, a hand-built payload) may still carry a lone
+            // surrogate, and the writer must never throw on text it can encode with U+FFFD. The
+            // JSON writer emits such a surrogate raw inside a string literal, so this touches only
+            // string content. Reading stays strict: invalid UTF-8 bytes are still rejected.
+            return StrictUtf8.GetBytes(ReplaceLoneSurrogates(json));
         }
 
         private static T DeserializeJson<T>(byte[] bytes, string entryName)

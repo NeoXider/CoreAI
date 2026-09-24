@@ -380,6 +380,23 @@ namespace CoreAI.Mods.WorldPackages
 
         /// <summary>Why a successful confirmed load was not recorded for the next start; empty otherwise.</summary>
         public string StartupSelectionError { get; }
+
+        /// <summary>
+        /// Non-empty when the load ran without its pre-load safety autosave, because the outgoing world
+        /// could not be encoded as a package at all (a format limit or a platform budget); says why.
+        /// The outgoing world is then not recoverable from an autosave.
+        /// </summary>
+        public string BackupWarning { get; private set; } = "";
+
+        /// <summary>A copy of this result that carries <paramref name="warning"/> as its <see cref="BackupWarning"/>.</summary>
+        internal RbxWorldLoadResult WithBackupWarning(string warning)
+        {
+            return new RbxWorldLoadResult(
+                Success, Error, ActiveModsStarted, StartupSelectionPersisted, StartupSelectionError, Status)
+            {
+                BackupWarning = warning ?? ""
+            };
+        }
     }
 
     /// <summary>What the boot-time restore of the durable startup selection did.</summary>
@@ -1407,7 +1424,8 @@ namespace CoreAI.Mods.WorldPackages
     {
         private const int MaximumPendingLoadRequests = 8;
         private static readonly TimeSpan DefaultPendingLoadTimeToLive = TimeSpan.FromMinutes(2d);
-        private const string PreLoadAutosaveTrigger = "load_world-pre";
+        /// <summary>The backup trigger of the safety autosave a confirmed load writes of the outgoing world.</summary>
+        internal const string PreLoadAutosaveTrigger = "load_world-pre";
         private const string ManualSourceKind = "manual";
         private const string AutosaveSourceKind = "autosave";
         private const string NonTransactionalSourceStoreRefusal =
@@ -1462,6 +1480,8 @@ namespace CoreAI.Mods.WorldPackages
         private TimeSpan _pendingLoadTimeToLive = DefaultPendingLoadTimeToLive;
         private string _lastAdvanceFailure;
         private string _lastTickFailure;
+        private Action<string> _mutationStartingHook;
+        private Func<string, CancellationToken, UniTask<string>> _afterMutationHook;
 
         public RbxWorldRuntimeSessionController(
             IRbxWorldSessionHost host,
@@ -1513,8 +1533,10 @@ namespace CoreAI.Mods.WorldPackages
             _worldMutationGate = initialStack.ToolExecutor.WorldMutationGate;
             if (_worldMutationGate is IStartupAwareWorldMutationGate startupAwareGate)
             {
-                startupAwareGate.MutationStarting = OnGatedMutationStarting;
-                startupAwareGate.AfterMutationAsync = RefreshStartupSelectionAfterMutationAsync;
+                _mutationStartingHook = OnGatedMutationStarting;
+                _afterMutationHook = RefreshStartupSelectionAfterMutationAsync;
+                startupAwareGate.MutationStarting = _mutationStartingHook;
+                startupAwareGate.AfterMutationAsync = _afterMutationHook;
             }
             else if (_worldMutationGate != null && _startupStore != null)
             {
@@ -2034,10 +2056,16 @@ namespace CoreAI.Mods.WorldPackages
 
                 if (_worldMutationGate == null)
                 {
-                    string safetyFailure = await WriteSafetyAutosaveAsync(cancellationToken);
-                    return safetyFailure.Length > 0
-                        ? new RbxWorldLoadResult(false, safetyFailure, 0)
-                        : await ReplaceWorldAsync(payload, startupSource, restoredStartup, cancellationToken);
+                    (string safetyFailure, string backupWarning) =
+                        await WriteSafetyAutosaveAsync(cancellationToken);
+                    if (safetyFailure.Length > 0)
+                    {
+                        return new RbxWorldLoadResult(false, safetyFailure, 0);
+                    }
+
+                    RbxWorldLoadResult replaced =
+                        await ReplaceWorldAsync(payload, startupSource, restoredStartup, cancellationToken);
+                    return backupWarning.Length == 0 ? replaced : replaced.WithBackupWarning(backupWarning);
                 }
 
                 // WHY the whole replacement runs inside the shared gate: execute_lua and manage_mods
@@ -2070,19 +2098,25 @@ namespace CoreAI.Mods.WorldPackages
         }
 
         /// <summary>
-        /// The safety autosave of a load composed without a shared gate. Returns why it failed, or an
-        /// empty string once the store confirmed it.
+        /// The safety autosave of a load composed without a shared gate. Returns why it failed (empty
+        /// once the store confirmed it), and a backup warning when the outgoing world cannot be encoded
+        /// as a package at all, so the load runs without the autosave, as it does through the gate.
         /// </summary>
-        private async UniTask<string> WriteSafetyAutosaveAsync(CancellationToken cancellationToken)
+        private async UniTask<(string Failure, string BackupWarning)> WriteSafetyAutosaveAsync(
+            CancellationToken cancellationToken)
         {
             RbxWorldPackagePayload currentPayload;
             try
             {
                 currentPayload = CaptureCurrent();
             }
+            catch (RbxWorldPackageFormatLimitException ex)
+            {
+                return ("", ConfirmedWorldMutationGate.DescribeSkippedBackup(PreLoadAutosaveTrigger, ex.Message));
+            }
             catch (Exception ex)
             {
-                return "Pre-load safety autosave capture failed: " + ex.Message;
+                return ("Pre-load safety autosave capture failed: " + ex.Message, "");
             }
 
             RbxWorldPackageWriteResult safetyAutosave;
@@ -2095,7 +2129,7 @@ namespace CoreAI.Mods.WorldPackages
             }
             catch (Exception ex)
             {
-                return "Pre-load safety autosave '" + PreLoadAutosaveTrigger + "' failed: " + ex.Message;
+                return ("Pre-load safety autosave '" + PreLoadAutosaveTrigger + "' failed: " + ex.Message, "");
             }
 
             if (safetyAutosave == null || !safetyAutosave.Success)
@@ -2103,10 +2137,15 @@ namespace CoreAI.Mods.WorldPackages
                 string reason = safetyAutosave == null || string.IsNullOrWhiteSpace(safetyAutosave.Error)
                     ? "durability not confirmed"
                     : safetyAutosave.Error;
-                return "Pre-load safety autosave '" + PreLoadAutosaveTrigger + "' failed: " + reason;
+                if (safetyAutosave != null && safetyAutosave.PackageCannotBeEncoded)
+                {
+                    return ("", ConfirmedWorldMutationGate.DescribeSkippedBackup(PreLoadAutosaveTrigger, reason));
+                }
+
+                return ("Pre-load safety autosave '" + PreLoadAutosaveTrigger + "' failed: " + reason, "");
             }
 
-            return "";
+            return ("", "");
         }
 
         /// <summary>
@@ -2324,7 +2363,19 @@ namespace CoreAI.Mods.WorldPackages
         /// </summary>
         public void PumpFrame(ActorContext actorContext, float deltaSeconds)
         {
-            Session session = Current;
+            Session session;
+            lock (_gate)
+            {
+                // WHY quiet: a host frame driver can outlive the controller by a frame or more, and a
+                // throw here was logged by the engine on every frame after shutdown.
+                if (_disposed)
+                {
+                    return;
+                }
+
+                session = _current;
+            }
+
             // WHY two containments: the scheduler and the mod runtime are independent frame owners. A
             // throw from one (an unobserved host fault the scheduler rethrows after its frame, or a
             // runtime that refuses the caller) used to skip the other, so mod timers and queued events
@@ -2373,7 +2424,53 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             Unwatch(watched);
+            DetachGateHooks();
             ShutdownOutgoing(outgoing);
+        }
+
+        /// <summary>True once <see cref="Dispose"/> ran; a frame pump then has nothing to drive.</summary>
+        public bool IsDisposed
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _disposed;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Clears the hooks this controller set on the shared gate, but only while they still point at
+        /// this controller.
+        /// </summary>
+        /// <remarks>
+        /// WHY: the gate outlives a controller that a host disposes and replaces; left set, every later
+        /// gated mutation called into the disposed controller, and a successor's hooks must survive.
+        /// </remarks>
+        private void DetachGateHooks()
+        {
+            if (!(_worldMutationGate is IStartupAwareWorldMutationGate startupAwareGate))
+            {
+                return;
+            }
+
+            try
+            {
+                if (_mutationStartingHook != null && startupAwareGate.MutationStarting == _mutationStartingHook)
+                {
+                    startupAwareGate.MutationStarting = null;
+                }
+
+                if (_afterMutationHook != null && startupAwareGate.AfterMutationAsync == _afterMutationHook)
+                {
+                    startupAwareGate.AfterMutationAsync = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                ReportDiagnostic("Detaching the world session hooks from the shared gate failed: " + ex.Message);
+            }
         }
 
         private Session Current

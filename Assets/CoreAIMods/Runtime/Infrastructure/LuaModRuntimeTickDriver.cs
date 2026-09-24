@@ -118,6 +118,13 @@ namespace CoreAI.Infrastructure.Lua
             // delegates kept driving the dead world — gravity on a torn-down binder, raycasts that
             // always miss, every Humanoid back on the null motor — with nothing in the log. The
             // captured delegates remain the fallback for a host that runs no session controller.
+            // WHY a disposed controller ends the step quietly: its world is torn down, and reading it
+            // threw ObjectDisposedException, which the engine logged on every fixed step.
+            if (_sessionController != null && _sessionController.IsDisposed)
+            {
+                return;
+            }
+
             global::CoreAI.Ai.LuaCs.LuaCsRbxApiBindings live = _sessionController?.CurrentRbxApi;
             if (live != null)
             {

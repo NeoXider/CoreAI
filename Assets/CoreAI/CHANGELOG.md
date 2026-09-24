@@ -163,6 +163,36 @@ and runtime, C3-xx sandbox for round 3; details in `TODO.md`).
 
 ### Fixed
 
+- **Half an emoji locked the world: no save, no autosave, no gated tool, not even `forget` or a load.** Lua strings
+  are cut by UTF-16 code unit, so `s:sub(1, 1)` on a string that starts with an emoji hands the CLR a lone
+  surrogate; written to a name, a `StringValue`, a string attribute or a tag it captured fine, and then the strict
+  UTF-8 writer threw at write time. Every confirmed pre-mutation autosave failed, so `ConfirmedWorldMutationGate`
+  refused every `execute_lua` and `manage_mods` mutation (`forget` included), `save_world` failed, a
+  player-confirmed load failed its safety autosave and the startup refresh failed. Capture now replaces every lone
+  surrogate in the snapshot only (names, origin and owner fields, value payloads, string attributes, tags,
+  MaterialVariant maps, Humanoid `DisplayName`, Part `MaterialVariant`, mod sources) with U+FFFD and records one
+  `ill-formed-text` diagnostic per member (`model_id` 0 and member `Mods/<id>/source` for a mod source); a tag
+  that becomes a duplicate is dropped. The writer also replaces any surrogate left in text that did not come
+  through capture (mod manifests, settings, a hand-built payload), so `WritePackage` no longer throws on it.
+  Reading stays strict: invalid UTF-8 bytes in a package are still refused.
+- **A world too large to encode locked itself the same way.** About 84 `StringValue`s at the 200,000-character cap
+  push `world.json` past the 16 MiB entry limit (11 on WebGL's 2 MiB text budget): capture succeeds, the write
+  fails, and every gated mutation and player-confirmed load was refused. `RbxWorldPackageWriteResult` now says
+  whether the payload itself cannot be encoded (`PackageCannotBeEncoded`: a format limit, a WebGL budget, text the
+  encoder refuses) as opposed to an I/O or durability failure. For such a failure the gate treats the world like
+  one past the mod limit: `forget` and the safety autosave of a confirmed load (`load_world`, `load_autosave`,
+  trusted host loads) run without the backup they can never get and say so — the `manage_mods` result gains a
+  `backup_warning` field, `RbxWorldLoadResult` a `BackupWarning` that the Hub shows — while every other mutation
+  stays refused and a durability failure still refuses everything. A world past the mod limit can now also be
+  replaced by a confirmed load. The source-side bound (refusing the write that makes a world too large) is still
+  open (`TODO.md`).
+- **Smaller world-session fixes.** Disposing `RbxWorldRuntimeSessionController` clears the hooks it set on the
+  shared gate (only while they still point at it); `PumpFrame` and `LuaModRuntimeTickDriver.FixedUpdate` return
+  quietly once the controller is disposed (new `IsDisposed`) instead of logging `ObjectDisposedException` every
+  frame; `FileRbxWorldPackageStore.CreateAutoAsync` returns a failed result when the autosave folder cannot be
+  prepared instead of throwing; and after a backwards clock step a new autosave never sorts before the existing
+  ring (it takes the newest existing timestamp, and the ring orders the sequence numerically), so the ring rotates
+  the oldest autosave instead of the one just written.
 - **One line of Lua could block every save, every autosave and every gated `execute_lua`.** A NaN written to a
   world `NumberValue` (and five other states: an `ObjectValue` pointing at a destroyed, unparented or mod-owned
   instance, a `PrimaryPart` outside its Model, a negative `ClickDetector.MaxActivationDistance`, a non-positive

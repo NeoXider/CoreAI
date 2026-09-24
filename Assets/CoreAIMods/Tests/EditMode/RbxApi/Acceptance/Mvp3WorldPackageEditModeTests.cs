@@ -2652,6 +2652,374 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual(RbxWorldPackageSerializer.MaximumMods, backups[0].Mods.Count);
         }
 
+        // ==================== Unencodable worlds: lone surrogates, write-time limits, lifecycle ====================
+
+        /// <summary>
+        /// A lone UTF-16 surrogate that Lua cuts out of an emoji (<c>string.sub</c> on its first half)
+        /// reached the strict UTF-8 writer, which threw after a successful capture: every autosave
+        /// failed, so every gated mutation, forget included, was refused. The package now holds U+FFFD
+        /// with one <c>ill-formed-text</c> diagnostic per member, and the gated tools keep running.
+        /// </summary>
+        [Test]
+        public async Task ConfirmedBackup_LoneSurrogateWrittenFromLua_IsSavedAsReplacementCharacter_AndGatedMutationsRun()
+        {
+            const string lone = "\uD83D";
+            const string replaced = "\uFFFD";
+            RuntimeWorld world = new(WorldId);
+            _games.Add(world.Game);
+            RbxStringValue holder = (RbxStringValue)CreateNamed(
+                world.Registry, "StringValue", "Holder", world.Registry.WorldRoot);
+            world.SourceStore.Save("stale-mod", "local stale = 1", new LuaModManifest
+            {
+                Id = "stale-mod",
+                Name = "stale-mod",
+                OwnerActorId = "surrogate-actor",
+                Capabilities = LuaCapabilities.Read.ToString(),
+                Active = false
+            });
+            world.Stack.Runtime.LoadMod(
+                "surrogate-writer",
+                "local half = ('\U0001F600 x'):sub(1, 1)\n"
+                + "local holder = workspace:FindFirstChild('Holder')\n"
+                + "holder.Value = half .. 'tail'\n"
+                + "holder:SetAttribute('Label', half)\n"
+                + "holder:AddTag('Tag' .. half)\n"
+                + "holder.Name = 'Half' .. half",
+                LuaCapabilities.All);
+            Assert.AreEqual("Half" + lone, holder.Name, "precondition: Lua handed the CLR a lone surrogate");
+            Assert.AreEqual(lone + "tail", holder.Value);
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore store = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => CapturedAtUtc);
+            ConfirmedWorldMutationGate gate = new(
+                cancellationToken => UniTask.FromResult(Capture(world, CapturedAtUtc)),
+                store);
+            RecordingLuaCsBindings bindings = new();
+            LuaCsGameToolExecutor executor = new(
+                new LuaCsSecureEnvironment(),
+                bindings,
+                new NullLuaExecutionObserver(),
+                null,
+                gate);
+            LuaModsLlmTool tool = CreateWorldGatedModsTool(
+                world.Stack.Runtime,
+                new LocalActorIdentityProvider("surrogate-actor"),
+                new TestCoreAiSettings(),
+                gate);
+
+            LuaTool.LuaResult mutation = await executor.ExecuteAsync("mutate_world()", CancellationToken.None);
+            JObject forget = JObject.Parse(await tool.ExecuteAsync("forget", "stale-mod"));
+
+            Assert.IsTrue(mutation.Success, "A lone surrogate must not refuse execute_lua: " + mutation.Error);
+            Assert.AreEqual("new-tree", bindings.TreeState);
+            Assert.IsTrue(forget.Value<bool>("success"), forget.ToString());
+            Assert.IsNull(forget["backup_warning"], "the world encodes, so forget was backed up as usual");
+            Assert.IsFalse(world.SourceStore.TryLoad("stale-mod", out _, out _));
+            IReadOnlyList<RbxAutoSaveInfo> autosaves = store.ListAutoSaves();
+            Assert.AreEqual(2, autosaves.Count);
+            RbxWorldPackagePayload saved = RbxWorldPackageSerializer.ReadPackage(
+                File.ReadAllBytes(Path.Combine(root, "Auto", autosaves[0].FileName)));
+            InstanceSnapshot savedHolder = FindNode(saved, "Half" + replaced);
+            Assert.AreEqual(holder.Id.Value, savedHolder.Id);
+            Assert.AreEqual(replaced + "tail", savedHolder.Value.StringValue);
+            Assert.AreEqual(replaced, FindAttribute(savedHolder, "Label").StringValue);
+            CollectionAssert.Contains(savedHolder.Tags, "Tag" + replaced);
+            AssertDiagnostics(
+                saved,
+                Diagnostic(holder, null, "ill-formed-text", "Name"),
+                Diagnostic(holder, null, "ill-formed-text", "Value"),
+                Diagnostic(holder, null, "ill-formed-text", "Attributes.Label"),
+                Diagnostic(holder, null, "ill-formed-text", "Tags"));
+            RbxWorldPackageRestoreResult restored = RbxWorldPackageSerializer.RestoreFresh(
+                saved,
+                new RbxWorldPackageRestoreOptions { CameraRig = new InMemoryCameraRig() });
+            _games.Add(restored.Game);
+            Assert.IsTrue(restored.Registry.TryGet(holder.Id, out RbxInstance restoredHolder));
+            Assert.AreEqual("Half" + replaced, restoredHolder.Name);
+            Assert.AreEqual(replaced + "tail", ((RbxStringValue)restoredHolder).Value);
+            Assert.AreEqual("Half" + lone, holder.Name, "Only the payload is adjusted; the live world keeps it.");
+        }
+
+        /// <summary>
+        /// The writer never throws on a lone surrogate, even in text that did not come through the
+        /// capture projection: a mod source is replaced at capture with a diagnostic, and a mod manifest
+        /// or a hand-built payload is replaced by the writer itself. Reading stays strict.
+        /// </summary>
+        [Test]
+        public void WritePackage_LoneSurrogateInModSourceManifestOrHandBuiltPayload_WritesReplacementCharacter()
+        {
+            MemorySourceStore sources = new();
+            sources.Save("half-mod", "local s = '\uD83D'", new LuaModManifest
+            {
+                Id = "half-mod",
+                Name = "half\uDC00",
+                Capabilities = LuaCapabilities.Read.ToString(),
+                Active = false
+            });
+            InstanceRegistry registry = new(worldId: WorldId);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            _games.Add(game);
+            CreateNamed(registry, "Folder", "Plain", registry.WorldRoot);
+            RbxWorldPackagePayload payload = RbxWorldPackageSerializer.Capture(
+                new RbxWorldPackageCaptureContext(
+                    registry,
+                    game,
+                    new InMemoryPartPropertySink(),
+                    NewSettings(),
+                    null,
+                    sources,
+                    CapturedAtUtc));
+            FindNode(payload, "Plain").Name = "Plain\uDC00";
+
+            byte[] package = RbxWorldPackageSerializer.WritePackage(payload);
+            RbxWorldPackagePayload decoded = RbxWorldPackageSerializer.ReadPackage(package);
+
+            AssertDiagnostics(payload, "0:0:ill-formed-text:Mods/half-mod/source");
+            Assert.AreEqual("local s = '\uFFFD'", payload.Mods[0].Source);
+            Assert.IsNotNull(FindNodeOrNull(decoded, "Plain\uFFFD"));
+            Assert.AreEqual("half\uFFFD", decoded.Mods[0].Manifest.Name);
+            Assert.AreEqual("local s = '\uFFFD'", decoded.Mods[0].Source);
+            AssertDiagnostics(decoded, "0:0:ill-formed-text:Mods/half-mod/source");
+        }
+
+        /// <summary>
+        /// A world whose world.json passes the 16 MiB entry limit (84 StringValues at their
+        /// 200,000-character cap) captures, but its autosave fails at write time, so every gated
+        /// mutation was refused, forget included. Forget now runs without the backup it can never get
+        /// and says so in <c>backup_warning</c>; an ordinary execute_lua mutation stays refused.
+        /// </summary>
+        [Test]
+        public async Task ConfirmedBackup_WorldOverTheEntryLimit_RunsForgetWithoutBackupAndSaysSo_AndRefusesExecuteLua()
+        {
+            MemorySourceStore sources = new();
+            sources.Save("stale-mod", "local stale = 1", new LuaModManifest
+            {
+                Id = "stale-mod",
+                Name = "stale-mod",
+                OwnerActorId = "size-actor",
+                Capabilities = LuaCapabilities.Read.ToString(),
+                Active = false
+            });
+            InstanceRegistry registry = new(worldId: WorldId);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            _games.Add(game);
+            string filler = new('x', RbxStringValue.MaxLength);
+            int count = RbxWorldPackageSerializer.MaximumEntryBytes / RbxStringValue.MaxLength + 1;
+            for (int index = 0; index < count; index++)
+            {
+                RbxStringValue big = (RbxStringValue)CreateNamed(
+                    registry, "StringValue", "Big" + index, registry.WorldRoot);
+                big.Value = filler;
+            }
+
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore store = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => CapturedAtUtc);
+            ConfirmedWorldMutationGate gate = new(
+                cancellationToken => UniTask.FromResult(RbxWorldPackageSerializer.Capture(
+                    new RbxWorldPackageCaptureContext(
+                        registry,
+                        game,
+                        new InMemoryPartPropertySink(),
+                        NewSettings(),
+                        null,
+                        sources,
+                        CapturedAtUtc))),
+                store);
+            RecordingLuaCsBindings bindings = new();
+            LuaCsGameToolExecutor executor = new(
+                new LuaCsSecureEnvironment(),
+                bindings,
+                new NullLuaExecutionObserver(),
+                null,
+                gate);
+            LuaCsModRuntime runtime = new(sourceStore: sources, versionStore: new MemoryLuaScriptVersionStore());
+            LuaModsLlmTool tool = CreateWorldGatedModsTool(
+                runtime, new LocalActorIdentityProvider("size-actor"), new TestCoreAiSettings(), gate);
+
+            LuaTool.LuaResult mutation = await executor.ExecuteAsync("mutate_world()", CancellationToken.None);
+            JObject forget = JObject.Parse(await tool.ExecuteAsync("forget", "stale-mod"));
+
+            Assert.IsFalse(mutation.Success, mutation.Output);
+            StringAssert.Contains("Confirmed pre-mutation backup 'execute_lua' failed", mutation.Error);
+            StringAssert.Contains("world.json", mutation.Error);
+            Assert.AreEqual("old-tree", bindings.TreeState, "an ordinary mutation cannot shrink the world");
+            Assert.IsTrue(forget.Value<bool>("success"), forget.ToString());
+            string warning = forget.Value<string>(ConfirmedWorldMutationGate.BackupNoteField);
+            StringAssert.Contains(
+                "No pre-mutation backup was written for '" + LuaModsLlmTool.ForgetBackupTrigger + "'", warning);
+            StringAssert.Contains("world.json", warning);
+            Assert.IsFalse(sources.TryLoad("stale-mod", out _, out _));
+            Assert.AreEqual(0, store.ListAutoSaves().Count, "nothing could be written");
+        }
+
+        /// <summary>
+        /// Only a failure of the payload itself lets forget skip its backup: a store that wrote the
+        /// package but could not confirm durability still refuses it, and the source stays.
+        /// </summary>
+        [Test]
+        public async Task ConfirmedBackup_DurabilityFailure_StillRefusesForget()
+        {
+            MemorySourceStore sources = new();
+            sources.Save("stale-mod", "local stale = 1", new LuaModManifest
+            {
+                Id = "stale-mod",
+                Name = "stale-mod",
+                OwnerActorId = "durability-actor",
+                Capabilities = LuaCapabilities.Read.ToString(),
+                Active = false
+            });
+            RbxWorldPackagePayload payload = CreateMinimalPayload(CapturedAtUtc);
+            FileRbxWorldPackageStore store = new(
+                NewTemporaryDirectory(),
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(false),
+                utcNow: () => CapturedAtUtc);
+            ConfirmedWorldMutationGate gate = new(cancellationToken => UniTask.FromResult(payload), store);
+            LuaCsModRuntime runtime = new(sourceStore: sources, versionStore: new MemoryLuaScriptVersionStore());
+            LuaModsLlmTool tool = CreateWorldGatedModsTool(
+                runtime, new LocalActorIdentityProvider("durability-actor"), new TestCoreAiSettings(), gate);
+
+            JObject forget = JObject.Parse(await tool.ExecuteAsync("forget", "stale-mod"));
+
+            Assert.IsFalse(forget.Value<bool>("success"), forget.ToString());
+            StringAssert.Contains("durable persistence was not confirmed", forget.ToString());
+            Assert.IsNull(forget[ConfirmedWorldMutationGate.BackupNoteField]);
+            Assert.IsTrue(sources.TryLoad("stale-mod", out _, out _), "the refused forget kept the source");
+        }
+
+        /// <summary>
+        /// A player-confirmed load of a world whose outgoing world cannot be encoded used to be refused
+        /// ("Pre-load safety autosave did not complete"), so a load could not rescue it either. It now
+        /// runs without the safety autosave and names why in <see cref="RbxWorldLoadResult.BackupWarning"/>;
+        /// a durability failure of the safety autosave still refuses the load.
+        /// </summary>
+        [Test]
+        public async Task WorldLoad_OutgoingWorldThatCannotBeEncoded_LoadsWithoutSafetyAutosave_ButADurabilityFailureRefuses()
+        {
+            const string refusal = "World package entry 'world.json' is 17000000 bytes; limit is 16777216.";
+            ScriptedWorldPackageStore packages = new()
+            {
+                ManualPayload = CreatePayloadWithFolder("Loaded"),
+                EncodingRefusal = refusal
+            };
+            using GatedHeadlessSession session = new(packages, new RecordingTransactionalSourceStore());
+            ActorContext actor = new LocalActorIdentityProvider("load-actor")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            InstanceRegistry outgoing = session.Controller.CurrentRbxApi.Registry;
+
+            RbxWorldLoadRequest request = await session.Controller.RequestManualLoadAsync(actor, "big-slot");
+            RbxWorldLoadResult loaded = await session.Controller.ConfirmManualLoadAsync(request.RequestId, true);
+
+            Assert.IsTrue(loaded.Success, loaded.Error);
+            StringAssert.Contains("No pre-mutation backup was written for 'load_world-pre'", loaded.BackupWarning);
+            StringAssert.Contains(refusal, loaded.BackupWarning);
+            InstanceRegistry replacedWorld = session.Controller.CurrentRbxApi.Registry;
+            Assert.AreNotSame(outgoing, replacedWorld);
+            Assert.IsNotNull(replacedWorld.WorldRoot.FindFirstChild("Loaded"));
+
+            packages.EncodingRefusal = null;
+            packages.DurabilityRefusal = true;
+            RbxWorldLoadRequest second = await session.Controller.RequestManualLoadAsync(actor, "big-slot");
+            RbxWorldLoadResult refused = await session.Controller.ConfirmManualLoadAsync(second.RequestId, true);
+
+            Assert.IsFalse(refused.Success);
+            StringAssert.Contains("Pre-load safety autosave 'load_world-pre' did not complete", refused.Error);
+            Assert.AreEqual("", refused.BackupWarning);
+            Assert.AreSame(replacedWorld, session.Controller.CurrentRbxApi.Registry);
+        }
+
+        /// <summary>
+        /// The controller set its hooks on the shared gate and never cleared them, so a gate that
+        /// outlived it kept calling into the disposed controller; and a frame pump after disposal threw
+        /// ObjectDisposedException every frame. Dispose now detaches only its own hooks, and later
+        /// frames return quietly.
+        /// </summary>
+        [Test]
+        public void Dispose_DetachesOnlyItsOwnGateHooks_AndLaterFramesAreQuiet()
+        {
+            GatedHeadlessSession session = new(new ScriptedWorldPackageStore(), new RecordingTransactionalSourceStore());
+            Assert.IsNotNull(session.Gate.MutationStarting, "precondition: the controller set its hooks");
+            Assert.IsNotNull(session.Gate.AfterMutationAsync);
+            Func<string, CancellationToken, UniTask<string>> foreign =
+                (trigger, cancellationToken) => UniTask.FromResult("");
+            session.Gate.AfterMutationAsync = foreign;
+            int diagnosticsBefore = session.Diagnostics.Count;
+
+            session.Dispose();
+            ActorContext host = new LocalActorIdentityProvider("pump-host")
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+
+            Assert.IsTrue(session.Controller.IsDisposed);
+            Assert.IsNull(session.Gate.MutationStarting);
+            Assert.AreSame(foreign, session.Gate.AfterMutationAsync, "a hook someone else set survives");
+            Assert.DoesNotThrow(() => session.Controller.PumpFrame(host, 0.016f));
+            Assert.DoesNotThrow(() => session.Controller.PumpFrame(host, 0.016f));
+            Assert.AreEqual(diagnosticsBefore, session.Diagnostics.Count);
+        }
+
+        /// <summary>
+        /// Preparing the autosave folder ran outside any containment, so an I/O fault there escaped as an
+        /// exception instead of the failed result every other autosave failure is.
+        /// </summary>
+        [Test]
+        public async Task FileStore_AutosaveFolderThatCannotBePrepared_ReturnsAFailedResult()
+        {
+            FileRbxWorldPackageStore store = new(
+                NewTemporaryDirectory(),
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => CapturedAtUtc,
+                fileSystem: new UncreatableDirectoryFileSystem());
+
+            RbxWorldPackageWriteResult result = await store.CreateAutoAsync(
+                "execute_lua", CreateMinimalPayload(CapturedAtUtc));
+
+            Assert.IsFalse(result.Success);
+            Assert.IsFalse(result.PackageCannotBeEncoded, "an I/O fault is not a failure of the payload");
+            StringAssert.Contains("Injected directory failure", result.Error);
+        }
+
+        /// <summary>
+        /// The ring rotated in file-name (wall-clock) order, so after a backwards clock step the autosave
+        /// just written sorted first and was the next one rotated out, while older ones survived. Names
+        /// now never sort before an existing autosave, so the oldest autosave is the one rotated.
+        /// </summary>
+        [Test]
+        public async Task FileStore_BackwardsClockStep_RotatesTheOldestAutosaveNotTheNewest()
+        {
+            DateTime now = new(2026, 9, 1, 10, 0, 0, DateTimeKind.Utc);
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore store = new(
+                root,
+                3,
+                cancellationToken => UniTask.FromResult(true),
+                () => now);
+            RbxWorldPackagePayload payload = CreateMinimalPayload(CapturedAtUtc);
+
+            Assert.IsTrue((await store.CreateAutoAsync("first", payload)).Success);
+            now = now.AddSeconds(1d);
+            Assert.IsTrue((await store.CreateAutoAsync("second", payload)).Success);
+            now = now.AddHours(-1d);
+            Assert.IsTrue((await store.CreateAutoAsync("third", payload)).Success);
+            Assert.IsTrue((await store.CreateAutoAsync("fourth", payload)).Success);
+
+            List<string> triggers = new();
+            foreach (RbxAutoSaveInfo autosave in store.ListAutoSaves())
+            {
+                triggers.Add(autosave.Trigger);
+            }
+
+            CollectionAssert.AreEqual(new[] { "second", "third", "fourth" }, triggers);
+            Assert.Less(
+                FileRbxWorldPackageStore.CompareAutoFileNames(
+                    "20260901T100001000Z-9999-a.world", "20260901T100001000Z-10000-a.world"),
+                0,
+                "the sequence orders as a number once it passes four digits");
+        }
+
         /// <summary>
         /// A1-04: the live-network rule was checked once, before the multi-frame safety autosave and
         /// staging, so a client that joined meanwhile had its world replaced under it. It is checked
@@ -5380,6 +5748,60 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
         }
 
+        /// <summary>The real file system, except that creating a directory always fails.</summary>
+        private sealed class UncreatableDirectoryFileSystem : IRbxWorldPackageFileSystem
+        {
+            private readonly IRbxWorldPackageFileSystem _inner = new SystemRbxWorldPackageFileSystem();
+
+            public bool DirectoryExists(string path)
+            {
+                return _inner.DirectoryExists(path);
+            }
+
+            public void CreateDirectory(string path)
+            {
+                throw new IOException("Injected directory failure.");
+            }
+
+            public bool FileExists(string path)
+            {
+                return _inner.FileExists(path);
+            }
+
+            public long GetFileLength(string path)
+            {
+                return _inner.GetFileLength(path);
+            }
+
+            public UniTask WriteAllBytesCreateNewAsync(
+                string path,
+                byte[] bytes,
+                CancellationToken cancellationToken)
+            {
+                return _inner.WriteAllBytesCreateNewAsync(path, bytes, cancellationToken);
+            }
+
+            public UniTask<byte[]> ReadAllBytesAsync(string path, CancellationToken cancellationToken)
+            {
+                return _inner.ReadAllBytesAsync(path, cancellationToken);
+            }
+
+            public void MoveCreateNew(string sourcePath, string destinationPath)
+            {
+                _inner.MoveCreateNew(sourcePath, destinationPath);
+            }
+
+            public void DeleteFile(string path)
+            {
+                _inner.DeleteFile(path);
+            }
+
+            public IReadOnlyList<string> GetFiles(string directory, string extension)
+            {
+                return _inner.GetFiles(directory, extension);
+            }
+        }
+
         /// <summary>A package store whose next autosave can be held open; it records every autosave request.</summary>
         private sealed class ScriptedWorldPackageStore : IRbxWorldPackageStore
         {
@@ -5387,6 +5809,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             /// <summary>When set, the next autosave stays pending until <see cref="ReleaseHeldWrite"/>.</summary>
             public bool HoldNextWrite { get; set; }
+
+            /// <summary>When set, every autosave fails as a payload that cannot be encoded, with this reason.</summary>
+            public string EncodingRefusal { get; set; }
+
+            /// <summary>When set, every autosave fails as unconfirmed durability.</summary>
+            public bool DurabilityRefusal { get; set; }
 
             public List<string> AutoTriggers { get; } = new();
 
@@ -5416,6 +5844,17 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             {
                 AutoTriggers.Add(trigger);
                 AutoPayloads.Add(payload);
+                if (EncodingRefusal != null)
+                {
+                    return UniTask.FromResult(new RbxWorldPackageWriteResult(false, "", EncodingRefusal, true));
+                }
+
+                if (DurabilityRefusal)
+                {
+                    return UniTask.FromResult(new RbxWorldPackageWriteResult(
+                        false, "", "Injected durability refusal."));
+                }
+
                 if (!HoldNextWrite)
                 {
                     return UniTask.FromResult(new RbxWorldPackageWriteResult(true, trigger + ".world", ""));

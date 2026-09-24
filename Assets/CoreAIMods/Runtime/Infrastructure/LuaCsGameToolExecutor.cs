@@ -82,6 +82,12 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>The manage_mods result field that carries the after-mutation note.</summary>
         internal const string StartupNoteField = "startup_warning";
 
+        /// <summary>
+        /// The manage_mods result field that says a mutation ran without its pre-mutation backup,
+        /// because the live world cannot be encoded as a package at all, and why.
+        /// </summary>
+        internal const string BackupNoteField = "backup_warning";
+
         private readonly Func<CancellationToken, UniTask<RbxWorldPackagePayload>> _captureCurrentAsync;
         private readonly IRbxWorldPackageStore _packageStore;
         private readonly SemaphoreSlim _singleFlight = new(1, 1);
@@ -128,21 +134,21 @@ namespace CoreAI.Mods.WorldPackages
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 RbxWorldPackagePayload payload;
-                bool backupImpossible = false;
+                string backupNote = "";
                 try
                 {
                     payload = await _captureCurrentAsync(cancellationToken);
                 }
-                catch (RbxWorldPackageFormatLimitException) when (BringsTheWorldUnderTheLimit(trigger))
+                catch (RbxWorldPackageFormatLimitException ex) when (MayRunWithoutAnImpossibleBackup(trigger))
                 {
                     // WHY: a world past a format limit cannot be captured, so no backup of it can exist.
-                    // Forget is the one way back under the limit; refusing it too would leave the world
-                    // unable to change or save forever.
+                    // Forget and a confirmed load are the ways back under the limit; refusing them too
+                    // would leave the world unable to change or save forever.
                     payload = null;
-                    backupImpossible = true;
+                    backupNote = DescribeSkippedBackup(trigger, ex.Message);
                 }
 
-                if (!backupImpossible)
+                if (backupNote.Length == 0)
                 {
                     if (payload == null)
                     {
@@ -150,25 +156,50 @@ namespace CoreAI.Mods.WorldPackages
                             "Confirmed pre-mutation backup capture returned no world payload.");
                     }
 
-                    RbxWorldPackageWriteResult backup = await _packageStore.CreateAutoAsync(
-                        trigger,
-                        payload,
-                        cancellationToken);
+                    RbxWorldPackageWriteResult backup;
+                    try
+                    {
+                        backup = await _packageStore.CreateAutoAsync(
+                            trigger,
+                            payload,
+                            cancellationToken);
+                    }
+                    catch (Exception ex) when (IsEncodingFailure(ex) && MayRunWithoutAnImpossibleBackup(trigger))
+                    {
+                        backup = new RbxWorldPackageWriteResult(false, "", ex.Message, true);
+                    }
+
                     if (backup == null || !backup.Success)
                     {
                         string reason = backup == null || string.IsNullOrWhiteSpace(backup.Error)
                             ? "the package store did not confirm durability"
                             : backup.Error;
-                        throw new InvalidOperationException(
-                            "Confirmed pre-mutation backup '" + trigger + "' failed: " + reason);
+                        // WHY only an encoding failure: the captured world itself cannot become a
+                        // package (a format limit or a platform budget met at write time), so it fails
+                        // the same way on every retry, exactly like a capture past a format limit. A
+                        // durability or I/O failure may pass on retry and keeps refusing everything.
+                        if (backup == null
+                            || !backup.PackageCannotBeEncoded
+                            || !MayRunWithoutAnImpossibleBackup(trigger))
+                        {
+                            throw new InvalidOperationException(
+                                "Confirmed pre-mutation backup '" + trigger + "' failed: " + reason);
+                        }
+
+                        backupNote = DescribeSkippedBackup(trigger, reason);
                     }
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
                 NotifyMutationStarting(trigger);
                 TResult result = await mutationAsync(cancellationToken);
+                if (backupNote.Length > 0)
+                {
+                    result = WithNote(result, backupNote, BackupNoteField);
+                }
+
                 string note = await NotifyAfterMutationAsync(trigger);
-                return note.Length == 0 ? result : WithNote(result, note);
+                return note.Length == 0 ? result : WithNote(result, note, StartupNoteField);
             }
             finally
             {
@@ -202,16 +233,39 @@ namespace CoreAI.Mods.WorldPackages
         }
 
         /// <summary>
-        /// True for the trigger of forget, the one action that removes a mod's source and so brings a
-        /// world past the mod limit back under it.
+        /// True for the triggers that may run without a backup when the live world cannot be encoded
+        /// as a package at all: forget, the one mutation that removes a mod's source and so can bring
+        /// the world back under a limit, and the safety autosave of a confirmed world load, which
+        /// replaces the whole world with a package that was already read and validated.
         /// </summary>
         /// <remarks>
         /// WHY not unload as well: an unloaded mod keeps its source, so an unload never brings the
         /// world back under the limit, and letting it skip its backup only removed the backup.
+        /// WHY not every other mutation: none of them can make the world encodable again through the
+        /// gate, and each would change a world that has no backup.
         /// </remarks>
-        private static bool BringsTheWorldUnderTheLimit(string trigger)
+        private static bool MayRunWithoutAnImpossibleBackup(string trigger)
         {
-            return string.Equals(trigger, LuaModsLlmTool.ForgetBackupTrigger, StringComparison.Ordinal);
+            return string.Equals(trigger, LuaModsLlmTool.ForgetBackupTrigger, StringComparison.Ordinal)
+                   || string.Equals(
+                       trigger,
+                       RbxWorldRuntimeSessionController.PreLoadAutosaveTrigger,
+                       StringComparison.Ordinal);
+        }
+
+        /// <summary>True for a failure of the payload itself, as opposed to cancellation or I/O.</summary>
+        private static bool IsEncodingFailure(Exception exception)
+        {
+            return exception is RbxWorldPackageException
+                   || exception is System.Text.EncoderFallbackException;
+        }
+
+        /// <summary>The note a mutation that ran without its impossible backup carries on its result.</summary>
+        internal static string DescribeSkippedBackup(string trigger, string reason)
+        {
+            return "No pre-mutation backup was written for '" + trigger + "': the live world cannot be "
+                   + "encoded as a world package (" + (reason ?? "").Trim() + "). The action ran without "
+                   + "one, because it is the way to bring the world back within the package limits.";
         }
 
         private void NotifyMutationStarting(string trigger)
@@ -254,16 +308,25 @@ namespace CoreAI.Mods.WorldPackages
         }
 
         /// <summary>
-        /// Adds <paramref name="note"/> to the result of the two gated tools: an execute_lua
-        /// <see cref="LuaTool.LuaResult"/> (after its output, or its error when it failed) or a
-        /// manage_mods JSON object (as <see cref="StartupNoteField"/>). Any other result is returned as is.
+        /// Adds <paramref name="note"/> to the result of the gated operations: an execute_lua
+        /// <see cref="LuaTool.LuaResult"/> (after its output, or its error when it failed), a
+        /// manage_mods JSON object (as <paramref name="jsonField"/>), or, for
+        /// <see cref="BackupNoteField"/> only, a confirmed load's <see cref="RbxWorldLoadResult"/>
+        /// (as <see cref="RbxWorldLoadResult.BackupWarning"/>). Any other result is returned as is.
         /// </summary>
         /// <remarks>
         /// WHY on the result: the note says a change will not survive a restart, and the one reader who
         /// can act on it is the caller of the tool that made the change.
         /// </remarks>
-        private static TResult WithNote<TResult>(TResult result, string note)
+        private static TResult WithNote<TResult>(TResult result, string note, string jsonField)
         {
+            if (result is RbxWorldLoadResult loadResult)
+            {
+                return string.Equals(jsonField, BackupNoteField, StringComparison.Ordinal)
+                    ? (TResult)(object)loadResult.WithBackupWarning(note)
+                    : result;
+            }
+
             if (result is LuaTool.LuaResult luaResult)
             {
                 LuaTool.LuaResult noted = luaResult.Success
@@ -291,7 +354,7 @@ namespace CoreAI.Mods.WorldPackages
                     using System.IO.StringReader text = new(json);
                     using JsonTextReader reader = new(text) { DateParseHandling = DateParseHandling.None };
                     JObject parsed = JObject.Load(reader);
-                    parsed[StartupNoteField] = note;
+                    parsed[jsonField] = note;
                     return (TResult)(object)parsed.ToString(Formatting.None);
                 }
                 catch (JsonException)
