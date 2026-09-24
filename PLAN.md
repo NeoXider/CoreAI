@@ -21,12 +21,12 @@ MVP4 (RBXL import/export) starts only after MVP3 is closed, verified in Unity an
 - [x] ACL floor: a package without `world_acl_version` is refused by a session composed with ACL (c7b1f44e).
 - [x] Restored trees: per-actor instance quota seeded from existing records; pre-existing Humanoids get the
       scheduler in headless composition (632366fa).
-- [ ] W3.5 tail: the confirmed world survives a process restart (durable startup copy under
+- [x] W3.5 tail (82649c98): the confirmed world survives a process restart (durable startup copy under
       `Saves/Startup`, restored through the same staged swap, fallback to the default world on any failure,
       Hub reset button, WebGL durability through `CoreAiWebGlPersistence`).
 - [x] DoD (a)-(f) each proven by a named, non-vacuous test (94019f99; b-positive-confirm lands with W3.5) (golden JSON, positive confirm, exact triggers,
       default durability hook, create-once with different bytes, no delete path).
-- [ ] World AI tools return JSON failures (never exceptions) for missing/corrupt packages.
+- [x] World AI tools return JSON failures (never exceptions) for missing/corrupt packages (94019f99, 82649c98, 99eaa660).
 - [ ] Docs: WORLD_PACKAGE.md, ROBLOX_API_ROADMAP.md, Docs/ROADMAP.md (Track C), TODO.md, CHANGELOGs.
 - [ ] Unity verification gate (owner/CI): EditMode 0 failed, PlayMode FastNoLlm 0 failed; then bump + tag.
 
@@ -50,7 +50,10 @@ MVP4 (RBXL import/export) starts only after MVP3 is closed, verified in Unity an
 - [x] Remote codec: MP-02 allocation amplification, MP-17 NaN on the wire, MP-01 client references filtered by
       sender visibility (5f1cc8f5, 700db814).
 - [x] A non-finite value written by a script no longer blocks every save/autosave (8854bb0d).
-- [ ] W2 in progress: scheduler fault containment, Lua VM budgets, budgeted string patterns, datatype bindings +
-      ownerless Connect, tween hang/NaN/Reverses/leak; then CORE-A/B, BINDER-A, DEBRIS, IB-1, NET-REPL, MIRROR-1/2.
-- [ ] W3: ApiBindings pass 1, InstanceBindings pass 2, Humanoid/Players, runtime quarantine, binder pass 2,
-      composition, Mirror clock. W4: ApiBindings pass 2 + ClickDetector, fillers. W5: docs.
+- [x] W2 landed: scheduler fault containment (2d6bdee4), Lua VM budgets (a5c453f4), budgeted string patterns
+      (c97e6367), datatype bindings + ownerless Connect (6cc8c54c), tweens (1d4b635f), capture robustness
+      (8854bb0d, 30437d0b), replication resync (99eaa660), RbxInstance (bca443ca), registry/catalogs (d2216d38),
+      binder (4b47d48d), Debris/InstanceBindings pass 1 (360c57b0). Mirror bridge fixes in progress.
+- [ ] W3 in progress: ApiBindings pass 1, InstanceBindings pass 2, Humanoid/Players, runtime quarantine + WebGL
+      ceiling, binder pass 2. Then Mirror clock (MIRROR-3), W4 ApiBindings pass 2 + ClickDetector + fillers, W5 docs.
+
