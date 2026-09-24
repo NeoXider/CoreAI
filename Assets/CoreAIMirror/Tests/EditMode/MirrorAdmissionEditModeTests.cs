@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
+using System.Text;
 using CoreAI.Ai;
 using CoreAI.Authority;
+using Mirror;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -130,6 +133,245 @@ namespace CoreAI.Net.Mirror.Tests
                 "a reused connection id must not inherit the previous peer's admission");
         }
 
+        [Test]
+        public void ASecondAdmissionRequestOnOneConnection_IsIgnored_AndTheProviderIsAskedOnce()
+        {
+            // WHY through the real message handler: the once-per-connection rule lives where a
+            // connection asks. Every accept raises OnServerAuthenticated again, so a connection
+            // that could ask twice would mint a Player per request and call the provider at will.
+            TokenProvider provider = new("open-sesame");
+            _authenticator.Configure(provider, "world-a");
+            List<int> accepted = new();
+            _authenticator.OnServerAuthenticated.AddListener(conn =>
+            {
+                conn.isAuthenticated = true;
+                accepted.Add(conn.connectionId);
+            });
+            OfflineMirror mirror = new();
+            try
+            {
+                StartServer();
+                OfflineMirror.OpenServerConnection(7);
+
+                RequestAdmission(7, "open-sesame");
+                RequestAdmission(7, "open-sesame");
+
+                Assert.AreEqual(1, provider.Calls, "the host's provider is asked once per connection");
+                CollectionAssert.AreEqual(new[] { 7 }, accepted, "one connection is accepted once");
+                Assert.AreEqual(1, _authenticator.AdmittedCount);
+                Assert.AreEqual(1, _authenticator.IgnoredAdmissionRequests);
+                Assert.AreEqual("remote-1", _authenticator.ResultFor(7).Context.ActorId,
+                    "the first admission stands; the repeat changed nothing");
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void Negative_ARepeatThatWouldBeRefused_DoesNotTearDownTheAdmittedSession()
+        {
+            TokenProvider provider = new("open-sesame");
+            _authenticator.Configure(provider, "world-a");
+            _authenticator.OnServerAuthenticated.AddListener(conn => conn.isAuthenticated = true);
+            OfflineMirror mirror = new();
+            try
+            {
+                StartServer();
+                OfflineMirror.OpenServerConnection(7);
+                RequestAdmission(7, "open-sesame");
+
+                RequestAdmission(7, "guess");
+
+                CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests,
+                    "the policy is pinned: a repeat is ignored, so it cannot disconnect the session it repeats");
+                Assert.AreEqual(0, _authenticator.RejectedCount);
+                Assert.AreEqual(1, provider.Calls);
+                Assert.IsNotNull(_authenticator.ResultFor(7));
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void Negative_ARefusedConnection_CannotRetryBeforeItsDropTakesEffect()
+        {
+            // WHY: a refusal disconnects, but a transport may report the drop later than the next
+            // packet; a second credential in that window must not reach the provider.
+            TokenProvider provider = new("open-sesame");
+            _authenticator.Configure(provider, "world-a");
+            OfflineMirror mirror = new();
+            try
+            {
+                StartServer();
+                OfflineMirror.OpenServerConnection(8);
+
+                RequestAdmission(8, "guess");
+                RequestAdmission(8, "open-sesame");
+
+                Assert.AreEqual(0, _authenticator.AdmittedCount, "the retry admitted nobody");
+                Assert.AreEqual(1, provider.Calls);
+                Assert.AreEqual(1, _authenticator.IgnoredAdmissionRequests);
+                CollectionAssert.AreEqual(new[] { 8 }, mirror.ServerDisconnectRequests,
+                    "the refused connection is dropped once, for its one attempt");
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void ANewConnectionOnAReusedId_GetsItsOwnAttempt()
+        {
+            TokenProvider provider = new("open-sesame");
+            _authenticator.Configure(provider, "world-a");
+            OfflineMirror mirror = new();
+            try
+            {
+                StartServer();
+                OfflineMirror.OpenServerConnection(8);
+                RequestAdmission(8, "guess");
+                OfflineMirror.DropServerConnection(8);
+                // WHY no Forget: nothing is hooked to the drop here, so the departed attempt is
+                // still on record — and a new connection object must not inherit it.
+                OfflineMirror.OpenServerConnection(8);
+
+                RequestAdmission(8, "open-sesame");
+
+                Assert.AreEqual(1, _authenticator.AdmittedCount,
+                    "kcp2k reuses ids; the next peer on this one is someone new with an attempt of its own");
+                Assert.AreEqual(0, _authenticator.IgnoredAdmissionRequests);
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void AConnectionThatSendsNothing_IsDroppedAtTheAdmissionDeadline_AndNotBefore()
+        {
+            double now = 0d;
+            _authenticator.ClockSeconds = () => now;
+            _authenticator.Configure(new TokenProvider("open-sesame"), "world-a");
+            OfflineMirror mirror = new();
+            try
+            {
+                StartServer();
+                _authenticator.OnServerAuthenticate(OfflineMirror.OpenServerConnection(7));
+
+                now = 9.9d;
+                _authenticator.EnforceAdmissionDeadline();
+                CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests, "the deadline is 10 seconds, not 9.9");
+
+                now = 10d;
+                _authenticator.EnforceAdmissionDeadline();
+                CollectionAssert.AreEqual(new[] { 7 }, mirror.ServerDisconnectRequests,
+                    "Mirror has no authentication timeout: without this the silent peer keeps its slot for ever");
+                Assert.AreEqual(1, _authenticator.AdmissionTimeouts);
+
+                now = 30d;
+                _authenticator.EnforceAdmissionDeadline();
+                RequestAdmission(7, "open-sesame");
+                Assert.AreEqual(1, mirror.ServerDisconnectRequests.Count, "the drop is made once");
+                Assert.AreEqual(0, _authenticator.AdmittedCount,
+                    "a request arriving after the deadline admits nobody");
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void AConnectionAdmittedBeforeTheDeadline_IsNotTouched()
+        {
+            double now = 0d;
+            _authenticator.ClockSeconds = () => now;
+            _authenticator.Configure(new TokenProvider("open-sesame"), "world-a");
+            _authenticator.OnServerAuthenticated.AddListener(conn => conn.isAuthenticated = true);
+            OfflineMirror mirror = new();
+            try
+            {
+                StartServer();
+                _authenticator.OnServerAuthenticate(OfflineMirror.OpenServerConnection(7));
+                now = 3d;
+                RequestAdmission(7, "open-sesame");
+
+                now = 100d;
+                _authenticator.EnforceAdmissionDeadline();
+
+                CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests);
+                Assert.AreEqual(0, _authenticator.AdmissionTimeouts);
+                Assert.IsNotNull(_authenticator.ResultFor(7));
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void AConnectionThatLeftOrWasForgotten_DuringAdmission_DoesNotTroubleTheDeadline()
+        {
+            double now = 0d;
+            _authenticator.ClockSeconds = () => now;
+            _authenticator.Configure(new TokenProvider("open-sesame"), "world-a");
+            OfflineMirror mirror = new();
+            try
+            {
+                StartServer();
+                _authenticator.OnServerAuthenticate(OfflineMirror.OpenServerConnection(7));
+                _authenticator.OnServerAuthenticate(OfflineMirror.OpenServerConnection(8));
+                _authenticator.Forget(7);
+                OfflineMirror.DropServerConnection(8);
+
+                now = 100d;
+                Assert.DoesNotThrow(() => _authenticator.EnforceAdmissionDeadline());
+                Assert.DoesNotThrow(() => _authenticator.EnforceAdmissionDeadline());
+
+                CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests,
+                    "a forgotten record is not enforced, and a connection that is gone is not dropped again");
+                Assert.AreEqual(0, _authenticator.AdmissionTimeouts);
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void AdmissionTimeout_DefaultsToTenSeconds_AndRefusesADeadlineThatNeverComes()
+        {
+            Assert.AreEqual(10f, _authenticator.AdmissionTimeoutSeconds);
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => _authenticator.AdmissionTimeoutSeconds = 0f);
+            Assert.Throws<ArgumentOutOfRangeException>(() => _authenticator.AdmissionTimeoutSeconds = -1f);
+            Assert.Throws<ArgumentOutOfRangeException>(() => _authenticator.AdmissionTimeoutSeconds = float.NaN);
+            Assert.Throws<ArgumentOutOfRangeException>(
+                () => _authenticator.AdmissionTimeoutSeconds = float.PositiveInfinity);
+            _authenticator.AdmissionTimeoutSeconds = 2.5f;
+            Assert.AreEqual(2.5f, _authenticator.AdmissionTimeoutSeconds);
+        }
+
+        private void StartServer()
+        {
+            OfflineMirror.StartServer();
+            _authenticator.OnStartServer();
+        }
+
+        private static void RequestAdmission(int connectionId, string credential)
+        {
+            OfflineMirror.DeliverToServer(connectionId, new CoreAiAdmissionRequestMessage
+            {
+                Credential = Encoding.UTF8.GetBytes(credential)
+            });
+        }
+
         private sealed class TokenProvider : IActorAdmissionProvider
         {
             private readonly string _expected;
@@ -140,8 +382,11 @@ namespace CoreAI.Net.Mirror.Tests
                 _expected = expected;
             }
 
+            public int Calls { get; private set; }
+
             public ActorAdmissionResult TryAdmit(in ActorCredential credential, string worldId)
             {
+                Calls++;
                 string offered = System.Text.Encoding.UTF8.GetString(credential.Opaque);
                 if (!string.Equals(offered, _expected, StringComparison.Ordinal))
                 {

@@ -231,6 +231,90 @@ namespace CoreAI.Net.Mirror.Tests
             }
         }
 
+        [Test]
+        public void Reconnect_NewestSessionWins_ThePlayerCarriesOver_AndTheOlderConnectionIsClosed()
+        {
+            // WHY this shape: a Wi-Fi blip. The client reconnects and is admitted as the same
+            // durable actor on a new connection while kcp2k keeps the old one alive for its whole
+            // timeout; the old one's drop is reported only afterwards.
+            OfflineMirror mirror = new();
+            try
+            {
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(1);
+                OfflineMirror.AdmitServerConnection(2);
+                List<RbxNetworkEventMessage> delivered = new();
+                _bridge.EventReceived += delivered.Add;
+
+                Assert.IsTrue(_host.Admit(1, Admit("actor-a", 1L, "a", "A"), "session-1"));
+                Assert.IsTrue(_host.Admit(2, Admit("actor-a", 2L, "a", "A"), "session-2"));
+
+                CollectionAssert.AreEqual(new[] { 1 }, mirror.ServerDisconnectRequests,
+                    "the older connection is closed at the transport: the newest session wins");
+                Assert.AreEqual(1, _host.LiveSessionCount);
+                Assert.IsFalse(_host.HasLiveSession(1));
+                Assert.IsTrue(_host.HasLiveSession(2));
+                Assert.AreEqual(1, _host.SupersededSessions);
+                Assert.IsEmpty(_disconnected, "the Player carries over: nothing is torn down");
+                Assert.IsTrue(_host.TryGetIdentity("actor-a", out long userId, out _, out _));
+                Assert.AreEqual(2L, userId, "the identity is the newest admission's");
+
+                _bridge.NotifyDisconnected(1, RbxNetworkDisconnectReason.TransportLost);
+                _bridge.ReceiveServerEvent(2, OfflineMirror.Event(7UL));
+
+                Assert.IsEmpty(_disconnected,
+                    "the older connection's late drop must not tear down the session that replaced it");
+                Assert.AreEqual(1, delivered.Count, "the live connection's next packet is heard");
+                Assert.AreEqual("actor-a", delivered[0].SenderActorId);
+                Assert.AreEqual(0, _bridge.UnadmittedPacketsDropped);
+
+                _bridge.NotifyDisconnected(2, RbxNetworkDisconnectReason.TransportLost);
+
+                CollectionAssert.AreEqual(new[] { "actor-a" }, _disconnected,
+                    "the actor leaves once, when its last session ends");
+                Assert.AreEqual(0, _host.LiveSessionCount, "no session entry may leak");
+                CollectionAssert.IsEmpty(_bridge.ActorIds);
+                Assert.IsFalse(_host.TryGetIdentity("actor-a", out _, out _, out _));
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void Negative_AConnectionHoldingASession_CannotBeAdmittedAsAnotherActor()
+        {
+            Assert.IsTrue(_host.Admit(3, Admit("actor-a", 1L, "a", "A"), "session-a"));
+            List<RbxNetworkEventMessage> delivered = new();
+            _bridge.EventReceived += delivered.Add;
+
+            Assert.IsFalse(_host.Admit(3, Admit("actor-b", 2L, "b", "B"), "session-b"),
+                "a connection must never switch identity by being admitted again");
+
+            CollectionAssert.AreEqual(new[] { "actor-a" }, _connected, "no second actor is created");
+            Assert.AreEqual(1, _host.LiveSessionCount);
+            Assert.IsFalse(_host.TryGetIdentity("actor-b", out _, out _, out _));
+            CollectionAssert.AreEqual(new[] { "actor-a" }, _bridge.ActorIds);
+            _bridge.ReceiveServerEvent(3, OfflineMirror.Event(1UL));
+            Assert.AreEqual("actor-a", delivered[0].SenderActorId,
+                "the session the connection holds is left exactly as it was");
+        }
+
+        [Test]
+        public void AdmittingTheSameActorTwiceOnOneConnection_CreatesNothingTwice()
+        {
+            Assert.IsTrue(_host.Admit(3, Admit("actor-a", 1L, "a", "A"), "session-a"));
+
+            Assert.IsTrue(_host.Admit(3, Admit("actor-a", 1L, "a", "A"), "session-a"),
+                "the connection already is this actor's session");
+
+            CollectionAssert.AreEqual(new[] { "actor-a" }, _connected,
+                "the world is asked to create the actor once, not once per admission");
+            Assert.AreEqual(1, _host.LiveSessionCount);
+            Assert.AreEqual(0, _host.SupersededSessions);
+        }
+
         private static ActorAdmissionResult Admit(string actorId, long userId, string name,
             string displayName)
         {

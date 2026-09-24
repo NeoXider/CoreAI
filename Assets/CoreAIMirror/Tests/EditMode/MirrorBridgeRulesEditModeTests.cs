@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
+using Mirror;
 using NUnit.Framework;
 
 namespace CoreAI.Net.Mirror.Tests
@@ -17,8 +18,10 @@ namespace CoreAI.Net.Mirror.Tests
     /// gate depend on the player loop's timing rather than on the rule.
     /// <para>
     /// What this file explicitly does NOT claim: that bytes cross a real socket. Delivery over the
-    /// wire, MTU behaviour and latency belong to a two-process run that has not been done yet, and
-    /// nothing here should be read as evidence for it.
+    /// wire and latency belong to a two-process run that has not been done yet, and nothing here
+    /// should be read as evidence for it. The size rules are proven against the packet sizes kcp2k
+    /// reports, which the harness can be told to report, and against Mirror's own packer — not
+    /// against kcp2k itself.
     /// </para>
     /// </remarks>
     [TestFixture]
@@ -282,7 +285,9 @@ namespace CoreAI.Net.Mirror.Tests
         [Test]
         public void Negative_ClientTrafficPastTheBudget_IsRefused()
         {
-            // The transport facing a real network must not be the one without a budget.
+            // WHY a server bridge: it charges the client-to-server traffic of the actors running in
+            // its own process, as the loopback does; what it receives from remote clients is not
+            // budgeted yet, a known limit.
             _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
 
             for (int request = 0; request < 3; request++)
@@ -327,6 +332,453 @@ namespace CoreAI.Net.Mirror.Tests
             Assert.AreEqual(65536, _bridge.MaxPayloadBytes);
         }
 
+        [Test]
+        public void MaxPayloadBytesFor_Unreliable_FallsBackToRobloxsCeilingWithNoTransport()
+        {
+            Assert.AreEqual(MirrorNetworkBridge.UnreliablePayloadCeilingBytes,
+                _bridge.MaxPayloadBytesFor(RbxNetworkReliability.UnreliableUnordered),
+                "an UnreliableRemoteEvent is capped at Roblox's 1000 bytes before any transport exists");
+            Assert.AreEqual(65536, _bridge.MaxPayloadBytesFor(RbxNetworkReliability.ReliableOrdered));
+            Assert.AreEqual(65536, _bridge.MaxRequestPayloadBytes);
+        }
+
+        [Test]
+        public void NegativeConnectionIds_AreConnectionsLikeAnyOther()
+        {
+            // WHY: kcp2k derives connection ids from an endpoint hash, and Mirror allows any id but
+            // 0. A bridge that treated a negative id as "no connection" would drop every packet of
+            // roughly half the players as unadmitted.
+            _bridge.BindConnection(-5, new RbxNetworkPeer("actor-b", "session-b", "-5"));
+            List<RbxNetworkEventMessage> delivered = new();
+            _bridge.EventReceived += delivered.Add;
+
+            _bridge.ReceiveServerEvent(-5, ClientWire(7UL));
+
+            Assert.AreEqual(1, delivered.Count, "an admitted connection with a negative id must be heard");
+            Assert.AreEqual("actor-b", delivered[0].SenderActorId);
+            Assert.AreEqual(0, _bridge.UnadmittedPacketsDropped);
+        }
+
+        [Test]
+        public void Negative_AResponseFromANegativeIdConnection_CannotAnswerAnotherConnectionsQuestion()
+        {
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            _bridge.BindConnection(-5, new RbxNetworkPeer("actor-b", "session-b", "conn-5"));
+            List<RbxNetworkResponse> completed = new();
+            _bridge.SendRequest(ServerRequest(), completed.Add);
+
+            _bridge.ReceiveServerResponse(-5, Answer(1u));
+
+            Assert.IsEmpty(completed,
+                "the question was asked of actor-a's connection; actor-b's must not be able to answer it");
+            Assert.AreEqual(1, _bridge.OrphanResponsesDropped);
+        }
+
+        [Test]
+        public void Negative_NoConnectionCanAnswerAQuestionThatWasNeverSentAnywhere()
+        {
+            List<RbxNetworkResponse> completed = new();
+            _bridge.SendRequest(new RbxNetworkRequestMessage(new InstanceId(3UL),
+                RbxNetworkDirection.ServerToClient, null, "actor-nobody", Array.Empty<byte>()), completed.Add);
+
+            _bridge.ReceiveServerResponse(-1, Answer(1u));
+
+            Assert.IsEmpty(completed, "a request that reached no connection is completed by none");
+            Assert.AreEqual(1, _bridge.OrphanResponsesDropped);
+            Assert.AreEqual(1, _bridge.UnroutablePacketsDropped,
+                "a request addressed to nobody never left, and that is counted");
+        }
+
+        [Test]
+        public void Negative_AnEventWithAnInvalidRemoteId_IsDroppedAndCounted_NeverThrown()
+        {
+            // WHY: left to the engine-free message constructor, an invalid id throws inside
+            // Mirror's handler after the packet has been counted as delivered.
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            List<RbxNetworkEventMessage> delivered = new();
+            _bridge.EventReceived += delivered.Add;
+
+            Assert.DoesNotThrow(() => _bridge.ReceiveServerEvent(11, ClientWire(0UL)));
+            Assert.DoesNotThrow(() => _bridge.ReceiveServerEvent(11, ClientWire(InstanceId.AuthorityBit | 5UL)));
+
+            Assert.IsEmpty(delivered);
+            Assert.AreEqual(0, _bridge.PacketsDelivered, "a dropped packet is not a delivered one");
+            Assert.AreEqual(2, _bridge.MalformedPacketsDropped);
+
+            _bridge.ReceiveServerEvent(11, ClientWire(7UL));
+            Assert.AreEqual(1, delivered.Count, "the connection stays admitted; its next valid remote is heard");
+        }
+
+        [Test]
+        public void Negative_AReliabilityByteOutsideTheEnum_IsDroppedAndCounted()
+        {
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            List<RbxNetworkEventMessage> delivered = new();
+            _bridge.EventReceived += delivered.Add;
+            CoreAiRemoteEventMessage wire = ClientWire(7UL);
+            wire.Reliability = 7;
+
+            _bridge.ReceiveServerEvent(11, wire);
+
+            Assert.IsEmpty(delivered, "a delivery class the enum does not name must reach no world");
+            Assert.AreEqual(1, _bridge.MalformedPacketsDropped);
+        }
+
+        [Test]
+        public void Negative_AServerBoundEventClaimingAnotherDirection_IsDroppedAndCounted()
+        {
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            List<RbxNetworkEventMessage> delivered = new();
+            _bridge.EventReceived += delivered.Add;
+            CoreAiRemoteEventMessage wire = ClientWire(7UL);
+            wire.Direction = (byte)RbxNetworkDirection.ServerToAllClients;
+
+            _bridge.ReceiveServerEvent(11, wire);
+
+            Assert.IsEmpty(delivered);
+            Assert.AreEqual(1, _bridge.MalformedPacketsDropped);
+        }
+
+        [Test]
+        public void Negative_ARequestWithAnInvalidRemoteId_IsDroppedAndCounted_NeverThrown()
+        {
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            bool received = false;
+            _bridge.RequestReceived += (_, _) => received = true;
+
+            Assert.DoesNotThrow(() => _bridge.ReceiveServerRequest(11, new CoreAiRemoteRequestMessage
+            {
+                RemoteId = 0UL,
+                Direction = (byte)RbxNetworkDirection.ClientToServer,
+                CorrelationId = 1u,
+                Payload = Array.Empty<byte>()
+            }));
+
+            Assert.IsFalse(received);
+            Assert.AreEqual(0, _bridge.PacketsDelivered);
+            Assert.AreEqual(1, _bridge.MalformedPacketsDropped);
+        }
+
+        [Test]
+        public void Negative_AMalformedEnvelope_CrossingMirrorsHandler_LeavesTheConnectionUp()
+        {
+            OfflineMirror mirror = new();
+            try
+            {
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(11);
+                _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+                List<RbxNetworkEventMessage> delivered = new();
+                _bridge.EventReceived += delivered.Add;
+
+                OfflineMirror.DeliverToServer(11, ClientWire(0UL));
+                OfflineMirror.DeliverToServer(11, ClientWire(7UL));
+
+                CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests,
+                    "the policy is pinned: a malformed envelope is dropped and counted, and the "
+                    + "connection is not disconnected for it");
+                Assert.AreEqual(1, _bridge.MalformedPacketsDropped);
+                Assert.AreEqual(1, delivered.Count);
+                Assert.AreEqual(7UL, delivered[0].RemoteId.Value);
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void NotifyDisconnected_ReleasesThatConnection_EvenWithNobodyListening_AndOnlyThatOne()
+        {
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            _bridge.BindConnection(12, new RbxNetworkPeer("actor-b", "session-b", "conn-12"));
+            _bridge.RegisterActor("actor-a");
+            _bridge.RegisterActor("actor-b");
+            List<RbxNetworkEventMessage> delivered = new();
+            _bridge.EventReceived += delivered.Add;
+
+            _bridge.NotifyDisconnected(11, RbxNetworkDisconnectReason.TransportLost);
+            _bridge.ReceiveServerEvent(11, ClientWire(7UL));
+            _bridge.ReceiveServerEvent(12, ClientWire(8UL));
+
+            Assert.AreEqual(1, delivered.Count,
+                "a connection that is gone must stop resolving to its actor, whoever listened");
+            Assert.AreEqual("actor-b", delivered[0].SenderActorId);
+            Assert.AreEqual(1, _bridge.UnadmittedPacketsDropped);
+            CollectionAssert.AreEqual(new[] { "actor-b" }, _bridge.ActorIds);
+        }
+
+        [Test]
+        public void BindingAnActorOnANewConnection_ClosesItsOlderOne_NewestWins()
+        {
+            OfflineMirror mirror = new();
+            try
+            {
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(1);
+                OfflineMirror.AdmitServerConnection(2);
+                _bridge.BindConnection(1, new RbxNetworkPeer("actor-a", "session-1", "1"));
+                _bridge.RegisterActor("actor-a");
+                List<RbxNetworkResponse> olderQuestion = new();
+                _bridge.SendRequest(ServerRequest(), olderQuestion.Add);
+                List<RbxNetworkEventMessage> delivered = new();
+                List<RbxNetworkPeerDisconnected> disconnects = new();
+                _bridge.EventReceived += delivered.Add;
+                _bridge.PeerDisconnected += disconnects.Add;
+
+                _bridge.BindConnection(2, new RbxNetworkPeer("actor-a", "session-2", "2"));
+
+                CollectionAssert.AreEqual(new[] { 1 }, mirror.ServerDisconnectRequests,
+                    "the older connection of an actor bound again is dropped at the transport");
+                Assert.AreEqual(1, _bridge.SupersededConnections);
+                Assert.AreEqual(1, olderQuestion.Count, "the older connection's open request fails now");
+                StringAssert.Contains("newer connection", olderQuestion[0].Error);
+                CollectionAssert.AreEqual(new[] { "actor-a" }, _bridge.ActorIds,
+                    "the actor carries over to its new connection");
+
+                _bridge.NotifyDisconnected(1, RbxNetworkDisconnectReason.TransportLost);
+                _bridge.ReceiveServerEvent(1, ClientWire(7UL));
+                _bridge.ReceiveServerEvent(2, ClientWire(8UL));
+
+                Assert.IsEmpty(disconnects,
+                    "the older connection's late report finds nothing: it cannot tear down the new session");
+                Assert.AreEqual(1, delivered.Count);
+                Assert.AreEqual(8UL, delivered[0].RemoteId.Value);
+                Assert.AreEqual("actor-a", delivered[0].SenderActorId);
+                Assert.AreEqual(1, _bridge.UnadmittedPacketsDropped);
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void UnderKcpSizes_AReliableRemoteAndARemoteFunctionOf2000Bytes_AreSentWhole()
+        {
+            // WHY: a single ceiling taken from the smaller channel — kcp2k's one-datagram
+            // unreliable limit — refuses every reliable remote over about 1.2 KB, and online only.
+            OfflineMirror mirror = new();
+            try
+            {
+                mirror.UsePacketSizes(OfflineMirror.KcpReliableMaxPacketSize,
+                    OfflineMirror.KcpUnreliableMaxPacketSize);
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(11);
+                _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+
+                Assert.AreEqual(65536, _bridge.MaxPayloadBytes,
+                    "kcp2k's reliable channel carries the codec's whole 64 KiB in one message");
+                Assert.DoesNotThrow(
+                    () => _bridge.SendEvent(ServerEvent(RbxNetworkReliability.ReliableOrdered, 2000)));
+                Assert.DoesNotThrow(() => _bridge.SendRequest(new RbxNetworkRequestMessage(new InstanceId(3UL),
+                    RbxNetworkDirection.ServerToClient, null, "actor-a", new byte[2000]), _ => { }));
+                mirror.FlushServer();
+
+                CollectionAssert.AreEqual(new[] { 11 }, mirror.ServerSendTargetsOf<CoreAiRemoteEventMessage>());
+                CollectionAssert.AreEqual(new[] { 11 }, mirror.ServerSendTargetsOf<CoreAiRemoteRequestMessage>());
+                Assert.AreEqual(2, _bridge.PacketsSent);
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void Negative_UnderKcpSizes_AnUnreliableRemoteOverRobloxs1000Bytes_IsRefused_AndNeverCountedAsSent()
+        {
+            OfflineMirror mirror = new();
+            try
+            {
+                mirror.UsePacketSizes(OfflineMirror.KcpReliableMaxPacketSize,
+                    OfflineMirror.KcpUnreliableMaxPacketSize);
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(11);
+                _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+
+                Assert.AreEqual(1000, _bridge.MaxPayloadBytesFor(RbxNetworkReliability.UnreliableUnordered));
+                // WHY 1190 as well as 1001: 1190 bytes fit kcp2k's 1194-byte datagram, but the
+                // message Mirror makes of them is 1204 bytes, which Mirror drops — so it must be
+                // refused here, never counted as sent.
+                foreach (int size in new[] { 1001, 1190 })
+                {
+                    RbxError error = Assert.Throws<RbxError>(
+                        () => _bridge.SendEvent(ServerEvent(RbxNetworkReliability.UnreliableUnordered, size)));
+                    Assert.AreEqual(RbxErrorCode.PayloadTooLarge, error.Code);
+                    StringAssert.Contains("UnreliableRemoteEvent", error.Message);
+                }
+
+                Assert.DoesNotThrow(
+                    () => _bridge.SendEvent(ServerEvent(RbxNetworkReliability.UnreliableUnordered, 1000)));
+                mirror.FlushServer();
+
+                CollectionAssert.AreEqual(new[] { 11 }, mirror.ServerSendTargetsOf<CoreAiRemoteEventMessage>(),
+                    "exactly the 1000-byte fire reached the transport");
+                Assert.AreEqual(1, _bridge.PacketsSent, "a refused fire is never counted as sent");
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void UnreliableCeiling_IsTheLargestPayloadMirrorsUnreliableChannelCarries_OnASmallMtu()
+        {
+            OfflineMirror mirror = new();
+            try
+            {
+                mirror.UsePacketSizes(65536, 600);
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(11);
+                _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+                int ceiling = _bridge.MaxPayloadBytesFor(RbxNetworkReliability.UnreliableUnordered);
+                int mirrorMax = NetworkMessages.MaxMessageSize(Channels.Unreliable);
+
+                Assert.Less(ceiling, 1000, "a 600-byte datagram is the tighter bound here");
+                Assert.LessOrEqual(PackedSize(ceiling), mirrorMax,
+                    "a payload at the ceiling fits the message Mirror accepts on the unreliable channel");
+                Assert.Greater(PackedSize(ceiling + 1), mirrorMax,
+                    "one byte more would be dropped by Mirror, so the ceiling is tight");
+
+                _bridge.SendEvent(ServerEvent(RbxNetworkReliability.UnreliableUnordered, ceiling));
+                Assert.Throws<RbxError>(
+                    () => _bridge.SendEvent(ServerEvent(RbxNetworkReliability.UnreliableUnordered, ceiling + 1)));
+                mirror.FlushServer();
+
+                CollectionAssert.AreEqual(new[] { 11 }, mirror.ServerSendTargetsOf<CoreAiRemoteEventMessage>(),
+                    "the fire at the ceiling reached the transport rather than being dropped by Mirror");
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void AnOnServerInvokeAnswerTooLargeForOneMessage_IsSentAsAFailureThatSaysSo()
+        {
+            OfflineMirror mirror = new();
+            List<CoreAiRemoteResponseMessage> handedToMirror = new();
+            Action<NetworkDiagnostics.MessageInfo> record = info =>
+            {
+                if (info.message is CoreAiRemoteResponseMessage answer)
+                {
+                    handedToMirror.Add(answer);
+                }
+            };
+            NetworkDiagnostics.OutMessageEvent += record;
+            try
+            {
+                mirror.UsePacketSizes(4096, 4096);
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(11);
+                _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+                List<RbxNetworkRequestResponder> responders = new();
+                _bridge.RequestReceived += (_, responder) => responders.Add(responder);
+                _bridge.ReceiveServerRequest(11, ClientRequestWire(1u));
+                _bridge.ReceiveServerRequest(11, ClientRequestWire(2u));
+
+                responders[0].Complete(new byte[5000]);
+                responders[1].Complete(new byte[100]);
+                mirror.FlushServer();
+
+                Assert.AreEqual(2, handedToMirror.Count,
+                    "both answers reach the transport; neither is dropped by Mirror for its size");
+                Assert.IsFalse(handedToMirror[0].Success);
+                StringAssert.Contains("5000 bytes", handedToMirror[0].ErrorMessage,
+                    "the caller learns why at once instead of waiting out the timeout");
+                Assert.AreEqual(1u, handedToMirror[0].CorrelationId);
+                Assert.IsTrue(handedToMirror[1].Success, "an answer that fits is sent unchanged");
+                Assert.AreEqual(100, handedToMirror[1].Payload.Length);
+                Assert.AreEqual(1, _bridge.OversizeResponsesFailed);
+            }
+            finally
+            {
+                NetworkDiagnostics.OutMessageEvent -= record;
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void Negative_AnAnswerOutlivingItsConnection_NeverReachesTheStrangerOnTheReusedId()
+        {
+            OfflineMirror mirror = new();
+            try
+            {
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(7);
+                _bridge.BindConnection(7, new RbxNetworkPeer("actor-a", "session-a", "7"));
+                List<RbxNetworkRequestResponder> responders = new();
+                _bridge.RequestReceived += (_, responder) => responders.Add(responder);
+                _bridge.ReceiveServerRequest(7, ClientRequestWire(1u));
+                OfflineMirror.DropServerConnection(7);
+                _bridge.NotifyDisconnected(7, RbxNetworkDisconnectReason.TransportLost);
+                // WHY the same id: kcp2k's ids are endpoint hashes, so the next peer from that
+                // endpoint sits exactly where the one that asked was, and its first request uses
+                // correlation id 1 too.
+                OfflineMirror.AdmitServerConnection(7);
+                _bridge.BindConnection(7, new RbxNetworkPeer("actor-b", "session-b", "7"));
+
+                responders[0].Complete(new byte[] { 1 });
+                mirror.FlushServer();
+
+                CollectionAssert.IsEmpty(mirror.ServerSendTargetsOf<CoreAiRemoteResponseMessage>(),
+                    "actor-a's answer must not be delivered to actor-b on the reused id");
+                Assert.AreEqual(1, _bridge.StaleResponsesDropped);
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void AnAnswer_ReachesTheConnectionThatAsked()
+        {
+            OfflineMirror mirror = new();
+            try
+            {
+                OfflineMirror.StartServer();
+                OfflineMirror.AdmitServerConnection(7);
+                _bridge.BindConnection(7, new RbxNetworkPeer("actor-a", "session-a", "7"));
+                List<RbxNetworkRequestResponder> responders = new();
+                _bridge.RequestReceived += (_, responder) => responders.Add(responder);
+                _bridge.ReceiveServerRequest(7, ClientRequestWire(1u));
+
+                responders[0].Complete(new byte[] { 1 });
+                mirror.FlushServer();
+
+                CollectionAssert.AreEqual(new[] { 7 }, mirror.ServerSendTargetsOf<CoreAiRemoteResponseMessage>());
+                Assert.AreEqual(0, _bridge.StaleResponsesDropped);
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void Dispose_FailsOpenRequestsInsteadOfDroppingThem_AndARequestAfterwardsFailsAtOnce()
+        {
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            List<RbxNetworkResponse> completed = new();
+            _bridge.SendRequest(ServerRequest(), completed.Add);
+
+            _bridge.Dispose();
+
+            Assert.AreEqual(1, completed.Count, "a waiting script is told, not abandoned");
+            Assert.IsFalse(completed[0].Succeeded);
+            StringAssert.Contains("disposed", completed[0].Error);
+
+            _bridge.SendRequest(ServerRequest(), completed.Add);
+
+            Assert.AreEqual(2, completed.Count,
+                "nothing pumps a disposed bridge's timeouts, so a request made to it fails now");
+            Assert.IsFalse(completed[1].Succeeded);
+        }
+
         private static RbxNetworkRequestMessage ServerRequest()
         {
             return new RbxNetworkRequestMessage(
@@ -335,6 +787,65 @@ namespace CoreAI.Net.Mirror.Tests
                 null,
                 "actor-a",
                 Array.Empty<byte>());
+        }
+
+        private static RbxNetworkEventMessage ServerEvent(RbxNetworkReliability reliability, int size)
+        {
+            return new RbxNetworkEventMessage(
+                new InstanceId(4UL),
+                RbxNetworkDirection.ServerToClient,
+                reliability,
+                null,
+                "actor-a",
+                new byte[size]);
+        }
+
+        private static CoreAiRemoteEventMessage ClientWire(ulong remoteId)
+        {
+            return new CoreAiRemoteEventMessage
+            {
+                RemoteId = remoteId,
+                Direction = (byte)RbxNetworkDirection.ClientToServer,
+                Reliability = (byte)RbxNetworkReliability.ReliableOrdered,
+                Payload = new byte[] { 1 }
+            };
+        }
+
+        private static CoreAiRemoteRequestMessage ClientRequestWire(uint correlationId)
+        {
+            return new CoreAiRemoteRequestMessage
+            {
+                RemoteId = 9UL,
+                Direction = (byte)RbxNetworkDirection.ClientToServer,
+                CorrelationId = correlationId,
+                Payload = Array.Empty<byte>()
+            };
+        }
+
+        private static CoreAiRemoteResponseMessage Answer(uint correlationId)
+        {
+            return new CoreAiRemoteResponseMessage
+            {
+                CorrelationId = correlationId,
+                Success = true,
+                Payload = new byte[] { 7 },
+                ErrorCode = "",
+                ErrorMessage = ""
+            };
+        }
+
+        /// <summary>The size Mirror's own packer gives an unreliable fire of this many payload bytes.</summary>
+        private static int PackedSize(int payloadBytes)
+        {
+            NetworkWriter writer = new();
+            NetworkMessages.Pack(new CoreAiRemoteEventMessage
+            {
+                RemoteId = 4UL,
+                Direction = (byte)RbxNetworkDirection.ServerToClient,
+                Reliability = (byte)RbxNetworkReliability.UnreliableUnordered,
+                Payload = new byte[payloadBytes]
+            }, writer);
+            return writer.Position;
         }
 
         private static RbxNetworkEventMessage ClientEvent()

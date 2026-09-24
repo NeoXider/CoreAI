@@ -268,6 +268,130 @@ namespace CoreAI.Net.Mirror.Tests
             Assert.IsNull(_client.AdmittedActorId);
         }
 
+        [Test]
+        public void ARemoteThatOvertakesTheAdmissionResponse_IsDroppedByTheBridge_NotRefusedByMirror()
+        {
+            // WHY this state: the connection is up but Mirror has not marked it authenticated,
+            // because the reliable admission response has not been processed yet — and an
+            // unreliable remote the server fired in the same frame arrives first. With Mirror's
+            // default the handler never runs and Mirror disconnects the joining client for it.
+            NetworkClient.connection.isAuthenticated = false;
+            Transport.active.OnClientConnected?.Invoke();
+            CoreAiRemoteEventMessage early = OfflineMirror.Event(1UL);
+            early.Reliability = (byte)RbxNetworkReliability.UnreliableUnordered;
+
+            OfflineMirror.DeliverToClient(early);
+
+            Assert.AreEqual(1, _client.UnadmittedPacketsDropped,
+                "the bridge's own rule saw the packet: Mirror's authentication gate did not throw it away first");
+            CollectionAssert.IsEmpty(_events);
+            Assert.AreEqual(1, _said.Count);
+
+            _client.BindAdmittedActor(Admitted);
+            OfflineMirror.DeliverToClient(OfflineMirror.Event(2UL));
+
+            Assert.AreEqual(1, _events.Count,
+                "once admission binds the actor, remotes are heard whatever Mirror's own flag says");
+            Assert.IsTrue(NetworkClient.isConnected);
+        }
+
+        [Test]
+        public void Negative_AReliabilityByteOutsideTheEnum_IsDroppedOnTheClientToo()
+        {
+            _client.BindAdmittedActor(Admitted);
+            CoreAiRemoteEventMessage wire = OfflineMirror.Event(1UL);
+            wire.Reliability = 9;
+
+            OfflineMirror.DeliverToClient(wire);
+            OfflineMirror.DeliverToClient(OfflineMirror.Event(0UL));
+
+            CollectionAssert.IsEmpty(_events);
+            Assert.AreEqual(2, _client.MalformedPacketsDropped);
+            Assert.AreEqual(0, _client.PacketsDelivered);
+        }
+
+        [Test]
+        public void AnOpenInvokeServer_FailsAtOnce_WhenTheConnectionDrops()
+        {
+            Transport.active.OnClientConnected?.Invoke();
+            List<RbxNetworkResponse> completed = new();
+            _client.SendRequest(ClientRequest(), completed.Add);
+            Assert.IsEmpty(completed, "connected, the request is on its way");
+            Assert.AreEqual(1, _client.PacketsSent);
+
+            Transport.active.OnClientDisconnected?.Invoke();
+            _client.PumpTimeouts();
+
+            Assert.AreEqual(1, completed.Count,
+                "no answer can come back on a connection that is gone; the call fails now, not in thirty seconds");
+            Assert.IsFalse(completed[0].Succeeded);
+            StringAssert.Contains("not connected", completed[0].Error);
+        }
+
+        [Test]
+        public void ForgetAdmittedActor_FailsTheOpenRequests()
+        {
+            Transport.active.OnClientConnected?.Invoke();
+            _client.BindAdmittedActor(Admitted);
+            List<RbxNetworkResponse> completed = new();
+            _client.SendRequest(ClientRequest(), completed.Add);
+
+            _client.ForgetAdmittedActor();
+
+            Assert.AreEqual(1, completed.Count);
+            Assert.IsFalse(completed[0].Succeeded);
+            StringAssert.Contains("not connected", completed[0].Error);
+        }
+
+        [Test]
+        public void Dispose_FailsTheOpenRequests_InsteadOfDroppingThem()
+        {
+            Transport.active.OnClientConnected?.Invoke();
+            List<RbxNetworkResponse> completed = new();
+            _client.SendRequest(ClientRequest(), completed.Add);
+
+            _client.Dispose();
+
+            Assert.AreEqual(1, completed.Count, "a waiting script is told, not abandoned");
+            Assert.IsFalse(completed[0].Succeeded);
+            StringAssert.Contains("disposed", completed[0].Error);
+        }
+
+        [Test]
+        public void AnOnClientInvokeAnswerTooLargeForOneMessage_IsSentAsAFailureThatSaysSo()
+        {
+            _mirror.UsePacketSizes(4096, 4096);
+            Transport.active.OnClientConnected?.Invoke();
+            _client.BindAdmittedActor(Admitted);
+            List<RbxNetworkRequestResponder> responders = new();
+            _client.RequestReceived += (_, responder) => responders.Add(responder);
+            List<CoreAiRemoteResponseMessage> handedToMirror = new();
+            Action<NetworkDiagnostics.MessageInfo> record = info =>
+            {
+                if (info.message is CoreAiRemoteResponseMessage answer)
+                {
+                    handedToMirror.Add(answer);
+                }
+            };
+            NetworkDiagnostics.OutMessageEvent += record;
+            try
+            {
+                OfflineMirror.DeliverToClient(Request(2UL));
+
+                responders[0].Complete(new byte[5000]);
+
+                Assert.AreEqual(1, handedToMirror.Count,
+                    "Mirror took the answer rather than dropping it for its size");
+                Assert.IsFalse(handedToMirror[0].Success);
+                StringAssert.Contains("5000 bytes", handedToMirror[0].ErrorMessage);
+                Assert.AreEqual(1, _client.OversizeResponsesFailed);
+            }
+            finally
+            {
+                NetworkDiagnostics.OutMessageEvent -= record;
+            }
+        }
+
         private static CoreAiRemoteRequestMessage Request(ulong remoteId)
         {
             return new CoreAiRemoteRequestMessage

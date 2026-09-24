@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
@@ -10,6 +11,7 @@ using CoreAI.Mods.Rbx.Instances.Networking;
 using Mirror;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace CoreAI.Net.Mirror.Tests
 {
@@ -192,6 +194,60 @@ namespace CoreAI.Net.Mirror.Tests
             Assert.AreEqual("", told.ActorId, "and it names nobody");
         }
 
+        [Test]
+        public void AnUnreliableBroadcastThatOvertakesTheAdmissionResponse_LeavesTheJoiningClientConnected()
+        {
+            // WHY the server fires from its accept listener: that is the same frame the admission
+            // response is queued in, and a game broadcasting an UnreliableRemoteEvent at 20-60 Hz
+            // does exactly that. kcp2k sends the unreliable datagram at once and the reliable
+            // response on its next tick, so the remote reaches the client first.
+            RbxRemoteEvent remote = (RbxRemoteEvent)_registry.Create("UnreliableRemoteEvent");
+            _authenticator.OnServerAuthenticated.AddListener(
+                _ => _server.SendEvent(FireAllClients(remote, "[\"early\"]")));
+            _mirror.UnreliableOvertakesReliable = true;
+            LogAssert.Expect(LogType.Warning, new Regex("before this client's admission"));
+
+            string admitted = Join(Credential);
+
+            Assert.IsTrue(NetworkClient.isConnected,
+                "the early remote must not make Mirror disconnect the client it was sent to");
+            Assert.AreEqual(1, _clientAccepts, "the admission response still arrived and was heard");
+            Assert.AreEqual(1, _client.UnadmittedPacketsDropped,
+                "the early remote is the bridge's to drop and count, before the actor is bound");
+            Assert.AreEqual(admitted, _client.AdmittedActorId);
+
+            List<object[]> received = new();
+            ListenOn(remote, admitted, received);
+            _server.SendEvent(FireAllClients(remote, "[\"tick\"]"));
+            _mirror.PumpLoopback();
+            _bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual(1, received.Count, "the next broadcast reaches the admitted client's OnClientEvent");
+            CollectionAssert.AreEqual(new object[] { "tick" }, received[0]);
+            CollectionAssert.IsEmpty(WorldLogBesidesTheHeadlessNotice());
+        }
+
+        [Test]
+        public void Negative_AnAdmittedClientThatAsksAgain_GetsNoSecondPlayer_AndIsNotDisconnected()
+        {
+            string admitted = Join(Credential);
+            Assert.IsNotNull(admitted);
+
+            _authenticator.OnClientAuthenticate();
+            _mirror.PumpLoopback();
+
+            CollectionAssert.AreEqual(new[] { admitted }, _serverActors,
+                "one connection is one admission: asking again mints no second actor");
+            Assert.AreEqual(1, _authenticator.AdmittedCount, "the host's provider is asked once");
+            Assert.AreEqual(1, _authenticator.IgnoredAdmissionRequests);
+            Assert.AreEqual(1, _clientAccepts);
+            TheOneAdmissionResponseHandedToMirror();
+            CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests,
+                "the repeat is ignored; the session the connection holds is left as it was");
+            Assert.IsTrue(NetworkClient.isConnected);
+            CollectionAssert.AreEqual(new[] { admitted }, _server.ActorIds);
+        }
+
         /// <summary>Runs the whole admission exchange and returns the actor the server admitted, or null.</summary>
         private string Join(string credential)
         {
@@ -211,15 +267,21 @@ namespace CoreAI.Net.Mirror.Tests
         /// </summary>
         private RbxRemoteEvent ClientRemoteHeardBy(string actorId, List<object[]> received)
         {
+            RbxRemoteEvent remote = (RbxRemoteEvent)_registry.Create("RemoteEvent");
+            ListenOn(remote, actorId, received);
+            return remote;
+        }
+
+        /// <summary>The client world's side of a LocalScript listening on an existing remote.</summary>
+        private void ListenOn(RbxRemoteEvent remote, string actorId, List<object[]> received)
+        {
             Assert.IsNotNull(actorId, "admission must have succeeded before a client can listen");
             ActorContext actor = new LocalActorIdentityProvider(
                     actorId, "session-" + actorId, WorldId, ActorGrantSet.None, AgentMemoryScope.Empty)
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
             _bindings.ConnectActor(actor);
-            RbxRemoteEvent remote = (RbxRemoteEvent)_registry.Create("RemoteEvent");
             remote.AttachScheduler(_bindings.Scheduler);
             remote.GetOnClientEvent(actorId).Connect((Action<object[]>)received.Add);
-            return remote;
         }
 
         /// <summary>

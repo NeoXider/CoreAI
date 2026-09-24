@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Instances.Networking;
@@ -23,8 +24,9 @@ namespace CoreAI.Net.Mirror
     /// hand it to <c>CoreAiModsLifetimeScope</c>'s network bridge provider field, and the world's
     /// remotes travel over the wire instead of the in-process loopback. Builds the
     /// <see cref="MirrorNetworkBridge"/> and, on a server, the <see cref="CoreAiMirrorSessionHost"/>
-    /// that turns admitted connections into players; every frame it pumps request timeouts and
-    /// drops the connections admission could not turn into players.
+    /// that turns admitted connections into players; every frame it pumps request timeouts, drops
+    /// the connections admission could not turn into players, keeps its disconnect hook in Mirror's
+    /// disconnect event, and keeps the attached world's identity source wired.
     /// </summary>
     /// <remarks>
     /// WHY the side is declared in the scene rather than read from Mirror when the bridge is built:
@@ -75,6 +77,11 @@ namespace CoreAI.Net.Mirror
         private CoreAiMirrorSessionHost _sessionHost;
         private Func<ActorContext, bool> _connectActor;
         private Func<ActorContext, bool> _disconnectActor;
+        private Func<LuaCsRbxApiBindings> _world;
+        private Action<NetworkConnectionToClient> _serverDisconnectHook;
+        private Action<NetworkConnectionToClient> _checkedDisconnectEvent;
+        private bool _foreignIdentityWarned;
+        private bool _worldResolveWarned;
         private bool _bridgeIsServer;
         private bool _admissionHooked;
         private bool _transportHooked;
@@ -109,8 +116,10 @@ namespace CoreAI.Net.Mirror
         public override INetworkBridge Bridge => EnsureBridge();
 
         /// <summary>
-        /// The server's session host, built together with the bridge; null on a client. Assign it
-        /// to the world's <c>Players.IdentitySource</c> so a Player's UserId is the admitted one.
+        /// The server's session host, built together with the bridge; null on a client. It is the
+        /// world's <c>Players.IdentitySource</c>, so a Player's UserId is the admitted one:
+        /// <see cref="AttachWorld(Func{LuaCsRbxApiBindings})"/> wires that itself, a composition
+        /// over the delegate overload assigns it by hand.
         /// </summary>
         public CoreAiMirrorSessionHost SessionHost
         {
@@ -119,6 +128,44 @@ namespace CoreAI.Net.Mirror
                 EnsureBridge();
                 return _sessionHost;
             }
+        }
+
+        /// <summary>
+        /// Attaches the world this provider serves: every admitted connection becomes a player in
+        /// the world <paramref name="world"/> returns at that moment and every lost one leaves it,
+        /// and that world's <c>Players.IdentitySource</c> is the session host, so a Player's UserId
+        /// is the one admission decided — no manual wiring. Once per provider, like the delegate
+        /// overload; unused on a client.
+        /// </summary>
+        /// <remarks>
+        /// WHY a function and not the world itself: a world loaded at runtime replaces the bindings
+        /// behind the composition's facade, so <c>() =&gt; stack.GameplayBindings.RbxApi</c> keeps
+        /// following the live one. WHY the identity source is checked every frame and before every
+        /// admission: a newly published world starts with none, and without one its Players service
+        /// hands admitted players counter UserIds. An identity source the host already set on the
+        /// world is left as it is, and said once. A world published between two frames is wired on
+        /// the next one; a player first seen in that window is not.
+        /// </remarks>
+        public void AttachWorld(Func<LuaCsRbxApiBindings> world)
+        {
+            if (world == null)
+            {
+                throw new ArgumentNullException(nameof(world));
+            }
+
+            RequireNoWorldAttached();
+            _world = world;
+            AttachWorld(
+                context =>
+                {
+                    LuaCsRbxApiBindings live = world();
+                    return live != null && live.ConnectActor(context) != null;
+                },
+                context =>
+                {
+                    LuaCsRbxApiBindings live = world();
+                    return live != null && live.DisconnectActor(context);
+                });
         }
 
         /// <summary>
@@ -148,14 +195,7 @@ namespace CoreAI.Net.Mirror
                 throw new ArgumentNullException(nameof(disconnectActor));
             }
 
-            if (_connectActor != null)
-            {
-                throw new InvalidOperationException(
-                    "a world is already attached to this Mirror network bridge provider and cannot "
-                    + "be swapped: the sessions it admitted are its own, so a world committed at "
-                    + "runtime needs a new composition with a new provider");
-            }
-
+            RequireNoWorldAttached();
             _connectActor = connectActor;
             _disconnectActor = disconnectActor;
             AdmitRecordedConnections();
@@ -181,9 +221,9 @@ namespace CoreAI.Net.Mirror
                 }
             }
 
-            if (_transportHooked && _bridgeIsServer)
+            if (_bridgeIsServer && _serverDisconnectHook != null)
             {
-                NetworkServer.OnDisconnectedEvent -= OnServerDisconnected;
+                NetworkServer.OnDisconnectedEvent -= _serverDisconnectHook;
             }
 
             _admissionHooked = false;
@@ -276,6 +316,11 @@ namespace CoreAI.Net.Mirror
             _roleConflict = conflict;
             HookTransport();
             FlushPendingDrops();
+            if (_bridgeIsServer)
+            {
+                WireIdentitySource();
+            }
+
             _bridge.PumpTimeouts();
         }
 
@@ -320,21 +365,89 @@ namespace CoreAI.Net.Mirror
 
             if (_transportHooked)
             {
+                if (_bridgeIsServer && !ServerDisconnectHookInPlace())
+                {
+                    // WHY the handlers too: a stop and start within one frame reassigns the event
+                    // the same way and clears the handler table with it; replacing them is idempotent.
+                    Debug.LogWarning("[CoreAI.Mirror] NetworkServer.OnDisconnectedEvent was reassigned "
+                                     + "while the server ran, which removed the provider's disconnect "
+                                     + "hook; it is put back so a lost connection still leaves the world");
+                    _bridge.AttachHandlers();
+                    HookServerDisconnects();
+                }
+
                 return;
             }
 
             _bridge.AttachHandlers();
             if (_bridgeIsServer)
             {
-                NetworkServer.OnDisconnectedEvent += OnServerDisconnected;
+                HookServerDisconnects();
             }
 
             _transportHooked = true;
         }
 
         /// <summary>
+        /// Puts the provider's disconnect hook FIRST in Mirror's disconnect event, once.
+        /// </summary>
+        /// <remarks>
+        /// WHY first: Mirror invokes that multicast unguarded, from inside the transport's receive
+        /// tick, so a listener ahead of this one that throws — a NetworkManager.OnServerDisconnect
+        /// override, which the manager assigns when the server starts — would skip CoreAI's
+        /// teardown and leave a Player behind for a connection that is gone.
+        /// </remarks>
+        private void HookServerDisconnects()
+        {
+            if (_serverDisconnectHook == null)
+            {
+                _serverDisconnectHook = OnServerDisconnected;
+            }
+
+            Action<NetworkConnectionToClient> others = NetworkServer.OnDisconnectedEvent;
+            if (others != null)
+            {
+                others -= _serverDisconnectHook;
+            }
+
+            NetworkServer.OnDisconnectedEvent = _serverDisconnectHook + others;
+            _checkedDisconnectEvent = NetworkServer.OnDisconnectedEvent;
+        }
+
+        /// <summary>
+        /// Whether the disconnect hook is still in Mirror's event; the invocation list is only read
+        /// when the event is no longer the delegate this provider last checked, so a frame where
+        /// nothing changed allocates nothing.
+        /// </summary>
+        private bool ServerDisconnectHookInPlace()
+        {
+            Action<NetworkConnectionToClient> current = NetworkServer.OnDisconnectedEvent;
+            if (current == null || _serverDisconnectHook == null)
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(current, _checkedDisconnectEvent))
+            {
+                return true;
+            }
+
+            Delegate[] listeners = current.GetInvocationList();
+            for (int index = 0; index < listeners.Length; index++)
+            {
+                if (listeners[index].Equals(_serverDisconnectHook))
+                {
+                    _checkedDisconnectEvent = current;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Admits an accepted connection into the attached world; with no world attached yet the
-        /// connection stays recorded by the authenticator for <see cref="AttachWorld"/> to admit.
+        /// connection stays recorded by the authenticator for the world's attach to admit.
         /// </summary>
         /// <remarks>
         /// WHY not admitted anyway: the session host binds first and asks the world second, and a
@@ -381,6 +494,7 @@ namespace CoreAI.Net.Mirror
         /// </remarks>
         private void AdmitOrDrop(NetworkConnectionToClient conn)
         {
+            WireIdentitySource();
             bool admitted;
             try
             {
@@ -480,7 +594,13 @@ namespace CoreAI.Net.Mirror
         /// </remarks>
         private void AdmitRecordedConnections()
         {
-            if (_sessionHost == null || _connectActor == null || authenticator == null)
+            if (_sessionHost == null || _connectActor == null)
+            {
+                return;
+            }
+
+            WireIdentitySource();
+            if (authenticator == null)
             {
                 return;
             }
@@ -512,6 +632,12 @@ namespace CoreAI.Net.Mirror
         /// teardown is the same either way — and forgets its admission, which a connection admitted
         /// before a world attached has no binding to release it through.
         /// </summary>
+        /// <remarks>
+        /// WHY nothing escapes: Mirror raises this from inside the transport's receive tick, and a
+        /// throw out of the world's teardown — mod code runs in PlayerRemoving — would abort that
+        /// tick for every other connection this frame. The failure is logged; the bridge has
+        /// released the connection's binding in its own finally by then.
+        /// </remarks>
         private void OnServerDisconnected(NetworkConnectionToClient conn)
         {
             if (conn == null)
@@ -519,12 +645,82 @@ namespace CoreAI.Net.Mirror
                 return;
             }
 
-            if (authenticator != null)
+            try
             {
-                authenticator.Forget(conn.connectionId);
+                if (authenticator != null)
+                {
+                    authenticator.Forget(conn.connectionId);
+                }
+
+                _bridge?.NotifyDisconnected(conn.connectionId,
+                    RbxNetworkDisconnectReason.TransportLost);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+            }
+        }
+
+        /// <summary>
+        /// Makes the session host the attached world's identity source when the world has none.
+        /// </summary>
+        private void WireIdentitySource()
+        {
+            if (_world == null || _sessionHost == null)
+            {
+                return;
             }
 
-            _bridge?.NotifyDisconnected(conn.connectionId, RbxNetworkDisconnectReason.TransportLost);
+            LuaCsRbxApiBindings live;
+            try
+            {
+                live = _world();
+            }
+            catch (Exception exception)
+            {
+                if (!_worldResolveWarned)
+                {
+                    _worldResolveWarned = true;
+                    Debug.LogWarning("[CoreAI.Mirror] the attached world could not be resolved to wire "
+                                     + "its Players.IdentitySource: " + exception.Message);
+                }
+
+                return;
+            }
+
+            RbxPlayers players = live?.Players;
+            if (players == null)
+            {
+                return;
+            }
+
+            IRbxActorIdentitySource current = players.IdentitySource;
+            if (current == null)
+            {
+                players.IdentitySource = _sessionHost;
+                return;
+            }
+
+            if (ReferenceEquals(current, _sessionHost) || _foreignIdentityWarned)
+            {
+                return;
+            }
+
+            _foreignIdentityWarned = true;
+            Debug.LogWarning("[CoreAI.Mirror] the attached world's Players.IdentitySource is a "
+                             + current.GetType().Name + ", not this provider's session host; it is "
+                             + "left as the host set it, so admitted players get their UserIds from it");
+        }
+
+        private void RequireNoWorldAttached()
+        {
+            if (_connectActor != null)
+            {
+                throw new InvalidOperationException(
+                    "a world is already attached to this Mirror network bridge provider and cannot "
+                    + "be swapped: the sessions it admitted are its own, so a world committed at "
+                    + "runtime needs a new composition with a new provider");
+            }
         }
 
         private static bool MirrorRunsAsOtherSide(bool bridgeIsServer)

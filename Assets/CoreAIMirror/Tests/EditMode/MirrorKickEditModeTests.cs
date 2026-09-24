@@ -208,6 +208,47 @@ namespace CoreAI.Net.Mirror.Tests
             }
         }
 
+        [Test]
+        public void Reconnect_BeforeTheOldLinkTimesOut_KeepsThePlayer_AndPlayerRemovingWaitsForTheLastSession()
+        {
+            // WHY a real world: "the Player carries over" is the world's own behaviour — its
+            // connect entry point finds the Player the durable actor already has — and only the
+            // world's PlayerAdded and PlayerRemoving can show that nobody left and nobody joined.
+            _authenticator.Configure(new DurableProvider("remote-durable"), WorldId);
+            RbxPlayer player = Admit(Connection);
+            RbxRemoteEvent remote = (RbxRemoteEvent)_registry.Create("RemoteEvent");
+            List<object[]> removing = new();
+            _bindings.Players.PlayerRemoving.Connect((Action<object[]>)removing.Add);
+            int added = 0;
+            _bindings.Players.PlayerAdded.Connect((Action<object[]>)(_ => added++));
+
+            RbxPlayer rejoined = Admit(Connection + 1);
+            _bindings.Scheduler.Advance(0d);
+
+            Assert.AreSame(player, rejoined, "the durable actor keeps its Player across the reconnect");
+            Assert.AreEqual(0, added, "nobody joined: PlayerAdded does not fire again");
+            CollectionAssert.AreEqual(new[] { Connection }, _mirror.ServerDisconnectRequests,
+                "the older connection is closed: the newest session wins");
+
+            _server.NotifyDisconnected(Connection, RbxNetworkDisconnectReason.TransportLost);
+            _bindings.Scheduler.Advance(0d);
+
+            Assert.IsEmpty(removing, "the old link's late drop must not remove the player the new link carries");
+            Assert.AreEqual(1, _bindings.Players.GetPlayers().Count);
+            OfflineMirror.DeliverToServer(Connection + 1, ClientEvent(remote));
+            OfflineMirror.DeliverToServer(Connection, ClientEvent(remote));
+            Assert.AreEqual(1, _server.PacketsDelivered, "the new connection is heard");
+            Assert.AreEqual(1, _server.UnadmittedPacketsDropped, "the old one is nobody");
+
+            _server.NotifyDisconnected(Connection + 1, RbxNetworkDisconnectReason.TransportLost);
+            _bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual(1, removing.Count, "PlayerRemoving fires once, when the last session ends");
+            CollectionAssert.IsEmpty(_bindings.Players.GetPlayers());
+            Assert.AreEqual(0, _sessionHost.LiveSessionCount);
+            CollectionAssert.IsEmpty(_server.ActorIds);
+        }
+
         /// <summary>Admits one connection through the authenticator and the session host, returning its Player.</summary>
         private RbxPlayer Admit(int connectionId)
         {
@@ -231,6 +272,31 @@ namespace CoreAI.Net.Mirror.Tests
                 Reliability = (byte)remote.Reliability,
                 Payload = Encoding.UTF8.GetBytes("[]")
             };
+        }
+
+        /// <summary>Issues one durable actor for every valid admission: the same player joining again.</summary>
+        private sealed class DurableProvider : IActorAdmissionProvider
+        {
+            private readonly string _actorId;
+            private int _sessions;
+
+            public DurableProvider(string actorId)
+            {
+                _actorId = actorId;
+            }
+
+            public ActorAdmissionResult TryAdmit(in ActorCredential credential, string worldId)
+            {
+                _sessions++;
+                ActorContext context = new LocalActorIdentityProvider(
+                        _actorId,
+                        "session-" + _sessions,
+                        worldId,
+                        ActorGrantSet.Create(new[] { "read" }),
+                        AgentMemoryScope.Empty)
+                    .GetActorContext(BuiltInAgentRoleIds.SmartChat);
+                return ActorAdmissionResult.Admit(context, 4242L, "durable", "Durable");
+            }
         }
 
         private sealed class TokenProvider : IActorAdmissionProvider

@@ -5,6 +5,7 @@ using System.Runtime.ExceptionServices;
 using System.Text.RegularExpressions;
 using CoreAI.Ai;
 using CoreAI.Authority;
+using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using Mirror;
 using NUnit.Framework;
@@ -151,6 +152,29 @@ namespace CoreAI.Net.Mirror.Tests
             LogAssert.Expect(LogType.Warning, new Regex("before this client's admission"));
             OfflineMirror.DeliverToClient(OfflineMirror.Event(1UL));
             Assert.AreEqual(1, bridge.UnadmittedPacketsDropped);
+        }
+
+        [Test]
+        public void Provider_FailsTheClientsOpenRequests_OnTheFrameTheClientSideStops()
+        {
+            MirrorNetworkBridge bridge = (MirrorNetworkBridge)_provider.Bridge;
+            StartClientAndFrame();
+            OfflineMirror.DeliverToClient(Accepted("remote-1"));
+            Transport.active.OnClientConnected?.Invoke();
+            List<RbxNetworkResponse> completed = new();
+            bridge.SendRequest(new RbxNetworkRequestMessage(new InstanceId(6UL),
+                RbxNetworkDirection.ClientToServer, "remote-1", null, new byte[] { 1 }), completed.Add);
+            Assert.IsEmpty(completed, "connected, the InvokeServer is on its way");
+
+            _authenticator.OnStopClient();
+            OfflineMirror.StopClient();
+            Frame();
+
+            Assert.AreEqual(1, completed.Count,
+                "the connection that carried the call is gone; the script hears so on the next frame, "
+                + "not after the thirty-second timeout");
+            Assert.IsFalse(completed[0].Succeeded);
+            StringAssert.Contains("not connected", completed[0].Error);
         }
 
         private void StartClientAndFrame()

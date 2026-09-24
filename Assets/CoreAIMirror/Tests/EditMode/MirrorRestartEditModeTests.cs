@@ -3,8 +3,11 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Text.RegularExpressions;
+using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
+using Mirror;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -250,6 +253,76 @@ namespace CoreAI.Net.Mirror.Tests
             Assert.IsFalse(_provider.HasBridge);
             Assert.AreEqual(0, bridge.PacketsDelivered,
                 "a disposed bridge must stay off the table however many times Mirror restarts");
+        }
+
+        [Test]
+        public void Negative_AWorldWhoseDisconnectTeardownThrows_DoesNotEscapeTheTransportTick()
+        {
+            // WHY it matters: Mirror raises the disconnect event from inside the transport's receive
+            // tick, and a throw out of there aborts that tick for every other connection this frame.
+            _provider.AttachWorld(_ => true, _ => throw new InvalidOperationException("PlayerRemoving blew up"));
+            MirrorNetworkBridge bridge = (MirrorNetworkBridge)_provider.Bridge;
+            OfflineMirror.StartServer();
+            OfflineMirror.AdmitServerConnection(Connection);
+            Assert.IsTrue(_provider.SessionHost.Admit(Connection, AdmittedAs("actor-a"), sessionId: null));
+            Frame();
+            LogAssert.Expect(LogType.Exception, new Regex("PlayerRemoving blew up"));
+
+            Assert.DoesNotThrow(() => OfflineMirror.DropServerConnection(Connection),
+                "the world's teardown failure is logged, never thrown into the transport");
+
+            Assert.AreEqual(0, _provider.SessionHost.LiveSessionCount);
+            CollectionAssert.IsEmpty(bridge.ActorIds, "the connection is released even though the teardown threw");
+        }
+
+        [Test]
+        public void AReassignedDisconnectEvent_IsHookedBackOnTheNextFrame()
+        {
+            MirrorNetworkBridge bridge = (MirrorNetworkBridge)_provider.Bridge;
+            List<RbxNetworkPeerDisconnected> disconnects = new();
+            bridge.PeerDisconnected += disconnects.Add;
+            StartServerAndAdmit(bridge);
+            // WHY an assignment: that is what NetworkManager itself does at StartServer, and what
+            // any script copying it does — it silently removes every listener added before.
+            NetworkServer.OnDisconnectedEvent = _ => { };
+            LogAssert.Expect(LogType.Warning, new Regex("was reassigned"));
+
+            Frame();
+            OfflineMirror.DropServerConnection(Connection);
+
+            Assert.AreEqual(1, disconnects.Count, "the provider's hook is back, so the lost peer leaves the world");
+        }
+
+        [Test]
+        public void AThrowingDisconnectListenerAheadOfTheProvider_DoesNotSkipCoreAisTeardown()
+        {
+            MirrorNetworkBridge bridge = (MirrorNetworkBridge)_provider.Bridge;
+            List<RbxNetworkPeerDisconnected> disconnects = new();
+            bridge.PeerDisconnected += disconnects.Add;
+            OfflineMirror.StartServer();
+            // WHY assigned before the provider's frame: NetworkManager assigns its own handler at
+            // StartServer, before the provider sees the server active, and a user's override of
+            // OnServerDisconnect runs inside it.
+            NetworkServer.OnDisconnectedEvent =
+                _ => throw new InvalidOperationException("OnServerDisconnect override blew up");
+            OfflineMirror.AdmitServerConnection(Connection);
+            bridge.BindConnection(Connection, new RbxNetworkPeer("actor-a", "session-a", "conn-7"));
+            Frame();
+
+            Assert.Throws<InvalidOperationException>(() => OfflineMirror.DropServerConnection(Connection),
+                "the other listener's throw is its own and still surfaces");
+
+            Assert.AreEqual(1, disconnects.Count,
+                "CoreAI's teardown ran first, so another listener's throw cannot leave a Player behind");
+        }
+
+        private static ActorAdmissionResult AdmittedAs(string actorId)
+        {
+            ActorContext context = new LocalActorIdentityProvider(
+                    actorId, "session-" + actorId, "world-a", ActorGrantSet.Create(new[] { "read" }),
+                    AgentMemoryScope.Empty)
+                .GetActorContext(BuiltInAgentRoleIds.SmartChat);
+            return ActorAdmissionResult.Admit(context, 1001L, actorId, actorId);
         }
 
         private void StartServerAndAdmit(MirrorNetworkBridge bridge)

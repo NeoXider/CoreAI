@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Mods.Rbx.Instances;
@@ -10,6 +12,7 @@ using CoreAI.Mods.Rbx.Instances.Networking;
 using Mirror;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using VContainer;
 
 namespace CoreAI.Net.Mirror.Tests
@@ -239,6 +242,123 @@ namespace CoreAI.Net.Mirror.Tests
             Assert.AreEqual(1, ((MirrorNetworkBridge)bridge).TimedOutRequests);
         }
 
+        [Test]
+        public void AttachWorld_WiresTheSessionHostAsTheWorldsIdentitySource()
+        {
+            LuaCsRbxApiBindings world = CreateWorld(_provider.Bridge);
+            try
+            {
+                Assert.IsNull(world.Players.IdentitySource, "a fresh world starts with none");
+
+                _provider.AttachWorld(() => world);
+
+                Assert.AreSame(_provider.SessionHost, world.Players.IdentitySource,
+                    "attaching a world is all a host does; the admitted identity must not depend on a "
+                    + "manual step that, skipped, hands remote players counter UserIds");
+            }
+            finally
+            {
+                world.Dispose();
+            }
+        }
+
+        [Test]
+        public void AnAdmittedPlayer_GetsItsAdmittedUserId_WithoutManualWiring()
+        {
+            CoreAiMirrorAuthenticator authenticator = _go.AddComponent<CoreAiMirrorAuthenticator>();
+            authenticator.Configure(new TokenProvider("open-sesame"), "world-a");
+            SetField(_provider, "authenticator", authenticator);
+            LuaCsRbxApiBindings world = CreateWorld(_provider.Bridge);
+            try
+            {
+                _provider.AttachWorld(() => world);
+                ActorAdmissionResult admitted = authenticator.Decide(7, "127.0.0.1:7777",
+                    Encoding.UTF8.GetBytes("open-sesame"));
+
+                authenticator.OnServerAuthenticated.Invoke(new NetworkConnectionToClient(7));
+
+                Assert.IsTrue(world.Players.TryGetByActorId(admitted.Context.ActorId, out RbxPlayer player),
+                    "the attached world got the admitted player");
+                Assert.AreEqual(admitted.UserId, player.UserId,
+                    "the UserId a script saves by is the admitted one, not a per-world counter");
+            }
+            finally
+            {
+                world.Dispose();
+            }
+        }
+
+        [Test]
+        public void AWorldPublishedLater_IsWiredOnTheProvidersNextFrame()
+        {
+            LuaCsRbxApiBindings first = CreateWorld(_provider.Bridge);
+            LuaCsRbxApiBindings second = CreateWorld(_provider.Bridge);
+            try
+            {
+                LuaCsRbxApiBindings live = first;
+                _provider.AttachWorld(() => live);
+                live = second;
+
+                InvokeUpdate(_provider);
+
+                Assert.AreSame(_provider.SessionHost, second.Players.IdentitySource,
+                    "a world loaded at runtime starts with no identity source; the provider follows it");
+            }
+            finally
+            {
+                first.Dispose();
+                second.Dispose();
+            }
+        }
+
+        [Test]
+        public void Negative_AnIdentitySourceTheHostSet_IsLeftAlone_AndSaidOnce()
+        {
+            LuaCsRbxApiBindings world = CreateWorld(_provider.Bridge);
+            try
+            {
+                FixedIdentity own = new();
+                world.Players.IdentitySource = own;
+                LogAssert.Expect(LogType.Warning, new Regex("not this provider's session host"));
+
+                _provider.AttachWorld(() => world);
+                InvokeUpdate(_provider);
+
+                Assert.AreSame(own, world.Players.IdentitySource,
+                    "a host that chose its own identity source keeps it; the provider does not overrule it");
+            }
+            finally
+            {
+                world.Dispose();
+            }
+        }
+
+        [Test]
+        public void Negative_TheWorldOverload_IsOncePerProvider_LikeTheOther()
+        {
+            LuaCsRbxApiBindings world = CreateWorld(_provider.Bridge);
+            try
+            {
+                _provider.AttachWorld(() => world);
+
+                Assert.Throws<InvalidOperationException>(() => _provider.AttachWorld(() => world));
+                Assert.Throws<InvalidOperationException>(() => _provider.AttachWorld(_ => true, _ => true));
+                Assert.Throws<ArgumentNullException>(() => _provider.AttachWorld((Func<LuaCsRbxApiBindings>)null));
+            }
+            finally
+            {
+                world.Dispose();
+            }
+        }
+
+        private static LuaCsRbxApiBindings CreateWorld(INetworkBridge bridge)
+        {
+            InstanceRegistry registry = new(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion, worldId: "world-a");
+            return new LuaCsRbxApiBindings(registry, DataModelBootstrap.CreateGame(registry),
+                networkBridge: bridge, log: _ => { });
+        }
+
         private static void Configure(CoreAiModsLifetimeScope scope, ContainerBuilder builder)
         {
             MethodInfo configure = typeof(CoreAiModsLifetimeScope).GetMethod(
@@ -260,6 +380,18 @@ namespace CoreAI.Net.Mirror.Tests
             FieldInfo field = target.GetType().GetField(name, Private);
             Assert.IsNotNull(field, target.GetType().Name + "." + name);
             field.SetValue(target, value);
+        }
+
+        private sealed class FixedIdentity : IRbxActorIdentitySource
+        {
+            public bool TryGetIdentity(string actorId, out long userId, out string username,
+                out string displayName)
+            {
+                userId = 99L;
+                username = "fixed";
+                displayName = "Fixed";
+                return true;
+            }
         }
 
         private sealed class TokenProvider : IActorAdmissionProvider

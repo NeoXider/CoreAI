@@ -29,18 +29,25 @@ namespace CoreAI.Net.Mirror.Tests
     /// is static and this project runs without domain reload, so <see cref="Dispose"/> restores all
     /// of it unconditionally and every fixture must reach it from its teardown.
     /// <para>
-    /// NOT modelled, and a test that needs any of it needs a real transport rather than this: an
-    /// unreliable channel that actually loses or reorders (both queues here are FIFO and lossless,
-    /// so unreliable traffic arrives reliably and in order), per-channel MTU (the max packet size
-    /// reported here is the same large number on both channels, where kcp2k's unreliable channel is
-    /// MTU-bound), and any authentication timeout - so the window in which a connected but
-    /// unadmitted peer exists never closes on its own here.
+    /// Modelled on request: kcp2k's per-channel packet sizes (<see cref="UsePacketSizes"/>; by
+    /// default both channels report the same large number) and kcp2k's send order, in which an
+    /// unreliable datagram leaves before reliable data queued in the same frame
+    /// (<see cref="UnreliableOvertakesReliable"/>). NOT modelled, and a test that needs any of it
+    /// needs a real transport rather than this: an unreliable channel that actually loses packets
+    /// (both queues here are lossless), and time — the authenticator's admission deadline runs on
+    /// its own injected clock and is pumped by the fixture, never by this harness.
     /// </para>
     /// </remarks>
     internal sealed class OfflineMirror : IDisposable
     {
         /// <summary>The one server connection a loopback client gets.</summary>
         public const int LoopbackConnectionId = 1;
+
+        /// <summary>kcp2k's reliable max message size at its defaults: MTU 1200, receive window 255 fragments.</summary>
+        public const int KcpReliableMaxPacketSize = (1200 - 24 - 5) * (255 - 1) - 1;
+
+        /// <summary>kcp2k's unreliable max message size at its default MTU of 1200.</summary>
+        public const int KcpUnreliableMaxPacketSize = 1200 - 5 - 1;
 
         /// <summary>One message the server handed the transport: the connection, and its type's wire id.</summary>
         public readonly struct SentMessage
@@ -76,6 +83,28 @@ namespace CoreAI.Net.Mirror.Tests
 
         /// <summary>Every connection the server asked the transport to drop, in order.</summary>
         public IReadOnlyList<int> ServerDisconnectRequests => _transport.ServerDisconnectLog;
+
+        /// <summary>
+        /// When set, each pump hands the client every queued unreliable batch before the reliable
+        /// ones queued with it — kcp2k sends an unreliable datagram at once, while reliable data
+        /// waits for the next outgoing tick, so the unreliable one arrives first.
+        /// </summary>
+        public bool UnreliableOvertakesReliable
+        {
+            get => _transport.UnreliableFirst;
+            set => _transport.UnreliableFirst = value;
+        }
+
+        /// <summary>
+        /// Makes the transport report these max packet sizes, and kcp2k's batch threshold (the
+        /// unreliable size); call before anything is sent, since Mirror sizes a connection's
+        /// batchers on its first send.
+        /// </summary>
+        public void UsePacketSizes(int reliable, int unreliable)
+        {
+            _transport.ReliableMaxPacketSize = reliable;
+            _transport.UnreliableMaxPacketSize = unreliable;
+        }
 
         /// <summary>
         /// Every message the server handed the transport, in order, Mirror's own included; they
@@ -341,6 +370,9 @@ namespace CoreAI.Net.Mirror.Tests
             }
 
             public bool Loopback;
+            public bool UnreliableFirst;
+            public int ReliableMaxPacketSize = 65536;
+            public int UnreliableMaxPacketSize = 65536;
             public readonly Queue<Packet> ToClient = new();
             public readonly Queue<Packet> ToServer = new();
             public readonly List<int> ServerDisconnectLog = new();
@@ -358,8 +390,9 @@ namespace CoreAI.Net.Mirror.Tests
             }
 
             /// <summary>
-            /// Hands the client what the server put on the wire, in order, until the client's peer
-            /// is closed; from then on the rest is discarded.
+            /// Hands the client what the server put on the wire, in order — every unreliable batch
+            /// first when <see cref="UnreliableFirst"/> is set — until the client's peer is closed;
+            /// from then on the rest is discarded.
             /// </summary>
             /// <remarks>
             /// WHY a closed peer discards rather than delivers: kcp2k surfaces nothing for a peer
@@ -370,23 +403,49 @@ namespace CoreAI.Net.Mirror.Tests
             /// </remarks>
             public void DrainToClient()
             {
+                if (UnreliableFirst)
+                {
+                    Queue<Packet> held = new();
+                    while (ToClient.Count > 0)
+                    {
+                        Packet packet = ToClient.Dequeue();
+                        if (!packet.IsDisconnect && packet.Channel == Channels.Unreliable)
+                        {
+                            HandToClient(packet);
+                        }
+                        else
+                        {
+                            held.Enqueue(packet);
+                        }
+                    }
+
+                    while (held.Count > 0)
+                    {
+                        HandToClient(held.Dequeue());
+                    }
+                }
+
                 while (ToClient.Count > 0)
                 {
-                    Packet packet = ToClient.Dequeue();
-                    if (_clientPeerClosed)
-                    {
-                        continue;
-                    }
-
-                    if (packet.IsDisconnect)
-                    {
-                        _clientPeerClosed = true;
-                        OnClientDisconnected?.Invoke();
-                        continue;
-                    }
-
-                    OnClientDataReceived?.Invoke(new ArraySegment<byte>(packet.Bytes), packet.Channel);
+                    HandToClient(ToClient.Dequeue());
                 }
+            }
+
+            private void HandToClient(Packet packet)
+            {
+                if (_clientPeerClosed)
+                {
+                    return;
+                }
+
+                if (packet.IsDisconnect)
+                {
+                    _clientPeerClosed = true;
+                    OnClientDisconnected?.Invoke();
+                    return;
+                }
+
+                OnClientDataReceived?.Invoke(new ArraySegment<byte>(packet.Bytes), packet.Channel);
             }
 
             /// <summary>The server-bound half of <see cref="DrainToClient"/>.</summary>
@@ -501,7 +560,15 @@ namespace CoreAI.Net.Mirror.Tests
             {
             }
 
-            public override int GetMaxPacketSize(int channelId = Channels.Reliable) => 65536;
+            public override int GetMaxPacketSize(int channelId = Channels.Reliable) =>
+                channelId == Channels.Unreliable ? UnreliableMaxPacketSize : ReliableMaxPacketSize;
+
+            /// <remarks>
+            /// WHY the unreliable size for every channel: that is kcp2k's own answer, so a large
+            /// reliable message is its own batch here exactly as it is on kcp2k.
+            /// </remarks>
+            public override int GetBatchThreshold(int channelId = Channels.Reliable) =>
+                UnreliableMaxPacketSize;
 
             public override void Shutdown()
             {
