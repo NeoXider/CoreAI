@@ -3469,18 +3469,16 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>
         /// True when a hook or timer failed because the guard cut it at its instruction, time or memory
-        /// budget, told by the CLR cause the guard attaches (a <see cref="TimeoutException"/>, a memory
-        /// trip, or the guard's own step line opening an <see cref="InvalidOperationException"/>), never
-        /// by text a script raised: a mod that writes a trip line into error() must not get another mod
-        /// that called it suspended.
+        /// budget, told by the type of the CLR cause the guard attaches (a <see cref="TimeoutException"/>, a
+        /// <see cref="LuaStepBudgetException"/> or a memory trip), never by text: a mod that writes a trip
+        /// line into error() must not get another mod that called it suspended, and the guard's lines may be
+        /// reworded (audit C3-07 gave them the sandbox's prefix).
         /// </summary>
         private static bool IsBudgetTrip(Exception exception)
         {
             for (Exception cause = exception; cause != null; cause = ScriptExecutionErrors.NextCause(cause))
             {
-                if (cause is TimeoutException
-                    || (cause is InvalidOperationException
-                        && (cause.Message ?? "").StartsWith(StepTripLinePrefix, StringComparison.Ordinal)))
+                if (cause is TimeoutException || cause is LuaStepBudgetException)
                 {
                     return true;
                 }
@@ -3488,9 +3486,6 @@ namespace CoreAI.Ai.LuaCs
 
             return ScriptExecutionErrors.IsMemoryBudgetTrip(exception);
         }
-
-        /// <summary>How the execution guard's instruction-budget trip line starts.</summary>
-        private const string StepTripLinePrefix = "LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS";
 
         /// <summary>
         /// True when a scheduler thread was killed at its resume budget: the scheduler codes it

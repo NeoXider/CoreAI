@@ -178,7 +178,7 @@ namespace CoreAI.Tests.EditMode
             // while the real step and time guards must NOT be — those keep counting toward the streak.
             System.Exception memoryTrip = new System.InvalidOperationException("wrapped",
                 new LuaMemoryBudgetException(
-                    $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} (268435456 bytes)"));
+                    $"sandbox: {LuaCsExecutionGuard.MemoryBudgetTripMarker} (268435456 bytes)"));
             Assert.IsTrue(LuaCsExecutionGuard.IsMemoryBudgetTrip(memoryTrip),
                 "A LuaMemoryBudgetException anywhere in the exception chain must be recognised.");
 
@@ -190,13 +190,46 @@ namespace CoreAI.Tests.EditMode
                 "A forged marker string in an ordinary exception message must NOT be classified as a memory trip.");
 
             Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(
-                    new System.InvalidOperationException("LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (200000)")),
+                    new LuaStepBudgetException("sandbox: EXCEEDED_HARD_LIMIT_STEPS (200000)")),
                 "A step overrun is a real guard and must not be classified as a memory trip.");
             Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(
-                    new System.TimeoutException("Lua exceeded 500 ms.")),
+                    new System.TimeoutException("sandbox: Lua exceeded 500 ms.")),
                 "A timeout is a real guard and must not be classified as a memory trip.");
             Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(null),
                 "A null exception is not a memory trip.");
+        }
+
+        [Test]
+        public void IsStepBudgetTrip_ClassifiesTheGuardsStepTripByItsType_NeverByItsText()
+        {
+            // WHY (audit C3-07): the guard's trip lines were renamed to the sandbox's prefix, and the mod runtime
+            // classified a step trip by the old line's first words, so the rename would have silently stopped
+            // counting step trips toward a mod's suspension. The trip is now told by the dedicated cause type, through
+            // the host function error a trip crosses, and a mod that writes the line into error() forges nothing.
+            LuaCsExecutionGuard guard = new(60_000, 20_000, 0);
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+            LuaCsHostFunctionException trip = Assert.Catch<LuaCsHostFunctionException>(
+                () => env.RunChunk(state, "while true do end", guard));
+
+            Assert.AreEqual("sandbox: " + LuaCsExecutionGuard.StepBudgetTripMarker + " (20000)", trip.Message);
+            Assert.IsInstanceOf<LuaStepBudgetException>(trip.HostException);
+            Assert.IsTrue(LuaCsExecutionGuard.IsStepBudgetTrip(trip));
+            Assert.IsTrue(LuaCsExecutionGuard.IsStepBudgetTrip(
+                    new LuaCsHostFunctionException(null, "mods_call: budget", trip)),
+                "a step trip behind a host function error must still be recognised by its type");
+            Assert.IsFalse(LuaCsExecutionGuard.IsStepBudgetTrip(
+                    new System.InvalidOperationException("sandbox: " + LuaCsExecutionGuard.StepBudgetTripMarker
+                                                         + " (20000)")),
+                "the line in an ordinary exception is not a trip");
+            Assert.IsFalse(LuaCsExecutionGuard.IsStepBudgetTrip(
+                    new LuaMemoryBudgetException("sandbox: " + LuaCsExecutionGuard.MemoryBudgetTripMarker)),
+                "a memory trip is not a step trip");
+            Assert.IsFalse(LuaCsExecutionGuard.IsStepBudgetTrip(null));
+
+            LuaRuntimeException forged = Assert.Catch<LuaRuntimeException>(() => env.RunChunk(state,
+                "error('sandbox: " + LuaCsExecutionGuard.StepBudgetTripMarker + " (20000)', 0)", guard));
+            Assert.IsFalse(LuaCsExecutionGuard.IsStepBudgetTrip(forged), "a script's own error() forges nothing");
         }
 
         [Test]
@@ -207,7 +240,7 @@ namespace CoreAI.Tests.EditMode
             System.Exception crossed = new LuaCsHostFunctionException(null, "mods_call: budget",
                 new System.InvalidOperationException("wrapped",
                     new LuaMemoryBudgetException(
-                        $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} (268435456 bytes)")));
+                        $"sandbox: {LuaCsExecutionGuard.MemoryBudgetTripMarker} (268435456 bytes)")));
             Assert.IsTrue(LuaCsExecutionGuard.IsMemoryBudgetTrip(crossed),
                 "A memory trip behind a host function error must still be recognised by its type.");
 
@@ -231,7 +264,7 @@ namespace CoreAI.Tests.EditMode
             System.Exception crossed = new LuaCsHostFunctionException(null, "mods_call: budget",
                 new System.InvalidOperationException("wrapped",
                     new LuaMemoryBudgetException(
-                        $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} (268435456 bytes)")));
+                        $"sandbox: {LuaCsExecutionGuard.MemoryBudgetTripMarker} (268435456 bytes)")));
             Assert.IsTrue(ScriptExecutionErrors.IsMemoryBudgetTrip(crossed),
                 "A memory trip behind a host function error must be recognised by its type through the neutral walker.");
             Assert.IsTrue(ScriptExecutionErrors.IsMemoryBudgetTrip(
@@ -448,10 +481,12 @@ namespace CoreAI.Tests.EditMode
             // `while true` in it hung the host), and xpcall ran its handler after the budget was gone. A trip
             // now ends the run from inside any protected call, with exactly the trip's clean line (the guard
             // once raised it over an inner exception, handing pcall "System.TimeoutException: ...").
+            // WHY the sandbox's prefix (audit C3-07): the line reaches the script, the model and the auto-repair
+            // loop, where the CLR class the guard lives in named nothing they could act on.
             bool steps = budget == "steps";
             string expected = steps
-                ? "LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (20000)"
-                : "Lua exceeded 100 ms.";
+                ? "sandbox: EXCEEDED_HARD_LIMIT_STEPS (20000)"
+                : "sandbox: Lua exceeded 100 ms.";
             string[] calls =
             {
                 "record(pcall(runaway))",
@@ -481,12 +516,14 @@ namespace CoreAI.Tests.EditMode
                 Assert.IsNotNull(ended, call + ": the trip must end the run");
                 Assert.AreEqual(expected, ended.Message);
                 AssertIsOnlyTheErrorLine(ended.Message);
+                AssertNamesNoClrTypeOrEngine(ended.Message);
                 Assert.AreEqual(expected, ended.ErrorObject.ToString(),
                     "the error value, which a protected coroutine.resume hands its resumer, must be the same line");
                 LuaCsHostFunctionException trip = ended as LuaCsHostFunctionException;
                 Assert.IsNotNull(trip, "a guard trip must carry its cause for C#: " + ended.GetType().Name);
-                Assert.IsInstanceOf(steps ? typeof(System.InvalidOperationException) : typeof(System.TimeoutException),
+                Assert.IsInstanceOf(steps ? typeof(LuaStepBudgetException) : typeof(System.TimeoutException),
                     trip.HostException);
+                Assert.AreEqual(steps, LuaCsExecutionGuard.IsStepBudgetTrip(ended));
                 Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(ended));
                 Assert.IsFalse(ScriptExecutionErrors.IsMemoryBudgetTrip(ended));
             }
@@ -1579,24 +1616,22 @@ namespace CoreAI.Tests.EditMode
         [Timeout(60000)]
         public void CallsBackIntoLua_ASuspendedCoroutineHoldsItsLevelsOnItsOwnThreadOnly()
         {
-            // WHY: the count is per Lua thread, not per .NET thread. A coroutine that yields inside a table.sort
-            // comparator keeps that call open while it is suspended; a shared count would charge it to every
-            // other thread, which on Unity's single main thread means every other mod.
-            // WHY unhurried raw resumes: the second resume runs 199 nested sorts inside one raw resume; its default
+            // WHY: the count is per Lua thread, not per .NET thread. A coroutine that yields inside a pcall keeps
+            // that call open while it is suspended; a shared count would charge it to every other thread, which on
+            // Unity's single main thread means every other mod. WHY a pcall: a yield through table.sort, where this
+            // test used to suspend, is refused now, as in Luau (audit C3-06); pcall is the counted call a yield
+            // still crosses.
+            // WHY unhurried raw resumes: the second resume runs 63 nested sorts inside one raw resume; its default
             // 1 s wall-clock allowance is not what this test measures.
             // WHY max: the pcall on the main thread opens one level and each sort two; the coroutine starts after
-            // its resume's two, so it nests the same max sorts only once the suspended sort gave its levels back.
+            // its resume's two, so it nests the same max sorts only once the suspended pcall gave its level back.
             List<string> rows = new();
             int max = (LuaCsSecureEnvironment.MaxCCallDepth - LuaCsSecureEnvironment.LightCallLevels)
                       / LuaCsSecureEnvironment.HeavyCallLevels;
             LuaRuntimeException ended = RunRecordingChunk(
                 NestSort +
                 "local co = coroutine.create(function()\n" +
-                "  local yielded = false\n" +
-                "  table.sort({2, 1}, function(a, b)\n" +
-                "    if not yielded then yielded = true coroutine.yield('inside sort') end\n" +
-                "    return a < b\n" +
-                "  end)\n" +
+                "  pcall(function() coroutine.yield('inside pcall') end)\n" +
                 "  return nest(" + max + ")\n" +
                 "end)\n" +
                 "record(coroutine.resume(co))\n" +
@@ -1607,10 +1642,10 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNull(ended, ended?.Message);
             CollectionAssert.AreEqual(new[]
             {
-                "boolean:true|string:inside sort",
+                "boolean:true|string:inside pcall",
                 "boolean:true|number:" + max,
                 "boolean:true|number:" + max
-            }, rows, "the suspended sort neither limits the main thread nor stays counted once it finished");
+            }, rows, "the suspended pcall neither limits the main thread nor stays counted once it finished");
         }
 
         [Test]
@@ -1682,7 +1717,7 @@ namespace CoreAI.Tests.EditMode
                 new[] { "string:deepest|number:" + (MaxNestedPcalls + 1) + "|string:" + CStackLimitLine("pcall") },
                 rows, "the pcall past the limit returns the C-stack line, and nothing runs after the trip");
             Assert.IsNotNull(ended, "the trip must end the run");
-            Assert.AreEqual("Lua exceeded 200 ms.", ended.Message);
+            Assert.AreEqual("sandbox: Lua exceeded 200 ms.", ended.Message);
             AssertIsOnlyTheErrorLine(ended.Message);
             Assert.Less(elapsedMs, 3000,
                 "backstop: the capped levels unwind in a fraction of a second, the uncounted recursion took a minute");
@@ -1713,7 +1748,7 @@ namespace CoreAI.Tests.EditMode
                 new[] { "string:handler|number:" + (MaxNestedPcalls + 1) + "|string:" + CStackLimitLine("xpcall") },
                 rows, "the handler runs once, with the C-stack line, and never after the trip");
             Assert.IsNotNull(ended, "the trip must end the run");
-            Assert.AreEqual("Lua exceeded 200 ms.", ended.Message);
+            Assert.AreEqual("sandbox: Lua exceeded 200 ms.", ended.Message);
             Assert.Less(elapsedMs, 3000, "backstop: the capped nesting unwinds in a fraction of a second");
         }
 
@@ -2090,29 +2125,17 @@ namespace CoreAI.Tests.EditMode
             Assert.Less(elapsedMs, 3000, "backstop: the frame must not be held for seconds");
         }
 
-        /// <summary>
-        /// Native stack one level of each channel took on CoreCLR x64 (Hub-crash investigation, probe S1): the
-        /// worst chains below are held under <see cref="NativeStackCeilingBytes"/> by their depth alone.
-        /// </summary>
-        private const int TaskSpawnLevelBytes = 7_408;
-
-        private const int ToStringLevelBytes = 4_448;
-
-        private const int PcallLevelBytes = 3_152;
-
-        /// <summary>The native stack every chain of nested runs must stay under (a 1 MB IL2CPP main thread's half).</summary>
-        private const int NativeStackCeilingBytes = 512 * 1024;
-
         [Test]
         [Timeout(120000)]
-        public void NestedTaskSpawnChain_ContinuesTheCallCount_SoTaskSpawnAndTostringTogetherStayUnder512KB()
+        public void NestedTaskSpawnChain_ContinuesTheCallCount_SoTaskSpawnAndTostringTogetherStayUnderTheCap()
         {
             // WHY (Hub-crash investigation): a task.spawn that runs its thread at once nests that thread's whole
-            // run on the native stack (7,408 B a level), and each task thread counted its calls back into Lua from
-            // zero: 250 nested spawns and then 200 tostring levels took 2.56 MB, where only Lua-CSharp's
+            // run on the native stack, and each task thread counted its calls back into Lua from zero: 250 nested
+            // spawns and then 200 tostring levels took 2.56 MB, where only Lua-CSharp's
             // TryEnsureSufficientExecutionStack - a constant true on some runtimes - stood between the chain and
             // the end of the process. A spawned thread now continues its spawner's count, so the tostring nesting
-            // at the bottom of 20 spawns gets only what the spawns left, by construction under 512 KB.
+            // at the bottom of 20 spawns gets only what the spawns left. What a level of each channel takes on the
+            // native stack is measured by NativeStack_EveryChannelStaysWithinItsWeight_AtTheCap.
             LuaCsRbxApiBindings bindings = new();
             NestedRunModStore store = new();
             LuaCsModStack stack = NewNestedRunModStack(bindings, store);
@@ -2132,8 +2155,6 @@ namespace CoreAI.Tests.EditMode
                                  / LuaCsSecureEnvironment.HeavyCallLevels;
             Assert.AreEqual("false|" + toStringLevels + "|" + CStackLimitLine("tostring"), store.Get("m", "result"),
                 HandlerErrorsOf(stack));
-            Assert.Less(20 * TaskSpawnLevelBytes + PcallLevelBytes + toStringLevels * ToStringLevelBytes,
-                NativeStackCeilingBytes, "the deepest chain allowed stays under 512 KB of native stack");
         }
 
         [Test]
@@ -2162,8 +2183,6 @@ namespace CoreAI.Tests.EditMode
                 store.Get("m", "spawned"), errors);
             Assert.AreEqual("yes", store.Get("m", "chunk end"), errors);
             StringAssert.Contains(CStackLimitLine("task.spawn"), errors);
-            Assert.Less(maxSpawns * TaskSpawnLevelBytes, NativeStackCeilingBytes,
-                "the deepest spawn chain allowed stays under 512 KB of native stack");
         }
 
         [Test]
@@ -2257,12 +2276,15 @@ namespace CoreAI.Tests.EditMode
         [TestCase(false)]
         [TestCase(true)]
         [Timeout(120000)]
-        public void TaskWaitInsideToString_IsRefusedAtTheFence_AlsoAfterANestedResume_AndTheTaskThreadRunsOn(
+        public void TaskWaitInTostringRunByStringFormat_IsRefusedAtTheFence_AlsoAfterANestedResume_AndTheThreadRunsOn(
             bool nestedResumeFirst)
         {
             // WHY (audit B3-04, the mod-runtime shape): after a nested coroutine.resume the task.wait in __tostring got
             // through the lifted fence, the task thread died with "BAD_ARGUMENT: nil" and never reached its end. The
-            // twin without the nested resume pins what both must do.
+            // twin without the nested resume pins what both must do. WHY named for string.format (audit C3-06): the
+            // __tostring here is run by string.format, called by pcall from host code; the call through tostring
+            // itself and every other counted call is
+            // TaskWaitInsideACountedCallBackIntoLua_IsRefusedAtTheFence_AlsoAfterANestedResume_AndTheTaskThreadRunsOn.
             LuaCsRbxApiBindings bindings = new();
             NestedRunModStore store = new();
             LuaCsModStack stack = NewNestedRunModStack(bindings, store);
@@ -2472,6 +2494,540 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("false|[string \"sandbox_chunk\"]:1: " + expected, result[0].Read<string>(),
                 "pcall positions a bad argument like any level-1 error");
             AssertNamesNoClrTypeOrEngine(result[0].Read<string>());
+        }
+
+        #endregion
+
+        #region Audit R3 C3-02: the native stack a level of each channel takes, measured
+
+        /// <summary>
+        /// Reads the native stack pointer of the calling thread: the address of a local in the frame of a two-instruction
+        /// dynamic method, which lies right on top of its caller's frame.
+        /// </summary>
+        private static readonly System.Func<System.IntPtr> ReadStackPointer = BuildStackPointerReader();
+
+        // WHY a dynamic method: this test assembly does not allow unsafe code, so there is no address-of and no
+        // stackalloc, and Unsafe.AsPointer is not on the .NET Standard 2.1 surface Unity compiles against. The two
+        // instructions are what taking the address of a local compiles to, so two readings differ by exactly the native
+        // stack used between them, on any JIT - which a StackTrace frame count cannot tell, since frames differ in size.
+        private static System.Func<System.IntPtr> BuildStackPointerReader()
+        {
+            System.Reflection.Emit.DynamicMethod method = new("coreai_test_stack_pointer", typeof(System.IntPtr),
+                System.Type.EmptyTypes, typeof(LuaCsSecureSandboxEditModeTests).Module, true);
+            System.Reflection.Emit.ILGenerator il = method.GetILGenerator();
+            il.DeclareLocal(typeof(int));
+            il.Emit(System.Reflection.Emit.OpCodes.Ldloca_S, (byte)0);
+            il.Emit(System.Reflection.Emit.OpCodes.Conv_U);
+            il.Emit(System.Reflection.Emit.OpCodes.Ret);
+            return (System.Func<System.IntPtr>)method.CreateDelegate(typeof(System.Func<System.IntPtr>));
+        }
+
+        /// <summary>The native stack in use at each level a chain's <c>probe(level)</c> calls reported.</summary>
+        private sealed class NativeStackRecorder
+        {
+            private readonly Dictionary<int, long> _bytesAtLevel = new();
+            private long _base;
+
+            /// <summary>Starts a chain: readings are taken from here.</summary>
+            public void Start()
+            {
+                _bytesAtLevel.Clear();
+                _base = (long)ReadStackPointer();
+            }
+
+            /// <summary>Notes the native stack in use the first time <paramref name="level"/> is reached.</summary>
+            public void Record(int level)
+            {
+                if (!_bytesAtLevel.ContainsKey(level))
+                {
+                    // WHY base minus now: the native stack grows down on every platform Unity and .NET run on.
+                    _bytesAtLevel[level] = _base - (long)ReadStackPointer();
+                }
+            }
+
+            /// <summary>The deepest level reported.</summary>
+            public int Deepest
+            {
+                get
+                {
+                    int deepest = 0;
+                    foreach (int level in _bytesAtLevel.Keys)
+                    {
+                        deepest = System.Math.Max(deepest, level);
+                    }
+
+                    return deepest;
+                }
+            }
+
+            /// <summary>Native stack from level 2 to the deepest level, per level (level 1 carries the chain's entry).</summary>
+            public long BytesPerLevel => Deepest > 2 ? (_bytesAtLevel[Deepest] - _bytesAtLevel[2]) / (Deepest - 2) : 0;
+
+            /// <summary>Native stack from level 1 to the deepest level: the chain itself.</summary>
+            public long ChainBytes => Deepest > 1 ? _bytesAtLevel[Deepest] - _bytesAtLevel[1] : 0;
+        }
+
+        /// <summary>
+        /// Each chain nests one channel into itself until the C-stack count refuses it; <c>probe(n)</c> reports level n,
+        /// and each level opens the levels given (see <see cref="LuaCsSecureEnvironment.MaxCCallDepth"/>).
+        /// </summary>
+        private static readonly (string Channel, int Levels, string Chain)[] NativeStackChannels =
+        {
+            ("pcall", LuaCsSecureEnvironment.LightCallLevels,
+                "local function f(n) probe(n) local ok, e = pcall(f, n + 1) if not ok then error(e, 0) end end\n" +
+                "pcall(f, 1)"),
+            ("xpcall", LuaCsSecureEnvironment.LightCallLevels,
+                "local function f(n) probe(n) local ok, e = xpcall(f, function(m) return m end, n + 1)\n" +
+                "  if not ok then error(e, 0) end end\n" +
+                "pcall(f, 1)"),
+            ("string.gsub replacement function", LuaCsSecureEnvironment.LightCallLevels,
+                "local function g(n) probe(n) string.gsub('a', 'a', function() g(n + 1) end) end\n" +
+                "pcall(g, 1)"),
+            ("string.gsub __index", LuaCsSecureEnvironment.HeavyCallLevels,
+                "local function g(n) probe(n)\n" +
+                "  string.gsub('a', 'a', setmetatable({}, {__index = function() g(n + 1) return 'z' end})) end\n" +
+                "pcall(g, 1)"),
+            ("string.format %s", LuaCsSecureEnvironment.HeavyCallLevels,
+                "local mt = {} mt.__tostring = function(o) probe(o.n)\n" +
+                "  return string.format('%s', setmetatable({n = o.n + 1}, mt)) end\n" +
+                "pcall(string.format, '%s', setmetatable({n = 1}, mt))"),
+            ("tostring", LuaCsSecureEnvironment.HeavyCallLevels,
+                "local mt = {} mt.__tostring = function(o) probe(o.n) return tostring(setmetatable({n = o.n + 1}, mt)) end\n" +
+                "pcall(tostring, setmetatable({n = 1}, mt))"),
+            ("print", LuaCsSecureEnvironment.HeavyCallLevels,
+                "local mt = {} mt.__tostring = function(o) probe(o.n) print(setmetatable({n = o.n + 1}, mt)) return 'x' end\n" +
+                "pcall(print, setmetatable({n = 1}, mt))"),
+            ("table.sort comparator", LuaCsSecureEnvironment.HeavyCallLevels,
+                "local function mk(n) return function(a, b) probe(n) table.sort({2, 1}, mk(n + 1)) return a < b end end\n" +
+                "pcall(table.sort, {2, 1}, mk(1))"),
+            ("table.sort __lt", LuaCsSecureEnvironment.HeavyCallLevels,
+                "local mt = {} mt.__lt = function(a, b) probe(a.n)\n" +
+                "  table.sort({setmetatable({n = a.n + 1}, mt), setmetatable({n = a.n + 1}, mt)}) return false end\n" +
+                "pcall(table.sort, {setmetatable({n = 1}, mt), setmetatable({n = 1}, mt)})"),
+            ("pairs __pairs", LuaCsSecureEnvironment.HeavyCallLevels,
+                "local mt = {} mt.__pairs = function(o) probe(o.n) pairs(setmetatable({n = o.n + 1}, mt)) return next, {}, nil end\n" +
+                "pcall(pairs, setmetatable({n = 1}, mt))"),
+            ("ipairs __ipairs", LuaCsSecureEnvironment.HeavyCallLevels,
+                "local mt = {} mt.__ipairs = function(o) probe(o.n) ipairs(setmetatable({n = o.n + 1}, mt)) return next, {}, nil end\n" +
+                "pcall(ipairs, setmetatable({n = 1}, mt))"),
+            ("coroutine.resume", LuaCsSecureEnvironment.HeavyCallLevels,
+                "local function f(n) probe(n) local ok, e = coroutine.resume(coroutine.create(f), n + 1)\n" +
+                "  if not ok then error(e, 0) end end\n" +
+                "pcall(f, 1)"),
+            ("guarded call re-entering the state", LuaCsSecureEnvironment.HeavyCallLevels,
+                "local function f(n) probe(n) reenter(f, n + 1) end\n" +
+                "pcall(f, 1)"),
+            ("alternating mix", 0,
+                "local mt = {}\n" +
+                "local function f(n)\n" +
+                "  probe(n)\n" +
+                "  local k = n % 5\n" +
+                "  if k == 0 then local ok, e = pcall(f, n + 1) if not ok then error(e, 0) end\n" +
+                "  elseif k == 1 then string.gsub('a', 'a', function() f(n + 1) end)\n" +
+                "  elseif k == 2 then tostring(setmetatable({n = n + 1}, mt))\n" +
+                "  elseif k == 3 then local ok, e = coroutine.resume(coroutine.create(f), n + 1) if not ok then error(e, 0) end\n" +
+                "  else table.sort({2, 1}, function(a, b) f(n + 1) return a < b end) end\n" +
+                "end\n" +
+                "mt.__tostring = function(o) f(o.n) return 'x' end\n" +
+                "pcall(f, 1)")
+        };
+
+        /// <summary>The chains that need the mod stack: task.spawn and warn.</summary>
+        private static readonly (string Channel, int Levels, string Chain)[] NativeStackModChannels =
+        {
+            ("task.spawn", LuaCsSecureEnvironment.HeavyCallLevels,
+                "local function f(n) probe(n) task.spawn(f, n + 1) end\n" +
+                "pcall(f, 1)"),
+            ("warn", 2 * LuaCsSecureEnvironment.HeavyCallLevels,
+                "local mt = {} mt.__tostring = function(o) probe(o.n) warn(setmetatable({n = o.n + 1}, mt)) return 'x' end\n" +
+                "pcall(warn, setmetatable({n = 1}, mt))")
+        };
+
+        /// <summary>The C-call count's unit: the native stack a level of weight one may take (see MaxCCallDepth).</summary>
+        private const long CCallLevelBudgetBytes = 4 * 1024;
+
+        /// <summary>The native stack a chain of any mix of channels at the C-call limit must stay under.</summary>
+        private const long NativeStackEnvelopeBytes = 512 * 1024;
+
+        [Test]
+        [Timeout(300000)]
+        public void NativeStack_EveryChannelStaysWithinItsWeight_AtTheCap()
+        {
+            // WHY (audit C3-02): the C-call weights exist so that a chain of any mix of channels at the limit stays
+            // under 512 KB of native stack, where the engine's own stack check may be a stub (IL2CPP, WebGL) and a
+            // deeper chain ends the process. Making gsub asynchronous put three state machines under every
+            // replacement function, 5.8 KB a level at the weight of a 4 KB call - a direct gsub recursion reached 728
+            // KB - and the test that stood for this measured nothing: it multiplied constants. Each channel below
+            // now runs to the C-call limit on a thread of its own, and the stack pointer is read at every level.
+            // WHY two yardsticks: the weights were measured on CoreCLR, where a level of weight one must fit 4 KB and
+            // a chain at the limit 512 KB. Mono's JIT (the editor) lays out much larger frames - a pcall level took
+            // 9.7 KB on .NET's Mono runtime - so there every channel is held to its weight in units of the pcall
+            // level measured in the same run, with a fifth for noise; the gsub level that broke the envelope took
+            // 1.29 of those units there. WHY a thread with a 16 MB stack: the chains must reach the limit whatever
+            // the editor's main thread was given, so that the per-level figure covers the whole chain.
+            bool mono = System.Type.GetType("Mono.Runtime") != null;
+            List<(string Channel, int Levels, NativeStackRecorder Recorder, string Outcome)> measured = new();
+            string crash = null;
+            System.Threading.Thread worker = new(() =>
+            {
+                try
+                {
+                    MeasureNativeStackChannels(measured);
+                }
+                catch (System.Exception ex)
+                {
+                    crash = ex.ToString();
+                }
+            }, 16 * 1024 * 1024);
+            worker.Start();
+            worker.Join();
+            Assert.IsNull(crash, crash);
+
+            long pcallBytesPerLevel = measured.Find(m => m.Channel == "pcall").Recorder.BytesPerLevel;
+            long unit = mono ? pcallBytesPerLevel * 6 / 5 : CCallLevelBudgetBytes;
+            List<string> report = new();
+            List<string> failures = new();
+            foreach ((string channel, int levels, NativeStackRecorder recorder, string outcome) in measured)
+            {
+                report.Add(channel + ": " + recorder.BytesPerLevel + " B a level to level " + recorder.Deepest + ", "
+                           + recorder.ChainBytes / 1024 + " KB in all (" + outcome + ")");
+                if (recorder.Deepest < 16)
+                {
+                    failures.Add(channel + " stopped at level " + recorder.Deepest + ": " + outcome);
+                    continue;
+                }
+
+                if (levels > 0 && recorder.BytesPerLevel > levels * unit)
+                {
+                    failures.Add(channel + " takes " + recorder.BytesPerLevel + " B a level, over its " + levels
+                                 + " x " + unit + " B");
+                }
+
+                if (!mono && recorder.ChainBytes >= NativeStackEnvelopeBytes)
+                {
+                    failures.Add(channel + " took " + recorder.ChainBytes / 1024 + " KB at the limit");
+                }
+            }
+
+            TestContext.WriteLine((mono ? "Mono" : "CoreCLR") + ", unit " + unit + " B:\n" + string.Join("\n", report));
+            CollectionAssert.IsEmpty(failures, string.Join("\n", report));
+        }
+
+        /// <summary>Runs every chain of <see cref="NativeStackChannels"/> and the mod channels, recording each.</summary>
+        private static void MeasureNativeStackChannels(
+            List<(string Channel, int Levels, NativeStackRecorder Recorder, string Outcome)> measured)
+        {
+            foreach ((string channel, int levels, string chain) in NativeStackChannels)
+            {
+                NativeStackRecorder recorder = new();
+                LuaCsSecureEnvironment env = new();
+                LuaCsApiRegistry registry = new();
+                LuaCsExecutionGuard reentry = new(60_000, 5_000_000_000L, 0);
+                registry.RegisterCallback("probe", (ctx, ct) =>
+                {
+                    recorder.Record((int)ctx.GetArgument(0).Read<double>());
+                    return new System.Threading.Tasks.ValueTask<int>(ctx.Return());
+                });
+                registry.RegisterCallback("reenter", (ctx, ct) =>
+                {
+                    LuaValue[] results = reentry.Execute(ctx.State, ctx.GetArgument<LuaFunction>(0), ct,
+                        ctx.GetArgument(1));
+                    return new System.Threading.Tasks.ValueTask<int>(ctx.Return(results));
+                });
+                LuaState state = env.Create(registry, UnhurriedRawResumes());
+                string outcome = "completed";
+                recorder.Start();
+                try
+                {
+                    env.RunChunk(state, chain, new LuaCsExecutionGuard(60_000, 5_000_000_000L, 0));
+                }
+                catch (LuaRuntimeException ex)
+                {
+                    outcome = ex.Message;
+                }
+
+                measured.Add((channel, levels, recorder, outcome));
+            }
+
+            foreach ((string channel, int levels, string chain) in NativeStackModChannels)
+            {
+                NativeStackRecorder recorder = new();
+                LuaCsRbxApiBindings bindings = new();
+                NestedRunModStore store = new();
+                LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+                {
+                    Logger = new NestedRunSilentLogger(),
+                    ModStore = store,
+                    Capabilities = CoreAI.Ai.LuaCapabilities.All,
+                    OneOffCapabilities = CoreAI.Ai.LuaCapabilities.All,
+                    RbxApi = bindings,
+                    AdditionalGameplayBindings = (registry, capabilities) => registry.RegisterCallback("probe",
+                        (ctx, ct) =>
+                        {
+                            recorder.Record((int)ctx.GetArgument(0).Read<double>());
+                            return new System.Threading.Tasks.ValueTask<int>(ctx.Return());
+                        })
+                });
+                string outcome = "completed";
+                recorder.Start();
+                try
+                {
+                    stack.Runtime.LoadMod("m", chain);
+                }
+                catch (System.Exception ex)
+                {
+                    outcome = ex.Message;
+                }
+
+                measured.Add((channel, levels, recorder, outcome + " " + HandlerErrorsOf(stack)));
+            }
+        }
+
+        #endregion
+
+        #region Audit R3 C3-04..C3-07: xpcall and the engine's overflow, suspended calls, the fence everywhere, names
+
+        [Test]
+        [Timeout(120000)]
+        public void XpcallAroundRecursionToTheEnginesStackOverflow_RunsItsHandler_AsPcallReturnsTheLine()
+        {
+            // WHY (audit C3-04): plain Lua recursion fills the engine's value stack in one VM run, and native xpcall
+            // then ran its handler on top of that full stack, where the handler overflowed it again: the overflow
+            // escaped the xpcall and ended the run, while pcall of the same function returned false. The handler
+            // now runs where it runs for any other error; one that overflows the stack itself ends as Luau's does.
+            List<string> rows = new();
+            LuaRuntimeException ended = RunRecordingChunk(
+                "local function f() return 1 + f() end\n" +
+                "record('xpcall', xpcall(f, function(m) return 'H:' .. type(m) .. ':' .. tostring(m) end))\n" +
+                "record('pcall', pcall(f))\n" +
+                "local function r() return 1 + r() end\n" +
+                "record('overflowing handler', xpcall(f, function(m) return r() end))\n" +
+                "local function nest(n) if n == 0 then return 'bottom' end\n" +
+                "  local ok, v = pcall(nest, n - 1) if not ok then error(v, 0) end return v end\n" +
+                "record('levels', pcall(nest, " + (MaxNestedPcalls - 1) + "))",
+                new LuaCsExecutionGuard(120_000, 5_000_000_000L, 0), rows);
+
+            Assert.IsNull(ended, "the overflow must not end the run: " + ended?.Message);
+            Assert.AreEqual(4, rows.Count, string.Join(" / ", rows));
+            Assert.AreEqual("string:xpcall|boolean:false|string:H:string:stack overflow", rows[0]);
+            StringAssert.StartsWith("string:pcall|boolean:false|string:", rows[1]);
+            StringAssert.EndsWith("stack overflow", rows[1], "pcall is the negative twin: unchanged");
+            Assert.AreEqual("string:overflowing handler|boolean:false|string:error in error handling", rows[2]);
+            Assert.AreEqual("string:levels|boolean:true|string:bottom", rows[3],
+                "every xpcall gave its level back: pcall still nests to the limit afterwards");
+        }
+
+        [Test]
+        public void APcallSuspendedByAYield_AllocatesNothingPerSuspension()
+        {
+            // WHY (audit C3-05): a counted call whose function yields completes after a later resume, and the async
+            // method that closed its level then boxed a state machine, about 136 bytes on every suspension -
+            // `pcall(function() ... task.wait() ... end)` in a loop is ordinary Roblox code, and each suspension was
+            // steady garbage for WebGL's non-moving collector. The level is now closed by a pooled continuation. The
+            // twin below yields the same way without the pcall, so the raw resume's own cost cancels out. WHY 0
+            // passes: Unity's Mono answers 0 from GetAllocatedBytesForCurrentThread, so the bound is enforced where
+            // the counter exists (CoreCLR).
+            const string yieldOnly =
+                "local y = coroutine.yield\n" +
+                "local co = coroutine.create(function() while true do (function() y() end)() end end)\n" +
+                "for i = 1, 20000 do coroutine.resume(co) end";
+            const string yieldInsidePcall =
+                "local y = coroutine.yield\n" +
+                "local co = coroutine.create(function() while true do pcall(function() y() end) end end)\n" +
+                "for i = 1, 20000 do coroutine.resume(co) end";
+
+            long plainBytes = AllocatedBytesOfSecondRun(yieldOnly);
+            long pcallBytes = AllocatedBytesOfSecondRun(yieldInsidePcall);
+
+            Assert.IsTrue(pcallBytes == 0 || pcallBytes <= plainBytes + 16 * 1024,
+                "20,000 pcalls suspended by a yield allocated " + pcallBytes + " bytes against " + plainBytes
+                + " for the same yields without the pcall");
+        }
+
+        /// <summary>
+        /// Bytes <paramref name="chunk"/> allocates on this thread when it runs a second time on a fresh sandboxed
+        /// state with no guard (the first run leaves the JIT and the pools warm).
+        /// </summary>
+        private static long AllocatedBytesOfSecondRun(string chunk)
+        {
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create(null, UnhurriedRawResumes());
+            Lua.Runtime.LuaClosure loaded = state.Load(chunk, "sandbox_chunk");
+            state.ExecuteAsync(loaded).AsTask().GetAwaiter().GetResult();
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
+            state.ExecuteAsync(loaded).AsTask().GetAwaiter().GetResult();
+            return System.GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+
+        /// <summary>A __tostring, a __pairs and an __ipairs that yield, and the calls that run them.</summary>
+        private const string YieldingMetamethods =
+            "local o = setmetatable({}, {__tostring = function() coroutine.yield('escaped') return 'x' end})\n" +
+            "local p = setmetatable({}, {__pairs = function(t) coroutine.yield('escaped') return next, {}, nil end})\n" +
+            "local q = setmetatable({}, {__ipairs = function(t) coroutine.yield('escaped') return next, {}, nil end})\n";
+
+        [TestCase("tostring", "tostring(o)")]
+        [TestCase("print", "print(o)")]
+        [TestCase("table.sort", "table.sort({2, 1}, function(a, b) coroutine.yield('escaped') return a < b end)")]
+        [TestCase("pairs", "pairs(p)")]
+        [TestCase("ipairs", "ipairs(q)")]
+        [TestCase("string.format", "string.format('%s', o)")]
+        [TestCase("string.gsub", "string.gsub('a', 'a', function() coroutine.yield('escaped') end)")]
+        [Timeout(60000)]
+        public void YieldThroughEveryCountedCallBackIntoLua_IsRefusedAtTheFence_AndTheCoroutineRunsOn(string boundary,
+            string call)
+        {
+            // WHY (audit C3-06, Luau parity): a yield got through tostring, print, table.sort and pairs/ipairs
+            // metamethods while string.format and string.gsub refused it, and Luau refuses it through every C
+            // function that calls back into Lua - a script that yielded through tostring here failed on Roblox. Every
+            // counted call now raises the same line, and the coroutine, whose thread the fence left running, yields
+            // normally afterwards; its levels are back too.
+            List<string> rows = new();
+            LuaRuntimeException ended = RunRecordingChunk(
+                YieldingMetamethods +
+                "local co = coroutine.create(function()\n" +
+                "  local ok, e = pcall(function() return " + call + " end)\n" +
+                "  record('call', ok, e)\n" +
+                "  coroutine.yield('second')\n" +
+                "  record('body end')\n" +
+                "end)\n" +
+                "record(coroutine.resume(co))\n" +
+                "record(coroutine.status(co))\n" +
+                "record(coroutine.resume(co))\n" +
+                "record(coroutine.status(co))\n" +
+                "local function nest(n) if n == 0 then return 'bottom' end\n" +
+                "  local ok, v = pcall(nest, n - 1) if not ok then error(v, 0) end return v end\n" +
+                "record(pcall(nest, " + (MaxNestedPcalls - 1) + "))",
+                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows);
+
+            Assert.IsNull(ended, ended?.Message);
+            Assert.AreEqual(7, rows.Count, string.Join(" / ", rows));
+            StringAssert.StartsWith("string:call|boolean:false|string:", rows[0], "the yield must not reach the resumer");
+            StringAssert.Contains(LuaCsSecureEnvironment.YieldAcrossCallBoundaryMessage + " (" + boundary
+                                  + " called a Lua function that yielded)", rows[0]);
+            CollectionAssert.AreEqual(new[]
+            {
+                "boolean:true|string:second",
+                "string:suspended",
+                "string:body end",
+                "boolean:true",
+                "string:dead",
+                "boolean:true|string:bottom"
+            }, rows.GetRange(1, 6), "the refused yield must leave the coroutine running on normally");
+        }
+
+        [TestCase("tostring", "tostring(o)", false)]
+        [TestCase("tostring", "tostring(o)", true)]
+        [TestCase("table.sort", "(function() local t = {2, 1} table.sort(t, function(a, b) WAIT return a < b end) return t[1] end)()",
+            false)]
+        [TestCase("pairs", "pairs(p)", false)]
+        [TestCase("ipairs", "ipairs(q)", false)]
+        [TestCase("warn", "warn(o)", false)]
+        [TestCase("warn", "warn(o)", true)]
+        [TestCase("string.format", "string.format('%s', o)", false)]
+        [TestCase("string.format", "string.format('%s', o)", true)]
+        [TestCase("string.gsub", "string.gsub('a', 'a', function() WAIT return 'b' end)", true)]
+        [Timeout(120000)]
+        public void TaskWaitInsideACountedCallBackIntoLua_IsRefusedAtTheFence_AlsoAfterANestedResume_AndTheTaskThreadRunsOn(
+            string boundary, string call, bool nestedResumeFirst)
+        {
+            // WHY (audit B3-04, the mod-runtime shape): after a nested coroutine.resume the task.wait in __tostring got
+            // through the lifted fence, the task thread died with "BAD_ARGUMENT: nil" and never reached its end. WHY
+            // every counted call (audit C3-06): this test used to reach __tostring through string.format only, while
+            // a task.wait through tostring itself, a sort comparator, a __pairs, an __ipairs or warn went through. The
+            // twins without the nested resume pin what every channel must do.
+            LuaCsRbxApiBindings bindings = new();
+            NestedRunModStore store = new();
+            LuaCsModStack stack = NewNestedRunModStack(bindings, store);
+            string wait = (nestedResumeFirst ? "coroutine.resume(coroutine.create(function() end)) " : "")
+                          + "task.wait(0.1) store_set('after the wait', 'yes')";
+            stack.Runtime.LoadMod("m",
+                "task.spawn(function()\n" +
+                "  local o = setmetatable({}, {__tostring = function() " + wait + " return 'x' end})\n" +
+                "  local p = setmetatable({}, {__pairs = function(t) " + wait + " return next, {}, nil end})\n" +
+                "  local q = setmetatable({}, {__ipairs = function(t) " + wait + " return next, {}, nil end})\n" +
+                "  local ok, e = pcall(function() return " + call.Replace("WAIT", wait) + " end)\n" +
+                "  store_set('call', tostring(ok) .. '|' .. tostring(e))\n" +
+                "  task.wait(0.1)\n" +
+                "  store_set('thread end', 'yes')\n" +
+                "end)\n" +
+                "store_set('chunk end', 'yes')");
+            for (int frame = 0; frame < 5; frame++)
+            {
+                bindings.Scheduler.Advance(0.1d);
+            }
+
+            string errors = HandlerErrorsOf(stack);
+            StringAssert.StartsWith("false|", store.Get("m", "call"), errors);
+            StringAssert.Contains(LuaCsSecureEnvironment.YieldAcrossCallBoundaryMessage + " (" + boundary
+                                  + " called a Lua function that yielded)", store.Get("m", "call"));
+            Assert.AreEqual("", store.Get("m", "after the wait"), "the callback must not run on past its refused wait");
+            Assert.AreEqual("yes", store.Get("m", "chunk end"), errors);
+            Assert.AreEqual("yes", store.Get("m", "thread end"), errors);
+            Assert.AreEqual("", errors);
+        }
+
+        [TestCase("string.rep", "bad argument #1 to 'string.rep' (string expected, got no value)")]
+        [TestCase("string.find", "bad argument #1 to 'string.find' (string expected, got no value)")]
+        [TestCase("string.match", "bad argument #1 to 'string.match' (string expected, got no value)")]
+        [TestCase("string.gmatch", "bad argument #1 to 'string.gmatch' (string expected, got no value)")]
+        [TestCase("string.gsub", "bad argument #1 to 'string.gsub' (string expected, got no value)")]
+        [TestCase("table.concat", "bad argument #1 to 'table.concat' (table expected, got no value)")]
+        [TestCase("coroutine.resume", "bad argument #1 to 'coroutine.resume' (thread expected, got no value)")]
+        public void SandboxReplacedFunction_CalledFromHostCode_NamesItselfAsTheNativeOneDoes(string function,
+            string expected)
+        {
+            // WHY (audit C3-07): a function called from host code (pcall(f), a sort comparator) is named by its own
+            // name in a bad-argument line, and the sandbox's replacements were named 'rep', 'resume', 'gsub' where
+            // Lua-CSharp's own functions, and Luau's, say 'string.rep' and 'coroutine.resume'. From Lua code the name
+            // comes from the call site and stays short (see the test above).
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+
+            LuaValue[] result = env.RunChunk(state,
+                "local ok, e = pcall(" + function + ")\n" +
+                "return tostring(ok) .. '|' .. tostring(e)");
+
+            Assert.AreEqual("false|" + expected, result[0].Read<string>());
+            AssertNamesNoClrTypeOrEngine(result[0].Read<string>());
+        }
+
+        [Test]
+        [Timeout(30000)]
+        public void ACoroutineWhoseBodyIsCoroutineYield_FailsItsResumeWithALuaLine_AndAYieldFromLuaStillWorks()
+        {
+            // WHY (audit C3-07): Lua-CSharp finds the frame that called yield at the second-to-last place of the
+            // thread's call stack, and a coroutine whose body is coroutine.yield has one frame, so its resume handed
+            // the script "Index was outside the bounds of the array."; a body that ends in `return coroutine.yield()`
+            // has one too, its frame replaced by the tail call, and failed with a nil error. Both now fail with a
+            // call-boundary line that names the fix; the negative twin yields from a Lua body exactly as before.
+            List<string> rows = new();
+            LuaRuntimeException ended = RunRecordingChunk(
+                "local co = coroutine.create(coroutine.yield)\n" +
+                "record(coroutine.resume(co, 1, 2))\n" +
+                "record(coroutine.status(co))\n" +
+                "local tail = coroutine.create(function(...) return coroutine.yield(...) end)\n" +
+                "record(coroutine.resume(tail, 1, 2))\n" +
+                "local lua = coroutine.create(function(...) local r = coroutine.yield(...) return r end)\n" +
+                "record(coroutine.resume(lua, 1, 2))\n" +
+                "record(coroutine.resume(lua, 'back'))\n" +
+                "record(coroutine.status(lua))",
+                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows);
+
+            Assert.IsNull(ended, ended?.Message);
+            string refused = "boolean:false|string:" + LuaCsSecureEnvironment.YieldWithoutLuaCallerMessage;
+            CollectionAssert.AreEqual(new[]
+            {
+                refused,
+                "string:dead",
+                refused,
+                "boolean:true|number:1|number:2",
+                "boolean:true|string:back",
+                "string:dead"
+            }, rows);
+            StringAssert.StartsWith(LuaCsSecureEnvironment.YieldAcrossCallBoundaryMessage,
+                LuaCsSecureEnvironment.YieldWithoutLuaCallerMessage);
+            AssertIsOnlyTheErrorLine(rows[0]);
+            AssertNamesNoClrTypeOrEngine(rows[0]);
         }
 
         #endregion

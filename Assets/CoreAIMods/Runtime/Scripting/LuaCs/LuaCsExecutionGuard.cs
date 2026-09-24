@@ -54,12 +54,29 @@ namespace CoreAI.Sandbox.LuaCs
     }
 
     /// <summary>
+    /// The CLR cause <see cref="LuaCsExecutionGuard"/> attaches (as the trip's
+    /// <see cref="LuaCsHostFunctionException.HostException"/>) when a guarded run exceeds its instruction-step
+    /// budget. A dedicated type, like <see cref="LuaMemoryBudgetException"/>, so a classifier tells the trip by type
+    /// (<see cref="LuaCsExecutionGuard.IsStepBudgetTrip"/>) and never by the wording of its line. Only this guard
+    /// constructs it.
+    /// </summary>
+    public sealed class LuaStepBudgetException : InvalidOperationException
+    {
+        internal LuaStepBudgetException(string message) : base(message)
+        {
+        }
+    }
+
+    /// <summary>
     /// The cost of one completed guarded execution, delivered to
     /// <see cref="ILuaCsGuardObserver"/> exactly once per <see cref="LuaCsExecutionGuard"/> call.
     /// </summary>
     public readonly struct LuaCsGuardExecutionRecord
     {
-        /// <summary>Guarded instructions charged to the step budget by this execution.</summary>
+        /// <summary>
+        /// Guarded instructions charged to the step budget by this execution, those of the runs nested in it (a raw
+        /// coroutine it resumed, a thread a <c>task.spawn</c> in it ran at once) included.
+        /// </summary>
         public long Steps { get; }
 
         /// <summary>Wall-clock <see cref="Stopwatch"/> ticks spent inside this execution.</summary>
@@ -110,17 +127,33 @@ namespace CoreAI.Sandbox.LuaCs
     /// 16 MB guard, 12 nested <c>task.spawn</c> levels 137 MB under a mod's 16 MB, and 5 nested raw levels ran
     /// 4.4 s inside one 500 ms resume. On WebGL the memory is an out-of-memory crash of the page.
     /// <para>
-    /// WHY the enclosing run is found from the resuming thread's <see cref="LuaState"/> (<see cref="FindExecuting"/>
-    /// reads the registries keyed by thread: the guard's installed hooks, the handle threads, the raw coroutines)
-    /// and not from a [ThreadStatic] stack of active runs: an <c>execute_lua</c> chunk awaits frames from inside its
-    /// hook, and other runs execute on the same .NET thread in between, so a thread-wide stack would interleave.
-    /// A run parked in a frame yield reports itself as not executing instead, and a resume the scheduler drives from
-    /// its own frame finds no executing run and keeps its full allowance.
+    /// WHY the enclosing run is the innermost EXECUTING run on this OS thread (<see cref="InnermostExecuting"/>),
+    /// whichever Lua state or thread it belongs to (audit C3-03): Lua runs on one OS thread, so whatever run is
+    /// executing Lua when a new one starts is physically below it on the native stack, and the new run is part of
+    /// it. Looking the enclosing run up by the new run's own state instead nested a guarded call made from a
+    /// coroutine of that state in the state's guard, skipping the coroutine's run between them: an xpcall in the
+    /// coroutine caught the trip and its handler ran on, and every hop added a fresh count of calls back into Lua on
+    /// the same native stack (8 hops, 4 MB). A guarded call into ANOTHER state (a <c>mods_call</c> export) is nested
+    /// the same way, so it continues the caller's count and is held to the caller's allowance too.
+    /// </para>
+    /// <para>
+    /// WHY a list of begun runs scanned from the newest for one that executes, and not a stack popped in order: an
+    /// <c>execute_lua</c> chunk awaits frames from inside its hook, other runs begin and end on the same OS thread
+    /// while it is parked, and it may resume while one of them is parked in turn, so runs do not end in the order
+    /// they began. A parked run reports itself as not executing and is skipped; a run that resumes executing moves
+    /// to the end of the list, because it resumes on top of whatever is on the native stack then. The executing
+    /// runs in the list are therefore always in the order they sit on the native stack, and the newest of them is
+    /// the innermost. A resume the scheduler drives from its own frame finds no executing run and keeps its full
+    /// allowance. The list is per OS thread; a run that continues on another OS thread after a frame yield (an
+    /// awaiter without a synchronization context) moves to that thread's list, and the entry it left behind is
+    /// dropped by the next scan of the old one.
     /// </para>
     /// <para>
     /// WHY only steps are charged back: the deadline is wall clock and the allocation line an absolute live-heap
     /// reading, both of which already contain whatever the nested run spent; steps are counted by each hook on its
-    /// own thread, so without the charge the enclosing run could spend them again.
+    /// own thread, so without the charge the enclosing run could spend them again. The charge includes what the
+    /// nested run's own nested runs charged to it (audit C3-01): a run two levels down used to spend steps nothing
+    /// above its parent ever saw, which multiplied the budget of any chain three runs deep.
     /// </para>
     /// <para>
     /// WHY a lent allowance ends the enclosing run too, and with ITS trip line: the allowance was the enclosing
@@ -132,16 +165,47 @@ namespace CoreAI.Sandbox.LuaCs
     /// </remarks>
     internal abstract class LuaCsGuardedRun
     {
+        /// <summary>The runs begun on this OS thread and not yet ended, oldest first (see the remarks).</summary>
+        [ThreadStatic]
+        private static List<LuaCsGuardedRun> _begunRuns;
+
         private LuaCsGuardedRun _enclosing;
+        private LuaState _thread;
+        private List<LuaCsGuardedRun> _registry;
         private bool _stepsLent;
         private bool _deadlineLent;
         private bool _executing;
+        private long _nestedSteps;
+        private long _nestedUnreportedSteps;
 
         /// <summary>
         /// True while this run executes Lua further down the stack: begun, not yet ended, and not parked in a frame
         /// yield. Only an executing run can enclose a run that starts now.
         /// </summary>
         internal bool IsExecuting => _executing;
+
+        /// <summary>
+        /// The Lua thread this run executes on while it is begun, null otherwise. A run nested in this one continues
+        /// the count of calls back into Lua open on it (see <see cref="LuaCsSecureEnvironment.MaxCCallDepth"/>).
+        /// </summary>
+        /// <remarks>
+        /// WHY held only while begun: the registries that map a thread to its run (a handle's thread, a raw
+        /// coroutine) keep the run as the value of an entry keyed by that thread, and an entry whose value holds its
+        /// key would keep the thread alive on a runtime without ephemeron support.
+        /// </remarks>
+        internal LuaState Thread => _thread;
+
+        /// <summary>
+        /// Steps the runs nested in this one charged to it since it began, including what their own nested runs
+        /// charged to them.
+        /// </summary>
+        internal long NestedSteps => _nestedSteps;
+
+        /// <summary>
+        /// The part of <see cref="NestedSteps"/> no nested run recorded as its own (see
+        /// <see cref="EndRun"/>): a raw coroutine's steps, which nothing else reports.
+        /// </summary>
+        internal long NestedUnreportedSteps => _nestedUnreportedSteps;
 
         /// <summary>Steps this run may still spend.</summary>
         internal abstract long RemainingSteps { get; }
@@ -173,7 +237,8 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>
         /// The executing guarded run on <paramref name="state"/>: the innermost guard execution installed on it,
         /// else the resume of the coroutine handle whose thread it is, else the raw <c>coroutine.resume</c> of the
-        /// coroutine it is. Null when none is executing, including when <paramref name="state"/> is null.
+        /// coroutine it is. Null when none is executing, including when <paramref name="state"/> is null. A run that
+        /// starts now is nested in <see cref="InnermostExecuting"/> instead, whatever thread it runs on.
         /// </summary>
         internal static LuaCsGuardedRun FindExecuting(LuaState state)
         {
@@ -188,16 +253,55 @@ namespace CoreAI.Sandbox.LuaCs
         }
 
         /// <summary>
-        /// Starts this run, nested in <paramref name="enclosing"/> when that is not null: lowers
-        /// <paramref name="stepLimit"/> and <paramref name="deadlineTimestamp"/> to what the enclosing run has left
-        /// and remembers which of them it lent. The allocation ceiling is <see cref="CeilingOf"/>.
+        /// The innermost guarded run executing on this OS thread, whichever Lua state or thread it runs on: the run a
+        /// run that starts now is nested in. Null when none is executing (a resume the scheduler drives from its own
+        /// frame, a guarded call from host code, a run whose enclosing runs are all parked in a frame yield).
         /// </summary>
-        protected void BeginRun(LuaCsGuardedRun enclosing, ref long stepLimit, ref long deadlineTimestamp)
+        internal static LuaCsGuardedRun InnermostExecuting()
+        {
+            List<LuaCsGuardedRun> runs = _begunRuns;
+            if (runs == null)
+            {
+                return null;
+            }
+
+            for (int i = runs.Count - 1; i >= 0; i--)
+            {
+                LuaCsGuardedRun run = runs[i];
+                if (!ReferenceEquals(run._registry, runs))
+                {
+                    // WHY dropped here: the run ended or moved on while it ran on another OS thread, which cannot
+                    // touch this thread's list.
+                    runs.RemoveAt(i);
+                    continue;
+                }
+
+                if (run._executing)
+                {
+                    return run;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Starts this run on <paramref name="thread"/>, nested in <paramref name="enclosing"/> when that is not null:
+        /// lowers <paramref name="stepLimit"/> and <paramref name="deadlineTimestamp"/> to what the enclosing run has
+        /// left and remembers which of them it lent. The allocation ceiling is <see cref="CeilingOf"/>.
+        /// <paramref name="enclosing"/> is <see cref="InnermostExecuting"/>, read before anything of this run changed.
+        /// </summary>
+        protected void BeginRun(LuaCsGuardedRun enclosing, LuaState thread, ref long stepLimit,
+            ref long deadlineTimestamp)
         {
             _enclosing = enclosing;
+            _thread = thread;
             _stepsLent = false;
             _deadlineLent = false;
+            _nestedSteps = 0;
+            _nestedUnreportedSteps = 0;
             _executing = true;
+            Register();
             if (enclosing == null)
             {
                 return;
@@ -224,22 +328,79 @@ namespace CoreAI.Sandbox.LuaCs
             return enclosing?.AllocationLineBytes ?? long.MaxValue;
         }
 
-        /// <summary>Marks this run parked in a frame yield (false) or executing again (true).</summary>
+        /// <summary>
+        /// Marks this run parked in a frame yield (false) or executing again (true); a run that executes again is
+        /// the newest on the native stack of the OS thread it continues on.
+        /// </summary>
         protected void SetExecuting(bool executing)
         {
+            if (executing)
+            {
+                Register();
+            }
+
             _executing = executing;
         }
 
         /// <summary>
-        /// Ends this run: charges the <paramref name="steps"/> it spent to the run it was nested in and forgets
-        /// that run.
+        /// Ends this run: charges the <paramref name="steps"/> it spent, and what its nested runs charged to it, to
+        /// the run it was nested in and forgets that run. <paramref name="reported"/> is true when this run records
+        /// its steps itself (a guard's observability sink, a handle's <see cref="LuaCsCoroutineHandle.ConsumedSteps"/>
+        /// read by the scheduler); otherwise they reach the enclosing run's record as unreported.
         /// </summary>
-        protected void EndRun(long steps)
+        protected void EndRun(long steps, bool reported)
         {
             _executing = false;
+            Unregister();
+            _thread = null;
             LuaCsGuardedRun enclosing = _enclosing;
             _enclosing = null;
-            enclosing?.ChargeNestedSteps(steps);
+            if (enclosing == null)
+            {
+                return;
+            }
+
+            enclosing._nestedSteps += steps + _nestedSteps;
+            enclosing._nestedUnreportedSteps += reported ? 0L : steps + _nestedUnreportedSteps;
+            enclosing.ChargeNestedSteps(steps + _nestedSteps);
+        }
+
+        /// <summary>Appends this run to this OS thread's begun runs, taking it out of there first if it is in.</summary>
+        private void Register()
+        {
+            List<LuaCsGuardedRun> runs = _begunRuns ??= new List<LuaCsGuardedRun>(16);
+            if (ReferenceEquals(_registry, runs))
+            {
+                RemoveFrom(runs);
+            }
+
+            runs.Add(this);
+            _registry = runs;
+        }
+
+        /// <summary>
+        /// Takes this run out of the begun runs of the OS thread it ends on; an entry it left on another OS thread
+        /// becomes stale and is dropped by that thread (see <see cref="InnermostExecuting"/>).
+        /// </summary>
+        private void Unregister()
+        {
+            List<LuaCsGuardedRun> runs = _registry;
+            _registry = null;
+            if (runs != null && ReferenceEquals(runs, _begunRuns))
+            {
+                RemoveFrom(runs);
+            }
+        }
+
+        private void RemoveFrom(List<LuaCsGuardedRun> runs)
+        {
+            for (int i = runs.Count - 1; i >= 0; i--)
+            {
+                if (ReferenceEquals(runs[i], this))
+                {
+                    runs.RemoveAt(i);
+                }
+            }
         }
 
         /// <summary>
@@ -260,7 +421,10 @@ namespace CoreAI.Sandbox.LuaCs
             return enclosing.TripFromNested(kind, where);
         }
 
-        /// <summary>Takes <paramref name="steps"/> a nested run spent off what this run may still spend.</summary>
+        /// <summary>
+        /// Takes <paramref name="steps"/> a nested run spent (its own and its nested runs') off what this run may
+        /// still spend.
+        /// </summary>
         protected abstract void ChargeNestedSteps(long steps);
 
         /// <summary>This run's own trip line for an exhausted limit of <paramref name="kind"/>.</summary>
@@ -365,6 +529,12 @@ namespace CoreAI.Sandbox.LuaCs
         public const string MemoryBudgetTripMarker = "EXCEEDED_MEMORY_BUDGET";
 
         /// <summary>
+        /// Human-readable marker stamped into an instruction-step budget trip's line, after
+        /// <c>"sandbox: "</c>. Classify by <see cref="IsStepBudgetTrip"/>, never by this literal.
+        /// </summary>
+        public const string StepBudgetTripMarker = "EXCEEDED_HARD_LIMIT_STEPS";
+
+        /// <summary>
         /// True when <paramref name="ex"/> (or any exception it wraps) is a process-heap memory-budget trip
         /// raised by this guard. Detection is by TYPE (<see cref="LuaMemoryBudgetException"/>), NOT by message
         /// text, so a mod cannot forge the classification via its own error message. Used only for the trip's
@@ -380,6 +550,24 @@ namespace CoreAI.Sandbox.LuaCs
             for (Exception e = ex; e != null; e = LuaCsHostFunctionException.NextCause(e))
             {
                 if (e is LuaMemoryBudgetException)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// True when <paramref name="ex"/> (or any exception it wraps) is this guard's instruction-step budget trip.
+        /// Detection is by TYPE (<see cref="LuaStepBudgetException"/>), never by message text, for the reason
+        /// <see cref="IsMemoryBudgetTrip"/> gives.
+        /// </summary>
+        public static bool IsStepBudgetTrip(Exception ex)
+        {
+            for (Exception e = ex; e != null; e = LuaCsHostFunctionException.NextCause(e))
+            {
+                if (e is LuaStepBudgetException)
                 {
                     return true;
                 }
@@ -630,19 +818,22 @@ namespace CoreAI.Sandbox.LuaCs
         // WHY: Split into Begin/End rather than a Func<> body wrapper — a delegate body would capture
         // state/closure/function/args into a fresh display-class on EVERY guarded call (20 Hz timers/
         // events across mods), reintroducing the per-call heap churn the pooled GuardHook removes.
-        // WHY a guarded call re-entering an executing one on the same state is nested in it (see
-        // LuaCsGuardedRun): the outer call's hook is replaced for as long as the inner one runs, so the inner call
-        // is part of the outer run and may only spend what the outer one has left. It is also one more run on the
-        // native stack, counted like any other call back into Lua (LuaCsSecureEnvironment.MaxCCallDepth) and
-        // refused with the same catchable line past the limit.
+        // WHY a guarded call that starts while a run is executing is nested in it (see LuaCsGuardedRun), whatever
+        // state that run is on: re-entering the same state replaces the outer call's hook for as long as the inner one
+        // runs, and a call into another state (a mods_call export) runs where the caller's hook cannot fire, so either
+        // way the inner call is part of the outer run and may only spend what it has left. It is also one more run
+        // on the native stack, continuing the enclosing run's count of calls back into Lua
+        // (LuaCsSecureEnvironment.MaxCCallDepth) and refused with the same catchable line past the limit.
         private GuardHook BeginGuard(LuaState state, IScriptFrameYielder frameYielder,
             CancellationToken cancellationToken, out Stack<GuardHook> installed, out CancellationToken runToken)
         {
             installed = InstalledHooks.GetOrCreateValue(state);
-            GuardHook enclosing = installed.Count > 0 && installed.Peek().IsExecuting ? installed.Peek() : null;
+            LuaCsGuardedRun enclosing = LuaCsGuardedRun.InnermostExecuting();
+            int restoredCallBase = 0;
             if (enclosing != null)
             {
-                string refusal = LuaCsSecureEnvironment.OpenReentrantRun(state, "nested guarded call");
+                string refusal = LuaCsSecureEnvironment.OpenNestedRun(enclosing.Thread, state, "nested guarded call",
+                    out restoredCallBase);
                 if (refusal != null)
                 {
                     throw new LuaCsHostFunctionException(null, refusal, null);
@@ -650,11 +841,36 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             GuardHook hook = RentHook();
-            runToken = hook.Reset(_maxSteps, _timeoutMs, _maxAllocatedBytes, frameYielder, cancellationToken,
-                enclosing);
+            try
+            {
+                runToken = hook.Reset(_maxSteps, _timeoutMs, _maxAllocatedBytes, frameYielder, cancellationToken,
+                    enclosing, state, restoredCallBase);
+            }
+            catch
+            {
+                if (enclosing != null)
+                {
+                    LuaCsSecureEnvironment.CloseNestedRun(state, restoredCallBase);
+                }
+
+                hook.Release();
+                ReturnHook(hook);
+                throw;
+            }
 
             installed.Push(hook);
-            state.SetHook(hook.Function, string.Empty, HookInstructionBatch);
+            try
+            {
+                state.SetHook(hook.Function, string.Empty, HookInstructionBatch);
+            }
+            catch
+            {
+                // WHY ended here: the run is begun and registered as executing, and a run left executing would
+                // enclose every later run on this OS thread.
+                EndGuard(state, installed, hook, false);
+                throw;
+            }
+
             return hook;
         }
 
@@ -662,10 +878,10 @@ namespace CoreAI.Sandbox.LuaCs
         {
             if (hook.IsNested)
             {
-                LuaCsSecureEnvironment.CloseReentrantRun(state);
+                LuaCsSecureEnvironment.CloseNestedRun(state, hook.RestoredCallBase);
             }
 
-            hook.End();
+            hook.End(_observability != null);
             installed.Pop();
             if (hook.LeftInHookFlagSet)
             {
@@ -690,11 +906,14 @@ namespace CoreAI.Sandbox.LuaCs
                 /* ignore */
             }
 
-            if (_observability != null && hook.Steps > 0)
+            // WHY own steps plus only the unreported nested ones: a nested guard or coroutine handle records its own
+            // steps itself, so counting them here too would count them twice; a raw coroutine records nothing.
+            long observedSteps = hook.Steps + hook.NestedUnreportedSteps;
+            if (_observability != null && observedSteps > 0)
             {
                 try
                 {
-                    _observability.RecordGuardedInstructionSteps(hook.Steps);
+                    _observability.RecordGuardedInstructionSteps(observedSteps);
                 }
                 catch
                 {
@@ -707,7 +926,7 @@ namespace CoreAI.Sandbox.LuaCs
             if (observer != null)
             {
                 LuaCsGuardExecutionRecord record = new(
-                    hook.Steps,
+                    hook.Steps + hook.NestedSteps,
                     hook.ElapsedTicks,
                     completed,
                     completed ? LuaCsGuardTripKind.None : hook.Trip);
@@ -791,9 +1010,9 @@ namespace CoreAI.Sandbox.LuaCs
         /// allocation budget). False when no guarded run is executing on that thread.
         /// </summary>
         /// <remarks>
-        /// For host code that starts another guarded run on a different state from inside the executing one - a
-        /// <c>mods_call</c> export, whose guard is built from its own budget - so it can hold that run to the lower
-        /// of the two. A guarded call on the SAME state is nested automatically (see <see cref="BeginGuard"/>).
+        /// For host code that wants to know what the executing run has left before it starts more work. A guarded
+        /// call that starts while a run executes, on this state or any other, is nested in it automatically and held
+        /// to what it has left (see <see cref="BeginGuard"/>).
         /// </remarks>
         internal static bool TryGetRemainingAllowance(LuaState state, out long remainingSteps,
             out int remainingMilliseconds, out long remainingAllocatedBytes)
@@ -855,6 +1074,7 @@ namespace CoreAI.Sandbox.LuaCs
             private LuaCsHostFunctionException _tripError;
             private bool _leftInHookFlagSet;
             private bool _nested;
+            private int _restoredCallBase;
 
             // WHY two sources: a run whose caller passed no cancellable token (every mod handler, timer and
             // mods_call) runs on _ownSource, which is pooled with the hook and replaced only after a trip has
@@ -922,8 +1142,21 @@ namespace CoreAI.Sandbox.LuaCs
             /// A non-null <paramref name="enclosing"/> is the executing run this call is nested in.
             /// </summary>
             public CancellationToken Reset(long maxSteps, int timeoutMs, long maxAllocatedBytes,
-                IScriptFrameYielder frameYielder, CancellationToken callerToken, LuaCsGuardedRun enclosing)
+                IScriptFrameYielder frameYielder, CancellationToken callerToken, LuaCsGuardedRun enclosing,
+                LuaState state, int restoredCallBase)
             {
+                // WHY the token sources first: linking a caller token can throw, and nothing may throw once the run
+                // is begun, since a begun run registers itself as executing (see LuaCsGuardedRun).
+                if (_ownSource == null || _ownSource.IsCancellationRequested)
+                {
+                    _ownSource?.Dispose();
+                    _ownSource = new CancellationTokenSource();
+                }
+
+                _runSource = callerToken.CanBeCanceled
+                    ? CancellationTokenSource.CreateLinkedTokenSource(callerToken)
+                    : _ownSource;
+
                 _steps = 0;
                 _trip = LuaCsGuardTripKind.None;
                 _tripError = null;
@@ -939,33 +1172,34 @@ namespace CoreAI.Sandbox.LuaCs
                 _startTimestamp = Stopwatch.GetTimestamp();
                 _deadline = _startTimestamp + (long)_timeoutMs * Stopwatch.Frequency / 1000;
                 _nested = enclosing != null;
-                BeginRun(enclosing, ref _stepLimit, ref _deadline);
-                _allocation.ResetNested(maxAllocatedBytes, CeilingOf(enclosing));
+                _restoredCallBase = restoredCallBase;
 
                 _frameYielder = frameYielder;
                 _frameYieldSliceTicks = (long)FrameYieldSliceMs * Stopwatch.Frequency / 1000;
                 _lastYieldTimestamp = _startTimestamp;
 
-                if (_ownSource == null || _ownSource.IsCancellationRequested)
-                {
-                    _ownSource?.Dispose();
-                    _ownSource = new CancellationTokenSource();
-                }
-
-                _runSource = callerToken.CanBeCanceled
-                    ? CancellationTokenSource.CreateLinkedTokenSource(callerToken)
-                    : _ownSource;
+                BeginRun(enclosing, state, ref _stepLimit, ref _deadline);
+                _allocation.ResetNested(maxAllocatedBytes, CeilingOf(enclosing));
                 return _runSource.Token;
             }
 
-            /// <summary>True while the current execution is nested in another one on the same state.</summary>
+            /// <summary>True while the current execution is nested in a run that was executing when it began.</summary>
             public bool IsNested => _nested;
 
-            /// <summary>Ends the execution: its steps are charged to the run it was nested in, if any.</summary>
-            public void End()
+            /// <summary>
+            /// The count base <see cref="LuaCsSecureEnvironment.OpenNestedRun"/> replaced on the state, put back when a
+            /// nested execution ends.
+            /// </summary>
+            public int RestoredCallBase => _restoredCallBase;
+
+            /// <summary>
+            /// Ends the execution: its steps are charged to the run it was nested in, if any, as reported when
+            /// <paramref name="reported"/> (the guard records them to its observability sink).
+            /// </summary>
+            public void End(bool reported)
             {
                 _nested = false;
-                EndRun(_steps);
+                EndRun(_steps, reported);
             }
 
             /// <summary>
@@ -1007,22 +1241,26 @@ namespace CoreAI.Sandbox.LuaCs
             // cause's message is the line the caller receives, and the cause itself stays reachable as
             // LuaCsHostFunctionException.HostException for type-based classification
             // (LuaCsExecutionGuard.IsMemoryBudgetTrip, ScriptExecutionErrors.IsMemoryBudgetTrip).
+            // WHY every line starts with the sandbox's prefix and keeps its marker (audit C3-07): the lines reach the
+            // script, the model and the auto-repair loop, where a CLR class name means nothing, while classifiers
+            // read the markers after the prefix ("EXCEEDED_...", "Lua exceeded") or, for the runtime's suspension
+            // count, the cause's type.
             /// <inheritdoc />
             protected override LuaCsHostFunctionException CreateOwnTrip(LuaCsGuardTripKind kind, LuaState where)
             {
+                const string prefix = LuaCsSecureEnvironment.SandboxLinePrefix;
                 Exception cause;
                 switch (kind)
                 {
                     case LuaCsGuardTripKind.Timeout:
-                        cause = new TimeoutException($"Lua exceeded {_timeoutMs} ms.");
+                        cause = new TimeoutException($"{prefix}Lua exceeded {_timeoutMs} ms.");
                         break;
                     case LuaCsGuardTripKind.Memory:
                         cause = new LuaMemoryBudgetException(
-                            $"LuaCsSecureEnvironment: {MemoryBudgetTripMarker} ({_allocation.BudgetBytes} bytes)");
+                            $"{prefix}{MemoryBudgetTripMarker} ({_allocation.BudgetBytes} bytes)");
                         break;
                     default:
-                        cause = new InvalidOperationException(
-                            $"LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS ({_maxSteps})");
+                        cause = new LuaStepBudgetException($"{prefix}{StepBudgetTripMarker} ({_maxSteps})");
                         break;
                 }
 

@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Threading.Tasks.Sources;
 using CoreAI.Scripting;
 using Lua;
 using Lua.Runtime;
@@ -80,10 +81,11 @@ namespace CoreAI.Sandbox.LuaCs
         public const string PatternStepBudgetTripMarker = "EXCEEDED_PATTERN_STEP_BUDGET";
 
         /// <summary>
-        /// Error a Lua function raises when it tries to yield while a sandbox library function (the
-        /// <c>__tostring</c> call of <c>string.format</c>, a <c>string.gsub</c> replacement function or
-        /// <c>__index</c>) is running it. Same meaning as Luau's "attempt to yield across
-        /// metamethod/C-call boundary".
+        /// Error a Lua function raises when it tries to yield while a library function that called it back is still
+        /// running: a <c>__tostring</c> run by <c>tostring</c>, <c>print</c>, <c>warn</c> or <c>string.format</c>, a
+        /// <c>table.sort</c> comparator, a <c>__pairs</c>/<c>__ipairs</c> metamethod, a <c>string.gsub</c>
+        /// replacement function or <c>__index</c> (audit C3-06). Same meaning as Luau's "attempt to yield across
+        /// metamethod/C-call boundary". A yield across <c>pcall</c> still works, as in Luau.
         /// </summary>
         public const string YieldAcrossCallBoundaryMessage = "attempt to yield across a C-call boundary";
 
@@ -96,24 +98,29 @@ namespace CoreAI.Sandbox.LuaCs
         /// <see cref="HeavyCallLevels"/>: a <c>__tostring</c> run by <c>tostring</c>, <c>print</c>, <c>warn</c> or
         /// <c>string.format</c>, a <c>table.sort</c> comparator, a <c>__pairs</c>/<c>__ipairs</c> metamethod, a
         /// <c>string.gsub</c> <c>__index</c>, a coroutine run by <c>coroutine.resume</c>, a scheduler thread that
-        /// <c>task.spawn</c> runs at once, and a guarded call re-entering a run on the same state. A resumed
-        /// thread continues the count of the thread that resumes it. The call that would pass the limit raises
+        /// <c>task.spawn</c> runs at once, and a guarded call that starts inside a run (re-entering the state, or a
+        /// <c>mods_call</c> export on another). A thread run inside a run continues the count of the thread that run
+        /// executes on. The call that would pass the limit raises
         /// <see cref="CStackOverflowMessage"/>, an ordinary error <c>pcall</c> can catch; a <c>pcall</c> past the
         /// limit returns it (<c>false</c> and the line), and an <c>xpcall</c> hands it to its handler.
         /// </summary>
         /// <remarks>
         /// WHY 128 levels of about 4 KB (audit B3-01 and the Hub-crash investigation): each of these calls is a
-        /// nested VM run on the .NET stack, measured on CoreCLR x64 at 3,152 B a level for pcall, 3,072 for xpcall,
-        /// 3,488 for a gsub callback, 4,448 for tostring through <c>__tostring</c>, 3,488-5,824 for table.sort,
-        /// 5,008 for coroutine.resume and 7,408 for a <c>task.spawn</c> that runs its thread at once. The only
-        /// other bound is <c>RuntimeHelpers.TryEnsureSufficientExecutionStack</c> inside Lua-CSharp, which Unity's
-        /// Mono implements but upstream Mono and an IL2CPP build may answer with a constant <c>true</c>, so a deep
-        /// enough chain would end the process instead of raising an error. Weighting each call by its frame size
-        /// keeps the worst chain of any mix under 128 x 4 KB = 512 KB (measured at most 474 KB: 64 task.spawn levels
-        /// of 7,408 B), plus the eighth more room an xpcall message handler is given past the limit (16 levels of
-        /// 3,072 B, 49 KB), safe on a 1 MB IL2CPP main thread and on WebGL, while ordinary pcall nesting still goes
-        /// 128 deep. Before the count ran 200 per channel and restarted in every task thread: 250 nested task.spawn
-        /// levels plus 200 tostring levels took 2.56 MB.
+        /// nested VM run on the .NET stack. Measured on CoreCLR x64 at the limit, unoptimised (tier-0) code, by
+        /// NativeStack_EveryChannelStaysWithinItsWeight_AtTheCap: 3,408 B a level for pcall, 3,376 for xpcall, 3,872
+        /// for a gsub replacement function (5,776 while gsub was an async method chain, audit C3-02), and per two
+        /// levels 3,232 for tostring through <c>__tostring</c>, 6,432 for <c>string.format</c>, 2,736-3,904 for
+        /// table.sort, 3,440 for <c>__pairs</c>, 5,168 for coroutine.resume and 7,600 for a <c>task.spawn</c> that runs
+        /// its thread at once. The only other bound is <c>RuntimeHelpers.TryEnsureSufficientExecutionStack</c> inside
+        /// Lua-CSharp, which Unity's Mono implements but upstream Mono and an IL2CPP build may answer with a constant
+        /// <c>true</c>, so a deep enough chain would end the process instead of raising an error. Weighting each call
+        /// by its frame size keeps the worst chain of any mix under 128 x 4 KB = 512 KB on CoreCLR, plus the eighth
+        /// more room an xpcall message handler is given past the limit (16 levels of 3,312 B, 52 KB), while ordinary
+        /// pcall nesting still goes 128 deep. Mono's JIT lays out frames about 2.8 times larger (.NET's Mono runtime:
+        /// 9,696 B a pcall level, 9,472 a gsub level, 17,888 two task.spawn levels), so a chain at the limit takes
+        /// up to about 1.35 MB there, where Mono's own stack check stands behind it; the weights keep every channel
+        /// within its share of a pcall level on both. Before the count ran 200 per channel and restarted in every
+        /// task thread: 250 nested task.spawn levels plus 200 tostring levels took 2.56 MB.
         /// <para>
         /// WHY a cap at all, rather than the .NET stack's own limit: an error raised N levels deep is rethrown once
         /// per level with a stack trace that grows with N, so unwinding costs about N squared - with no instruction
@@ -122,10 +129,10 @@ namespace CoreAI.Sandbox.LuaCs
         /// Heartbeat frame 5.7 s under a 500 ms budget (audit B3-01). Plain Lua recursion and the metamethods the
         /// VM runs inside its own loop (<c>__index</c>, <c>__newindex</c>, <c>__eq</c>, <c>__lt</c>, <c>__le</c>,
         /// arithmetic, <c>__len</c>, <c>__call</c>) use no native stack and are not counted. Still uncounted
-        /// although they do nest: <c>__concat</c>, which the VM calls directly where no sandbox code runs (see the
-        /// TODO on <see cref="CountCallsBackIntoLua"/>), and a guarded call on ANOTHER state from inside a run (a
-        /// <c>mods_call</c> export), which <c>MaxCrossCallDepth</c> bounds at 8 (see the TODO on
-        /// <see cref="CCallDepths"/>).
+        /// although it does nest: <c>__concat</c>, which the VM calls directly where no sandbox code runs (see the
+        /// TODO on <see cref="CountCallsBackIntoLua"/>). A guarded call on any state from inside a run (a
+        /// <c>mods_call</c> export, the same state or another) continues the count of the run it starts in (audit
+        /// C3-03).
         /// </para>
         /// </remarks>
         public const int MaxCCallDepth = 128;
@@ -141,6 +148,11 @@ namespace CoreAI.Sandbox.LuaCs
         /// call, a resumed coroutine and a scheduler thread run at once (see <see cref="MaxCCallDepth"/>).
         /// </summary>
         public const int HeavyCallLevels = 2;
+
+        /// <summary>
+        /// Levels a <c>string.gsub</c> replacement function opens (see <see cref="MaxCCallDepth"/>).
+        /// </summary>
+        private const int GSubCallbackLevels = LightCallLevels;
 
         /// <summary>Start of the error raised past <see cref="MaxCCallDepth"/>; Luau's text for the same limit.</summary>
         public const string CStackOverflowMessage = "C stack overflow";
@@ -278,6 +290,7 @@ namespace CoreAI.Sandbox.LuaCs
             if (nativeYield.Type == LuaValueType.Function)
             {
                 NativeYields.Add(state, nativeYield.Read<LuaFunction>());
+                coro["yield"] = new LuaFunction("coroutine.yield", GuardedYield);
             }
 
             LuaValue nativeResume = coro["resume"];
@@ -290,10 +303,36 @@ namespace CoreAI.Sandbox.LuaCs
             // library never installs the execution-guard hook there. WHY liveResumeBudget is captured
             // (not read once here): it is re-read on every resume inside ResumeWithPerResumeGuard so a
             // later ScriptContext:SetTimeout reaches a raw coroutine created before the call too — see
-            // RawCoroutineResumeStepBudgetMultiplier.
-            coro["resume"] = new LuaFunction("resume",
+            // RawCoroutineResumeStepBudgetMultiplier. WHY the qualified name (audit C3-07): a call from host code
+            // (pcall(coroutine.resume)) names the function by it in its bad-argument line, as the native one does.
+            coro["resume"] = new LuaFunction("coroutine.resume",
                 (ctx, ct) => GuardedCoroutineResume(ctx, ct, nativeResume, liveResumeBudget));
         }
+
+        // WHY (audit C3-07): Lua-CSharp's yield finds the frame that called it at the second-to-last place of the
+        // thread's call stack, and a coroutine whose body IS coroutine.yield has only the one frame - as has one whose
+        // body ends in `return coroutine.yield(...)`, since a tail call replaces the body's frame - so resuming either
+        // handed the script "Index was outside the bounds of the array." or a nil error. Luau runs both; Lua-CSharp
+        // cannot suspend a yield with no Lua function below it, so the resume fails with the call-boundary line every
+        // other yield from C# code gets, naming the fix. Anything else runs the native yield in place, with this
+        // call's own context, exactly as before.
+        /// <summary><c>coroutine.yield</c>: the native yield, refusing one with no Lua function below it.</summary>
+        private static System.Threading.Tasks.ValueTask<int> GuardedYield(LuaFunctionExecutionContext ctx,
+            CancellationToken ct)
+        {
+            LuaState state = ctx.State;
+            if (state.IsCoroutine && state.GetCallStackFrames().Length < 2)
+            {
+                throw new LuaRuntimeException(state, (LuaValue)YieldWithoutLuaCallerMessage);
+            }
+
+            return state.YieldAsync(ctx, ct);
+        }
+
+        /// <summary>What resuming a coroutine whose body is, or tail-calls, <c>coroutine.yield</c> fails with.</summary>
+        internal const string YieldWithoutLuaCallerMessage = YieldAcrossCallBoundaryMessage
+            + " (coroutine.yield has no Lua function below it: it is the coroutine's body, or the body ends in "
+            + "'return coroutine.yield(...)'; write 'local r = coroutine.yield(...) return r')";
 
         // WHY captured while the environment is built and never read from it again (audit B3-07): host code that
         // suspends a thread of its own - the signal runner's loop - must park it with the real yield, and the
@@ -408,10 +447,16 @@ namespace CoreAI.Sandbox.LuaCs
             RawResumeHook hook = null;
             if (canResume)
             {
+                // WHY the resumer's run is the innermost run executing on this OS thread (see LuaCsGuardedRun): the
+                // body runs inside it, where its own hook cannot fire.
+                LuaCsGuardedRun enclosing = LuaCsGuardedRun.InnermostExecuting();
+
                 // WHY the resumed body continues the resumer's count (Luau's lua_resume does the same): each
                 // nested resume is one more VM run on the .NET stack, and a chain of them unwinds like any other
-                // nesting (see MaxCCallDepth). Refused like Luau's, with the coroutine left suspended.
-                int callerDepth = CCallDepthOf(callerState);
+                // nesting (see MaxCCallDepth). Refused like Luau's, with the coroutine left suspended. The count of
+                // the thread calling resume and of the run it executes in are the same unless host code ran this
+                // thread's Lua outside a run of its own; the larger one is the chain on the native stack.
+                int callerDepth = Math.Max(CCallDepthOf(callerState), CCallDepthOf(enclosing?.Thread));
                 if (callerDepth + HeavyCallLevels > MaxCCallDepth)
                 {
                     return new[] { new LuaValue(false), (LuaValue)CStackOverflowText("coroutine.resume") };
@@ -434,10 +479,9 @@ namespace CoreAI.Sandbox.LuaCs
                 // run's budget - the mod's HandlerMaxAllocatedBytes for its handlers, task threads and main
                 // chunk. A fixed 256 MB let a mod held to 16 MB keep 80 MB alive inside coroutine.create (audit
                 // A2-09).
-                LuaCsGuardedRun enclosing = LuaCsGuardedRun.FindExecuting(callerState);
                 long allocationBudget = enclosing?.AllocationBudgetBytes
                                         ?? LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget;
-                hook.Arm(stepBudget, timeoutMs, allocationBudget, enclosing);
+                hook.Arm(stepBudget, timeoutMs, allocationBudget, enclosing, coroutineState);
 
                 try
                 {
@@ -548,12 +592,13 @@ namespace CoreAI.Sandbox.LuaCs
             protected override bool AllocationLineIsLent => _allocation.LineIsCeiling;
 
             /// <summary>
-            /// Arms a fresh allowance for one resume: <paramref name="stepBudget"/> steps,
+            /// Arms a fresh allowance for one resume of <paramref name="thread"/>: <paramref name="stepBudget"/> steps,
             /// <paramref name="timeoutMs"/> of wall clock and <paramref name="allocationBudgetBytes"/> of live heap
             /// growth, each lowered to what <paramref name="enclosing"/> (the run executing on the resumer, or
             /// null) has left.
             /// </summary>
-            public void Arm(long stepBudget, long timeoutMs, long allocationBudgetBytes, LuaCsGuardedRun enclosing)
+            public void Arm(long stepBudget, long timeoutMs, long allocationBudgetBytes, LuaCsGuardedRun enclosing,
+                LuaState thread)
             {
                 _steps = 0;
                 _tripError = null;
@@ -564,7 +609,7 @@ namespace CoreAI.Sandbox.LuaCs
                 // allocation-avoidance reason as LuaCsExecutionGuard.GuardHook (see that type for detail).
                 _deadline = System.Diagnostics.Stopwatch.GetTimestamp()
                             + timeoutMs * System.Diagnostics.Stopwatch.Frequency / 1000;
-                BeginRun(enclosing, ref _stepLimit, ref _deadline);
+                BeginRun(enclosing, thread, ref _stepLimit, ref _deadline);
                 // WHY: the SAME allocation backstop the execution guard uses, on the coroutine's child
                 // state - step/time caps do not catch a doubling concat bomb, which is ordinary VM opcodes
                 // with no library call site to cap. Shared as one type rather than a second hand-copied
@@ -573,10 +618,13 @@ namespace CoreAI.Sandbox.LuaCs
                 _allocation.ResetNested(allocationBudgetBytes, CeilingOf(enclosing));
             }
 
-            /// <summary>Ends the resume: its steps are charged to the run it was nested in, if any.</summary>
+            /// <summary>
+            /// Ends the resume: its steps are charged to the run it was nested in, if any, as unreported, since
+            /// nothing else records a raw coroutine's steps.
+            /// </summary>
             public void End()
             {
-                EndRun(_steps);
+                EndRun(_steps, false);
             }
 
             /// <inheritdoc />
@@ -595,7 +643,7 @@ namespace CoreAI.Sandbox.LuaCs
                 switch (kind)
                 {
                     case LuaCsGuardTripKind.Timeout:
-                        message = $"Lua coroutine resume exceeded {_timeoutMs} ms.";
+                        message = $"{SandboxLinePrefix}Lua coroutine resume exceeded {_timeoutMs} ms.";
                         break;
                     case LuaCsGuardTripKind.Memory:
                         message = $"{SandboxLinePrefix}{LuaCsExecutionGuard.MemoryBudgetTripMarker} "
@@ -734,16 +782,18 @@ namespace CoreAI.Sandbox.LuaCs
 
             LuaTable stringLib = stringLibValue.Read<LuaTable>();
             stringLib["dump"] = LuaValue.Nil;
-            stringLib["rep"] = new LuaFunction("rep", CappedStringRep);
+            // WHY qualified names, as the native library gives them (audit C3-07): a call from host code
+            // (pcall(string.rep)) names the function by its own name in the bad-argument line.
+            stringLib["rep"] = new LuaFunction("string.rep", CappedStringRep);
 
             // WHY: the native find/match/gmatch/gsub run a backtracking matcher inside ONE VM instruction,
             // where no guard hook can interrupt it, and gsub builds its result with no size limit. They
             // are replaced by the budgeted port below. The string metatable's __index reads this table,
             // so method calls such as s:find(...) reach the replacements too.
-            stringLib["find"] = new LuaFunction("find", BudgetedFind);
-            stringLib["match"] = new LuaFunction("match", BudgetedMatch);
-            stringLib["gmatch"] = new LuaFunction("gmatch", BudgetedGMatch);
-            stringLib["gsub"] = new LuaFunction("gsub", BudgetedGSub);
+            stringLib["find"] = new LuaFunction("string.find", BudgetedFind);
+            stringLib["match"] = new LuaFunction("string.match", BudgetedMatch);
+            stringLib["gmatch"] = new LuaFunction("string.gmatch", BudgetedGMatch);
+            stringLib["gsub"] = new LuaFunction("string.gsub", BudgetedGSub);
 
             LuaValue originalFormat = stringLib["format"];
             // WHY captured here, before any mod runs: string.format's %s converts objects through the
@@ -751,7 +801,7 @@ namespace CoreAI.Sandbox.LuaCs
             LuaValue originalToString = state.Environment["tostring"];
             if (originalFormat.Type == LuaValueType.Function)
             {
-                stringLib["format"] = new LuaFunction("format",
+                stringLib["format"] = new LuaFunction("string.format",
                     (ctx, ct) => CappedStringFormat(ctx, ct, originalFormat, originalToString));
             }
 
@@ -762,7 +812,7 @@ namespace CoreAI.Sandbox.LuaCs
             if (tableLibValue.Type == LuaValueType.Table)
             {
                 LuaTable tableLib = tableLibValue.Read<LuaTable>();
-                tableLib["concat"] = new LuaFunction("concat", CappedTableConcat);
+                tableLib["concat"] = new LuaFunction("table.concat", CappedTableConcat);
             }
         }
 
@@ -874,13 +924,14 @@ namespace CoreAI.Sandbox.LuaCs
                 throw;
             }
 
-            return ExitWhenComplete(call, depth, LightCallLevels);
+            return ExitWhenComplete(call, depth, LightCallLevels, null, null);
         }
 
         /// <summary>
         /// <c>xpcall</c> as one counted call back into Lua, like <see cref="CountedPCall"/>: below the limit the
         /// native xpcall runs with this call's own context, and its message handler runs inside that same counted
-        /// call. At the limit the handler is given the C-stack line (see <see cref="XPCallPastTheLimit"/>).
+        /// call. At the limit the handler is given the C-stack line (see <see cref="XPCallPastTheLimit"/>), and after
+        /// the engine's own value-stack overflow it is given that line (see <see cref="RunHandlerAfterOverflow"/>).
         /// </summary>
         private static System.Threading.Tasks.ValueTask<int> CountedXPCall(LuaFunctionExecutionContext ctx,
             CancellationToken ct)
@@ -892,6 +943,11 @@ namespace CoreAI.Sandbox.LuaCs
                 return XPCallPastTheLimit(ctx, ct, depth, open);
             }
 
+            // WHY read before the call: the native xpcall moves the protected function over the handler's slot, and
+            // the frame base is computed from the stack top, which an overflow leaves near the engine's limit.
+            int frameBase = ctx.FrameBase;
+            int frameCount = ctx.State.CallStackFrameCount;
+            LuaValue handler = ctx.ArgumentCount > 1 ? ctx.GetArgument(1) : LuaValue.Nil;
             depth.Local += LightCallLevels;
             System.Threading.Tasks.ValueTask<int> call;
             try
@@ -904,11 +960,30 @@ namespace CoreAI.Sandbox.LuaCs
                 throw;
             }
 
-            return ExitWhenComplete(call, depth, LightCallLevels);
+            if (!call.IsCompleted || !call.IsFaulted)
+            {
+                return ExitWhenComplete(call, depth, LightCallLevels, null, null);
+            }
+
+            Exception fault = FaultOf(call);
+            if (IsEngineStackOverflow(fault) && !ct.IsCancellationRequested
+                                             && handler.Type == LuaValueType.Function
+                                             && ctx.State.CallStackFrameCount == frameCount)
+            {
+                ctx.State.Stack.PopUntil(frameBase + ctx.ArgumentCount);
+                return RunHandlerAfterOverflow(ctx, handler.Read<LuaFunction>(), depth, ct);
+            }
+
+            ExitCCall(depth, LightCallLevels);
+            return new System.Threading.Tasks.ValueTask<int>(
+                System.Threading.Tasks.Task.FromException<int>(fault));
         }
 
         /// <summary>What <c>xpcall</c> returns when even its message handler has no room left to run in (Luau's text).</summary>
         private const string ErrorInErrorHandlingMessage = "error in error handling";
+
+        /// <summary>The error value an <c>xpcall</c> handler gets for the engine's own value-stack overflow.</summary>
+        private const string EngineStackOverflowMessage = "stack overflow";
 
         // WHY the handler still runs at the limit (Luau parity, chosen over returning the line directly): Luau
         // raises "C stack overflow" inside the protected call once LUAI_MAXCCALLS calls are open, xpcall hands that
@@ -933,18 +1008,44 @@ namespace CoreAI.Sandbox.LuaCs
             // WHY: the check native xpcall makes before it runs a handler, so no handler ever runs after a trip.
             ct.ThrowIfCancellationRequested();
             depth.Local += LightCallLevels;
-            return RunHandlerPastTheLimit(ctx, handler, depth, ct);
+            return RunHandlerPastTheLimit(ctx, handler, depth, ct, CStackOverflowText("xpcall"), false);
+        }
+
+        // WHY (audit C3-04): plain Lua recursion fills the engine's value stack in one VM run, and native xpcall then
+        // runs its handler on top of that full stack, where the handler's own frame overflows it again, so the
+        // overflow escaped the xpcall and ended the run while pcall of the same function returned false. The stack
+        // is back at the xpcall's own frame by the time the fault reaches here (the frames above it are gone), so
+        // the handler runs where it would have run for any other error, with the engine's line, like Luau's. A
+        // handler that overflows the stack itself ends as Luau's does, with "error in error handling".
+        /// <summary>
+        /// <c>xpcall</c> after the protected function overflowed the engine's value stack: <c>false</c> plus what
+        /// <paramref name="handler"/> returns for <see cref="EngineStackOverflowMessage"/>.
+        /// </summary>
+        private static System.Threading.Tasks.ValueTask<int> RunHandlerAfterOverflow(LuaFunctionExecutionContext ctx,
+            LuaFunction handler, CCallDepth depth, CancellationToken ct)
+        {
+            return RunHandlerPastTheLimit(ctx, handler, depth, ct, EngineStackOverflowMessage, true);
         }
 
         private static async System.Threading.Tasks.ValueTask<int> RunHandlerPastTheLimit(
-            LuaFunctionExecutionContext ctx, LuaFunction handler, CCallDepth depth, CancellationToken ct)
+            LuaFunctionExecutionContext ctx, LuaFunction handler, CCallDepth depth, CancellationToken ct,
+            string error, bool overflowIsErrorInHandling)
         {
+            int top = ctx.State.Stack.Count;
+            int frameCount = ctx.State.CallStackFrameCount;
             try
             {
-                ctx.State.Stack.Push(CStackOverflowText("xpcall"));
+                ctx.State.Stack.Push(error);
                 int count = await ctx.State.RunAsync(handler, 1, ctx.ReturnFrameBase + 1, ct);
                 ctx.State.Stack[ctx.ReturnFrameBase] = false;
                 return count + 1;
+            }
+            catch (Exception ex) when (overflowIsErrorInHandling && IsEngineStackOverflow(ex)
+                                                                 && !ct.IsCancellationRequested
+                                                                 && ctx.State.CallStackFrameCount == frameCount)
+            {
+                ctx.State.Stack.PopUntil(top);
+                return ctx.Return(false, ErrorInErrorHandlingMessage);
             }
             finally
             {
@@ -952,33 +1053,171 @@ namespace CoreAI.Sandbox.LuaCs
             }
         }
 
-        /// <summary>
-        /// Closes the counted call of <paramref name="levels"/> <paramref name="depth"/> holds once
-        /// <paramref name="call"/> completes: at once when it already has, which allocates nothing, else when it
-        /// finishes after a yield or an awaited frame inside it.
-        /// </summary>
-        private static System.Threading.Tasks.ValueTask<int> ExitWhenComplete(
-            System.Threading.Tasks.ValueTask<int> call, CCallDepth depth, int levels)
-        {
-            if (call.IsCompleted)
-            {
-                ExitCCall(depth, levels);
-                return call;
-            }
-
-            return ExitWhenDone(call, depth, levels);
-        }
-
-        private static async System.Threading.Tasks.ValueTask<int> ExitWhenDone(
-            System.Threading.Tasks.ValueTask<int> call, CCallDepth depth, int levels)
+        /// <summary>The exception a completed, faulted <paramref name="call"/> ended with; consumes it.</summary>
+        private static Exception FaultOf(System.Threading.Tasks.ValueTask<int> call)
         {
             try
             {
-                return await call;
+                // WHY: the call has completed, so this only rethrows its exception, never waits.
+                call.GetAwaiter().GetResult();
             }
-            finally
+            catch (Exception ex)
             {
-                ExitCCall(depth, levels);
+                return ex;
+            }
+
+            return new InvalidOperationException("a faulted call completed without an exception");
+        }
+
+        // WHY by the type's name: Lua-CSharp's overflow exception is internal, and it reaches a caller either as
+        // itself (raised while a native function pushed onto the full stack) or as the inner exception of the
+        // LuaRuntimeException the VM wraps it in.
+        /// <summary>True when <paramref name="ex"/> is, or wraps, the engine's value-stack overflow.</summary>
+        private static bool IsEngineStackOverflow(Exception ex)
+        {
+            for (Exception e = ex; e != null; e = e.InnerException)
+            {
+                if (string.Equals(e.GetType().FullName, "Lua.LuaStackOverflowException", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Closes the counted call of <paramref name="levels"/> <paramref name="depth"/> holds, and the yield fence
+        /// on <paramref name="fencedState"/> when that is not null, once <paramref name="call"/> completes: at once
+        /// when it already has, which allocates nothing, else when it finishes after a yield or an awaited frame inside
+        /// it, through a pooled continuation (see <see cref="CountedCallCompletion"/>). A fenced call that failed
+        /// because a Lua function it ran yielded fails with the call-boundary line naming
+        /// <paramref name="boundary"/> instead.
+        /// </summary>
+        private static System.Threading.Tasks.ValueTask<int> ExitWhenComplete(
+            System.Threading.Tasks.ValueTask<int> call, CCallDepth depth, int levels, LuaState fencedState,
+            string boundary)
+        {
+            if (!call.IsCompleted)
+            {
+                return CountedCallCompletion.WhenDone(call, depth, levels, fencedState, boundary);
+            }
+
+            EndYieldFence(fencedState, fencedState != null);
+            ExitCCall(depth, levels);
+            if (fencedState == null || !call.IsFaulted)
+            {
+                return call;
+            }
+
+            Exception fault = FaultOf(call);
+            return new System.Threading.Tasks.ValueTask<int>(System.Threading.Tasks.Task.FromException<int>(
+                fault is LuaRuntimeException runtimeError && IsFencedYield(runtimeError)
+                    ? YieldAcrossBoundary(fencedState, boundary)
+                    : fault));
+        }
+
+        // WHY a pooled continuation and not an async method (audit C3-05): an async method that awaits a call
+        // suspended by a yield boxes its state machine, about 136 bytes on every suspension of every pcall, tostring
+        // or sort whose function yields - `pcall(function() ... task.wait() ... end)` in a loop is ordinary Roblox
+        // code, and each suspension was steady garbage for WebGL's non-moving collector. WHY the scheduling context
+        // is dropped, as Lua-CSharp's own sources drop it: a continuation posted to Unity's synchronization context
+        // would complete a coroutine resume a frame later, on the very thread a resume waits on synchronously.
+        /// <summary>
+        /// Completes a counted call that suspended: closes its levels (and its yield fence) when the call completes,
+        /// then hands the call's outcome to whoever awaits it, and goes back to the pool once that is read.
+        /// </summary>
+        private sealed class CountedCallCompletion : IValueTaskSource<int>
+        {
+            [ThreadStatic]
+            private static System.Collections.Generic.Stack<CountedCallCompletion> _pool;
+
+            private readonly Action _onCallCompleted;
+            private ManualResetValueTaskSourceCore<int> _core;
+            private System.Threading.Tasks.ValueTask<int> _call;
+            private CCallDepth _depth;
+            private int _levels;
+            private LuaState _fencedState;
+            private string _boundary;
+
+            private CountedCallCompletion()
+            {
+                _onCallCompleted = OnCallCompleted;
+            }
+
+            /// <summary>The outcome of <paramref name="call"/> once it completes, with its levels closed then.</summary>
+            public static System.Threading.Tasks.ValueTask<int> WhenDone(System.Threading.Tasks.ValueTask<int> call,
+                CCallDepth depth, int levels, LuaState fencedState, string boundary)
+            {
+                System.Collections.Generic.Stack<CountedCallCompletion> pool = _pool;
+                CountedCallCompletion completion = pool != null && pool.Count > 0
+                    ? pool.Pop()
+                    : new CountedCallCompletion();
+                completion._call = call;
+                completion._depth = depth;
+                completion._levels = levels;
+                completion._fencedState = fencedState;
+                completion._boundary = boundary;
+                short version = completion._core.Version;
+                call.GetAwaiter().UnsafeOnCompleted(completion._onCallCompleted);
+                return new System.Threading.Tasks.ValueTask<int>(completion, version);
+            }
+
+            private void OnCallCompleted()
+            {
+                System.Threading.Tasks.ValueTask<int> call = _call;
+                LuaState fencedState = _fencedState;
+                _call = default;
+                EndYieldFence(fencedState, fencedState != null);
+                ExitCCall(_depth, _levels);
+                int result;
+                try
+                {
+                    result = call.GetAwaiter().GetResult();
+                }
+                catch (LuaRuntimeException ex) when (fencedState != null && IsFencedYield(ex))
+                {
+                    _core.SetException(YieldAcrossBoundary(fencedState, _boundary));
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _core.SetException(ex);
+                    return;
+                }
+
+                _core.SetResult(result);
+            }
+
+            /// <inheritdoc />
+            public int GetResult(short token)
+            {
+                try
+                {
+                    return _core.GetResult(token);
+                }
+                finally
+                {
+                    _core.Reset();
+                    _depth = null;
+                    _fencedState = null;
+                    _boundary = null;
+                    (_pool ??= new System.Collections.Generic.Stack<CountedCallCompletion>()).Push(this);
+                }
+            }
+
+            /// <inheritdoc />
+            public ValueTaskSourceStatus GetStatus(short token)
+            {
+                return _core.GetStatus(token);
+            }
+
+            /// <inheritdoc />
+            public void OnCompleted(Action<object> continuation, object state, short token,
+                ValueTaskSourceOnCompletedFlags flags)
+            {
+                _core.OnCompleted(continuation, state, token,
+                    flags & ~ValueTaskSourceOnCompletedFlags.UseSchedulingContext);
             }
         }
 
@@ -1000,29 +1239,44 @@ namespace CoreAI.Sandbox.LuaCs
 
         private static readonly NativeLibraryFunction NativeSort = TableLibrary.Instance.Sort;
 
+        // WHY the yield fence here too (audit C3-06, Luau parity): Luau refuses a yield through every C function that
+        // calls back into Lua - tostring, print, table.sort, pairs, ipairs, warn - exactly as through string.format
+        // and string.gsub, where the sandbox already refused it; a script that yielded through tostring here failed
+        // on Roblox. A call that comes back unfinished for any other reason (the execute_lua path awaiting a frame)
+        // is awaited with the fence up, as in CallFencedAsync.
         /// <summary>
         /// Runs the native library function <paramref name="native"/> as this call itself, as one counted call back
-        /// into Lua of <see cref="HeavyCallLevels"/> (see <see cref="MaxCCallDepth"/>): with this call's own context,
-        /// on the caller's stack, the way <see cref="CountedPCall"/> runs native pcall. Its results, error values and
-        /// the function name in its errors are the native ones, and nothing is copied or allocated for the call.
-        /// Past the limit it raises the C-stack line instead; a call that suspends stays counted until it completes.
+        /// into Lua of <see cref="HeavyCallLevels"/> (see <see cref="MaxCCallDepth"/>) under the yield fence (see
+        /// <see cref="CallFencedAsync"/>): with this call's own context, on the caller's stack, the way
+        /// <see cref="CountedPCall"/> runs native pcall. Its results, error values and the function name in its errors
+        /// are the native ones, and nothing is copied or allocated for the call. Past the limit it raises the C-stack
+        /// line instead; a Lua function it runs that yields fails with <see cref="YieldAcrossCallBoundaryMessage"/>.
         /// </summary>
         private static System.Threading.Tasks.ValueTask<int> CallNativeInPlace(LuaFunctionExecutionContext ctx,
             CancellationToken ct, NativeLibraryFunction native, string boundary)
         {
-            CCallDepth depth = EnterCCall(ctx.State, boundary, HeavyCallLevels);
+            LuaState state = ctx.State;
+            CCallDepth depth = EnterCCall(state, boundary, HeavyCallLevels);
+            bool fenced = BeginYieldFence(state);
             System.Threading.Tasks.ValueTask<int> call;
             try
             {
                 call = native(ctx, ct);
             }
+            catch (LuaRuntimeException ex) when (fenced && IsFencedYield(ex))
+            {
+                EndYieldFence(state, true);
+                ExitCCall(depth, HeavyCallLevels);
+                throw YieldAcrossBoundary(state, boundary);
+            }
             catch
             {
+                EndYieldFence(state, fenced);
                 ExitCCall(depth, HeavyCallLevels);
                 throw;
             }
 
-            return ExitWhenComplete(call, depth, HeavyCallLevels);
+            return ExitWhenComplete(call, depth, HeavyCallLevels, fenced ? state : null, boundary);
         }
 
         /// <summary>
@@ -1124,13 +1378,14 @@ namespace CoreAI.Sandbox.LuaCs
 
         /// <summary>
         /// Calls <paramref name="function"/> as one counted call back into Lua on <paramref name="state"/> (see
-        /// <see cref="MaxCCallDepth"/>): once the limit is reached it raises the C-stack error instead of calling.
-        /// A call that suspends (a yield inside it, a frame yield of the async guard) stays counted on this
-        /// thread until it completes. Its one caller is <c>warn</c>, which converts its arguments with the
-        /// script's <c>tostring</c>; the sandbox's own library functions count their calls in place (see
-        /// <see cref="CallNativeInPlace"/>). A host function that runs a script's function recursively must call
-        /// through here too; the host callbacks that run one as the body of a thread use plain <c>CallAsync</c>
-        /// (see <see cref="MaxCCallDepth"/>).
+        /// <see cref="MaxCCallDepth"/>) under the yield fence (see <see cref="CallFencedAsync"/>): once the limit is
+        /// reached it raises the C-stack error instead of calling, and a Lua function it runs that yields fails with
+        /// <see cref="YieldAcrossCallBoundaryMessage"/>, as Luau's warn does (audit C3-06). A call that comes back
+        /// unfinished (a frame yield of the async guard) stays counted and fenced on this thread until it completes.
+        /// Its one caller is <c>warn</c>, which converts its arguments with the script's <c>tostring</c>; the
+        /// sandbox's own library functions count their calls in place (see <see cref="CallNativeInPlace"/>). A host
+        /// function that runs a script's function recursively must call through here too; the host callbacks that
+        /// run one as the body of a thread use plain <c>CallAsync</c> (see <see cref="MaxCCallDepth"/>).
         /// </summary>
         /// <param name="boundary">The library or host function named in the error, e.g. <c>table.sort</c>.</param>
         /// <param name="levels">
@@ -1142,20 +1397,28 @@ namespace CoreAI.Sandbox.LuaCs
             int levels = HeavyCallLevels)
         {
             CCallDepth depth = EnterCCall(state, boundary, levels);
+            bool fenced = BeginYieldFence(state);
             System.Threading.Tasks.ValueTask<LuaValue[]> call;
             try
             {
                 call = state.CallAsync(function, arguments, ct);
             }
+            catch (LuaRuntimeException ex) when (fenced && IsFencedYield(ex))
+            {
+                EndYieldFence(state, true);
+                ExitCCall(depth, levels);
+                throw YieldAcrossBoundary(state, boundary);
+            }
             catch
             {
+                EndYieldFence(state, fenced);
                 ExitCCall(depth, levels);
                 throw;
             }
 
             if (!call.IsCompleted)
             {
-                return AwaitCounted(call, depth, levels);
+                return AwaitCounted(call, state, depth, levels, fenced, boundary);
             }
 
             try
@@ -1163,21 +1426,32 @@ namespace CoreAI.Sandbox.LuaCs
                 // WHY: the task is already complete, so this unwraps its result or exception, never waits.
                 return new System.Threading.Tasks.ValueTask<LuaValue[]>(call.GetAwaiter().GetResult());
             }
+            catch (LuaRuntimeException ex) when (fenced && IsFencedYield(ex))
+            {
+                throw YieldAcrossBoundary(state, boundary);
+            }
             finally
             {
+                EndYieldFence(state, fenced);
                 ExitCCall(depth, levels);
             }
         }
 
         private static async System.Threading.Tasks.ValueTask<LuaValue[]> AwaitCounted(
-            System.Threading.Tasks.ValueTask<LuaValue[]> call, CCallDepth depth, int levels)
+            System.Threading.Tasks.ValueTask<LuaValue[]> call, LuaState state, CCallDepth depth, int levels,
+            bool fenced, string boundary)
         {
             try
             {
                 return await call;
             }
+            catch (LuaRuntimeException ex) when (fenced && IsFencedYield(ex))
+            {
+                throw YieldAcrossBoundary(state, boundary);
+            }
             finally
             {
+                EndYieldFence(state, fenced);
                 ExitCCall(depth, levels);
             }
         }
@@ -1668,14 +1942,11 @@ namespace CoreAI.Sandbox.LuaCs
 
         // WHY per thread (LuaState) and not per .NET thread: a coroutine suspended inside a library call keeps
         // that call open, and a shared counter would charge it to every other thread - on Unity's one main
-        // thread, to every other mod, which a mod could then make fail on purpose. A thread resumed from inside a
-        // run instead starts from the count of the thread that resumes it (Base) - a raw coroutine always, a
-        // coroutine handle's thread when a task.spawn runs it at once - so a chain of nested runs is counted as a
-        // whole, whichever channels it mixes, and a suspended thread's calls count again only when it runs.
-        // TODO: a guarded call on ANOTHER state from inside a run (a mods_call export) starts from that state's
-        // own count; MaxCrossCallDepth (8) bounds that nesting today. The runtime can hand the caller's thread to
-        // the guard (LuaCsExecutionGuard.TryGetRemainingAllowance reads its budget the same way) so the export
-        // continues the caller's count as a nested handle resume does.
+        // thread, to every other mod, which a mod could then make fail on purpose. A thread that runs inside a
+        // run instead starts from the count of the thread that run executes on (Base) - a raw coroutine always, a
+        // coroutine handle's thread when a task.spawn runs it at once, the state a guarded call re-enters or a
+        // mods_call export runs on (audit C3-03) - so a chain of nested runs is counted as a whole, whichever
+        // channels and states it mixes, and a suspended thread's calls count again only when it runs.
         private static readonly ConditionalWeakTable<LuaState, CCallDepth> CCallDepths = new();
 
         private static readonly ConditionalWeakTable<LuaState, CCallDepth>.CreateValueCallback NewCCallDepth =
@@ -1694,10 +1965,13 @@ namespace CoreAI.Sandbox.LuaCs
             public int Local;
         }
 
-        /// <summary>How many levels of calls back into Lua are open on <paramref name="state"/>, its resumers' included.</summary>
+        /// <summary>
+        /// How many levels of calls back into Lua are open on <paramref name="state"/>, its resumers' included; 0 for
+        /// null.
+        /// </summary>
         private static int CCallDepthOf(LuaState state)
         {
-            return CCallDepths.TryGetValue(state, out CCallDepth depth) ? depth.Base + depth.Local : 0;
+            return state != null && CCallDepths.TryGetValue(state, out CCallDepth depth) ? depth.Base + depth.Local : 0;
         }
 
         /// <summary>
@@ -1724,8 +1998,8 @@ namespace CoreAI.Sandbox.LuaCs
 
         /// <summary>
         /// Sets where the count of <paramref name="thread"/>, a coroutine handle's thread about to be resumed,
-        /// starts: after the count of <paramref name="resumer"/> plus <see cref="HeavyCallLevels"/> when a run on
-        /// <paramref name="resumer"/> is resuming it from inside (a <c>task.spawn</c> that runs it at once), from
+        /// starts: after the count of <paramref name="resumer"/> plus <see cref="HeavyCallLevels"/> when it is resumed
+        /// inside a run executing on <paramref name="resumer"/> (a <c>task.spawn</c> that runs it at once), from
         /// zero when <paramref name="resumer"/> is null (the scheduler's own frame). Returns the C-stack line,
         /// and leaves the thread untouched, when that resume would pass <see cref="MaxCCallDepth"/>; else null.
         /// </summary>
@@ -1746,29 +2020,39 @@ namespace CoreAI.Sandbox.LuaCs
         }
 
         /// <summary>
-        /// Opens <see cref="HeavyCallLevels"/> on <paramref name="state"/> for a guarded call that re-enters a run
-        /// executing on the same state (a host function running that state's Lua again), or returns the C-stack
-        /// line when that would pass <see cref="MaxCCallDepth"/>. A null return is paired with
-        /// <see cref="CloseReentrantRun"/>.
+        /// Opens <see cref="HeavyCallLevels"/> for a guarded call on <paramref name="state"/> that starts inside a run
+        /// executing on <paramref name="enclosingThread"/> (a host function running Lua of the same state again, or a
+        /// <c>mods_call</c> export on another state): the call's Lua continues the higher of the two threads' counts.
+        /// Returns the C-stack line, changing nothing, when that would pass <see cref="MaxCCallDepth"/>; else null,
+        /// and <paramref name="restoredBase"/> is what <see cref="CloseNestedRun"/> puts back when the call ends.
         /// </summary>
-        internal static string OpenReentrantRun(LuaState state, string boundary)
+        /// <remarks>
+        /// WHY the higher count: the enclosing run's thread holds the chain below the call on the native stack, and
+        /// <paramref name="state"/>'s own count holds whatever is open on it lower down (the same state re-entered).
+        /// WHY Base is raised rather than Local: the call's library functions open and close their own levels on
+        /// Local, which is back where it was when the call ends, so putting Base back ends the call's share exactly.
+        /// </remarks>
+        internal static string OpenNestedRun(LuaState enclosingThread, LuaState state, string boundary,
+            out int restoredBase)
         {
             CCallDepth depth = CCallDepths.GetValue(state, NewCCallDepth);
-            if (depth.Base + depth.Local + HeavyCallLevels > MaxCCallDepth)
+            restoredBase = depth.Base;
+            int from = Math.Max(depth.Base + depth.Local, CCallDepthOf(enclosingThread));
+            if (from + HeavyCallLevels > MaxCCallDepth)
             {
                 return CStackOverflowText(boundary);
             }
 
-            depth.Local += HeavyCallLevels;
+            depth.Base = from + HeavyCallLevels - depth.Local;
             return null;
         }
 
-        /// <summary>Closes what <see cref="OpenReentrantRun"/> opened on <paramref name="state"/>.</summary>
-        internal static void CloseReentrantRun(LuaState state)
+        /// <summary>Closes what <see cref="OpenNestedRun"/> opened on <paramref name="state"/>.</summary>
+        internal static void CloseNestedRun(LuaState state, int restoredBase)
         {
             if (CCallDepths.TryGetValue(state, out CCallDepth depth))
             {
-                depth.Local -= HeavyCallLevels;
+                depth.Base = restoredBase;
             }
         }
 
@@ -2049,90 +2333,230 @@ namespace CoreAI.Sandbox.LuaCs
                 : kind == LuaValueType.Number
                     ? replacement.ToString()
                     : null;
-            long maxReplacements = maxArgument > int.MaxValue ? int.MaxValue : (long)maxArgument;
-            return GSubAsync(ctx, ct, subject, pattern, replacement, replacementText, maxReplacements);
+            GSubRun run = new(new LuaPatternMatcher(state, "string.gsub", subject, pattern, MaxPatternMatchSteps),
+                new StringBuilder(Math.Min(subject.Length, MaxStringGsubLength) + 16), subject, replacement,
+                replacementText, maxArgument > int.MaxValue ? int.MaxValue : (long)maxArgument,
+                pattern.Length > 0 && pattern[0] == '^');
+            return GSubLoop(ctx, ct, ref run);
         }
 
+        /// <summary>The state of one <c>string.gsub</c> call's matching loop.</summary>
+        private struct GSubRun
+        {
+            public readonly LuaPatternMatcher Matcher;
+            public readonly StringBuilder Result;
+            public readonly string Subject;
+            public readonly LuaValue Replacement;
+            public readonly string ReplacementText;
+            public readonly long MaxReplacements;
+            public readonly bool Anchor;
+
+            /// <summary>The subject index the next match attempt starts at.</summary>
+            public int Source;
+
+            /// <summary>Replacements made so far.</summary>
+            public long Count;
+
+            public GSubRun(LuaPatternMatcher matcher, StringBuilder result, string subject, LuaValue replacement,
+                string replacementText, long maxReplacements, bool anchor)
+            {
+                Matcher = matcher;
+                Result = result;
+                Subject = subject;
+                Replacement = replacement;
+                ReplacementText = replacementText;
+                MaxReplacements = maxReplacements;
+                Anchor = anchor;
+                Source = 0;
+                Count = 0;
+            }
+        }
+
+        // WHY synchronous, and async only from a replacement call that comes back unfinished (audit C3-02): the
+        // replacement function of one gsub runs on top of this loop on the native stack, so a gsub that recurses
+        // through its replacement function nests every frame of the loop once per level. As an async method chain
+        // (the loop, the replacement read and the fenced call) it took 5.8 KB of native stack a level, 42% over
+        // what its C-call weight allows; the only call that can come back unfinished is one that awaited a frame
+        // (see CallFencedAsync), after which the loop goes on in GSubAfterAsync. The loop state is one struct passed
+        // by reference and the replacement call is made in the loop itself, without an exception handler (what can
+        // fail before the call is handled in PushReplacementCall, and the call reports failure as a faulted task),
+        // so a level takes no more native stack than a pcall level.
         /// <summary>
-        /// The matching loop of <see cref="BudgetedGSub"/>; it completes synchronously unless a replacement
-        /// function or <c>__index</c> it runs awaits a frame (see <see cref="CallFencedAsync"/>).
+        /// The matching loop of <see cref="BudgetedGSub"/> from where <paramref name="run"/> stands; it completes
+        /// synchronously unless a replacement function or <c>__index</c> it runs awaits a frame. A replacement
+        /// function is called as one counted call of <see cref="GSubCallbackLevels"/> under the yield fence (see
+        /// <see cref="CallFencedAsync"/>), with its arguments and results on the Lua stack, so nothing is allocated.
         /// </summary>
-        private static async System.Threading.Tasks.ValueTask<int> GSubAsync(LuaFunctionExecutionContext ctx,
-            CancellationToken ct, string subject, string pattern, LuaValue replacement, string replacementText,
-            long maxReplacements)
+        private static System.Threading.Tasks.ValueTask<int> GSubLoop(LuaFunctionExecutionContext ctx,
+            CancellationToken ct, ref GSubRun run)
         {
             LuaState state = ctx.State;
-            LuaPatternMatcher matcher = new(state, "string.gsub", subject, pattern, MaxPatternMatchSteps);
-            bool anchor = pattern.Length > 0 && pattern[0] == '^';
-            int patternStart = anchor ? 1 : 0;
-            StringBuilder result = new(Math.Min(subject.Length, MaxStringGsubLength) + 16);
-            int source = 0;
-            long count = 0;
-            while (count < maxReplacements)
+            LuaPatternMatcher matcher = run.Matcher;
+            int patternStart = run.Anchor ? 1 : 0;
+            while (run.Count < run.MaxReplacements)
             {
                 matcher.Reset();
-                int end = matcher.Match(source, patternStart);
+                int end = matcher.Match(run.Source, patternStart);
                 if (end >= 0)
                 {
-                    count++;
-                    if (replacementText != null)
+                    run.Count++;
+                    if (run.ReplacementText != null)
                     {
-                        AppendReplacementText(state, result, matcher, subject, source, end, replacementText);
+                        AppendReplacementText(state, run.Result, matcher, run.Subject, run.Source, end,
+                            run.ReplacementText);
+                    }
+                    else if (run.Replacement.Type == LuaValueType.Function)
+                    {
+                        CCallDepth depth = EnterCCall(state, "string.gsub", GSubCallbackLevels);
+                        int top = state.Stack.Count;
+                        PushReplacementCall(state, depth, top, matcher, run.Source, end, run.Replacement);
+                        bool fenced = BeginYieldFence(state);
+                        System.Threading.Tasks.ValueTask<int> call = state.CallAsync(top, top, ct);
+                        if (!call.IsCompleted)
+                        {
+                            return GSubAfterAsync(ctx, ct, AwaitReplacementAsync(state, call, top, depth, fenced),
+                                run, end);
+                        }
+
+                        if (call.IsFaulted)
+                        {
+                            return ReplacementFailed(state, call, top, depth, fenced);
+                        }
+
+                        LuaValue value = state.Stack.Count > top ? state.Stack[top] : LuaValue.Nil;
+                        EndReplacementCall(state, top, depth, fenced);
+                        AppendReplacementValue(state, run.Result, run.Subject, run.Source, end, value);
                     }
                     else
                     {
-                        LuaValue value = await ReplacementValueAsync(state, matcher, source, end, replacement, ct);
-                        AppendReplacementValue(state, result, subject, source, end, value);
+                        System.Threading.Tasks.ValueTask<LuaValue> value = GetTableFencedAsync(state,
+                            run.Replacement.Read<LuaTable>(), matcher.GetCapture(0, run.Source, end), ct,
+                            "string.gsub");
+                        if (!value.IsCompleted)
+                        {
+                            return GSubAfterAsync(ctx, ct, value, run, end);
+                        }
+
+                        AppendReplacementValue(state, run.Result, run.Subject, run.Source, end,
+                            value.GetAwaiter().GetResult());
                     }
                 }
 
-                if (end >= 0 && end > source)
-                {
-                    source = end;
-                }
-                else if (source < subject.Length)
-                {
-                    AppendCapped(state, result, subject, source, 1);
-                    source++;
-                }
-                else
-                {
-                    break;
-                }
-
-                if (anchor)
+                if (!NextGSubSource(state, ref run, end))
                 {
                     break;
                 }
             }
 
-            AppendCapped(state, result, subject, source, subject.Length - source);
-            return ctx.Return(result.ToString(), (double)count);
+            AppendCapped(state, run.Result, run.Subject, run.Source, run.Subject.Length - run.Source);
+            return new System.Threading.Tasks.ValueTask<int>(ctx.Return(run.Result.ToString(), (double)run.Count));
         }
 
         /// <summary>
-        /// What the replacement function returns for the match [<paramref name="start"/>, <paramref name="end"/>)
-        /// (its first result), or what the replacement table holds for its first capture.
+        /// Moves <paramref name="run"/> past the match attempt that ended at <paramref name="end"/> (-1 for no
+        /// match), copying an unmatched character; false when the loop is over.
         /// </summary>
-        private static async System.Threading.Tasks.ValueTask<LuaValue> ReplacementValueAsync(LuaState state,
-            LuaPatternMatcher matcher, int start, int end, LuaValue replacement, CancellationToken ct)
+        private static bool NextGSubSource(LuaState state, ref GSubRun run, int end)
         {
-            if (replacement.Type != LuaValueType.Function)
+            if (end >= 0 && end > run.Source)
             {
-                return await GetTableFencedAsync(state, replacement.Read<LuaTable>(),
-                    matcher.GetCapture(0, start, end), ct, "string.gsub");
+                run.Source = end;
+            }
+            else if (run.Source < run.Subject.Length)
+            {
+                AppendCapped(state, run.Result, run.Subject, run.Source, 1);
+                run.Source++;
+            }
+            else
+            {
+                return false;
             }
 
-            int captureCount = matcher.Level == 0 ? 1 : matcher.Level;
-            LuaValue[] captures = new LuaValue[captureCount];
-            for (int i = 0; i < captureCount; i++)
+            return !run.Anchor;
+        }
+
+        /// <summary>
+        /// The rest of <see cref="GSubLoop"/> once <paramref name="pending"/>, the replacement for the match that
+        /// starts at <c>run.Source</c> and ends at <paramref name="end"/>, completes.
+        /// </summary>
+        private static async System.Threading.Tasks.ValueTask<int> GSubAfterAsync(LuaFunctionExecutionContext ctx,
+            CancellationToken ct, System.Threading.Tasks.ValueTask<LuaValue> pending, GSubRun run, int end)
+        {
+            LuaValue value = await pending;
+            AppendReplacementValue(ctx.State, run.Result, run.Subject, run.Source, end, value);
+            if (!NextGSubSource(ctx.State, ref run, end))
             {
-                captures[i] = matcher.GetCapture(i, start, end);
+                AppendCapped(ctx.State, run.Result, run.Subject, run.Source, run.Subject.Length - run.Source);
+                return ctx.Return(run.Result.ToString(), (double)run.Count);
             }
 
-            LuaValue[] returned = await CallFencedAsync(state, replacement, captures, ct, "string.gsub",
-                LightCallLevels);
-            return returned.Length > 0 ? returned[0] : LuaValue.Nil;
+            return await GSubLoop(ctx, ct, ref run);
+        }
+
+        /// <summary>
+        /// Pushes the replacement <paramref name="function"/> and the captures of the match [<paramref name="start"/>,
+        /// <paramref name="end"/>) onto the Lua stack above <paramref name="top"/>; on failure (an invalid capture)
+        /// drops them and closes the call's levels.
+        /// </summary>
+        private static void PushReplacementCall(LuaState state, CCallDepth depth, int top, LuaPatternMatcher matcher,
+            int start, int end, LuaValue function)
+        {
+            try
+            {
+                LuaStack stack = state.Stack;
+                stack.Push(function);
+                int captureCount = matcher.Level == 0 ? 1 : matcher.Level;
+                for (int i = 0; i < captureCount; i++)
+                {
+                    stack.Push(matcher.GetCapture(i, start, end));
+                }
+            }
+            catch
+            {
+                EndReplacementCall(state, top, depth, false);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// A replacement call that completed faulted, ended: its error, or the call-boundary line for a yield the
+        /// fence refused.
+        /// </summary>
+        private static System.Threading.Tasks.ValueTask<int> ReplacementFailed(LuaState state,
+            System.Threading.Tasks.ValueTask<int> call, int top, CCallDepth depth, bool fenced)
+        {
+            Exception fault = FaultOf(call);
+            EndReplacementCall(state, top, depth, fenced);
+            return new System.Threading.Tasks.ValueTask<int>(System.Threading.Tasks.Task.FromException<int>(
+                fenced && fault is LuaRuntimeException runtimeError && IsFencedYield(runtimeError)
+                    ? YieldAcrossBoundary(state, "string.gsub")
+                    : fault));
+        }
+
+        private static async System.Threading.Tasks.ValueTask<LuaValue> AwaitReplacementAsync(LuaState state,
+            System.Threading.Tasks.ValueTask<int> call, int top, CCallDepth depth, bool fenced)
+        {
+            try
+            {
+                await call;
+                return state.Stack.Count > top ? state.Stack[top] : LuaValue.Nil;
+            }
+            catch (LuaRuntimeException ex) when (fenced && IsFencedYield(ex))
+            {
+                throw YieldAcrossBoundary(state, "string.gsub");
+            }
+            finally
+            {
+                EndReplacementCall(state, top, depth, fenced);
+            }
+        }
+
+        /// <summary>Drops a replacement call's values from the Lua stack, ends its fence and closes its levels.</summary>
+        private static void EndReplacementCall(LuaState state, int top, CCallDepth depth, bool fenced)
+        {
+            state.Stack.PopUntil(top);
+            EndYieldFence(state, fenced);
+            ExitCCall(depth, GSubCallbackLevels);
         }
 
         /// <summary>

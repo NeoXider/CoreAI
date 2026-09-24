@@ -36,10 +36,10 @@ namespace CoreAI.Sandbox.LuaCs
     /// like a per-resume trip, never as a silent kill after a successful resume.
     ///
     /// A resume that runs while another guarded run is executing - a <c>task.spawn</c> that runs the new or
-    /// parked thread at once, named through <see cref="ResumeNextNestedIn"/> - is NESTED in that run: it is held
-    /// to what is left of that run's allowance (see <see cref="LuaCsGuardedRun"/>) and continues its count of
-    /// calls back into Lua (see <see cref="LuaCsSecureEnvironment.MaxCCallDepth"/>). A resume the scheduler drives
-    /// from its own frame keeps the full per-resume budget and starts that count from zero.
+    /// parked thread at once - is NESTED in the innermost such run: it is held to what is left of that run's
+    /// allowance (see <see cref="LuaCsGuardedRun"/>) and continues its count of calls back into Lua (see
+    /// <see cref="LuaCsSecureEnvironment.MaxCCallDepth"/>). A resume the scheduler drives from its own frame keeps
+    /// the full per-resume budget and starts that count from zero.
     ///
     /// There is deliberately NO MoonSharp-style <c>AutoYieldCounter</c>/<c>YieldRequest</c> loop:
     /// Lua-CSharp has no preemptive auto-yield, so one resume already returns at exactly one yield.
@@ -106,7 +106,7 @@ namespace CoreAI.Sandbox.LuaCs
         private bool _lastOk = true;
         private LuaValue[] _lastValues = EmptyValues;
         private LuaValue _lastError = LuaValue.Nil;
-        private LuaState _nextResumer;
+        private long _observedSteps;
 
         /// <summary>
         /// Creates a coroutine from <paramref name="function"/> on the owning <paramref name="ownerState"/>.
@@ -199,8 +199,18 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>True once the coroutine has finished (dead) or been killed; the runner may drop it.</summary>
         public bool IsFinished => _killed || _coroutine.GetStatus() == LuaThreadStatus.Dead;
 
-        /// <summary>Instruction steps consumed across all resumes so far.</summary>
+        /// <summary>
+        /// Instruction steps consumed across all resumes so far, those of the runs nested in them (a raw coroutine a
+        /// resume ran, a thread a <c>task.spawn</c> in it ran at once) included. The lifetime cap counts them.
+        /// </summary>
         public long ConsumedSteps => _consumedSteps;
+
+        /// <summary>
+        /// The part of the steps of every resume so far that no nested run records itself: this handle's own and those
+        /// of the raw coroutines its resumes ran. What the scheduler reports to observability, so that a nested
+        /// handle's or guard's steps, which they report themselves, are not counted twice.
+        /// </summary>
+        internal long ObservedSteps => _observedSteps;
 
         /// <summary>
         /// Cap on instruction steps across the whole coroutine lifetime, or
@@ -237,19 +247,6 @@ namespace CoreAI.Sandbox.LuaCs
 
         /// <summary>This handle's Lua thread.</summary>
         internal LuaState Thread => _coroutine;
-
-        /// <summary>
-        /// Names the thread whose run the NEXT <see cref="Resume"/> is nested in: the Lua thread resuming this
-        /// handle right now from inside its own run (a <c>task.spawn</c> that runs the thread at once). That resume
-        /// is held to what is left of the run executing on <paramref name="resumer"/> (see
-        /// <see cref="LuaCsGuardedRun"/>) and continues its count of calls back into Lua. Null, and every resume
-        /// nothing names, keeps the handle's full per-resume budget and a count from zero: the scheduler resuming
-        /// a thread from its own frame. The name is used by one resume only.
-        /// </summary>
-        internal void ResumeNextNestedIn(LuaState resumer)
-        {
-            _nextResumer = resumer;
-        }
 
         /// <summary>
         /// Restarts the consumed-step count. Only a pooled signal runner calls this, at the moment it is
@@ -293,11 +290,10 @@ namespace CoreAI.Sandbox.LuaCs
         /// </summary>
         public LuaValue[] Resume(params LuaValue[] args)
         {
-            // WHY only while its run still executes: the name was given for this resume, and a run that has ended
-            // or is parked in a frame yield no longer encloses anything (see LuaCsGuardedRun).
-            LuaCsGuardedRun enclosing = LuaCsGuardedRun.FindExecuting(_nextResumer);
-            LuaState resumer = enclosing != null ? _nextResumer : null;
-            _nextResumer = null;
+            // WHY the innermost run executing on this OS thread (see LuaCsGuardedRun): a task.spawn that runs this
+            // thread at once runs it inside that run, whose hook cannot fire until it returns; a resume the scheduler
+            // drives from its own frame finds none and keeps the full per-resume budget.
+            LuaCsGuardedRun enclosing = LuaCsGuardedRun.InnermostExecuting();
             if (_killed)
             {
                 throw new ObjectDisposedException(nameof(LuaCsCoroutineHandle));
@@ -314,7 +310,8 @@ namespace CoreAI.Sandbox.LuaCs
             // WHY refused before anything runs, the thread left as it was: the resume would nest one more run on
             // the native stack past the limit every other call back into Lua is held to (see
             // LuaCsSecureEnvironment.MaxCCallDepth); like Luau's resume at LUAI_MAXCCALLS it fails with the line.
-            string cStackRefusal = LuaCsSecureEnvironment.ContinueCCallCount(resumer, _coroutine, "task.spawn");
+            string cStackRefusal = LuaCsSecureEnvironment.ContinueCCallCount(enclosing?.Thread, _coroutine,
+                "task.spawn");
             if (cStackRefusal != null)
             {
                 return EndRefused(cStackRefusal);
@@ -349,7 +346,7 @@ namespace CoreAI.Sandbox.LuaCs
                 ? Math.Max(0L, _totalLifetimeSteps - _consumedSteps)
                 : UnlimitedLifetimeSteps;
             _hook.Arm(budgetPerResume, resumeTimeoutMs, lifetimeRemaining, _totalLifetimeSteps,
-                _maxAllocatedBytes, enclosing);
+                _maxAllocatedBytes, enclosing, _coroutine);
 
             int count = 0;
             try
@@ -377,7 +374,8 @@ namespace CoreAI.Sandbox.LuaCs
                 }
             }
 
-            _consumedSteps += _hook.Steps;
+            _consumedSteps += _hook.Steps + _hook.NestedSteps;
+            _observedSteps += _hook.Steps + _hook.NestedUnreportedSteps;
             if (_hook.HasTripped)
             {
                 EndWithTrip(_hook.TripError);
@@ -746,7 +744,7 @@ namespace CoreAI.Sandbox.LuaCs
             /// resume is nested in, which may lower every limit further (see <see cref="LuaCsGuardedRun"/>).
             /// </summary>
             public void Arm(int budget, int timeoutMs, long lifetimeRemaining, long lifetimeCap,
-                long maxAllocatedBytes, LuaCsGuardedRun enclosing)
+                long maxAllocatedBytes, LuaCsGuardedRun enclosing, LuaState thread)
             {
                 _steps = 0;
                 _trip = LuaCsGuardTripKind.None;
@@ -758,7 +756,7 @@ namespace CoreAI.Sandbox.LuaCs
                 _timeoutMs = timeoutMs;
                 long startTimestamp = Stopwatch.GetTimestamp();
                 _deadline = startTimestamp + (long)timeoutMs * Stopwatch.Frequency / 1000;
-                BeginRun(enclosing, ref _stepLimit, ref _deadline);
+                BeginRun(enclosing, thread, ref _stepLimit, ref _deadline);
                 // WHY the baseline is read here, once per resume, and not lazily at the first sample: a
                 // baseline taken a millisecond in would already contain whatever one long instruction
                 // allocated first — a resume that does one `s = s .. s` and yields would double its
@@ -769,10 +767,13 @@ namespace CoreAI.Sandbox.LuaCs
                     : long.MaxValue;
             }
 
-            /// <summary>Ends the resume: its steps are charged to the run it was nested in, if any.</summary>
+            /// <summary>
+            /// Ends the resume: its steps are charged to the run it was nested in, if any, as reported, since the
+            /// handle keeps them in <see cref="ObservedSteps"/>.
+            /// </summary>
             public void End()
             {
-                EndRun(_steps);
+                EndRun(_steps, true);
             }
 
             /// <summary>Forgets the previous resume's steps and trip, for a resume refused before it ran.</summary>
@@ -817,7 +818,7 @@ namespace CoreAI.Sandbox.LuaCs
                 switch (kind)
                 {
                     case LuaCsGuardTripKind.Timeout:
-                        return $"Lua coroutine resume exceeded {_timeoutMs} ms.";
+                        return $"{prefix}Lua coroutine resume exceeded {_timeoutMs} ms.";
                     case LuaCsGuardTripKind.Memory:
                         return $"{prefix}{LuaCsExecutionGuard.MemoryBudgetTripMarker} ({_allocation.BudgetBytes} bytes)";
                     default:

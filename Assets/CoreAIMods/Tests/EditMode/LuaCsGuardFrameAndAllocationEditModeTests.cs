@@ -437,7 +437,9 @@ namespace CoreAI.Tests.EditMode
             // the run still ends with exactly the trip's clean line. The cause travels as HostException, and
             // the mod runtime labels a handler failure through the NEUTRAL walker, so that one must still
             // find the trip by type as well as the guard's own.
-            const string expected = "LuaCsSecureEnvironment: EXCEEDED_MEMORY_BUDGET (8388608 bytes)";
+            // WHY the sandbox's prefix (audit C3-07): the line reaches the script and the model, where the CLR class
+            // the guard lives in named nothing they could act on.
+            const string expected = "sandbox: EXCEEDED_MEMORY_BUDGET (8388608 bytes)";
             const string bomb =
                 "local function bomb() local s = 'x' for i = 1, 26 do s = s .. s end return #s end\n";
             string[] calls =
@@ -461,6 +463,7 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreEqual(expected, ended.Message, call);
                 Assert.IsTrue(LuaCsExecutionGuard.IsMemoryBudgetTrip(ended), call);
                 LuaCsSecureSandboxEditModeTests.AssertIsOnlyTheErrorLine(ended.Message);
+                LuaCsSecureSandboxEditModeTests.AssertNamesNoClrTypeOrEngine(ended.Message);
             }
 
             CollectGarbage();
@@ -574,9 +577,9 @@ namespace CoreAI.Tests.EditMode
             LuaCsHostFunctionException tripped = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state, "run_detached(function() local n = 0 while true do n = n + 1 end end)\nreturn 1",
                     guard));
-            Assert.AreEqual("LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (20000)", tripped.Message,
+            Assert.AreEqual("sandbox: EXCEEDED_HARD_LIMIT_STEPS (20000)", tripped.Message,
                 "the caller must receive the trip itself, not the cancellation that carried it out");
-            Assert.IsInstanceOf<InvalidOperationException>(tripped.HostException);
+            Assert.IsInstanceOf<LuaStepBudgetException>(tripped.HostException);
 
             Assert.Throws<LuaCsHostFunctionException>(() => env.RunChunk(state, FiniteRunaway, guard),
                 "the next runaway on the same state must be cut, so the guard must have cleared the hook flag");
@@ -602,7 +605,7 @@ namespace CoreAI.Tests.EditMode
                 await guard.ExecuteAsync(state, state.Load(UnboundedArithmeticLoop, "linked_trip_probe"),
                     new CountingFrameYielder(), caller.Token));
 
-            Assert.AreEqual("LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (20000)", tripped.Message);
+            Assert.AreEqual("sandbox: EXCEEDED_HARD_LIMIT_STEPS (20000)", tripped.Message);
             Assert.IsFalse(caller.IsCancellationRequested, "a trip must never cancel the caller's own token");
             Assert.AreEqual(LuaCsGuardTripKind.Steps, observer.Records[0].TrippedBudget);
 
@@ -844,6 +847,15 @@ namespace CoreAI.Tests.EditMode
         [TestCase("string.gsub('abc', '.', setmetatable({}, {__index = function(t, k) return slow(k) end}))", "ABC|3")]
         [TestCase("string.format('%s-%s', setmetatable({}, {__tostring = function() return slow('x') end}), 'y')",
             "X-y")]
+        [TestCase("tostring(setmetatable({}, {__tostring = function() return slow('t') end}))", "T")]
+        [TestCase("(function() print(setmetatable({}, {__tostring = function() return slow('p') end})) return 'printed' end)()",
+            "printed")]
+        [TestCase("(function() local t = {3, 1, 2} table.sort(t, function(a, b) slow('s') return a < b end) " +
+                  "return table.concat(t, ',') end)()", "1,2,3")]
+        [TestCase("type(pairs(setmetatable({}, {__pairs = function(o) slow('p') return next, {}, nil end})))", "function")]
+        [TestCase("type(ipairs(setmetatable({}, {__ipairs = function(o) slow('i') return next, {}, nil end})))", "function")]
+        [TestCase("select(2, pcall(slow, 'q'))", "Q")]
+        [TestCase("select(2, xpcall(slow, print, 'x'))", "X")]
         [Timeout(120000)]
         public void AsyncExecute_AFencedCallbackThatOutlastsAFrameSlice_AwaitsTheFrame_AndReturnsTheNormalResult(
             string expression, string expected)
@@ -853,6 +865,9 @@ namespace CoreAI.Tests.EditMode
             // __tostring, the library call came back unfinished and was refused as a yield: correct code failed with
             // "attempt to yield across a C-call boundary", and the abandoned VM continuation resumed on the next
             // frame over a call stack that had moved on, faulting the run with ArgumentOutOfRangeException.
+            // WHY every counted call (audits C3-05, C3-06): tostring, print, table.sort, pairs and ipairs are fenced
+            // now too, and a counted call that comes back unfinished - these and pcall/xpcall - completes through a
+            // pooled continuation instead of an async method; a frame awaited inside any of them is still awaited.
             LuaCsSecureEnvironment env = new();
             ManualFrameYielder yielder = new();
             LuaState state = CreateFrameCountingState(env, yielder);
@@ -1162,7 +1177,7 @@ namespace CoreAI.Tests.EditMode
             CollectionAssert.IsEmpty(rows, "no level may outlive the handle's 500 ms: " + string.Join(" / ", rows));
             Assert.IsFalse(handle.LastOk);
             Assert.AreEqual(LuaCsGuardTripKind.Timeout, handle.LastTrip);
-            StringAssert.StartsWith("Lua coroutine resume exceeded 500 ms.", handle.LastErrorText);
+            StringAssert.StartsWith("sandbox: Lua coroutine resume exceeded 500 ms.", handle.LastErrorText);
             Assert.Less(elapsedMs, 3000, "backstop: the uncapped chain took 4.4 s");
         }
 
@@ -1189,7 +1204,7 @@ namespace CoreAI.Tests.EditMode
 
             CollectionAssert.AreEqual(new[] { "string:first|boolean:true|number:30000" }, rows);
             Assert.IsNotNull(ended, "the guard's steps are spent: the run must end");
-            Assert.AreEqual("LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (100000)", ended.Message);
+            Assert.AreEqual("sandbox: EXCEEDED_HARD_LIMIT_STEPS (100000)", ended.Message);
         }
 
         [Test]
@@ -1402,6 +1417,424 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(plain.BaselineBytes, nested.BaselineBytes);
             Assert.IsFalse(nested.CeilingExceeded);
         }
+
+        #endregion
+
+        #region Audit R3 C3-01, C3-03: nested steps at any depth; the innermost executing run encloses
+
+        /// <summary>A Lua function that spends steps in <paramref name="levels"/> raw coroutines nested in each other.</summary>
+        private static string SpendInNestedCoroutines(int levels)
+        {
+            return "local function spendIn(depth)\n" +
+                   "  if depth == 0 then local n = 0 for i = 1, 150000 do n = n + 1 end return n end\n" +
+                   "  local ok, v = coroutine.resume(coroutine.create(spendIn), depth - 1)\n" +
+                   "  if not ok then error(v, 0) end\n" +
+                   "  return v\n" +
+                   "end\n" +
+                   "local total = 0\n" +
+                   "for round = 1, 20 do total = total + spendIn(" + levels + ") end\n" +
+                   "record('done', total)";
+        }
+
+        [TestCase(1)]
+        [TestCase(2)]
+        [TestCase(3)]
+        [Timeout(120000)]
+        public void NestedCoroutines_AtAnyDepth_SpendTheGuardsSteps(int levels)
+        {
+            // WHY (audit C3-01): a nested run's steps were charged to the run it was nested in by lowering that
+            // run's limit only, so the parent passed nothing but its own steps up when it ended: a coroutine two
+            // levels down spent steps nothing above its parent ever saw, and 3,000,000 steps ran under a 1,000,000
+            // guard. Each run now passes what its nested runs charged to it along with its own steps. The one-level
+            // twin tripped before and still does.
+            List<string> rows = new();
+
+            LuaRuntimeException ended = LuaCsSecureSandboxEditModeTests.RunRecordingChunk(
+                SpendInNestedCoroutines(levels), new LuaCsExecutionGuard(60_000, 1_000_000, 0), rows,
+                LuaCsSecureSandboxEditModeTests.UnhurriedRawResumes());
+
+            CollectionAssert.IsEmpty(rows, "the rounds must not complete: " + string.Join(" / ", rows));
+            Assert.IsNotNull(ended, "the guard's steps are spent: the run must end");
+            Assert.AreEqual("sandbox: " + LuaCsExecutionGuard.StepBudgetTripMarker + " (1000000)", ended.Message);
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void HandleResume_CoroutinesTwoDeep_SpendItsPerResumeBudget_AndCountInItsConsumedSteps()
+        {
+            // WHY (audit C3-01): handle -> raw -> raw ran 300,000 steps inside one 10,000-step resume, and the handle
+            // reported 1,210 consumed steps. The nested steps now reach the handle, whose resume trips at its own
+            // budget, and its consumed and observed steps both hold them (raw coroutines report nothing themselves).
+            LuaCsSecureEnvironment env = new();
+            List<string> rows = new();
+            LuaState state = LuaCsSecureSandboxEditModeTests.CreateRecordingState(env, rows,
+                LuaCsSecureSandboxEditModeTests.UnhurriedRawResumes());
+            LuaFunction body = env.RunChunk(state,
+                "return function()\n" +
+                "  for k = 1, 100 do\n" +
+                "    local outer = coroutine.create(function()\n" +
+                "      local inner = coroutine.create(function() local n = 0 for i = 1, 1500 do n = n + 1 end end)\n" +
+                "      local ok, e = coroutine.resume(inner)\n" +
+                "      if not ok then error(e, 0) end\n" +
+                "    end)\n" +
+                "    local ok, e = coroutine.resume(outer)\n" +
+                "    if not ok then error(e, 0) end\n" +
+                "  end\n" +
+                "  record('done')\n" +
+                "end")[0].Read<LuaFunction>();
+            LuaCsCoroutineHandle handle = new(state, body, budgetPerResume: 10_000, resumeTimeoutMs: 30_000,
+                totalLifetimeSteps: LuaCsCoroutineHandle.UnlimitedLifetimeSteps, maxAllocatedBytes: 0);
+
+            handle.Resume();
+
+            CollectionAssert.IsEmpty(rows, "the loop must not complete inside one resume");
+            Assert.IsFalse(handle.LastOk);
+            Assert.AreEqual(LuaCsGuardTripKind.Steps, handle.LastTrip);
+            StringAssert.StartsWith("sandbox: EXCEEDED_RESUME_STEP_BUDGET (10000)", handle.LastErrorText);
+            Assert.That(handle.ConsumedSteps, Is.InRange(9_000L, 10_100L),
+                "the steps of the coroutines two levels down are the handle's");
+            Assert.AreEqual(handle.ConsumedSteps, handle.ObservedSteps,
+                "a raw coroutine reports nothing itself, so its steps are the handle's to report");
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void TaskThread_SpawningThreadsThatResumeCoroutines_IsHeldToItsResumeBudget()
+        {
+            // WHY (audit C3-01, the production shape): a task thread that spawned threads which each ran a raw
+            // coroutine got 300,000 steps through one 10,000-step resume - the spawned thread's resume saw the
+            // coroutine's steps, but passed only its own to the task thread.
+            CoreAI.Ai.LuaCs.LuaCsRbxApiBindings bindings = new();
+            LuaCsSecureSandboxEditModeTests.NestedRunModStore store = new();
+            CoreAI.Ai.LuaCs.LuaCsModStack stack = LuaCsSecureSandboxEditModeTests.NewNestedRunModStack(bindings, store);
+            stack.Runtime.LoadMod("m",
+                "task.spawn(function()\n" +
+                "  local rounds = 0\n" +
+                "  for k = 1, 100 do\n" +
+                "    task.spawn(function()\n" +
+                "      coroutine.resume(coroutine.create(function() local n = 0 for i = 1, 1500 do n = n + 1 end end))\n" +
+                "    end)\n" +
+                "    rounds = rounds + 1\n" +
+                "    store_set('rounds', tostring(rounds))\n" +
+                "  end\n" +
+                "  store_set('done', 'yes')\n" +
+                "end)");
+            for (int frame = 0; frame < 3; frame++)
+            {
+                bindings.Scheduler.Advance(0.05d);
+            }
+
+            string errors = LuaCsSecureSandboxEditModeTests.HandlerErrorsOf(stack);
+            Assert.AreEqual("", store.Get("m", "done"), "100 rounds of 3,000 steps must not fit one resume: " + errors);
+            Assert.That(int.Parse(store.Get("m", "rounds"), System.Globalization.CultureInfo.InvariantCulture),
+                Is.InRange(1, 4), errors);
+            StringAssert.Contains("sandbox: EXCEEDED_RESUME_STEP_BUDGET ("
+                                  + LuaCsCoroutineHandle.DefaultBudgetPerResume + ")", errors);
+        }
+
+        /// <summary>An observability sink that adds up the guarded instruction steps reported to it.</summary>
+        private sealed class CountingObservabilitySink : CoreAI.Mods.Rbx.Instances.Scheduling.IRbxRuntimeObservabilitySink
+        {
+            public long GuardedInstructionSteps;
+
+            public bool IsEnabled => true;
+
+            public void RecordGuardedInstructionSteps(long count)
+            {
+                GuardedInstructionSteps += count;
+            }
+
+            public void RecordThreadResumes(long count)
+            {
+            }
+
+            public void RecordEventsDelivered(long count)
+            {
+            }
+
+            public void RecordCompletedOperations(long count)
+            {
+            }
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void NestedRunsSteps_AreInTheEnclosingRecord_AndTheObservabilitySinkCountsEveryStepOnce()
+        {
+            // WHY (audit C3-01): the execution record and the observability counters left out every nested run's
+            // steps. The record of a run now holds them all; the sink gets each step once - a nested guard reports its
+            // own, the enclosing guard its own and those of the raw coroutine it resumed, which reports nothing.
+            CountingObservabilitySink sink = new();
+            RecordingObserver outerObserver = new();
+            RecordingObserver innerObserver = new();
+            LuaCsExecutionGuard outer = new(60_000, 5_000_000, 0, sink, outerObserver);
+            LuaCsExecutionGuard inner = new(60_000, 5_000_000, 0, sink, innerObserver);
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+            state.Environment["reenter"] = new LuaFunction("reenter", (ctx, ct) =>
+            {
+                inner.Execute(ctx.State, ctx.GetArgument<LuaFunction>(0), ct);
+                return new ValueTask<int>(ctx.Return());
+            });
+
+            env.RunChunk(state,
+                SpendSteps +
+                "coroutine.resume(coroutine.create(spend), 15000)\n" +
+                "reenter(function() spend(10000) end)",
+                outer);
+
+            Assert.AreEqual(1, innerObserver.Records.Count);
+            Assert.AreEqual(1, outerObserver.Records.Count);
+            long innerSteps = innerObserver.Records[0].Steps;
+            long outerSteps = outerObserver.Records[0].Steps;
+            Assert.That(innerSteps, Is.InRange(19_000L, 21_000L), "the nested guard spent about 20,000 steps");
+            Assert.That(outerSteps, Is.GreaterThanOrEqualTo(innerSteps + 29_000L),
+                "the outer record holds the coroutine's 30,000 steps and the nested guard's");
+            Assert.AreEqual(outerSteps, sink.GuardedInstructionSteps,
+                "the sink must count every step once: the nested guard's " + innerSteps + " not twice");
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void GuardedCallFromARawCoroutine_IsNestedInTheCoroutinesRun_SoAnXpcallThereCannotCatchItsTrip()
+        {
+            // WHY (audit C3-03): a guarded call on a state, made from a coroutine of that state, was nested in the
+            // state's guard - the run executing on the state itself - and the coroutine's run between them was
+            // skipped: the trip of the allowance the call was lent did not end the coroutine, whose xpcall ran its
+            // handler and whose body ran on. The call is now nested in the innermost run executing, the coroutine's,
+            // which lent it its allowance and ends with it; its resumer, still inside its own budget, goes on.
+            LuaCsSecureEnvironment env = new();
+            List<string> rows = new();
+            LuaState state = LuaCsSecureSandboxEditModeTests.CreateRecordingState(env, rows,
+                LuaCsSecureSandboxEditModeTests.UnhurriedRawResumes());
+            LuaCsExecutionGuard inner = new(60_000, 50_000_000, 0);
+            state.Environment["reenter"] = new LuaFunction("reenter", (ctx, ct) =>
+            {
+                inner.Execute(state, ctx.GetArgument<LuaFunction>(0), ct);
+                return new ValueTask<int>(ctx.Return());
+            });
+
+            LuaRuntimeException ended = null;
+            try
+            {
+                env.RunChunk(state,
+                    "local co = coroutine.create(function()\n" +
+                    "  local ok, e = xpcall(function() reenter(function() while true do end end) end,\n" +
+                    "    function(m) record('handler ran', m) return m end)\n" +
+                    "  record('xpcall returned', ok, e)\n" +
+                    "  record('coroutine ran on')\n" +
+                    "end)\n" +
+                    "record('resume', coroutine.resume(co))\n" +
+                    "record('after')",
+                    new LuaCsExecutionGuard(60_000, 2_000_000, 0));
+            }
+            catch (LuaRuntimeException ex)
+            {
+                ended = ex;
+            }
+
+            Assert.IsNull(ended, "the resumer is inside its own budget: " + ended?.Message);
+            Assert.AreEqual(2, rows.Count, string.Join(" / ", rows));
+            StringAssert.StartsWith("string:resume|boolean:false|string:sandbox: EXCEEDED_COROUTINE_STEP_BUDGET (", rows[0],
+                "the coroutine ends with the trip of the allowance it lent the call");
+            Assert.AreEqual("string:after", rows[1]);
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void ModsCallToItsOwnExport_FromARawCoroutineInATimer_EndsTheCoroutine_AndNoXpcallHandlerRuns()
+        {
+            // WHY (audit C3-03, the production shape of the test above): a hooks_every timer resumed a raw coroutine
+            // whose xpcall called the mod's own export, a runaway. The export's trip was caught there, the handler
+            // ran 100,000 iterations and the coroutine 100,000 more before the timer's own budget ended it.
+            CoreAI.Ai.LuaCs.LuaCsRbxApiBindings bindings = new();
+            LuaCsSecureSandboxEditModeTests.NestedRunModStore store = new();
+            CoreAI.Ai.LuaCs.LuaCsModStack stack = LuaCsSecureSandboxEditModeTests.NewNestedRunModStack(bindings, store,
+                handlerMaxSteps: 2_000_000);
+            stack.Runtime.LoadMod("m",
+                "mods_export('exp', function() while true do end end)\n" +
+                "hooks_every(0.05, function()\n" +
+                "  if store_get('fired') == 'yes' then return end\n" +
+                "  store_set('fired', 'yes')\n" +
+                "  local co = coroutine.create(function()\n" +
+                "    local ok, e = xpcall(function() mods_call('m', 'exp') end,\n" +
+                "      function(msg) store_set('handler', tostring(msg)) return msg end)\n" +
+                "    store_set('xpcall', tostring(ok) .. '|' .. tostring(e))\n" +
+                "    store_set('coroutine after', 'yes')\n" +
+                "  end)\n" +
+                "  local ok, e = coroutine.resume(co)\n" +
+                "  store_set('resume', tostring(ok) .. '|' .. tostring(e))\n" +
+                "  store_set('timer after', 'yes')\n" +
+                "end)");
+
+            for (int tick = 0; tick < 3; tick++)
+            {
+                stack.Runtime.Tick(0.1d);
+            }
+
+            string errors = LuaCsSecureSandboxEditModeTests.HandlerErrorsOf(stack);
+            Assert.AreEqual("", store.Get("m", "handler"), "no handler may run after a trip: " + errors);
+            Assert.AreEqual("", store.Get("m", "xpcall"), errors);
+            Assert.AreEqual("", store.Get("m", "coroutine after"), errors);
+            StringAssert.StartsWith("false|sandbox: EXCEEDED_COROUTINE_STEP_BUDGET (", store.Get("m", "resume"), errors);
+            Assert.AreEqual("yes", store.Get("m", "timer after"), "the timer is inside its own budget: " + errors);
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void ModsCallHopsThroughCoroutines_ContinueOneCallCount_AndStopAtTheLimitInTotal()
+        {
+            // WHY (audit C3-03): a guarded call re-entering the state from a coroutine counted on from the state's own
+            // count, not the coroutine's, so each hop through mods_call to the mod's own export and a coroutine got
+            // a fresh count on the same native stack: 8 hops reached 707 levels, 4 MB. The count now runs on through
+            // every hop: the first hop nests 118 pcalls, the export's guarded call and its resume open two levels
+            // each, and the second hop gets what is left of the limit.
+            CoreAI.Ai.LuaCs.LuaCsRbxApiBindings bindings = new();
+            LuaCsSecureSandboxEditModeTests.NestedRunModStore store = new();
+            CoreAI.Ai.LuaCs.LuaCsModStack stack = LuaCsSecureSandboxEditModeTests.NewNestedRunModStack(bindings, store);
+            stack.Runtime.LoadMod("m",
+                "local total = 0\n" +
+                "local function deep(n, hop)\n" +
+                "  total = total + 1\n" +
+                "  if n < 118 then\n" +
+                "    local ok, e = pcall(deep, n + 1, hop)\n" +
+                "    if not ok then error(e, 0) end\n" +
+                "  elseif hop < 8 then\n" +
+                "    mods_call('m', 'hop', hop + 1)\n" +
+                "  end\n" +
+                "end\n" +
+                "mods_export('hop', function(hop)\n" +
+                "  local ok, e = coroutine.resume(coroutine.create(function() deep(1, hop) end))\n" +
+                "  if not ok then store_set('refused', tostring(e)) error(e, 0) end\n" +
+                "end)\n" +
+                "hooks_every(0.05, function()\n" +
+                "  if store_get('fired') == 'yes' then return end\n" +
+                "  store_set('fired', 'yes')\n" +
+                "  coroutine.resume(coroutine.create(function() deep(1, 1) end))\n" +
+                "  store_set('levels', tostring(total))\n" +
+                "end)");
+
+            for (int tick = 0; tick < 3; tick++)
+            {
+                stack.Runtime.Tick(0.1d);
+            }
+
+            const int firstHop = 118;
+            int secondHopFrom = LuaCsSecureEnvironment.HeavyCallLevels + (firstHop - 1) * LuaCsSecureEnvironment.LightCallLevels
+                                + LuaCsSecureEnvironment.HeavyCallLevels + LuaCsSecureEnvironment.HeavyCallLevels;
+            int secondHop = (LuaCsSecureEnvironment.MaxCCallDepth - secondHopFrom) / LuaCsSecureEnvironment.LightCallLevels + 1;
+            string errors = LuaCsSecureSandboxEditModeTests.HandlerErrorsOf(stack);
+            Assert.AreEqual((firstHop + secondHop).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                store.Get("m", "levels"), errors);
+            StringAssert.Contains(LuaCsSecureSandboxEditModeTests.CStackLimitLine("pcall"), store.Get("m", "refused"));
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void ModsCallIntoAnotherMod_ContinuesTheCallersCount_AndSpendsTheCallersAllowance()
+        {
+            // WHY (audit C3-03 and the A2-10 residual): a mods_call export on another state started from that
+            // state's own count and with a fresh allowance, so every cross-mod hop added a full C-call budget on the
+            // same native stack, and an export could spend what its caller no longer had. The export is now nested in
+            // the caller's run: it continues the caller's count, and a runaway export that uses up the caller's
+            // allowance ends the caller with its trip, which no pcall there can catch.
+            CoreAI.Ai.LuaCs.LuaCsRbxApiBindings bindings = new();
+            LuaCsSecureSandboxEditModeTests.NestedRunModStore store = new();
+            CoreAI.Ai.LuaCs.LuaCsModStack stack = LuaCsSecureSandboxEditModeTests.NewNestedRunModStack(bindings, store,
+                handlerMaxSteps: 200_000);
+            stack.Runtime.LoadMod("b",
+                "mods_export('deep', function()\n" +
+                "  local depth = 0\n" +
+                "  local function f() depth = depth + 1 pcall(f) end\n" +
+                "  f()\n" +
+                "  return depth\n" +
+                "end)\n" +
+                "mods_export('spin', function() while true do end end)");
+            stack.Runtime.LoadMod("a",
+                "hooks_on('deep', function()\n" +
+                "  local function nest(n)\n" +
+                "    if n == 0 then store_set('b depth', tostring(mods_call('b', 'deep'))) return end\n" +
+                "    local ok, e = pcall(nest, n - 1)\n" +
+                "    if not ok then error(e, 0) end\n" +
+                "  end\n" +
+                "  nest(40)\n" +
+                "end)\n" +
+                "hooks_on('spin', function()\n" +
+                "  pcall(mods_call, 'b', 'spin')\n" +
+                "  store_set('after the spin', 'yes')\n" +
+                "end)");
+
+            stack.Runtime.EmitEvent("deep", "");
+            stack.Runtime.Tick(0);
+            stack.Runtime.EmitEvent("spin", "");
+            stack.Runtime.Tick(0);
+
+            int exportFrom = 40 * LuaCsSecureEnvironment.LightCallLevels + LuaCsSecureEnvironment.HeavyCallLevels;
+            int exportDepth = (LuaCsSecureEnvironment.MaxCCallDepth - exportFrom) / LuaCsSecureEnvironment.LightCallLevels + 1;
+            Assert.AreEqual(exportDepth.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                store.Get("a", "b depth"), "the export nests only what the caller's 40 pcalls left of the limit");
+            Assert.AreEqual("", store.Get("a", "after the spin"),
+                "the runaway export used up the caller's allowance, so no pcall in the caller may survive it");
+            List<string> callerErrors = new();
+            foreach (CoreAI.Ai.LuaModHandlerError error in stack.Runtime.GetRecentHandlerErrors("a"))
+            {
+                callerErrors.Add(error.Error);
+            }
+
+            StringAssert.Contains("sandbox: " + LuaCsExecutionGuard.StepBudgetTripMarker + " (200000)",
+                string.Join(" / ", callerErrors), "the caller ends with its own budget's line");
+        }
+
+        [Test]
+        [Timeout(120000)]
+        public void ARunResumedFromAFrameYieldInsideAnotherRun_NestsWhatItStartsInItself_NotInTheRunBelowIt()
+        {
+            // WHY (audit C3-03, the design): the enclosing run is the newest EXECUTING run on this OS thread, kept in
+            // a list of begun runs rather than a stack, because frame yields interleave runs: chunk A below parks in a
+            // frame yield, run B starts, and B's host function releases A's frame, so A continues on top of B. A run
+            // that executes again moves to the end of the list; had A stayed where it began, the raw coroutine it
+            // resumes next would have been nested in B - held to B's allowance and charged to B.
+            LuaCsSecureEnvironment env = new();
+            ManualFrameYielder yielder = new();
+            LuaState stateA = CreateFrameCountingState(env, yielder);
+            stateA.Environment["remaining"] = RemainingStepsFunction;
+            Task<LuaValue[]> runA = env.RunChunkAsync(stateA,
+                SpendSteps +
+                "local start = frames()\n" +
+                "repeat spend(100) until frames() > start\n" +
+                "local before = remaining()\n" +
+                "coroutine.resume(coroutine.create(spend), 15000)\n" +
+                "return before - remaining()",
+                new LuaCsExecutionGuard(60_000, 5_000_000_000L, 0), yielder);
+            Assert.IsFalse(runA.IsCompleted, "precondition: A is parked in a frame yield");
+
+            LuaState stateB = env.Create();
+            stateB.Environment["remaining"] = RemainingStepsFunction;
+            stateB.Environment["releaseA"] = new LuaFunction("releaseA", (ctx, ct) =>
+            {
+                yielder.ReleaseFrame();
+                return new ValueTask<int>(ctx.Return());
+            });
+            LuaValue[] chargedToB = env.RunChunk(stateB,
+                "local before = remaining()\n" +
+                "releaseA()\n" +
+                "return before - remaining()",
+                new LuaCsExecutionGuard(60_000, 1_000_000, 0));
+            PlayFramesUntilDone(runA, yielder);
+
+            Assert.AreEqual(TaskStatus.RanToCompletion, runA.Status, runA.Exception?.ToString());
+            Assert.That(runA.Result[0].Read<double>(), Is.GreaterThanOrEqualTo(29_000d),
+                "the coroutine A resumed is nested in A and charged to it");
+            Assert.That(chargedToB[0].Read<double>(), Is.LessThan(1_000d), "B is charged none of A's coroutine");
+        }
+
+        /// <summary><c>remaining()</c>: the steps the run executing on the calling state may still spend.</summary>
+        private static readonly LuaFunction RemainingStepsFunction = new("remaining", (ctx, ct) =>
+        {
+            Assert.IsTrue(LuaCsExecutionGuard.TryGetRemainingAllowance(ctx.State, out long steps, out int _,
+                out long _), "a guarded run is executing");
+            return new ValueTask<int>(ctx.Return((double)steps));
+        });
 
         #endregion
     }

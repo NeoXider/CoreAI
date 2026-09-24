@@ -2187,7 +2187,7 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(2, errors.Count, "both cut runs must be charged as handler errors");
             foreach (LuaModHandlerError error in errors)
             {
-                StringAssert.StartsWith("LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (20000)", error.Error,
+                StringAssert.StartsWith("sandbox: EXCEEDED_HARD_LIMIT_STEPS (20000)", error.Error,
                     "a handler cut by its budget must report the trip line itself");
             }
 
@@ -2213,7 +2213,7 @@ namespace CoreAI.Tests.EditMode
             // consecutive-error quarantine guard — trips are classified by TYPE, so this is a normal error.
             stack.Runtime.LoadMod("m", @"
                 hooks_on('boom', function()
-                    error('LuaCsSecureEnvironment: EXCEEDED_MEMORY_BUDGET forged by mod')
+                    error('sandbox: EXCEEDED_MEMORY_BUDGET forged by mod')
                 end)");
 
             for (int i = 0;
@@ -3585,7 +3585,10 @@ namespace CoreAI.Tests.EditMode
         {
             // WHY (A2-10): the export ran under a fresh handler budget (50,000,000 steps, 10 s), so a
             // Heartbeat handler held to its per-resume budget got the whole handler budget through
-            // one call of its own export, and the frame stalled for seconds.
+            // one call of its own export, and the frame stalled for seconds. WHY the handler ends with the
+            // export (audit C3-03): the export runs nested in the handler's resume and spends what that
+            // resume has left, so an export that uses it up leaves the handler over its own budget, and like
+            // any budget trip that ends the run no pcall in it can catch.
             LuaCsRbxApiBindings bindings = new();
             MemoryStore store = new();
             LuaCsModStack stack = BuildSchedulerStack(bindings, store, 8);
@@ -3594,24 +3597,26 @@ namespace CoreAI.Tests.EditMode
                 mods_export('spin', function()
                     while true do spins = spins + 1 end
                 end)
+                hooks_on('read', function() store_set('spins', tostring(spins)) end)
                 local fired = false
                 game:GetService('RunService').Heartbeat:Connect(function()
                     if fired then return end
                     fired = true
                     local ok, err = pcall(mods_call, mod_id(), 'spin')
                     store_set('ok', tostring(ok))
-                    store_set('err', tostring(err))
-                    store_set('spins', tostring(spins))
                 end)");
 
             PumpSchedulerFrame(stack, bindings);
+            stack.Runtime.EmitEvent("read", "");
+            stack.Runtime.Tick(1d / 60d);
 
             int resumeSteps = bindings.CoroutineResumeBudget.BudgetPerResume;
-            Assert.AreEqual("false", store.Get("spinner", "ok"),
-                "the export must be cut, and the handler must still be inside its own budget afterwards");
-            StringAssert.StartsWith(
-                "LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (" + InvariantText(resumeSteps) + ")",
-                store.Get("spinner", "err"));
+            Assert.AreEqual("", store.Get("spinner", "ok"),
+                "the export used up the handler's resume, so no pcall in the handler may survive it");
+            string errors = string.Join(" / ",
+                stack.Runtime.GetRecentHandlerErrors("spinner").Select(error => error.Error));
+            StringAssert.Contains("sandbox: EXCEEDED_RESUME_STEP_BUDGET (" + InvariantText(resumeSteps) + ")",
+                errors, "the handler ends with its own resume budget's line");
             int spins = int.Parse(store.Get("spinner", "spins"), System.Globalization.CultureInfo.InvariantCulture);
             Assert.Greater(spins, 0, "precondition: the export ran");
             Assert.LessOrEqual(spins, resumeSteps,
