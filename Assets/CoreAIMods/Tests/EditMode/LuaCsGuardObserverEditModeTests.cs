@@ -131,7 +131,7 @@ namespace CoreAI.Tests.EditMode
             RecordingObserver observer = new();
             LuaCsExecutionGuard guard = new(60_000, 5_000, 0, guardObserver: observer);
 
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException ex = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state,
                     "local x = 0\n" +
                     "for i = 1, 5000000 do x = x + 1 end\n" +
@@ -154,7 +154,7 @@ namespace CoreAI.Tests.EditMode
             RecordingObserver observer = new();
             LuaCsExecutionGuard guard = new(150, 5_000_000_000L, 0, guardObserver: observer);
 
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException ex = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state,
                     "local x = 0\n" +
                     "while true do x = x + 1 end\n" +
@@ -193,7 +193,7 @@ namespace CoreAI.Tests.EditMode
 
             RecordingObserver outerObserver = new();
             LuaCsExecutionGuard outerGuard = new(2000, 5_000, guardObserver: outerObserver);
-            Assert.Throws<LuaRuntimeException>(() =>
+            Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state,
                     "nested()\n" +
                     "local x = 0\n" +

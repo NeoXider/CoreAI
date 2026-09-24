@@ -256,7 +256,7 @@ namespace CoreAI.Tests.EditMode
                 16 * MB,
                 guardObserver: observer);
 
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException ex = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state, RetentionWithGarbageChurn, guard),
                 "64 MB of retained growth under a 16 MB budget must be cut, however much garbage hides it");
 
@@ -367,7 +367,7 @@ namespace CoreAI.Tests.EditMode
                 LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget,
                 guardObserver: observer);
 
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException ex = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state, UnboundedArithmeticLoop, guard));
 
             Assert.AreEqual(1, observer.Records.Count);
@@ -392,7 +392,7 @@ namespace CoreAI.Tests.EditMode
                 LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget,
                 guardObserver: observer);
 
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException ex = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state, UnboundedArithmeticLoop, guard));
 
             Assert.AreEqual(1, observer.Records.Count);
@@ -417,7 +417,7 @@ namespace CoreAI.Tests.EditMode
             // WHY: the anti-bomb guarantee the confirmation must not trade away. Doubling concatenation
             // has no library call site to cap and its result string is LIVE, so it survives the
             // confirming collection and must still be cut.
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException ex = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state, "local s = 'x'\nwhile true do s = s .. s end\nreturn s", guard));
 
             Assert.AreEqual(1, observer.Records.Count);
@@ -425,6 +425,49 @@ namespace CoreAI.Tests.EditMode
                 "a live doubling string must still trip the allocation backstop");
             Assert.IsTrue(LuaCsExecutionGuard.IsMemoryBudgetTrip(ex),
                 "the trip must stay classified by type so a mod cannot forge or suppress it");
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void MemoryTrip_PcallXpcallAndTheErrorValue_GetOneCleanLine_AndBothWalkersStillClassifyIt()
+        {
+            // WHY: the trip was raised over an inner LuaMemoryBudgetException, so pcall handed the script
+            // "CoreAI.Sandbox.LuaCs.LuaMemoryBudgetException: ..." and xpcall's handler and a protected
+            // coroutine.resume - both read the error value - got nil. The cause now travels as HostException,
+            // and the mod runtime labels a handler failure through the NEUTRAL walker, so that one must still
+            // find the trip by type as well as the guard's own.
+            const string expected = "LuaCsSecureEnvironment: EXCEEDED_MEMORY_BUDGET (8388608 bytes)";
+            const string bomb =
+                "local function bomb() local s = 'x' for i = 1, 26 do s = s .. s end return #s end\n";
+            string[] calls = { "record(pcall(bomb))", "record(xpcall(bomb, echo))" };
+            foreach (string call in calls)
+            {
+                CollectGarbage();
+                List<string> rows = new();
+                LuaCsSecureSandboxEditModeTests.RunRecordingChunk(bomb + call + "\nreturn 1",
+                    new LuaCsExecutionGuard(20_000, 5_000_000_000L, 8 * MB), rows);
+
+                CollectionAssert.AreEqual(new[] { "boolean:false|string:" + expected }, rows,
+                    call + " must hand the script exactly the trip's line");
+                LuaCsSecureSandboxEditModeTests.AssertIsOnlyTheErrorLine(rows[0]);
+            }
+
+            CollectGarbage();
+            LuaRuntimeException uncaught = LuaCsSecureSandboxEditModeTests.RunRecordingChunk(bomb + "return bomb()",
+                new LuaCsExecutionGuard(20_000, 5_000_000_000L, 8 * MB), new List<string>());
+
+            Assert.IsNotNull(uncaught, "an uncaught bomb must end the run");
+            Assert.AreEqual(expected, uncaught.Message);
+            Assert.AreEqual(expected, uncaught.ErrorObject.ToString(),
+                "the error value, which a protected coroutine.resume hands its resumer, must be the same line");
+            LuaCsHostFunctionException trip = uncaught as LuaCsHostFunctionException;
+            Assert.IsNotNull(trip, "a guard trip must carry its cause for C#: " + uncaught.GetType().Name);
+            Assert.IsInstanceOf<LuaMemoryBudgetException>(trip.HostException,
+                "the trip's cause must stay reachable from C#");
+            Assert.IsTrue(LuaCsExecutionGuard.IsMemoryBudgetTrip(uncaught),
+                "the guard's classifier must still find the trip by type");
+            Assert.IsTrue(ScriptExecutionErrors.IsMemoryBudgetTrip(uncaught),
+                "the engine-neutral classifier the mod runtime uses must still find the trip by type");
         }
 
         [Test]
@@ -517,7 +560,7 @@ namespace CoreAI.Tests.EditMode
             LuaCsExecutionGuard outerGuard = new(20_000, 5_000, 0, guardObserver: outerObserver);
             CountingFrameYielder yielder = new();
 
-            Assert.ThrowsAsync<LuaRuntimeException>(async () =>
+            Assert.ThrowsAsync<LuaCsHostFunctionException>(async () =>
                 await outerGuard.ExecuteAsync(
                     state,
                     state.Load(

@@ -1,8 +1,10 @@
 #if COREAI_LUA
+using System.Collections.Generic;
 using System.Threading;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Sandbox.LuaCs;
+using CoreAI.Scripting;
 using Lua;
 using NUnit.Framework;
 
@@ -104,7 +106,7 @@ namespace CoreAI.Tests.EditMode
             // the string stays bounded (~128MB peak) — a huge default-budget bomb risks a multi-GB concat opcode
             // (uninterruptible between VM instructions) that can hang/OOM the machine.
             LuaCsExecutionGuard guard = new(8000, 10_000_000, 64 * 1024 * 1024);
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException ex = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state,
                     "local s = string.rep('x', 1000000)\n" +
                     "for i = 1, 7 do s = s .. s end\n" +
@@ -124,7 +126,7 @@ namespace CoreAI.Tests.EditMode
             LuaCsSecureEnvironment env = new();
             LuaState state = env.Create();
 
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException ex = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state,
                     "local t = {}\n" +
                     "local chunk = string.rep('x', 1000000)\n" +
@@ -156,7 +158,7 @@ namespace CoreAI.Tests.EditMode
             // The nested guard's cleanup must restore the outer hook instead of clearing it; otherwise
             // the over-budget loop after nested() runs unlimited and the chunk returns normally.
             LuaCsExecutionGuard outerGuard = new(2000, 5_000);
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException ex = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state,
                     "nested()\n" +
                     "local x = 0\n" +
@@ -217,6 +219,52 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(
                     new LuaCsHostFunctionException(null, "no cause", null)),
                 "A host function error without a cause is not a memory trip.");
+        }
+
+        [Test]
+        public void NeutralIsMemoryBudgetTrip_FollowsTheCauseAHostFunctionErrorCarries()
+        {
+            // WHY: the mod runtime labels a handler failure through the engine-neutral classifier, which walked
+            // InnerException only. A host function error - every guard trip included - keeps its cause in
+            // HostException, so that walk stopped at it and a real memory trip behind one was labelled a
+            // plain error.
+            System.Exception crossed = new LuaCsHostFunctionException(null, "mods_call: budget",
+                new System.InvalidOperationException("wrapped",
+                    new LuaMemoryBudgetException(
+                        $"LuaCsSecureEnvironment: {LuaCsExecutionGuard.MemoryBudgetTripMarker} (268435456 bytes)")));
+            Assert.IsTrue(ScriptExecutionErrors.IsMemoryBudgetTrip(crossed),
+                "A memory trip behind a host function error must be recognised by its type through the neutral walker.");
+            Assert.IsTrue(ScriptExecutionErrors.IsMemoryBudgetTrip(
+                    new System.InvalidOperationException("outer", crossed)),
+                "An ordinary wrapper around that error must not hide it either.");
+
+            Assert.IsFalse(ScriptExecutionErrors.IsMemoryBudgetTrip(
+                    new LuaCsHostFunctionException(null,
+                        $"forged {LuaCsExecutionGuard.MemoryBudgetTripMarker}",
+                        new System.InvalidOperationException(LuaCsExecutionGuard.MemoryBudgetTripMarker))),
+                "A host function error whose cause is no trip must not be classified as one, whatever its text.");
+            Assert.IsFalse(ScriptExecutionErrors.IsMemoryBudgetTrip(
+                    new LuaCsHostFunctionException(null, "no cause", null)),
+                "A host function error without a cause is not a memory trip.");
+        }
+
+        [Test]
+        public void HostFunctionError_IsTheNeutralHostFailure_AndBothCauseWalkersTakeTheSameStep()
+        {
+            System.InvalidOperationException cause = new("cause", new System.TimeoutException("inner"));
+            LuaCsHostFunctionException host = new(null, "api: cause", cause);
+
+            IScriptHostFailure neutral = host;
+            Assert.AreSame(cause, neutral.HostException,
+                "the engine-neutral view must expose the same cause C# reads from HostException");
+            Assert.AreSame(cause, ScriptExecutionErrors.NextCause(host));
+            Assert.AreSame(cause, LuaCsHostFunctionException.NextCause(host),
+                "the Lua-side walker must step exactly like the neutral one");
+            Assert.AreSame(cause.InnerException, ScriptExecutionErrors.NextCause(cause),
+                "an ordinary exception still steps through InnerException");
+            Assert.AreSame(cause.InnerException, LuaCsHostFunctionException.NextCause(cause));
+            Assert.IsNull(ScriptExecutionErrors.NextCause(null));
+            Assert.IsNull(LuaCsHostFunctionException.NextCause(null));
         }
 
         /// <summary>
@@ -327,6 +375,164 @@ namespace CoreAI.Tests.EditMode
                 "the Lua error value must cross the host function unchanged");
         }
 
+        [TestCase("string.rep('x', 2000000)",
+            "LuaCsSecureEnvironment: string.rep result would exceed 1000000 chars.")]
+        [TestCase("table.concat({'a', true})",
+            "invalid value (Boolean) at index 2 in table for 'concat'")]
+        [TestCase("table.concat({string.rep('x', 600000), string.rep('y', 600000)})",
+            "LuaCsSecureEnvironment: table.concat result would exceed 1000000 chars.")]
+        [TestCase("string.format('%99999999d', 1)",
+            "LuaCsSecureEnvironment: string.format width/precision exceeds 1000000 chars.")]
+        [TestCase("(string.rep('a', 30000):gsub('.', string.rep('b', 40)))",
+            "LuaCsSecureEnvironment: string.gsub result would exceed 1000000 chars.")]
+        public void SandboxLibraryRefusal_EveryProtectedPathGetsTheSameCleanLine(string call, string expected)
+        {
+            // WHY: string.rep, table.concat and the string.format width check raised their refusal over an inner
+            // InvalidOperationException, so pcall handed the script "System.InvalidOperationException: ..." and
+            // xpcall and a protected coroutine.resume handed it nil. The string.gsub result cap was a level-1
+            // error object, which pcall alone prefixed with a "[string ...]:line:" position.
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+
+            AssertEveryProtectedPathGets(expected,
+                env.RunChunk(state, ProtectedPathsProbe + "return probe(function() return " + call + " end)"));
+
+            LuaCsHostFunctionException uncaught =
+                Assert.Throws<LuaCsHostFunctionException>(() => env.RunChunk(state, "return " + call));
+            Assert.AreEqual(expected, uncaught.Message, "C# callers read the same line from Message");
+            Assert.AreEqual(expected, uncaught.ErrorObject.ToString(),
+                "the error value a protected resume hands its resumer must be the same line");
+            AssertIsOnlyTheErrorLine(expected);
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void PatternStepTrip_EveryProtectedPathGetsTheSameLine()
+        {
+            // WHY: the pattern-step trip was a level-1 error object, so inside string.gsub pcall alone prepended
+            // a "[string ...]:line:" position the error value does not hold, while xpcall and coroutine.resume
+            // read the bare line.
+            LuaCsSecureEnvironment env = new();
+            LuaState state = env.Create();
+
+            string[] rows = env.RunChunk(state,
+                    ProtectedPathsProbe
+                    + "return probe(function() return (string.rep('a', 120):gsub('.-.-.-.-b', 'x')) end)")[0]
+                .Read<string>().Split('\n');
+
+            Assert.AreEqual(4, rows.Length, string.Join(" / ", rows));
+            StringAssert.StartsWith(
+                "false|string|LuaCsSecureEnvironment: " + LuaCsSecureEnvironment.PatternStepBudgetTripMarker,
+                rows[0], "pcall must receive the trip line itself, with nothing in front of it");
+            StringAssert.Contains("in string.gsub", rows[0]);
+            for (int index = 1; index < rows.Length; index++)
+            {
+                Assert.AreEqual(rows[0], rows[index], "every protected path must receive the same line");
+            }
+
+            AssertIsOnlyTheErrorLine(rows[0]);
+        }
+
+        [TestCase("steps")]
+        [TestCase("time")]
+        [Timeout(60000)]
+        public void GuardStepAndTimeTrips_PcallAndXpcallGetTheTripLine_AndTheRunStillEndsWithIt(string budget)
+        {
+            // WHY: the guard raised both trips over an inner exception, so pcall handed the script
+            // "System.InvalidOperationException: ..." or "System.TimeoutException: ...", and xpcall's handler and
+            // a protected coroutine.resume - both read the error value - got nil.
+            bool steps = budget == "steps";
+            string expected = steps
+                ? "LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS (20000)"
+                : "Lua exceeded 100 ms.";
+            string[] calls = { "record(pcall(runaway))", "record(xpcall(runaway, echo))" };
+            foreach (string call in calls)
+            {
+                LuaCsExecutionGuard guard = steps
+                    ? new LuaCsExecutionGuard(60_000, 20_000, 0)
+                    : new LuaCsExecutionGuard(100, 5_000_000_000L, 0);
+                List<string> rows = new();
+
+                LuaRuntimeException ended = RunRecordingChunk(
+                    "local function runaway() local n = 0 for i = 1, 50000000 do n = n + 1 end return n end\n"
+                    + call + "\n"
+                    + "local after = 0\n"
+                    + "for i = 1, 1000 do after = after + i end\n"
+                    + "return after",
+                    guard, rows);
+
+                CollectionAssert.AreEqual(new[] { "boolean:false|string:" + expected }, rows,
+                    call + " must hand the script exactly the trip's line");
+                AssertIsOnlyTheErrorLine(rows[0]);
+
+                // WHY the run must still end with the trip: a step or time budget stays exceeded, so the hook
+                // raises it again at its next fire after pcall returns. Catching it never lets the script go on.
+                Assert.IsNotNull(ended, call + ": catching the trip must not let the chunk run to its end");
+                Assert.AreEqual(expected, ended.Message);
+                Assert.AreEqual(expected, ended.ErrorObject.ToString(),
+                    "the error value, which a protected coroutine.resume hands its resumer, must be the same line");
+                LuaCsHostFunctionException trip = ended as LuaCsHostFunctionException;
+                Assert.IsNotNull(trip, "a guard trip must carry its cause for C#: " + ended.GetType().Name);
+                Assert.IsInstanceOf(steps ? typeof(System.InvalidOperationException) : typeof(System.TimeoutException),
+                    trip.HostException);
+                Assert.IsFalse(LuaCsExecutionGuard.IsMemoryBudgetTrip(ended));
+                Assert.IsFalse(ScriptExecutionErrors.IsMemoryBudgetTrip(ended));
+            }
+        }
+
+        /// <summary>
+        /// Runs <paramref name="chunk"/> under <paramref name="guard"/> on a fresh state with two host functions
+        /// that run no Lua instruction: <c>record(...)</c> adds one "type:value|..." row of its arguments to
+        /// <paramref name="rows"/>, and <c>echo(...)</c> returns its arguments (an xpcall handler). Returns the
+        /// Lua error that ended the run, or null when the chunk returned.
+        /// </summary>
+        internal static LuaRuntimeException RunRecordingChunk(string chunk, LuaCsExecutionGuard guard,
+            List<string> rows)
+        {
+            LuaCsSecureEnvironment env = new();
+            LuaCsApiRegistry registry = new();
+            registry.RegisterCallback("record", (ctx, ct) =>
+            {
+                List<string> parts = new();
+                for (int index = 0; index < ctx.ArgumentCount; index++)
+                {
+                    LuaValue value = ctx.GetArgument(index);
+                    parts.Add(value.Type.ToString().ToLowerInvariant() + ":" + value);
+                }
+
+                rows.Add(string.Join("|", parts));
+                return new System.Threading.Tasks.ValueTask<int>(ctx.Return());
+            });
+            registry.RegisterCallback("echo", (ctx, ct) =>
+                new System.Threading.Tasks.ValueTask<int>(ctx.Return(ctx.Arguments.ToArray())));
+
+            // WHY a fresh state per run: after a guard trip Lua-CSharp leaves the state flagged as inside its
+            // hook, and a later run on that state is not guarded at all.
+            LuaState state = env.Create(registry);
+            try
+            {
+                env.RunChunk(state, chunk, guard);
+                return null;
+            }
+            catch (LuaRuntimeException ex)
+            {
+                return ex;
+            }
+        }
+
+        /// <summary>
+        /// Fails when <paramref name="text"/> carries anything of a CLR exception beyond its message: a type
+        /// name, a managed stack frame, an absolute source path or a second line.
+        /// </summary>
+        internal static void AssertIsOnlyTheErrorLine(string text)
+        {
+            StringAssert.DoesNotContain("Exception", text, "no CLR exception type name may leak: " + text);
+            StringAssert.DoesNotContain("   at ", text, "no managed stack frame may leak: " + text);
+            StringAssert.DoesNotContain("/Assets/", text, "no source path may leak: " + text);
+            StringAssert.DoesNotContain(":\\", text, "no Windows source path may leak: " + text);
+            StringAssert.DoesNotContain("\n", text, "the error must stay one line: " + text);
+        }
+
         [Test]
         public void AllocationBomb_NormalHundredKbString_StillPasses()
         {
@@ -355,7 +561,7 @@ namespace CoreAI.Tests.EditMode
             // longer accumulate), the hook would under-count and the loop would run to completion, returning
             // normally and failing this Assert.Throws instead of hanging (the loop is finite).
             LuaCsExecutionGuard guard = new(60_000, 5_000, 0);
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException ex = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state,
                     "local x = 0\n" +
                     "for i = 1, 5000000 do x = x + 1 end\n" +
@@ -378,7 +584,7 @@ namespace CoreAI.Tests.EditMode
             // that broke the GetTimestamp/ticks-budget math would let the busy loop run unbounded and this
             // [Timeout] test would fail — the signal.
             LuaCsExecutionGuard guard = new(150, 5_000_000_000L, 0);
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException ex = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state,
                     "local x = 0\n" +
                     "while true do x = x + 1 end\n" +
@@ -581,7 +787,7 @@ namespace CoreAI.Tests.EditMode
             // WHY: the audit's exact case. One find call backtracks about n^4.6 times, and the native matcher ran it
             // to completion inside ONE VM instruction (3.3 s at n = 120, returning nil), where no guard hook
             // can interrupt it. The budgeted matcher must refuse it, naming the budget and the function.
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException ex = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state, "return string.rep('a', 120):find('.-.-.-.-b')"));
 
             StringAssert.Contains(LuaCsSecureEnvironment.PatternStepBudgetTripMarker, ex.Message);
@@ -603,7 +809,7 @@ namespace CoreAI.Tests.EditMode
             // so the only way the call can stop at budget + 1 is the step counter itself.
             LuaCsSecureEnvironment.LuaPatternMatcher bounded =
                 new(state, "string.find", new string('a', 40), ".-.-.-.-b", budget);
-            Assert.Throws<LuaRuntimeException>(() => FindFromEveryStart(bounded, 40));
+            Assert.Throws<LuaCsHostFunctionException>(() => FindFromEveryStart(bounded, 40));
             Assert.AreEqual(budget + 1, bounded.Steps,
                 "the matcher must stop on the first step past its budget, not finish the backtracking");
 
@@ -643,12 +849,12 @@ namespace CoreAI.Tests.EditMode
             LuaCsSecureEnvironment env = new();
             LuaState state = env.Create();
 
-            LuaRuntimeException gsub = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException gsub = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state, "return (string.rep('a', 120):gsub('.-.-.-.-b', 'x'))"));
             StringAssert.Contains(LuaCsSecureEnvironment.PatternStepBudgetTripMarker, gsub.Message);
             StringAssert.Contains("string.gsub", gsub.Message);
 
-            LuaRuntimeException gmatch = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException gmatch = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state, "for w in string.rep('a', 120):gmatch('.-.-.-.-b') do end"));
             StringAssert.Contains(LuaCsSecureEnvironment.PatternStepBudgetTripMarker, gmatch.Message);
             StringAssert.Contains("string.gmatch", gmatch.Message);
@@ -684,7 +890,7 @@ namespace CoreAI.Tests.EditMode
 
             // WHY: 30,000 matches x 40 chars = 1,200,000 chars, over MaxStringGsubLength. The native gsub built
             // it (the audit's 1M x 40 variant built 40,000,000 chars, +151 MB, in one call).
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException ex = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state, "return (string.rep('a', 30000):gsub('.', string.rep('b', 40)))"));
             StringAssert.Contains("string.gsub result would exceed " + LuaCsSecureEnvironment.MaxStringGsubLength,
                 ex.Message);
@@ -704,7 +910,7 @@ namespace CoreAI.Tests.EditMode
 
             // WHY: 40 x %s of a 30,000-char string = 1,200,000 chars, over MaxStringFormatResultLength. Only the
             // width/precision fields were capped before, so the native format built it.
-            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException ex = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state,
                     "local s = string.rep('a', 30000)\n" +
                     "local args = {}\n" +
@@ -715,7 +921,7 @@ namespace CoreAI.Tests.EditMode
                 ex.Message);
 
             // WHY: a __tostring object counts with the length of the string it returns.
-            LuaRuntimeException viaToString = Assert.Throws<LuaRuntimeException>(() =>
+            LuaRuntimeException viaToString = Assert.Throws<LuaCsHostFunctionException>(() =>
                 env.RunChunk(state,
                     "local big = setmetatable({}, {__tostring = function() return string.rep('x', 600000) end})\n" +
                     "return string.format('%s%s', big, big)"));

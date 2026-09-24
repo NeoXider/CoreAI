@@ -371,11 +371,17 @@ namespace CoreAI.Sandbox.LuaCs
         /// therefore came back as the literal text "nil": the scheduler classified the runaway as a
         /// BAD_ARGUMENT Lua bug, the fix hint said "fix the Lua error", and auto-repair was handed a
         /// diagnosis that named no bound. An unprotected resume rethrows the same exception, whose
-        /// <c>Message</c> then embeds the error object, so the text survives on both paths.
+        /// <c>Message</c> is that same text, so the text survives on both paths.
+        /// <para>
+        /// WHY <see cref="LuaCsHostFunctionException"/> (an error object at level 0) and not a plain
+        /// level-1 error object: at level 1 pcall alone prepends a "chunk:line:" position the error value
+        /// does not hold, so a pattern-step trip inside <c>string.gsub</c> read one way under pcall and
+        /// another under xpcall and coroutine.resume; the trip already names its author line itself.
+        /// </para>
         /// </remarks>
         internal static LuaRuntimeException CreateBudgetTrip(LuaState state, string message)
         {
-            return new LuaRuntimeException(state, (LuaValue)(message + DescribeCurrentLine(state)));
+            return new LuaCsHostFunctionException(state, message + DescribeCurrentLine(state), null);
         }
 
         /// <summary>

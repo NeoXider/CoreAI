@@ -103,6 +103,97 @@ namespace CoreAI.Mods.Rbx.Instances
             return prefix + ToWireName(code) + ": " + message + suffix;
         }
 
+        /// <summary>
+        /// Reads back a line <see cref="Format"/> wrote: an optional <c>[mod:id script:path line:n] </c>
+        /// prefix, a wire code, <c>": "</c>, the message and an optional <c>" | fix: "</c> suggestion.
+        /// True only when formatting the parsed parts reproduces <paramref name="line"/> exactly, so text
+        /// that merely resembles the format is never re-coded. A <c>script:?</c> prefix reads back as a
+        /// null <see cref="Script"/>, as <see cref="Format"/> writes it.
+        /// </summary>
+        /// <param name="line">The candidate §5.2.7 line.</param>
+        /// <param name="error">The parsed error, or null when <paramref name="line"/> is not such a line.</param>
+        public static bool TryParse(string line, out RbxError error)
+        {
+            error = null;
+            if (string.IsNullOrEmpty(line))
+            {
+                return false;
+            }
+
+            string modId = null;
+            string script = null;
+            int lineNumber = 0;
+            string body = line;
+            if (line.StartsWith("[mod:", StringComparison.Ordinal))
+            {
+                int close = line.IndexOf("] ", StringComparison.Ordinal);
+                if (close < 0)
+                {
+                    return false;
+                }
+
+                string header = line.Substring(5, close - 5);
+                int scriptAt = header.IndexOf(" script:", StringComparison.Ordinal);
+                int lineAt = header.LastIndexOf(" line:", StringComparison.Ordinal);
+                if (scriptAt < 0 || lineAt < scriptAt + 8
+                    || !int.TryParse(header.Substring(lineAt + 6), System.Globalization.NumberStyles.None,
+                        System.Globalization.CultureInfo.InvariantCulture, out lineNumber))
+                {
+                    return false;
+                }
+
+                modId = header.Substring(0, scriptAt);
+                script = header.Substring(scriptAt + 8, lineAt - scriptAt - 8);
+                if (script == "?")
+                {
+                    script = null;
+                }
+
+                body = line.Substring(close + 2);
+            }
+
+            int codeEnd = body.IndexOf(": ", StringComparison.Ordinal);
+            if (codeEnd <= 0 || !TryFromWireName(body.Substring(0, codeEnd), out RbxErrorCode code))
+            {
+                return false;
+            }
+
+            string rest = body.Substring(codeEnd + 2);
+            string message = rest;
+            string fix = null;
+            int fixAt = rest.LastIndexOf(" | fix: ", StringComparison.Ordinal);
+            if (fixAt >= 0 && fixAt + 8 < rest.Length)
+            {
+                message = rest.Substring(0, fixAt);
+                fix = rest.Substring(fixAt + 8);
+            }
+
+            if (!string.Equals(Format(code, message, fix, modId, script, lineNumber), line, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            error = new RbxError(code, message, fix, modId, script, lineNumber);
+            return true;
+        }
+
+        private static readonly RbxErrorCode[] AllCodes = (RbxErrorCode[])Enum.GetValues(typeof(RbxErrorCode));
+
+        private static bool TryFromWireName(string wireName, out RbxErrorCode code)
+        {
+            for (int index = 0; index < AllCodes.Length; index++)
+            {
+                if (string.Equals(ToWireName(AllCodes[index]), wireName, StringComparison.Ordinal))
+                {
+                    code = AllCodes[index];
+                    return true;
+                }
+            }
+
+            code = default;
+            return false;
+        }
+
         /// <summary>Loud stub per the roadmap stub-error contract; names the phase that completes it.</summary>
         public static RbxError NotImplemented(string feature, string phase, string workaround)
         {

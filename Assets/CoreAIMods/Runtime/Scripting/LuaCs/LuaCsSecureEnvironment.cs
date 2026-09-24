@@ -453,9 +453,8 @@ namespace CoreAI.Sandbox.LuaCs
             long total = s.Length * count + sep.Length * (count - 1);
             if (total > MaxStringRepLength)
             {
-                throw new LuaRuntimeException(ctx.State,
-                    new InvalidOperationException(
-                        $"LuaCsSecureEnvironment: string.rep result would exceed {MaxStringRepLength} chars."));
+                throw LibraryRefusal(ctx.State,
+                    $"LuaCsSecureEnvironment: string.rep result would exceed {MaxStringRepLength} chars.");
             }
 
             StringBuilder sb = new((int)total);
@@ -499,8 +498,7 @@ namespace CoreAI.Sandbox.LuaCs
                 }
                 else
                 {
-                    throw new LuaRuntimeException(ctx.State,
-                        new InvalidOperationException($"invalid value ({v.Type}) at index {i} in table for 'concat'"));
+                    throw LibraryRefusal(ctx.State, $"invalid value ({v.Type}) at index {i} in table for 'concat'");
                 }
 
                 if (i != end)
@@ -510,9 +508,8 @@ namespace CoreAI.Sandbox.LuaCs
 
                 if (sb.Length > MaxTableConcatLength)
                 {
-                    throw new LuaRuntimeException(ctx.State,
-                        new InvalidOperationException(
-                            $"LuaCsSecureEnvironment: table.concat result would exceed {MaxTableConcatLength} chars."));
+                    throw LibraryRefusal(ctx.State,
+                        $"LuaCsSecureEnvironment: table.concat result would exceed {MaxTableConcatLength} chars.");
                 }
             }
 
@@ -765,8 +762,21 @@ namespace CoreAI.Sandbox.LuaCs
 
         private static LuaRuntimeException ResultTooLong(LuaState state, string function, int cap)
         {
-            return new LuaRuntimeException(state,
-                (LuaValue)$"LuaCsSecureEnvironment: {function} result would exceed {cap} chars.");
+            return LibraryRefusal(state, $"LuaCsSecureEnvironment: {function} result would exceed {cap} chars.");
+        }
+
+        // WHY LuaCsHostFunctionException and not LuaRuntimeException(LuaState, Exception) or a plain error
+        // object: the inner-exception form gave pcall "System.InvalidOperationException: ..." and gave xpcall
+        // and a protected coroutine.resume nil, while a level-1 error object lets pcall alone prepend a
+        // "chunk:line:" position (string.gsub's refusal read one way under pcall and another under xpcall).
+        // Level 0 with the text as the error value gives pcall, xpcall, resume and C# the same one line.
+        /// <summary>
+        /// The error a sandbox library function raises when it refuses a call (a result or field over its
+        /// cap, a value it cannot concatenate); <paramref name="message"/> is exactly what Lua receives.
+        /// </summary>
+        private static LuaRuntimeException LibraryRefusal(LuaState state, string message)
+        {
+            return new LuaCsHostFunctionException(state, message, null);
         }
 
         /// <summary>
@@ -928,9 +938,8 @@ namespace CoreAI.Sandbox.LuaCs
                 value = value * 10 + (format[i] - '0');
                 if (value > MaxStringFormatLength)
                 {
-                    throw new LuaRuntimeException(state,
-                        new InvalidOperationException(
-                            $"LuaCsSecureEnvironment: string.format width/precision exceeds {MaxStringFormatLength} chars."));
+                    throw LibraryRefusal(state,
+                        $"LuaCsSecureEnvironment: string.format width/precision exceeds {MaxStringFormatLength} chars.");
                 }
 
                 i++;

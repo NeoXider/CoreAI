@@ -344,6 +344,109 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             StringAssert.Contains("post-wait entry failure", fault.ToString());
         }
 
+        private static List<RbxError> RecordFaults(LuaCsRbxApiBindings bindings, string modId)
+        {
+            List<RbxError> faults = new();
+            bindings.Scheduler.ThreadFaulted += (string ownerModId, RbxError error) =>
+            {
+                if (ownerModId == modId)
+                {
+                    faults.Add(error);
+                }
+            };
+            return faults;
+        }
+
+        [Test]
+        public void Lua_TaskSpawnHostError_FaultKeepsTheHostCodeAndLine_UnderOnePrefix()
+        {
+            // WHY: the thread fault wrapped the host's own §5.2.7 line as BAD_ARGUMENT, so ModHandlerErrored and
+            // auto-repair read "[mod:m script:? line:0] BAD_ARGUMENT: [mod:m script:main.lua line:2]
+            // UNKNOWN_SERVICE: ... | fix: ... | fix: fix the Lua error before scheduling the thread again" - two
+            // prefixes, two fixes, and a wrong service name re-coded as a Lua bug.
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            List<RbxError> faults = RecordFaults(bindings, "m");
+
+            stack.Runtime.LoadMod("m", "task.spawn(function()\n    game:GetService('NoSuchService')\nend)");
+
+            const string expected = "[mod:m script:main.lua line:2] UNKNOWN_SERVICE: NoSuchService is not a valid "
+                                    + "Service name | fix: call game:GetService with an exact service class name, "
+                                    + "e.g. \"Workspace\"";
+            Assert.AreEqual(1, faults.Count, "the failing task thread must be reported once");
+            Assert.AreEqual(RbxErrorCode.UnknownService, faults[0].Code, faults[0].Message);
+            Assert.AreEqual(expected, faults[0].Message);
+            Assert.AreEqual("m", faults[0].ModId);
+            Assert.AreEqual("main.lua", faults[0].Script);
+            Assert.AreEqual(2, faults[0].Line);
+
+            IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("m");
+            Assert.AreEqual(1, errors.Count, "the fault must reach the handler-error buffer once");
+            Assert.AreEqual(expected, errors[0].Error,
+                "ModHandlerErrored and the handler-error buffer must carry the host's line itself, once");
+        }
+
+        [TestCase("error('boom')", "boom")]
+        [TestCase("error('NOT_A_CODE: boom')", "NOT_A_CODE: boom")]
+        [TestCase("error('BAD_ARGUMENT:boom')", "BAD_ARGUMENT:boom")]
+        public void Lua_TaskSpawnPlainLuaError_FaultStaysWrappedAsBadArgument(string statement, string text)
+        {
+            // WHY the negative twin: only an exact §5.2.7 line keeps its own code; any other error text is a
+            // Lua bug of the thread and keeps the BAD_ARGUMENT wrapping and its fix hint.
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            List<RbxError> faults = RecordFaults(bindings, "m");
+
+            stack.Runtime.LoadMod("m", "task.spawn(function()\n    " + statement + "\nend)");
+
+            Assert.AreEqual(1, faults.Count, "the failing task thread must be reported once");
+            Assert.AreEqual(RbxErrorCode.BadArgument, faults[0].Code, faults[0].Message);
+            Assert.AreEqual("[mod:m script:? line:0] BAD_ARGUMENT: " + text
+                            + " | fix: fix the Lua error before scheduling the thread again",
+                faults[0].Message);
+        }
+
+        [Test]
+        public void RbxErrorLine_TryParse_ReadsBackExactlyTheLinesFormatWrites()
+        {
+            RbxError[] originals =
+            {
+                new(RbxErrorCode.UnknownService, "X is not a valid Service name", "call GetService with a class name",
+                    "m", "main.lua", 3),
+                new(RbxErrorCode.ThreadCap, "too many live threads"),
+                new(RbxErrorCode.BadArgument, "refused", "pass a number", "m", null, 0),
+                new(RbxErrorCode.ContextViolation,
+                    "wrapped: [mod:n script:lib.lua line:9] BAD_ARGUMENT: inner | fix: inner fix", "outer fix",
+                    "m", "src/a b.lua", 12),
+            };
+            foreach (RbxError original in originals)
+            {
+                Assert.IsTrue(RbxError.TryParse(original.Message, out RbxError parsed), original.Message);
+                Assert.AreEqual(original.Code, parsed.Code, original.Message);
+                Assert.AreEqual(original.RawMessage, parsed.RawMessage, original.Message);
+                Assert.AreEqual(original.Fix, parsed.Fix, original.Message);
+                Assert.AreEqual(original.ModId, parsed.ModId, original.Message);
+                Assert.AreEqual(original.Script, parsed.Script, original.Message);
+                Assert.AreEqual(original.Line, parsed.Line, original.Message);
+                Assert.AreEqual(original.Message, parsed.Message, original.Message);
+            }
+
+            string[] notLines =
+            {
+                null, "", "boom", "NOT_A_CODE: boom", "BAD_ARGUMENT:boom", "bad_argument: boom",
+                "Lua-CSharp: BAD_ARGUMENT: boom", "[string \"main.lua\"]:5: BAD_ARGUMENT: boom",
+                "[mod:m script:main.lua line:x] BAD_ARGUMENT: boom", "[mod:m script:main.lua line:05] BAD_ARGUMENT: boom",
+                "[mod:m line:5] BAD_ARGUMENT: boom", "[mod:m script:main.lua line:5]BAD_ARGUMENT: boom",
+            };
+            foreach (string text in notLines)
+            {
+                Assert.IsFalse(RbxError.TryParse(text, out RbxError none), "must not parse: " + text);
+                Assert.IsNull(none, "no error may come back for: " + text);
+            }
+        }
+
         [Test]
         public void Lua_ModMainChunk_UnloadKillsThreadSuspendedAtTaskWait()
         {

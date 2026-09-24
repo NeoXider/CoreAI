@@ -12,7 +12,8 @@ using Lua.Runtime;
 namespace CoreAI.Sandbox.LuaCs
 {
     /// <summary>
-    /// Raised (as the CLR cause) by <see cref="LuaCsExecutionGuard"/> when a guarded run exceeds the
+    /// The CLR cause <see cref="LuaCsExecutionGuard"/> attaches (as the trip's
+    /// <see cref="LuaCsHostFunctionException.HostException"/>) when a guarded run exceeds the
     /// process-heap allocation budget. A dedicated type — never a message substring — so a mod's own
     /// <c>error("…EXCEEDED_MEMORY_BUDGET…")</c> text cannot masquerade as a memory-budget trip in logs or
     /// telemetry. Only this guard can construct it.
@@ -150,8 +151,9 @@ namespace CoreAI.Sandbox.LuaCs
         /// </summary>
         public static bool IsMemoryBudgetTrip(Exception ex)
         {
-            // WHY NextCause: a host function's LuaCsHostFunctionException carries its cause as HostException,
-            // not InnerException, so a plain InnerException walk would stop at it.
+            // WHY NextCause: a host function's LuaCsHostFunctionException, this guard's own trips included,
+            // carries its cause as HostException, not InnerException, so a plain InnerException walk would
+            // stop at it.
             for (Exception e = ex; e != null; e = LuaCsHostFunctionException.NextCause(e))
             {
                 if (e is LuaMemoryBudgetException)
@@ -539,7 +541,7 @@ namespace CoreAI.Sandbox.LuaCs
                 if (_steps > _maxSteps)
                 {
                     _trip = LuaCsGuardTripKind.Steps;
-                    throw new LuaRuntimeException(ctx.State,
+                    throw TripError(ctx.State,
                         new InvalidOperationException(
                             $"LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS ({_maxSteps})"));
                 }
@@ -557,8 +559,7 @@ namespace CoreAI.Sandbox.LuaCs
                 if (now - _startTimestamp - _yieldedTicks > _timeoutTicks)
                 {
                     _trip = LuaCsGuardTripKind.Timeout;
-                    throw new LuaRuntimeException(ctx.State,
-                        new TimeoutException($"Lua exceeded {_timeoutMs} ms."));
+                    throw TripError(ctx.State, new TimeoutException($"Lua exceeded {_timeoutMs} ms."));
                 }
 
                 // WHY: Backstop for plain concatenation (s = s .. s), which unlike string.rep/format/
@@ -570,7 +571,7 @@ namespace CoreAI.Sandbox.LuaCs
                 if (_allocation.IsExceeded())
                 {
                     _trip = LuaCsGuardTripKind.Memory;
-                    throw new LuaRuntimeException(ctx.State,
+                    throw TripError(ctx.State,
                         new LuaMemoryBudgetException(
                             $"LuaCsSecureEnvironment: {MemoryBudgetTripMarker} ({_allocation.BudgetBytes} bytes)"));
                 }
@@ -595,6 +596,23 @@ namespace CoreAI.Sandbox.LuaCs
                 _yieldedTicks += resumed - yieldStart;
                 _lastYieldTimestamp = resumed;
                 return ctx.Return();
+            }
+
+            // WHY not LuaRuntimeException(LuaState, Exception): with the cause as InnerException, pcall handed
+            // the script the cause's ToString() ("System.TimeoutException: Lua exceeded 500 ms.") while
+            // xpcall and a protected coroutine.resume read ErrorObject, which that constructor leaves nil -
+            // the same defect LuaCsCoroutineHandle.CreateBudgetTrip fixed for the per-resume hooks. Whether
+            // pcall can catch the trip at all is unchanged: pcall catches every Lua error, and a step or time
+            // trip stays exceeded, so the next hook fire raises it again.
+            /// <summary>
+            /// The VM error a budget trip raises: <paramref name="cause"/>'s message is the error value
+            /// every protected path receives, and <paramref name="cause"/> itself stays reachable as
+            /// <see cref="LuaCsHostFunctionException.HostException"/> for type-based classification
+            /// (<see cref="LuaCsExecutionGuard.IsMemoryBudgetTrip"/>, <see cref="ScriptExecutionErrors.IsMemoryBudgetTrip"/>).
+            /// </summary>
+            private static LuaRuntimeException TripError(LuaState state, Exception cause)
+            {
+                return new LuaCsHostFunctionException(state, cause.Message, cause);
             }
         }
     }

@@ -964,6 +964,17 @@ namespace CoreAI.Ai.LuaCs
                                       StringComparison.Ordinal) >= 0
                                   || error.IndexOf("resume exceeded",
                                       StringComparison.OrdinalIgnoreCase) >= 0;
+            // WHY the §5.2.7 line is kept as it is: a host error the thread did not catch (an RbxError from
+            // game:GetService, Instance.new, ...) reaches here as the exact line the script's pcall would
+            // have received, already carrying its code, fix and [mod: script: line:] context. Wrapping it
+            // as BAD_ARGUMENT gave the fault two prefixes and two fixes and re-coded, say, UNKNOWN_SERVICE
+            // as a Lua bug for ModHandlerErrored and auto-repair. Budget kills keep the classification
+            // above, and any other text (error('boom'), a Lua runtime error) keeps the wrapping below.
+            if (!budgetExceeded && RbxError.TryParse(error, out RbxError raised))
+            {
+                return raised.ModId == null ? raised.WithContext(OwnerModId, null, 0) : raised;
+            }
+
             // WHY a separate hint for the memory trip: "reduce the work" steers a repair toward the loop,
             // while the fix for EXCEEDED_MEMORY_BUDGET is to keep less data alive inside one resume.
             bool memoryExceeded = budgetExceeded

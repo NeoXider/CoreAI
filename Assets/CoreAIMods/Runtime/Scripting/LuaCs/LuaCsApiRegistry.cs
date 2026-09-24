@@ -281,14 +281,16 @@ namespace CoreAI.Sandbox.LuaCs
     }
 
     /// <summary>
-    /// The Lua error raised when a host (C#) function fails. Lua code receives exactly
-    /// <see cref="Message"/> as a string error value, through <c>pcall</c>, <c>xpcall</c> and a
-    /// protected <c>coroutine.resume</c> alike: the host's own one-line text (on the Roblox surface the
-    /// §5.2.7 <c>[mod:id script:path line:n] CODE: message | fix: ...</c> line), never a CLR type name,
-    /// a managed stack trace or a source path. C# code reads the original exception from
-    /// <see cref="HostException"/>.
+    /// The Lua error raised by a host (C#) function: a failing API call, a sandbox library refusal
+    /// (a <c>string.rep</c>/<c>table.concat</c>/<c>string.format</c> cap) or a guard hook cutting the
+    /// script on a budget. Lua code receives exactly <see cref="Message"/> as a string error value,
+    /// through <c>pcall</c>, <c>xpcall</c> and a protected <c>coroutine.resume</c> alike: the host's own
+    /// one-line text (on the Roblox surface the §5.2.7 <c>[mod:id script:path line:n] CODE: message |
+    /// fix: ...</c> line), never a CLR type name, a managed stack trace or a source path. C# code reads
+    /// the original exception from <see cref="HostException"/>, which engine-neutral walkers reach through
+    /// <see cref="IScriptHostFailure"/>.
     /// </summary>
-    public sealed class LuaCsHostFunctionException : LuaRuntimeException
+    public sealed class LuaCsHostFunctionException : LuaRuntimeException, IScriptHostFailure
     {
         private readonly string _message;
 
@@ -315,7 +317,8 @@ namespace CoreAI.Sandbox.LuaCs
 
         /// <summary>
         /// The exception the host function threw (for example an <c>RbxError</c> carrying its code and
-        /// mod context). Not exposed as <see cref="Exception.InnerException"/>: see the constructor's WHY.
+        /// mod context, or a guard's <see cref="LuaMemoryBudgetException"/>); null for a refusal that has
+        /// no separate cause. Not exposed as <see cref="Exception.InnerException"/>: see the constructor's WHY.
         /// </summary>
         public Exception HostException { get; }
 
@@ -328,13 +331,12 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>
         /// Next link of a cause chain: <see cref="HostException"/> for this type, otherwise
         /// <see cref="Exception.InnerException"/>. Walkers that classify a failure by the TYPE of a
-        /// wrapped cause step with this so a host function's error does not end the chain.
+        /// wrapped cause step with this so a host function's error does not end the chain. The same
+        /// rule as the engine-neutral <see cref="ScriptExecutionErrors.NextCause"/>, which it delegates to.
         /// </summary>
         public static Exception NextCause(Exception exception)
         {
-            return exception is LuaCsHostFunctionException host
-                ? host.HostException
-                : exception?.InnerException;
+            return ScriptExecutionErrors.NextCause(exception);
         }
     }
 }
