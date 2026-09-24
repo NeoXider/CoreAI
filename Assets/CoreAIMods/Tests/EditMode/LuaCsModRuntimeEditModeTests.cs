@@ -640,6 +640,97 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void LuaCs_EmergencyInstanceCeiling_InjectedValueIsEnforcedAndCanOnlyLowerTheCeiling()
+        {
+            const int ceiling = 3;
+            LuaCsRbxApiBindings rbxApi = new();
+            LuaCsModRuntime runtime = new(
+                rbxApi: rbxApi,
+                maxRegisteredInstancesPerActor: 100,
+                emergencyMaxRegisteredInstances: ceiling);
+            Assert.AreEqual(ceiling, runtime.EmergencyRegisteredInstanceCeiling);
+
+            List<RbxInstance> created = new();
+            for (int index = 0; index < ceiling; index++)
+            {
+                created.Add(rbxApi.Registry.Create("Folder"));
+            }
+
+            int liveBeforeRefusal = rbxApi.Registry.Count;
+            InvalidOperationException refused = Assert.Throws<InvalidOperationException>(
+                () => rbxApi.Registry.Create("Folder"),
+                "the injected ceiling, not the 16384 constant, bounds the world");
+            StringAssert.Contains(
+                "emergency registered instances ceiling reached (" + ceiling + ")", refused.Message);
+            Assert.AreEqual(liveBeforeRefusal, rbxApi.Registry.Count,
+                "the refused creation must leave nothing behind");
+
+            created[0].Destroy();
+            Assert.DoesNotThrow(() => rbxApi.Registry.Create("Folder"),
+                "destroying a charged instance frees one slot under the injected ceiling");
+
+            LuaCsModRuntime lifted = new(
+                rbxApi: new LuaCsRbxApiBindings(),
+                emergencyMaxRegisteredInstances: LuaCsModRuntime.EmergencyMaxRegisteredInstances * 2);
+            Assert.AreEqual(LuaCsModRuntime.DefaultEmergencyMaxRegisteredInstances,
+                lifted.EmergencyRegisteredInstanceCeiling,
+                "a host may lower the emergency ceiling but never lift it above the platform bound");
+            Assert.AreEqual(1, new LuaCsModRuntime(emergencyMaxRegisteredInstances: 0)
+                .EmergencyRegisteredInstanceCeiling);
+            Assert.AreEqual(LuaCsModRuntime.DefaultEmergencyMaxRegisteredInstances,
+                new LuaCsModRuntime().EmergencyRegisteredInstanceCeiling);
+            Assert.AreEqual(LuaCsModRuntime.EmergencyMaxRegisteredInstances,
+                LuaCsModRuntime.DefaultEmergencyMaxRegisteredInstances,
+                "outside a WebGL player the default emergency ceiling stays 16384");
+        }
+
+        [Test]
+        public void LuaCs_WebGlEmergencyCeiling_AWorldGrownToItStillFitsTheWebGlSaveBudget()
+        {
+            const int webGlSaveBudget =
+                CoreAI.Mods.WorldPackages.FileRbxWorldPackageStore.MaximumWebGlSafeInstances;
+            LuaCsRbxApiBindings rbxApi = new();
+            LuaCsModRuntime runtime = new(
+                rbxApi: rbxApi,
+                maxRegisteredInstancesPerActor: LuaCsModRuntime.EmergencyMaxRegisteredInstances,
+                emergencyMaxRegisteredInstances: LuaCsModRuntime.WebGlEmergencyMaxRegisteredInstances);
+            Assert.AreEqual(LuaCsModRuntime.WebGlEmergencyMaxRegisteredInstances,
+                runtime.EmergencyRegisteredInstanceCeiling);
+
+            int created = 0;
+            InvalidOperationException refusal = null;
+            for (int attempt = 0;
+                 attempt <= LuaCsModRuntime.WebGlEmergencyMaxRegisteredInstances && refusal == null;
+                 attempt++)
+            {
+                try
+                {
+                    RbxInstance folder = rbxApi.Registry.Create("Folder");
+                    folder.Parent = rbxApi.Registry.WorldRoot;
+                    created++;
+                }
+                catch (InvalidOperationException exception)
+                {
+                    refusal = exception;
+                }
+            }
+
+            Assert.IsNotNull(refusal, "growth must stop at the WebGL emergency ceiling");
+            StringAssert.Contains(
+                "emergency registered instances ceiling reached ("
+                + LuaCsModRuntime.WebGlEmergencyMaxRegisteredInstances + ")",
+                refusal.Message);
+            int capturedNodes = InstanceTreeSerializer.Capture(rbxApi.Game).Instances.Count;
+            Assert.LessOrEqual(capturedNodes, webGlSaveBudget,
+                "a world grown to the WebGL ceiling must still pass the WebGL package instance budget, "
+                + "or the pre-mutation autosave would refuse it and lock every gated tool");
+            Assert.LessOrEqual(capturedNodes - created, LuaCsModRuntime.UnchargedWorldSkeletonAllowance,
+                "the uncharged world skeleton must fit the allowance kept under the save budget");
+            Assert.Greater(LuaCsModRuntime.EmergencyMaxRegisteredInstances, webGlSaveBudget,
+                "the desktop ceiling alone would let a script outgrow the WebGL save budget");
+        }
+
+        [Test]
         public void LuaCs_EventSubscriptionQuota_IsPerActorAtNAndNPlusOne()
         {
             LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
@@ -2503,6 +2594,385 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("dmg", errors[0].Error, "The recorded error must name the slot.");
             Assert.AreEqual(1, stack.Runtime.ListMods()[0].ErrorCount,
                 "The override failure charges the owning mod's error streak.");
+        }
+
+        /// <summary>Collects the runtime's error lines so host-fault reporting can be counted.</summary>
+        private sealed class RecordingLog : CoreAI.Logging.ILog
+        {
+            public readonly List<string> Errors = new();
+
+            public void Debug(string message, string tag = null)
+            {
+            }
+
+            public void Info(string message, string tag = null)
+            {
+            }
+
+            public void Warn(string message, string tag = null)
+            {
+            }
+
+            public void Error(string message, string tag = null)
+            {
+                Errors.Add(message);
+            }
+        }
+
+        /// <summary>
+        /// Builds a Roblox-API stack wired to the installer's ModTearingDown cleanup, so a quarantined
+        /// mod's scheduler threads and connections stop exactly as they do in production.
+        /// </summary>
+        private static LuaCsModStack BuildSchedulerStack(LuaCsRbxApiBindings bindings,
+            MemoryStore store, int maxErrorsBeforeQuarantine, CoreAI.Logging.ILog log = null)
+        {
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = bindings,
+                MaxErrorsBeforeQuarantine = maxErrorsBeforeQuarantine,
+                Log = log
+            });
+            stack.Runtime.ModTearingDown += (modId, reason) =>
+            {
+                if (reason == LuaModTeardownReason.Reload)
+                {
+                    bindings.KillOutgoingScheduledGenerations(modId);
+                }
+                else
+                {
+                    bindings.KillAllScheduledOwnedBy(modId);
+                }
+
+                bindings.Connections.DisconnectOwnedBy(modId, reason == LuaModTeardownReason.Reload);
+            };
+            return stack;
+        }
+
+        /// <summary>One production frame: the scheduler's Advance, then the runtime's Tick.</summary>
+        private static void PumpSchedulerFrame(LuaCsModStack stack, LuaCsRbxApiBindings bindings)
+        {
+            Assert.DoesNotThrow(() => bindings.Scheduler.Advance(1d / 60d),
+                "a mod's fault must never escape the frame");
+            stack.Runtime.Tick(1d / 60d);
+        }
+
+        private static LuaModInfo ModInfo(LuaCsModStack stack, string modId)
+        {
+            return stack.Runtime.ListMods().Single(mod => mod.Id == modId);
+        }
+
+        private static string InvariantText(int value)
+        {
+            return value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private const string CascadingModSource = @"
+            local RunService = game:GetService('RunService')
+            workspace.ChildAdded:Connect(function(child)
+                if child.Name == 'Loop' then
+                    local folder = Instance.new('Folder')
+                    folder.Name = 'Loop'
+                    folder.Parent = workspace
+                end
+            end)
+            RunService.Stepped:Connect(function()
+                local seed = Instance.new('Folder')
+                seed.Name = 'Loop'
+                seed.Parent = workspace
+            end)";
+
+        private const string HealthySchedulerModSource = @"
+            local RunService = game:GetService('RunService')
+            local beats = 0
+            RunService.Heartbeat:Connect(function()
+                beats = beats + 1
+                store_set('heartbeats', tostring(beats))
+            end)
+            task.spawn(function()
+                local waits = 0
+                while true do
+                    task.wait()
+                    waits = waits + 1
+                    store_set('waits', tostring(waits))
+                end
+            end)";
+
+        [Test]
+        public void LuaCs_M2_02_CascadingModIsQuarantinedAfterKFaultingFrames_WhileAnotherModKeepsRunning()
+        {
+            const int threshold = 3;
+            const int framesAfterQuarantine = 3;
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildSchedulerStack(bindings, store, threshold);
+            List<(string ModId, int Streak)> quarantines = new();
+            stack.Runtime.ModQuarantined += (modId, streak) => quarantines.Add((modId, streak));
+            stack.Runtime.LoadMod("cascading", CascadingModSource);
+            stack.Runtime.LoadMod("healthy", HealthySchedulerModSource);
+
+            // WHY this mod: its Stepped handler and the ChildAdded handlers of the chain resume cleanly
+            // in the same frame, before the chain is cut, so a streak that any clean resume resets would
+            // never reach the threshold.
+            for (int frame = 1; frame <= threshold; frame++)
+            {
+                PumpSchedulerFrame(stack, bindings);
+                Assert.AreEqual(frame == threshold, ModInfo(stack, "cascading").Quarantined,
+                    "the cascading mod is quarantined exactly at faulting frame " + threshold
+                    + ", checked after frame " + frame);
+            }
+
+            CollectionAssert.AreEqual(new[] { ("cascading", threshold) }, quarantines);
+            IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("cascading");
+            Assert.AreEqual(threshold, errors.Count,
+                "one SIGNAL_CASCADE per frame: " + string.Join(" || ", errors.Select(error => error.Error)));
+            for (int index = 0; index < errors.Count; index++)
+            {
+                StringAssert.Contains("SIGNAL_CASCADE", errors[index].Error);
+                Assert.AreEqual(index + 1, errors[index].ConsecutiveCount,
+                    "each faulting frame lengthens the streak by one");
+            }
+
+            for (int frame = 0; frame < framesAfterQuarantine; frame++)
+            {
+                PumpSchedulerFrame(stack, bindings);
+            }
+
+            Assert.AreEqual(threshold, stack.Runtime.GetRecentHandlerErrors("cascading").Count,
+                "the quarantined mod's connections are gone, so its cascade stops");
+            string totalFrames = InvariantText(threshold + framesAfterQuarantine);
+            Assert.AreEqual(totalFrames, store.Get("healthy", "heartbeats"),
+                "the healthy mod's Heartbeat ran every frame, before and after the quarantine");
+            Assert.AreEqual(totalFrames, store.Get("healthy", "waits"),
+                "the healthy mod's task.wait loop resumed every frame, before and after the quarantine");
+            Assert.IsFalse(ModInfo(stack, "healthy").Quarantined);
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("healthy"));
+        }
+
+        [Test]
+        public void LuaCs_M2_08_SchedulerHandlerErroringOnAlternateFires_IsNeverQuarantined()
+        {
+            const int frames = 20;
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildSchedulerStack(bindings, store, 2);
+            stack.Runtime.LoadMod("flaky", @"
+                local beats = 0
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    beats = beats + 1
+                    store_set('beats', tostring(beats))
+                    if beats % 2 == 1 then
+                        error('odd beat')
+                    end
+                end)");
+
+            for (int frame = 1; frame <= frames; frame++)
+            {
+                PumpSchedulerFrame(stack, bindings);
+                Assert.IsFalse(ModInfo(stack, "flaky").Quarantined,
+                    "a clean frame between two faulting frames resets the streak; quarantined after frame "
+                    + frame);
+            }
+
+            Assert.AreEqual(InvariantText(frames), store.Get("flaky", "beats"),
+                "the handler kept firing every frame");
+            IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("flaky");
+            Assert.AreEqual(frames / 2, errors.Count);
+            Assert.IsTrue(errors.All(error => error.ConsecutiveCount == 1),
+                "every fault starts a fresh streak: "
+                + string.Join(", ", errors.Select(error => error.ConsecutiveCount)));
+            Assert.AreEqual(0, ModInfo(stack, "flaky").ErrorCount,
+                "the last frame ran cleanly, so the streak is zero");
+        }
+
+        [Test]
+        public void LuaCs_M2_08_SchedulerHandlerErroringKFiresInARow_IsQuarantinedAtTheNextTick_AndReloadClearsIt()
+        {
+            const int threshold = 3;
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildSchedulerStack(bindings, store, threshold);
+            stack.Runtime.LoadMod("poked", @"
+                workspace.ChildAdded:Connect(function(child)
+                    if child.Name == 'Poke' then
+                        error('poke failed')
+                    end
+                end)");
+
+            // WHY idle frames between the pokes: a frame in which the mod ran nothing is no success, so
+            // K faults in a row quarantine however far apart they land.
+            for (int poke = 1; poke <= threshold; poke++)
+            {
+                RbxInstance folder = bindings.Registry.Create("Folder");
+                folder.Name = "Poke";
+                folder.Parent = bindings.Registry.WorldRoot;
+                Assert.DoesNotThrow(() => bindings.Scheduler.Advance(1d / 60d));
+                Assert.IsFalse(ModInfo(stack, "poked").Quarantined,
+                    "quarantine is decided at Tick, never inside the scheduler frame");
+                stack.Runtime.Tick(1d / 60d);
+                Assert.AreEqual(poke == threshold, ModInfo(stack, "poked").Quarantined,
+                    "quarantined exactly at the Tick after fault " + threshold + ", checked after " + poke);
+                PumpSchedulerFrame(stack, bindings);
+            }
+
+            Assert.AreEqual(threshold, stack.Runtime.GetRecentHandlerErrors("poked").Count);
+
+            stack.Runtime.ReloadMod("poked", @"
+                workspace.ChildAdded:Connect(function(child)
+                    store_set('seen', child.Name)
+                end)");
+            LuaModInfo reloaded = ModInfo(stack, "poked");
+            Assert.IsFalse(reloaded.Quarantined, "a reload clears the scheduler-path quarantine");
+            Assert.AreEqual(0, reloaded.ErrorCount, "a reload clears the scheduler-path streak");
+
+            RbxInstance afterReload = bindings.Registry.Create("Folder");
+            afterReload.Name = "Poke";
+            afterReload.Parent = bindings.Registry.WorldRoot;
+            PumpSchedulerFrame(stack, bindings);
+            Assert.AreEqual("Poke", store.Get("poked", "seen"), "the reloaded mod dispatches again");
+            Assert.AreEqual(threshold, stack.Runtime.GetRecentHandlerErrors("poked").Count);
+        }
+
+        [Test]
+        public void LuaCs_M2_08_ManySchedulerFaultsInOneFrame_CountAsOneFaultingFrame()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildSchedulerStack(bindings, store, 2);
+            stack.Runtime.LoadMod("burst", @"
+                local RunService = game:GetService('RunService')
+                for index = 1, 3 do
+                    RunService.Heartbeat:Connect(function()
+                        error('burst ' .. index)
+                    end)
+                end");
+
+            PumpSchedulerFrame(stack, bindings);
+
+            IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("burst");
+            Assert.AreEqual(3, errors.Count, "every fault of the burst is still reported");
+            Assert.IsTrue(errors.All(error => error.ConsecutiveCount == 1),
+                "three faults in one frame are one faulting frame");
+            Assert.AreEqual(1, ModInfo(stack, "burst").ErrorCount);
+            Assert.IsFalse(ModInfo(stack, "burst").Quarantined,
+                "one burst frame must not quarantine a mod whose threshold is two");
+
+            PumpSchedulerFrame(stack, bindings);
+
+            Assert.IsTrue(ModInfo(stack, "burst").Quarantined,
+                "a second faulting frame in a row reaches the threshold");
+            Assert.AreEqual(2, ModInfo(stack, "burst").ErrorCount);
+        }
+
+        [Test]
+        public void LuaCs_M2_08_CleanSchedulerFrameDoesNotForgiveALegacyHookErrorOfTheSameFrame()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildSchedulerStack(bindings, store, 2);
+            stack.Runtime.LoadMod("mixed", @"
+                hooks_on('boom', function() error('legacy boom') end)
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    store_set('beat', 'yes')
+                end)");
+
+            // WHY: the Heartbeat handler resumes cleanly in Advance, before Tick dispatches the failing
+            // hook; closing the frame must not let that earlier clean resume erase the later failure.
+            for (int frame = 1; frame <= 2; frame++)
+            {
+                stack.Runtime.EmitEvent("boom", "");
+                PumpSchedulerFrame(stack, bindings);
+                Assert.AreEqual(frame, ModInfo(stack, "mixed").ErrorCount,
+                    "the hook failure of frame " + frame + " stays charged");
+            }
+
+            Assert.AreEqual("yes", store.Get("mixed", "beat"));
+            Assert.IsTrue(ModInfo(stack, "mixed").Quarantined);
+        }
+
+        [Test]
+        public void LuaCs_SchedulerHostFault_IsLoggedOncePerDistinctFault_AndNeverRethrownOutOfTheFrame()
+        {
+            RecordingLog log = new();
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildSchedulerStack(bindings, new MemoryStore(), 8, log);
+            Assert.IsNotNull(stack.Runtime);
+            int heartbeats = 0;
+            bindings.Scheduler.PhaseReached += (phase, deltaSeconds) =>
+            {
+                if (phase != CoreAI.Mods.Rbx.Instances.Scheduling.SchedulerPhase.Heartbeat)
+                {
+                    return;
+                }
+
+                heartbeats++;
+                throw new InvalidOperationException(
+                    heartbeats <= 3 ? "host-fault-probe first" : "host-fault-probe second");
+            };
+
+            for (int frame = 0; frame < 5; frame++)
+            {
+                Assert.DoesNotThrow(() => bindings.Scheduler.Advance(1d / 60d),
+                    "an ownerless fault the runtime reports is not rethrown after the frame");
+            }
+
+            Assert.AreEqual(5, heartbeats);
+            Assert.AreEqual(1, log.Errors.Count(line => line.Contains("host-fault-probe first")),
+                "a fault recurring every frame is logged once: " + string.Join(" || ", log.Errors));
+            Assert.AreEqual(1, log.Errors.Count(line => line.Contains("host-fault-probe second")),
+                "a distinct fault is logged once more");
+        }
+
+        [Test]
+        public void LuaCs_SchedulerHostFault_DistinctFaultMemoIsBounded()
+        {
+            RecordingLog log = new();
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildSchedulerStack(bindings, new MemoryStore(), 8, log);
+            Assert.IsNotNull(stack.Runtime);
+            int heartbeats = 0;
+            bindings.Scheduler.PhaseReached += (phase, deltaSeconds) =>
+            {
+                if (phase == CoreAI.Mods.Rbx.Instances.Scheduling.SchedulerPhase.Heartbeat)
+                {
+                    heartbeats++;
+                    throw new InvalidOperationException("host-fault-probe distinct " + heartbeats);
+                }
+            };
+
+            int frames = LuaCsModRuntime.MaxDistinctHostFaultsLogged + 5;
+            for (int frame = 0; frame < frames; frame++)
+            {
+                Assert.DoesNotThrow(() => bindings.Scheduler.Advance(1d / 60d));
+            }
+
+            List<string> probeLines = log.Errors.Where(line => line.Contains("host-fault-probe")).ToList();
+            Assert.AreEqual(LuaCsModRuntime.MaxDistinctHostFaultsLogged + 1, probeLines.Count,
+                "each distinct fault up to the cap, then one overflow line, then nothing");
+            StringAssert.Contains("further distinct faults are not logged", probeLines[probeLines.Count - 1]);
+        }
+
+        [Test]
+        public void LuaCs_SchedulerHostFault_WithoutALogger_IsStillRethrownAfterTheFrame()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildSchedulerStack(bindings, new MemoryStore(), 8);
+            Assert.IsNotNull(stack.Runtime);
+            bindings.Scheduler.PhaseReached += (phase, deltaSeconds) =>
+            {
+                if (phase == CoreAI.Mods.Rbx.Instances.Scheduling.SchedulerPhase.Heartbeat)
+                {
+                    throw new InvalidOperationException("host-fault-probe unlogged");
+                }
+            };
+
+            InvalidOperationException rethrown = Assert.Throws<InvalidOperationException>(
+                () => bindings.Scheduler.Advance(1d / 60d),
+                "with nowhere to report it, the runtime must leave the fault to the scheduler's rethrow");
+            StringAssert.Contains("host-fault-probe unlogged", rethrown.Message);
         }
     }
 }

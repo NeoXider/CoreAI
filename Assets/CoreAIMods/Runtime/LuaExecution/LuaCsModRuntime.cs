@@ -49,7 +49,9 @@ namespace CoreAI.Ai.LuaCs
     /// per-call instruction/time guard (<see cref="LuaCsExecutionGuard"/>).
     ///
     /// ERROR POLICY — QUARANTINE, NOT UNLOAD: a mod failing <see cref="MaxErrorsBeforeQuarantine"/>
-    /// times in a row (the counter resets on a successful call) is QUARANTINED: it stops dispatching
+    /// times in a row (a failed hook/timer call counts once and a successful one resets the streak; for
+    /// scheduler threads a frame with any fault counts once and a frame whose threads ran cleanly resets
+    /// it) is QUARANTINED at the end of a <see cref="Tick"/>: it stops dispatching
     /// (handlers, timers, and queued events are all skipped and its logic-slot overrides revert to
     /// vanilla) but it STAYS loaded and fully addressable — <c>manage_mods list/get_source/diagnostics</c>
     /// keep seeing it and <see cref="ReloadMod"/> works normally, clearing the quarantine and the error
@@ -79,6 +81,47 @@ namespace CoreAI.Ai.LuaCs
         public const int EmergencyMaxMods = 256;
         public const int DefaultMaxRegisteredInstancesPerActor = 2048;
         public const int EmergencyMaxRegisteredInstances = 16384;
+
+        /// <summary>
+        /// Room kept under the WebGL world-package save budget for the nodes a save carries that the
+        /// registered-instance ceiling never charges: the DataModel, its services and the Workspace
+        /// Camera (17 in a bootstrapped world).
+        /// </summary>
+        public const int UnchargedWorldSkeletonAllowance = 64;
+
+        /// <summary>
+        /// Emergency registered-instance ceiling of a WebGL player: the WebGL world-package save budget
+        /// (<see cref="CoreAI.Mods.WorldPackages.FileRbxWorldPackageStore.MaximumWebGlSafeInstances"/>)
+        /// minus <see cref="UnchargedWorldSkeletonAllowance"/>.
+        /// </summary>
+        /// <remarks>
+        /// WHY: the WebGL store refuses to write a package whose tree holds more instances than its
+        /// budget, and the pre-mutation autosave gates every world-changing tool on that write. A
+        /// script allowed to grow the world to the desktop ceiling would therefore lock every gated tool
+        /// until something is deleted by hand, so on WebGL the growth stops where the save still fits.
+        /// </remarks>
+        public const int WebGlEmergencyMaxRegisteredInstances =
+            CoreAI.Mods.WorldPackages.FileRbxWorldPackageStore.MaximumWebGlSafeInstances
+            - UnchargedWorldSkeletonAllowance;
+
+        /// <summary>
+        /// Emergency registered-instance ceiling a runtime gets when its host passes none:
+        /// <see cref="WebGlEmergencyMaxRegisteredInstances"/> in a WebGL player,
+        /// <see cref="EmergencyMaxRegisteredInstances"/> everywhere else.
+        /// </summary>
+#if UNITY_WEBGL && !UNITY_EDITOR
+        public const int DefaultEmergencyMaxRegisteredInstances = WebGlEmergencyMaxRegisteredInstances;
+#else
+        public const int DefaultEmergencyMaxRegisteredInstances = EmergencyMaxRegisteredInstances;
+#endif
+
+        /// <summary>
+        /// Distinct ownerless scheduler faults (<see cref="ModScheduler.HostFaulted"/>) a runtime logs;
+        /// a repeat of a logged fault is never logged again, and the first fault beyond this many distinct
+        /// ones is announced by one final line instead of growing the memo without bound.
+        /// </summary>
+        public const int MaxDistinctHostFaultsLogged = 64;
+
         public const int DefaultMaxHandlersPerMod = 64;
         public const int DefaultMaxEventSubscriptionsPerActor =
             DefaultMaxMods * DefaultMaxHandlersPerMod;
@@ -178,6 +221,21 @@ namespace CoreAI.Ai.LuaCs
             /// <see cref="ReloadMod"/> replaces it with a fresh, un-quarantined instance.
             /// </summary>
             public bool Quarantined;
+
+            /// <summary>
+            /// Any failure was charged to this mod since the last <see cref="Tick"/> closed its frame, so
+            /// a clean scheduler resume earlier in the same frame must not forgive it.
+            /// </summary>
+            public bool FaultedThisFrame;
+
+            /// <summary>
+            /// A scheduler-thread fault of this frame has already been charged; further scheduler faults
+            /// of the same frame are reported but do not lengthen the streak again.
+            /// </summary>
+            public bool SchedulerFaultChargedThisFrame;
+
+            /// <summary>A scheduler thread of this mod yielded or completed cleanly during this frame.</summary>
+            public bool SchedulerSucceededThisFrame;
         }
 
         private readonly object _gate = new();
@@ -211,8 +269,12 @@ namespace CoreAI.Ai.LuaCs
 
         private readonly Queue<LuaModHandlerError> _recentHandlerErrors = new();
         private readonly Queue<LuaModReport> _recentReports = new();
+        private readonly Dictionary<string, int> _buildDepthByModId = new(StringComparer.Ordinal);
+        private readonly object _hostFaultGate = new();
+        private readonly HashSet<string> _loggedHostFaults = new(StringComparer.Ordinal);
 
         private int _registeredInstanceCount;
+        private bool _hostFaultOverflowLogged;
         private long _nextLoadOrder;
         private long _subscriptionEntriesTouched;
 
@@ -253,10 +315,10 @@ namespace CoreAI.Ai.LuaCs
         internal event Action<string, LuaModTeardownReason> ModTearingDown;
 
         /// <summary>
-        /// Raised when a loaded mod's hook/timer throws while running under <see cref="Tick"/>:
-        /// (modId, error, consecutiveErrorCount). Fired asynchronously on the host thread; the count
-        /// resets to zero after any successful call, so a host can debounce an auto-repair loop on the
-        /// streak length.
+        /// Raised when a loaded mod's hook/timer throws while running under <see cref="Tick"/>, or one of
+        /// its scheduler threads faults: (modId, error, consecutiveErrorCount). Fired asynchronously on the
+        /// host thread; the count resets to zero after any successful call (for scheduler threads, after a
+        /// frame that ran cleanly), so a host can debounce an auto-repair loop on the streak length.
         /// </summary>
         internal event Action<string, string, int> ModHandlerErrored;
 
@@ -283,11 +345,20 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Host-configured per-actor registered-instance capacity.</summary>
         public int MaxRegisteredInstancesPerActor { get; }
 
+        /// <summary>
+        /// Emergency ceiling on registered instances across every actor of this runtime: the host's value
+        /// clamped to at most <see cref="DefaultEmergencyMaxRegisteredInstances"/>, so a host can lower the
+        /// ceiling but never lift it above the platform's hard bound.
+        /// </summary>
+        public int EmergencyRegisteredInstanceCeiling { get; }
+
         /// <summary>Host-configured per-actor named-event subscription capacity.</summary>
         public int MaxEventSubscriptionsPerActor { get; }
 
         /// <summary>
-        /// Consecutive-error streak (reset by any successful call) at which a mod is quarantined.
+        /// Consecutive-error streak (reset by any successful call) at which a mod is quarantined. Scheduler
+        /// threads count per frame: a frame with any fault adds one, and a frame whose threads only ran
+        /// cleanly resets the streak.
         /// Quarantine suspends dispatch (handlers, timers, queued events) and reverts the mod's
         /// logic-slot overrides to vanilla, but the mod stays loaded; <see cref="ReloadMod"/> clears
         /// both the quarantine and the streak.
@@ -367,6 +438,11 @@ namespace CoreAI.Ai.LuaCs
         /// <param name="maxSchedulerThreadsPerActor">Per-actor live scheduler-thread quota.</param>
         /// <param name="maxRegisteredInstancesPerActor">Per-actor registered-instance quota.</param>
         /// <param name="maxEventSubscriptionsPerActor">Per-actor named-event subscription quota.</param>
+        /// <param name="emergencyMaxRegisteredInstances">
+        /// Emergency ceiling on registered instances across all actors. Defaults to
+        /// <see cref="DefaultEmergencyMaxRegisteredInstances"/> (the WebGL save budget in a WebGL player);
+        /// a larger value is clamped to that default and a value below one to one.
+        /// </param>
         public LuaCsModRuntime(
             Action<IScriptFunctionRegistry, LuaCapabilities, string> gameplayBindings = null,
             ILuaModStore store = null,
@@ -387,7 +463,8 @@ namespace CoreAI.Ai.LuaCs
             IRbxRuntimeObservabilitySink observability = null,
             int maxSchedulerThreadsPerActor = ModScheduler.DefaultMaxThreadsPerActor,
             int maxRegisteredInstancesPerActor = DefaultMaxRegisteredInstancesPerActor,
-            int maxEventSubscriptionsPerActor = DefaultMaxEventSubscriptionsPerActor)
+            int maxEventSubscriptionsPerActor = DefaultMaxEventSubscriptionsPerActor,
+            int emergencyMaxRegisteredInstances = DefaultEmergencyMaxRegisteredInstances)
         {
             _gameplayBindings = gameplayBindings;
             _store = store;
@@ -405,12 +482,26 @@ namespace CoreAI.Ai.LuaCs
             MaxSchedulerThreadsPerActor = Math.Max(1, maxSchedulerThreadsPerActor);
             MaxRegisteredInstancesPerActor = Math.Max(1, maxRegisteredInstancesPerActor);
             MaxEventSubscriptionsPerActor = Math.Max(1, maxEventSubscriptionsPerActor);
+            EmergencyRegisteredInstanceCeiling = Math.Max(
+                1, Math.Min(emergencyMaxRegisteredInstances, DefaultEmergencyMaxRegisteredInstances));
             MaxErrorsBeforeQuarantine = Math.Max(1, maxErrorsBeforeQuarantine);
             if (_rbxApi != null)
             {
                 _rbxApi.Scheduler.ConfigureActorQuota(
                     MaxSchedulerThreadsPerActor, ResolveSchedulerActorId);
                 _rbxApi.Scheduler.ThreadFaulted += OnSchedulerThreadFaulted;
+                _rbxApi.Scheduler.ThreadResumeSucceeded += OnSchedulerThreadResumeSucceeded;
+
+                // WHY only with a logger: an unobserved host fault is rethrown by Advance after every
+                // frame it recurs in, so a pump that contains the throw logs the same failure every frame
+                // and a pump that does not loses the rest of its own frame. With a logger this runtime
+                // reports each distinct fault once instead; without one, subscribing would make the
+                // fault vanish, so the scheduler's rethrow stays the report.
+                if (_log != null)
+                {
+                    _rbxApi.Scheduler.HostFaulted += OnSchedulerHostFaulted;
+                }
+
                 _rbxApi.Registry.Registered += OnInstanceRegistered;
                 _rbxApi.Registry.Unregistered += OnInstanceUnregistered;
                 SeedRegisteredInstanceCounts(_rbxApi.Registry);
@@ -1077,45 +1168,18 @@ namespace CoreAI.Ai.LuaCs
                     || string.Equals(instance.ClassName, "Camera", StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// Charges a newly registered record to its actor, or destroys it and refuses the creation with
+        /// the quota or ceiling text when <see cref="ChargeRegisteredInstance"/> rejects it.
+        /// </summary>
         private void OnInstanceRegistered(InstanceRecord record)
         {
-            if (record.IsRuntimeInfrastructure)
-            {
-                return;
-            }
-
-            string actorId = ResolveInstanceQuotaActorId(record);
-            string rejection = null;
-            lock (_instanceQuotaGate)
-            {
-                // WHY: a record the attach-time seeding already charged is never charged twice,
-                // whichever of the two paths saw it first.
-                if (_quotaActorByInstanceId.ContainsKey(record.Id))
-                {
-                    return;
-                }
-
-                _registeredInstancesByActor.TryGetValue(actorId, out int actorCount);
-                if (_registeredInstanceCount >= EmergencyMaxRegisteredInstances)
-                {
-                    rejection =
-                        $"Instance.new: actor '{actorId}' cannot register instance '{record.Id.Value}': "
-                        + $"emergency registered instances ceiling reached ({EmergencyMaxRegisteredInstances}).";
-                }
-                else if (actorCount >= MaxRegisteredInstancesPerActor)
-                {
-                    rejection =
-                        $"Instance.new: actor '{actorId}' cannot register instance '{record.Id.Value}': "
-                        + $"registered instances quota reached (limit {MaxRegisteredInstancesPerActor}).";
-                }
-                else
-                {
-                    _quotaActorByInstanceId.Add(record.Id, actorId);
-                    _registeredInstancesByActor[actorId] = actorCount + 1;
-                    _registeredInstanceCount++;
-                }
-            }
-
+            // TODO: this refusal is thrown from inside the InstanceRegistry.Registered multicast, so a
+            // subscriber added after this runtime misses Registered for the refused record and still
+            // receives its Unregistered. No Registered subscriber can move its throw past the rest of the
+            // multicast; the fix is a pre-registration admission hook on InstanceRegistry, evaluated
+            // before the record is added or announced and wired to ChargeRegisteredInstance.
+            string rejection = ChargeRegisteredInstance(record);
             if (rejection == null)
             {
                 return;
@@ -1132,6 +1196,48 @@ namespace CoreAI.Ai.LuaCs
             }
 
             throw new InvalidOperationException(rejection, cleanupError);
+        }
+
+        /// <summary>
+        /// Charges <paramref name="record"/> to its quota actor and returns null, or returns the refusal
+        /// text and charges nothing when the runtime's emergency ceiling or the actor's quota is full.
+        /// Runtime infrastructure is admitted uncharged, and a record already charged is not charged twice.
+        /// </summary>
+        private string ChargeRegisteredInstance(InstanceRecord record)
+        {
+            if (record.IsRuntimeInfrastructure)
+            {
+                return null;
+            }
+
+            string actorId = ResolveInstanceQuotaActorId(record);
+            lock (_instanceQuotaGate)
+            {
+                // WHY: a record the attach-time seeding already charged is never charged twice,
+                // whichever of the two paths saw it first.
+                if (_quotaActorByInstanceId.ContainsKey(record.Id))
+                {
+                    return null;
+                }
+
+                _registeredInstancesByActor.TryGetValue(actorId, out int actorCount);
+                if (_registeredInstanceCount >= EmergencyRegisteredInstanceCeiling)
+                {
+                    return $"Instance.new: actor '{actorId}' cannot register instance '{record.Id.Value}': "
+                        + $"emergency registered instances ceiling reached ({EmergencyRegisteredInstanceCeiling}).";
+                }
+
+                if (actorCount >= MaxRegisteredInstancesPerActor)
+                {
+                    return $"Instance.new: actor '{actorId}' cannot register instance '{record.Id.Value}': "
+                        + $"registered instances quota reached (limit {MaxRegisteredInstancesPerActor}).";
+                }
+
+                _quotaActorByInstanceId.Add(record.Id, actorId);
+                _registeredInstancesByActor[actorId] = actorCount + 1;
+                _registeredInstanceCount++;
+                return null;
+            }
         }
 
         private void OnInstanceUnregistered(InstanceRecord record)
@@ -1252,6 +1358,7 @@ namespace CoreAI.Ai.LuaCs
                 LoadedAtUtc = DateTime.UtcNow
             };
             LuaCsRbxApiBindings.ModLoadCandidate rbxLoadCandidate = null;
+            EnterModBuild(modId);
 
             try
             {
@@ -1317,6 +1424,41 @@ namespace CoreAI.Ai.LuaCs
                 // can show WHY the mod never came up.
                 AppendLog(modId, LuaLogLevel.RuntimeError, $"load failed: {SingleLineErrorMessage(ex)}");
                 throw;
+            }
+            finally
+            {
+                ExitModBuild(modId);
+            }
+        }
+
+        /// <summary>Marks <paramref name="modId"/> as having a candidate chunk under construction.</summary>
+        private void EnterModBuild(string modId)
+        {
+            lock (_gate)
+            {
+                _buildDepthByModId.TryGetValue(modId, out int depth);
+                _buildDepthByModId[modId] = depth + 1;
+            }
+        }
+
+        /// <summary>Ends one <see cref="EnterModBuild"/> of <paramref name="modId"/>.</summary>
+        private void ExitModBuild(string modId)
+        {
+            lock (_gate)
+            {
+                if (!_buildDepthByModId.TryGetValue(modId, out int depth))
+                {
+                    return;
+                }
+
+                if (depth <= 1)
+                {
+                    _buildDepthByModId.Remove(modId);
+                }
+                else
+                {
+                    _buildDepthByModId[modId] = depth - 1;
+                }
             }
         }
 
@@ -1662,6 +1804,7 @@ namespace CoreAI.Ai.LuaCs
                 {
                     // WHY: A single mod's dispatch failure must never abort the other mods' frame tick.
                     mod.ErrorCount++;
+                    mod.FaultedThisFrame = true;
                     _log?.Error($"[LuaCsModRuntime] Mod '{mod.Id}' scheduled dispatch failed: {ex}");
                     AppendLog(mod.Id, LuaLogLevel.RuntimeError,
                         $"scheduled dispatch failed: {SingleLineErrorMessage(ex)}");
@@ -1682,11 +1825,13 @@ namespace CoreAI.Ai.LuaCs
                 {
                     // WHY: A single mod's dispatch failure must never abort the other mods' frame tick.
                     mod.ErrorCount++;
+                    mod.FaultedThisFrame = true;
                     _log?.Error($"[LuaCsModRuntime] Mod '{mod.Id}' scheduled dispatch failed: {ex}");
                     AppendLog(mod.Id, LuaLogLevel.RuntimeError,
                         $"scheduled dispatch failed: {SingleLineErrorMessage(ex)}");
                 }
 
+                CloseModFrame(mod);
                 QuarantineIfExhausted(mod);
             }
 
@@ -1710,6 +1855,38 @@ namespace CoreAI.Ai.LuaCs
                 catch
                 {
                 }
+            }
+        }
+
+        /// <summary>
+        /// Ends one frame of <paramref name="mod"/>'s scheduler record at <see cref="Tick"/>: a frame whose
+        /// scheduler threads only yielded or completed cleanly, with no failure of any kind charged in it,
+        /// resets the error streak; a frame with a failure keeps the streak its failures built.
+        /// </summary>
+        /// <remarks>
+        /// WHY a streak of faulting frames, reset by a clean frame, rather than a per-fault count reset by
+        /// every success or a sliding window: a scheduler mod runs as many short resumes per frame. A
+        /// per-fault streak that any clean resume resets never sees a signal cascade repeated every frame,
+        /// because the chain's own handler resumes succeed before the chain is cut, while a count that
+        /// nothing resets quarantines a healthy mod for a handful of errors spread over an hour. Counting
+        /// a frame once, however many faults it held, also keeps one burst (a physics step that fires an
+        /// erroring Touched handler for many parts at once) from quarantining on its own. A sliding window
+        /// needs a time or frame horizon that is wrong either for a 30 Hz WebGL page or for a world paused
+        /// at timeScale 0, and it would forgive a streak no success ever interrupted. A frame with no
+        /// activity changes nothing, so K failures in a row still quarantine however far apart they are.
+        /// </remarks>
+        private void CloseModFrame(Mod mod)
+        {
+            lock (_gate)
+            {
+                if (mod.SchedulerSucceededThisFrame && !mod.FaultedThisFrame)
+                {
+                    mod.ErrorCount = 0;
+                }
+
+                mod.FaultedThisFrame = false;
+                mod.SchedulerFaultChargedThisFrame = false;
+                mod.SchedulerSucceededThisFrame = false;
             }
         }
 
@@ -1828,6 +2005,8 @@ namespace CoreAI.Ai.LuaCs
             if (_rbxApi != null)
             {
                 _rbxApi.Scheduler.ThreadFaulted -= OnSchedulerThreadFaulted;
+                _rbxApi.Scheduler.ThreadResumeSucceeded -= OnSchedulerThreadResumeSucceeded;
+                _rbxApi.Scheduler.HostFaulted -= OnSchedulerHostFaulted;
                 _rbxApi.Registry.Registered -= OnInstanceRegistered;
                 _rbxApi.Registry.Unregistered -= OnInstanceUnregistered;
             }
@@ -1877,6 +2056,7 @@ namespace CoreAI.Ai.LuaCs
                 if (_mods.TryGetValue(modId, out Mod mod))
                 {
                     mod.ErrorCount++;
+                    mod.FaultedThisFrame = true;
                     streak = mod.ErrorCount;
                 }
                 else
@@ -1890,6 +2070,10 @@ namespace CoreAI.Ai.LuaCs
             RaiseModHandlerErrored(modId, message, streak);
         }
 
+        /// <summary>
+        /// Records and reports a contained scheduler fault of a mod, charging the mod's streak once per
+        /// frame (see <see cref="CloseModFrame"/>).
+        /// </summary>
         private void OnSchedulerThreadFaulted(string ownerModId, RbxError error)
         {
             string modId = Normalize(ownerModId);
@@ -1903,7 +2087,13 @@ namespace CoreAI.Ai.LuaCs
             {
                 if (_mods.TryGetValue(modId, out Mod mod))
                 {
-                    mod.ErrorCount++;
+                    if (!mod.SchedulerFaultChargedThisFrame)
+                    {
+                        mod.SchedulerFaultChargedThisFrame = true;
+                        mod.ErrorCount++;
+                    }
+
+                    mod.FaultedThisFrame = true;
                     streak = mod.ErrorCount;
                 }
                 else
@@ -1917,6 +2107,82 @@ namespace CoreAI.Ai.LuaCs
                 : "scheduler thread failed without a structured error";
             RecordHandlerError(modId, message, streak);
             RaiseModHandlerErrored(modId, message, streak);
+        }
+
+        /// <summary>
+        /// Notes that a scheduler thread of a loaded mod yielded or completed without a fault, so the
+        /// frame can reset the mod's streak when it closes clean (see <see cref="CloseModFrame"/>).
+        /// </summary>
+        private void OnSchedulerThreadResumeSucceeded(string ownerModId, bool completed)
+        {
+            if (string.IsNullOrEmpty(ownerModId))
+            {
+                return;
+            }
+
+            string modId = Normalize(ownerModId);
+            lock (_gate)
+            {
+                // WHY: while a chunk of this id is being built, its resumes belong to a candidate that
+                // is not in _mods yet. On a reload _mods still holds the live instance, and a candidate
+                // that runs cleanly but is then refused must not forgive the live instance's streak.
+                if (_buildDepthByModId.Count != 0 && _buildDepthByModId.ContainsKey(modId))
+                {
+                    return;
+                }
+
+                if (_mods.TryGetValue(modId, out Mod mod))
+                {
+                    mod.SchedulerSucceededThisFrame = true;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Logs an ownerless scheduler fault (<see cref="ModScheduler.HostFaulted"/>) once per distinct
+        /// source, type and message; repeats are dropped and faults past
+        /// <see cref="MaxDistinctHostFaultsLogged"/> distinct ones are summarised by one final line.
+        /// </summary>
+        private void OnSchedulerHostFaulted(string source, Exception exception)
+        {
+            string description = exception == null
+                ? "no exception"
+                : exception.GetType().Name + ": " + exception.Message;
+            string key = (source ?? "") + "\n" + description;
+            bool firstOfItsKind = false;
+            lock (_hostFaultGate)
+            {
+                if (_loggedHostFaults.Contains(key))
+                {
+                    return;
+                }
+
+                if (_loggedHostFaults.Count < MaxDistinctHostFaultsLogged)
+                {
+                    _loggedHostFaults.Add(key);
+                    firstOfItsKind = true;
+                }
+                else if (_hostFaultOverflowLogged)
+                {
+                    return;
+                }
+                else
+                {
+                    _hostFaultOverflowLogged = true;
+                }
+            }
+
+            if (firstOfItsKind)
+            {
+                _log?.Error(
+                    $"[LuaCsModRuntime] Host scheduler fault in {source}: {description}. The frame kept "
+                    + $"running; this fault is logged once. {exception}");
+                return;
+            }
+
+            _log?.Error(
+                $"[LuaCsModRuntime] More than {MaxDistinctHostFaultsLogged} distinct host scheduler faults; "
+                + $"further distinct faults are not logged. Latest: {source}: {description}");
         }
 
         private int TickTimers(Mod mod, double dt, int alreadyCompletedThisTick)
@@ -2032,6 +2298,7 @@ namespace CoreAI.Ai.LuaCs
                 // cannot forge the marker in its own error text to change how it is charged.
                 bool memoryTrip = ScriptExecutionErrors.IsMemoryBudgetTrip(ex);
                 mod.ErrorCount++;
+                mod.FaultedThisFrame = true;
 
                 _log?.Error(
                     $"[LuaCsModRuntime] Mod '{mod.Id}' handler failed " +
