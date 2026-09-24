@@ -226,7 +226,7 @@ namespace CoreAI.Ai.LuaCs
             // EnsureActor could possibly fire (F7). A script cannot beat this.
             _players.CharacterAutoLoads = defaultCharacterAutoLoads;
 
-            _networkCodec = new LuaCsRbxNetworkCodec(_registry, _enums, _log);
+            _networkCodec = new LuaCsRbxNetworkCodec(_registry, _enums, log);
             _partSink = partSink ?? new InMemoryPartPropertySink();
             _cameraRig = cameraRig ?? new InMemoryCameraRig();
             _log = log;
@@ -1445,7 +1445,9 @@ namespace CoreAI.Ai.LuaCs
                     return;
                 }
 
-                object[] arguments = _networkCodec.DecodeArguments(message.Payload);
+                object[] arguments = message.Direction == RbxNetworkDirection.ClientToServer
+                    ? _networkCodec.DecodeClientArguments(message.Payload, admittedSender)
+                    : _networkCodec.DecodeArguments(message.Payload);
                 remote.AttachScheduler(_scheduler);
                 switch (message.Direction)
                 {
@@ -1551,7 +1553,9 @@ namespace CoreAI.Ai.LuaCs
                     return;
                 }
 
-                object[] decoded = _networkCodec.DecodeArguments(message.Payload);
+                object[] decoded = message.Direction == RbxNetworkDirection.ClientToServer
+                    ? _networkCodec.DecodeClientArguments(message.Payload, admittedSender)
+                    : _networkCodec.DecodeArguments(message.Payload);
                 int prefixCount = message.Direction == RbxNetworkDirection.ClientToServer ? 1 : 0;
                 object[] callbackArguments = new object[decoded.Length + prefixCount];
                 int destinationIndex = 0;
@@ -2603,6 +2607,7 @@ namespace CoreAI.Ai.LuaCs
                 _remoteFunctionWaitGenerations[caller] = generation;
                 string actorId = context.ActorContext.ActorId;
                 string remoteFullName = remote.GetFullName();
+                string respondingClientActorId = null;
 
                 RbxScriptSignal responseSignal = new(
                     "RemoteFunction.Response[" + remote.Id.Value + "]");
@@ -2621,7 +2626,8 @@ namespace CoreAI.Ai.LuaCs
                     RbxNetworkResponse response = arguments != null && arguments.Length > 0
                         ? arguments[0] as RbxNetworkResponse
                         : null;
-                    LuaTable values = BuildRemoteFunctionResumeValues(context, response);
+                    LuaTable values = BuildRemoteFunctionResumeValues(
+                        context, response, respondingClientActorId);
                     _scheduler.ResumeSignalWait(caller,
                         new object[] { new LuaValue(values) });
                 });
@@ -2650,6 +2656,9 @@ namespace CoreAI.Ai.LuaCs
 
                         byte[] payload = _networkCodec.EncodeArguments(
                             ReadRemoteArguments(ctx, 2));
+                        // WHY never null here: whatever the Player, its answer is authored by a
+                        // client, and a null id would select the trusted decode for it.
+                        respondingClientActorId = player.NetworkActorId ?? "";
                         remote.InvokeClient(_networkBridge, player, payload, receiveResponse);
                     }
 
@@ -2671,7 +2680,7 @@ namespace CoreAI.Ai.LuaCs
                                 + "' for remote '" + remoteFullName
                                 + "': response timed out after 30 seconds");
                             LuaTable timeoutValues = BuildRemoteFunctionResumeValues(
-                                context, timeoutResponse);
+                                context, timeoutResponse, null);
                             return new object[] { new LuaValue(timeoutValues) };
                         });
                 }
@@ -2696,8 +2705,14 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        /// <summary>
+        /// Turns a RemoteFunction answer into the waiting caller's resume values.
+        /// <paramref name="respondingClientActorId"/> names the client that authored the answer (an
+        /// InvokeClient response), whose Instance references then resolve only as far as that client
+        /// can see; null means the answer came from the trusted server (an InvokeServer response).
+        /// </summary>
         private LuaTable BuildRemoteFunctionResumeValues(LuaCsRbxModContext context,
-            RbxNetworkResponse response)
+            RbxNetworkResponse response, string respondingClientActorId)
         {
             LuaTable values = new();
             if (response == null || !response.Succeeded)
@@ -2710,7 +2725,9 @@ namespace CoreAI.Ai.LuaCs
 
             try
             {
-                object[] decoded = _networkCodec.DecodeArguments(response.Payload);
+                object[] decoded = respondingClientActorId != null
+                    ? _networkCodec.DecodeClientArguments(response.Payload, respondingClientActorId)
+                    : _networkCodec.DecodeArguments(response.Payload);
                 for (int index = 0; index < decoded.Length; index++)
                 {
                     values[index + 1] = _networkCodec.ToLuaValue(context, decoded[index]);
