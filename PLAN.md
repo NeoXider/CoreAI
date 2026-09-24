@@ -15,16 +15,16 @@ MVP4 (RBXL import/export) starts only after MVP3 is closed, verified in Unity an
 
 ## MVP3 closure
 
-- [ ] Rung-zero residue: world-package restore writes run as one host-enveloped operation
+- [x] Rung-zero residue: world-package restore writes run as one host-enveloped operation
       (`InstanceTreeSerializer.Restore(..., hostActorId)` from `RestoreFresh`); red test through production
-      composition (`RetainedMutationOperationCount` 0 -> 1).
-- [ ] ACL floor: a package without `world_acl_version` is refused by a session composed with ACL.
-- [ ] Restored trees: per-actor instance quota seeded from existing records; pre-existing Humanoids get the
-      scheduler in headless composition.
+      composition (`RetainedMutationOperationCount` 0 -> 1) (c7b1f44e).
+- [x] ACL floor: a package without `world_acl_version` is refused by a session composed with ACL (c7b1f44e).
+- [x] Restored trees: per-actor instance quota seeded from existing records; pre-existing Humanoids get the
+      scheduler in headless composition (632366fa).
 - [ ] W3.5 tail: the confirmed world survives a process restart (durable startup copy under
       `Saves/Startup`, restored through the same staged swap, fallback to the default world on any failure,
       Hub reset button, WebGL durability through `CoreAiWebGlPersistence`).
-- [ ] DoD (a)-(f) each proven by a named, non-vacuous test (golden JSON, positive confirm, exact triggers,
+- [x] DoD (a)-(f) each proven by a named, non-vacuous test (94019f99; b-positive-confirm lands with W3.5) (golden JSON, positive confirm, exact triggers,
       default durability hook, create-once with different bytes, no delete path).
 - [ ] World AI tools return JSON failures (never exceptions) for missing/corrupt packages.
 - [ ] Docs: WORLD_PACKAGE.md, ROBLOX_API_ROADMAP.md, Docs/ROADMAP.md (Track C), TODO.md, CHANGELOGs.
@@ -32,15 +32,25 @@ MVP4 (RBXL import/export) starts only after MVP3 is closed, verified in Unity an
 
 ## Compile health
 
-- [ ] CI legs `core` and `lua` (no `COREAI_LLM`) compile: 23 unguarded LLM-only references in 7 files.
-- [ ] Engine-free RbxApi tests (Datatypes/Instances/LuauDownlevel) run in the portable Linux suite.
+- [x] CI legs `core` and `lua` (no `COREAI_LLM`) compile: 23 unguarded LLM-only references in 7 files (32dbe28d).
+- [x] Engine-free RbxApi tests (Datatypes/Instances/LuauDownlevel) run in the portable Linux suite (4a4c80c2).
 
 ## Audits (read-only reports in the session scratchpad; findings become fixes or TODO.md items)
 
-- [ ] MVP1 Instance/DataModel core
-- [ ] MVP2 scheduler, signals, budgets, sandbox, mutation envelopes
-- [ ] MVP8 gameplay services
-- [ ] Multiplayer foundation (Mirror bridge, remotes, ACL, replication core); MVP11 entry: live Mirror
+- [x] MVP1 Instance/DataModel core (37 findings)
+- [x] MVP2 scheduler, signals, budgets, sandbox, mutation envelopes (28 findings)
+- [x] MVP8 gameplay services (28 findings)
+- [x] Multiplayer foundation (Mirror bridge, remotes, ACL, replication core); MVP11 entry: live Mirror
       sessions are not handed to a world loaded at runtime (known limit since 7.43.0)
-- [ ] Newcomer API ergonomics (42 findings) triaged into TODO.md
+- [x] Newcomer API ergonomics (42 findings) triaged into TODO.md (3aad1d49)
 - [ ] Three audit -> fix -> verify rounds over the whole wave
+
+## Fix waves (plan: session scratchpad fix_waves_plan.md; decisions: DECISIONS.md)
+
+- [x] Remote codec: MP-02 allocation amplification, MP-17 NaN on the wire, MP-01 client references filtered by
+      sender visibility (5f1cc8f5, 700db814).
+- [x] A non-finite value written by a script no longer blocks every save/autosave (8854bb0d).
+- [ ] W2 in progress: scheduler fault containment, Lua VM budgets, budgeted string patterns, datatype bindings +
+      ownerless Connect, tween hang/NaN/Reverses/leak; then CORE-A/B, BINDER-A, DEBRIS, IB-1, NET-REPL, MIRROR-1/2.
+- [ ] W3: ApiBindings pass 1, InstanceBindings pass 2, Humanoid/Players, runtime quarantine, binder pass 2,
+      composition, Mirror clock. W4: ApiBindings pass 2 + ClickDetector, fillers. W5: docs.
