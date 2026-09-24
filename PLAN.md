@@ -1,7 +1,8 @@
 # MVP3 closure wave (world/place package), then audit of MVP1 / MVP2 / MVP2.5 foundation
 
 Checkpoint: 2026-09-24. Branch `claude/dazzling-noether-im5m79`, base `main` 1ef27101 (release 7.45.0).
-MVP4 (RBXL import/export) starts only after MVP3 is closed, verified in Unity and released.
+MVP4 (RBXL import/export) starts only after MVP3 is closed, verified in Unity and released. Owner decision
+(2026-09-24): MVP4 is out of this session; finish everything up to MVP4, push, report.
 
 ## Verification available in this wave
 
