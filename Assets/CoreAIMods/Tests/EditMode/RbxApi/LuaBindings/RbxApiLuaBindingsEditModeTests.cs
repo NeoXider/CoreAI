@@ -603,6 +603,157 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
+        public void Lua_MP_10_RemoteFunctionFlood_IsChargedToTheSenderAndRefusedOverItsBudget()
+        {
+            using ProductionNetworkHarness harness = new();
+            ActorContext serverActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext flooder = Actor("mp10-flood-actor");
+            ActorContext secondClient = Actor("mp10-second-actor");
+            int budget = LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender;
+            int calls = budget + 8;
+
+            harness.Runtime.LoadMod(serverActor, "mp10-server", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'FloodRemote'
+                remote.Parent = workspace
+                local started = 0
+                remote.OnServerInvoke = function(player)
+                    started = started + 1
+                    store_set('started', tostring(started))
+                    task.wait(10)
+                    return 'done'
+                end", persistToStore: false);
+            harness.Runtime.LoadMod(flooder, "mp10-flooder", @"
+                local remote = workspace:FindFirstChild('FloodRemote')
+                for index = 1, " + calls + @" do
+                    task.spawn(function()
+                        local ok, err = pcall(function() return remote:InvokeServer(index) end)
+                        if not ok then
+                            store_set('refused', tostring((tonumber(store_get('refused')) or 0) + 1))
+                            store_set('refusal', tostring(err))
+                        end
+                    end)
+                end", persistToStore: false);
+
+            harness.PumpFrames(1);
+
+            // WHY: the handler threads used to be charged to the handler's owner, the host, so one
+            // client flooding a yielding OnServerInvoke filled the host's whole thread quota.
+            Assert.AreEqual(budget.ToString(CultureInfo.InvariantCulture),
+                harness.Store.Get("mp10-server", "started"),
+                "at most the sender's budget of handler threads runs at once");
+            Assert.AreEqual("8", harness.Store.Get("mp10-flooder", "refused"));
+            StringAssert.Contains("BUDGET_EXCEEDED", harness.Store.Get("mp10-flooder", "refusal"));
+            StringAssert.Contains(flooder.ActorId, harness.Store.Get("mp10-flooder", "refusal"));
+
+            harness.Runtime.LoadMod(secondClient, "mp10-second", @"
+                local remote = workspace:FindFirstChild('FloodRemote')
+                task.spawn(function()
+                    local ok, value = pcall(function() return remote:InvokeServer(1) end)
+                    store_set('answer', tostring(ok) .. ':' .. tostring(value))
+                end)", persistToStore: false);
+            harness.PumpFrames(1);
+
+            Assert.AreEqual((budget + 1).ToString(CultureInfo.InvariantCulture),
+                harness.Store.Get("mp10-server", "started"), "another sender has its own budget");
+            harness.Runtime.LoadMod(serverActor, "mp10-host-spawn",
+                "task.spawn(function() store_set('ran', 'yes') end)", persistToStore: false);
+            Assert.AreEqual("yes", harness.Store.Get("mp10-host-spawn", "ran"),
+                "the host's own thread quota is untouched by the flood");
+            Assert.IsEmpty(harness.Runtime.GetRecentHandlerErrors(serverActor, "mp10-server"),
+                "a refused remote call is not the handler owner's fault");
+
+            harness.Bindings.Scheduler.Advance(10.1d);
+            harness.PumpFrames(1);
+
+            Assert.AreEqual("true:done", harness.Store.Get("mp10-second", "answer"));
+            Assert.AreEqual(0, harness.Bindings.Scheduler.CountInducedThreads(flooder.ActorId),
+                "finished handlers release the sender's budget");
+        }
+
+        [Test]
+        public void Lua_MP_10_RemoteEventFlood_DropsAndCountsHandlersOverTheSendersBudget()
+        {
+            using ProductionNetworkHarness harness = new();
+            ActorContext serverActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext flooder = Actor("mp10-event-flood-actor");
+            ActorContext secondClient = Actor("mp10-event-second-actor");
+            int budget = LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender;
+
+            harness.Runtime.LoadMod(serverActor, "mp10-event-server", @"
+                local remote = Instance.new('RemoteEvent')
+                remote.Name = 'FloodEvent'
+                remote.Parent = workspace
+                local started = 0
+                remote.OnServerEvent:Connect(function(player)
+                    started = started + 1
+                    store_set('started', tostring(started))
+                    task.wait(10)
+                end)", persistToStore: false);
+            long refusalsBefore = harness.Bindings.RemoteHandlerRefusalCount;
+            harness.Runtime.LoadMod(flooder, "mp10-event-flooder", @"
+                local remote = workspace:FindFirstChild('FloodEvent')
+                for index = 1, " + (budget + 8) + @" do
+                    remote:FireServer(index)
+                end", persistToStore: false);
+
+            harness.PumpFrames(1);
+
+            Assert.AreEqual(budget.ToString(CultureInfo.InvariantCulture),
+                harness.Store.Get("mp10-event-server", "started"));
+            Assert.AreEqual(8L, harness.Bindings.RemoteHandlerRefusalCount - refusalsBefore,
+                "every dropped invocation is counted");
+            Assert.IsEmpty(harness.Runtime.GetRecentHandlerErrors(serverActor, "mp10-event-server"),
+                "a dropped remote invocation is not the handler owner's fault");
+
+            harness.Runtime.LoadMod(secondClient, "mp10-event-second",
+                "workspace:FindFirstChild('FloodEvent'):FireServer(1)", persistToStore: false);
+            harness.PumpFrames(1);
+
+            Assert.AreEqual((budget + 1).ToString(CultureInfo.InvariantCulture),
+                harness.Store.Get("mp10-event-server", "started"), "another sender has its own budget");
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void Lua_HeadlessPartSink_DestroyingHandlerReadsLastValuesAndLiveStateIsReleased(
+            bool hostSinkWithoutRegistry)
+        {
+            InMemoryPartPropertySink hostSink = hostSinkWithoutRegistry
+                ? new InMemoryPartPropertySink()
+                : null;
+            LuaCsRbxApiBindings bindings = new(partSink: hostSink);
+            InMemoryPartPropertySink sink = (InMemoryPartPropertySink)bindings.PartSink;
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            int liveBefore = sink.LivePartCount;
+
+            stack.Runtime.LoadMod("m", @"
+                local part = Instance.new('Part')
+                part.Size = Vector3.new(3, 5, 7)
+                part.Position = Vector3.new(10, 20, 30)
+                part.Parent = workspace
+                part.Destroying:Connect(function()
+                    store_set('size', tostring(part.Size))
+                    store_set('position', tostring(part.Position))
+                end)
+                part:Destroy()");
+
+            // WHY both sinks: the headless default hears destruction from the registry itself, and a sink
+            // built without the registry (a host sink, a fresh restore's) hears it from the bindings.
+            Assert.AreEqual(liveBefore, sink.LivePartCount, "the destroyed part's live state is released");
+            Assert.AreEqual(1, sink.RetainedDestroyedPartCount);
+
+            bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("3, 5, 7", store.Get("m", "size"),
+                "a Destroying handler reads the part's last Size, not the default");
+            Assert.AreEqual("10, 20, 30", store.Get("m", "position"));
+        }
+
+        [Test]
         public void NetworkActorRegistration_PlayerFailureDoesNotLeaveBridgeActor()
         {
             InstanceRegistry registry = new(
@@ -2076,7 +2227,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             string fullText = FullText(ex);
             StringAssert.Contains("[mod:stub-context script:main.lua line:3]", fullText);
             StringAssert.Contains("NOT_IMPLEMENTED", fullText);
-            StringAssert.Contains("backlog", fullText);
+            // WHY the catalog's backlog wording: the old text read "is planned for no planned MVP
+            // (backlog)", a planned-rung sentence with no rung in it.
+            StringAssert.Contains("Instance.fromExisting is a known Rbx member, but no roadmap rung is assigned",
+                fullText);
+            StringAssert.DoesNotContain("planned for", fullText);
         }
 
         [Test]

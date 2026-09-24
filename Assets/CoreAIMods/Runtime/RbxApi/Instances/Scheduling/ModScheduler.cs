@@ -151,6 +151,22 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             /// </summary>
             public bool HasTimedEntry { get; set; }
 
+            /// <summary>
+            /// Sequence of the one timed entry allowed to resume this record; 0 when none. A heap entry
+            /// with any other sequence is stale, so a rescheduled thread can never be resumed twice by
+            /// the entry it left behind (M2-14).
+            /// </summary>
+            public long TimedSequence { get; set; }
+
+            /// <summary>Sequence of the one deferred-queue entry allowed to resume this record; 0 when none.</summary>
+            public long DeferredSequence { get; set; }
+
+            /// <summary>
+            /// Actor whose induced-thread budget this record is charged to instead of its owner's actor
+            /// quota (MP-10: a handler started by another actor's remote call); null for every other thread.
+            /// </summary>
+            public string QuotaActorId { get; set; }
+
             /// <summary>Re-arms a record for a new thread and owner; every per-thread field restarts.</summary>
             public void Reset(IRbxScriptThread thread, string ownerModId)
             {
@@ -161,6 +177,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 CompletionWait = null;
                 ReadableTombstone = null;
                 HasTimedEntry = false;
+                TimedSequence = 0;
+                DeferredSequence = 0;
+                QuotaActorId = null;
                 // WHY: SignalWaitGeneration keeps counting across tenants on purpose. A timeout entry is
                 // matched by (record, generation); a monotonic counter can never re-produce a value an
                 // earlier tenant used, so a stale entry can never resume a later tenant.
@@ -176,7 +195,27 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 CompletionWait = null;
                 ReadableTombstone = null;
                 HasTimedEntry = false;
+                TimedSequence = 0;
+                DeferredSequence = 0;
+                QuotaActorId = null;
             }
+        }
+
+        /// <summary>
+        /// One deferred-queue slot. Only the slot whose sequence the record still names may resume it,
+        /// so a thread moved out of the queue (M2-14) leaves a harmless stale slot behind.
+        /// </summary>
+        private readonly struct DeferredEntry
+        {
+            public DeferredEntry(ThreadRecord record, long sequence)
+            {
+                Record = record;
+                Sequence = sequence;
+            }
+
+            public ThreadRecord Record { get; }
+
+            public long Sequence { get; }
         }
 
         private readonly struct PendingSignalFault
@@ -195,13 +234,14 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private sealed class SignalInvocation
         {
             public SignalInvocation(RbxScriptConnection connection, object[] arguments,
-                RbxInstance readableTombstone, int generation, string[] chain)
+                RbxInstance readableTombstone, int generation, string[] chain, string quotaActorId)
             {
                 Connection = connection;
                 Arguments = arguments;
                 ReadableTombstone = readableTombstone;
                 Generation = generation;
                 Chain = chain;
+                QuotaActorId = quotaActorId;
             }
 
             public RbxScriptConnection Connection { get; }
@@ -213,6 +253,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             public int Generation { get; }
 
             public string[] Chain { get; }
+
+            /// <summary>Actor on whose behalf the fire happened (see <see cref="BeginSignalsOnBehalfOf"/>).</summary>
+            public string QuotaActorId { get; }
         }
 
         private abstract class TimedEntry
@@ -453,8 +496,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private readonly Dictionary<IRbxScriptThread, ThreadRecord> _records =
             new(ThreadReferenceComparer.Instance);
         private readonly Stack<ThreadRecord> _recordPool = new();
-        private readonly Queue<ThreadRecord> _deferredQueue = new();
-        private readonly List<ThreadRecord> _drainBuffer = new();
+        private readonly Queue<DeferredEntry> _deferredQueue = new();
+        private readonly List<DeferredEntry> _drainBuffer = new();
+        private readonly Dictionary<string, int> _inducedThreadsByQuotaActor = new(StringComparer.Ordinal);
         private readonly Queue<SignalInvocation> _signalQueue = new();
         private readonly List<SignalInvocation> _signalDrainBuffer = new();
         private readonly List<TimedEntry> _delayedBatchBuffer = new();
@@ -487,6 +531,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private Action<string, Exception> _hostFaulted;
         private Action<string, Exception>[] _hostFaultedSubscribers =
             Array.Empty<Action<string, Exception>>();
+        private Action<IRbxScriptThread> _threadRetired;
+        private Action<IRbxScriptThread>[] _threadRetiredSubscribers =
+            Array.Empty<Action<IRbxScriptThread>>();
 
         private long _frameIndex;
         private long _sequence;
@@ -500,6 +547,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private int _staleTimedEntries;
         private string[] _currentSignalChain;
         private string _currentInvocationOwnerModId;
+        private string _currentInvocationQuotaActorId;
+        private string _enqueueQuotaActorId;
         private string _runningOwnerModId;
         private RbxInstance _currentSignalTombstone;
         private Exception _heldFault;
@@ -546,11 +595,14 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             _hostHeap = new MinHeap<HostCallbackEntry>(
                 (HostCallbackEntry left, HostCallbackEntry right) =>
                     CompareTimedEntries(left, right));
-            _isStaleWait = entry => !IsLiveInState(entry.Record, ThreadScheduleState.Waiting);
-            _isStaleDelay = entry => !IsLiveInState(entry.Record, ThreadScheduleState.Delayed);
+            _isStaleWait = entry => !IsLiveInState(entry.Record, ThreadScheduleState.Waiting)
+                                    || entry.Record.TimedSequence != entry.Sequence;
+            _isStaleDelay = entry => !IsLiveInState(entry.Record, ThreadScheduleState.Delayed)
+                                     || entry.Record.TimedSequence != entry.Sequence;
             _isStaleSignalTimeout = entry =>
                 !IsLiveInState(entry.Record, ThreadScheduleState.WaitingForSignal)
-                || entry.Record.SignalWaitGeneration != entry.Generation;
+                || entry.Record.SignalWaitGeneration != entry.Generation
+                || entry.Record.TimedSequence != entry.Sequence;
         }
 
         /// <summary>Configures actor attribution and the per-actor live-thread quota.</summary>
@@ -608,6 +660,22 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
         /// <summary>Heap entries visited while removing cancelled or killed work (M2-26 regression counter).</summary>
         internal long QueuedWorkScanCount { get; private set; }
+
+        /// <summary>
+        /// Actor on whose behalf the signal invocation being dispatched right now was fired (see
+        /// <see cref="BeginSignalsOnBehalfOf"/>); null outside such a dispatch and inside every thread
+        /// resume, so only the handler the invocation starts is charged to that actor (MP-10).
+        /// </summary>
+        internal string CurrentSignalQuotaActorId => _currentInvocationQuotaActorId;
+
+        /// <summary>Live threads charged to <paramref name="quotaActorId"/>'s induced-thread budget (MP-10).</summary>
+        internal int CountInducedThreads(string quotaActorId)
+        {
+            return quotaActorId != null
+                   && _inducedThreadsByQuotaActor.TryGetValue(quotaActorId.Trim(), out int count)
+                ? count
+                : 0;
+        }
 
         /// <summary>
         /// Raised at each observable phase boundary in canonical pipeline order. Each subscriber is
@@ -717,9 +785,48 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
         }
 
-        /// <summary>Creates and immediately resumes a thread to its first yield or completion.</summary>
+        /// <summary>
+        /// Raised once for every thread this scheduler stops tracking, however it ended: completed,
+        /// faulted, cancelled or killed with its owner. Lets an adapter drop its own per-thread
+        /// bookkeeping (tracked-thread ledgers, wait connections) the moment the thread is gone instead of
+        /// holding it until the mod unloads (M2-07, M2-18). Raised on the hot path; each subscriber is
+        /// contained on its own and a throwing one is reported through <see cref="HostFaulted"/>.
+        /// </summary>
+        internal event Action<IRbxScriptThread> ThreadRetired
+        {
+            add
+            {
+                lock (_subscriberGate)
+                {
+                    _threadRetired += value;
+                    _threadRetiredSubscribers = ToSubscriberArray(_threadRetired);
+                }
+            }
+            remove
+            {
+                lock (_subscriberGate)
+                {
+                    _threadRetired -= value;
+                    _threadRetiredSubscribers = ToSubscriberArray(_threadRetired);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Creates and immediately resumes a thread to its first yield or completion. A live thread
+        /// this scheduler already owns (a task handle) is resumed now with <paramref name="args"/>
+        /// instead (M2-14): a parked thread continues, and a deferred or delayed one runs now and loses
+        /// its pending slot. See <see cref="TakeForReschedule"/> for the refused cases.
+        /// </summary>
         public IRbxScriptThread Spawn(string ownerModId, object callable, object[] args)
         {
+            if (callable is IRbxScriptThread existing)
+            {
+                ThreadRecord moved = TakeForReschedule(ownerModId, existing, "task.spawn", false);
+                ResumeThread(moved, CopyArguments(args));
+                return existing;
+            }
+
             ThreadRecord record = CreateRecord(ownerModId, callable);
             IRbxScriptThread thread = record.Thread;
             ResumeThread(record, CopyArguments(args));
@@ -749,6 +856,182 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         }
 
         /// <summary>
+        /// Starts a signal callback on behalf of another actor (MP-10): the thread still runs as
+        /// <paramref name="ownerModId"/>'s code, but it is charged to <paramref name="quotaActorId"/>'s
+        /// induced-thread budget, which allows <paramref name="maxLiveThreads"/> such threads at once,
+        /// instead of the owner's actor quota. A remote caller can therefore exhaust only its own budget,
+        /// never the host's. Over that budget (or at <see cref="EmergencyMaxThreads"/>) nothing starts,
+        /// null is returned with <paramref name="refusal"/> set, and nothing is reported to the owner:
+        /// the owner did nothing wrong, so the caller answers the remote side instead. A null or blank
+        /// <paramref name="quotaActorId"/> behaves exactly like the three-argument overload.
+        /// </summary>
+        internal IRbxScriptThread SpawnSignal(string ownerModId, object callable, object[] args,
+            string quotaActorId, int maxLiveThreads, out RbxError refusal)
+        {
+            refusal = null;
+            if (string.IsNullOrWhiteSpace(quotaActorId))
+            {
+                return SpawnSignal(ownerModId, callable, args);
+            }
+
+            string quotaActor = quotaActorId.Trim();
+            int limit = Math.Max(1, maxLiveThreads);
+            if (_records.Count >= EmergencyMaxThreads)
+            {
+                refusal = new RbxError(
+                    RbxErrorCode.ThreadCap,
+                    "actor '" + quotaActor + "' cannot start a handler of mod '" + ownerModId
+                    + "': emergency live scheduler threads ceiling reached (" + EmergencyMaxThreads + ")",
+                    "retry after the server's running handlers finish");
+                return null;
+            }
+
+            if (CountInducedThreads(quotaActor) >= limit)
+            {
+                refusal = new RbxError(
+                    RbxErrorCode.BudgetExceeded,
+                    "actor '" + quotaActor + "' already has " + limit
+                    + " handler threads in flight that its remote calls started; mod '" + ownerModId
+                    + "' did not start another one",
+                    "wait for earlier remote calls to finish before sending more");
+                return null;
+            }
+
+            ThreadRecord record;
+            try
+            {
+                record = CreateRecord(ownerModId, callable, quotaActor);
+            }
+            catch (RbxError error)
+            {
+                ReportThreadFault(ownerModId, error);
+                return null;
+            }
+
+            IRbxScriptThread thread = record.Thread;
+            record.ReadableTombstone = _currentSignalTombstone;
+            ResumeThread(record, CopyArguments(args));
+            TryReleaseRecord(record);
+            return thread;
+        }
+
+        /// <summary>
+        /// Marks every signal invocation queued from now until <see cref="EndSignalsOnBehalfOf"/> as
+        /// fired on behalf of <paramref name="quotaActorId"/>, so the handler thread each one starts can
+        /// be charged to that actor (MP-10). Returns the previous scope for the matching end call.
+        /// </summary>
+        internal string BeginSignalsOnBehalfOf(string quotaActorId)
+        {
+            string previous = _enqueueQuotaActorId;
+            _enqueueQuotaActorId = string.IsNullOrWhiteSpace(quotaActorId) ? null : quotaActorId.Trim();
+            return previous;
+        }
+
+        /// <summary>Restores the scope <see cref="BeginSignalsOnBehalfOf"/> replaced.</summary>
+        internal void EndSignalsOnBehalfOf(string previous)
+        {
+            _enqueueQuotaActorId = previous;
+        }
+
+        /// <summary>
+        /// Undoes a scheduled wait that never suspended its thread (M2-19): the adapter scheduled
+        /// task.wait, signal:Wait or a completion wait and then the yield itself was refused, so the
+        /// thread kept running with a record that still says it waits. Call it only for a thread that
+        /// is demonstrably executing right now. Returns true when a wait was rolled back; its timed
+        /// entry, completion registration and signal-timeout generation are abandoned and the record
+        /// is Running again, so the thread's next wait schedules normally.
+        /// </summary>
+        internal bool RollbackUnfinishedYield(IRbxScriptThread thread)
+        {
+            if (thread == null || !_records.TryGetValue(thread, out ThreadRecord record))
+            {
+                return false;
+            }
+
+            switch (record.State)
+            {
+                case ThreadScheduleState.Waiting:
+                case ThreadScheduleState.WaitingForSignal:
+                case ThreadScheduleState.WaitingForCompletion:
+                    RemoveQueuedWork(record);
+                    record.SignalWaitGeneration++;
+                    record.State = ThreadScheduleState.Running;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Validates a thread handed back to <see cref="Spawn"/>, <see cref="Defer"/> or
+        /// <see cref="Delay"/> and detaches it from whatever slot it held (M2-14). Accepted: a parked
+        /// thread (suspended outside the scheduler, for example by a native <c>coroutine.yield</c>), a
+        /// deferred or delayed thread (its old slot is abandoned), and, for defer and delay only, the
+        /// running thread itself. Refused loudly: a dead thread, another mod's or another scheduler's
+        /// thread, the running thread for spawn, and a thread suspended in a scheduler wait.
+        /// </summary>
+        private ThreadRecord TakeForReschedule(string ownerModId, IRbxScriptThread thread,
+            string operation, bool allowRunning)
+        {
+            ValidateOwnerModId(ownerModId);
+            if (!_records.TryGetValue(thread, out ThreadRecord record))
+            {
+                if (thread.IsDead || thread.Status == RbxScriptThreadStatus.Dead)
+                {
+                    throw RbxError.BadArgument(
+                        operation + " cannot resume a dead thread",
+                        "a finished or cancelled task never runs again; schedule its function anew");
+                }
+
+                throw RbxError.BadArgument(
+                    operation + " received a thread not owned by this scheduler",
+                    "pass a thread returned by task.spawn, task.defer or task.delay in this world");
+            }
+
+            if (!string.Equals(record.OwnerModId, ownerModId, StringComparison.Ordinal))
+            {
+                throw RbxError.BadArgument(
+                    operation + " received a thread owned by mod " + record.OwnerModId
+                    + ", not " + ownerModId,
+                    "reschedule a thread only from the mod that created it");
+            }
+
+            if (thread.IsDead || thread.Status == RbxScriptThreadStatus.Dead)
+            {
+                throw RbxError.BadArgument(
+                    operation + " cannot resume a dead thread",
+                    "a finished or cancelled task never runs again; schedule its function anew");
+            }
+
+            switch (record.State)
+            {
+                case ThreadScheduleState.Idle:
+                    return record;
+                case ThreadScheduleState.Running:
+                    if (!allowRunning)
+                    {
+                        throw RbxError.BadArgument(
+                            operation + " cannot resume the running thread",
+                            "use task.defer(thread) or task.delay(seconds, thread) to resume it after it yields");
+                    }
+
+                    return record;
+                case ThreadScheduleState.Deferred:
+                    record.DeferredArguments = null;
+                    record.DeferredSequence = 0;
+                    return record;
+                case ThreadScheduleState.Delayed:
+                    AbandonTimedEntry(record);
+                    return record;
+                default:
+                    throw RbxError.BadArgument(
+                        operation + " cannot reschedule a thread suspended in a scheduler wait (state "
+                        + record.State + ")",
+                        "let its task.wait, signal:Wait or RemoteFunction call finish, or task.cancel it first");
+            }
+        }
+
+        /// <summary>
         /// Pools a record whose thread died inside the resume that started it. That thread never left
         /// the Running state, so no wait/delay/timeout heap, deferred queue, or completion entry can
         /// reference the record; any other ending (yielded, faulted, killed) keeps today's GC lifetime.
@@ -771,25 +1054,35 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
         }
 
-        /// <summary>Creates a thread for the next deferred resumption point.</summary>
+        /// <summary>
+        /// Creates a thread for the next deferred resumption point. A live thread this scheduler already
+        /// owns (a task handle) moves to the back of the deferred queue instead, with
+        /// <paramref name="args"/> as its resume values (M2-14); the running thread may defer itself
+        /// and then yield.
+        /// </summary>
         public IRbxScriptThread Defer(string ownerModId, object callable, object[] args)
         {
-            ThreadRecord record = CreateRecord(ownerModId, callable);
+            ThreadRecord record = callable is IRbxScriptThread existing
+                ? TakeForReschedule(ownerModId, existing, "task.defer", true)
+                : CreateRecord(ownerModId, callable);
             record.State = ThreadScheduleState.Deferred;
             record.DeferredArguments = CopyArguments(args);
-            _deferredQueue.Enqueue(record);
+            EnqueueDeferred(record);
             return record.Thread;
         }
 
         /// <summary>
         /// Creates a thread for the next eligible delayed slot. A duration of positive infinity
         /// (<c>task.delay(math.huge, f)</c>) parks the thread: it never resumes, stays cancellable, and
-        /// is killed with its owner (M2-17).
+        /// is killed with its owner (M2-17). A live thread this scheduler already owns (a task handle)
+        /// is re-armed for the new duration with <paramref name="args"/> instead (M2-14).
         /// </summary>
         public IRbxScriptThread Delay(string ownerModId, double seconds, object callable, object[] args)
         {
             double duration = ValidateAndNormalizeDuration(seconds, "Delay");
-            ThreadRecord record = CreateRecord(ownerModId, callable);
+            ThreadRecord record = callable is IRbxScriptThread existing
+                ? TakeForReschedule(ownerModId, existing, "task.delay", true)
+                : CreateRecord(ownerModId, callable);
             record.State = ThreadScheduleState.Delayed;
             if (double.IsPositiveInfinity(duration))
             {
@@ -800,7 +1093,21 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 GetEarliestTimerFrame(), NextSequence());
             _delayHeap.Add(entry);
             record.HasTimedEntry = true;
+            record.TimedSequence = entry.Sequence;
             return record.Thread;
+        }
+
+        private void EnqueueDeferred(ThreadRecord record)
+        {
+            long sequence = NextSequence();
+            record.DeferredSequence = sequence;
+            _deferredQueue.Enqueue(new DeferredEntry(record, sequence));
+        }
+
+        private bool IsLiveDeferredEntry(DeferredEntry entry)
+        {
+            return entry.Record.DeferredSequence == entry.Sequence
+                   && IsLiveInState(entry.Record, ThreadScheduleState.Deferred);
         }
 
         /// <summary>
@@ -854,6 +1161,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 GetEarliestTimerFrame(), NextSequence());
             _waitHeap.Add(entry);
             record.HasTimedEntry = true;
+            record.TimedSequence = entry.Sequence;
         }
 
         /// <summary>Marks a running scheduler thread as yielded until its signal's first delivery.</summary>
@@ -889,6 +1197,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 NextSequence());
             _signalWaitTimeoutHeap.Add(entry);
             record.HasTimedEntry = true;
+            record.TimedSequence = entry.Sequence;
         }
 
         /// <summary>Resumes one signal waiter with the arguments captured at fire time.</summary>
@@ -978,7 +1287,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
             string[] chain = BuildSignalChain(connection.SignalName);
             _signalQueue.Enqueue(new SignalInvocation(
-                connection, CopyArguments(arguments), readableTombstone, generation, chain));
+                connection, CopyArguments(arguments), readableTombstone, generation, chain,
+                _enqueueQuotaActorId));
         }
 
         /// <summary>
@@ -1270,15 +1580,16 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             {
                 for (; nextIndex < _drainBuffer.Count; nextIndex++)
                 {
-                    ThreadRecord record = _drainBuffer[nextIndex];
-                    if (record.State != ThreadScheduleState.Deferred
-                        || !_records.ContainsKey(record.Thread))
+                    DeferredEntry entry = _drainBuffer[nextIndex];
+                    if (!IsLiveDeferredEntry(entry))
                     {
                         continue;
                     }
 
+                    ThreadRecord record = entry.Record;
                     object[] arguments = record.DeferredArguments;
                     record.DeferredArguments = null;
+                    record.DeferredSequence = 0;
                     ResumeThread(record, arguments ?? EmptyArguments);
                 }
             }
@@ -1295,7 +1606,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
         private void RestoreDeferredBatch(int startIndex)
         {
-            List<ThreadRecord> newlyDeferred = new(_deferredQueue.Count);
+            List<DeferredEntry> newlyDeferred = new(_deferredQueue.Count);
             while (_deferredQueue.Count > 0)
             {
                 newlyDeferred.Add(_deferredQueue.Dequeue());
@@ -1303,11 +1614,10 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
             for (int index = startIndex; index < _drainBuffer.Count; index++)
             {
-                ThreadRecord record = _drainBuffer[index];
-                if (record.State == ThreadScheduleState.Deferred
-                    && _records.ContainsKey(record.Thread))
+                DeferredEntry entry = _drainBuffer[index];
+                if (IsLiveDeferredEntry(entry))
                 {
-                    _deferredQueue.Enqueue(record);
+                    _deferredQueue.Enqueue(entry);
                 }
             }
 
@@ -1344,6 +1654,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                         _currentSignalChain = invocation.Chain;
                         _currentSignalTombstone = invocation.ReadableTombstone;
                         _currentInvocationOwnerModId = invocation.Connection.OwnerModId;
+                        _currentInvocationQuotaActorId = invocation.QuotaActorId;
                         try
                         {
                             invocation.Connection.InvokePending(invocation.Arguments);
@@ -1351,6 +1662,10 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                         catch (Exception exception)
                         {
                             ReportSignalHandlerFailure(invocation.Connection, exception);
+                        }
+                        finally
+                        {
+                            _currentInvocationQuotaActorId = null;
                         }
                     }
 
@@ -1365,6 +1680,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 _currentSignalChain = null;
                 _currentSignalTombstone = null;
                 _currentInvocationOwnerModId = null;
+                _currentInvocationQuotaActorId = null;
                 _drainingSignals = false;
             }
         }
@@ -1490,7 +1806,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                         case RbxSchedulerCompletionStatus.Succeeded:
                             record.State = ThreadScheduleState.Deferred;
                             record.DeferredArguments = CopyArguments(entry.Completion.ResumeArguments);
-                            _deferredQueue.Enqueue(record);
+                            EnqueueDeferred(record);
                             break;
                         case RbxSchedulerCompletionStatus.Faulted:
                             FinalizeFault(record, entry.Completion.Error);
@@ -1643,8 +1959,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                     WaitEntry wait = entry as WaitEntry;
                     if (wait != null)
                     {
-                        if (wait.Record.State == ThreadScheduleState.Waiting
-                            && _records.ContainsKey(wait.Record.Thread))
+                        if (!_isStaleWait(wait))
                         {
                             double elapsed = CurrentTime - wait.ScheduledAt;
                             ResumeThread(wait.Record, new object[] { elapsed });
@@ -1656,8 +1971,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                     DelayEntry delay = entry as DelayEntry;
                     if (delay != null)
                     {
-                        if (delay.Record.State == ThreadScheduleState.Delayed
-                            && _records.ContainsKey(delay.Record.Thread))
+                        if (!_isStaleDelay(delay))
                         {
                             ResumeThread(delay.Record, delay.Arguments);
                         }
@@ -1667,9 +1981,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
                     SignalWaitTimeoutEntry signalTimeout =
                         (SignalWaitTimeoutEntry)entry;
-                    if (signalTimeout.Record.State == ThreadScheduleState.WaitingForSignal
-                        && signalTimeout.Record.SignalWaitGeneration == signalTimeout.Generation
-                        && _records.ContainsKey(signalTimeout.Record.Thread))
+                    if (!_isStaleSignalTimeout(signalTimeout))
                     {
                         object[] timeoutArguments;
                         try
@@ -1713,8 +2025,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 WaitEntry wait = entry as WaitEntry;
                 if (wait != null)
                 {
-                    if (wait.Record.State == ThreadScheduleState.Waiting
-                        && _records.ContainsKey(wait.Record.Thread))
+                    if (!_isStaleWait(wait))
                     {
                         _waitHeap.Add(wait);
                         wait.Record.HasTimedEntry = true;
@@ -1726,8 +2037,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 DelayEntry delay = entry as DelayEntry;
                 if (delay != null)
                 {
-                    if (delay.Record.State == ThreadScheduleState.Delayed
-                        && _records.ContainsKey(delay.Record.Thread))
+                    if (!_isStaleDelay(delay))
                     {
                         _delayHeap.Add(delay);
                         delay.Record.HasTimedEntry = true;
@@ -1738,9 +2048,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
                 SignalWaitTimeoutEntry signalTimeout =
                     (SignalWaitTimeoutEntry)entry;
-                if (signalTimeout.Record.State == ThreadScheduleState.WaitingForSignal
-                    && signalTimeout.Record.SignalWaitGeneration == signalTimeout.Generation
-                    && _records.ContainsKey(signalTimeout.Record.Thread))
+                if (!_isStaleSignalTimeout(signalTimeout))
                 {
                     _signalWaitTimeoutHeap.Add(signalTimeout);
                     signalTimeout.Record.HasTimedEntry = true;
@@ -1831,6 +2139,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 RbxScriptSignal.EnterTombstoneScope(record.ReadableTombstone);
             string previousRunningOwner = _runningOwnerModId;
             _runningOwnerModId = record.OwnerModId;
+            // WHY cleared for the resume: the quota actor belongs to the one handler an invocation
+            // starts. Whatever that handler's code spawns in turn is its owner's own work and is
+            // charged the ordinary way.
+            string previousQuotaActor = _currentInvocationQuotaActorId;
+            _currentInvocationQuotaActorId = null;
             RbxScriptThreadResumeResult result;
             try
             {
@@ -1843,6 +2156,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
             finally
             {
+                _currentInvocationQuotaActorId = previousQuotaActor;
                 _runningOwnerModId = previousRunningOwner;
                 RbxScriptSignal.ExitTombstoneScope(previousTombstone);
             }
@@ -1858,7 +2172,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
             if (record.State == ThreadScheduleState.Canceled)
             {
-                _records.Remove(record.Thread);
+                RetireRecord(record);
                 return;
             }
 
@@ -1873,7 +2187,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                     return;
                 }
 
-                _records.Remove(record.Thread);
+                RetireRecord(record);
                 RaiseThreadResumeSucceeded(record.OwnerModId, true);
                 return;
             }
@@ -1917,7 +2231,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
             record.DeferredArguments = null;
             record.State = ThreadScheduleState.Canceled;
-            _records.Remove(record.Thread);
+            RetireRecord(record);
             ReportThreadFault(record.OwnerModId, error);
         }
 
@@ -2032,7 +2346,49 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
             record.DeferredArguments = null;
             record.State = ThreadScheduleState.Canceled;
-            _records.Remove(record.Thread);
+            RetireRecord(record);
+        }
+
+        /// <summary>
+        /// The single exit of a record from the live set: releases its induced-thread charge and raises
+        /// <see cref="ThreadRetired"/> exactly once, whichever path ended the thread.
+        /// </summary>
+        private void RetireRecord(ThreadRecord record)
+        {
+            IRbxScriptThread thread = record.Thread;
+            if (thread == null || !_records.TryGetValue(thread, out ThreadRecord live)
+                || !ReferenceEquals(live, record))
+            {
+                return;
+            }
+
+            _records.Remove(thread);
+            string quotaActorId = record.QuotaActorId;
+            if (quotaActorId != null
+                && _inducedThreadsByQuotaActor.TryGetValue(quotaActorId, out int induced))
+            {
+                if (induced <= 1)
+                {
+                    _inducedThreadsByQuotaActor.Remove(quotaActorId);
+                }
+                else
+                {
+                    _inducedThreadsByQuotaActor[quotaActorId] = induced - 1;
+                }
+            }
+
+            Action<IRbxScriptThread>[] subscribers = _threadRetiredSubscribers;
+            for (int index = 0; index < subscribers.Length; index++)
+            {
+                try
+                {
+                    subscribers[index](thread);
+                }
+                catch (Exception exception)
+                {
+                    ReportHostFault("ThreadRetired subscriber", exception);
+                }
+            }
         }
 
         /// <summary>
@@ -2053,11 +2409,13 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             record.DeferredArguments = null;
+            record.DeferredSequence = 0;
             AbandonTimedEntry(record);
         }
 
         private void AbandonTimedEntry(ThreadRecord record)
         {
+            record.TimedSequence = 0;
             if (!record.HasTimedEntry)
             {
                 return;
@@ -2124,7 +2482,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
         }
 
-        private ThreadRecord CreateRecord(string ownerModId, object callable)
+        private ThreadRecord CreateRecord(string ownerModId, object callable,
+            string quotaActorId = null)
         {
             ValidateOwnerModId(ownerModId);
             if (callable == null)
@@ -2145,14 +2504,24 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                     "finish or cancel live threads before scheduling more work");
             }
 
-            if (CountThreadsForActor(actorId) >= MaxThreadsPerActor)
+            if (quotaActorId == null && CountThreadsForActor(actorId) >= MaxThreadsPerActor)
             {
+                // WHY the parked count is named: a thread suspended by a native coroutine.yield holds
+                // its quota slot until something resumes or cancels it, and nothing else in the
+                // refusal explains why an actor with no visible work is out of threads (M2-20).
+                int parked = CountParkedThreadsForActor(actorId);
                 throw new RbxError(
                     RbxErrorCode.ThreadCap,
                     "actor '" + actorId + "' cannot create a scheduler thread for mod '"
                     + ownerModId + "': live scheduler threads quota reached (limit "
-                    + MaxThreadsPerActor + ")",
-                    "finish or cancel live threads before scheduling more work");
+                    + MaxThreadsPerActor + ")"
+                    + (parked > 0
+                        ? "; " + parked + " of them are parked outside the scheduler (suspended by "
+                          + "coroutine.yield) and hold their slot until resumed or cancelled"
+                        : string.Empty),
+                    parked > 0
+                        ? "resume parked threads with task.spawn(thread) or release them with task.cancel(thread)"
+                        : "finish or cancel live threads before scheduling more work");
             }
 
             IRbxScriptThread thread = _threadFactory.Create(ownerModId, callable);
@@ -2189,6 +2558,13 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             _records.Add(thread, record);
+            if (quotaActorId != null)
+            {
+                record.QuotaActorId = quotaActorId;
+                _inducedThreadsByQuotaActor.TryGetValue(quotaActorId, out int induced);
+                _inducedThreadsByQuotaActor[quotaActorId] = induced + 1;
+            }
+
             return record;
         }
 
@@ -2197,7 +2573,25 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             int count = 0;
             foreach (ThreadRecord record in _records.Values)
             {
-                if (string.Equals(ResolveActorId(record.OwnerModId), actorId,
+                if (record.QuotaActorId == null
+                    && string.Equals(ResolveActorId(record.OwnerModId), actorId,
+                        StringComparison.Ordinal))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private int CountParkedThreadsForActor(string actorId)
+        {
+            int count = 0;
+            foreach (ThreadRecord record in _records.Values)
+            {
+                if (record.QuotaActorId == null
+                    && record.State == ThreadScheduleState.Idle
+                    && string.Equals(ResolveActorId(record.OwnerModId), actorId,
                         StringComparison.Ordinal))
                 {
                     count++;

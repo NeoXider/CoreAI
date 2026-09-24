@@ -32,6 +32,15 @@ namespace CoreAI.Ai.LuaCs
         private const double LegacySchedulerMinimumDelaySeconds = 0.029d;
         internal const double RemoteFunctionInvokeTimeoutSeconds = 30d;
 
+        /// <summary>
+        /// Handler threads one remote sender may keep alive at once on this machine (MP-10): the
+        /// OnServerInvoke callbacks and OnServerEvent handlers its calls started that are still
+        /// suspended. They are charged to the sender, never to the handler's owner, so a flooding client
+        /// exhausts only this budget; a call over it is refused (RemoteFunction) or dropped and counted
+        /// (RemoteEvent) without faulting the handler's mod.
+        /// </summary>
+        internal const int MaxRemoteHandlerThreadsPerSender = 32;
+
         private sealed class ExecutingScriptBacking
         {
             public ExecutingScriptBacking(RbxInstance container, RbxInstance script)
@@ -124,6 +133,7 @@ namespace CoreAI.Ai.LuaCs
             _remoteFunctionWaitGenerations = new();
         private readonly HashSet<string> _legacySchedulerDeprecationOwners =
             new(StringComparer.Ordinal);
+        private readonly HashSet<string> _remoteRefusalLoggedSenders = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Dictionary<int, HashSet<IRbxScriptThread>>>
             _scheduledThreadsByMod = new(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _currentSchedulerGenerationByMod =
@@ -135,7 +145,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly Action<string> _log;
         private CoreAI.Ai.IInGameLlmChatServiceFactory _chatFactory;
         private int _consoleInvocationCounter;
-        private float _runServiceElapsed;
+        private double _runServiceElapsed;
         private bool _disposed;
 
         private bool _mouseButton1Down;
@@ -227,7 +237,10 @@ namespace CoreAI.Ai.LuaCs
             _players.CharacterAutoLoads = defaultCharacterAutoLoads;
 
             _networkCodec = new LuaCsRbxNetworkCodec(_registry, _enums, log);
-            _partSink = partSink ?? new InMemoryPartPropertySink();
+            // WHY the registry-aware sink: it releases a destroyed part's live state itself and keeps a
+            // bounded last-known copy, so a headless world neither grows forever nor answers a
+            // Destroying handler with default values.
+            _partSink = partSink ?? new InMemoryPartPropertySink(_registry);
             _cameraRig = cameraRig ?? new InMemoryCameraRig();
             _log = log;
             if (registry == null || partSink == null)
@@ -304,7 +317,10 @@ namespace CoreAI.Ai.LuaCs
             // slice may lack the service; create it here so game:GetService("TweenService")
             // resolves, then attach the Heartbeat driver, the property host, and the
             // PlaybackState item resolver so Create/Play/Completed all work.
-            _tweenPropertyHost = new LuaCsTweenPropertyHost(_partSink, _registry);
+            // WHY a reader for world physics: physics is built further down, and the host reads it on
+            // every spatial write, so a tweened move reaches the teleport note of the live physics port.
+            _tweenPropertyHost = new LuaCsTweenPropertyHost(
+                _partSink, _registry, () => _worldPhysics, _cameraRig);
             _tweenService =
                 _game.FindFirstChildOfClass("TweenService") as RbxTweenService;
             if (_tweenService == null
@@ -317,7 +333,7 @@ namespace CoreAI.Ai.LuaCs
             if (_tweenService != null)
             {
                 _tweenService.AttachHost(
-                    _scheduler, _tweenPropertyHost, ResolvePlaybackStateItem);
+                    _scheduler, _tweenPropertyHost, ResolvePlaybackStateItem, _log);
             }
 
             // WHY constructed unconditionally, unlike the services above: world physics is not an
@@ -367,6 +383,7 @@ namespace CoreAI.Ai.LuaCs
             _registry.Unregistered += OnInstanceUnregistered;
 
             _scheduler.PhaseReached += PumpSchedulerPhase;
+            _scheduler.ThreadRetired += OnSchedulerThreadRetired;
 
             // WHY: a restored world registers its Humanoids before these bindings exist, so the
             // Registered wiring above never sees them. A headless host attaches no motor factory to
@@ -1058,6 +1075,7 @@ namespace CoreAI.Ai.LuaCs
                 callbacks.Remove(actorId);
             }
 
+            _remoteRefusalLoggedSenders.Remove(actorId);
             return true;
         }
 
@@ -1092,6 +1110,10 @@ namespace CoreAI.Ai.LuaCs
             {
                 _collectionService.DetachHost();
             }
+            // WHY: the service subscribes itself to this scheduler's phases and to the registry; left
+            // attached, advancing the old scheduler after a session swap kept stepping its tweens and
+            // writing into a world these bindings no longer front (M8-22).
+            _tweenService?.DetachHost();
             _scheduler.PhaseReached -= PumpSchedulerPhase;
             _networkRequestConnection.Disconnect();
 
@@ -1103,6 +1125,7 @@ namespace CoreAI.Ai.LuaCs
                 _connections.DisconnectOwnedBy(ownerModId);
             }
 
+            _scheduler.ThreadRetired -= OnSchedulerThreadRetired;
             _serverRemoteCallbacks.Clear();
             _clientRemoteCallbacks.Clear();
             _remoteFunctionWaitGenerations.Clear();
@@ -1253,8 +1276,44 @@ namespace CoreAI.Ai.LuaCs
             object callable, object[] arguments)
         {
             string ownerModId = RequireTaskOwner(context);
-            TrackScheduledThread(context, _scheduler.SpawnSignal(
-                ownerModId, callable, arguments));
+            string sender = _scheduler.CurrentSignalQuotaActorId;
+            if (sender == null)
+            {
+                TrackScheduledThread(context, _scheduler.SpawnSignal(
+                    ownerModId, callable, arguments));
+                return;
+            }
+
+            // WHY charged to the sender: this handler runs because a remote client fired an
+            // OnServerEvent. Charged to the handler's owner (normally the host), one client that fired
+            // faster than a yielding handler finishes filled the host's whole thread quota (MP-10).
+            IRbxScriptThread thread = _scheduler.SpawnSignal(ownerModId, callable, arguments,
+                sender, MaxRemoteHandlerThreadsPerSender, out RbxError refusal);
+            if (refusal != null)
+            {
+                NoteRemoteHandlerRefusal(sender, "an OnServerEvent invocation was dropped", refusal);
+                return;
+            }
+
+            TrackScheduledThread(context, thread);
+        }
+
+        /// <summary>
+        /// Remote-induced handler starts refused because their sender's budget was full (MP-10):
+        /// dropped OnServerEvent invocations plus refused OnServerInvoke calls.
+        /// </summary>
+        internal long RemoteHandlerRefusalCount { get; private set; }
+
+        private void NoteRemoteHandlerRefusal(string senderActorId, string outcome, RbxError refusal)
+        {
+            RemoteHandlerRefusalCount++;
+            // WHY once per sender: a flood produces one refusal per call, and logging each would turn
+            // the client's flood into a log flood on the host.
+            if (_remoteRefusalLoggedSenders.Add(senderActorId))
+            {
+                _log?.Invoke("[RbxApi] " + outcome + ": " + refusal.Message
+                             + " (logged once per sender; later refusals are only counted)");
+            }
         }
 
         internal RbxPlayer GetLocalPlayer(LuaCsRbxModContext context)
@@ -1453,7 +1512,16 @@ namespace CoreAI.Ai.LuaCs
                 {
                     case RbxNetworkDirection.ClientToServer:
                         RbxPlayer player = EnsureNetworkActor(admittedSender);
-                        remote.DeliverToServer(player, arguments);
+                        string previousSender = _scheduler.BeginSignalsOnBehalfOf(admittedSender);
+                        try
+                        {
+                            remote.DeliverToServer(player, arguments);
+                        }
+                        finally
+                        {
+                            _scheduler.EndSignalsOnBehalfOf(previousSender);
+                        }
+
                         return;
                     case RbxNetworkDirection.ServerToClient:
                         remote.DeliverToClient(message.RecipientActorId, arguments);
@@ -1496,6 +1564,10 @@ namespace CoreAI.Ai.LuaCs
 
             _serverRemoteCallbacks.Remove(record.Id);
             _clientRemoteCallbacks.Remove(record.Id);
+            // WHY here as well as in a registry-aware sink: a sink built without the registry (a host
+            // sink, or the one a fresh restore builds) hears about destruction only through this call;
+            // for one that already heard it the call is an idempotent no-op.
+            _partSink.OnPartDestroyed(record.Id);
             if (record.Instance is RbxHumanoid humanoid)
             {
                 humanoid.DetachHost();
@@ -1572,7 +1644,8 @@ namespace CoreAI.Ai.LuaCs
                         _networkCodec.ToLuaValue(registration.Context, decoded[index]);
                 }
 
-                SpawnRemoteFunctionCallback(registration, callbackArguments, responder);
+                SpawnRemoteFunctionCallback(registration, callbackArguments, responder,
+                    admittedSender);
             }
             catch (Exception ex)
             {
@@ -1624,9 +1697,14 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        /// <summary>
+        /// Starts a RemoteFunction callback thread. <paramref name="senderActorId"/> names the client whose
+        /// call this is (null for a server-to-client invoke); its call is charged to its own remote
+        /// handler budget and refused with a failed response when that budget is full (MP-10).
+        /// </summary>
         private void SpawnRemoteFunctionCallback(
             RemoteFunctionCallbackRegistration registration, object[] arguments,
-            RbxNetworkRequestResponder responder)
+            RbxNetworkRequestResponder responder, string senderActorId)
         {
             LuaFunction callbackRunner = new("RemoteFunction.callback", async (ctx, ct) =>
             {
@@ -1651,8 +1729,48 @@ namespace CoreAI.Ai.LuaCs
                 registration.OwnerState, new LuaValue(callbackRunner));
             try
             {
-                TrackScheduledThread(registration.Context, _scheduler.SpawnSignal(
-                    RequireTaskOwner(registration.Context), callable, arguments));
+                string ownerModId = RequireTaskOwner(registration.Context);
+                IRbxScriptThread thread;
+                if (senderActorId == null)
+                {
+                    thread = _scheduler.SpawnSignal(ownerModId, callable, arguments);
+                }
+                else
+                {
+                    thread = _scheduler.SpawnSignal(ownerModId, callable, arguments, senderActorId,
+                        MaxRemoteHandlerThreadsPerSender, out RbxError refusal);
+                    if (refusal != null)
+                    {
+                        NoteRemoteHandlerRefusal(senderActorId, "a RemoteFunction call was refused",
+                            refusal);
+                        if (!responder.IsCompleted)
+                        {
+                            responder.Fail(refusal.Message);
+                        }
+
+                        return;
+                    }
+                }
+
+                TrackScheduledThread(registration.Context, thread);
+                if (thread == null)
+                {
+                    // WHY: the scheduler refused to start the callback and reported that to its owner;
+                    // the caller would otherwise wait for its whole timeout for an answer that never comes.
+                    if (!responder.IsCompleted)
+                    {
+                        responder.Fail("RemoteFunction callback of mod '" + ownerModId
+                                       + "' could not start");
+                    }
+
+                    return;
+                }
+
+                if (thread is LuaCsRbxScriptThread luaThread && !luaThread.IsDead
+                    && !responder.IsCompleted)
+                {
+                    luaThread.PendingResponder = responder;
+                }
             }
             catch (Exception ex)
             {
@@ -1697,6 +1815,19 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public void PumpPreSimulation(float dt)
         {
+            PumpPreSimulationCore(dt, dt);
+        }
+
+        /// <summary>
+        /// <paramref name="runTimeDelta"/> is the unrounded frame delta Stepped's run time accumulates.
+        /// </summary>
+        /// <remarks>
+        /// WHY a double accumulator fed the scheduler's double delta: a float run time drifted by
+        /// seconds within an hour at 60 Hz and stopped advancing at 524,288 s (about six days), while
+        /// the mirror types Stepped's time as a double (M2-16).
+        /// </remarks>
+        private void PumpPreSimulationCore(float dt, double runTimeDelta)
+        {
             _registry.ProcessPreSimulation();
             RefreshCharacterMotors();
             if (_runService == null || _runService.IsDestroyed)
@@ -1704,7 +1835,7 @@ namespace CoreAI.Ai.LuaCs
                 return;
             }
 
-            _runServiceElapsed += dt;
+            _runServiceElapsed += runTimeDelta;
             if (_runService.PreSimulation.HasConnections)
             {
                 _runService.PreSimulation.Fire(dt);
@@ -1828,7 +1959,7 @@ namespace CoreAI.Ai.LuaCs
                     PumpPreAnimation(frameDelta);
                     return;
                 case SchedulerPhase.PreSimulation:
-                    PumpPreSimulation(frameDelta);
+                    PumpPreSimulationCore(frameDelta, deltaSeconds);
                     return;
                 case SchedulerPhase.PostSimulation:
                     PumpPostSimulation(frameDelta);
@@ -2269,9 +2400,9 @@ namespace CoreAI.Ai.LuaCs
                 }
             }, context);
             // TODO: backlog — Instance.fromExisting (not scheduled; Clone covers the corpus).
-            t["fromExisting"] = Fn("Instance.fromExisting", _ => throw RbxError.NotImplemented(
-                "Instance.fromExisting", "no planned MVP (backlog)", "use instance:Clone() instead"),
-                context);
+            t["fromExisting"] = Fn("Instance.fromExisting", _ => throw RbxKnownUnimplementedErrors.ForMember(
+                "Instance.fromExisting", RbxKnownUnimplementedMemberStatus.Backlog, null,
+                "use instance:Clone() instead"), context);
             return new LuaValue(t);
         }
 
@@ -2295,6 +2426,8 @@ namespace CoreAI.Ai.LuaCs
                 ReadRemoteFunctionResumeValues(context, ctx));
             t["_warnInfiniteYield"] = Fn("task._warnInfiniteYield", ctx =>
                 WarnInfiniteYield(context, ctx));
+            t["_checkWaitForChild"] = FnMulti("task._checkWaitForChild",
+                ReadWaitForChildArguments, context);
             t["_realtime"] = Fn("task._realtime", _ =>
                 LuaCsValueMarshaller.Unbox(UnityEngine.Time.realtimeSinceStartupAsDouble));
             t["_buildCharacter"] = Fn("task._buildCharacter", ctx =>
@@ -2310,14 +2443,14 @@ namespace CoreAI.Ai.LuaCs
                         RequireTaskOwner(context),
                         ReadTaskCallable(ctx, 0, "task.spawn"),
                         ReadTaskArguments(ctx, 1))),
-                threadMeta));
+                threadMeta, Arg(ctx, 0)));
             t["defer"] = Fn("task.defer", ctx => WrapTaskThread(
                 TrackScheduledThread(context,
                     _scheduler.Defer(
                         RequireTaskOwner(context),
                         ReadTaskCallable(ctx, 0, "task.defer"),
                         ReadTaskArguments(ctx, 1))),
-                threadMeta));
+                threadMeta, Arg(ctx, 0)));
             t["delay"] = Fn("task.delay", ctx => WrapTaskThread(
                 TrackScheduledThread(context,
                     _scheduler.Delay(
@@ -2325,7 +2458,7 @@ namespace CoreAI.Ai.LuaCs
                         ReadDouble(ctx, 0, "task.delay"),
                         ReadTaskCallable(ctx, 1, "task.delay"),
                         ReadTaskArguments(ctx, 2))),
-                threadMeta));
+                threadMeta, Arg(ctx, 1)));
             t["cancel"] = Fn("task.cancel", ctx =>
             {
                 IRbxScriptThread thread = ReadTaskThread(ctx, 0);
@@ -2427,13 +2560,142 @@ namespace CoreAI.Ai.LuaCs
                 double duration = durationValue.Type == LuaValueType.Nil
                     ? minimumDuration
                     : Math.Max(ReadDouble(ctx, 0, functionName), minimumDuration);
+                if (!CanSuspendCaller(ctx, luaThread, functionName))
+                {
+                    return LuaValue.Nil;
+                }
+
                 _scheduler.ScheduleWait(caller, duration);
+                luaThread.NoteScheduledYield();
                 return LuaValue.Nil;
             }
             catch (Exception ex)
             {
                 throw ToLuaError(ctx.State, ex);
             }
+        }
+
+        /// <summary>
+        /// Decides whether a yielding binding may schedule a wait for <paramref name="caller"/> from the
+        /// Lua code running right now. False means that code cannot yield at all (it runs inside a
+        /// sandbox callback boundary such as string.format's <c>__tostring</c>): nothing is scheduled, and
+        /// the bridge's own yield then raises the boundary error, so the thread's record is never left
+        /// waiting for a suspension that did not happen (M2-19). Code running in a nested
+        /// <c>coroutine.create</c> coroutine is refused with CONTEXT_VIOLATION: the wait would suspend
+        /// that coroutine while the scheduler resumed the enclosing task thread instead (M2-06).
+        /// </summary>
+        private bool CanSuspendCaller(LuaFunctionExecutionContext ctx, LuaCsRbxScriptThread caller,
+            string functionName)
+        {
+            LuaState running = ctx.State;
+            if (running == null || !running.IsCoroutine
+                || running.GetStatus() != LuaThreadStatus.Running)
+            {
+                return false;
+            }
+
+            if (!caller.IsOwnCoroutineRunning)
+            {
+                throw new RbxError(
+                    RbxErrorCode.ContextViolation,
+                    functionName + " cannot suspend a coroutine.create thread; only a task thread (the "
+                    + "mod's chunk, a task.spawn/task.defer/task.delay function or a signal handler) "
+                    + "can wait on the scheduler",
+                    "run the waiting code with task.spawn(function() ... end) instead of "
+                    + "coroutine.create/coroutine.resume");
+            }
+
+            // WHY: a wait state here means the thread's previous scheduled yield never took effect (its
+            // yield was refused after the wait was scheduled), yet the thread is demonstrably running.
+            // Rolled back, the next wait schedules normally instead of failing forever (M2-19).
+            if (_scheduler.RollbackUnfinishedYield(caller))
+            {
+                ReleasePendingWait(caller);
+            }
+
+            return true;
+        }
+
+        /// <summary>Disconnects the wait connection a thread no longer waits on and forgets its RemoteFunction wait.</summary>
+        private void ReleasePendingWait(LuaCsRbxScriptThread thread)
+        {
+            RbxScriptConnection connection = thread.PendingWaitConnection;
+            thread.PendingWaitConnection = null;
+            connection?.Disconnect();
+            if (_remoteFunctionWaitGenerations.Count > 0)
+            {
+                _remoteFunctionWaitGenerations.Remove(thread);
+            }
+        }
+
+        /// <summary>
+        /// Drops everything these bindings keep for a thread the scheduler has stopped tracking (M2-07,
+        /// M2-18): its tracked-thread ledger entry, the connection of the signal or RemoteFunction wait it
+        /// was suspended on, and an unanswered RemoteFunction request, which is failed so its caller
+        /// hears about it now instead of at its timeout.
+        /// </summary>
+        private void OnSchedulerThreadRetired(IRbxScriptThread thread)
+        {
+            if (!(thread is LuaCsRbxScriptThread luaThread))
+            {
+                _remoteFunctionWaitGenerations.Remove(thread);
+                return;
+            }
+
+            HashSet<IRbxScriptThread> trackingSet = luaThread.TrackingSet;
+            luaThread.TrackingSet = null;
+            trackingSet?.Remove(luaThread);
+            ReleasePendingWait(luaThread);
+            RbxNetworkRequestResponder responder = luaThread.PendingResponder;
+            luaThread.PendingResponder = null;
+            if (responder == null || responder.IsCompleted)
+            {
+                return;
+            }
+
+            try
+            {
+                responder.Fail("RemoteFunction callback of mod '" + luaThread.OwnerModId
+                               + "' stopped before it returned");
+            }
+            catch (Exception ex)
+            {
+                // WHY contained: this runs inside the scheduler's kill and fault paths; a transport that
+                // throws while answering must not abort the teardown of every other thread.
+                _log?.Invoke("[RbxApi] Failing an unanswered RemoteFunction request threw: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Validates WaitForChild's arguments before the bridge touches them (M1-32): the child name
+        /// must be a string and the optional timeout a number other than NaN. Returns both, the timeout
+        /// as nil when omitted.
+        /// </summary>
+        private static LuaValue[] ReadWaitForChildArguments(LuaFunctionExecutionContext ctx)
+        {
+            if (!TryGetInstance(Arg(ctx, 0), out LuaCsRbxInstanceProxy _))
+            {
+                throw RbxError.BadArgument(
+                    "WaitForChild expects an Instance as self",
+                    "call it with a colon, e.g. workspace:WaitForChild('Name')");
+            }
+
+            string childName = ReadString(ctx, 1, "WaitForChild", 1);
+            LuaValue timeoutValue = Arg(ctx, 2);
+            if (timeoutValue.Type == LuaValueType.Nil)
+            {
+                return new LuaValue[] { childName, LuaValue.Nil };
+            }
+
+            double timeout = ReadDouble(ctx, 2, "WaitForChild", 2);
+            if (double.IsNaN(timeout))
+            {
+                throw RbxError.BadArgument(
+                    "WaitForChild timeout must be a number, not NaN",
+                    "pass the timeout in seconds, or omit it to wait until the child appears");
+            }
+
+            return new LuaValue[] { childName, timeout };
         }
 
         private LuaValue ReadWaitResumeValue(LuaCsRbxModContext context,
@@ -2444,7 +2706,8 @@ namespace CoreAI.Ai.LuaCs
                 string ownerModId = RequireTaskOwner(context);
                 if (!(_schedulerThreadFactory.CurrentThread is LuaCsRbxScriptThread caller)
                     || !string.Equals(caller.OwnerModId, ownerModId,
-                        StringComparison.Ordinal))
+                        StringComparison.Ordinal)
+                    || !caller.IsOwnCoroutineRunning)
                 {
                     throw RbxError.BadArgument(
                         "task.wait resumed outside its owning scheduler thread",
@@ -2490,17 +2753,24 @@ namespace CoreAI.Ai.LuaCs
                         "wait only from a live scheduler thread owned by the current mod");
                 }
 
+                LuaValue timeoutValue = Arg(ctx, 1);
+                double timeout = timeoutValue.Type == LuaValueType.Nil
+                    ? double.NaN
+                    : ReadDouble(ctx, 1, "signal timed wait");
+                if (!CanSuspendCaller(ctx, luaThread, "signal:Wait"))
+                {
+                    return LuaValue.Nil;
+                }
+
                 signal.BindScheduler(_scheduler);
                 double scheduledAt = _scheduler.CurrentTime;
                 RbxScriptConnection connection = null;
-                LuaValue timeoutValue = Arg(ctx, 1);
                 if (timeoutValue.Type == LuaValueType.Nil)
                 {
                     _scheduler.ScheduleSignalWait(caller);
                 }
                 else
                 {
-                    double timeout = ReadDouble(ctx, 1, "signal timed wait");
                     _scheduler.ScheduleSignalWait(caller, timeout, () =>
                     {
                         connection?.Disconnect();
@@ -2519,6 +2789,8 @@ namespace CoreAI.Ai.LuaCs
                         new object[] { new LuaValue(values) });
                 });
                 context.TrackConnection(connection);
+                luaThread.PendingWaitConnection = connection;
+                luaThread.NoteScheduledYield();
                 return LuaValue.Nil;
             }
             catch (Exception ex)
@@ -2551,13 +2823,15 @@ namespace CoreAI.Ai.LuaCs
                 string ownerModId = RequireTaskOwner(context);
                 if (!(_schedulerThreadFactory.CurrentThread is LuaCsRbxScriptThread caller)
                     || !string.Equals(caller.OwnerModId, ownerModId,
-                        StringComparison.Ordinal))
+                        StringComparison.Ordinal)
+                    || !caller.IsOwnCoroutineRunning)
                 {
                     throw RbxError.BadArgument(
                         "signal:Wait resumed outside its owning scheduler thread",
                         "resume signal waiters through the deferred signal drain");
                 }
 
+                caller.PendingWaitConnection = null;
                 object values = caller.ReadCurrentResumeArgument(0);
                 if (values == null)
                 {
@@ -2601,6 +2875,14 @@ namespace CoreAI.Ai.LuaCs
                     throw RbxError.BadArgument(
                         "RemoteFunction invoke caller is not owned by mod " + ownerModId,
                         "invoke only from a live scheduler thread owned by the current mod");
+                }
+
+                // WHY before anything is sent: a call that cannot suspend its caller must not reach the
+                // other side, or the remote handler would run for an answer nobody ever reads.
+                if (!CanSuspendCaller(ctx, luaThread,
+                        invokeServer ? "RemoteFunction:InvokeServer" : "RemoteFunction:InvokeClient"))
+                {
+                    return LuaValue.Nil;
                 }
 
                 long generation = luaThread.AdvanceRemoteFunctionWaitGeneration();
@@ -2683,6 +2965,8 @@ namespace CoreAI.Ai.LuaCs
                                 context, timeoutResponse, null);
                             return new object[] { new LuaValue(timeoutValues) };
                         });
+                    luaThread.PendingWaitConnection = responseConnection;
+                    luaThread.NoteScheduledYield();
                 }
                 catch
                 {
@@ -2754,13 +3038,15 @@ namespace CoreAI.Ai.LuaCs
                 string ownerModId = RequireTaskOwner(context);
                 if (!(_schedulerThreadFactory.CurrentThread is LuaCsRbxScriptThread caller)
                     || !string.Equals(caller.OwnerModId, ownerModId,
-                        StringComparison.Ordinal))
+                        StringComparison.Ordinal)
+                    || !caller.IsOwnCoroutineRunning)
                 {
                     throw RbxError.BadArgument(
                         "RemoteFunction resumed outside its owning scheduler thread",
                         "resume remote invocations through the deferred network response signal");
                 }
 
+                caller.PendingWaitConnection = null;
                 object values = caller.ReadCurrentResumeArgument(0);
                 if (values == null)
                 {
@@ -2831,10 +3117,14 @@ namespace CoreAI.Ai.LuaCs
             return context.OwnerModId;
         }
 
-        /// <summary>Kills every scheduler thread owned by a mod on unload or quarantine.</summary>
+        /// <summary>
+        /// Kills every scheduler thread owned by a mod on unload or quarantine, and destroys the tweens
+        /// its scripts created (playing ones stop where they are; nothing fires into the departing mod).
+        /// </summary>
         public int KillAllScheduledOwnedBy(string ownerModId)
         {
             int killed = _scheduler.KillOwnedBy(ownerModId);
+            _tweenService?.CancelAndReleaseOwnedBy(ownerModId);
             RemoveRemoteFunctionWaitsOwnedBy(ownerModId, null);
             RemoveRemoteFunctionCallbacksOwnedBy(ownerModId, null);
             _scheduledThreadsByMod.Remove(ownerModId);
@@ -2878,7 +3168,10 @@ namespace CoreAI.Ai.LuaCs
                     continue;
                 }
 
-                foreach (IRbxScriptThread thread in generation.Value)
+                // WHY a snapshot: each cancel retires its thread, and retirement removes the thread from
+                // this very set (M2-07).
+                List<IRbxScriptThread> outgoing = new(generation.Value);
+                foreach (IRbxScriptThread thread in outgoing)
                 {
                     if (thread == null || thread.IsDead
                         || thread.Status == RbxScriptThreadStatus.Dead)
@@ -2921,7 +3214,8 @@ namespace CoreAI.Ai.LuaCs
             }
 
             int killed = 0;
-            foreach (IRbxScriptThread thread in threads)
+            List<IRbxScriptThread> cancelled = new(threads);
+            foreach (IRbxScriptThread thread in cancelled)
             {
                 if (thread == null || thread.IsDead
                     || thread.Status == RbxScriptThreadStatus.Dead)
@@ -2939,7 +3233,7 @@ namespace CoreAI.Ai.LuaCs
                 _scheduledThreadsByMod.Remove(ownerModId);
             }
 
-            RemoveRemoteFunctionWaits(threads);
+            RemoveRemoteFunctionWaits(cancelled);
             RemoveRemoteFunctionCallbacksOwnedBy(ownerModId, generation, true);
 
             return killed;
@@ -3080,9 +3374,41 @@ namespace CoreAI.Ai.LuaCs
                 && thread.Status != RbxScriptThreadStatus.Dead)
             {
                 threads.Add(thread);
+                if (thread is LuaCsRbxScriptThread luaThread)
+                {
+                    // WHY the set is remembered on the thread: the scheduler retires the thread later
+                    // through ThreadRetired, and the entry is dropped from exactly this set then instead
+                    // of staying until the mod unloads (M2-07).
+                    if (luaThread.TrackingSet != null
+                        && !ReferenceEquals(luaThread.TrackingSet, threads))
+                    {
+                        luaThread.TrackingSet.Remove(luaThread);
+                    }
+
+                    luaThread.TrackingSet = threads;
+                }
             }
 
             return thread;
+        }
+
+        /// <summary>Threads held by the tracked-thread ledger across every mod and generation (M2-07).</summary>
+        internal int TrackedScheduledThreadCount
+        {
+            get
+            {
+                int count = 0;
+                foreach (Dictionary<int, HashSet<IRbxScriptThread>> generations
+                         in _scheduledThreadsByMod.Values)
+                {
+                    foreach (HashSet<IRbxScriptThread> threads in generations.Values)
+                    {
+                        count += threads.Count;
+                    }
+                }
+
+                return count;
+            }
         }
 
         private static void PruneDeadThreads(HashSet<IRbxScriptThread> threads)
@@ -3094,9 +3420,20 @@ namespace CoreAI.Ai.LuaCs
         private object ReadTaskCallable(LuaFunctionExecutionContext ctx, int index, string what)
         {
             LuaValue callable = Arg(ctx, index);
+            if (callable.Type == LuaValueType.Thread)
+            {
+                // WHY named apart from a wrong type: the value IS a thread, just not one the scheduler
+                // owns. R4.10 keeps coroutine.create threads and coroutine.running() values outside it.
+                throw RbxError.BadArgument(
+                    what + " cannot schedule a coroutine.create thread or a coroutine.running() value "
+                    + "at argument " + (index + 1),
+                    "pass a function, or a thread handle returned by task.spawn, task.defer or task.delay");
+            }
+
             try
             {
-                return _schedulerThreadFactory.CaptureCallable(ctx.State, callable);
+                return _schedulerThreadFactory.CaptureCallable(ctx.State, callable,
+                    resumableByHandle: true);
             }
             catch (RbxError error)
             {
@@ -3137,8 +3474,19 @@ namespace CoreAI.Ai.LuaCs
             return arguments;
         }
 
-        private static LuaValue WrapTaskThread(IRbxScriptThread thread, LuaTable threadMeta)
+        /// <summary>
+        /// Boxes a scheduled thread for Lua. A handle passed back in (M2-14) is returned as the very value
+        /// the script passed, so <c>task.spawn(t) == t</c> holds the way it does for Roblox threads.
+        /// </summary>
+        private static LuaValue WrapTaskThread(IRbxScriptThread thread, LuaTable threadMeta,
+            LuaValue passed)
         {
+            if (TryUnbox(passed, out IRbxScriptThread passedThread)
+                && ReferenceEquals(passedThread, thread))
+            {
+                return passed;
+            }
+
             return Box(thread, threadMeta);
         }
 

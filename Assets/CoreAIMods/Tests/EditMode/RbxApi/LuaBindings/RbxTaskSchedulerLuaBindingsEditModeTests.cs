@@ -11,6 +11,7 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
+using CoreAI.Sandbox.LuaCs;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -1379,6 +1380,412 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.AreEqual("waiting", store.Get("m", "phase"));
             bindings.Scheduler.Advance(0.15d);
             Assert.AreEqual("resumed:0.25", store.Get("m", "phase"));
+        }
+
+        [Test]
+        public void Lua_M2_06_TaskWaitInsideCoroutineCreate_RaisesAndTheEnclosingThreadKeepsWaiting()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            // WHY: the inner coroutine's task.wait used to schedule the ENCLOSING main-chunk thread and
+            // then suspend only the inner coroutine, so the main chunk's own task.wait below failed with
+            // "already in state Waiting" and the inner coroutine was never resumed.
+            stack.Runtime.LoadMod("m", @"
+                local co = coroutine.create(function()
+                    local ok, err = pcall(task.wait, 1)
+                    store_set('inner_ok', tostring(ok))
+                    store_set('inner_err', tostring(err))
+                end)
+                store_set('resumed', tostring(coroutine.resume(co)))
+                store_set('co_status', coroutine.status(co))
+                local elapsed = task.wait(0.1)
+                store_set('outer', 'resumed:' .. tostring(elapsed))");
+
+            Assert.AreEqual("false", store.Get("m", "inner_ok"),
+                "task.wait inside coroutine.create must raise instead of suspending the wrong thread");
+            StringAssert.Contains("CONTEXT_VIOLATION", store.Get("m", "inner_err"));
+            StringAssert.Contains("coroutine.create", store.Get("m", "inner_err"));
+            Assert.AreEqual("true", store.Get("m", "resumed"));
+            Assert.AreEqual("dead", store.Get("m", "co_status"));
+
+            bindings.Scheduler.Advance(0.1d);
+
+            Assert.AreEqual("resumed:0.1", store.Get("m", "outer"),
+                "the enclosing thread's own wait was never touched");
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("m"));
+        }
+
+        [Test]
+        public void Lua_M2_06_SignalWaitAndWaitForChildInsideCoroutineCreate_Raise()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            stack.Runtime.LoadMod("m", @"
+                local co = coroutine.create(function()
+                    local ok, err = pcall(function() return workspace.ChildAdded:Wait() end)
+                    store_set('signal_ok', tostring(ok))
+                    store_set('signal_err', tostring(err))
+                    local ok2, err2 = pcall(function() return workspace:WaitForChild('Never', 5) end)
+                    store_set('child_ok', tostring(ok2))
+                    store_set('child_err', tostring(err2))
+                end)
+                coroutine.resume(co)
+                store_set('co_status', coroutine.status(co))
+                task.delay(0.5, function()
+                    local later = Instance.new('Folder')
+                    later.Name = 'Later'
+                    later.Parent = workspace
+                end)
+                local child = workspace:WaitForChild('Later', 1)
+                store_set('outer', tostring(child))");
+
+            Assert.AreEqual("false", store.Get("m", "signal_ok"));
+            StringAssert.Contains("CONTEXT_VIOLATION", store.Get("m", "signal_err"));
+            Assert.AreEqual("false", store.Get("m", "child_ok"));
+            StringAssert.Contains("CONTEXT_VIOLATION", store.Get("m", "child_err"));
+            Assert.AreEqual("dead", store.Get("m", "co_status"));
+
+            bindings.Scheduler.Advance(0.5d);
+
+            Assert.AreEqual("Later", store.Get("m", "outer"),
+                "the enclosing thread's WaitForChild still returns the child");
+        }
+
+        [Test]
+        public void Lua_M2_19_YieldRefusedInsideFormat_LeavesTheNextWaitsWorking()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            // WHY: the refused yield used to leave the thread's scheduler record waiting, so every
+            // later task.wait or signal:Wait of that thread failed with "already in state Waiting".
+            stack.Runtime.LoadMod("m", @"
+                local quiet = Instance.new('Folder')
+                quiet.Name = 'Quiet'
+                quiet.Parent = workspace
+                task.spawn(function()
+                    local waits = setmetatable({}, {__tostring = function()
+                        task.wait(0)
+                        return 'X'
+                    end})
+                    local ok, err = pcall(string.format, '%s', waits)
+                    store_set('wait_ok', tostring(ok))
+                    store_set('wait_err', tostring(err))
+                    store_set('first', tostring(task.wait(0.25)))
+                    local signals = setmetatable({}, {__tostring = function()
+                        quiet.ChildRemoved:Wait()
+                        return 'Y'
+                    end})
+                    local ok2 = pcall(string.format, '%s', signals)
+                    store_set('signal_ok', tostring(ok2))
+                    store_set('second', tostring(task.wait(0.25)))
+                end)");
+
+            Assert.AreEqual("false", store.Get("m", "wait_ok"));
+            StringAssert.Contains(LuaCsSecureEnvironment.YieldAcrossCallBoundaryMessage,
+                store.Get("m", "wait_err"));
+
+            bindings.Scheduler.Advance(0.25d);
+
+            Assert.AreEqual("0.25", store.Get("m", "first"), "the next task.wait schedules normally");
+            Assert.AreEqual("false", store.Get("m", "signal_ok"));
+
+            bindings.Scheduler.Advance(0.25d);
+
+            Assert.AreEqual("0.25", store.Get("m", "second"));
+            RbxInstance quietFolder = bindings.Registry.WorldRoot.FindFirstChild("Quiet");
+            Assert.IsFalse(quietFolder.ChildRemoved.HasConnections,
+                "the refused signal wait left no connection behind");
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("m"));
+        }
+
+        [Test]
+        public void Lua_M2_14_TaskHandles_AreRescheduledBySpawnDeferAndDelay()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            stack.Runtime.LoadMod("m", @"
+                local parked = task.spawn(function()
+                    store_set('parked', 'first')
+                    coroutine.yield()
+                    store_set('parked', 'resumed')
+                end)
+                store_set('same_handle', tostring(task.spawn(parked) == parked))
+                local delayed = task.delay(5, function(value)
+                    store_set('delayed', tostring(value))
+                end, 'original')
+                task.defer(delayed, 'moved')
+                local deferred = task.defer(function(value)
+                    store_set('deferred', tostring(value))
+                end, 'original')
+                task.delay(0.5, deferred, 'moved-late')");
+
+            Assert.AreEqual("resumed", store.Get("m", "parked"),
+                "task.spawn(handle) resumes a thread parked by coroutine.yield");
+            Assert.AreEqual("true", store.Get("m", "same_handle"),
+                "task.spawn(thread) returns the thread it was given");
+
+            bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("moved", store.Get("m", "delayed"), "task.defer moved the delayed thread");
+            Assert.AreEqual("", store.Get("m", "deferred"), "task.delay took the thread off the defer queue");
+
+            bindings.Scheduler.Advance(0.5d);
+
+            Assert.AreEqual("moved-late", store.Get("m", "deferred"));
+
+            bindings.Scheduler.Advance(5d);
+
+            Assert.AreEqual("moved", store.Get("m", "delayed"), "the abandoned delay never runs it again");
+            Assert.AreEqual(0, bindings.Scheduler.LiveThreadCount);
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("m"));
+        }
+
+        [Test]
+        public void Lua_M2_14_NegativeTwin_WaitingDeadRunningAndRawThreadsAreRefused()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            stack.Runtime.LoadMod("m", @"
+                local function capture(name, callback)
+                    local ok, err = pcall(callback)
+                    store_set(name .. '_ok', tostring(ok))
+                    store_set(name .. '_err', tostring(err))
+                end
+                local waiting = task.spawn(function() task.wait(10) end)
+                capture('waiting', function() task.spawn(waiting) end)
+                local finished = task.spawn(function() end)
+                capture('dead', function() task.defer(finished) end)
+                capture('raw', function() task.spawn(coroutine.create(function() end)) end)
+                local selfHandle
+                selfHandle = task.defer(function()
+                    capture('running', function() task.spawn(selfHandle) end)
+                end)");
+
+            bindings.Scheduler.Advance(0d);
+
+            string[] refused = { "waiting", "dead", "raw", "running" };
+            string[] reasons =
+            {
+                "scheduler wait", "dead thread", "coroutine.create", "running thread"
+            };
+            for (int index = 0; index < refused.Length; index++)
+            {
+                Assert.AreEqual("false", store.Get("m", refused[index] + "_ok"),
+                    refused[index] + " must be refused");
+                StringAssert.Contains("BAD_ARGUMENT", store.Get("m", refused[index] + "_err"));
+                StringAssert.Contains(reasons[index], store.Get("m", refused[index] + "_err"));
+            }
+        }
+
+        [Test]
+        public void Lua_M2_20_NativeYieldInASignalHandler_IsAContextViolationAndLeavesNoThread()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            // WHY: nothing can resume a handler thread that suspended itself outside the scheduler. It
+            // used to stay as an idle record holding one of its actor's 256 thread slots per fire.
+            stack.Runtime.LoadMod("h", @"
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    store_set('fired', tostring((tonumber(store_get('fired')) or 0) + 1))
+                    coroutine.yield()
+                    store_set('after_yield', 'ran')
+                end)");
+
+            bindings.Scheduler.Advance(1d / 60d);
+            bindings.Scheduler.Advance(1d / 60d);
+
+            Assert.AreEqual("2", store.Get("h", "fired"));
+            Assert.AreEqual("", store.Get("h", "after_yield"));
+            Assert.AreEqual(0, bindings.Scheduler.LiveThreadCount,
+                "each natively suspended handler thread is stopped, not kept");
+            IReadOnlyList<LuaModHandlerError> errors = stack.Runtime.GetRecentHandlerErrors("h");
+            Assert.GreaterOrEqual(errors.Count, 1, "the stopped handler is reported, not dropped");
+            Assert.IsTrue(errors.All(error => error.Error.Contains("CONTEXT_VIOLATION")
+                                              && error.Error.Contains("coroutine.yield")),
+                "every report names the cause: " + string.Join(" || ", errors.Select(error => error.Error)));
+        }
+
+        [Test]
+        public void Lua_M2_20_NativelyParkedTaskThreads_TheThreadCapNamesThem()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = bindings,
+                MaxSchedulerThreadsPerActor = 8
+            });
+
+            stack.Runtime.LoadMod("p", @"
+                for index = 1, 20 do
+                    local ok, err = pcall(task.spawn, function() coroutine.yield() end)
+                    if not ok then
+                        store_set('refused_at', tostring(index))
+                        store_set('err', tostring(err))
+                        break
+                    end
+                end");
+
+            Assert.AreNotEqual("", store.Get("p", "refused_at"), "the actor's thread quota still applies");
+            string refusal = store.Get("p", "err");
+            StringAssert.Contains("THREAD_CAP", refusal);
+            StringAssert.Contains("parked outside the scheduler", refusal,
+                "the refusal must say why an actor with no visible work is out of threads");
+            StringAssert.Contains("task.cancel", refusal);
+        }
+
+        [Test]
+        public void Lua_M2_20_MainChunkNativeYield_FailsTheLoadLoudly()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            System.Exception error = Assert.Catch<System.Exception>(() =>
+                stack.Runtime.LoadMod("m", @"
+                    store_set('before', 'ran')
+                    coroutine.yield()
+                    store_set('after', 'ran')"));
+
+            StringAssert.Contains("CONTEXT_VIOLATION", error.ToString());
+            StringAssert.Contains("main chunk", error.ToString());
+            Assert.IsFalse(stack.Runtime.IsLoaded("m"));
+            Assert.AreEqual("", store.Get("m", "after"));
+            Assert.AreEqual(0, bindings.Scheduler.LiveThreadCount);
+        }
+
+        [Test]
+        public void Lua_M2_07_TrackedThreadLedger_StaysBoundedUnderDeferAndDelayChurn()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            // WHY: every task.defer/task.delay thread used to stay in the per-mod ledger until the mod
+            // unloaded, about 2 KB each, so an ordinary per-frame defer leaked hundreds of MB an hour.
+            stack.Runtime.LoadMod("m", @"
+                local function noop() end
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    for index = 1, 50 do
+                        task.defer(noop)
+                    end
+                    task.delay(0, noop)
+                end)");
+
+            for (int frame = 0; frame < 40; frame++)
+            {
+                bindings.Scheduler.Advance(1d / 60d);
+            }
+
+            Assert.LessOrEqual(bindings.TrackedScheduledThreadCount,
+                bindings.Scheduler.LiveThreadCount + 2,
+                "finished threads leave the ledger when the scheduler retires them");
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("m"));
+        }
+
+        [Test]
+        public void Lua_M2_18_CancelledSignalWaiters_LeaveNoConnectionBehind()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            stack.Runtime.LoadMod("m", @"
+                local quiet = Instance.new('Folder')
+                quiet.Name = 'Quiet'
+                quiet.Parent = workspace
+                for index = 1, 1000 do
+                    task.cancel(task.spawn(function() quiet.ChildRemoved:Wait() end))
+                end
+                task.cancel(task.spawn(function() quiet.ChildRemoved:Wait(30) end))
+                store_set('done', 'yes')");
+
+            Assert.AreEqual("yes", store.Get("m", "done"));
+            RbxInstance quietFolder = bindings.Registry.WorldRoot.FindFirstChild("Quiet");
+            Assert.IsFalse(quietFolder.ChildRemoved.HasConnections,
+                "a cancelled waiter's connection is disconnected at once, not when the signal fires");
+            Assert.LessOrEqual(bindings.Connections.TrackedEntryCount("m"), 32,
+                "the mod's connection ledger does not keep a thousand dead waits");
+        }
+
+        [Test]
+        public void Lua_WaitForChild_BadArguments_NameWaitForChild()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            stack.Runtime.LoadMod("m", @"
+                local ok1, err1 = pcall(function() return workspace:WaitForChild() end)
+                store_set('nil_ok', tostring(ok1))
+                store_set('nil_err', tostring(err1))
+                local ok2, err2 = pcall(function() return workspace:WaitForChild('Child', '5') end)
+                store_set('text_ok', tostring(ok2))
+                store_set('text_err', tostring(err2))
+                local ok3, err3 = pcall(function() return workspace:WaitForChild('Child', 0/0) end)
+                store_set('nan_ok', tostring(ok3))
+                store_set('nan_err', tostring(err3))");
+
+            Assert.AreEqual("false", store.Get("m", "nil_ok"));
+            StringAssert.Contains("WaitForChild expects a string at argument 1",
+                store.Get("m", "nil_err"));
+            Assert.AreEqual("false", store.Get("m", "text_ok"));
+            StringAssert.Contains("WaitForChild expects a number at argument 2",
+                store.Get("m", "text_err"), "a string timeout used to fail as 'attempt to compare'");
+            Assert.AreEqual("false", store.Get("m", "nan_ok"));
+            StringAssert.Contains("WaitForChild timeout must be a number, not NaN",
+                store.Get("m", "nan_err"));
+        }
+
+        [Test]
+        public void Lua_WaitForChild_ChildDestroyedBeforeDrain_KeepsWaiting()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+
+            // WHY: ChildAdded is deferred, so the waiter used to resume with a child destroyed in the
+            // meantime and raise INSTANCE_DESTROYED reading its Name.
+            stack.Runtime.LoadMod("m", @"
+                task.defer(function()
+                    local doomed = Instance.new('Folder')
+                    doomed.Name = 'Late'
+                    doomed.Parent = workspace
+                    doomed:Destroy()
+                end)
+                task.delay(0.5, function()
+                    local live = Instance.new('Folder')
+                    live.Name = 'Late'
+                    live.Parent = workspace
+                end)
+                local child = workspace:WaitForChild('Late', 2)
+                store_set('result', tostring(child))");
+
+            bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("", store.Get("m", "result"), "a destroyed child does not end the wait");
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("m"));
+
+            bindings.Scheduler.Advance(0.5d);
+
+            Assert.AreEqual("Late", store.Get("m", "result"), "the live child that appears later is returned");
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors("m"));
         }
     }
 }

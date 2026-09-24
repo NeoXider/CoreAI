@@ -143,6 +143,38 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
+        public void Lua_M2_16_SteppedRunTime_StaysExactAcrossAMillionFrames()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(roblox, store);
+            const int frames = 1000000;
+            const float delta = 1f / 60f;
+
+            // WHY the bare pump with nothing connected: the run time accumulates on every
+            // PreSimulation whether or not Stepped fires, and a million pumps without a handler cost
+            // a fraction of a second. A float accumulator drifted by seconds within an hour at 60 Hz
+            // (about 4.6 hours here) and stopped advancing entirely after about six days.
+            for (int frame = 0; frame < frames; frame++)
+            {
+                roblox.PumpPreSimulation(delta);
+            }
+
+            stack.Runtime.LoadMod("m", @"
+                game:GetService('RunService').Stepped:Connect(function(runTime)
+                    store_set('run_time', tostring(runTime))
+                end)");
+            roblox.Scheduler.Advance(0d);
+
+            double runTime = double.Parse(store.Get("m", "run_time"),
+                System.Globalization.CultureInfo.InvariantCulture);
+            double expected = frames * (double)delta;
+            Assert.Less(System.Math.Abs(runTime - expected) / expected, 1e-6,
+                "Stepped's run time is a double (RunService.yaml types it so): got " + runTime
+                + ", expected " + expected);
+        }
+
+        [Test]
         public void Lua_M2_11_TaskDeferFromPreRenderRunsInTheSameFrame()
         {
             LuaCsRbxApiBindings roblox = new();

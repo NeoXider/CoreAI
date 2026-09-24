@@ -6,6 +6,7 @@ using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using Lua;
 using NUnit.Framework;
@@ -317,6 +318,61 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             {
                 Object.DestroyImmediate(driver.gameObject);
             }
+        }
+
+        [Test]
+        public void M8_22_Dispose_DetachesTweenService_SoTheOldSchedulerStepsNoTween()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            RbxInstance part = roblox.Registry.Create("Part");
+            part.Parent = roblox.Registry.WorldRoot;
+            RbxTween tween = roblox.TweenService.Create(part,
+                new RbxTweenInfo(1d, RbxEasingStyle.Linear, RbxEasingDirection.Out, 0, false, 0d),
+                new[] { new KeyValuePair<string, object>("Transparency", 1d) },
+                new TweenCaller("teardown-host", true, roblox.Registry.WorldId));
+            tween.Play();
+            roblox.Scheduler.Advance(0.25d);
+            float beforeDispose = roblox.PartSink.GetPartPropertiesOrDefault(part.Id).Transparency;
+            Assert.AreEqual(0.25f, beforeDispose, 0.001f, "the tween steps while the bindings live");
+
+            roblox.Dispose();
+            // WHY the old scheduler is advanced on purpose: after a session swap nothing should still be
+            // subscribed to it, and a service left attached kept writing into a world these bindings no
+            // longer front.
+            roblox.Scheduler.Advance(0.25d);
+
+            Assert.AreEqual(beforeDispose,
+                roblox.PartSink.GetPartPropertiesOrDefault(part.Id).Transparency,
+                "a disposed world's TweenService no longer steps its tweens");
+        }
+
+        [Test]
+        public void KillAllScheduledOwnedBy_AlsoDestroysTheTweensTheModCreated()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildWiredStack(out LuaCsRbxApiBindings roblox, store);
+            stack.Runtime.LoadMod("m", @"
+                local part = Instance.new('Part')
+                part.Name = 'Tweened'
+                part.Transparency = 0
+                part.Parent = workspace
+                local tweenService = game:GetService('TweenService')
+                tweenService:Create(part, TweenInfo.new(1), {Transparency = 1}):Play()");
+            roblox.Scheduler.Advance(0.25d);
+            Assert.AreEqual(1, roblox.TweenService.ActiveTweenCount);
+            RbxInstance part = roblox.Registry.WorldRoot.FindFirstChild("Tweened");
+            float killedAt = roblox.PartSink.GetPartPropertiesOrDefault(part.Id).Transparency;
+
+            // WHY the kill path alone: it is what unload and quarantine both run, and the mod's tweens
+            // must stop there even when nothing else sweeps the mod's instances.
+            roblox.KillAllScheduledOwnedBy("m");
+            roblox.Scheduler.Advance(0.25d);
+
+            Assert.AreEqual(0, roblox.TweenService.ActiveTweenCount,
+                "the killed mod's tweens stop with it instead of playing on");
+            Assert.AreEqual(0, roblox.TweenService.LiveTweenCount);
+            Assert.AreEqual(killedAt, roblox.PartSink.GetPartPropertiesOrDefault(part.Id).Transparency,
+                "the part keeps the value it had when the mod was killed");
         }
 
         [Test]

@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
@@ -18,7 +19,8 @@ namespace CoreAI.Ai.LuaCs
     {
         public LuaCsRbxSchedulerCallable(IScriptState ownerState, object callable,
             bool bindInitialArguments = true, IExecutionBudget resumeBudget = null,
-            bool propagateOriginalException = false, bool recyclable = false)
+            bool propagateOriginalException = false, bool recyclable = false,
+            bool resumableByHandle = false)
         {
             OwnerState = ownerState ?? throw new ArgumentNullException(nameof(ownerState));
             Callable = callable ?? throw new ArgumentNullException(nameof(callable));
@@ -26,6 +28,7 @@ namespace CoreAI.Ai.LuaCs
             ResumeBudget = resumeBudget;
             PropagateOriginalException = propagateOriginalException;
             Recyclable = recyclable;
+            ResumableByHandle = resumableByHandle;
         }
 
         public IScriptState OwnerState { get; }
@@ -43,6 +46,15 @@ namespace CoreAI.Ai.LuaCs
         /// a handler that returns without yielding may run on a pooled <see cref="LuaCsRbxSignalRunner"/>.
         /// </summary>
         public bool Recyclable { get; }
+
+        /// <summary>
+        /// True when the thread is handed back to Lua as a task handle (task.spawn, task.defer,
+        /// task.delay), so a native <c>coroutine.yield</c> parks it and <c>task.spawn(handle, ...)</c>
+        /// can resume it later (M2-14). Any other thread (signal handlers, RemoteFunction callbacks, the
+        /// legacy globals, the main chunk) has no handle to be resumed through, so a native yield ends
+        /// it with a loud fault instead of leaking a record that holds a quota slot forever (M2-20).
+        /// </summary>
+        public bool ResumableByHandle { get; }
     }
 
     /// <summary>
@@ -61,9 +73,14 @@ namespace CoreAI.Ai.LuaCs
             local scheduleRemoteInvokeClient = task._scheduleRemoteInvokeClient
             local remoteFunctionResumeValues = task._remoteFunctionResumeValues
             local warnInfiniteYield = task._warnInfiniteYield
+            local checkWaitForChild = task._checkWaitForChild
             local realtime = task._realtime
             local buildCharacter = task._buildCharacter
             local noteLoadCharacterDeprecation = task._noteLoadCharacterDeprecation
+            -- WHY: captured before any mod code runs. Each bridge suspends its thread right after
+            -- scheduling the resume; a mod that reassigned coroutine.yield could otherwise turn that
+            -- suspension into a no-op and leave the scheduler waiting on a thread that is still running.
+            local yield = coroutine.yield
             task._resumeValue = nil
             task._scheduleSignalWait = nil
             task._signalResumeValues = nil
@@ -71,22 +88,23 @@ namespace CoreAI.Ai.LuaCs
             task._scheduleRemoteInvokeClient = nil
             task._remoteFunctionResumeValues = nil
             task._warnInfiniteYield = nil
+            task._checkWaitForChild = nil
             task._realtime = nil
             task._buildCharacter = nil
             task._noteLoadCharacterDeprecation = nil
             task.wait = function(duration)
                 scheduleTaskWait(duration)
-                coroutine.yield()
+                yield()
                 return resumeValue()
             end
             wait = function(duration)
                 scheduleLegacyWait(duration)
-                coroutine.yield()
+                yield()
                 return resumeValue(), realtime()
             end
             task._signalWaitBridge = function(signal)
                 scheduleSignalWait(signal)
-                coroutine.yield()
+                yield()
                 local values = signalResumeValues()
                 return table.unpack(values, 1, values.n)
             end
@@ -99,19 +117,19 @@ namespace CoreAI.Ai.LuaCs
             end
             task._remoteFunctionInvokeServerBridge = function(remote, ...)
                 scheduleRemoteInvokeServer(remote, ...)
-                coroutine.yield()
+                yield()
                 return readRemoteFunctionResponse()
             end
             task._remoteFunctionInvokeClientBridge = function(remote, player, ...)
                 scheduleRemoteInvokeClient(remote, player, ...)
-                coroutine.yield()
+                yield()
                 return readRemoteFunctionResponse()
             end
             local function timedSignalWait(signal, duration)
                 scheduleSignalWait(signal, duration)
-                coroutine.yield()
+                yield()
                 local values = signalResumeValues()
-                return values.timedOut, values.elapsed, table.unpack(values, 1, values.n)
+                return values.timedOut, values.elapsed
             end
             -- WHY LoadCharacterAsync yields at all: the mirror makes it a yielding call that
             -- returns once the character is loaded, and CoreAI's signals are deferred, so a
@@ -128,6 +146,7 @@ namespace CoreAI.Ai.LuaCs
                 return task._loadCharacterBridge(player)
             end
             task._waitForChildBridge = function(instance, childName, timeout)
+                childName, timeout = checkWaitForChild(instance, childName, timeout)
                 local child = instance:FindFirstChild(childName)
                 if child ~= nil then
                     return child
@@ -147,12 +166,11 @@ namespace CoreAI.Ai.LuaCs
                     if duration == nil then
                         duration = warningRemaining
                     end
-                    local timedOut, elapsed, added = timedSignalWait(
-                        instance.ChildAdded, duration)
-                    if added ~= nil and added.Name == childName then
-                        return added
-                    end
-
+                    -- WHY the added child is never read: ChildAdded is deferred, so by the time this
+                    -- thread resumes that child may already be destroyed (reading its Name raised
+                    -- INSTANCE_DESTROYED into the waiting script) or renamed or reparented. Looking the
+                    -- name up again answers what WaitForChild promises: a live child with that name.
+                    local timedOut, elapsed = timedSignalWait(instance.ChildAdded, duration)
                     child = instance:FindFirstChild(childName)
                     if child ~= nil then
                         return child
@@ -405,13 +423,23 @@ namespace CoreAI.Ai.LuaCs
         }
 
         internal object CaptureCallable(LuaState ownerState, LuaValue callable,
-            bool recyclable = false)
+            bool recyclable = false, bool resumableByHandle = false)
         {
             if (callable.Type != LuaValueType.Function)
             {
                 if (LuaCsRbxLua.TryUnbox(callable, out LuaCsRbxScriptThread thread))
                 {
                     return thread;
+                }
+
+                if (callable.Type == LuaValueType.Thread)
+                {
+                    // WHY its own message: "expects a function or thread, got thread" reads as a
+                    // contradiction. The refusal is about WHICH thread: R4.10 keeps coroutine.create
+                    // threads and coroutine.running() values outside the scheduler.
+                    throw RbxError.BadArgument(
+                        "task scheduler cannot take a coroutine.create thread or a coroutine.running() value",
+                        "pass a Lua function, or a thread handle returned by task.spawn, task.defer or task.delay");
                 }
 
                 throw RbxError.BadArgument(
@@ -423,7 +451,7 @@ namespace CoreAI.Ai.LuaCs
             IScriptState capturedOwnerState = _currentThread?.OwnerState
                                               ?? new LuaCsScriptState(ownerState);
             return new LuaCsRbxSchedulerCallable(capturedOwnerState, callable,
-                recyclable: recyclable);
+                recyclable: recyclable, resumableByHandle: resumableByHandle);
         }
 
         internal object CaptureChunk(IScriptState ownerState, string source,
@@ -508,8 +536,14 @@ namespace CoreAI.Ai.LuaCs
     /// coroutine is a pooled <see cref="LuaCsRbxSignalRunner"/>: once the armed handler has returned
     /// the thread detaches from the runner, reports itself dead to the scheduler, and hands the runner
     /// back to the factory pool for the next fire. The wrapper itself is never reused.
+    /// <para>
+    /// A resume that ends suspended without a scheduler wait (a native <c>coroutine.yield</c>) parks a
+    /// thread that Lua holds a task handle for, so <c>task.spawn(handle, ...)</c> can resume it (M2-14).
+    /// Any other thread has no handle to be resumed through: the adapter stops it and reports the stop
+    /// as its <see cref="TerminalFault"/> (M2-20).
+    /// </para>
     /// </summary>
-    public sealed class LuaCsRbxScriptThread : IRbxScriptThread
+    public sealed class LuaCsRbxScriptThread : IRbxScriptThread, IRbxScriptThreadTerminalFault
     {
         private readonly LuaCsRbxScriptThreadFactory _factory;
         private readonly IScriptEngine _scriptEngine;
@@ -519,9 +553,12 @@ namespace CoreAI.Ai.LuaCs
         private IScriptCoroutine _coroutine;
         private object[] _resumeArguments = Array.Empty<object>();
         private long _remoteFunctionWaitGeneration;
+        private RbxError _terminalFault;
         private bool _killed;
         private bool _runnerArmed;
         private bool _runnerIterationDone;
+        private bool _scheduledYieldPending;
+        private bool _parkedByNativeYield;
 
         internal LuaCsRbxScriptThread(LuaCsRbxScriptThreadFactory factory,
             IScriptEngine scriptEngine, LuaCsRbxSchedulerCallable launch, string ownerModId)
@@ -574,10 +611,56 @@ namespace CoreAI.Ai.LuaCs
 
         internal Exception LastException { get; private set; }
 
+        /// <inheritdoc />
+        /// <remarks>
+        /// Set only when this adapter stopped the thread after a resume that itself succeeded: a native
+        /// <c>coroutine.yield</c> of a thread nothing can resume. A failed main-chunk load is not
+        /// reported here; <see cref="LastException"/> carries it out of LoadMod instead.
+        /// </remarks>
+        public RbxError TerminalFault => IsDead ? _terminalFault : null;
+
         internal IScriptState OwnerState => _launch.OwnerState;
 
         /// <summary>True while this thread's handler runs on a pooled signal runner.</summary>
         internal bool IsSignalRunner => _runner != null;
+
+        /// <summary>
+        /// True while this thread's own coroutine is the one executing Lua. False while it has resumed a
+        /// nested <c>coroutine.create</c> coroutine, whose code then runs with this thread still current
+        /// in the factory: a wait scheduled from there would suspend the wrong coroutine (M2-06).
+        /// </summary>
+        internal bool IsOwnCoroutineRunning =>
+            _coroutine != null && _coroutine.Status == ScriptCoroutineStatus.Running;
+
+        /// <summary>
+        /// Ledger set of the bindings' tracked-thread bookkeeping that holds this thread, so the entry
+        /// can be dropped in O(1) when the scheduler retires the thread (M2-07). Owned by
+        /// <see cref="LuaCsRbxApiBindings"/>.
+        /// </summary>
+        internal HashSet<IRbxScriptThread> TrackingSet { get; set; }
+
+        /// <summary>
+        /// Connection of the signal:Wait or RemoteFunction response this thread is suspended on, so a
+        /// cancelled or killed waiter disconnects it at once instead of when the signal next fires
+        /// (M2-18). Owned by <see cref="LuaCsRbxApiBindings"/>.
+        /// </summary>
+        internal RbxScriptConnection PendingWaitConnection { get; set; }
+
+        /// <summary>
+        /// Responder of the RemoteFunction request this callback thread still has to answer; failed if
+        /// the thread is stopped before it returns, so the caller is not left waiting for its timeout.
+        /// Owned by <see cref="LuaCsRbxApiBindings"/>.
+        /// </summary>
+        internal RbxNetworkRequestResponder PendingResponder { get; set; }
+
+        /// <summary>
+        /// Records that a scheduler wait was scheduled for this thread's next suspension, so the resume
+        /// that ends in that suspension is not mistaken for a native <c>coroutine.yield</c>.
+        /// </summary>
+        internal void NoteScheduledYield()
+        {
+            _scheduledYieldPending = true;
+        }
 
         /// <inheritdoc />
         public RbxScriptThreadResumeResult Resume(params object[] args)
@@ -590,6 +673,11 @@ namespace CoreAI.Ai.LuaCs
             }
 
             bool isInitialResume = _runner != null ? !_runnerArmed : _coroutine == null;
+            // WHY only after a native yield: a scheduler wait reads its resume values through the
+            // bridge's own hook, so handing them to coroutine.yield as well would only cost a copy.
+            bool resumeValuesToYield = _parkedByNativeYield && !isInitialResume && _runner == null;
+            _parkedByNativeYield = false;
+            _scheduledYieldPending = false;
             bool observe = _factory.IsObservabilityEnabled;
             long consumedStepsBefore = observe ? ReadConsumedSteps() : 0;
             LuaCsRbxScriptThread previous = _factory.Enter(this);
@@ -612,8 +700,9 @@ namespace CoreAI.Ai.LuaCs
                     _coroutine = CreateCoroutine(_resumeArguments);
                 }
 
-                ScriptResumeResult result = _factory.Resume(
-                    OwnerModId, _resumeCore ??= ResumeCore);
+                ScriptResumeResult result = resumeValuesToYield
+                    ? _factory.Resume(OwnerModId, ResumeWithValuesForYield)
+                    : _factory.Resume(OwnerModId, _resumeCore ??= ResumeCore);
                 if (result.Ok)
                 {
                     if (_runner != null && _runner.IterationCompleted)
@@ -625,6 +714,10 @@ namespace CoreAI.Ai.LuaCs
                         _runner = null;
                         _coroutine = null;
                         _runnerIterationDone = true;
+                    }
+                    else if (!IsDead && !_scheduledYieldPending)
+                    {
+                        ParkOrStopAfterNativeYield(isInitialResume);
                     }
 
                     return RbxScriptThreadResumeResult.Success();
@@ -668,6 +761,52 @@ namespace CoreAI.Ai.LuaCs
         private ScriptResumeResult ResumeCore()
         {
             return _coroutine.Resume();
+        }
+
+        // TODO: LuaCsCoroutineHandle.Resume drops its arguments and hands coroutine.yield the previous
+        // resume's results instead, so a parked thread resumed by task.spawn(handle, ...) does not yet
+        // receive those values; once the handle pushes them, this path delivers them unchanged.
+        private ScriptResumeResult ResumeWithValuesForYield()
+        {
+            return _coroutine.Resume(_resumeArguments);
+        }
+
+        /// <summary>
+        /// Handles a resume that ended suspended although no scheduler wait was scheduled: the thread's
+        /// own code called <c>coroutine.yield</c>. A task thread is parked for <c>task.spawn(handle)</c>;
+        /// any other thread is stopped, because nothing can ever resume it and it would otherwise hold a
+        /// live-thread quota slot until its mod unloads (M2-20).
+        /// </summary>
+        private void ParkOrStopAfterNativeYield(bool isInitialResume)
+        {
+            if (_launch.ResumableByHandle)
+            {
+                _parkedByNativeYield = true;
+                return;
+            }
+
+            string kind = _launch.PropagateOriginalException
+                ? "the mod's main chunk"
+                : _launch.Recyclable
+                    ? "a signal handler"
+                    : "a scheduler thread that has no task handle (a RemoteFunction callback or a legacy spawn/delay function)";
+            RbxError stop = new(
+                RbxErrorCode.ContextViolation,
+                "coroutine.yield() suspended " + kind
+                + " outside the task scheduler; nothing can resume it, so it was stopped",
+                "pause with task.wait() or signal:Wait(), or run the work in task.spawn and resume that "
+                + "thread with task.spawn(thread, ...)",
+                OwnerModId);
+            _runner?.Disarm();
+            _coroutine?.Kill();
+            _killed = true;
+            if (_launch.PropagateOriginalException && isInitialResume)
+            {
+                LastException = stop;
+                return;
+            }
+
+            _terminalFault = stop;
         }
 
         private long ReadConsumedSteps(LuaCsRbxSignalRunner finishedRunner = null)
