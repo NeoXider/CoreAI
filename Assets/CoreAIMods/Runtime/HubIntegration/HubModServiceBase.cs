@@ -85,6 +85,30 @@ namespace CoreAI.Ai.Hub
         /// <summary>Reloads a loaded mod's code, keeping its tier (throws on a Lua error).</summary>
         protected abstract void RuntimeReload(string id, string code);
 
+        /// <summary>
+        /// Reloads a loaded mod's code in <paramref name="mode"/> and returns what the reload did with the
+        /// previous run's startup objects (null when the runtime reports nothing). The default carries the
+        /// mode to the runtime in a <see cref="ModReloadScope"/> around <see cref="RuntimeReload(string, string)"/>,
+        /// so it reaches the runtime through any facade in between.
+        /// </summary>
+        protected virtual ModReloadReport RuntimeReload(string id, string code, ModReloadMode mode)
+        {
+            using (ModReloadScope scope = ModReloadScope.Begin(id, mode))
+            {
+                RuntimeReload(id, code);
+                return scope.Report;
+            }
+        }
+
+        /// <summary>
+        /// True when the runtime behind this service has the Roblox API wired, which picks the Roblox
+        /// flavour of <see cref="NewModTemplate"/>. False by default.
+        /// </summary>
+        protected virtual bool RbxApiAvailable => false;
+
+        /// <inheritdoc />
+        public virtual string NewModTemplate => HubModTemplates.For(RbxApiAvailable);
+
         /// <summary>Unloads a loaded mod. Returns false when it was not loaded.</summary>
         protected abstract bool RuntimeUnload(string id);
 
@@ -127,6 +151,7 @@ namespace CoreAI.Ai.Hub
                     SeededVersion = manifest.SeededVersion,
                     Capabilities = manifest.Capabilities,
                     StoredActive = manifest.Active,
+                    SuspendedAfterBudgetTrips = manifest.SuspendedAfterBudgetTrips,
                     IsStored = true
                 };
             }
@@ -192,6 +217,12 @@ namespace CoreAI.Ai.Hub
         /// <inheritdoc />
         public void SaveOrReload(string id, string code)
         {
+            SaveOrReload(id, code, ModReloadMode.CleanStartupObjects);
+        }
+
+        /// <inheritdoc />
+        public HubModSaveResult SaveOrReload(string id, string code, ModReloadMode mode)
+        {
             string modId = (id ?? "").Trim();
             if (modId.Length == 0)
             {
@@ -204,17 +235,21 @@ namespace CoreAI.Ai.Hub
             }
 
             LuaCapabilities caps = EffectiveCapabilities(code);
+            HubModSaveResult result;
             if (IsLoaded(modId))
             {
-                RuntimeReload(modId, code);
+                ModReloadReport report = RuntimeReload(modId, code, mode);
+                result = new HubModSaveResult(modId, true, mode, report);
             }
             else
             {
                 RuntimeLoad(modId, code, caps);
+                result = new HubModSaveResult(modId, false, mode, null);
             }
 
             Persist(modId, code, caps, true);
             RaiseChanged();
+            return result;
         }
 
         /// <inheritdoc />
@@ -234,7 +269,33 @@ namespace CoreAI.Ai.Hub
 
             RuntimeLoad(modId, source, EffectiveCapabilities(source));
             SafeSetActive(modId, true);
+            ClearSuspension(modId);
             RaiseChanged();
+        }
+
+        /// <summary>
+        /// Clears <see cref="LuaModManifest.SuspendedAfterBudgetTrips"/> once the player started a suspended
+        /// mod by hand. The runtime's own persist already writes a fresh manifest when it persists loads;
+        /// this covers a composition whose runtime does not. Best-effort like every store write here.
+        /// </summary>
+        private void ClearSuspension(string modId)
+        {
+            try
+            {
+                if (_store != null
+                    && _store.TryLoad(modId, out string source, out LuaModManifest manifest)
+                    && manifest != null
+                    && manifest.SuspendedAfterBudgetTrips)
+                {
+                    manifest.SuspendedAfterBudgetTrips = false;
+                    manifest.Active = true;
+                    _store.Save(modId, source, manifest);
+                }
+            }
+            catch
+            {
+                // WHY: Best-effort: the mod is already running; the marker only labels it in the list.
+            }
         }
 
         /// <inheritdoc />

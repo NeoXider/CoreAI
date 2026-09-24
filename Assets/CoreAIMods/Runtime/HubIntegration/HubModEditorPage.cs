@@ -6,39 +6,73 @@ using UnityEngine.UIElements;
 namespace CoreAI.Ai.Hub
 {
     /// <summary>
+    /// Hub-wide mod editor preferences (one value for every mod, not per mod). The default store is
+    /// <see cref="PlayerPrefsHubModEditorPreferences"/>; a host with its own settings store supplies its own.
+    /// </summary>
+    public interface IHubModEditorPreferences
+    {
+        /// <summary>
+        /// When true, "Save &amp; run" reloads a loaded mod in <see cref="ModReloadMode.KeepObjects"/>;
+        /// when false (the default) in <see cref="ModReloadMode.CleanStartupObjects"/>.
+        /// </summary>
+        bool KeepObjectsOnSave { get; set; }
+    }
+
+    /// <summary><see cref="IHubModEditorPreferences"/> kept in Unity's PlayerPrefs, so it survives restarts on every platform.</summary>
+    public sealed class PlayerPrefsHubModEditorPreferences : IHubModEditorPreferences
+    {
+        /// <summary>The PlayerPrefs key of <see cref="KeepObjectsOnSave"/>.</summary>
+        public const string KeepObjectsOnSaveKey = "CoreAI.Hub.Mods.KeepObjectsOnSave";
+
+        /// <summary>The shared instance the Hub pages use by default.</summary>
+        public static readonly PlayerPrefsHubModEditorPreferences Instance = new();
+
+        /// <inheritdoc />
+        public bool KeepObjectsOnSave
+        {
+            get => PlayerPrefs.GetInt(KeepObjectsOnSaveKey, 0) == 1;
+            set
+            {
+                PlayerPrefs.SetInt(KeepObjectsOnSaveKey, value ? 1 : 0);
+                PlayerPrefs.Save();
+            }
+        }
+    }
+
+    /// <summary>
     /// The Lua mod code editor shown inside the <see cref="HubModsPage"/>: a multiline source field,
     /// the mod's parsed <c>@coreai</c> header fields, and Save / Copy / Close / Refresh-diagnostics
     /// actions. Save persists and (re)runs the mod through <see cref="IHubModService.SaveOrReload"/>,
     /// which validates the Lua by executing it — a compile/run error is caught and shown in the status
-    /// line. Runtime hook/timer failures are surfaced from
+    /// line, which also says what the reload did with the previous run's objects. A "Keep objects on
+    /// Save &amp; run" toggle (off by default, one Hub preference for every mod) picks the reload mode.
+    /// Runtime hook/timer failures are surfaced from
     /// <see cref="IHubModService.RecentErrors"/>. New/pasted mods derive their id from the header on save.
     /// </summary>
     public sealed class HubModEditorPage
     {
-        /// <summary>Starter source offered by the Mods page "Add" button.</summary>
-        public const string NewModTemplate =
-            "--[[@coreai\n" +
-            "id: new_mod\n" +
-            "name: New Mod\n" +
-            "version: 1.0.0\n" +
-            "active: true\n" +
-            "capabilities: All\n" +
-            "author: \n" +
-            "description: A new CoreAI Lua mod.\n" +
-            "]]\n" +
-            "\n" +
-            "-- Registered once on load; the host then drives your hooks.\n" +
-            "hooks_every(1.0, function()\n" +
-            "  report(\"new_mod tick\")\n" +
-            "end)\n";
+        /// <summary>
+        /// The legacy starter source (<see cref="HubModTemplates.Legacy"/>). The Mods page "Add" button
+        /// opens <see cref="IHubModService.NewModTemplate"/>, which is the Roblox API template wherever
+        /// that API is wired.
+        /// </summary>
+        public const string NewModTemplate = HubModTemplates.Legacy;
+
+        /// <summary>Element name of the "Keep objects on Save &amp; run" toggle.</summary>
+        public const string KeepObjectsToggleName = "coreai-hub-mod-keep-objects";
+
+        /// <summary>Element name of the editor's status line.</summary>
+        public const string StatusLabelName = "coreai-hub-mod-status";
 
         private readonly IHubModService _service;
+        private readonly IHubModEditorPreferences _preferences;
         private readonly string _modId;
         private readonly bool _isNew;
         private readonly string _initialSource;
         private readonly Action _onClose;
 
         private TextField _codeField;
+        private Toggle _keepObjectsToggle;
         private Label _highlightOverlay;
         private Label _status;
         private Label _diagnostics;
@@ -55,8 +89,22 @@ namespace CoreAI.Ai.Hub
         /// </param>
         /// <param name="onClose">Invoked when the user closes the editor (returns to the list).</param>
         public HubModEditorPage(IHubModService service, string modId, string initialSource, Action onClose)
+            : this(service, modId, initialSource, onClose, null)
+        {
+        }
+
+        /// <param name="service">CRUD surface used to load/save/validate the mod.</param>
+        /// <param name="modId">Existing mod id to edit; null/empty for a new or pasted mod.</param>
+        /// <param name="initialSource">Pre-filled source; see the other constructor.</param>
+        /// <param name="onClose">Invoked when the user closes the editor (returns to the list).</param>
+        /// <param name="preferences">
+        /// Hub-wide editor preferences; null uses <see cref="PlayerPrefsHubModEditorPreferences.Instance"/>.
+        /// </param>
+        public HubModEditorPage(IHubModService service, string modId, string initialSource, Action onClose,
+            IHubModEditorPreferences preferences)
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
+            _preferences = preferences ?? PlayerPrefsHubModEditorPreferences.Instance;
             _modId = (modId ?? "").Trim();
             _isNew = _modId.Length == 0;
             _onClose = onClose;
@@ -123,6 +171,21 @@ namespace CoreAI.Ai.Hub
             actions.Add(HubModWidgets.MakeButton("History", ToggleHistory));
             root.Add(actions);
 
+            _keepObjectsToggle = new Toggle("Keep objects on Save & run")
+            {
+                name = KeepObjectsToggleName,
+                value = _preferences.KeepObjectsOnSave,
+                tooltip = "Off (default): Save & run first removes the objects the previous run's main chunk " +
+                          "built, so the new code builds into a clean world; objects created later by handlers " +
+                          "or players stay. On: every object stays and the new code builds next to them. " +
+                          "One setting for every mod."
+            };
+            _keepObjectsToggle.style.flexShrink = 0f;
+            _keepObjectsToggle.style.marginBottom = 4f;
+            HubModWidgets.StyleToggleLabel(_keepObjectsToggle);
+            _keepObjectsToggle.RegisterValueChangedCallback(evt => OnKeepObjectsToggled(evt.newValue));
+            root.Add(_keepObjectsToggle);
+
             _historyBox = HubModWidgets.MakePanel();
             _historyBox.style.flexShrink = 0f;
             _historyBox.style.display = DisplayStyle.None;
@@ -141,6 +204,7 @@ namespace CoreAI.Ai.Hub
             root.Add(_codeField);
 
             _status = HubModWidgets.MakeStatus();
+            _status.name = StatusLabelName;
             root.Add(_status);
 
             _diagnostics = HubModWidgets.MakeMutedLabel(string.Empty);
@@ -216,7 +280,24 @@ namespace CoreAI.Ai.Hub
                 _highlightOverlay.text = LuaSyntaxHighlighter.Highlight(evt.newValue));
         }
 
-        private void Save()
+        /// <summary>Records the toggle's new state as the Hub-wide preference.</summary>
+        internal void OnKeepObjectsToggled(bool keepObjects)
+        {
+            _preferences.KeepObjectsOnSave = keepObjects;
+        }
+
+        /// <summary>
+        /// The "Save &amp; run" action: persists and (re)runs the mod in the mode the toggle shows and says
+        /// in the status line what the reload did with the previous run's objects.
+        /// </summary>
+        /// <remarks>
+        /// WHY it blocks for as long as it does: the mod's main chunk runs synchronously on this click, as
+        /// it always has, until it first yields or ends, bounded by the runtime's handler budget (10 s by
+        /// default); taking the previous run's objects out and destroying them afterwards is a walk over
+        /// that run's own objects. Nothing here waits on a thread or a task, so the WebGL page behaves the
+        /// same.
+        /// </remarks>
+        internal void Save()
         {
             string code = _codeField.value ?? "";
             string id = _isNew ? ParseId(code) : _modId;
@@ -226,10 +307,12 @@ namespace CoreAI.Ai.Hub
                 return;
             }
 
+            bool keepObjects = _keepObjectsToggle?.value ?? _preferences.KeepObjectsOnSave;
             try
             {
-                _service.SaveOrReload(id, code);
-                SetStatus($"Saved & ran '{id}'.", false);
+                HubModSaveResult result = _service.SaveOrReload(
+                    id, code, keepObjects ? ModReloadMode.KeepObjects : ModReloadMode.CleanStartupObjects);
+                SetStatus(result != null ? result.Describe() : $"Saved & ran '{id}'.", false);
                 if (!_isNew)
                 {
                     _titleLabel.text = $"Edit mod: {id}";

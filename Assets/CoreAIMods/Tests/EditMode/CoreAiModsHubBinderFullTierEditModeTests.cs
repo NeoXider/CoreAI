@@ -1105,6 +1105,197 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(store.TryLoad(welcomeId, out _, out LuaModManifest updated));
             Assert.AreNotEqual("0.0.1", updated.SeededVersion, "precondition: the bundled update was applied");
         }
+
+        private const string HubCastleSource = "--[[@coreai\ncapabilities: All\n]]\n" + @"
+            local root = Instance.new('Folder')
+            root.Name = 'CastleShowcase'
+            root.Parent = workspace
+            for index = 1, 25 do
+                local part = Instance.new('Part')
+                part.Name = 'Castle' .. index
+                part.Parent = root
+            end";
+
+        private static LuaCsModStack HubRbxStack(LuaCsRbxApiBindings bindings, ILuaModSourceStore store)
+        {
+            return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new CoreAI.Tests.EditMode.RbxApi.Acceptance.Mvp1AcceptanceNullLogger(),
+                ModSourceStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = bindings
+            });
+        }
+
+        private static int CountWorkspaceChildren(LuaCsRbxApiBindings bindings, string name)
+        {
+            int count = 0;
+            foreach (CoreAI.Mods.Rbx.Instances.RbxInstance child in bindings.Registry.WorldRoot.GetChildren())
+            {
+                if (child.Name == name)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>
+        /// HUB-CRASH R6: every Hub Save &amp; run of sample_castle3d added its 126 instances again. A save
+        /// cleans the previous run's startup objects by default and says how many it cleaned.
+        /// </summary>
+        [Test]
+        public void HubService_SaveAndRun_CleansThePreviousRunsStartupObjectsByDefault_AndSaysHowMany()
+        {
+            ActorContext actorContext = CreateHostActor();
+            FakeSourceStore store = new();
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = HubRbxStack(bindings, store);
+            IHubModService service = new LuaCsModRuntimeHubService(stack.Runtime, actorContext, store);
+
+            HubModSaveResult first = service.SaveOrReload("castle", HubCastleSource, ModReloadMode.CleanStartupObjects);
+            service.SaveOrReload("castle", HubCastleSource + "\n-- edit 1");
+            HubModSaveResult third = service.SaveOrReload(
+                "castle", HubCastleSource + "\n-- edit 2", ModReloadMode.CleanStartupObjects);
+
+            Assert.IsFalse(first.Reloaded, "the first save loads the mod");
+            Assert.AreEqual("Saved & ran 'castle'.", first.Describe());
+            Assert.IsTrue(third.Reloaded);
+            Assert.IsNotNull(third.Reload, "the reload reports what it did through the runtime");
+            Assert.AreEqual(26, third.Reload.CleanedObjects);
+            Assert.AreEqual("Saved & ran 'castle'; cleaned 26 objects of the previous run.", third.Describe());
+            Assert.AreEqual(1, CountWorkspaceChildren(bindings, "CastleShowcase"),
+                "three saves, the mode-less one included, leave one castle");
+        }
+
+        /// <summary>Negative twin: with "Keep objects on Save &amp; run" every save builds next to the previous runs.</summary>
+        [Test]
+        public void HubService_SaveAndRun_InKeepMode_KeepsThePreviousRunsObjects_AndSaysSo()
+        {
+            ActorContext actorContext = CreateHostActor();
+            FakeSourceStore store = new();
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = HubRbxStack(bindings, store);
+            IHubModService service = new LuaCsModRuntimeHubService(stack.Runtime, actorContext, store);
+            service.SaveOrReload("castle", HubCastleSource);
+
+            HubModSaveResult kept = service.SaveOrReload(
+                "castle", HubCastleSource + "\n-- keep", ModReloadMode.KeepObjects);
+
+            Assert.AreEqual(ModReloadMode.KeepObjects, kept.Mode);
+            Assert.AreEqual("Saved & ran 'castle'; kept 26 objects of the previous run.", kept.Describe());
+            Assert.AreEqual(2, CountWorkspaceChildren(bindings, "CastleShowcase"));
+        }
+
+        /// <summary>
+        /// With the Roblox API wired, the "Add" template runs per-frame work on Heartbeat and periodic work
+        /// in a task loop (each resume under the scheduler's short budget), never a legacy hooks_every
+        /// timer, whose calls run under the long handler budget; and it runs as written.
+        /// </summary>
+        [Test]
+        public void HubService_NewModTemplate_WithTheRobloxApi_UsesRunServiceAndTask_AndRuns()
+        {
+            ActorContext actorContext = CreateHostActor();
+            FakeSourceStore store = new();
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = HubRbxStack(bindings, store);
+            IHubModService service = new LuaCsModRuntimeHubService(stack.Runtime, actorContext, store);
+
+            string template = service.NewModTemplate;
+
+            Assert.AreEqual(HubModTemplates.RbxApi, template);
+            StringAssert.Contains("RunService.Heartbeat:Connect(", template);
+            StringAssert.Contains("task.spawn(", template);
+            StringAssert.Contains("task.wait(", template);
+            StringAssert.DoesNotContain("hooks_every", template);
+
+            service.SaveOrReload("new_mod", template);
+            for (int frame = 0; frame < 3; frame++)
+            {
+                bindings.Scheduler.Advance(1d / 60d);
+                stack.Runtime.Tick(1d / 60d);
+            }
+
+            Assert.IsEmpty(service.RecentErrorEntries("new_mod"), "the template runs without an error");
+            Assert.IsTrue(service.RecentReports("new_mod").Any(report => report.Message == "new_mod tick"),
+                "the template's task loop printed");
+        }
+
+        /// <summary>Negative twin: a composition without the Roblox API keeps the hooks_every template, which runs there.</summary>
+        [Test]
+        public void HubService_NewModTemplate_WithoutTheRobloxApi_KeepsHooksEvery_AndRuns()
+        {
+            ActorContext actorContext = CreateHostActor();
+            FakeSourceStore store = new();
+            LuaCsModRuntime runtime = new(sourceStore: store);
+            IHubModService service = new LuaCsModRuntimeHubService(runtime, actorContext, store);
+
+            string template = service.NewModTemplate;
+
+            Assert.AreEqual(HubModTemplates.Legacy, template);
+            Assert.AreEqual(HubModEditorPage.NewModTemplate, template);
+            StringAssert.Contains("hooks_every(", template);
+            StringAssert.DoesNotContain("RunService", template);
+
+            service.SaveOrReload("new_mod", template);
+            runtime.Tick(1.1d);
+
+            Assert.IsTrue(service.RecentReports("new_mod").Any(report => report.Message == "new_mod tick"));
+        }
+
+        /// <summary>
+        /// The Hub usually holds a facade over the active world session, which cannot say whether the
+        /// Roblox API is wired; the host passes the answer.
+        /// </summary>
+        [Test]
+        public void HubService_NewModTemplate_FollowsTheHostsAnswerForAFacade()
+        {
+            ActorContext actorContext = CreateHostActor();
+            FakeSourceStore store = new();
+            LuaCsModRuntime runtime = new(sourceStore: store);
+
+            IHubModService withApi = new LuaCsModRuntimeHubService(
+                runtime, actorContext, store, rbxApiAvailable: true);
+            IHubModService withoutApi = new LuaCsModRuntimeHubService(
+                runtime, actorContext, store, rbxApiAvailable: false);
+
+            Assert.AreEqual(HubModTemplates.RbxApi, withApi.NewModTemplate);
+            Assert.AreEqual(HubModTemplates.Legacy, withoutApi.NewModTemplate);
+        }
+
+        /// <summary>
+        /// A mod the runtime suspended after repeated budget trips shows as suspended in the list, and
+        /// starting it by hand clears the suspension even where the runtime does not persist loads.
+        /// </summary>
+        [Test]
+        public void HubService_ASuspendedMod_IsListedAsSuspended_AndStartingItByHandClearsIt()
+        {
+            ActorContext actorContext = CreateHostActor();
+            FakeSourceStore store = new();
+            store.Save("spinner", "local x = 1", new LuaModManifest
+            {
+                Id = "spinner",
+                Capabilities = LuaCapabilities.All.ToString(),
+                Active = false,
+                SuspendedAfterBudgetTrips = true
+            });
+            LuaCsModRuntime runtime = new(sourceStore: store, autoPersistMods: false);
+            IHubModService service = new LuaCsModRuntimeHubService(runtime, actorContext, store);
+
+            HubModRecord listed = service.ListMods().Single(record => record.Id == "spinner");
+            Assert.IsTrue(listed.SuspendedAfterBudgetTrips);
+            Assert.IsFalse(listed.StoredActive);
+
+            service.Enable("spinner");
+
+            Assert.IsTrue(runtime.IsLoaded(actorContext, "spinner"));
+            Assert.IsTrue(store.TryLoad("spinner", out _, out LuaModManifest started));
+            Assert.IsTrue(started.Active);
+            Assert.IsFalse(started.SuspendedAfterBudgetTrips);
+            Assert.IsFalse(service.ListMods().Single(record => record.Id == "spinner").SuspendedAfterBudgetTrips);
+        }
 #endif
     }
 }

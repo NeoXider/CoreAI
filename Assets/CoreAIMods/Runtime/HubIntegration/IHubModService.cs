@@ -65,6 +65,107 @@ namespace CoreAI.Ai.Hub
 
         /// <summary>Consecutive runtime error count (live; 0 when not loaded).</summary>
         public int Errors;
+
+        /// <summary>
+        /// The runtime quarantined the mod after repeated budget trips and suspended its stored package
+        /// (<see cref="LuaModManifest.SuspendedAfterBudgetTrips"/>): it does not start with the game until
+        /// it is started or saved by hand.
+        /// </summary>
+        public bool SuspendedAfterBudgetTrips;
+    }
+
+    /// <summary>What a Hub "Save &amp; run" did: a first load, or a reload and what it did with the previous run's objects.</summary>
+    public sealed class HubModSaveResult
+    {
+        public HubModSaveResult(string modId, bool reloaded, ModReloadMode mode, ModReloadReport reload)
+        {
+            ModId = modId ?? "";
+            Reloaded = reloaded;
+            Mode = mode;
+            Reload = reload;
+        }
+
+        /// <summary>The saved mod.</summary>
+        public string ModId { get; }
+
+        /// <summary>True when the mod was already loaded and was reloaded; false for a first load.</summary>
+        public bool Reloaded { get; }
+
+        /// <summary>The reload mode requested for the save.</summary>
+        public ModReloadMode Mode { get; }
+
+        /// <summary>What the reload did with the previous run's startup objects; null for a first load or a runtime that reports nothing.</summary>
+        public ModReloadReport Reload { get; }
+
+        /// <summary>The status line the mod editor shows, e.g. "Saved &amp; ran 'castle'; cleaned 126 objects of the previous run."</summary>
+        public string Describe()
+        {
+            string saved = "Saved & ran '" + ModId + "'";
+            return Reload == null ? saved + "." : saved + "; " + Reload.Describe() + ".";
+        }
+    }
+
+    /// <summary>
+    /// Starter sources the Mods page "Add" button offers. With the Roblox API wired, the template runs
+    /// per-frame work on <c>RunService.Heartbeat</c> and periodic work in a <c>task.spawn</c> loop that
+    /// yields with <c>task.wait</c>, each resume under the scheduler's short per-resume budget; only a
+    /// composition without the Roblox API gets the legacy <c>hooks_every</c> timer, whose calls run
+    /// under the much longer handler budget.
+    /// </summary>
+    public static class HubModTemplates
+    {
+        /// <summary>Template for a composition without the Roblox API (legacy hooks).</summary>
+        public const string Legacy =
+            "--[[@coreai\n" +
+            "id: new_mod\n" +
+            "name: New Mod\n" +
+            "version: 1.0.0\n" +
+            "active: true\n" +
+            "capabilities: All\n" +
+            "author: \n" +
+            "description: A new CoreAI Lua mod.\n" +
+            "]]\n" +
+            "\n" +
+            "-- Registered once on load; the host then drives your hooks.\n" +
+            "hooks_every(1.0, function()\n" +
+            "  report(\"new_mod tick\")\n" +
+            "end)\n";
+
+        /// <summary>Template for a composition with the Roblox API (RunService and task).</summary>
+        public const string RbxApi =
+            "--[[@coreai\n" +
+            "id: new_mod\n" +
+            "name: New Mod\n" +
+            "version: 1.0.0\n" +
+            "active: true\n" +
+            "capabilities: All\n" +
+            "author: \n" +
+            "description: A new CoreAI Lua mod.\n" +
+            "]]\n" +
+            "\n" +
+            "-- The main chunk runs once per Save & run. Objects it builds are this run's startup objects:\n" +
+            "-- the next Save & run removes them before it runs, unless \"Keep objects\" is on.\n" +
+            "local RunService = game:GetService(\"RunService\")\n" +
+            "\n" +
+            "-- Per-frame work: keep each call short.\n" +
+            "local elapsed = 0\n" +
+            "RunService.Heartbeat:Connect(function(deltaTime)\n" +
+            "  elapsed = elapsed + deltaTime\n" +
+            "end)\n" +
+            "\n" +
+            "-- Periodic work: a loop that yields with task.wait between steps.\n" +
+            "task.spawn(function()\n" +
+            "  while true do\n" +
+            "    print(\"new_mod tick\")\n" +
+            "    task.wait(1)\n" +
+            "  end\n" +
+            "end)\n";
+
+        /// <summary>The template for a composition with or without the Roblox API.</summary>
+        public static string For(bool rbxApiAvailable)
+        {
+            return rbxApiAvailable ? RbxApi : Legacy;
+        }
     }
 
     /// <summary>Minimal live-status projection each runtime adapter maps its own info type onto.</summary>
@@ -115,6 +216,16 @@ namespace CoreAI.Ai.Hub
         /// the editor can surface it (this doubles as the validate affordance).
         /// </summary>
         void SaveOrReload(string id, string code);
+
+        /// <summary>
+        /// <see cref="SaveOrReload(string, string)"/> with an explicit reload <paramref name="mode"/> for an
+        /// already loaded mod (the mode-less overload cleans the previous run's startup objects), returning
+        /// what the save did. Throws like the mode-less overload.
+        /// </summary>
+        HubModSaveResult SaveOrReload(string id, string code, ModReloadMode mode);
+
+        /// <summary>The starter source the Mods page "Add" button opens, matched to the composition (<see cref="HubModTemplates"/>).</summary>
+        string NewModTemplate { get; }
 
         /// <summary>Loads a dormant stored mod (using its persisted source) and marks it active.</summary>
         void Enable(string id);

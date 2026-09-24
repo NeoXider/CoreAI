@@ -614,10 +614,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             RbxNetworkResponse before = InvokeServer(bindings, WorkspaceChild(bindings, "Svc"), client.ActorId);
             Assert.IsTrue(before != null && before.Succeeded, before?.Error);
 
+            // WHY keep mode: the reload reuses the remote the loaded run built; a default (clean) reload
+            // takes that remote out of the world while the new chunk runs.
             System.Exception error = Assert.Catch<System.Exception>(() => stack.Runtime.ReloadMod(host, "svc", @"
                 local remote = workspace:FindFirstChild('Svc')
                 remote.OnServerInvoke = function(player) return 'v2' end
-                error('reload fails here')"));
+                error('reload fails here')", ModReloadMode.KeepObjects));
             StringAssert.Contains("reload fails here", error.ToString());
             Assert.IsTrue(stack.Runtime.IsLoaded(host, "svc"));
 
@@ -645,9 +647,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 remote.Parent = workspace
                 remote.OnServerInvoke = function(player) return 'v1' end", LuaCapabilities.All, persistToStore: false);
 
-            Assert.Catch<System.Exception>(() => stack.Runtime.ReloadMod(host, "svc", @"
+            System.Exception cleared = Assert.Catch<System.Exception>(() => stack.Runtime.ReloadMod(host, "svc", @"
                 workspace:FindFirstChild('Svc').OnServerInvoke = nil
-                error('reload fails here')"));
+                error('reload fails here')", ModReloadMode.KeepObjects));
+            StringAssert.Contains("reload fails here", cleared.ToString());
 
             RbxNetworkResponse after = InvokeServer(bindings, WorkspaceChild(bindings, "Svc"), client.ActorId);
             Assert.IsTrue(after != null && after.Succeeded, "a failed reload's nil assignment is undone: " + after?.Error);
@@ -731,7 +734,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 remote.OnServerInvoke = function(player) return 'v1' end", LuaCapabilities.All, persistToStore: false);
 
             stack.Runtime.ReloadMod(host, "svc", @"
-                workspace:FindFirstChild('Svc').OnServerInvoke = function(player) return 'v2' end");
+                workspace:FindFirstChild('Svc').OnServerInvoke = function(player) return 'v2' end",
+                ModReloadMode.KeepObjects);
 
             RbxNetworkResponse after = InvokeServer(bindings, WorkspaceChild(bindings, "Svc"), client.ActorId);
             Assert.IsTrue(after != null && after.Succeeded, after?.Error);

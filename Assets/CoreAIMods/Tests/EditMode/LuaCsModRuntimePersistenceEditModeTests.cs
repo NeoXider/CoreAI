@@ -837,6 +837,159 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private const string SpinningTimerSource = "hooks_every(0.01, function() while true do end end)";
+
+        /// <summary>
+        /// HUB-CRASH R3: a mod that stalls the game at every budget kept doing so after the player killed
+        /// the frozen process, because the next start ran it again. A quarantine for budget trips marks
+        /// the stored package inactive and suspended, so the restart does not start it.
+        /// </summary>
+        [Test]
+        [Timeout(60000)]
+        public void BudgetTripQuarantine_SuspendsTheStoredPackage_AndTheNextStartDoesNotRunIt()
+        {
+            FakeSourceStore store = new();
+            LuaCsModRuntime runtime = new(sourceStore: store, handlerMaxSteps: 20_000);
+            runtime.LoadMod("spinner", SpinningTimerSource);
+
+            runtime.Tick(0.05);
+            runtime.Tick(0.05);
+
+            Assert.IsTrue(runtime.ListMods()[0].Quarantined, "precondition: two budget trips quarantined it");
+            Assert.IsTrue(store.TryLoad("spinner", out string source, out LuaModManifest manifest));
+            Assert.AreEqual(SpinningTimerSource, source, "the suspension keeps the stored source");
+            Assert.IsFalse(manifest.Active, "a mod suspended for budget trips must not start with the game");
+            Assert.IsTrue(manifest.SuspendedAfterBudgetTrips, "the Hub must be able to say why it is off");
+
+            LuaCsModRuntime restarted = new(sourceStore: store, handlerMaxSteps: 20_000);
+            Assert.AreEqual(0, restarted.RehydrateFromStore(LuaCapabilities.All));
+            Assert.IsFalse(restarted.IsLoaded("spinner"), "the restart must not run the stalling mod again");
+            Assert.AreEqual(0, restarted.RehydrateExactOrThrow(LuaCapabilities.All),
+                "nor may a world restore of the same sources");
+
+            restarted.LoadMod("spinner", "local fixed = true");
+
+            Assert.IsTrue(store.TryLoad("spinner", out _, out LuaModManifest started));
+            Assert.IsTrue(started.Active, "starting it by hand makes it start with the game again");
+            Assert.IsFalse(started.SuspendedAfterBudgetTrips, "and clears the suspension");
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void BudgetTripQuarantine_ASuccessfulReload_ClearsTheSuspension()
+        {
+            FakeSourceStore store = new();
+            LuaCsModRuntime runtime = new(sourceStore: store, handlerMaxSteps: 20_000);
+            runtime.LoadMod("spinner", SpinningTimerSource);
+            runtime.Tick(0.05);
+            runtime.Tick(0.05);
+            Assert.IsTrue(store.TryLoad("spinner", out _, out LuaModManifest suspended));
+            Assert.IsTrue(suspended.SuspendedAfterBudgetTrips, "precondition");
+
+            runtime.ReloadMod("spinner", "local fixed = true");
+
+            Assert.IsFalse(runtime.ListMods()[0].Quarantined);
+            Assert.IsTrue(store.TryLoad("spinner", out _, out LuaModManifest repaired));
+            Assert.IsTrue(repaired.Active);
+            Assert.IsFalse(repaired.SuspendedAfterBudgetTrips);
+        }
+
+        /// <summary>Negative twin: a quarantine for ordinary errors costs no time and suspends nothing.</summary>
+        [Test]
+        public void ErrorStreakQuarantine_DoesNotSuspendTheStoredPackage()
+        {
+            FakeSourceStore store = new();
+            LuaCsModRuntime runtime = NewRuntime(store);
+            runtime.LoadMod("thrower", "hooks_every(0.01, function() error('boom') end)");
+
+            for (int tick = 0; tick < LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine; tick++)
+            {
+                runtime.Tick(0.05);
+            }
+
+            Assert.IsTrue(runtime.ListMods()[0].Quarantined, "precondition: the error streak quarantined it");
+            Assert.IsTrue(store.TryLoad("thrower", out _, out LuaModManifest manifest));
+            Assert.IsTrue(manifest.Active);
+            Assert.IsFalse(manifest.SuspendedAfterBudgetTrips);
+            Assert.AreEqual(1, NewRuntime(store).RehydrateFromStore(LuaCapabilities.All),
+                "a mod quarantined for ordinary errors starts again with the game, as before");
+        }
+
+        [Test]
+        public void SuspendedAfterBudgetTrips_IsWrittenOnlyWhenSet_AndSurvivesTheFileStore()
+        {
+            FileLuaModSourceStore store = NewFileStore();
+            store.Save("plain", "local x = 1", new LuaModManifest { Id = "plain", Active = true });
+            store.Save("suspended", "local x = 1", new LuaModManifest
+            {
+                Id = "suspended",
+                Active = false,
+                SuspendedAfterBudgetTrips = true
+            });
+
+            Assert.IsTrue(store.TryLoad("plain", out _, out LuaModManifest plain));
+            Assert.IsFalse(plain.SuspendedAfterBudgetTrips);
+            Assert.IsTrue(store.TryLoad("suspended", out _, out LuaModManifest suspended));
+            Assert.IsTrue(suspended.SuspendedAfterBudgetTrips);
+            StringAssert.DoesNotContain("SuspendedAfterBudgetTrips",
+                Newtonsoft.Json.JsonConvert.SerializeObject(plain),
+                "a manifest that was never suspended stays byte-identical to one written before the field");
+        }
+
+        /// <summary>
+        /// Startup objects are runtime state and are never persisted. A restart or a world restore runs
+        /// every active main chunk again through the same build, so the restarted run records its own
+        /// startup objects and the first clean reload after it cleans them.
+        /// </summary>
+        [TestCase(false)]
+        [TestCase(true)]
+        public void AfterARestart_TheFirstCleanReload_CleansWhatTheRestartedRunBuilt(bool exactRestore)
+        {
+            const string castle = @"
+                local root = Instance.new('Folder')
+                root.Name = 'Castle'
+                root.Parent = workspace
+                for index = 1, 4 do
+                    Instance.new('Part').Parent = root
+                end";
+            FakeSourceStore store = new();
+            LuaCsModStack before = RbxStack(new LuaCsRbxApiBindings(), store);
+            before.Runtime.LoadMod("castle", castle);
+
+            LuaCsRbxApiBindings world = new();
+            LuaCsModStack restarted = RbxStack(world, store);
+            int started = exactRestore
+                ? restarted.Runtime.RehydrateExactOrThrow(LuaCapabilities.All)
+                : restarted.Runtime.RehydrateFromStore(LuaCapabilities.All);
+            Assert.AreEqual(1, started, "precondition: the restart ran the mod's main chunk");
+
+            ModReloadReport report = restarted.Runtime.ReloadMod(
+                "castle", castle + "\n-- edit", ModReloadMode.CleanStartupObjects);
+
+            Assert.AreEqual(5, report.CleanedObjects, "the restarted run's own startup objects are known");
+            int castles = 0;
+            foreach (CoreAI.Mods.Rbx.Instances.RbxInstance child in world.Registry.WorldRoot.GetChildren())
+            {
+                if (child.Name == "Castle")
+                {
+                    castles++;
+                }
+            }
+
+            Assert.AreEqual(1, castles, "the first save after a restart must not duplicate the castle");
+        }
+
+        private static LuaCsModStack RbxStack(LuaCsRbxApiBindings bindings, ILuaModSourceStore store)
+        {
+            return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                ModSourceStore = store,
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = bindings
+            });
+        }
+
         private const LuaCapabilities CapacityCapabilities =
             LuaCapabilities.Read | LuaCapabilities.WorldEdit | LuaCapabilities.LogicOverride;
 

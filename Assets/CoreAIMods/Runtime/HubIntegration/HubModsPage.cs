@@ -24,6 +24,7 @@ namespace CoreAI.Ai.Hub
 
         private readonly IHubModService _service;
         private readonly Action<Action> _deferToPanel;
+        private readonly IHubModEditorPreferences _editorPreferences;
 
         private VisualElement _root;
         private VisualElement _listRoot;
@@ -56,11 +57,17 @@ namespace CoreAI.Ai.Hub
         /// Runs an action on the panel's next update; null uses the page root's scheduler. Tests pass a
         /// recorder, since a page that is not attached to a panel never runs its scheduled work.
         /// </param>
-        internal HubModsPage(IHubModService service, int order, Action<Action> deferToPanel)
+        /// <param name="editorPreferences">
+        /// Hub-wide editor preferences handed to every editor this page opens; null uses
+        /// <see cref="PlayerPrefsHubModEditorPreferences.Instance"/>.
+        /// </param>
+        internal HubModsPage(IHubModService service, int order, Action<Action> deferToPanel,
+            IHubModEditorPreferences editorPreferences = null)
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
             Order = order;
             _deferToPanel = deferToPanel;
+            _editorPreferences = editorPreferences;
         }
 
         /// <inheritdoc />
@@ -342,7 +349,18 @@ namespace CoreAI.Ai.Hub
                     : "";
             string version = string.IsNullOrWhiteSpace(mod.Version) ? "" : $"  v{mod.Version}";
             string bundled = string.IsNullOrWhiteSpace(mod.Origin) ? "" : "  [bundled]";
-            return id + version + caps + status + bundled;
+            return id + version + caps + status + bundled + SuspensionNote(mod);
+        }
+
+        /// <summary>
+        /// The meta-line note for a mod the runtime suspended after repeated budget trips; empty for any
+        /// other mod.
+        /// </summary>
+        internal static string SuspensionNote(HubModRecord mod)
+        {
+            return mod != null && mod.SuspendedAfterBudgetTrips
+                ? "  suspended after repeated budget trips — start it manually"
+                : "";
         }
 
         private static bool Matches(HubModRecord mod, string search)
@@ -474,12 +492,19 @@ namespace CoreAI.Ai.Hub
 
         private void OpenNewEditor()
         {
-            OpenEditor(new HubModEditorPage(_service, null, HubModEditorPage.NewModTemplate, CloseEditor));
+            OpenEditor(new HubModEditorPage(_service, null, NewModSource(), CloseEditor, _editorPreferences));
+        }
+
+        /// <summary>The source the "Add" button opens: the service's template for its composition.</summary>
+        private string NewModSource()
+        {
+            string template = _service.NewModTemplate;
+            return string.IsNullOrWhiteSpace(template) ? HubModTemplates.Legacy : template;
         }
 
         private void OpenEditEditor(string id)
         {
-            OpenEditor(new HubModEditorPage(_service, id, null, CloseEditor));
+            OpenEditor(new HubModEditorPage(_service, id, null, CloseEditor, _editorPreferences));
         }
 
         private void PasteFromClipboard()
@@ -491,7 +516,7 @@ namespace CoreAI.Ai.Hub
                 return;
             }
 
-            OpenEditor(new HubModEditorPage(_service, null, clip, CloseEditor));
+            OpenEditor(new HubModEditorPage(_service, null, clip, CloseEditor, _editorPreferences));
         }
 
         private void OpenEditor(HubModEditorPage editor)

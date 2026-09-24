@@ -87,7 +87,8 @@ namespace CoreAI.Ai.Hub
             LuaCapabilities grant = allowFullTier
                 ? LuaCapabilities.All | LuaCapabilities.Full
                 : LuaCapabilities.All;
-            HubModsPages.Register(registry, runtime, actorContext, sourceStore, grant, allowFullTier);
+            HubModsPages.Register(registry, runtime, actorContext, sourceStore, grant, allowFullTier,
+                rbxApiAvailable: IsRbxApiWired(container));
 
             IRbxWorldRuntimeService worldRuntimeService =
                 container.ResolveOrDefault<IRbxWorldRuntimeService>();
@@ -110,6 +111,27 @@ namespace CoreAI.Ai.Hub
             if (window.Registry == null)
             {
                 window.Registry = registry;
+            }
+        }
+
+        /// <summary>
+        /// Whether the mods composition wired the Roblox API into its stack.
+        /// </summary>
+        /// <remarks>
+        /// WHY read from the stack: the <see cref="ILuaModRuntime"/> the Hub gets is a facade over the
+        /// active world session and does not say whether the Roblox API is wired, which picks the "Add"
+        /// template (RunService and task, or legacy hooks).
+        /// </remarks>
+        private static bool IsRbxApiWired(IObjectResolver container)
+        {
+            try
+            {
+                LuaCsModStack stack = container.ResolveOrDefault<LuaCsModStack>();
+                return stack?.GameplayBindings?.RbxApi != null;
+            }
+            catch (System.InvalidOperationException)
+            {
+                return false;
             }
         }
 

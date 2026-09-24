@@ -211,6 +211,13 @@ namespace CoreAI.Ai.LuaCs
         public int MaxErrorsBeforeQuarantine = LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine;
 
         /// <summary>
+        /// Budget trips in a row (instruction, time or memory budget) at which a persistent mod is
+        /// quarantined and its stored package suspended, so the next start does not run it again. See
+        /// <see cref="LuaCsModRuntime.MaxBudgetTripsBeforeQuarantine"/>.
+        /// </summary>
+        public int MaxBudgetTripsBeforeQuarantine = LuaCsModRuntime.DefaultMaxBudgetTripsBeforeQuarantine;
+
+        /// <summary>
         /// Live-heap growth allowed in one execution of a mod's code (the allocation-bomb backstop): every
         /// guarded hook/timer call and, with <see cref="RbxApi"/> set, every resume of the mod's main
         /// chunk, its <c>task.*</c> threads and its signal handlers. It starts over with each call or
@@ -408,7 +415,13 @@ namespace CoreAI.Ai.LuaCs
                 options.Observability,
                 options.MaxSchedulerThreadsPerActor,
                 options.MaxRegisteredInstancesPerActor,
-                options.MaxEventSubscriptionsPerActor);
+                options.MaxEventSubscriptionsPerActor,
+                maxBudgetTripsBeforeQuarantine: options.MaxBudgetTripsBeforeQuarantine);
+
+            if (options.RbxApi != null)
+            {
+                WireRbxTeardown(runtime, options.RbxApi, options.Log);
+            }
 
             LuaCsGameToolExecutor executor = new(
                 engine.Environment,
@@ -422,6 +435,57 @@ namespace CoreAI.Ai.LuaCs
             executor.FrameYielder = options.FrameYielder;
 
             return new LuaCsModStack(runtime, executor, bindings);
+        }
+
+        /// <summary>
+        /// Releases what a mod run made through the Roblox surface whenever the runtime tears that run
+        /// down: its scheduler threads (only the outgoing generation's on a reload), its signal
+        /// connections (likewise), and, on unload, every instance it owns.
+        /// </summary>
+        /// <remarks>
+        /// WHY here, by default: a host that composed its stack from this factory alone got a reload
+        /// that left the replaced run's task loops, Heartbeat handlers and tweens running next to the
+        /// new run's, one more set per save. Every host needs this teardown, so it belongs to the
+        /// composition root rather than to each host. WHY a host that wires the same teardown itself
+        /// is unaffected: this one runs after every <see cref="LuaCsModRuntime.ModTearingDown"/>
+        /// subscriber and each step only releases what is still held.
+        /// </remarks>
+        private static void WireRbxTeardown(LuaCsModRuntime runtime, LuaCsRbxApiBindings rbxApi, ILog log)
+        {
+            ModConnectionRegistry connections = rbxApi.Connections;
+            InstanceRegistry registry = rbxApi.Registry;
+            runtime.SetDefaultTeardown((modId, reason) =>
+            {
+                // WHY: on a reload the replacement chunk has already run and connected (BuildMod runs
+                // before the teardown), so only the outgoing generation goes; an unload or a quarantine
+                // has no new chunk, so everything goes.
+                if (reason == LuaModTeardownReason.Reload)
+                {
+                    rbxApi.KillOutgoingScheduledGenerations(modId);
+                }
+                else
+                {
+                    rbxApi.KillAllScheduledOwnedBy(modId);
+                }
+
+                connections.DisconnectOwnedBy(modId, reason == LuaModTeardownReason.Reload);
+                if (reason != LuaModTeardownReason.Unload)
+                {
+                    return;
+                }
+
+                foreach (RbxInstance owned in registry.GetTeardownOwnedBy(modId))
+                {
+                    try
+                    {
+                        owned?.Destroy();
+                    }
+                    catch (Exception ex)
+                    {
+                        log?.Warn($"[LuaCsModRuntimeFactory] Destroying an instance owned by unloaded mod '{modId}' failed: {ex.Message}");
+                    }
+                }
+            });
         }
 
         /// <summary>

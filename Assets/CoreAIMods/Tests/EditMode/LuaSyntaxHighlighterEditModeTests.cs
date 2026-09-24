@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Ai.Hub;
 using NUnit.Framework;
+using UnityEngine.UIElements;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -140,6 +141,18 @@ namespace CoreAI.Tests.EditMode
             public void SaveOrReload(string id, string code)
             {
             }
+
+            public List<ModReloadMode> SaveModes { get; } = new();
+
+            public HubModSaveResult SaveOrReload(string id, string code, ModReloadMode mode)
+            {
+                SaveModes.Add(mode);
+                return new HubModSaveResult(id, true, mode, mode == ModReloadMode.KeepObjects
+                    ? new ModReloadReport(id, mode, 0, 126, 0)
+                    : new ModReloadReport(id, mode, 126, 0, 0));
+            }
+
+            public string NewModTemplate => HubModTemplates.Legacy;
 
             public void Enable(string id)
             {
@@ -291,6 +304,73 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(2, queued.Count,
                 "A mod change after the queued rebuild ran must queue the next one, or the list goes stale.");
+        }
+
+        private sealed class MemoryEditorPreferences : IHubModEditorPreferences
+        {
+            public bool KeepObjectsOnSave { get; set; }
+        }
+
+        /// <summary>
+        /// The mod editor's "Keep objects on Save &amp; run" toggle starts from the Hub-wide preference,
+        /// off by default, Save &amp; run reloads in the mode it shows, and the status line says what the
+        /// reload did with the previous run's objects.
+        /// </summary>
+        [Test]
+        public void ModEditor_KeepObjectsToggle_DefaultsOff_PicksTheReloadMode_AndTheStatusSaysWhatWasCleaned()
+        {
+            CountingHubModService service = new();
+            MemoryEditorPreferences preferences = new();
+            HubModEditorPage editor = new(service, "castle", "local x = 1", null, preferences);
+            UnityEngine.UIElements.VisualElement root = editor.Build();
+            UnityEngine.UIElements.Toggle toggle =
+                root.Q<UnityEngine.UIElements.Toggle>(HubModEditorPage.KeepObjectsToggleName);
+            UnityEngine.UIElements.Label status =
+                root.Q<UnityEngine.UIElements.Label>(HubModEditorPage.StatusLabelName);
+
+            Assert.IsNotNull(toggle, "the editor shows the toggle");
+            Assert.IsFalse(toggle.value, "keeping objects is off by default");
+
+            editor.Save();
+
+            CollectionAssert.AreEqual(new[] { ModReloadMode.CleanStartupObjects }, service.SaveModes);
+            Assert.AreEqual("Saved & ran 'castle'; cleaned 126 objects of the previous run.", status.text);
+
+            toggle.value = true;
+            editor.Save();
+
+            Assert.AreEqual(ModReloadMode.KeepObjects, service.SaveModes[1], "the toggle picks keep mode");
+            StringAssert.Contains("kept 126 objects", status.text);
+        }
+
+        [Test]
+        public void ModEditor_KeepObjectsToggle_IsOneHubPreference_ReadByEveryEditorAndWrittenOnChange()
+        {
+            CountingHubModService service = new();
+            MemoryEditorPreferences preferences = new();
+            HubModEditorPage first = new(service, "first", "local x = 1", null, preferences);
+            first.Build();
+
+            first.OnKeepObjectsToggled(true);
+
+            Assert.IsTrue(preferences.KeepObjectsOnSave, "changing the toggle writes the Hub preference");
+            HubModEditorPage second = new(service, "second", "local x = 2", null, preferences);
+            UnityEngine.UIElements.Toggle toggle = second.Build()
+                .Q<UnityEngine.UIElements.Toggle>(HubModEditorPage.KeepObjectsToggleName);
+            Assert.IsTrue(toggle.value, "an editor for another mod opens with the same preference");
+
+            second.Save();
+
+            Assert.AreEqual(ModReloadMode.KeepObjects, service.SaveModes[0]);
+        }
+
+        [Test]
+        public void ModsPage_ASuspendedMod_SaysWhyItIsOffAndHowToStartIt()
+        {
+            Assert.AreEqual("  suspended after repeated budget trips — start it manually",
+                HubModsPage.SuspensionNote(new HubModRecord { Id = "spinner", SuspendedAfterBudgetTrips = true }));
+            Assert.AreEqual("", HubModsPage.SuspensionNote(new HubModRecord { Id = "plain" }),
+                "a mod that was not suspended gets no note");
         }
 
         [Test]

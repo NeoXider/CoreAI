@@ -676,6 +676,51 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             Assert.AreEqual(0, registry.Count, "a refused record is never added");
         }
 
+        /// <summary>
+        /// A host that took instances out of the world for a while (a clean mod reload that failed) puts
+        /// each back at the position it had among its parent's children, not at the end, through the
+        /// same pipeline as the Parent setter.
+        /// </summary>
+        [Test]
+        public void SetParentAtSiblingIndex_PutsDetachedChildrenBackAtTheirPositions_AndAnnouncesTheMove()
+        {
+            InstanceRegistry registry = new();
+            RbxInstance parent = registry.Create("Folder");
+            List<RbxInstance> children = new();
+            foreach (string name in new[] { "a", "b", "c", "d" })
+            {
+                RbxInstance child = registry.Create("Folder");
+                child.Name = name;
+                child.Parent = parent;
+                children.Add(child);
+            }
+
+            long revisionBefore = Record(registry, parent).Revision;
+            children[1].Parent = null;
+            children[3].Parent = null;
+
+            children[1].SetParentAtSiblingIndex(parent, 1);
+            children[3].SetParentAtSiblingIndex(parent, 3);
+
+            CollectionAssert.AreEqual(children, parent.GetChildren(), "each child is back at its own position");
+            Assert.Greater(Record(registry, parent).Revision, revisionBefore,
+                "the parent's children revision advances as for any re-parent, so replication sees it");
+
+            RbxInstance late = registry.Create("Folder");
+            late.SetParentAtSiblingIndex(parent, 99);
+            Assert.AreSame(late, parent.GetChildren()[4], "a position past the end appends");
+
+            RbxInstance first = registry.Create("Folder");
+            first.SetParentAtSiblingIndex(parent, -3);
+            Assert.AreSame(first, parent.GetChildren()[0], "a negative position inserts first");
+        }
+
+        private static InstanceRecord Record(InstanceRegistry registry, RbxInstance instance)
+        {
+            Assert.IsTrue(registry.TryGetRecord(instance.Id, out InstanceRecord record));
+            return record;
+        }
+
         /// <summary>An admission check that refuses every record with one fixed answer.</summary>
         private sealed class CodedRefusalAdmission : IInstanceRegistrationAdmission
         {

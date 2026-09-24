@@ -47,6 +47,11 @@ namespace CoreAI.Ai.Hub
         /// <param name="grant">Capability ceiling applied to every mod loaded from the UI.</param>
         /// <param name="allowFull">When true, <see cref="LuaCapabilities.Full"/> may be granted from the header.</param>
         /// <param name="order">Hub tab order (default 300).</param>
+        /// <param name="rbxApiAvailable">
+        /// Whether the runtime has the Roblox API wired, which picks the "Add" template; null reads it from
+        /// <paramref name="runtime"/> when that is the Lua-CSharp runtime itself (see
+        /// <see cref="LuaCsModRuntimeHubService"/>).
+        /// </param>
         public static void Register(
             HubPageRegistry registry,
             ILuaModRuntime runtime,
@@ -54,7 +59,8 @@ namespace CoreAI.Ai.Hub
             ILuaModSourceStore sourceStore = null,
             LuaCapabilities grant = LuaCapabilities.All,
             bool allowFull = false,
-            int order = DefaultOrder)
+            int order = DefaultOrder,
+            bool? rbxApiAvailable = null)
         {
             if (runtime == null)
             {
@@ -63,7 +69,8 @@ namespace CoreAI.Ai.Hub
 
             Register(
                 registry,
-                new LuaCsModRuntimeHubService(runtime, actorContext, sourceStore, grant, allowFull),
+                new LuaCsModRuntimeHubService(
+                    runtime, actorContext, sourceStore, grant, allowFull, rbxApiAvailable),
                 order);
         }
 

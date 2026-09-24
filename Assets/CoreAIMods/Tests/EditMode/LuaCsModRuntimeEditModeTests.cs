@@ -3797,5 +3797,600 @@ namespace CoreAI.Tests.EditMode
             StringAssert.DoesNotContain("Instance.new", store.Get("coded-quota", "tween_err"),
                 "a refused TweenService:Create must not be reported as an Instance.new");
         }
+
+        /// <summary>
+        /// A castle-like main chunk: one folder in Workspace holding 25 parts, 26 startup objects in all
+        /// (sample_castle3d builds 126 the same way).
+        /// </summary>
+        private const string CastleLikeSource = @"
+            local root = Instance.new('Folder')
+            root.Name = 'CastleShowcase'
+            root.Parent = workspace
+            for index = 1, 25 do
+                local part = Instance.new('Part')
+                part.Name = 'Castle' .. index
+                part.Anchored = true
+                part.Parent = root
+            end";
+
+        private const int CastleLikeStartupObjects = 26;
+
+        /// <summary>A factory-built stack over <paramref name="bindings"/> with no teardown wired by the test.</summary>
+        private static LuaCsModStack BuildReloadStack(LuaCsRbxApiBindings bindings, MemoryStore store = null)
+        {
+            return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = store ?? new MemoryStore(),
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = bindings
+            });
+        }
+
+        private static List<RbxInstance> WorkspaceChildrenNamed(LuaCsRbxApiBindings bindings, string name)
+        {
+            List<RbxInstance> result = new();
+            foreach (RbxInstance child in bindings.Registry.WorldRoot.GetChildren())
+            {
+                if (child.Name == name)
+                {
+                    result.Add(child);
+                }
+            }
+
+            return result;
+        }
+
+        private static List<InstanceId> ChildIds(RbxInstance parent)
+        {
+            List<InstanceId> ids = new();
+            foreach (RbxInstance child in parent.GetChildren())
+            {
+                ids.Add(child.Id);
+            }
+
+            return ids;
+        }
+
+        private static RbxInstance HostFolder(LuaCsRbxApiBindings bindings, string name, RbxInstance parent)
+        {
+            RbxInstance folder = bindings.Registry.Create("Folder");
+            folder.Name = name;
+            folder.Parent = parent;
+            return folder;
+        }
+
+        /// <summary>
+        /// HUB-CRASH R6: every Save &amp; run re-ran the main chunk next to the objects the previous run
+        /// built, so sample_castle3d added 126 instances per save until the 2,048 quota refused the
+        /// next one. A default reload cleans the previous run's startup objects first.
+        /// </summary>
+        [Test]
+        public void Reload_DefaultMode_RepeatedSavesOfACastleLikeMod_AddNoDuplicates()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            stack.Runtime.LoadMod("castle", CastleLikeSource);
+            int registeredAfterLoad = bindings.Registry.Count;
+
+            for (int save = 1; save <= 5; save++)
+            {
+                stack.Runtime.ReloadMod("castle", CastleLikeSource + "\n-- edit " + InvariantText(save));
+                PumpSchedulerFrame(stack, bindings);
+            }
+
+            Assert.AreEqual(1, WorkspaceChildrenNamed(bindings, "CastleShowcase").Count,
+                "five saves must leave one castle, not six");
+            Assert.AreEqual(CastleLikeStartupObjects, bindings.Registry.GetOwnedBy("castle").Count,
+                "the mod owns exactly one run's startup objects after any number of saves");
+            Assert.AreEqual(registeredAfterLoad, bindings.Registry.Count,
+                "the world holds as many instances as after the first load");
+        }
+
+        [Test]
+        public void Reload_CleanMode_ReportsHowManyStartupObjectsOfThePreviousRunItDestroyed()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            stack.Runtime.LoadMod("castle", CastleLikeSource);
+            RbxInstance firstCastle = WorkspaceChildrenNamed(bindings, "CastleShowcase")[0];
+
+            ModReloadReport report = stack.Runtime.ReloadMod(
+                "castle", CastleLikeSource + "\n-- edit", ModReloadMode.CleanStartupObjects);
+
+            Assert.AreEqual(ModReloadMode.CleanStartupObjects, report.Mode);
+            Assert.AreEqual(CastleLikeStartupObjects, report.CleanedObjects);
+            Assert.AreEqual(0, report.KeptObjects);
+            Assert.AreEqual(0, report.RescuedObjects);
+            Assert.AreEqual("cleaned 26 objects of the previous run", report.Describe());
+            Assert.IsTrue(firstCastle.IsDestroyed, "the previous run's castle is destroyed, not only hidden");
+            Assert.AreEqual(1, WorkspaceChildrenNamed(bindings, "CastleShowcase").Count);
+        }
+
+        /// <summary>Negative twin: the opt-in keep mode is the hot reload every earlier version did.</summary>
+        [Test]
+        public void Reload_KeepMode_KeepsEveryObject_AndALaterCleanReloadRemovesAllKeptRuns()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            stack.Runtime.LoadMod("castle", CastleLikeSource);
+
+            for (int save = 1; save <= 3; save++)
+            {
+                ModReloadReport kept = stack.Runtime.ReloadMod(
+                    "castle", CastleLikeSource + "\n-- keep " + InvariantText(save), ModReloadMode.KeepObjects);
+                Assert.AreEqual(ModReloadMode.KeepObjects, kept.Mode);
+                Assert.AreEqual(save * CastleLikeStartupObjects, kept.KeptObjects,
+                    "keep mode leaves every earlier run's startup objects in place, still tracked");
+                Assert.AreEqual(0, kept.CleanedObjects);
+                Assert.AreEqual(save + 1, WorkspaceChildrenNamed(bindings, "CastleShowcase").Count,
+                    "keep mode adds one castle per save, as the hot reload always did");
+            }
+
+            ModReloadReport cleaned = stack.Runtime.ReloadMod(
+                "castle", CastleLikeSource + "\n-- clean", ModReloadMode.CleanStartupObjects);
+
+            Assert.AreEqual(4 * CastleLikeStartupObjects, cleaned.CleanedObjects,
+                "the clean reload removes the startup objects every kept run built");
+            Assert.AreEqual(1, WorkspaceChildrenNamed(bindings, "CastleShowcase").Count);
+            Assert.AreEqual(CastleLikeStartupObjects, bindings.Registry.GetOwnedBy("castle").Count);
+        }
+
+        /// <summary>
+        /// A failed reload must leave the world exactly as it was: the previous run's startup objects
+        /// return to their parent at their position among its children, and what the failed chunk built
+        /// is gone (the bindings rollback never destroyed it).
+        /// </summary>
+        [Test]
+        public void Reload_ThatFails_PutsThePreviousRunsObjectsBackWhereTheyWere_AndLeavesNothingOfItsOwn()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            RbxInstance workspace = bindings.Registry.WorldRoot;
+            HostFolder(bindings, "HostBefore", workspace);
+            stack.Runtime.LoadMod("base", @"
+                local first = Instance.new('Folder')
+                first.Name = 'FirstStartup'
+                first.Parent = workspace
+                for index = 1, 3 do
+                    local part = Instance.new('Part')
+                    part.Name = 'Brick' .. index
+                    part.Parent = first
+                end
+                local second = Instance.new('Part')
+                second.Name = 'SecondStartup'
+                second.Parent = workspace");
+            RbxInstance secondStartup = WorkspaceChildrenNamed(bindings, "SecondStartup")[0];
+            HostFolder(bindings, "HostBetween", workspace);
+            secondStartup.Parent = null;
+            secondStartup.Parent = workspace;
+            HostFolder(bindings, "HostAfter", workspace);
+            RbxInstance firstStartup = WorkspaceChildrenNamed(bindings, "FirstStartup")[0];
+            List<InstanceId> workspaceBefore = ChildIds(workspace);
+            List<InstanceId> firstBefore = ChildIds(firstStartup);
+            int registeredBefore = bindings.Registry.Count;
+
+            Exception error = Assert.Catch(() => stack.Runtime.ReloadMod("base", @"
+                local seen = workspace:FindFirstChild('FirstStartup')
+                store_set('saw_previous_run', tostring(seen ~= nil))
+                local half = Instance.new('Folder')
+                half.Name = 'HalfBuilt'
+                half.Parent = workspace
+                Instance.new('Part').Parent = half
+                error('reload fails here')"));
+
+            StringAssert.Contains("reload fails here", error.ToString());
+            Assert.IsTrue(stack.Runtime.IsLoaded("base"), "a failed reload keeps the loaded mod");
+            CollectionAssert.AreEqual(workspaceBefore, ChildIds(workspace),
+                "every child of Workspace is back, in its order, and nothing of the failed chunk is left");
+            CollectionAssert.AreEqual(firstBefore, ChildIds(firstStartup),
+                "a startup object comes back with its whole subtree");
+            Assert.AreSame(workspace, firstStartup.Parent);
+            Assert.AreSame(workspace, secondStartup.Parent);
+            Assert.IsEmpty(WorkspaceChildrenNamed(bindings, "HalfBuilt"),
+                "the failed chunk's half-built objects must not stay next to the ones it was to replace");
+            Assert.AreEqual(registeredBefore, bindings.Registry.Count);
+        }
+
+        [Test]
+        public void Reload_ThatFails_InKeepMode_AlsoLeavesNothingOfItsOwn()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            stack.Runtime.LoadMod("castle", CastleLikeSource);
+            List<InstanceId> workspaceBefore = ChildIds(bindings.Registry.WorldRoot);
+            int registeredBefore = bindings.Registry.Count;
+
+            Assert.Catch(() => stack.Runtime.ReloadMod(
+                "castle", CastleLikeSource + "\nerror('reload fails here')", ModReloadMode.KeepObjects));
+
+            CollectionAssert.AreEqual(workspaceBefore, ChildIds(bindings.Registry.WorldRoot));
+            Assert.AreEqual(registeredBefore, bindings.Registry.Count);
+        }
+
+        /// <summary>
+        /// The new chunk runs while the previous run's startup objects are out of the world, so a script
+        /// that looks for its own folder first builds a fresh one instead of reusing the one being replaced.
+        /// </summary>
+        [Test]
+        public void Reload_CleanMode_TheNewChunkDoesNotSeeThePreviousRunsStartupObjects()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildReloadStack(bindings, store);
+            const string source = @"
+                local existing = workspace:FindFirstChild('CastleShowcase')
+                store_set('found_existing', tostring(existing ~= nil))
+                if not existing then
+                    local root = Instance.new('Folder')
+                    root.Name = 'CastleShowcase'
+                    root.Parent = workspace
+                end";
+            stack.Runtime.LoadMod("castle", source);
+            RbxInstance first = WorkspaceChildrenNamed(bindings, "CastleShowcase")[0];
+
+            stack.Runtime.ReloadMod("castle", source + "\n-- edit");
+
+            Assert.AreEqual("false", store.Get("castle", "found_existing"));
+            RbxInstance second = WorkspaceChildrenNamed(bindings, "CastleShowcase")[0];
+            Assert.AreNotSame(first, second);
+            Assert.IsTrue(first.IsDestroyed);
+        }
+
+        /// <summary>
+        /// What sits inside a startup object without being one of that run's startup objects (a player's
+        /// build placed in the mod's folder, a part a handler made later) is moved to the startup object's
+        /// parent before the destroy, never destroyed.
+        /// </summary>
+        [Test]
+        public void Reload_CleanMode_MovesWhatIsNotAStartupObjectOutOfTheFolderItDestroys()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            const string source = @"
+                local base = Instance.new('Folder')
+                base.Name = 'Base'
+                base.Parent = workspace
+                local floor = Instance.new('Part')
+                floor.Name = 'Floor'
+                floor.Parent = base
+                local made = false
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    if made then return end
+                    made = true
+                    local later = Instance.new('Part')
+                    later.Name = 'MadeByAHandler'
+                    later.Parent = workspace:FindFirstChild('Base')
+                end)";
+            stack.Runtime.LoadMod("base", source);
+            PumpSchedulerFrame(stack, bindings);
+            RbxInstance oldBase = WorkspaceChildrenNamed(bindings, "Base")[0];
+            RbxInstance handlerPart = oldBase.FindFirstChild("MadeByAHandler");
+            Assert.IsNotNull(handlerPart, "precondition: the handler built its part inside the folder");
+            RbxInstance playerBuild = bindings.Registry.Create("Part");
+            playerBuild.Name = "PlayerBuild";
+            playerBuild.Parent = oldBase;
+
+            stack.Runtime.ReloadMod("base", source + "\n-- edit");
+
+            Assert.IsTrue(oldBase.IsDestroyed, "the previous run's folder is a startup object and is destroyed");
+            Assert.IsFalse(playerBuild.IsDestroyed, "a player's build is never destroyed");
+            Assert.AreSame(bindings.Registry.WorldRoot, playerBuild.Parent,
+                "it moves to the destroyed folder's parent");
+            Assert.IsFalse(handlerPart.IsDestroyed, "an object a handler made later is not a startup object");
+            Assert.AreSame(bindings.Registry.WorldRoot, handlerPart.Parent);
+            Assert.AreEqual(1, WorkspaceChildrenNamed(bindings, "Base").Count);
+        }
+
+        [Test]
+        public void Reload_CleanMode_ReportsTheObjectsItMovedOutBeforeTheDestroy()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            stack.Runtime.LoadMod("base", @"
+                local base = Instance.new('Folder')
+                base.Name = 'Base'
+                base.Parent = workspace
+                local inner = Instance.new('Folder')
+                inner.Name = 'Inner'
+                inner.Parent = base");
+            RbxInstance oldBase = WorkspaceChildrenNamed(bindings, "Base")[0];
+            RbxInstance playerInBase = HostFolder(bindings, "PlayerInBase", oldBase);
+            RbxInstance playerInInner = HostFolder(bindings, "PlayerInInner", oldBase.FindFirstChild("Inner"));
+
+            ModReloadReport report = stack.Runtime.ReloadMod(
+                "base", "local rebuilt = true", ModReloadMode.CleanStartupObjects);
+
+            Assert.AreEqual(2, report.CleanedObjects);
+            Assert.AreEqual(2, report.RescuedObjects);
+            Assert.AreSame(bindings.Registry.WorldRoot, playerInBase.Parent);
+            Assert.AreSame(bindings.Registry.WorldRoot, playerInInner.Parent,
+                "an object two startup objects deep goes to the nearest ancestor that stays");
+        }
+
+        /// <summary>Negative twin: objects a mod creates after its main chunk ran are never cleaned.</summary>
+        [Test]
+        public void Reload_CleanMode_KeepsObjectsHandlersCreatedAfterStartup()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            stack.Runtime.LoadMod("spawner", @"
+                local made = false
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    if made then return end
+                    made = true
+                    local drop = Instance.new('Part')
+                    drop.Name = 'Drop'
+                    drop.Parent = workspace
+                end)");
+            PumpSchedulerFrame(stack, bindings);
+            RbxInstance drop = WorkspaceChildrenNamed(bindings, "Drop")[0];
+
+            ModReloadReport report = stack.Runtime.ReloadMod(
+                "spawner", "local quiet = true", ModReloadMode.CleanStartupObjects);
+
+            Assert.AreEqual(0, report.CleanedObjects);
+            Assert.IsFalse(drop.IsDestroyed);
+            Assert.AreSame(bindings.Registry.WorldRoot, drop.Parent);
+        }
+
+        /// <summary>Negative twin: a startup object handed to another actor is no longer the mod's to clean.</summary>
+        [Test]
+        public void Reload_CleanMode_SkipsAStartupObjectReattributedToAnotherActor()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            stack.Runtime.LoadMod("giver", @"
+                local gift = Instance.new('Part')
+                gift.Name = 'Gift'
+                gift.Parent = workspace");
+            RbxInstance gift = WorkspaceChildrenNamed(bindings, "Gift")[0];
+            bindings.Registry.SetAccessControl(gift, "player-7", InstanceAccessScope.Owned, false);
+
+            ModReloadReport report = stack.Runtime.ReloadMod(
+                "giver", "local empty = true", ModReloadMode.CleanStartupObjects);
+
+            Assert.AreEqual(0, report.CleanedObjects);
+            Assert.IsFalse(gift.IsDestroyed);
+            Assert.AreSame(bindings.Registry.WorldRoot, gift.Parent);
+        }
+
+        /// <summary>
+        /// The mode-less <see cref="ILuaModRuntime.ReloadMod"/>, the call every facade forwards, takes its
+        /// mode from an open <see cref="ModReloadScope"/> and hands the report back through it.
+        /// </summary>
+        [Test]
+        public void Reload_ThroughTheModeLessInterface_TakesTheModeAndReturnsTheReportThroughAScope()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            ActorContext host = CoreAI.Composition.CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ILuaModRuntime facade = stack.Runtime;
+            facade.LoadMod(host, "castle", CastleLikeSource, LuaCapabilities.All, false);
+
+            ModReloadReport keptReport;
+            using (ModReloadScope scope = ModReloadScope.Begin("castle", ModReloadMode.KeepObjects))
+            {
+                facade.ReloadMod(host, "castle", CastleLikeSource + "\n-- keep");
+                keptReport = scope.Report;
+            }
+
+            Assert.IsNotNull(keptReport);
+            Assert.AreEqual(ModReloadMode.KeepObjects, keptReport.Mode);
+            Assert.AreEqual(2, WorkspaceChildrenNamed(bindings, "CastleShowcase").Count);
+
+            using (ModReloadScope other = ModReloadScope.Begin("another-mod", ModReloadMode.KeepObjects))
+            {
+                facade.ReloadMod(host, "castle", CastleLikeSource + "\n-- clean");
+                Assert.IsNull(other.Report, "a scope for another mod neither applies nor receives the report");
+            }
+
+            Assert.AreEqual(1, WorkspaceChildrenNamed(bindings, "CastleShowcase").Count,
+                "without a scope for the mod the reload cleans, the default");
+        }
+
+        /// <summary>
+        /// HUB-CRASH R1: a host that composed its stack from the factory alone got a reload that left the
+        /// replaced run's task loop, Heartbeat handler and tween running next to the new run's.
+        /// </summary>
+        [Test]
+        public void Factory_Reload_StopsTheReplacedRunsThreadsHandlersAndTweens_WithoutHostWiring()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildReloadStack(bindings, store);
+            string Run(string tag) => @"
+                local tag = '" + tag + @"'
+                local loops = 0
+                task.spawn(function()
+                    while true do
+                        loops = loops + 1
+                        store_set('loop_' .. tag, tostring(loops))
+                        task.wait(0.05)
+                    end
+                end)
+                local beats = 0
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    beats = beats + 1
+                    store_set('beat_' .. tag, tostring(beats))
+                end)
+                local part = Instance.new('Part')
+                part.Parent = workspace
+                game:GetService('TweenService'):Create(part, TweenInfo.new(5), { Transparency = 1 }):Play()";
+            stack.Runtime.LoadMod("zombie", Run("a"));
+            for (int frame = 0; frame < 12; frame++)
+            {
+                PumpSchedulerFrame(stack, bindings);
+            }
+
+            stack.Runtime.ReloadMod("zombie", Run("b"));
+            string loopsA = store.Get("zombie", "loop_a");
+            string beatsA = store.Get("zombie", "beat_a");
+            for (int frame = 0; frame < 12; frame++)
+            {
+                PumpSchedulerFrame(stack, bindings);
+            }
+
+            Assert.AreEqual(loopsA, store.Get("zombie", "loop_a"), "the replaced run's task loop must stop");
+            Assert.AreEqual(beatsA, store.Get("zombie", "beat_a"), "the replaced run's Heartbeat handler must stop");
+            Assert.AreNotEqual("", store.Get("zombie", "loop_b"), "the new run's loop runs");
+            Assert.AreNotEqual("", store.Get("zombie", "beat_b"), "the new run's handler runs");
+            int liveTweens = 0;
+            foreach (RbxInstance owned in bindings.Registry.GetOwnedBy("zombie"))
+            {
+                if (owned.ClassName == "Tween")
+                {
+                    liveTweens++;
+                }
+            }
+
+            Assert.AreEqual(1, liveTweens, "only the new run's tween is left");
+        }
+
+        [Test]
+        public void Factory_Unload_DestroysTheModsInstances_WithoutHostWiring()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            stack.Runtime.LoadMod("castle", CastleLikeSource);
+
+            Assert.IsTrue(stack.Runtime.UnloadMod("castle"));
+
+            Assert.IsEmpty(bindings.Registry.GetTeardownOwnedBy("castle"));
+            Assert.IsEmpty(WorkspaceChildrenNamed(bindings, "CastleShowcase"));
+        }
+
+        /// <summary>
+        /// HUB-CRASH R3: a hook that loops forever is cut at its budget (10 s of stall by default), and
+        /// eight such cuts froze the game for over a minute before the quarantine. Two budget trips in a
+        /// row now quarantine.
+        /// </summary>
+        [Test]
+        [Timeout(60000)]
+        public void BudgetTrips_TwoInARowInATimer_QuarantineTheMod()
+        {
+            LuaCsModStack stack = BuildStack(new MemoryStore(), handlerMaxSteps: 20_000);
+            stack.Runtime.LoadMod("spinner", "hooks_every(0.01, function() while true do end end)");
+
+            stack.Runtime.Tick(0.05);
+            Assert.IsFalse(stack.Runtime.ListMods()[0].Quarantined, "one trip can be bad luck");
+            stack.Runtime.Tick(0.05);
+
+            Assert.IsTrue(stack.Runtime.ListMods()[0].Quarantined, "two budget trips in a row quarantine");
+            Assert.IsTrue(stack.Runtime.IsLoaded("spinner"), "a quarantined mod stays loaded and repairable");
+        }
+
+        /// <summary>Negative twin: ordinary errors still take the full error streak.</summary>
+        [Test]
+        public void OrdinaryErrors_TwoInARow_DoNotQuarantine_TheErrorStreakStillDoes()
+        {
+            LuaCsModStack stack = BuildStack(new MemoryStore());
+            stack.Runtime.LoadMod("thrower", "hooks_every(0.01, function() error('boom') end)");
+
+            stack.Runtime.Tick(0.05);
+            stack.Runtime.Tick(0.05);
+            Assert.IsFalse(stack.Runtime.ListMods()[0].Quarantined,
+                "two ordinary errors are far below the error streak");
+
+            for (int tick = 2; tick < LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine; tick++)
+            {
+                stack.Runtime.Tick(0.05);
+            }
+
+            Assert.IsTrue(stack.Runtime.ListMods()[0].Quarantined,
+                "the ordinary error streak quarantines at MaxErrorsBeforeQuarantine as before");
+        }
+
+        [Test]
+        [Timeout(60000)]
+        public void BudgetTrips_TwoInARowInHeartbeatHandlers_QuarantineTheMod()
+        {
+            LuaCsRbxApiBindings bindings = new(
+                coroutineResumeBudget: new CoreAI.Sandbox.LuaCs.LuaCsCoroutineBudgetSettings(20_000, 30_000));
+            LuaCsModStack stack = BuildSchedulerStack(bindings, new MemoryStore(), 8);
+            stack.Runtime.LoadMod("spinner", @"
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    while true do end
+                end)");
+
+            PumpSchedulerFrame(stack, bindings);
+            Assert.IsFalse(ModInfo(stack, "spinner").Quarantined, "one trip can be bad luck");
+            PumpSchedulerFrame(stack, bindings);
+
+            Assert.IsTrue(ModInfo(stack, "spinner").Quarantined, "two budget trips in a row quarantine");
+        }
+
+        /// <summary>
+        /// Negative twin: an instance quota refusal is coded BUDGET_EXCEEDED too, but costs no time and
+        /// stays an ordinary error.
+        /// </summary>
+        [Test]
+        public void QuotaRefusals_InHeartbeatHandlers_AreOrdinaryErrors_NotBudgetTrips()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = new FakeGameLogger(),
+                ModStore = new MemoryStore(),
+                Capabilities = LuaCapabilities.All,
+                OneOffCapabilities = LuaCapabilities.All,
+                RbxApi = bindings,
+                MaxRegisteredInstancesPerActor = 2
+            });
+            ActorContext actor = QuotaActor("quota-refusal-actor");
+            stack.Runtime.LoadMod(actor, "hoarder", @"
+                Instance.new('Folder')
+                Instance.new('Folder')
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    Instance.new('Folder')
+                end)", persistToStore: false);
+
+            for (int frame = 0; frame < 4; frame++)
+            {
+                PumpSchedulerFrame(stack, bindings);
+            }
+
+            Assert.IsFalse(ModInfo(stack, "hoarder").Quarantined,
+                "four quota refusals are ordinary errors, below the error streak");
+        }
+
+        /// <summary>manage_mods reload cleans by default and keeps objects on keep_objects=true.</summary>
+        [Test]
+        public async Task ManageMods_Reload_CleansByDefault_AndKeepsObjectsOnRequest()
+        {
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildReloadStack(bindings);
+            LuaModsLlmTool tool = new(
+                stack.Runtime,
+                new CoreAISettingsOptions { LogToolCalls = false, LogToolCallResults = false },
+                CoreAI.Logging.NullLog.Instance,
+                LuaCapabilities.All,
+                true,
+                CoreAI.Composition.CoreServicesInstaller.DefaultLocalHostIdentityProvider,
+                BuiltInAgentRoleIds.Programmer);
+            Newtonsoft.Json.Linq.JObject load = Newtonsoft.Json.Linq.JObject.Parse(
+                await tool.ExecuteAsync("load", "castle", CastleLikeSource));
+            Assert.IsTrue(load.Value<bool>("success"), load.ToString());
+
+            Newtonsoft.Json.Linq.JObject cleaned = Newtonsoft.Json.Linq.JObject.Parse(
+                await tool.ExecuteAsync("reload", "castle", CastleLikeSource + "\n-- edit"));
+
+            Assert.IsTrue(cleaned.Value<bool>("success"), cleaned.ToString());
+            Assert.AreEqual(CastleLikeStartupObjects, cleaned["data"].Value<int>("cleaned_objects"));
+            StringAssert.Contains("cleaned 26 objects of the previous run", cleaned.Value<string>("message"));
+            Assert.AreEqual(1, WorkspaceChildrenNamed(bindings, "CastleShowcase").Count);
+
+            Newtonsoft.Json.Linq.JObject kept = Newtonsoft.Json.Linq.JObject.Parse(
+                await tool.ExecuteAsync("reload", "castle", CastleLikeSource + "\n-- keep", keep_objects: true));
+
+            Assert.IsTrue(kept.Value<bool>("success"), kept.ToString());
+            Assert.AreEqual("keep_objects", kept["data"].Value<string>("mode"));
+            Assert.AreEqual(CastleLikeStartupObjects, kept["data"].Value<int>("kept_objects"));
+            Assert.AreEqual(2, WorkspaceChildrenNamed(bindings, "CastleShowcase").Count);
+            StringAssert.Contains("\"keep_objects\"", tool.ParametersSchema,
+                "the schema the model sees offers the option");
+        }
     }
 }

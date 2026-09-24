@@ -71,9 +71,10 @@ namespace CoreAI.Mcp.Tools
             string code = McpArguments.String(arguments, "code");
             string bundle = McpArguments.String(arguments, "bundle");
             int revision = McpArguments.Int(arguments, "revision", -1);
+            bool keepObjects = McpArguments.Bool(arguments, "keep_objects");
 
             string json = await _inner
-                .ExecuteAsync(action, modId, code, bundle, revision, cancellationToken)
+                .ExecuteAsync(action, modId, code, bundle, revision, cancellationToken, keepObjects)
                 .ConfigureAwait(false);
 
             bool isError = TryReadSuccessFalse(json);

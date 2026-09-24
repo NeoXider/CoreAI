@@ -128,7 +128,10 @@ namespace CoreAI.Ai
         public override string Description =>
             "Manage persistent Lua mods (long-lived scripts with hooks_on/hooks_every handlers). " +
             "Actions: list (all loaded mods), get_source (read a mod's Lua code), " +
-            "load (install new mod), reload (replace a mod's code keeping its permissions), " +
+            "load (install new mod), reload (replace a mod's code keeping its permissions; by default the " +
+            "objects the previous run's main chunk built are removed first so the new code builds into a clean " +
+            "world, objects created later by handlers or players are kept, and a failed reload changes nothing; " +
+            "pass keep_objects=true to keep every object and build next to them), " +
             "unload (remove a mod), export (get a shareable bundle of a mod to move it to another player), " +
             "import (install a mod from a shareable bundle, passed in the 'bundle' or 'code' param), " +
             "forget (unload a mod and delete it from persistent storage), " +
@@ -162,13 +165,19 @@ namespace CoreAI.Ai
             ("bundle", "string", false,
                 "Shareable mod bundle JSON (as returned by export) for the import action."),
             ("revision", "integer", false,
-                "Revision index to roll back to for the revert action (as listed by versions; 0 is the original).")
+                "Revision index to roll back to for the revert action (as listed by versions; 0 is the original)."),
+            ("keep_objects", "boolean", false,
+                KeepObjectsDescription)
         );
+
+        private const string KeepObjectsDescription =
+            "reload only. false (default): the objects the previous run's main chunk built are removed before " +
+            "the new code runs. true: every object stays and the new code builds next to them.";
 
         /// <summary>Creates the MEAI function surface for <c>manage_mods</c>.</summary>
         public AIFunction CreateAIFunction()
         {
-            Func<string, string, string, string, int, CancellationToken, Task<string>> func = ExecuteAsync;
+            Func<string, string, string, string, int, CancellationToken, bool, Task<string>> func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
                 Name = Name,
@@ -196,11 +205,14 @@ namespace CoreAI.Ai
             [Description(
                 "Revision index to roll back to for the revert action (as listed by versions; 0 is the original).")]
             int revision = -1,
-            CancellationToken cancellationToken = default) =>
-            MeaiToolTaskBridge.Publish(ExecuteBodyAsync(action, mod_id, code, bundle, revision, cancellationToken));
+            CancellationToken cancellationToken = default,
+            [Description(KeepObjectsDescription)]
+            bool keep_objects = false) =>
+            MeaiToolTaskBridge.Publish(
+                ExecuteBodyAsync(action, mod_id, code, bundle, revision, keep_objects, cancellationToken));
 
         private async Task<string> ExecuteBodyAsync(string action, string mod_id, string code, string bundle,
-            int revision, CancellationToken cancellationToken)
+            int revision, bool keepObjects, CancellationToken cancellationToken)
         {
             string normalized = (action ?? "").Trim().ToLowerInvariant();
             if (_settings.LogToolCalls)
@@ -227,7 +239,8 @@ namespace CoreAI.Ai
                             mod_id,
                             code,
                             bundle,
-                            revision)),
+                            revision,
+                            keepObjects)),
                         cancellationToken);
                 }
                 else
@@ -238,7 +251,8 @@ namespace CoreAI.Ai
                         mod_id,
                         code,
                         bundle,
-                        revision);
+                        revision,
+                        keepObjects);
                 }
             }
             catch (Exception ex)
@@ -280,7 +294,8 @@ namespace CoreAI.Ai
             string modId,
             string code,
             string bundle,
-            int revision)
+            int revision,
+            bool keepObjects)
         {
             lock (_authorizationGate)
             {
@@ -289,7 +304,7 @@ namespace CoreAI.Ai
                     "list" => ListMods(actor),
                     "get_source" => GetSource(actor, modId),
                     "load" => Mutate(() => Load(modId, code, actor)),
-                    "reload" => Mutate(() => Reload(actor, modId, code)),
+                    "reload" => Mutate(() => Reload(actor, modId, code, keepObjects)),
                     "unload" => Mutate(() => Unload(actor, modId)),
                     "export" => Export(actor, modId),
                     "import" => Mutate(() => Import(bundle ?? code, actor)),
@@ -382,15 +397,30 @@ namespace CoreAI.Ai
             return Ok($"Mod '{modId.Trim()}' loaded (capabilities={_grantedCapabilities}).");
         }
 
-        private string Reload(ActorContext actor, string modId, string code)
+        private string Reload(ActorContext actor, string modId, string code, bool keepObjects)
         {
             if (string.IsNullOrWhiteSpace(modId) || string.IsNullOrWhiteSpace(code))
             {
                 return Fail("reload: mod_id and code are required.");
             }
 
-            _runtime.ReloadMod(actor, modId, code);
-            return Ok($"Mod '{modId.Trim()}' reloaded.");
+            ModReloadReport report;
+            using (ModReloadScope scope = ModReloadScope.Begin(
+                       modId, keepObjects ? ModReloadMode.KeepObjects : ModReloadMode.CleanStartupObjects))
+            {
+                _runtime.ReloadMod(actor, modId, code);
+                report = scope.Report;
+            }
+
+            return report == null
+                ? Ok($"Mod '{modId.Trim()}' reloaded.")
+                : Ok($"Mod '{modId.Trim()}' reloaded; {report.Describe()}.", new
+                {
+                    mode = report.Mode == ModReloadMode.KeepObjects ? "keep_objects" : "clean_startup_objects",
+                    cleaned_objects = report.CleanedObjects,
+                    kept_objects = report.KeptObjects,
+                    rescued_objects = report.RescuedObjects
+                });
         }
 
         private string Unload(ActorContext actor, string modId)

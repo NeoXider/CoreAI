@@ -18,17 +18,30 @@ namespace CoreAI.Ai.Hub
     {
         private readonly ILuaModRuntime _runtime;
         private readonly ActorContext _actorContext;
+        private readonly bool _rbxApiAvailable;
 
+        /// <param name="runtime">The mod runtime, or a facade over the active world session's runtime.</param>
+        /// <param name="actorContext">Trusted actor performing Hub mod operations.</param>
+        /// <param name="store">Package store (source + manifest).</param>
+        /// <param name="grant">Capability ceiling applied to every mod loaded through the UI.</param>
+        /// <param name="allowFull">When false, <see cref="LuaCapabilities.Full"/> is stripped from every load.</param>
+        /// <param name="rbxApiAvailable">
+        /// Whether the runtime has the Roblox API wired, which picks the "Add" template. Null reads it from
+        /// <paramref name="runtime"/> when that is the Lua-CSharp runtime itself; a host that hands in a
+        /// facade passes it explicitly.
+        /// </param>
         public LuaCsModRuntimeHubService(
             ILuaModRuntime runtime,
             ActorContext actorContext,
             ILuaModSourceStore store,
             LuaCapabilities grant = LuaCapabilities.All,
-            bool allowFull = false)
+            bool allowFull = false,
+            bool? rbxApiAvailable = null)
             : base(store, grant, allowFull)
         {
             _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
             _actorContext = actorContext;
+            _rbxApiAvailable = rbxApiAvailable ?? (runtime is LuaCsModRuntime luaCsRuntime && luaCsRuntime.HasRbxApi);
             _runtime.AddModSourceLoadedListener(_actorContext, OnModsChanged);
             _runtime.AddModSourceUnloadedListener(_actorContext, OnModsChanged);
             _runtime.AddModHandlerErroredListener(_actorContext, OnHandlerErrored);
@@ -37,6 +50,9 @@ namespace CoreAI.Ai.Hub
 
         /// <inheritdoc />
         public override bool IsSupported => LuaCsModRuntime.IsSupported;
+
+        /// <inheritdoc />
+        protected override bool RbxApiAvailable => _rbxApiAvailable;
 
         /// <inheritdoc />
         public override bool IsLoaded(string id)

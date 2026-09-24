@@ -97,6 +97,17 @@ namespace CoreAI.Ai
         public long LoadOrder;
 
         /// <summary>
+        /// Set, together with <see cref="Active"/> = false, when the runtime quarantined the mod after
+        /// repeated budget trips (instruction, time or memory budget), so neither a restart nor a world
+        /// restore starts it again; the Hub shows it as suspended until it is started by hand. A
+        /// successful load or reload writes a fresh manifest without it.
+        /// </summary>
+        // WHY omitted when false, like LoadOrder: a manifest of a mod that was never suspended stays
+        // byte-identical to one written before this field existed.
+        [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+        public bool SuspendedAfterBudgetTrips;
+
+        /// <summary>
         /// The <see cref="LoadOrder"/> for a mod that is being loaded for the first time into
         /// <paramref name="store"/>: one past the highest value stored there, dormant packages included,
         /// so the value keeps growing across restarts and never reuses a dormant mod's place. The one

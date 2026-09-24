@@ -185,7 +185,18 @@ namespace CoreAI.Mods.Rbx.Instances
             set => SetParent(value);
         }
 
-        private void SetParent(RbxInstance newParent)
+        /// <summary>
+        /// Parents this instance under <paramref name="newParent"/> at <paramref name="siblingIndex"/>
+        /// among its children (clamped to the end), through the same pipeline and signals as the
+        /// <see cref="Parent"/> setter. A host that detached an instance to take it out of the world for
+        /// a while puts it back exactly where it was with this; scripts only ever append.
+        /// </summary>
+        internal void SetParentAtSiblingIndex(RbxInstance newParent, int siblingIndex)
+        {
+            SetParent(newParent, siblingIndex < 0 ? 0 : siblingIndex);
+        }
+
+        private void SetParent(RbxInstance newParent, int siblingIndex = -1)
         {
             if (_destroyed)
             {
@@ -243,7 +254,17 @@ namespace CoreAI.Mods.Rbx.Instances
 
             oldParent?._children.Remove(this);
             _parent = newParent;
-            newParent?._children.Add(this);
+            if (newParent != null)
+            {
+                if (siblingIndex >= 0 && siblingIndex < newParent._children.Count)
+                {
+                    newParent._children.Insert(siblingIndex, this);
+                }
+                else
+                {
+                    newParent._children.Add(this);
+                }
+            }
 
             Registry?.AdvanceRevision(Id, ReplicationMembers.Parent);
             oldParent?.Registry?.AdvanceRevision(oldParent.Id, ReplicationMembers.Children);

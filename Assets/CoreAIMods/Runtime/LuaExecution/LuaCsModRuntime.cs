@@ -11,6 +11,187 @@ using CoreAI.Scripting;
 using CoreAI.Scripting.LuaCs;
 using Newtonsoft.Json;
 
+namespace CoreAI.Ai
+{
+    /// <summary>
+    /// What a reload does with the objects the replaced run of a mod built at startup. A run's startup
+    /// objects are the instances registered while its main chunk ran, up to the chunk's first yield or
+    /// its end, that the mod still owns; objects its handlers, timers, remote calls or players create
+    /// later are never startup objects.
+    /// </summary>
+    public enum ModReloadMode
+    {
+        /// <summary>
+        /// The default everywhere. The previous run's startup objects leave the world (Parent = nil)
+        /// before the new main chunk runs, so it builds into a clean world, and are destroyed once it
+        /// has run. A reload that fails puts them back exactly where they were. An object inside one of
+        /// them that is not itself a startup object (a player's build in the mod's folder) is moved to
+        /// that startup object's parent before the destroy, never destroyed.
+        /// </summary>
+        CleanStartupObjects = 0,
+
+        /// <summary>
+        /// Every object stays where it is and the new main chunk builds next to them (the hot reload
+        /// every earlier version did). The kept startup objects stay tracked, so a later clean reload
+        /// removes them too.
+        /// </summary>
+        KeepObjects = 1
+    }
+
+    /// <summary>What one successful reload did with the startup objects of the run it replaced.</summary>
+    public sealed class ModReloadReport
+    {
+        public ModReloadReport(string modId, ModReloadMode mode, int cleanedObjects, int keptObjects,
+            int rescuedObjects)
+        {
+            ModId = modId ?? "";
+            Mode = mode;
+            CleanedObjects = cleanedObjects;
+            KeptObjects = keptObjects;
+            RescuedObjects = rescuedObjects;
+        }
+
+        /// <summary>The reloaded mod.</summary>
+        public string ModId { get; }
+
+        /// <summary>The mode the reload ran in.</summary>
+        public ModReloadMode Mode { get; }
+
+        /// <summary>Startup objects of earlier runs this reload destroyed (0 in <see cref="ModReloadMode.KeepObjects"/>).</summary>
+        public int CleanedObjects { get; }
+
+        /// <summary>Startup objects of earlier runs this reload left in the world (<see cref="ModReloadMode.KeepObjects"/>).</summary>
+        public int KeptObjects { get; }
+
+        /// <summary>
+        /// Objects that sat inside a destroyed startup object without being startup objects themselves,
+        /// moved out to its parent before the destroy.
+        /// </summary>
+        public int RescuedObjects { get; }
+
+        /// <summary>One English clause for a status line, e.g. "cleaned 126 objects of the previous run".</summary>
+        public string Describe()
+        {
+            if (Mode == ModReloadMode.KeepObjects)
+            {
+                return KeptObjects == 0
+                    ? "kept objects (the previous run had no startup objects left)"
+                    : "kept " + CountObjects(KeptObjects) + " of the previous run";
+            }
+
+            string cleaned = CleanedObjects == 0
+                ? "nothing to clean (the previous run had no startup objects left)"
+                : "cleaned " + CountObjects(CleanedObjects) + " of the previous run";
+            return RescuedObjects == 0
+                ? cleaned
+                : cleaned + " and moved " + CountObjects(RescuedObjects)
+                          + " that were not its startup objects out of them first";
+        }
+
+        private static string CountObjects(int count)
+        {
+            return count == 1 ? "1 object" : count + " objects";
+        }
+    }
+
+    /// <summary>
+    /// A reload request for one mod, ambient on the calling thread: a reload of <see cref="ModId"/> that
+    /// reaches the Lua-CSharp runtime through the mode-less <see cref="ILuaModRuntime.ReloadMod"/> while
+    /// the scope is open runs in <see cref="Mode"/> and leaves its <see cref="Report"/> here.
+    /// </summary>
+    /// <remarks>
+    /// WHY ambient: the runtime a Hub page or the manage_mods tool holds is usually a facade over the
+    /// active world session (and actor attribution) implementing the VM-agnostic
+    /// <see cref="ILuaModRuntime"/>, whose ReloadMod carries no mode and returns nothing. The scope takes
+    /// the request through any such facade to the runtime and the report back, without every facade
+    /// having to forward a new member. WHY per thread: a reload runs synchronously on its caller's thread,
+    /// and a reload another thread starts meanwhile must not pick this request up.
+    /// </remarks>
+    public sealed class ModReloadScope : IDisposable
+    {
+        [ThreadStatic]
+        private static ModReloadScope _innermost;
+
+        private readonly ModReloadScope _enclosing;
+        private bool _disposed;
+
+        private ModReloadScope(string modId, ModReloadMode mode, ModReloadScope enclosing)
+        {
+            ModId = modId;
+            Mode = mode;
+            _enclosing = enclosing;
+        }
+
+        /// <summary>The mod whose reload this scope configures.</summary>
+        public string ModId { get; }
+
+        /// <summary>The mode a reload of <see cref="ModId"/> inside the scope runs in.</summary>
+        public ModReloadMode Mode { get; }
+
+        /// <summary>What the last successful reload of <see cref="ModId"/> inside the scope did; null until one finished.</summary>
+        public ModReloadReport Report { get; private set; }
+
+        /// <summary>Opens a scope on the calling thread; dispose it (innermost first) when the reload call returns.</summary>
+        public static ModReloadScope Begin(string modId, ModReloadMode mode)
+        {
+            ModReloadScope scope = new((modId ?? "").Trim(), mode, _innermost);
+            _innermost = scope;
+            return scope;
+        }
+
+        /// <summary>The mode an open scope requests for <paramref name="modId"/>, or the default when none does.</summary>
+        internal static ModReloadMode ResolveMode(string modId)
+        {
+            ModReloadScope scope = Find(modId);
+            return scope?.Mode ?? ModReloadMode.CleanStartupObjects;
+        }
+
+        /// <summary>Hands the report of a finished reload to the innermost open scope of its mod.</summary>
+        internal static void Publish(ModReloadReport report)
+        {
+            ModReloadScope scope = report == null ? null : Find(report.ModId);
+            if (scope != null)
+            {
+                scope.Report = report;
+            }
+        }
+
+        private static ModReloadScope Find(string modId)
+        {
+            for (ModReloadScope scope = _innermost; scope != null; scope = scope._enclosing)
+            {
+                if (!scope._disposed && string.Equals(scope.ModId, modId, StringComparison.Ordinal))
+                {
+                    return scope;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>Closes the scope; the enclosing one, if any, applies again.</summary>
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            if (ReferenceEquals(_innermost, this))
+            {
+                ModReloadScope next = _enclosing;
+                while (next != null && next._disposed)
+                {
+                    next = next._enclosing;
+                }
+
+                _innermost = next;
+            }
+        }
+    }
+}
+
 namespace CoreAI.Ai.LuaCs
 {
     /// <summary>
@@ -153,6 +334,20 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public const int DefaultMaxErrorsBeforeQuarantine = 8;
 
+        /// <summary>
+        /// Default count of budget trips (the instruction, time or memory budget of one call or resume)
+        /// in a row at which a mod is quarantined, however far its ordinary error streak is from
+        /// <see cref="DefaultMaxErrorsBeforeQuarantine"/>, and its stored package is marked inactive and
+        /// suspended so the next start does not run it again.
+        /// </summary>
+        /// <remarks>
+        /// WHY 2 and apart from the error streak: every trip is a stall as long as the budget (10 s for a
+        /// hook or timer by default), so eight of them froze the game for over a minute before the
+        /// quarantine, long enough for the player to kill the process, and the next start ran the mod
+        /// and froze again. One trip can be bad luck; two in a row are a loop.
+        /// </remarks>
+        public const int DefaultMaxBudgetTripsBeforeQuarantine = 2;
+
         /// <summary>Maximum values/functions one mod may publish via <c>mods_export</c>.</summary>
         public const int DefaultMaxExportsPerMod = 64;
 
@@ -223,6 +418,154 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        /// <summary>
+        /// One startup object of a mod run: its id (never a reference, so a destroyed instance is not
+        /// kept alive) and the actor that owned it when it was created.
+        /// </summary>
+        private readonly struct StartupObject
+        {
+            public StartupObject(InstanceId id, string ownerActorId)
+            {
+                Id = id;
+                OwnerActorId = ownerActorId;
+            }
+
+            public InstanceId Id { get; }
+
+            public string OwnerActorId { get; }
+        }
+
+        /// <summary>
+        /// The startup objects one build of a mod collects while its main chunk runs. An instance the
+        /// chunk destroys again before it returns leaves the set, so the set is bounded by what the
+        /// mod's instance quota lets it hold alive at once.
+        /// </summary>
+        private sealed class StartupCapture
+        {
+            private readonly List<StartupObject> _objects = new();
+            private readonly HashSet<InstanceId> _live = new();
+
+            public StartupCapture(string modId, StartupCapture enclosing)
+            {
+                ModId = modId;
+                Enclosing = enclosing;
+            }
+
+            public string ModId { get; }
+
+            /// <summary>The capture of an outer build of the same mod id this one interrupted, if any.</summary>
+            public StartupCapture Enclosing { get; }
+
+            public void Add(InstanceRecord record)
+            {
+                if (_live.Add(record.Id))
+                {
+                    _objects.Add(new StartupObject(record.Id, record.OwnerActorId));
+                }
+            }
+
+            public void Remove(InstanceId id)
+            {
+                if (!_live.Remove(id))
+                {
+                    return;
+                }
+
+                // WHY compacted here: a chunk that creates and destroys in a loop would otherwise grow
+                // the ordered list without bound while the live set stays small.
+                if (_objects.Count > 2 * _live.Count + 64)
+                {
+                    _objects.RemoveAll(entry => !_live.Contains(entry.Id));
+                }
+            }
+
+            public List<StartupObject> Snapshot()
+            {
+                List<StartupObject> result = new(_live.Count);
+                for (int index = 0; index < _objects.Count; index++)
+                {
+                    if (_live.Contains(_objects[index].Id))
+                    {
+                        result.Add(_objects[index]);
+                    }
+                }
+
+                return result;
+            }
+        }
+
+        /// <summary>
+        /// A top-most startup object a clean reload took out of the world, with where it was: its parent,
+        /// its position among that parent's children, and the rest of its ancestor chain for when the
+        /// parent itself is gone by the time it is put back or its contents are rescued.
+        /// </summary>
+        private sealed class DetachedStartupRoot
+        {
+            public DetachedStartupRoot(RbxInstance instance, RbxInstance originalParent, int siblingIndex,
+                List<RbxInstance> ancestors)
+            {
+                Instance = instance;
+                OriginalParent = originalParent;
+                SiblingIndex = siblingIndex;
+                Ancestors = ancestors;
+            }
+
+            public RbxInstance Instance { get; }
+
+            /// <summary>Null for a startup object that was never parented (a tween, an object held only in Lua).</summary>
+            public RbxInstance OriginalParent { get; }
+
+            public int SiblingIndex { get; }
+
+            /// <summary>The original parent first, then its ancestors up to the root of the tree.</summary>
+            public List<RbxInstance> Ancestors { get; }
+
+            /// <summary>Whether the detach actually took it out (false when it was never parented or the detach failed).</summary>
+            public bool Detached { get; set; }
+        }
+
+        /// <summary>The startup objects of the run a clean reload replaces, while the new main chunk runs.</summary>
+        private sealed class StartupDetachment
+        {
+            public StartupDetachment(string modId, HashSet<InstanceId> members, List<StartupObject> objects,
+                List<DetachedStartupRoot> roots)
+            {
+                ModId = modId;
+                Members = members;
+                Objects = objects;
+                Roots = roots;
+            }
+
+            public string ModId { get; }
+
+            /// <summary>Every live startup object the mod still owned when the reload began.</summary>
+            public HashSet<InstanceId> Members { get; }
+
+            /// <summary><see cref="Members"/> as tracked entries, in creation order.</summary>
+            public List<StartupObject> Objects { get; }
+
+            /// <summary>The members none of whose ancestors is a member.</summary>
+            public List<DetachedStartupRoot> Roots { get; }
+        }
+
+        /// <summary>What destroying a set of startup objects did.</summary>
+        private readonly struct StartupCleanup
+        {
+            public StartupCleanup(int destroyed, int rescued, List<StartupObject> survivors)
+            {
+                Destroyed = destroyed;
+                Rescued = rescued;
+                Survivors = survivors;
+            }
+
+            public int Destroyed { get; }
+
+            public int Rescued { get; }
+
+            /// <summary>Members still alive after the cleanup because a destroy failed; they stay tracked.</summary>
+            public List<StartupObject> Survivors { get; }
+        }
+
         private sealed class Mod
         {
             public readonly object EventGate = new();
@@ -267,6 +610,22 @@ namespace CoreAI.Ai.LuaCs
             public bool SchedulerSucceededThisFrame;
 
             /// <summary>
+            /// Budget trips (instruction, time or memory) since this mod last ran a call or a frame
+            /// cleanly; reset wherever <see cref="ErrorCount"/> is. Reaching
+            /// <see cref="MaxBudgetTripsBeforeQuarantine"/> quarantines the mod and suspends its stored
+            /// package.
+            /// </summary>
+            public int BudgetTripStreak;
+
+            /// <summary>
+            /// This run's startup objects: the instances registered while its main chunk ran, in creation
+            /// order, plus the startup objects of earlier runs a <see cref="ModReloadMode.KeepObjects"/>
+            /// reload kept. Runtime state only, never persisted: a restart or a world restore runs every
+            /// main chunk again through the same build, which records the set afresh.
+            /// </summary>
+            public List<StartupObject> StartupObjects = new();
+
+            /// <summary>
             /// True once an unload took this instance out of the registry. A <see cref="Tick"/> that
             /// snapshotted it earlier in the same frame skips it from then on instead of dispatching
             /// into a mod that is gone.
@@ -307,6 +666,10 @@ namespace CoreAI.Ai.LuaCs
         private readonly Queue<LuaModHandlerError> _recentHandlerErrors = new();
         private readonly Queue<LuaModReport> _recentReports = new();
         private readonly Dictionary<string, int> _buildDepthByModId = new(StringComparer.Ordinal);
+        private readonly object _startupGate = new();
+        private readonly Dictionary<string, StartupCapture> _startupCaptureByModId =
+            new(StringComparer.Ordinal);
+        private Action<string, LuaModTeardownReason> _defaultTeardown;
         private readonly object _hostFaultGate = new();
         private readonly HashSet<string> _loggedHostFaults = new(StringComparer.Ordinal);
         private readonly Queue<KeyValuePair<string, string[]>> _pendingActorModReleases = new();
@@ -412,6 +775,17 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public int MaxErrorsBeforeQuarantine { get; }
 
+        /// <summary>
+        /// Budget trips in a row (no clean call or frame between them; ordinary errors do not break the
+        /// run) at which a mod is quarantined and its stored package is marked inactive and suspended
+        /// (<see cref="LuaModManifest.SuspendedAfterBudgetTrips"/>), so neither a restart nor a world
+        /// restore starts it again until it is loaded or reloaded by hand.
+        /// </summary>
+        public int MaxBudgetTripsBeforeQuarantine { get; }
+
+        /// <summary>True when the Roblox API surface is wired, so mods can use RunService, task and Instance.</summary>
+        public bool HasRbxApi => _rbxApi != null;
+
         /// <param name="gameplayBindings">
         /// Optional seam for registering ported world/unity gameplay APIs on each mod's
         /// <see cref="IScriptFunctionRegistry"/>, scoped to the mod's granted <see cref="LuaCapabilities"/>;
@@ -497,6 +871,10 @@ namespace CoreAI.Ai.LuaCs
         /// <see cref="DefaultEmergencyMaxRegisteredInstances"/> (the WebGL save budget in a WebGL player);
         /// a larger value is clamped to that default and a value below one to one.
         /// </param>
+        /// <param name="maxBudgetTripsBeforeQuarantine">
+        /// Budget trips in a row at which a mod is quarantined and its stored package suspended. Defaults
+        /// to <see cref="DefaultMaxBudgetTripsBeforeQuarantine"/>; clamped to at least 1.
+        /// </param>
         public LuaCsModRuntime(
             Action<IScriptFunctionRegistry, LuaCapabilities, string> gameplayBindings = null,
             ILuaModStore store = null,
@@ -518,7 +896,8 @@ namespace CoreAI.Ai.LuaCs
             int maxSchedulerThreadsPerActor = ModScheduler.DefaultMaxThreadsPerActor,
             int maxRegisteredInstancesPerActor = DefaultMaxRegisteredInstancesPerActor,
             int maxEventSubscriptionsPerActor = DefaultMaxEventSubscriptionsPerActor,
-            int emergencyMaxRegisteredInstances = DefaultEmergencyMaxRegisteredInstances)
+            int emergencyMaxRegisteredInstances = DefaultEmergencyMaxRegisteredInstances,
+            int maxBudgetTripsBeforeQuarantine = DefaultMaxBudgetTripsBeforeQuarantine)
         {
             _gameplayBindings = gameplayBindings;
             _store = store;
@@ -539,6 +918,7 @@ namespace CoreAI.Ai.LuaCs
             EmergencyRegisteredInstanceCeiling = Math.Max(
                 1, Math.Min(emergencyMaxRegisteredInstances, DefaultEmergencyMaxRegisteredInstances));
             MaxErrorsBeforeQuarantine = Math.Max(1, maxErrorsBeforeQuarantine);
+            MaxBudgetTripsBeforeQuarantine = Math.Max(1, maxBudgetTripsBeforeQuarantine);
             if (_rbxApi != null)
             {
                 _rbxApi.Scheduler.ConfigureActorQuota(
@@ -558,6 +938,7 @@ namespace CoreAI.Ai.LuaCs
 
                 _instanceQuotaAdmission = new InstanceQuotaAdmission(this);
                 _rbxApi.Registry.AddRegistrationAdmission(_instanceQuotaAdmission);
+                _rbxApi.Registry.Registered += OnInstanceRegistered;
                 _rbxApi.Registry.Unregistered += OnInstanceUnregistered;
                 SeedRegisteredInstanceCounts(_rbxApi.Registry);
                 _rbxApi.ActorModsDisconnected += OnActorModsDisconnected;
@@ -624,10 +1005,24 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// Runs in <see cref="ModReloadMode.CleanStartupObjects"/> unless a <see cref="ModReloadScope"/>
+        /// open on this thread requests another mode for the mod; the report goes to that scope.
+        /// </remarks>
         public void ReloadMod(ActorContext caller, string id, string luaCode)
         {
             DemandModAccess(caller, "reload", id);
-            ReloadMod(id, luaCode);
+            ReloadMod(id, luaCode, ModReloadScope.ResolveMode(Normalize(id)));
+        }
+
+        /// <summary>
+        /// Replaces a loaded mod's code in the given <paramref name="mode"/> (see <see cref="ReloadMod(string, string, ModReloadMode)"/>)
+        /// and reports what happened to the startup objects of the run it replaced.
+        /// </summary>
+        public ModReloadReport ReloadMod(ActorContext caller, string id, string luaCode, ModReloadMode mode)
+        {
+            DemandModAccess(caller, "reload", id);
+            return ReloadMod(id, luaCode, mode);
         }
 
         /// <inheritdoc />
@@ -1289,6 +1684,88 @@ namespace CoreAI.Ai.LuaCs
         private void OnInstanceUnregistered(InstanceRecord record)
         {
             ReleaseRegisteredInstance(record);
+            if (record.IsRuntimeInfrastructure || string.IsNullOrEmpty(record.OwnerModId))
+            {
+                return;
+            }
+
+            lock (_startupGate)
+            {
+                if (_startupCaptureByModId.Count != 0
+                    && _startupCaptureByModId.TryGetValue(record.OwnerModId, out StartupCapture capture))
+                {
+                    capture.Remove(record.Id);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Records a mod-owned instance registered while a build of its mod runs its main chunk as one
+        /// of that build's startup objects (<see cref="BeginStartupCapture"/>). Runtime infrastructure
+        /// (the per-mod Script, Players) is never a startup object.
+        /// </summary>
+        private void OnInstanceRegistered(InstanceRecord record)
+        {
+            if (record.IsRuntimeInfrastructure || string.IsNullOrEmpty(record.OwnerModId))
+            {
+                return;
+            }
+
+            lock (_startupGate)
+            {
+                if (_startupCaptureByModId.Count != 0
+                    && _startupCaptureByModId.TryGetValue(record.OwnerModId, out StartupCapture capture))
+                {
+                    capture.Add(record);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Starts collecting the startup objects of a build of <paramref name="modId"/>; null without
+        /// the Roblox surface, which is the only thing that registers instances.
+        /// </summary>
+        private StartupCapture BeginStartupCapture(string modId)
+        {
+            if (_rbxApi == null)
+            {
+                return null;
+            }
+
+            lock (_startupGate)
+            {
+                _startupCaptureByModId.TryGetValue(modId, out StartupCapture enclosing);
+                StartupCapture capture = new(modId, enclosing);
+                _startupCaptureByModId[modId] = capture;
+                return capture;
+            }
+        }
+
+        /// <summary>Stops collecting for <paramref name="capture"/>; an interrupted outer build of the same id collects again.</summary>
+        private void EndStartupCapture(StartupCapture capture)
+        {
+            if (capture == null)
+            {
+                return;
+            }
+
+            lock (_startupGate)
+            {
+                if (!_startupCaptureByModId.TryGetValue(capture.ModId, out StartupCapture current)
+                    || !ReferenceEquals(current, capture))
+                {
+                    return;
+                }
+
+                if (capture.Enclosing != null)
+                {
+                    _startupCaptureByModId[capture.ModId] = capture.Enclosing;
+                }
+                else
+                {
+                    _startupCaptureByModId.Remove(capture.ModId);
+                }
+            }
         }
 
         /// <summary>
@@ -1357,7 +1834,7 @@ namespace CoreAI.Ai.LuaCs
 
             BuildMod(
                 modId, luaCode, capabilities, ownerActorId, ownerHasHostAuthority,
-                built => InstallFirstLoad(modId, ownerActorId, built));
+                built => InstallFirstLoad(modId, ownerActorId, built), false);
 
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' loaded (caps={capabilities}).");
 
@@ -1415,14 +1892,19 @@ namespace CoreAI.Ai.LuaCs
         /// Creates the sandboxed state with capability-scoped gameplay bindings plus mod-core APIs, runs
         /// the chunk (hook registration happens there) and then <paramref name="commit"/>. Errors,
         /// including a refusal from <paramref name="commit"/>, propagate to the caller and the mod is
-        /// never added, so a failed build leaves no handlers behind; the logic-slot formulas its chunk
-        /// defined or reset are put back as they were, and a failed first load drops the quota
-        /// attribution it recorded.
+        /// never added, so a failed build leaves no handlers behind; a failed reload's chunk has the
+        /// objects it built destroyed, the logic-slot formulas its chunk defined or reset are put back as they were, and
+        /// a failed first load drops the quota attribution it recorded. A successful build records the
+        /// instances its main chunk registered as the new run's startup objects.
         /// </summary>
         /// <param name="commit">
         /// The last step of a successful build, inside its rollback: the checks that can still refuse a
         /// built candidate (another load took the id or the last mod slot meanwhile) and, for a first
         /// load, adding it to the loaded mods.
+        /// </param>
+        /// <param name="isReload">
+        /// True for the candidate of a reload, whose failure also destroys the objects its chunk built;
+        /// a failed first load keeps them.
         /// </param>
         private Mod BuildMod(
             string modId,
@@ -1430,7 +1912,8 @@ namespace CoreAI.Ai.LuaCs
             LuaCapabilities capabilities,
             string ownerActorId,
             bool ownerHasHostAuthority,
-            Action<Mod> commit)
+            Action<Mod> commit,
+            bool isReload)
         {
             Mod mod = new()
             {
@@ -1442,6 +1925,7 @@ namespace CoreAI.Ai.LuaCs
                 LoadedAtUtc = DateTime.UtcNow
             };
             LuaCsRbxApiBindings.ModLoadCandidate rbxLoadCandidate = null;
+            StartupCapture startupCapture = null;
             LuaCsLogicSlots.OverrideSnapshot slotsBeforeBuild = CaptureLogicSlots(modId);
             EnterModBuild(modId);
 
@@ -1470,6 +1954,7 @@ namespace CoreAI.Ai.LuaCs
                 // per-run reset) so a transaction left open by a failing load is discarded with the frame and
                 // cannot bleed into later scripts — and a transaction leaked elsewhere cannot swallow this
                 // chunk's world commands.
+                startupCapture = BeginStartupCapture(modId);
                 PushTransactionScope();
                 try
                 {
@@ -1486,6 +1971,12 @@ namespace CoreAI.Ai.LuaCs
                 finally
                 {
                     PopTransactionScope();
+                    EndStartupCapture(startupCapture);
+                }
+
+                if (startupCapture != null)
+                {
+                    mod.StartupObjects = startupCapture.Snapshot();
                 }
 
                 // WHY: a chunk that disconnected its own actor and still reached its end would load a
@@ -1519,6 +2010,17 @@ namespace CoreAI.Ai.LuaCs
                     {
                         _log?.Error($"[LuaCsModRuntime] Failed-load rollback for '{modId}' failed: {rollbackException}");
                     }
+                }
+
+                // WHY after the rollback: its threads are stopped and its connections dropped first, so
+                // nothing of the failed candidate reacts to its own objects going away. WHY for a reload
+                // only: a failed reload promises the world as it was, and the rollback released what the
+                // chunk registered with the bindings but not what it built, so its half-built objects
+                // stayed next to the ones it was meant to replace. A failed first load keeps what its
+                // chunk built, as a Roblox script that errors does.
+                if (isReload)
+                {
+                    DestroyFailedBuildObjects(modId, startupCapture);
                 }
 
                 RestoreLogicSlotsAfterFailedBuild(slotsBeforeBuild, modId, mod.State);
@@ -1798,15 +2300,28 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Replaces a loaded mod with new code, keeping its capability tier. The new chunk is built and
-        /// run first; if it fails, the old mod stays loaded and untouched (including its quarantine
-        /// state). On success the old instance's runtime effects are torn down before the swap
-        /// (<see cref="ModTearingDown"/> with <see cref="LuaModTeardownReason.Reload"/> — its logic-slot
-        /// overrides are cleared while the replacement chunk's own <c>logic_define</c> calls are kept),
-        /// and the replacement starts with a zero error streak and no quarantine, so reloading is THE
-        /// way to bring a quarantined mod back to life.
+        /// Replaces a loaded mod with new code in <see cref="ModReloadMode.CleanStartupObjects"/>, the
+        /// default (see <see cref="ReloadMod(string, string, ModReloadMode)"/>).
         /// </summary>
         internal void ReloadMod(string id, string luaCode)
+        {
+            ReloadMod(id, luaCode, ModReloadMode.CleanStartupObjects);
+        }
+
+        /// <summary>
+        /// Replaces a loaded mod with new code, keeping its capability tier. The new chunk is built and
+        /// run first; if it fails, the old mod stays loaded and untouched (including its quarantine
+        /// state) and the world is as it was: the objects the failed chunk built are destroyed and, in
+        /// <see cref="ModReloadMode.CleanStartupObjects"/>, the previous run's startup objects, taken out
+        /// of the world before the chunk ran, are put back exactly where they were. On success the old
+        /// instance's runtime effects are torn down before the swap (<see cref="ModTearingDown"/> with
+        /// <see cref="LuaModTeardownReason.Reload"/> — its logic-slot overrides are cleared while the
+        /// replacement chunk's own <c>logic_define</c> calls are kept), the previous run's startup
+        /// objects are destroyed (clean mode) or kept and still tracked (keep mode), and the replacement
+        /// starts with a zero error streak and no quarantine, so reloading is THE way to bring a
+        /// quarantined mod back to life.
+        /// </summary>
+        internal ModReloadReport ReloadMod(string id, string luaCode, ModReloadMode mode)
         {
             string modId = Normalize(id);
             if (string.IsNullOrWhiteSpace(luaCode))
@@ -1830,9 +2345,25 @@ namespace CoreAI.Ai.LuaCs
                 ownerHasHostAuthority = existing.OwnerHasHostAuthority;
             }
 
-            Mod replacement = BuildMod(
-                modId, luaCode, caps, ownerActorId, ownerHasHostAuthority,
-                built => DemandStillLoaded(modId, existing));
+            // WHY detached before the chunk runs and destroyed only after it succeeded: the new chunk
+            // must build into a world without the previous run's objects (a script that looks for its
+            // folder first would otherwise find the old one), yet a reload that fails must leave the
+            // world exactly as it was, which a destroy could not undo.
+            StartupDetachment detachment = mode == ModReloadMode.CleanStartupObjects
+                ? DetachStartupObjects(existing)
+                : null;
+            Mod replacement;
+            try
+            {
+                replacement = BuildMod(
+                    modId, luaCode, caps, ownerActorId, ownerHasHostAuthority,
+                    built => DemandStillLoaded(modId, existing), true);
+            }
+            catch
+            {
+                ReattachStartupObjects(detachment);
+                throw;
+            }
 
             // WHY: Teardown BEFORE the swap so the old instance's effects (its logic-slot overrides)
             // are gone by the time the replacement is live — the old formula must never be invoked
@@ -1840,33 +2371,521 @@ namespace CoreAI.Ai.LuaCs
             // BuildMod and may have re-defined slots, and those fresh defines must survive.
             TeardownModEffects(modId, LuaModTeardownReason.Reload, replacement.State);
 
+            bool replaced;
             lock (_gate)
             {
-                if (!_mods.TryGetValue(modId, out Mod live) || !ReferenceEquals(live, existing))
+                replaced = _mods.TryGetValue(modId, out Mod live) && ReferenceEquals(live, existing);
+                if (replaced)
                 {
-                    throw new InvalidOperationException($"Mod '{modId}' was reloaded concurrently.");
-                }
-
-                replacement.LoadOrder = existing.LoadOrder;
-                _mods[modId] = replacement;
-                int orderIndex = _modsInLoadOrder.IndexOf(existing);
-                if (orderIndex >= 0)
-                {
-                    _modsInLoadOrder[orderIndex] = replacement;
-                }
-
-                lock (_subscriptionGate)
-                {
-                    DeactivateSubscriptionsLocked(existing);
-                    ActivateSubscriptionsLocked(replacement);
-                    PublishSubscriptionSnapshotLocked();
+                    SwapInReplacementLocked(existing, replacement);
                 }
             }
 
-            _log?.Info($"[LuaCsModRuntime] Mod '{modId}' reloaded (caps={caps}).");
+            if (!replaced)
+            {
+                ReattachStartupObjects(detachment);
+                throw new InvalidOperationException($"Mod '{modId}' was reloaded concurrently.");
+            }
+
+            // WHY after the teardown: the replaced run's threads are stopped and its connections are
+            // dropped by then, so none of its code sees its objects destroyed.
+            ModReloadReport report;
+            if (mode == ModReloadMode.CleanStartupObjects)
+            {
+                StartupCleanup cleanup = DestroyDetachedStartupObjects(detachment);
+                if (cleanup.Survivors.Count > 0)
+                {
+                    replacement.StartupObjects.InsertRange(0, cleanup.Survivors);
+                }
+
+                report = new ModReloadReport(
+                    modId, ModReloadMode.CleanStartupObjects, cleanup.Destroyed, 0, cleanup.Rescued);
+            }
+            else
+            {
+                // WHY kept objects stay tracked: they are still objects the mod's main chunks built and
+                // still owns, so the next clean reload removes them with the newest run's own.
+                List<StartupObject> kept = LiveStartupObjects(modId, existing.StartupObjects);
+                replacement.StartupObjects.InsertRange(0, kept);
+                report = new ModReloadReport(modId, ModReloadMode.KeepObjects, 0, kept.Count, 0);
+            }
+
+            _log?.Info($"[LuaCsModRuntime] Mod '{modId}' reloaded (caps={caps}); {report.Describe()}.");
             RecordRevision(modId, luaCode);
             PersistMod(modId, luaCode, caps, ownerActorId, false);
             RaiseModSourceLoaded(modId, luaCode, caps);
+            ModReloadScope.Publish(report);
+            return report;
+        }
+
+        /// <summary>Makes <paramref name="replacement"/> the loaded run of its mod in place of <paramref name="existing"/>; call under the gate.</summary>
+        private void SwapInReplacementLocked(Mod existing, Mod replacement)
+        {
+            replacement.LoadOrder = existing.LoadOrder;
+            _mods[replacement.Id] = replacement;
+            int orderIndex = _modsInLoadOrder.IndexOf(existing);
+            if (orderIndex >= 0)
+            {
+                _modsInLoadOrder[orderIndex] = replacement;
+            }
+
+            lock (_subscriptionGate)
+            {
+                DeactivateSubscriptionsLocked(existing);
+                ActivateSubscriptionsLocked(replacement);
+                PublishSubscriptionSnapshotLocked();
+            }
+        }
+
+        /// <summary>
+        /// The entries of <paramref name="objects"/> that are still alive and still the mod's: owned by
+        /// <paramref name="modId"/> and by the actor that owned them at creation. An object a script or
+        /// the host re-attributed to another actor is no longer the mod's to clean.
+        /// </summary>
+        private List<StartupObject> LiveStartupObjects(string modId, List<StartupObject> objects)
+        {
+            List<StartupObject> live = new();
+            if (_rbxApi == null || objects == null)
+            {
+                return live;
+            }
+
+            InstanceRegistry registry = _rbxApi.Registry;
+            for (int index = 0; index < objects.Count; index++)
+            {
+                StartupObject entry = objects[index];
+                if (registry.TryGetRecord(entry.Id, out InstanceRecord record)
+                    && !record.Instance.IsDestroyed
+                    && string.Equals(record.OwnerModId, modId, StringComparison.Ordinal)
+                    && string.Equals(record.OwnerActorId ?? "", entry.OwnerActorId ?? "", StringComparison.Ordinal))
+                {
+                    live.Add(entry);
+                }
+            }
+
+            return live;
+        }
+
+        /// <summary>
+        /// Takes the live startup objects of <paramref name="existing"/> out of the world before a clean
+        /// reload runs its new chunk: each top-most one (no ancestor among them) gets Parent = nil, after
+        /// its parent, its position among that parent's children and its ancestor chain were recorded;
+        /// its descendants go with it. Null without the Roblox surface or once its world was replaced.
+        /// </summary>
+        private StartupDetachment DetachStartupObjects(Mod existing)
+        {
+            if (_rbxApi == null || _rbxApi.Registry.IsDetached)
+            {
+                return null;
+            }
+
+            List<StartupObject> objects = LiveStartupObjects(existing.Id, existing.StartupObjects);
+            if (objects.Count == 0)
+            {
+                return new StartupDetachment(existing.Id, new HashSet<InstanceId>(), objects,
+                    new List<DetachedStartupRoot>());
+            }
+
+            InstanceRegistry registry = _rbxApi.Registry;
+            HashSet<InstanceId> members = new();
+            for (int index = 0; index < objects.Count; index++)
+            {
+                members.Add(objects[index].Id);
+            }
+
+            // WHY every position is read before anything moves: taking one child out shifts the
+            // positions of its later siblings, and the put-back inserts at the original positions.
+            // WHY read once per parent: a mod that parents hundreds of startup parts straight into
+            // Workspace would otherwise copy Workspace's child list once per part.
+            Dictionary<RbxInstance, Dictionary<InstanceId, int>> positionsByParent = new();
+            List<DetachedStartupRoot> roots = new();
+            for (int index = 0; index < objects.Count; index++)
+            {
+                registry.TryGet(objects[index].Id, out RbxInstance instance);
+                if (HasAncestorIn(instance, members))
+                {
+                    continue;
+                }
+
+                RbxInstance parent = instance.Parent;
+                List<RbxInstance> ancestors = new();
+                for (RbxInstance ancestor = parent; ancestor != null; ancestor = ancestor.Parent)
+                {
+                    ancestors.Add(ancestor);
+                }
+
+                int siblingIndex = parent == null ? -1 : PositionAmongChildren(positionsByParent, parent, instance);
+                roots.Add(new DetachedStartupRoot(instance, parent, siblingIndex, ancestors));
+            }
+
+            StartupDetachment detachment = new(existing.Id, members, objects, roots);
+            RunStartupObjectWork(existing.Id, "take the previous run's startup objects of mod '"
+                                               + existing.Id + "' out of the world", () =>
+            {
+                for (int index = 0; index < roots.Count; index++)
+                {
+                    DetachedStartupRoot root = roots[index];
+                    if (root.OriginalParent == null)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        root.Instance.Parent = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        _log?.Warn($"[LuaCsModRuntime] Taking startup object '{root.Instance.Name}' of mod '{existing.Id}' out of the world failed; it stays where it is: {ex.Message}");
+                    }
+
+                    root.Detached = root.Instance.Parent == null && !root.Instance.IsDestroyed;
+                }
+            });
+            return detachment;
+        }
+
+        /// <summary>
+        /// Puts the startup objects a clean reload took out back exactly where they were, after the
+        /// reload failed: under their original parent at their original position (in ascending position
+        /// order per parent, so each lands where it was), or, if that parent is gone, at the end of the
+        /// nearest ancestor that still exists.
+        /// </summary>
+        private void ReattachStartupObjects(StartupDetachment detachment)
+        {
+            if (detachment == null || detachment.Roots.Count == 0)
+            {
+                return;
+            }
+
+            List<DetachedStartupRoot> detached = new();
+            for (int index = 0; index < detachment.Roots.Count; index++)
+            {
+                if (detachment.Roots[index].Detached)
+                {
+                    detached.Add(detachment.Roots[index]);
+                }
+            }
+
+            if (detached.Count == 0)
+            {
+                return;
+            }
+
+            detached.Sort((left, right) => left.SiblingIndex.CompareTo(right.SiblingIndex));
+            try
+            {
+                RunStartupObjectWork(detachment.ModId, "put the startup objects of mod '" + detachment.ModId
+                                                       + "' back after a failed reload",
+                    () => ReattachDetachedRoots(detachment.ModId, detached));
+            }
+            catch (Exception ex)
+            {
+                // WHY contained: this runs while a failed reload's own error is on its way out, and that
+                // error, not this one, is what the caller must see.
+                _log?.Error($"[LuaCsModRuntime] Putting the startup objects of mod '{detachment.ModId}' back after a failed reload failed: {ex}");
+            }
+        }
+
+        /// <summary>Puts each root of <paramref name="detached"/> (sorted by position) back; see <see cref="ReattachStartupObjects"/>.</summary>
+        private void ReattachDetachedRoots(string modId, List<DetachedStartupRoot> detached)
+        {
+            for (int index = 0; index < detached.Count; index++)
+            {
+                DetachedStartupRoot root = detached[index];
+                if (root.Instance.IsDestroyed || root.Instance.Parent != null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (!root.OriginalParent.IsDestroyed)
+                    {
+                        root.Instance.SetParentAtSiblingIndex(root.OriginalParent, root.SiblingIndex);
+                    }
+                    else
+                    {
+                        RbxInstance fallback = FirstSurvivingAncestor(root.Ancestors);
+                        if (fallback != null)
+                        {
+                            root.Instance.Parent = fallback;
+                        }
+                    }
+
+                    root.Detached = false;
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaCsModRuntime] Putting startup object '{root.Instance.Name}' of mod '{modId}' back after a failed reload failed: {ex}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Destroys the startup objects a successful clean reload took out of the world. What sits
+        /// inside one of them without being a startup object itself is moved out first to the nearest
+        /// ancestor that is not being destroyed (for the top-most ones, their original parent, or the
+        /// nearest ancestor of it that still exists) and is never destroyed.
+        /// </summary>
+        private StartupCleanup DestroyDetachedStartupObjects(StartupDetachment detachment)
+        {
+            if (detachment == null || detachment.Members.Count == 0)
+            {
+                return new StartupCleanup(0, 0, new List<StartupObject>());
+            }
+
+            List<RbxInstance> roots = new(detachment.Roots.Count);
+            List<List<RbxInstance>> chains = new(detachment.Roots.Count);
+            for (int index = 0; index < detachment.Roots.Count; index++)
+            {
+                roots.Add(detachment.Roots[index].Instance);
+                chains.Add(detachment.Roots[index].Ancestors);
+            }
+
+            try
+            {
+                return DestroyStartupObjects(detachment.ModId, detachment.Members, detachment.Objects,
+                    roots, chains,
+                    "destroy the previous run's startup objects of mod '" + detachment.ModId + "'");
+            }
+            catch (Exception ex)
+            {
+                // WHY contained: the reload itself succeeded and the new run is live; a cleanup that
+                // could not run must not report the reload as failed. What stays alive stays tracked.
+                _log?.Error($"[LuaCsModRuntime] Destroying the previous run's startup objects of mod '{detachment.ModId}' failed: {ex}");
+                return new StartupCleanup(0, 0, LiveStartupObjects(detachment.ModId, detachment.Objects));
+            }
+        }
+
+        /// <summary>
+        /// Destroys what the main chunk of a reload that failed created, so the failed reload leaves no
+        /// half-built objects behind; anything else placed inside them survives the same way it does in a
+        /// clean reload.
+        /// </summary>
+        private void DestroyFailedBuildObjects(string modId, StartupCapture capture)
+        {
+            if (capture == null || _rbxApi == null || _rbxApi.Registry.IsDetached)
+            {
+                return;
+            }
+
+            try
+            {
+                List<StartupObject> objects = LiveStartupObjects(modId, capture.Snapshot());
+                if (objects.Count == 0)
+                {
+                    return;
+                }
+
+                HashSet<InstanceId> members = new();
+                for (int index = 0; index < objects.Count; index++)
+                {
+                    members.Add(objects[index].Id);
+                }
+
+                List<RbxInstance> roots = new();
+                List<List<RbxInstance>> chains = new();
+                for (int index = 0; index < objects.Count; index++)
+                {
+                    _rbxApi.Registry.TryGet(objects[index].Id, out RbxInstance instance);
+                    if (!HasAncestorIn(instance, members))
+                    {
+                        roots.Add(instance);
+                        chains.Add(new List<RbxInstance>());
+                    }
+                }
+
+                StartupCleanup cleanup = DestroyStartupObjects(modId, members, objects, roots, chains,
+                    "destroy what the failed build of mod '" + modId + "' created");
+                if (cleanup.Destroyed > 0)
+                {
+                    _log?.Info(
+                        $"[LuaCsModRuntime] Destroyed {cleanup.Destroyed} object(s) the failed build of mod '{modId}' created.");
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Destroying what the failed build of mod '{modId}' created failed: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Destroys the <paramref name="members"/> under each of <paramref name="roots"/>, deepest first:
+        /// before a member goes, each child of it that is not a member is moved to the nearest ancestor
+        /// of that member that is not a member, or, past a root with no parent, to the first surviving
+        /// entry of that root's recorded <paramref name="chains"/> entry (nil when there is none).
+        /// Best-effort per object: a failing destroy is logged and its object stays tracked.
+        /// </summary>
+        private StartupCleanup DestroyStartupObjects(string modId, HashSet<InstanceId> members,
+            List<StartupObject> objects, List<RbxInstance> roots, List<List<RbxInstance>> chains,
+            string operation)
+        {
+            int destroyed = 0;
+            int rescued = 0;
+            RunStartupObjectWork(modId, operation, () =>
+            {
+                for (int rootIndex = 0; rootIndex < roots.Count; rootIndex++)
+                {
+                    RbxInstance root = roots[rootIndex];
+                    if (root == null || root.IsDestroyed)
+                    {
+                        continue;
+                    }
+
+                    List<RbxInstance> preorder = new() { root };
+                    preorder.AddRange(root.GetDescendants());
+                    for (int index = preorder.Count - 1; index >= 0; index--)
+                    {
+                        RbxInstance node = preorder[index];
+                        if (node.IsDestroyed || !members.Contains(node.Id))
+                        {
+                            continue;
+                        }
+
+                        try
+                        {
+                            IReadOnlyList<RbxInstance> children = node.GetChildren();
+                            if (children.Count > 0)
+                            {
+                                RbxInstance target = RescueTarget(node, members, chains[rootIndex]);
+                                for (int childIndex = 0; childIndex < children.Count; childIndex++)
+                                {
+                                    RbxInstance child = children[childIndex];
+                                    if (child.IsDestroyed || members.Contains(child.Id))
+                                    {
+                                        continue;
+                                    }
+
+                                    child.Parent = target;
+                                    rescued++;
+                                }
+                            }
+
+                            node.Destroy();
+                            destroyed++;
+                        }
+                        catch (Exception ex)
+                        {
+                            _log?.Error($"[LuaCsModRuntime] Destroying startup object '{node.Name}' of mod '{modId}' failed: {ex}");
+                        }
+                    }
+                }
+            });
+
+            List<StartupObject> survivors = new();
+            for (int index = 0; index < objects.Count; index++)
+            {
+                if (_rbxApi.Registry.TryGetRecord(objects[index].Id, out InstanceRecord record)
+                    && !record.Instance.IsDestroyed)
+                {
+                    survivors.Add(objects[index]);
+                }
+            }
+
+            return new StartupCleanup(destroyed, rescued, survivors);
+        }
+
+        /// <summary>
+        /// Where a child of <paramref name="node"/> that is not a startup object goes before
+        /// <paramref name="node"/> is destroyed: the nearest ancestor of it that is not a startup object
+        /// being destroyed; past a detached root, the first surviving entry of the root's recorded
+        /// ancestors; null (nil) when there is none.
+        /// </summary>
+        private static RbxInstance RescueTarget(RbxInstance node, HashSet<InstanceId> members,
+            List<RbxInstance> rootAncestors)
+        {
+            for (RbxInstance ancestor = node.Parent; ancestor != null; ancestor = ancestor.Parent)
+            {
+                if (!members.Contains(ancestor.Id))
+                {
+                    return ancestor;
+                }
+            }
+
+            return FirstSurvivingAncestor(rootAncestors);
+        }
+
+        private static RbxInstance FirstSurvivingAncestor(List<RbxInstance> ancestors)
+        {
+            if (ancestors == null)
+            {
+                return null;
+            }
+
+            for (int index = 0; index < ancestors.Count; index++)
+            {
+                if (!ancestors[index].IsDestroyed)
+                {
+                    return ancestors[index];
+                }
+            }
+
+            return null;
+        }
+
+        private static bool HasAncestorIn(RbxInstance instance, HashSet<InstanceId> members)
+        {
+            for (RbxInstance ancestor = instance.Parent; ancestor != null; ancestor = ancestor.Parent)
+            {
+                if (members.Contains(ancestor.Id))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static int PositionAmongChildren(
+            Dictionary<RbxInstance, Dictionary<InstanceId, int>> positionsByParent, RbxInstance parent,
+            RbxInstance child)
+        {
+            if (!positionsByParent.TryGetValue(parent, out Dictionary<InstanceId, int> positions))
+            {
+                IReadOnlyList<RbxInstance> children = parent.GetChildren();
+                positions = new Dictionary<InstanceId, int>(children.Count);
+                for (int index = 0; index < children.Count; index++)
+                {
+                    positions[children[index].Id] = index;
+                }
+
+                positionsByParent.Add(parent, positions);
+            }
+
+            return positions.TryGetValue(child.Id, out int position) ? position : int.MaxValue;
+        }
+
+        /// <summary>
+        /// Runs the runtime's own work on a mod's startup objects as one server-generated mutation of
+        /// the actor the mod runs as, the way a script's changes are applied, so replication and the
+        /// world ACL see it like any script change. When the mod's actor can no longer be resolved (its
+        /// attribution was released) the work runs directly: the objects are the mod's own and the host
+        /// is cleaning them.
+        /// </summary>
+        private void RunStartupObjectWork(string modId, string operation, Action work)
+        {
+            ActorContext actor;
+            try
+            {
+                actor = _rbxApi.ResolveOwnerActorContext(modId);
+            }
+            catch (RbxError)
+            {
+                work();
+                return;
+            }
+
+            _rbxApi.Registry.ApplyServerGeneratedMutation(
+                actor.ActorId,
+                actor.Grants.IsUnrestricted,
+                actor.WorldId,
+                operation,
+                () =>
+                {
+                    work();
+                    return true;
+                });
         }
 
         /// <summary>
@@ -2163,6 +3182,7 @@ namespace CoreAI.Ai.LuaCs
                 if (mod.SchedulerSucceededThisFrame && !mod.FaultedThisFrame)
                 {
                     mod.ErrorCount = 0;
+                    mod.BudgetTripStreak = 0;
                 }
 
                 mod.FaultedThisFrame = false;
@@ -2178,7 +3198,8 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         private void QuarantineIfExhausted(Mod mod)
         {
-            if (mod.Quarantined || mod.ErrorCount < MaxErrorsBeforeQuarantine)
+            bool budgetTrips = mod.BudgetTripStreak >= MaxBudgetTripsBeforeQuarantine;
+            if (mod.Quarantined || (mod.ErrorCount < MaxErrorsBeforeQuarantine && !budgetTrips))
             {
                 return;
             }
@@ -2203,16 +3224,30 @@ namespace CoreAI.Ai.LuaCs
                 PublishSubscriptionSnapshotLocked();
             }
 
-            _log?.Warn(
-                $"[LuaCsModRuntime] Mod '{mod.Id}' quarantined after {mod.ErrorCount} consecutive handler " +
-                "errors: dispatch suspended, mod kept loaded; reload it to clear the quarantine.");
+            if (budgetTrips)
+            {
+                _log?.Warn(
+                    $"[LuaCsModRuntime] Mod '{mod.Id}' quarantined after {mod.BudgetTripStreak} budget trips in a row " +
+                    "(instruction, time or memory budget): dispatch suspended, mod kept loaded, and its stored " +
+                    "package suspended so it does not start again on the next start; reload it or start it by " +
+                    "hand to clear both.");
+                AppendLog(mod.Id, LuaLogLevel.Error,
+                    $"mod quarantined after {mod.BudgetTripStreak} budget trips in a row; dispatch suspended " +
+                    "and the mod is not started again on the next start until it is reloaded or started by hand.");
+            }
+            else
+            {
+                _log?.Warn(
+                    $"[LuaCsModRuntime] Mod '{mod.Id}' quarantined after {mod.ErrorCount} consecutive handler " +
+                    "errors: dispatch suspended, mod kept loaded; reload it to clear the quarantine.");
 
-            // WHY: Error, not RuntimeError — the quarantine is a host-side lifecycle event, not a VM
-            // exception; the underlying failures were already appended as RuntimeError by the handler
-            // error channel.
-            AppendLog(mod.Id, LuaLogLevel.Error,
-                $"mod quarantined after {mod.ErrorCount} consecutive handler errors; " +
-                "dispatch suspended until reload.");
+                // WHY: Error, not RuntimeError — the quarantine is a host-side lifecycle event, not a VM
+                // exception; the underlying failures were already appended as RuntimeError by the handler
+                // error channel.
+                AppendLog(mod.Id, LuaLogLevel.Error,
+                    $"mod quarantined after {mod.ErrorCount} consecutive handler errors; " +
+                    "dispatch suspended until reload.");
+            }
 
             // WHY the actor record is put back after the teardown: the teardown releases the mod's
             // scheduled work through the same kill an unload uses, and that kill also drops the
@@ -2229,8 +3264,121 @@ namespace CoreAI.Ai.LuaCs
                 _rbxApi.RestoreModActorRecord(actorRecord);
             }
 
+            if (budgetTrips && IsLiveQuarantined(mod))
+            {
+                SuspendStoredPackage(mod.Id);
+            }
+
             RaiseModQuarantined(mod.Id, mod.ErrorCount);
         }
+
+        /// <summary>
+        /// Marks the stored package of a mod quarantined for budget trips inactive and
+        /// <see cref="LuaModManifest.SuspendedAfterBudgetTrips"/>, so neither a restart nor a world
+        /// restore starts it again. A successful load or reload of the mod writes a fresh manifest, which
+        /// clears both. Best-effort like every store write of the runtime, and only where the runtime
+        /// persists mods at all.
+        /// </summary>
+        /// <remarks>
+        /// WHY on the stored package: the stall repeats wherever the mod starts, and a player who killed a
+        /// frozen game met the same freeze on the next start, before any quarantine could happen.
+        /// WHY Active = false rather than a flag every start path must learn to read: rehydrate and the
+        /// exact world restore already skip an inactive package, and a world package already carries
+        /// the flag; the suspension marker only tells the Hub why the mod is off.
+        /// </remarks>
+        private void SuspendStoredPackage(string modId)
+        {
+            if (!_autoPersistMods)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!_sourceStore.TryLoad(modId, out string source, out LuaModManifest manifest)
+                    || manifest == null
+                    || string.IsNullOrWhiteSpace(source))
+                {
+                    return;
+                }
+
+                manifest.Active = false;
+                manifest.SuspendedAfterBudgetTrips = true;
+                _sourceStore.Save(modId, source, manifest);
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Suspending the stored package of mod '{modId}' after budget trips failed: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// True when a hook or timer failed because the guard cut it at its instruction, time or memory
+        /// budget, told by the CLR cause the guard attaches (a <see cref="TimeoutException"/>, a memory
+        /// trip, or the guard's own step line opening an <see cref="InvalidOperationException"/>), never
+        /// by text a script raised: a mod that writes a trip line into error() must not get another mod
+        /// that called it suspended.
+        /// </summary>
+        private static bool IsBudgetTrip(Exception exception)
+        {
+            for (Exception cause = exception; cause != null; cause = ScriptExecutionErrors.NextCause(cause))
+            {
+                if (cause is TimeoutException
+                    || (cause is InvalidOperationException
+                        && (cause.Message ?? "").StartsWith(StepTripLinePrefix, StringComparison.Ordinal)))
+                {
+                    return true;
+                }
+            }
+
+            return ScriptExecutionErrors.IsMemoryBudgetTrip(exception);
+        }
+
+        /// <summary>How the execution guard's instruction-budget trip line starts.</summary>
+        private const string StepTripLinePrefix = "LuaCsSecureEnvironment: EXCEEDED_HARD_LIMIT_STEPS";
+
+        /// <summary>
+        /// True when a scheduler thread was killed at its resume budget: the scheduler codes it
+        /// BUDGET_EXCEEDED from the handle's typed trip and keeps the guard's line. An instance quota
+        /// refusal is coded BUDGET_EXCEEDED too, but is an ordinary error: it costs no time.
+        /// </summary>
+        private static bool IsBudgetTrip(RbxError error)
+        {
+            return error != null
+                   && error.Code == RbxErrorCode.BudgetExceeded
+                   && ContainsBudgetTripLine(error.Message);
+        }
+
+        private static bool ContainsBudgetTripLine(string message)
+        {
+            if (string.IsNullOrEmpty(message))
+            {
+                return false;
+            }
+
+            for (int index = 0; index < BudgetTripLines.Length; index++)
+            {
+                if (message.IndexOf(BudgetTripLines[index], StringComparison.Ordinal) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>The markers the execution guard, the coroutine handle and the sandbox put into a budget trip's line.</summary>
+        private static readonly string[] BudgetTripLines =
+        {
+            "EXCEEDED_HARD_LIMIT_STEPS",
+            "EXCEEDED_RESUME_STEP_BUDGET",
+            "EXCEEDED_COROUTINE_STEP_BUDGET",
+            "EXCEEDED_LIFETIME_STEP_BUDGET",
+            "EXCEEDED_PATTERN_STEP_BUDGET",
+            LuaCsExecutionGuard.MemoryBudgetTripMarker,
+            "resume exceeded",
+            "Lua exceeded"
+        };
 
         /// <summary>
         /// True while <paramref name="mod"/> is still the loaded instance of its id and quarantined: a
@@ -2273,6 +3421,36 @@ namespace CoreAI.Ai.LuaCs
             }
 
             RaiseModTearingDown(modId, reason);
+            RunDefaultTeardown(modId, reason);
+        }
+
+        /// <summary>
+        /// Installs the teardown the composition root wires by default (the factory's release of a mod
+        /// run's threads, connections and, on unload, instances). It runs after every
+        /// <see cref="ModTearingDown"/> subscriber, so a host that releases the same effects itself
+        /// still sees them when its subscriber runs, and nothing is left for this one to release.
+        /// </summary>
+        internal void SetDefaultTeardown(Action<string, LuaModTeardownReason> teardown)
+        {
+            _defaultTeardown = teardown;
+        }
+
+        private void RunDefaultTeardown(string modId, LuaModTeardownReason reason)
+        {
+            Action<string, LuaModTeardownReason> teardown = _defaultTeardown;
+            if (teardown == null)
+            {
+                return;
+            }
+
+            try
+            {
+                teardown(modId, reason);
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] The default teardown of mod '{modId}' ({reason}) failed: {ex}");
+            }
         }
 
         /// <summary>
@@ -2318,6 +3496,7 @@ namespace CoreAI.Ai.LuaCs
                 _rbxApi.Scheduler.ThreadResumeSucceeded -= OnSchedulerThreadResumeSucceeded;
                 _rbxApi.Scheduler.HostFaulted -= OnSchedulerHostFaulted;
                 _rbxApi.Registry.RemoveRegistrationAdmission(_instanceQuotaAdmission);
+                _rbxApi.Registry.Registered -= OnInstanceRegistered;
                 _rbxApi.Registry.Unregistered -= OnInstanceUnregistered;
                 _rbxApi.ActorModsDisconnected -= OnActorModsDisconnected;
             }
@@ -2328,6 +3507,7 @@ namespace CoreAI.Ai.LuaCs
                 _logicSlots.SetInvocationScope(null, null);
             }
 
+            _defaultTeardown = null;
             ModEventEmitted = null;
             ModSourceLoaded = null;
             ModSourceUnloaded = null;
@@ -2575,6 +3755,14 @@ namespace CoreAI.Ai.LuaCs
                         mod.ErrorCount++;
                     }
 
+                    // WHY every trip counts, unlike the once-per-frame error streak: a trip is a stall as
+                    // long as the resume budget, so a frame of several trips is several stalls, not one
+                    // burst of cheap errors.
+                    if (IsBudgetTrip(error))
+                    {
+                        mod.BudgetTripStreak++;
+                    }
+
                     mod.FaultedThisFrame = true;
                     streak = mod.ErrorCount;
                 }
@@ -2783,6 +3971,7 @@ namespace CoreAI.Ai.LuaCs
                 if (!mod.SchedulerFaultChargedThisFrame)
                 {
                     mod.ErrorCount = 0;
+                    mod.BudgetTripStreak = 0;
                 }
             }
             catch (Exception ex)
@@ -2796,6 +3985,10 @@ namespace CoreAI.Ai.LuaCs
                 bool memoryTrip = ScriptExecutionErrors.IsMemoryBudgetTrip(ex);
                 mod.ErrorCount++;
                 mod.FaultedThisFrame = true;
+                if (memoryTrip || IsBudgetTrip(ex))
+                {
+                    mod.BudgetTripStreak++;
+                }
 
                 _log?.Error(
                     $"[LuaCsModRuntime] Mod '{mod.Id}' handler failed " +
