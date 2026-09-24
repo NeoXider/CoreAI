@@ -1333,14 +1333,15 @@ namespace CoreAI.Ai.LuaCs
 
             // ---- Navigation ----
             Method("FindFirstChild", (ctx, self) => context.WrapInstance(self.FindFirstChild(
-                ReadString(ctx, 1, "Instance:FindFirstChild", 1), Arg(ctx, 2).ToBoolean())));
+                ReadString(ctx, 1, "Instance:FindFirstChild", 1),
+                LuaCsRbxDatatypeBindings.ReadOptionalBoolean(ctx, 2, "Instance:FindFirstChild", 2))));
             Method("FindFirstChildOfClass", (ctx, self) => context.WrapInstance(
                 self.FindFirstChildOfClass(
                     ReadString(ctx, 1, "Instance:FindFirstChildOfClass", 1))));
             Method("FindFirstChildWhichIsA", (ctx, self) => context.WrapInstance(
                 self.FindFirstChildWhichIsA(
                     ReadString(ctx, 1, "Instance:FindFirstChildWhichIsA", 1),
-                    Arg(ctx, 2).ToBoolean())));
+                    LuaCsRbxDatatypeBindings.ReadOptionalBoolean(ctx, 2, "Instance:FindFirstChildWhichIsA", 2))));
             Method("FindFirstAncestor", (ctx, self) => context.WrapInstance(
                 self.FindFirstAncestor(ReadString(ctx, 1, "Instance:FindFirstAncestor", 1))));
             Method("FindFirstAncestorOfClass", (ctx, self) => context.WrapInstance(

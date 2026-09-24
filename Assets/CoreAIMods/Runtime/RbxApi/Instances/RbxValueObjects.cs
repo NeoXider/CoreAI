@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances.Replication;
 
@@ -86,7 +87,16 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
-        /// <summary>Rounds a Lua number to the mirror's integer rule; refuses non-finite input.</summary>
+        /// <summary>
+        /// Rounds a Lua number to the mirror's integer rule; refuses non-finite input and a rounded value
+        /// outside the int64 range [-2^63, 2^63 - 1].
+        /// </summary>
+        /// <remarks>
+        /// WHY refused and not stored: the mirror says a larger number "causes an integer overflow" and
+        /// sends such values to NumberValue. The cast is undefined for them: x64 stored long.MinValue for
+        /// 1e300 or 2^63 (a positive write turned negative) while ARM64 saturates, so the saved world
+        /// depended on the host's CPU (C1-04).
+        /// </remarks>
         public void SetFromDouble(double number)
         {
             ThrowIfDestroyed("Value");
@@ -97,7 +107,17 @@ namespace CoreAI.Mods.Rbx.Instances
                     "pass an integer, e.g. intValue.Value = 3");
             }
 
-            Value = (long)Math.Round(number, MidpointRounding.AwayFromZero);
+            double rounded = Math.Round(number, MidpointRounding.AwayFromZero);
+            // WHY 2^63 as a literal bound: (double)long.MaxValue rounds up to 2^63, which no long holds.
+            if (rounded < -9223372036854775808d || rounded >= 9223372036854775808d)
+            {
+                throw RbxError.BadArgument(
+                    "IntValue.Value expects a whole number from -2^63 to 2^63 - 1, got "
+                    + number.ToString("R", CultureInfo.InvariantCulture),
+                    "store numbers beyond the int64 range in a NumberValue");
+            }
+
+            Value = (long)rounded;
         }
 
         protected override void CopyValueTo(RbxValueBase copy)

@@ -746,7 +746,6 @@ namespace CoreAI.Tests.EditMode
             ActorContext serverActor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
             ActorContext flooder = Actor("a4-01-flood-actor");
-            int budget = LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender;
 
             harness.Runtime.LoadMod(serverActor, "a4-01-server", @"
                 local remote = Instance.new('RemoteEvent')
@@ -769,8 +768,9 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("yes", harness.Store.Get("a4-01-host-work", "ran"),
                 "the host's own thread quota is untouched by what the client's calls scheduled");
             Assert.AreEqual("300", harness.Store.Get("a4-01-server", "handled"));
-            Assert.AreEqual(budget - 1, harness.Bindings.Scheduler.CountInducedThreads(flooder.ActorId),
-                "the delayed threads are the sender's; each handler holds one slot while it runs");
+            Assert.AreEqual(harness.Bindings.Scheduler.MaxInducedThreadsPerSender,
+                harness.Bindings.Scheduler.CountInducedThreads(flooder.ActorId),
+                "the delayed threads are the sender's, held to its induced budget; the finished handlers hold none");
             Assert.IsEmpty(harness.Runtime.GetRecentHandlerErrors(serverActor, "a4-01-server"),
                 "a task.delay refused for the sender's budget is not the handler owner's fault");
             foreach (LuaModInfo info in harness.Runtime.ListMods(serverActor))

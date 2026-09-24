@@ -106,20 +106,20 @@ namespace CoreAI.Ai.LuaCs
         {
             registry.Register("unity_find", new Func<string, int>(FindByName));
             registry.Register("unity_id", new Func<string, int>(FindByName));
-            registry.RegisterVarArgs("unity_list_objects", call =>
-                ScriptCallResult.Return(ClrToScriptValue(ListObjects(ReadOptionalMax(call, 0)))));
+            registry.RegisterVarArgs("unity_list_objects", call => ScriptCallResult.Return(
+                ClrToScriptValue(ListObjects(ReadOptionalMax(call, 0, "unity_list_objects")))));
             registry.RegisterVarArgs("unity_find_all", call =>
                 ScriptCallResult.Return(ClrToScriptValue(FindAll(
                     ReadString(call, 0, "unity_find_all"),
-                    ReadOptionalMax(call, 1)))));
+                    ReadOptionalMax(call, 1, "unity_find_all")))));
             registry.RegisterVarArgs("unity_find_by_tag", call =>
                 ScriptCallResult.Return(ClrToScriptValue(FindByTag(
                     ReadString(call, 0, "unity_find_by_tag"),
-                    ReadOptionalMax(call, 1)))));
+                    ReadOptionalMax(call, 1, "unity_find_by_tag")))));
             registry.RegisterVarArgs("unity_find_by_component", call =>
                 ScriptCallResult.Return(ClrToScriptValue(FindByComponent(
                     ReadString(call, 0, "unity_find_by_component"),
-                    ReadOptionalMax(call, 1)))));
+                    ReadOptionalMax(call, 1, "unity_find_by_component")))));
             registry.Register("unity_describe_object", new Func<int, object>(instanceId =>
                 ClrToScriptValue(DescribeObject(instanceId))));
             registry.Register("unity_set_active", new Func<int, bool, bool>(SetActive));
@@ -174,19 +174,24 @@ namespace CoreAI.Ai.LuaCs
                    (_allowNonPublic ? BindingFlags.NonPublic : BindingFlags.Default);
         }
 
-        private static int ReadOptionalMax(ScriptCallContext call, int index)
+        private static int ReadOptionalMax(ScriptCallContext call, int index, string apiName)
         {
             if (call == null || !call.HasArgument(index) || call.GetKind(index) == ScriptValueKind.Nil)
             {
                 return 100;
             }
 
-            return (int)call.GetNumber(index);
+            return ToWholeInt(call.GetNumber(index), apiName, index);
         }
 
+        /// <summary>
+        /// A string argument by the one rule of every script surface: a string, or a number as the text
+        /// <c>tostring</c> gives it (C1-07).
+        /// </summary>
         private static string ReadString(ScriptCallContext call, int index, string apiName)
         {
-            if (call == null || call.GetKind(index) != ScriptValueKind.String)
+            ScriptValueKind kind = call?.GetKind(index) ?? ScriptValueKind.Nil;
+            if (kind != ScriptValueKind.String && kind != ScriptValueKind.Number)
             {
                 throw new ArgumentException($"{apiName}: argument {index + 1} must be a string.");
             }
@@ -194,14 +199,39 @@ namespace CoreAI.Ai.LuaCs
             return call.GetString(index);
         }
 
+        /// <summary>
+        /// An integer argument by the one rule of every script surface: a number or a numeric string,
+        /// truncated toward zero, refused when NaN or outside the int range (C1-07).
+        /// </summary>
         private static int ReadInt(ScriptCallContext call, int index, string apiName)
         {
-            if (call == null || call.GetKind(index) != ScriptValueKind.Number)
+            ScriptValueKind kind = call?.GetKind(index) ?? ScriptValueKind.Nil;
+            if (kind != ScriptValueKind.Number && kind != ScriptValueKind.String)
             {
                 throw new ArgumentException($"{apiName}: argument {index + 1} must be a number.");
             }
 
-            return (int)call.GetNumber(index);
+            return ToWholeInt(call.GetNumber(index), apiName, index);
+        }
+
+        /// <summary>
+        /// Truncates toward zero, as Luau's integer parameters do; NaN and a value outside the int range
+        /// are refused.
+        /// </summary>
+        /// <remarks>
+        /// WHY checked: the (int) cast is undefined for such a value; x64 turned 1e300 into int.MinValue, so
+        /// the result depended on the host's CPU.
+        /// </remarks>
+        private static int ToWholeInt(double number, string apiName, int index)
+        {
+            double truncated = Math.Truncate(number);
+            if (double.IsNaN(truncated) || truncated < int.MinValue || truncated > int.MaxValue)
+            {
+                throw new ArgumentException(
+                    $"{apiName}: argument {index + 1} must be a whole number within the int range.");
+            }
+
+            return (int)truncated;
         }
 
         private static int FindByName(string name)

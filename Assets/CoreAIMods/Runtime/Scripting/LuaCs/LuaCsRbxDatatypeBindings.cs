@@ -686,26 +686,26 @@ namespace CoreAI.Ai.LuaCs
             meta[Metamethods.Sub] = Fn("Vector2.__sub", ctx => Wrap(
                 ReadVector2(ctx, 0, "Vector2 -") - ReadVector2(ctx, 1, "Vector2 -")));
             meta[Metamethods.Unm] = Fn("Vector2.__unm", ctx => Wrap(-Self2(ctx)));
+            // WHY a numeric string is a scalar operand, as for Vector3: Roblox reads the number operand of
+            // a datatype operator the way luaL_checknumber reads a parameter, so v * "2" doubles v there
+            // too, and one script must not scale a Vector3 by "2" but fail on a Vector2 (C1-08).
             meta[Metamethods.Mul] = Fn("Vector2.__mul", ctx =>
             {
-                LuaValue a = Arg(ctx, 0);
-                LuaValue b = Arg(ctx, 1);
-                if (a.Type == LuaValueType.Number)
+                if (TryCoerceNumber(Arg(ctx, 0), out double leftScalar))
                 {
-                    return Wrap((float)a.Read<double>() * ReadVector2(ctx, 1, "Vector2 *"));
+                    return Wrap((float)leftScalar * ReadVector2(ctx, 1, "Vector2 *"));
                 }
 
                 RbxVector2 left = ReadVector2(ctx, 0, "Vector2 *");
-                return b.Type == LuaValueType.Number
-                    ? Wrap(left * (float)b.Read<double>())
+                return TryCoerceNumber(Arg(ctx, 1), out double rightScalar)
+                    ? Wrap(left * (float)rightScalar)
                     : Wrap(left * ReadVector2(ctx, 1, "Vector2 *"));
             });
             meta[Metamethods.Div] = Fn("Vector2.__div", ctx =>
             {
                 RbxVector2 left = ReadVector2(ctx, 0, "Vector2 /");
-                LuaValue b = Arg(ctx, 1);
-                return b.Type == LuaValueType.Number
-                    ? Wrap(left / (float)b.Read<double>())
+                return TryCoerceNumber(Arg(ctx, 1), out double scalar)
+                    ? Wrap(left / (float)scalar)
                     : Wrap(left / ReadVector2(ctx, 1, "Vector2 /"));
             });
             meta[Metamethods.Eq] = Fn("Vector2.__eq", ctx =>
@@ -1466,6 +1466,7 @@ namespace CoreAI.Ai.LuaCs
             Action<object[]> wrapper = BuildSignalHandler(
                 signalOwner, callable);
             RbxScriptConnection connection = once ? signal.Once(wrapper) : signal.Connect(wrapper);
+            connection.StartsSchedulerThread = true;
 
             // WHY: attribute the connection to the mod that opened it so composition teardown can
             // Disconnect it on unload/reload/quarantine — otherwise the handler keeps firing against the
@@ -1859,14 +1860,19 @@ namespace CoreAI.Ai.LuaCs
                 : throw ExpectedArgument(what, "a Vector3", value, argumentNumber);
         }
 
-        /// <summary>Optional boolean argument: nil is false; a non-boolean is a BAD_ARGUMENT.</summary>
-        private static bool ReadOptionalBoolean(LuaFunctionExecutionContext ctx, int index,
-            string what, int argumentNumber)
+        /// <summary>
+        /// Optional boolean argument, read by the one boolean rule of both script surfaces: only true and
+        /// false are booleans, nil is <paramref name="whenOmitted"/> (the parameter's documented default),
+        /// and any other value is a BAD_ARGUMENT. Lua truthiness is never used: it turned "false" and 0
+        /// into true (C1-05).
+        /// </summary>
+        internal static bool ReadOptionalBoolean(LuaFunctionExecutionContext ctx, int index,
+            string what, int argumentNumber, bool whenOmitted = false)
         {
             LuaValue value = Arg(ctx, index);
             if (value.Type == LuaValueType.Nil)
             {
-                return false;
+                return whenOmitted;
             }
 
             if (value.Type != LuaValueType.Boolean)

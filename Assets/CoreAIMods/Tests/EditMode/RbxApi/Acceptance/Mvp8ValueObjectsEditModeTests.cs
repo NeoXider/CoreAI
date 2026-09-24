@@ -778,6 +778,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [TestCase("inf", double.PositiveInfinity)]
         [TestCase("-Infinity", double.NegativeInfinity)]
         [TestCase("1e999", double.PositiveInfinity)]
+        [TestCase("5\0x", 5d)]
+        [TestCase(" 0x10\0 junk", 16d)]
         public void RuleTable_NumberParameter_TakesWhatLuauTonumberAccepts_OnBothSurfaces(string text,
             double expected)
         {
@@ -823,6 +825,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         [TestCase("e5")]
         [TestCase("\u00A05")]
         [TestCase("5\u0085")]
+        [TestCase("\u00005")]
+        [TestCase("5x\0")]
         public void RuleTable_NumberParameter_RefusesAStringTonumberRefuses_OnBothSurfaces(string text)
         {
             LuaValue value = text;
@@ -893,6 +897,55 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void RuleTable_FullTierReflectedMembers_ConvertByTheSameRules()
+        {
+            // WHY: the Full-tier unity_* bindings kept rules of their own: a numeric string was refused
+            // for a number, 0 was false and a string threw an engine cast error for a boolean, integer
+            // casts were unchecked ((int)1e300 depends on the CPU, (uint)-1 wrapped) and an enum name
+            // matched in any case (C1-07).
+            Assert.AreEqual("5", LuaCsFullUnityRuntimeBindings.ConvertArg((LuaValue)"5", typeof(string)));
+            Assert.AreEqual("5", LuaCsFullUnityRuntimeBindings.ConvertArg((LuaValue)5d, typeof(string)));
+            Assert.AreEqual(((LuaValue)0.25d).ToString(),
+                LuaCsFullUnityRuntimeBindings.ConvertArg((LuaValue)0.25d, typeof(string)));
+            Assert.AreEqual(2.5d, LuaCsFullUnityRuntimeBindings.ConvertArg((LuaValue)"2.5", typeof(double)));
+            Assert.AreEqual(16f, LuaCsFullUnityRuntimeBindings.ConvertArg((LuaValue)" 0x10 ", typeof(float)));
+            Assert.AreEqual(2, LuaCsFullUnityRuntimeBindings.ConvertArg((LuaValue)2.7d, typeof(int)));
+            Assert.AreEqual(-2, LuaCsFullUnityRuntimeBindings.ConvertArg((LuaValue)"-2.7", typeof(int)));
+            Assert.AreEqual(4294967295u,
+                LuaCsFullUnityRuntimeBindings.ConvertArg((LuaValue)4294967295d, typeof(uint)));
+            Assert.AreEqual((byte)255, LuaCsFullUnityRuntimeBindings.ConvertArg((LuaValue)255d, typeof(byte)));
+            Assert.AreEqual(true, LuaCsFullUnityRuntimeBindings.ConvertArg((LuaValue)true, typeof(bool)));
+            Assert.AreEqual(false, LuaCsFullUnityRuntimeBindings.ConvertArg(LuaValue.Nil, typeof(bool)));
+            Assert.AreEqual(DayOfWeek.Monday,
+                LuaCsFullUnityRuntimeBindings.ConvertArg((LuaValue)"Monday", typeof(DayOfWeek)));
+            Assert.AreEqual(DayOfWeek.Monday,
+                LuaCsFullUnityRuntimeBindings.ConvertArg((LuaValue)1d, typeof(DayOfWeek)));
+
+            (LuaValue Value, Type Target)[] refused =
+            {
+                (true, typeof(string)),
+                ("two", typeof(double)),
+                (true, typeof(double)),
+                (1e300, typeof(int)),
+                (double.NaN, typeof(int)),
+                (2147483648d, typeof(int)),
+                (-1d, typeof(uint)),
+                (256d, typeof(byte)),
+                (1e300, typeof(long)),
+                (1d, typeof(bool)),
+                (0d, typeof(bool)),
+                ("true", typeof(bool)),
+                ("monday", typeof(DayOfWeek)),
+                ("1", typeof(DayOfWeek))
+            };
+            foreach ((LuaValue value, Type target) in refused)
+            {
+                Assert.Throws<ArgumentException>(() => LuaCsFullUnityRuntimeBindings.ConvertArg(value, target),
+                    value + " for " + target.Name + " is refused, as on the other surfaces");
+            }
+        }
+
+        [Test]
         public void RuleTable_RbxSurface_PropertyWritesAndArguments_ConvertLikeRoblox()
         {
             using ProductionHarness harness = new ProductionHarness();
@@ -916,6 +969,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 local nv = Instance.new('NumberValue'); nv.Parent = root
                 local iv = Instance.new('IntValue'); iv.Parent = root
                 local bv = Instance.new('BoolValue'); bv.Parent = root
+                local deep = Instance.new('Folder'); deep.Name = 'Deep'; deep.Parent = five
+                local http = game:GetService('HttpService')
 
                 row('str_arg_number', function() return root:FindFirstChild(5) == five end)
                 row('str_arg_fraction', function() return root:FindFirstChild(0.5) == half end)
@@ -954,6 +1009,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 row('int_arg_fraction_string', function() return Random.new(1):NextInteger('-2.7', '-2.7') end)
                 row('int_arg_huge', function() return Random.new(1):NextInteger(1, 1e300) end)
                 row('int_prop_nan', function() iv.Value = 'nan' end)
+                row('int_prop_lowest', function() iv.Value = -2^63 return iv.Value == -2^63 end)
+                row('int_prop_2p63', function() iv.Value = 2^63 end)
+                row('int_prop_huge', function() iv.Value = 1e300 end)
+                row('int_prop_huge_string', function() iv.Value = '1e300' end)
+                row('int_prop_kept', function() return iv.Value == -2^63 end)
 
                 row('bool_prop_string', function() part.Anchored = 'true' end)
                 row('bool_prop_number', function() bv.Value = 1 end)
@@ -963,6 +1023,22 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     return a:Angle(b) == a:Angle(b, false)
                 end)
                 row('bool_arg_string', function() return Vector2.new(1, 0):Angle(Vector2.new(0, -1), 'true') end)
+                row('bool_arg_recursive', function() return root:FindFirstChild('Deep', true) == deep end)
+                row('bool_arg_recursive_omitted', function() return root:FindFirstChild('Deep') == nil end)
+                row('bool_arg_recursive_zero', function() return root:FindFirstChild('Deep', 0) end)
+                row('bool_arg_recursive_string', function() return root:FindFirstChild('Deep', 'false') end)
+                row('bool_arg_which_is_a', function() return five:FindFirstChildWhichIsA('Folder', false) == deep end)
+                row('bool_arg_which_is_a_number', function() return root:FindFirstChildWhichIsA('Folder', 1) end)
+                row('bool_arg_guid_omitted', function() return #http:GenerateGUID() end)
+                row('bool_arg_guid_false', function() return #http:GenerateGUID(false) end)
+                row('bool_arg_guid_number', function() return http:GenerateGUID(0) end)
+                row('bool_arg_compress_number', function() return http:PostAsync('https://example.invalid/', 'x', nil, 1) end)
+
+                row('v2_mul_string', function() return Vector2.new(1, 2) * '2' == Vector2.new(2, 4) end)
+                row('v2_string_mul', function() return '2' * Vector2.new(1, 2) == Vector2.new(2, 4) end)
+                row('v2_div_string', function() return Vector2.new(2, 4) / ' 0x2 ' == Vector2.new(1, 2) end)
+                row('v2_mul_text', function() return Vector2.new(1, 2) * 'two' end)
+                row('num_arg_nul', function() return tween:GetValue('0.5\0junk', linear, inward) end)
 
                 row('enum_prop_name', function() part.Material = 'Wood' return part.Material == Enum.Material.Wood end)
                 row('enum_prop_value', function() part.Material = 816 return part.Material == Enum.Material.Concrete end)
@@ -1009,7 +1085,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 ("int_prop_half", "true|3"),
                 ("int_arg_fraction", "true|2"),
                 ("int_arg_fraction_string", "true|-2"),
+                ("int_prop_lowest", "true|true"),
+                ("int_prop_kept", "true|true"),
                 ("bool_arg_omitted", "true|true"),
+                ("bool_arg_recursive", "true|true"),
+                ("bool_arg_recursive_omitted", "true|true"),
+                ("bool_arg_which_is_a", "true|true"),
+                ("bool_arg_guid_omitted", "true|38"),
+                ("bool_arg_guid_false", "true|36"),
+                ("v2_mul_string", "true|true"),
+                ("v2_string_mul", "true|true"),
+                ("v2_div_string", "true|true"),
+                ("num_arg_nul", "true|0.5"),
                 ("enum_prop_name", "true|true"),
                 ("enum_prop_value", "true|true"),
                 ("enum_prop_shape_name", "true|true"),
@@ -1053,10 +1140,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 ("num_prop_boolean", "NumberValue.Value expects a number, got boolean"),
                 ("int_arg_huge", "Random:NextInteger expects a finite whole number"),
                 ("int_prop_nan", "IntValue.Value expects a finite number"),
+                ("int_prop_2p63", "IntValue.Value expects a whole number from -2^63 to 2^63 - 1"),
+                ("int_prop_huge", "IntValue.Value expects a whole number from -2^63 to 2^63 - 1"),
+                ("int_prop_huge_string", "IntValue.Value expects a whole number from -2^63 to 2^63 - 1"),
                 ("bool_prop_string", "Part.Anchored expects a boolean, got string"),
                 ("bool_prop_number", "BoolValue.Value expects a boolean, got number"),
                 ("bool_prop_nil", "Part.Archivable expects a boolean, got nil"),
                 ("bool_arg_string", "Vector2:Angle expects a boolean at argument 2"),
+                ("bool_arg_recursive_zero", "Instance:FindFirstChild expects a boolean at argument 2"),
+                ("bool_arg_recursive_string", "Instance:FindFirstChild expects a boolean at argument 2"),
+                ("bool_arg_which_is_a_number", "Instance:FindFirstChildWhichIsA expects a boolean at argument 2"),
+                ("bool_arg_guid_number", "HttpService:GenerateGUID expects a boolean at argument 1"),
+                ("bool_arg_compress_number", "HttpService:PostAsync expects a boolean at argument 4"),
+                ("v2_mul_text", "Vector2 * expects a Vector2 at argument 2"),
                 ("enum_prop_unknown_name", "Part.Material expects an Enum.Material item, got string \"Plastik\""),
                 ("enum_prop_numeric_string", "Part.Material expects an Enum.Material item, got string \"256\""),
                 ("enum_prop_fraction", "Part.Material expects an Enum.Material item, got number 256.5"),

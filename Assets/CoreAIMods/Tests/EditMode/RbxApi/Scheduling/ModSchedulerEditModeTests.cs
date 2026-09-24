@@ -1999,6 +1999,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             // schedules work filled the host's whole thread quota (A4-01).
             ModScheduler scheduler = CreateScheduler(out _, out _);
             scheduler.ConfigureActorQuota(2, ownerModId => "host");
+            scheduler.ConfigureInducedThreadBudget(2, 0, 256, 4096);
             List<string> faults = new();
             scheduler.ThreadFaulted += (string ownerModId, RbxError error) => faults.Add(ownerModId);
             List<string> outcomes = new();
@@ -2027,11 +2028,15 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             Assert.AreEqual("started", outcomes[0]);
             Assert.AreEqual("started", outcomes[1]);
             StringAssert.StartsWith("BUDGET_EXCEEDED:", outcomes[2],
-                "the third thread would be the sender's fourth in flight");
+                "the third delayed thread would be the sender's third in its induced budget of two");
             StringAssert.Contains("client-a", outcomes[2]);
             StringAssert.Contains("task.delay", outcomes[2]);
             Assert.AreEqual(3, scheduler.CountInducedThreads("client-a"),
                 "the handler and the two delayed threads it started are all the sender's");
+            Assert.AreEqual(1, scheduler.CountRemoteHandlerThreads("client-a"),
+                "the handler holds the one slot of the sender's remote admission budget");
+            Assert.AreEqual(2, scheduler.CountInducedPoolThreads("client-a"),
+                "the delayed threads are held in the sender's induced budget");
             Assert.IsEmpty(faults, "a refusal the handler caught is nobody's fault");
             Assert.DoesNotThrow(() => scheduler.Spawn("host-mod",
                 new FakeThreadPlan(completeOnResume: false), Array.Empty<object>()));
@@ -2075,6 +2080,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
         public void A4_01_AHandlerThatDiesOfItsSendersRefusal_IsNotItsOwnersFault()
         {
             ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureInducedThreadBudget(1, 0, 256, 4096);
             List<string> faults = new();
             scheduler.ThreadFaulted += (string ownerModId, RbxError error) => faults.Add(ownerModId);
             FakeThreadPlan scheduling = new((FakeScriptThread thread, object[] args) =>
@@ -2101,7 +2107,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             IRbxScriptThread handler = scheduler.SpawnSignal("host-mod", dying, Array.Empty<object>(),
                 "client-a", 2, out RbxError _);
 
-            Assert.IsNotNull(caught, "the second handler and the delayed thread fill the budget of two");
+            Assert.IsNotNull(caught, "the delayed thread fills the sender's induced budget of one");
             Assert.AreEqual(RbxErrorCode.BudgetExceeded, caught.Code);
             Assert.IsTrue(handler.IsDead, "the refusal went uncaught and ended the handler");
             Assert.IsEmpty(faults,
@@ -2141,6 +2147,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
         public void A4_01_ARefusedInheritedStart_IsCountedAndRaisedWithItsSender()
         {
             ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureInducedThreadBudget(1, 0, 256, 4096);
             List<string> refusedSenders = new();
             scheduler.InducedThreadRefused += (string sender, RbxError refusal) =>
                 refusedSenders.Add(sender + ":" + RbxError.ToWireName(refusal.Code));
@@ -2167,7 +2174,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
         }
 
         [Test]
-        public void B1_02_ASignalFiredInsideAChargedThread_TagsItsInvocationWithThatThreadsSenderAndLimit()
+        public void B1_02_ASignalFiredInsideAChargedThread_TagsItsInvocationWithThatThreadsSender_AsInducedWork()
         {
             // WHY: only a remote event's own dispatch tagged an invocation with its sender. A handler
             // charged to a sender that renamed an instance or set an attribute queued that signal's
@@ -2179,7 +2186,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             changed.BindScheduler(scheduler);
             List<string> seen = new();
             changed.Connect((Action<object[]>)(_ => seen.Add(
-                (scheduler.CurrentSignalQuotaActorId ?? "none") + "/" + scheduler.CurrentSignalQuotaLimit)));
+                (scheduler.CurrentSignalQuotaActorId ?? "none") + "/"
+                + (scheduler.CurrentSignalIsInduced ? "induced" : "admission"))));
             FakeThreadPlan chargedHandler = new((FakeScriptThread thread, object[] args) => changed.Fire(),
                 completeOnResume: false);
             FakeThreadPlan hostThread = new((FakeScriptThread thread, object[] args) => changed.Fire(),
@@ -2191,29 +2199,482 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scheduling
             scheduler.Advance(0d);
 
             Assert.IsNull(refusal);
-            CollectionAssert.AreEqual(new[] { "client-a/3", "none/0" }, seen,
-                "the charged thread's fire carries its sender and limit; the host's own fire carries none");
+            CollectionAssert.AreEqual(new[] { "client-a/induced", "none/admission" }, seen,
+                "the charged thread's fire carries its sender as induced work; the host's own fire carries none");
             Assert.IsNull(scheduler.CurrentSignalQuotaActorId);
-            Assert.AreEqual(0, scheduler.CurrentSignalQuotaLimit);
+            Assert.IsFalse(scheduler.CurrentSignalIsInduced);
         }
 
         [Test]
-        public void B1_02_Negative_TheDispatchScopeStillTagsItsInvocationWithoutALimit()
+        public void B1_02_Negative_TheDispatchScopeStillTagsItsInvocationAsTheSendersOwnRemoteCall()
         {
             ModScheduler scheduler = CreateScheduler(out _, out _);
             RbxScriptSignal onServerEvent = new("RemoteEvent.OnServerEvent");
             onServerEvent.BindScheduler(scheduler);
             List<string> seen = new();
             onServerEvent.Connect((Action<object[]>)(_ => seen.Add(
-                (scheduler.CurrentSignalQuotaActorId ?? "none") + "/" + scheduler.CurrentSignalQuotaLimit)));
+                (scheduler.CurrentSignalQuotaActorId ?? "none") + "/"
+                + (scheduler.CurrentSignalIsInduced ? "induced" : "admission"))));
 
             string previous = scheduler.BeginSignalsOnBehalfOf("client-b");
             onServerEvent.Fire();
             scheduler.EndSignalsOnBehalfOf(previous);
             scheduler.Advance(0d);
 
-            CollectionAssert.AreEqual(new[] { "client-b/0" }, seen,
-                "a dispatch-scope tag leaves the limit to the caller that starts the handler");
+            CollectionAssert.AreEqual(new[] { "client-b/admission" }, seen,
+                "a dispatch-scope tag marks the sender's own remote call, held to its remote admission budget");
+        }
+
+        [Test]
+        public void C1_01_WhatARemoteHandlerCauses_NeverTakesTheSendersRemoteAdmissionBudget()
+        {
+            // WHY: the threads a sender's handler caused shared one budget with the handlers the sender's
+            // remote calls start, so the host's own parked listeners refused an honest player's next remote
+            // calls (C1-01).
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            FakeThreadPlan handler = new((FakeScriptThread thread, object[] args) =>
+            {
+                for (int index = 0; index < 5; index++)
+                {
+                    scheduler.Delay("host-mod", 60d, new FakeThreadPlan(), Array.Empty<object>());
+                }
+            }, completeOnResume: false);
+
+            IRbxScriptThread first = scheduler.SpawnSignal("host-mod", handler, Array.Empty<object>(),
+                "client-a", 2, out RbxError firstRefusal);
+            IRbxScriptThread second = scheduler.SpawnSignal("host-mod", new FakeThreadPlan(completeOnResume: false),
+                Array.Empty<object>(), "client-a", 2, out RbxError secondRefusal);
+            IRbxScriptThread third = scheduler.SpawnSignal("host-mod", new FakeThreadPlan(completeOnResume: false),
+                Array.Empty<object>(), "client-a", 2, out RbxError thirdRefusal);
+
+            Assert.IsNotNull(first);
+            Assert.IsNull(firstRefusal);
+            Assert.IsNotNull(second, "five induced threads take none of the sender's remote admission budget");
+            Assert.IsNull(secondRefusal);
+            Assert.IsNull(third, "the admission budget of two still holds the sender's own calls");
+            Assert.AreEqual(RbxErrorCode.BudgetExceeded, thirdRefusal.Code);
+            Assert.AreEqual(2, scheduler.CountRemoteHandlerThreads("client-a"));
+            Assert.AreEqual(5, scheduler.CountInducedPoolThreads("client-a"));
+            Assert.AreEqual(7, scheduler.CountInducedThreads("client-a"));
+            Assert.AreEqual(5, scheduler.InducedPoolThreadTotal);
+        }
+
+        [Test]
+        public void C1_01_TheInducedThreadsOfAllSenders_ShareOneCeiling()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureInducedThreadBudget(2, 3, 256, 4096);
+            List<string> outcomes = new();
+            Func<string, FakeThreadPlan> delayingTwice = sender => new FakeThreadPlan(
+                (FakeScriptThread thread, object[] args) =>
+                {
+                    for (int index = 0; index < 2; index++)
+                    {
+                        try
+                        {
+                            scheduler.Delay("host-mod", 60d, new FakeThreadPlan(), Array.Empty<object>());
+                            outcomes.Add(sender + ":started");
+                        }
+                        catch (RbxError error)
+                        {
+                            outcomes.Add(sender + ":" + RbxError.ToWireName(error.Code) + ":" + error.RawMessage);
+                        }
+                    }
+                });
+
+            scheduler.SpawnSignal("host-mod", delayingTwice("client-a"), Array.Empty<object>(), "client-a", 4,
+                out RbxError _);
+            scheduler.SpawnSignal("host-mod", delayingTwice("client-b"), Array.Empty<object>(), "client-b", 4,
+                out RbxError _);
+
+            Assert.AreEqual(4, outcomes.Count);
+            Assert.AreEqual("client-a:started", outcomes[0]);
+            Assert.AreEqual("client-a:started", outcomes[1]);
+            Assert.AreEqual("client-b:started", outcomes[2]);
+            StringAssert.StartsWith("client-b:BUDGET_EXCEEDED:", outcomes[3],
+                "the second sender has room of its own but the ceiling of all senders is reached");
+            StringAssert.Contains("all senders together", outcomes[3]);
+            StringAssert.Contains("client-b", outcomes[3]);
+            Assert.AreEqual(3, scheduler.InducedPoolThreadTotal);
+            Assert.AreEqual(3, scheduler.MaxInducedThreadsAllSenders);
+        }
+
+        [Test]
+        public void C1_01_TheCeilingOfAllSenders_DefaultsToTheActorQuotaLessTheHostReserve()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+
+            Assert.AreEqual(ModScheduler.DefaultMaxInducedThreadsPerSender, scheduler.MaxInducedThreadsPerSender);
+            Assert.AreEqual(ModScheduler.DefaultMaxThreadsPerActor - ModScheduler.DefaultInducedThreadsHostReserve,
+                scheduler.MaxInducedThreadsAllSenders, "192 of the default 256");
+
+            scheduler.ConfigureActorQuota(1024, ownerModId => "host");
+            Assert.AreEqual(1024 - ModScheduler.DefaultInducedThreadsHostReserve, scheduler.MaxInducedThreadsAllSenders);
+
+            scheduler.ConfigureActorQuota(8, ownerModId => "host");
+            Assert.AreEqual(scheduler.MaxInducedThreadsPerSender, scheduler.MaxInducedThreadsAllSenders,
+                "never below one sender's own budget");
+
+            scheduler.ConfigureInducedThreadBudget(16, 40, 8, 64);
+            Assert.AreEqual(16, scheduler.MaxInducedThreadsPerSender);
+            Assert.AreEqual(40, scheduler.MaxInducedThreadsAllSenders);
+            Assert.AreEqual(8, scheduler.MaxDeferredListenerInvocationsPerSender);
+            Assert.AreEqual(64, scheduler.MaxDeferredListenerInvocationsAllSenders);
+        }
+
+        [Test]
+        public void C1_02_AHandlerOverItsSendersInducedBudget_WaitsForRoomAndStartsInFireOrder()
+        {
+            // WHY: a listener a charged handler's write started was refused once the sender's budget was
+            // full, after the write was already applied, so the host's listener silently missed it (C1-02).
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureInducedThreadBudget(1, 0, 256, 4096);
+            RbxScriptSignal changed = new("Coins.Changed");
+            List<object> delivered = new();
+            List<FakeScriptThread> listeners = new();
+            ConnectScriptHandler(scheduler, changed, false, () => new FakeThreadPlan(
+                (FakeScriptThread thread, object[] resumed) =>
+                {
+                    delivered.Add(resumed[0]);
+                    listeners.Add(thread);
+                }, completeOnResume: false));
+            FakeThreadPlan writer = new((FakeScriptThread thread, object[] args) =>
+            {
+                changed.Fire(1);
+                changed.Fire(2);
+                changed.Fire(3);
+            }, completeOnResume: false);
+
+            scheduler.SpawnSignal("host-mod", writer, Array.Empty<object>(), "client-a", 4, out RbxError _);
+            scheduler.Advance(0d);
+
+            CollectionAssert.AreEqual(new object[] { 1 }, delivered, "the budget of one runs the first listener");
+            Assert.AreEqual(2, scheduler.CountDeferredListenerInvocations("client-a"),
+                "the other two wait for room instead of being dropped");
+            Assert.AreEqual(0L, scheduler.InducedListenerDrops);
+
+            scheduler.Cancel(listeners[0]);
+            scheduler.Advance(0d);
+
+            CollectionAssert.AreEqual(new object[] { 1, 2 }, delivered);
+
+            scheduler.Cancel(listeners[1]);
+            scheduler.Advance(0d);
+
+            CollectionAssert.AreEqual(new object[] { 1, 2, 3 }, delivered,
+                "every applied write reaches the listener, in fire order");
+            Assert.AreEqual(0, scheduler.CountDeferredListenerInvocations("client-a"));
+            Assert.AreEqual(0, scheduler.DeferredListenerInvocationTotal);
+            Assert.AreEqual(1, scheduler.CountInducedPoolThreads("client-a"));
+        }
+
+        [Test]
+        public void C1_02_Negative_TheHostsOwnFireNeverWaitsForASendersBudget()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureInducedThreadBudget(1, 0, 256, 4096);
+            RbxScriptSignal changed = new("Coins.Changed");
+            List<object> delivered = new();
+            ConnectScriptHandler(scheduler, changed, false, () => new FakeThreadPlan(
+                (FakeScriptThread thread, object[] resumed) => delivered.Add(resumed[0]), completeOnResume: false));
+            FakeThreadPlan writer = new((FakeScriptThread thread, object[] args) =>
+            {
+                changed.Fire(1);
+                changed.Fire(2);
+            }, completeOnResume: false);
+            scheduler.SpawnSignal("host-mod", writer, Array.Empty<object>(), "client-a", 4, out RbxError _);
+            scheduler.Advance(0d);
+
+            changed.Fire(3);
+            scheduler.Advance(0d);
+
+            CollectionAssert.AreEqual(new object[] { 1, 3 }, delivered,
+                "the host's own write runs its listener at once, on the host's quota");
+            Assert.AreEqual(1, scheduler.CountDeferredListenerInvocations("client-a"));
+        }
+
+        [Test]
+        public void C1_02_AOnceWhoseHandlerWaitsForRoom_IsConsumedOnlyWhenItStarts()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureInducedThreadBudget(1, 0, 256, 4096);
+            RbxScriptSignal changed = new("Round.Changed");
+            List<string> delivered = new();
+            RbxScriptConnection once = null;
+            once = ConnectScriptHandler(scheduler, changed, true, () => new FakeThreadPlan(
+                (FakeScriptThread thread, object[] resumed) =>
+                    delivered.Add(resumed[0] + ":" + (once.Connected ? "connected" : "consumed"))));
+            FakeThreadPlan writer = new((FakeScriptThread thread, object[] args) =>
+            {
+                scheduler.Delay("host-mod", 60d, new FakeThreadPlan(), Array.Empty<object>());
+                changed.Fire(2);
+            });
+
+            scheduler.SpawnSignal("host-mod", writer, Array.Empty<object>(), "client-a", 4, out RbxError _);
+            scheduler.Advance(0d);
+
+            Assert.IsEmpty(delivered, "the delayed thread fills the sender's induced budget of one");
+            Assert.IsTrue(once.Connected, "a Once whose handler has not started is not consumed");
+
+            changed.Fire(3);
+            scheduler.Advance(0d);
+
+            Assert.IsEmpty(delivered, "a Once that already waits for a fire is not queued a second time");
+
+            scheduler.Advance(60d);
+
+            CollectionAssert.AreEqual(new[] { "2:consumed" }, delivered,
+                "the Once runs once, for the first fire, and its handler sees it consumed");
+            Assert.IsFalse(once.Connected);
+        }
+
+        [Test]
+        public void C1_02_AOnceWhoseStartWasRefused_StaysConnectedForTheSendersNextCall()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            RbxScriptSignal onServerEvent = new("RemoteEvent.OnServerEvent");
+            List<object> delivered = new();
+            List<RbxError> refusals = new();
+            RbxScriptConnection once = ConnectScriptHandler(scheduler, onServerEvent, true,
+                () => new FakeThreadPlan((FakeScriptThread thread, object[] resumed) => delivered.Add(resumed[0])),
+                refusals);
+            IRbxScriptThread parked = scheduler.SpawnSignal("host-mod", new FakeThreadPlan(completeOnResume: false),
+                Array.Empty<object>(), "client-a", 1, out RbxError _);
+
+            FireOnBehalfOf(scheduler, onServerEvent, "client-a", 1);
+            scheduler.Advance(0d);
+
+            Assert.AreEqual(1, refusals.Count, "the sender's remote admission budget of one is full");
+            Assert.IsEmpty(delivered);
+            Assert.IsTrue(once.Connected, "a Once whose handler was refused never ran, so it is not consumed");
+
+            scheduler.Cancel(parked);
+            FireOnBehalfOf(scheduler, onServerEvent, "client-a", 2);
+            scheduler.Advance(0d);
+
+            CollectionAssert.AreEqual(new object[] { 2 }, delivered);
+            Assert.IsFalse(once.Connected);
+        }
+
+        [Test]
+        public void C1_02_PastItsDeferredQueue_AnInducedInvocationIsDroppedAndCounted_WithoutFaultingItsOwner()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureInducedThreadBudget(1, 0, 1, 4096);
+            List<string> faults = new();
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) => faults.Add(ownerModId);
+            List<string> dropped = new();
+            scheduler.InducedListenerDropped += (string sender, RbxError drop) =>
+                dropped.Add(sender + ":" + RbxError.ToWireName(drop.Code));
+            RbxScriptSignal changed = new("Score.Changed");
+            List<string> delivered = new();
+            ConnectScriptHandler(scheduler, changed, false, () => new FakeThreadPlan(
+                (FakeScriptThread thread, object[] resumed) => delivered.Add("first:" + resumed[0]),
+                completeOnResume: false));
+            ConnectScriptHandler(scheduler, changed, false, () => new FakeThreadPlan(
+                (FakeScriptThread thread, object[] resumed) => delivered.Add("second:" + resumed[0]),
+                completeOnResume: false));
+            RbxScriptConnection once = ConnectScriptHandler(scheduler, changed, true, () => new FakeThreadPlan(
+                (FakeScriptThread thread, object[] resumed) => delivered.Add("once:" + resumed[0])));
+            FakeThreadPlan writer = new((FakeScriptThread thread, object[] args) => changed.Fire(1));
+
+            scheduler.SpawnSignal("host-mod", writer, Array.Empty<object>(), "client-a", 4, out RbxError _);
+            scheduler.Advance(0d);
+
+            CollectionAssert.AreEqual(new[] { "first:1" }, delivered);
+            Assert.AreEqual(1, scheduler.CountDeferredListenerInvocations("client-a"),
+                "the second listener waits in the sender's queue of one");
+            Assert.AreEqual(1L, scheduler.InducedListenerDrops, "the Once found the sender's queue full");
+            CollectionAssert.AreEqual(new[] { "client-a:BUDGET_EXCEEDED" }, dropped);
+            Assert.IsEmpty(faults, "a dropped invocation is not its owner's fault");
+            Assert.IsTrue(once.Connected, "a dropped Once never ran, so it stays connected");
+
+            changed.Fire(2);
+            scheduler.Advance(0d);
+
+            CollectionAssert.Contains(delivered, "once:2", "the Once runs for the next fire, the host's own");
+            Assert.IsFalse(once.Connected);
+        }
+
+        [Test]
+        public void C1_03_AWaiterResumedByAChargedFire_ChargesWhatThatResumeStarts_ToTheSender_NotItself()
+        {
+            // WHY: a thread waiting in signal:Wait() resumed uncharged when a charged thread fired the
+            // signal, so everything it started for that fire was the host's: one client filled the host's
+            // thread quota through a `remote.OnServerEvent:Wait()` loop (C1-03).
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureActorQuota(2, ownerModId => "host");
+            RbxScriptSignal ping = new("Bus.Ping");
+            ping.BindScheduler(scheduler);
+            FakeThreadPlan waiterPlan = null;
+            waiterPlan = new FakeThreadPlan((FakeScriptThread thread, object[] args) =>
+            {
+                switch (thread.ResumeCount)
+                {
+                    case 1:
+                        scheduler.ScheduleSignalWait(thread);
+                        ping.Wait(arguments => scheduler.ResumeSignalWait(thread, arguments));
+                        break;
+                    case 2:
+                        scheduler.Spawn("host-mod", new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+                        scheduler.ScheduleWait(thread, 1d);
+                        break;
+                    default:
+                        scheduler.Spawn("host-mod", new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+                        break;
+                }
+            }, completeOnResume: false);
+            FakeScriptThread waiter = (FakeScriptThread)scheduler.Spawn("host-mod", waiterPlan, Array.Empty<object>());
+            FakeThreadPlan firing = new((FakeScriptThread thread, object[] args) => ping.Fire("p"));
+
+            scheduler.SpawnSignal("host-mod", firing, Array.Empty<object>(), "client-a", 4, out RbxError _);
+            scheduler.Advance(0d);
+
+            Assert.AreEqual(2, waiter.ResumeCount, "the charged fire resumed the waiter");
+            Assert.AreEqual(1, scheduler.CountInducedPoolThreads("client-a"),
+                "the thread the waiter started in that resume is the sender's");
+            Assert.AreEqual(1, scheduler.CountInducedThreads("client-a"), "the waiter itself stays the host's");
+            Assert.AreEqual(2, scheduler.LiveThreadCount);
+
+            scheduler.Advance(1d);
+
+            Assert.AreEqual(3, waiter.ResumeCount);
+            Assert.AreEqual(1, scheduler.CountInducedThreads("client-a"),
+                "the charge ended with the resume: the timer's resume starts the host's own thread");
+            Assert.AreEqual(3, scheduler.LiveThreadCount);
+            RbxError hostCap = Assert.Throws<RbxError>(() => scheduler.Spawn("host-mod",
+                new FakeThreadPlan(completeOnResume: false), Array.Empty<object>()));
+            Assert.AreEqual(RbxErrorCode.ThreadCap, hostCap.Code, "the waiter and its own later thread fill the host's two");
+        }
+
+        [Test]
+        public void C1_03_AWaiterResumeOfAChargedFire_WaitsForRoomInThatSendersInducedBudget()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureInducedThreadBudget(1, 0, 256, 4096);
+            RbxScriptSignal ping = new("Bus.Ping");
+            ping.BindScheduler(scheduler);
+            FakeThreadPlan waiterPlan = new((FakeScriptThread thread, object[] args) =>
+            {
+                if (thread.ResumeCount == 1)
+                {
+                    scheduler.ScheduleSignalWait(thread);
+                    ping.Wait(arguments => scheduler.ResumeSignalWait(thread, arguments));
+                    return;
+                }
+
+                scheduler.Spawn("host-mod", new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+            }, completeOnResume: false);
+            FakeScriptThread waiter = (FakeScriptThread)scheduler.Spawn("host-mod", waiterPlan, Array.Empty<object>());
+            FakeThreadPlan firing = new((FakeScriptThread thread, object[] args) =>
+            {
+                scheduler.Delay("host-mod", 60d, new FakeThreadPlan(), Array.Empty<object>());
+                ping.Fire("p");
+            });
+
+            scheduler.SpawnSignal("host-mod", firing, Array.Empty<object>(), "client-a", 4, out RbxError _);
+            scheduler.Advance(0d);
+
+            Assert.AreEqual(1, waiter.ResumeCount, "the sender's induced budget of one is full");
+            Assert.AreEqual(1, scheduler.CountDeferredListenerInvocations("client-a"));
+
+            scheduler.Advance(60d);
+
+            Assert.AreEqual(2, waiter.ResumeCount, "the waiter resumes once the sender's delayed thread ended");
+            Assert.AreEqual(1, scheduler.CountInducedPoolThreads("client-a"));
+            Assert.AreEqual(0, scheduler.CountDeferredListenerInvocations("client-a"));
+        }
+
+        [Test]
+        public void C1_03_AWaiterThatDiesOfItsResumesSenderRefusal_IsNotItsOwnersFault()
+        {
+            ModScheduler scheduler = CreateScheduler(out _, out _);
+            scheduler.ConfigureInducedThreadBudget(1, 0, 256, 4096);
+            List<string> faults = new();
+            scheduler.ThreadFaulted += (string ownerModId, RbxError error) => faults.Add(ownerModId);
+            RbxScriptSignal ping = new("Bus.Ping");
+            ping.BindScheduler(scheduler);
+            FakeThreadPlan waiterPlan = null;
+            waiterPlan = new FakeThreadPlan((FakeScriptThread thread, object[] args) =>
+            {
+                if (thread.ResumeCount == 1)
+                {
+                    scheduler.ScheduleSignalWait(thread);
+                    ping.Wait(arguments => scheduler.ResumeSignalWait(thread, arguments));
+                    return;
+                }
+
+                scheduler.Spawn("host-mod", new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+                try
+                {
+                    scheduler.Spawn("host-mod", new FakeThreadPlan(completeOnResume: false), Array.Empty<object>());
+                }
+                catch (RbxError error)
+                {
+                    waiterPlan.Failure = error;
+                }
+            }, completeOnResume: false);
+            FakeScriptThread waiter = (FakeScriptThread)scheduler.Spawn("host-mod", waiterPlan, Array.Empty<object>());
+            FakeThreadPlan firing = new((FakeScriptThread thread, object[] args) => ping.Fire("p"));
+
+            scheduler.SpawnSignal("host-mod", firing, Array.Empty<object>(), "client-a", 4, out RbxError _);
+            scheduler.Advance(0d);
+
+            Assert.IsTrue(waiter.IsDead, "the second start was refused, and the refusal ended the waiter");
+            Assert.IsEmpty(faults,
+                "a waiter that died of the budget of the sender whose fire resumed it did nothing wrong");
+            Assert.AreEqual(1L, scheduler.InducedThreadRefusals);
+            Assert.AreEqual(1, scheduler.CountInducedPoolThreads("client-a"));
+        }
+
+        /// <summary>
+        /// Production-shaped script handler: flagged as starting a scheduler thread, and started in the
+        /// budget the dispatched invocation names, the way the Lua bindings start one (remote admission
+        /// budget of one).
+        /// </summary>
+        private static RbxScriptConnection ConnectScriptHandler(ModScheduler scheduler, RbxScriptSignal signal,
+            bool once, Func<FakeThreadPlan> newPlan, List<RbxError> refusals = null)
+        {
+            signal.BindScheduler(scheduler);
+            Action<object[]> handler = args =>
+            {
+                string sender = scheduler.CurrentSignalQuotaActorId;
+                RbxError refusal = null;
+                if (sender == null)
+                {
+                    scheduler.SpawnSignal("host-mod", newPlan(), args);
+                }
+                else if (scheduler.CurrentSignalIsInduced)
+                {
+                    scheduler.SpawnInducedSignal("host-mod", newPlan(), args, sender, out refusal);
+                }
+                else
+                {
+                    scheduler.SpawnSignal("host-mod", newPlan(), args, sender, 1, out refusal);
+                }
+
+                if (refusal != null)
+                {
+                    refusals?.Add(refusal);
+                }
+            };
+            RbxScriptConnection connection = once ? signal.Once(handler) : signal.Connect(handler);
+            connection.StartsSchedulerThread = true;
+            return connection;
+        }
+
+        private static void FireOnBehalfOf(ModScheduler scheduler, RbxScriptSignal signal, string sender,
+            object argument)
+        {
+            string previous = scheduler.BeginSignalsOnBehalfOf(sender);
+            try
+            {
+                signal.Fire(argument);
+            }
+            finally
+            {
+                scheduler.EndSignalsOnBehalfOf(previous);
+            }
         }
 
         [Test]

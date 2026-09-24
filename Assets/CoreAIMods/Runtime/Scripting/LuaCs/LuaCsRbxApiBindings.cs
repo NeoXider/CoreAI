@@ -35,14 +35,16 @@ namespace CoreAI.Ai.LuaCs
         internal const double RemoteFunctionInvokeTimeoutSeconds = 30d;
 
         /// <summary>
-        /// Handler threads one remote sender may keep alive at once on this machine (MP-10): the
-        /// OnServerInvoke callbacks and OnServerEvent handlers its calls started that are still
-        /// suspended, every thread those handlers start with <c>task.spawn</c>, <c>task.defer</c>
-        /// or <c>task.delay</c> (A4-01), and every signal handler a signal those threads fire starts (a
-        /// property or attribute write firing <c>Changed</c>, B1-02). They are charged to the sender,
-        /// never to the handler's owner, so a flooding client exhausts only this budget; a call over it
-        /// is refused (RemoteFunction), dropped and counted (RemoteEvent, signal handlers), or answered
-        /// BUDGET_EXCEEDED inside the handler (a <c>task.*</c> start), without faulting the handler's mod.
+        /// Handler threads one remote sender's own remote invocations may keep alive at once on this
+        /// machine (MP-10): the OnServerInvoke callbacks and OnServerEvent handlers its calls started that
+        /// are still suspended. They are charged to the sender, never to the handler's owner, so a flooding
+        /// client exhausts only this budget; a call over it is refused (RemoteFunction) or dropped and
+        /// counted (RemoteEvent), without faulting the handler's mod. What those handlers cause (their
+        /// <c>task.spawn</c>/<c>task.defer</c>/<c>task.delay</c> threads, A4-01, the signal handlers their
+        /// writes and fires start, B1-02, and the threads a <c>:Wait()</c> resume they caused creates,
+        /// C1-03) never counts here: it is charged to the sender's separate induced budget
+        /// (<see cref="ModScheduler.ConfigureInducedThreadBudget"/>), so the host's own listeners that park
+        /// cannot refuse an honest player's next remote call (C1-01).
         /// </summary>
         internal const int MaxRemoteHandlerThreadsPerSender = 32;
 
@@ -56,7 +58,8 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>
         /// What the caller of a RemoteFunction is answered when the callback serving it was stopped
         /// before it returned for any reason other than its own budget: its mod was unloaded, reloaded
-        /// or quarantined, its thread was cancelled, or it yielded outside the task scheduler (B1-05).
+        /// or quarantined, the host cancelled its thread, or it yielded outside the task scheduler (B1-05).
+        /// A script cannot cancel it: <c>task.cancel</c> refuses a <c>coroutine.running()</c> value (C1-11).
         /// It names no mod: on a server the caller is a remote client.
         /// </summary>
         internal const string RemoteFunctionCallbackStoppedMessage =
@@ -71,9 +74,10 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>
         /// What a remote caller is answered when its call, or a thread its callback tried to start, was
-        /// refused because the threads its earlier calls started already fill its budget
-        /// (<see cref="MaxRemoteHandlerThreadsPerSender"/>). The refusal itself, which names the host
-        /// mod, goes to the host log only (B1-05).
+        /// refused because the threads its earlier calls started already fill its remote admission budget
+        /// (<see cref="MaxRemoteHandlerThreadsPerSender"/>) or its induced budget
+        /// (<see cref="ModScheduler.ConfigureInducedThreadBudget"/>). The refusal itself, which names the
+        /// host mod, goes to the host log only (B1-05).
         /// </summary>
         internal const string RemoteFunctionCallRefusedMessage =
             "the RemoteFunction call was refused: threads this caller's earlier calls started are still "
@@ -395,6 +399,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly HashSet<string> _legacySchedulerDeprecationOwners =
             new(StringComparer.Ordinal);
         private readonly HashSet<string> _remoteRefusalLoggedSenders = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _listenerDropLoggedSenders = new(StringComparer.Ordinal);
         private readonly Dictionary<(string Sender, NetworkWarningKind Kind), NetworkWarningWindow>
             _networkWarningWindows = new();
         private readonly Dictionary<string, Dictionary<int, HashSet<IRbxScriptThread>>>
@@ -656,6 +661,7 @@ namespace CoreAI.Ai.LuaCs
             _scheduler.PhaseReached += PumpSchedulerPhase;
             _scheduler.ThreadRetired += OnSchedulerThreadRetired;
             _scheduler.InducedThreadRefused += OnInducedThreadRefused;
+            _scheduler.InducedListenerDropped += OnInducedListenerDropped;
 
             // WHY: a restored world registers its Humanoids before these bindings exist, so the
             // Registered wiring above never sees them. A headless host attaches no motor factory to
@@ -1587,6 +1593,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             _remoteRefusalLoggedSenders.Remove(actorId);
+            _listenerDropLoggedSenders.Remove(actorId);
             ForgetNetworkWarningsFrom(actorId);
             _networkCodec.ForgetSender(actorId);
             if (ownerModIds.Count > 0)
@@ -1686,6 +1693,7 @@ namespace CoreAI.Ai.LuaCs
 
             _scheduler.ThreadRetired -= OnSchedulerThreadRetired;
             _scheduler.InducedThreadRefused -= OnInducedThreadRefused;
+            _scheduler.InducedListenerDropped -= OnInducedListenerDropped;
             _serverRemoteCallbacks.Clear();
             _clientRemoteCallbacks.Clear();
             _remoteFunctionWaitGenerations.Clear();
@@ -2042,14 +2050,19 @@ namespace CoreAI.Ai.LuaCs
             // WHY charged to the sender: this handler runs because a remote client fired an
             // OnServerEvent, or because a thread that client's call started fired this signal (B1-02).
             // Charged to the handler's owner (normally the host), one client that fired faster than a
-            // yielding handler finishes filled the host's whole thread quota (MP-10).
-            int inheritedLimit = _scheduler.CurrentSignalQuotaLimit;
-            IRbxScriptThread thread = _scheduler.SpawnSignal(ownerModId, callable, arguments,
-                sender, inheritedLimit > 0 ? inheritedLimit : MaxRemoteHandlerThreadsPerSender,
-                out RbxError refusal);
+            // yielding handler finishes filled the host's whole thread quota (MP-10). WHY two budgets:
+            // a listener the client's write started is host work the client caused; held to the budget
+            // that admits the client's own calls, the host's parking listeners refused an honest
+            // player's next remote calls (C1-01).
+            bool induced = _scheduler.CurrentSignalIsInduced;
+            RbxError refusal;
+            IRbxScriptThread thread = induced
+                ? _scheduler.SpawnInducedSignal(ownerModId, callable, arguments, sender, out refusal)
+                : _scheduler.SpawnSignal(ownerModId, callable, arguments, sender,
+                    MaxRemoteHandlerThreadsPerSender, out refusal);
             if (refusal != null)
             {
-                NoteRemoteHandlerRefusal(sender, inheritedLimit > 0
+                NoteRemoteHandlerRefusal(sender, induced
                     ? "a signal handler a remote call's thread caused was dropped"
                     : "an OnServerEvent invocation was dropped", refusal);
                 return;
@@ -2060,9 +2073,11 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>
         /// Remote-induced thread starts refused because their sender's budget was full (MP-10):
-        /// dropped OnServerEvent invocations, refused OnServerInvoke calls, <c>task.spawn</c>,
-        /// <c>task.defer</c> or <c>task.delay</c> calls those handlers made (A4-01), and dropped
-        /// invocations of signals those threads fired (B1-02).
+        /// dropped OnServerEvent invocations and refused OnServerInvoke calls over the sender's remote
+        /// admission budget, and <c>task.spawn</c>, <c>task.defer</c> or <c>task.delay</c> calls over its
+        /// induced budget (A4-01). A signal handler a charged thread caused is not refused: it waits for
+        /// room, and only one dropped past its sender's deferred queue is counted, in
+        /// <see cref="ModScheduler.InducedListenerDrops"/> (C1-02).
         /// </summary>
         internal long RemoteHandlerRefusalCount { get; private set; }
 
@@ -2070,6 +2085,17 @@ namespace CoreAI.Ai.LuaCs
         {
             NoteRemoteHandlerRefusal(senderActorId,
                 "a thread a remote call's handler tried to start was refused", refusal);
+        }
+
+        private void OnInducedListenerDropped(string senderActorId, RbxError drop)
+        {
+            // WHY once per sender: past the deferred queue every further write of a flood drops one
+            // invocation, and logging each would turn the client's flood into a log flood on the host.
+            if (_listenerDropLoggedSenders.Add(senderActorId))
+            {
+                _log?.Invoke("[RbxApi] a signal handler invocation a remote call's thread caused was dropped: "
+                             + drop.Message + " (logged once per sender; later drops are only counted)");
+            }
         }
 
         private void NoteRemoteHandlerRefusal(string senderActorId, string outcome, RbxError refusal)
@@ -2612,7 +2638,7 @@ namespace CoreAI.Ai.LuaCs
             {
                 if (!responder.IsCompleted)
                 {
-                    responder.Fail(ex.Message);
+                    responder.Fail(RemoteFailureLine(ex));
                 }
             }
         }
@@ -2685,7 +2711,7 @@ namespace CoreAI.Ai.LuaCs
                     // text, which names Lua-CSharp and not the reason, and it went to the caller —
                     // on a server, a remote client (A2-07).
                     // WHY only while the thread's own code runs: an unload, reload, quarantine,
-                    // task.cancel, world shutdown or a native coroutine.yield cancels the thread too,
+                    // host-side cancel, world shutdown or a native coroutine.yield cancels the thread too,
                     // while it is suspended or already marked dead; answered here, its caller was told
                     // the callback ran too long. The thread's retirement answers it with the real
                     // reason instead (B1-05).
@@ -2768,7 +2794,7 @@ namespace CoreAI.Ai.LuaCs
             {
                 if (!responder.IsCompleted)
                 {
-                    responder.Fail(ex.Message);
+                    responder.Fail(RemoteFailureLine(ex));
                 }
             }
         }
@@ -2807,7 +2833,29 @@ namespace CoreAI.Ai.LuaCs
             string refusal = _scheduler.RunningThreadInducedRefusalMessage;
             return refusal != null && message.IndexOf(refusal, StringComparison.Ordinal) >= 0
                 ? RemoteFunctionCallRefusedMessage
-                : message;
+                : RemoteFailureLine(failure);
+        }
+
+        /// <summary>
+        /// The line a RemoteFunction's caller is answered for <paramref name="failure"/>: a Lua error's error
+        /// value as text, any other exception's message.
+        /// </summary>
+        /// <remarks>
+        /// WHY the error value and never a Lua error's Message (B3-06): Message is Lua-CSharp's rendering,
+        /// "Lua-CSharp: [string "sandbox_chunk"]:5: boom" - the engine's name and the host's internal chunk
+        /// name in front of what the callback raised - and it went to the caller, on a server a remote client.
+        /// The value is what the callback raised, as text: "boom" for error('boom'), "table: ..." for
+        /// error({}), a host function's one clean line (a LuaCsHostFunctionException's value is its Message).
+        /// </remarks>
+        internal static string RemoteFailureLine(Exception failure)
+        {
+            if (failure is LuaRuntimeException luaError
+                && (luaError.ErrorObject.Type != LuaValueType.Nil || luaError.InnerException == null))
+            {
+                return luaError.ErrorObject.ToString();
+            }
+
+            return failure?.Message ?? "";
         }
 
         private static List<LuaValue> ReadRemoteArguments(
@@ -5004,6 +5052,19 @@ namespace CoreAI.Ai.LuaCs
             if (TryUnbox(value, out IRbxScriptThread thread))
             {
                 return thread;
+            }
+
+            if (value.Type == LuaValueType.Thread)
+            {
+                // WHY named apart from a wrong type: the value IS a thread, and "expects a thread" about a
+                // thread reads as a contradiction. R4.10 keeps coroutine.create threads and
+                // coroutine.running() values outside the scheduler, so the running handler or RemoteFunction
+                // callback cannot cancel itself; it stops by returning (C1-11).
+                throw RbxError.BadArgument(
+                    "task.cancel cannot cancel a coroutine.create thread or a coroutine.running() value at argument "
+                    + (index + 1),
+                    "pass a thread handle returned by task.spawn, task.defer or task.delay; to stop the "
+                    + "running code, return from it");
             }
 
             throw RbxError.BadArgument(

@@ -21,12 +21,13 @@ namespace CoreAI.Mods.Rbx.Instances
         private int _pendingCount;
 
         internal RbxScriptConnection(RbxScriptSignal signal, ModScheduler scheduler,
-            Action<object[]> handler, bool once)
+            Action<object[]> handler, bool once, bool signalWaiter = false)
         {
             _signal = signal;
             Scheduler = scheduler;
             Handler = handler;
             Once = once;
+            IsSignalWaiter = signalWaiter;
         }
 
         internal ModScheduler Scheduler { get; }
@@ -34,6 +35,22 @@ namespace CoreAI.Mods.Rbx.Instances
         internal Action<object[]> Handler { get; }
 
         internal bool Once { get; }
+
+        /// <summary>
+        /// True for the connection a <c>:Wait()</c> opened: its invocation resumes the waiting thread
+        /// instead of starting a handler thread.
+        /// </summary>
+        internal bool IsSignalWaiter { get; }
+
+        /// <summary>
+        /// Set by the scripting adapter for a connection whose every invocation starts one scheduler
+        /// thread (a script handler). The scheduler holds such an invocation, when a thread charged to a
+        /// remote sender fired it, until that sender's induced budget has room (C1-02).
+        /// </summary>
+        internal bool StartsSchedulerThread { get; set; }
+
+        /// <summary>True after <see cref="Disconnect"/>: the pending invocations run nothing.</summary>
+        internal bool IsExplicitlyDisconnected => _disconnectKind == DisconnectKind.Explicit;
 
         internal string SignalName => _signal.SignalName;
 
@@ -77,8 +94,15 @@ namespace CoreAI.Mods.Rbx.Instances
             return true;
         }
 
+        /// <summary>
+        /// Runs one queued invocation. A <c>Once</c> connection is consumed when its invocation starts:
+        /// by <see cref="ConsumeOnce"/> when the scheduler starts or resumes the thread it runs, otherwise
+        /// once the handler returned. When the scheduler refused to start that thread, the connection is
+        /// not consumed and is armed again for a later fire (C1-02).
+        /// </summary>
         internal void InvokePending(object[] arguments)
         {
+            bool invoked = false;
             try
             {
                 if (_disconnectKind == DisconnectKind.Explicit)
@@ -86,16 +110,40 @@ namespace CoreAI.Mods.Rbx.Instances
                     return;
                 }
 
-                if (Once && Connected)
-                {
-                    DisconnectCore(DisconnectKind.Once);
-                }
-
+                invoked = true;
                 Handler(arguments);
             }
             finally
             {
                 _pendingCount = Math.Max(0, _pendingCount - 1);
+                if (invoked && Once && Connected)
+                {
+                    if (Scheduler.CurrentSignalInvocationRefused)
+                    {
+                        // WHY armed again instead of consumed: the refused handler never ran; consumed,
+                        // the Once listener was lost for good, not even run for the host's own later change.
+                        if (_pendingCount == 0)
+                        {
+                            _onceQueued = false;
+                        }
+                    }
+                    else
+                    {
+                        DisconnectCore(DisconnectKind.Once);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Consumes a <c>Once</c> connection whose invocation starts now; called by the scheduler right
+        /// before it runs the invocation's thread, so the handler already sees the connection closed.
+        /// </summary>
+        internal void ConsumeOnce()
+        {
+            if (Once && Connected)
+            {
+                DisconnectCore(DisconnectKind.Once);
             }
         }
 
@@ -219,7 +267,7 @@ namespace CoreAI.Mods.Rbx.Instances
 
         internal RbxScriptConnection Wait(Action<object[]> resume)
         {
-            return ConnectCore(resume, true, "Wait");
+            return ConnectCore(resume, true, "Wait", true);
         }
 
         internal void DisconnectAll()
@@ -344,7 +392,8 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
-        private RbxScriptConnection ConnectCore(object handler, bool once, string member)
+        private RbxScriptConnection ConnectCore(object handler, bool once, string member,
+            bool signalWaiter = false)
         {
             if (!(handler is Action<object[]> action))
             {
@@ -360,7 +409,7 @@ namespace CoreAI.Mods.Rbx.Instances
                     "read and connect the signal through an active Lua mod context");
             }
 
-            RbxScriptConnection connection = new(this, _scheduler, action, once);
+            RbxScriptConnection connection = new(this, _scheduler, action, once, signalWaiter);
             connection.SignalSlot = _connections.Count;
             _connections.Add(connection);
             _liveConnectionCount++;

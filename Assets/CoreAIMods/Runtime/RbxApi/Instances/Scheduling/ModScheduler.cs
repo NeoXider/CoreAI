@@ -67,6 +67,29 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         public const int DefaultMaxQueuedSignalInvocations = 65536;
 
         /// <summary>
+        /// Default number of induced threads one remote sender may hold at once: threads its charged
+        /// threads start with <c>task.spawn</c>/<c>task.defer</c>/<c>task.delay</c>, signal handlers its
+        /// writes and fires start, and threads a <c>:Wait()</c> resume it caused creates. See
+        /// <see cref="ConfigureInducedThreadBudget"/>.
+        /// </summary>
+        public const int DefaultMaxInducedThreadsPerSender = 128;
+
+        /// <summary>
+        /// Threads of the default actor quota (<see cref="DefaultMaxThreadsPerActor"/>) kept out of the
+        /// default ceiling on all senders' induced threads together: 256 - 64 = 192.
+        /// </summary>
+        public const int DefaultInducedThreadsHostReserve = 64;
+
+        /// <summary>
+        /// Default number of signal handler invocations of one sender that wait for room in its induced
+        /// budget instead of being dropped.
+        /// </summary>
+        public const int DefaultMaxDeferredListenerInvocationsPerSender = 256;
+
+        /// <summary>Default ceiling on deferred signal handler invocations across all senders.</summary>
+        public const int DefaultMaxDeferredListenerInvocationsAllSenders = 4096;
+
+        /// <summary>
         /// Upper bound on {deferred threads, signal handlers} drain rounds at one resumption point.
         /// Work a handler defers runs in the same resumption point (R4.8); work left after the last round
         /// runs at the next resumption point, exactly as it did before rounds existed.
@@ -89,6 +112,27 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             Heartbeat,
             InputProcessing,
             PreRender
+        }
+
+        /// <summary>Which of a remote sender's two budgets a thread is charged to.</summary>
+        private enum SenderPool
+        {
+            /// <summary>Not charged to a sender: the thread counts against its owner's actor quota.</summary>
+            None,
+
+            /// <summary>
+            /// A handler a sender's own remote invocation started (OnServerEvent, OnServerInvoke), held to
+            /// the remote admission budget the caller of
+            /// <see cref="SpawnSignal(string, object, object[], string, int, out RbxError)"/> names.
+            /// </summary>
+            RemoteAdmission,
+
+            /// <summary>
+            /// Work a charged thread caused: a <c>task.*</c> start, a signal handler its write or fire
+            /// started, a thread a <c>:Wait()</c> resume it caused created (see
+            /// <see cref="ConfigureInducedThreadBudget"/>).
+            /// </summary>
+            Induced
         }
 
         private enum ThreadScheduleState
@@ -162,17 +206,14 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             public long DeferredSequence { get; set; }
 
             /// <summary>
-            /// Actor whose induced-thread budget this record is charged to instead of its owner's actor
-            /// quota (MP-10: a handler started by another actor's remote call, and every thread that
-            /// handler starts in turn); null for every other thread.
+            /// Remote sender this record is charged to instead of its owner's actor quota (MP-10: a
+            /// handler started by another actor's remote call, and every thread that handler causes in
+            /// turn); null for every other thread.
             /// </summary>
             public string QuotaActorId { get; set; }
 
-            /// <summary>
-            /// Live threads <see cref="QuotaActorId"/>'s budget allows; the threads this one starts are
-            /// held to the same number. Zero when the record is charged to its owner.
-            /// </summary>
-            public int QuotaLimit { get; set; }
+            /// <summary>Which of <see cref="QuotaActorId"/>'s two budgets holds this record.</summary>
+            public SenderPool Pool { get; set; }
 
             /// <summary>
             /// The message of the last induced-budget refusal raised inside this thread, so the thread's
@@ -193,7 +234,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 TimedSequence = 0;
                 DeferredSequence = 0;
                 QuotaActorId = null;
-                QuotaLimit = 0;
+                Pool = SenderPool.None;
                 InducedRefusalMessage = null;
                 // WHY: SignalWaitGeneration keeps counting across tenants on purpose. A timeout entry is
                 // matched by (record, generation); a monotonic counter can never re-produce a value an
@@ -213,7 +254,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 TimedSequence = 0;
                 DeferredSequence = 0;
                 QuotaActorId = null;
-                QuotaLimit = 0;
+                Pool = SenderPool.None;
                 InducedRefusalMessage = null;
             }
         }
@@ -252,7 +293,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         {
             public SignalInvocation(RbxScriptConnection connection, object[] arguments,
                 RbxInstance readableTombstone, int generation, string[] chain, string quotaActorId,
-                int quotaLimit)
+                bool induced)
             {
                 Connection = connection;
                 Arguments = arguments;
@@ -260,7 +301,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 Generation = generation;
                 Chain = chain;
                 QuotaActorId = quotaActorId;
-                QuotaLimit = quotaLimit;
+                Induced = induced;
             }
 
             public RbxScriptConnection Connection { get; }
@@ -280,10 +321,12 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             public string QuotaActorId { get; }
 
             /// <summary>
-            /// The firing thread's <see cref="ThreadRecord.QuotaLimit"/> when the charge came from it; zero
-            /// when <see cref="BeginSignalsOnBehalfOf"/> named the actor.
+            /// True when the charge came from the firing thread (or the <c>:Wait()</c> resume it ran in): the
+            /// handler it starts belongs to the sender's induced budget. False when
+            /// <see cref="BeginSignalsOnBehalfOf"/> named the actor: the sender's own remote invocation,
+            /// held to its remote admission budget.
             /// </summary>
-            public int QuotaLimit { get; }
+            public bool Induced { get; }
         }
 
         private abstract class TimedEntry
@@ -526,7 +569,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private readonly Stack<ThreadRecord> _recordPool = new();
         private readonly Queue<DeferredEntry> _deferredQueue = new();
         private readonly List<DeferredEntry> _drainBuffer = new();
-        private readonly Dictionary<string, int> _inducedThreadsByQuotaActor = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> _admittedThreadsBySender = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> _inducedThreadsBySender = new(StringComparer.Ordinal);
+        private readonly List<SignalInvocation> _deferredListeners = new();
+        private readonly Dictionary<string, int> _deferredListenersBySender = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _blockedDeferredSenders = new(StringComparer.Ordinal);
         private readonly Queue<SignalInvocation> _signalQueue = new();
         private readonly List<SignalInvocation> _signalDrainBuffer = new();
         private readonly List<TimedEntry> _delayedBatchBuffer = new();
@@ -576,11 +623,18 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         private string[] _currentSignalChain;
         private string _currentInvocationOwnerModId;
         private string _currentInvocationQuotaActorId;
-        private int _currentInvocationQuotaLimit;
+        private bool _currentInvocationInduced;
+        private RbxScriptConnection _currentInvocationConnection;
+        private bool _currentInvocationRefused;
         private string _enqueueQuotaActorId;
         private string _runningOwnerModId;
         private ThreadRecord _runningRecord;
+        private string _runningResumeChargeActorId;
+        private int _inducedThreadTotal;
+        private bool _deferredListenersMayStart;
+        private int _configuredMaxInducedThreadsAllSenders;
         private Action<string, RbxError> _inducedThreadRefused;
+        private Action<string, RbxError> _inducedListenerDropped;
         private RbxInstance _currentSignalTombstone;
         private Exception _heldFault;
         private PipelineStage? _currentStage;
@@ -596,6 +650,32 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
         /// <summary>Ceiling on queued signal invocations across all owners; see <see cref="ConfigureSignalBudget"/>.</summary>
         public int MaxQueuedSignalInvocations { get; private set; } = DefaultMaxQueuedSignalInvocations;
+
+        /// <summary>Induced threads one remote sender may hold at once; see <see cref="ConfigureInducedThreadBudget"/>.</summary>
+        public int MaxInducedThreadsPerSender { get; private set; } = DefaultMaxInducedThreadsPerSender;
+
+        /// <summary>
+        /// Induced threads all remote senders together may hold at once; see
+        /// <see cref="ConfigureInducedThreadBudget"/>. Unless configured, the actor quota
+        /// (<see cref="MaxThreadsPerActor"/>) minus <see cref="DefaultInducedThreadsHostReserve"/>, and
+        /// never less than <see cref="MaxInducedThreadsPerSender"/>: 192 with the defaults.
+        /// </summary>
+        public int MaxInducedThreadsAllSenders => _configuredMaxInducedThreadsAllSenders > 0
+            ? _configuredMaxInducedThreadsAllSenders
+            : Math.Max(MaxInducedThreadsPerSender, MaxThreadsPerActor - DefaultInducedThreadsHostReserve);
+
+        /// <summary>
+        /// Signal handler invocations of one sender that wait for room in its induced budget; see
+        /// <see cref="ConfigureInducedThreadBudget"/>.
+        /// </summary>
+        public int MaxDeferredListenerInvocationsPerSender { get; private set; } =
+            DefaultMaxDeferredListenerInvocationsPerSender;
+
+        /// <summary>
+        /// Deferred signal handler invocations across all senders; see <see cref="ConfigureInducedThreadBudget"/>.
+        /// </summary>
+        public int MaxDeferredListenerInvocationsAllSenders { get; private set; } =
+            DefaultMaxDeferredListenerInvocationsAllSenders;
 
         public ModScheduler(IRbxScriptThreadFactory threadFactory, IRbxTimeSource timeSource)
         {
@@ -658,6 +738,36 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             MaxQueuedSignalInvocations = Math.Max(1, maxQueuedInvocations);
         }
 
+        /// <summary>
+        /// Configures the induced budget of remote senders (C1-01). A sender has two budgets that never
+        /// share threads: the remote admission budget, which only the handlers its own remote invocations
+        /// start count against (the limit its caller passes to
+        /// <see cref="SpawnSignal(string, object, object[], string, int, out RbxError)"/>), and this induced
+        /// budget, which holds everything those handlers cause: <c>task.spawn</c>/<c>task.defer</c>/<c>task.delay</c>
+        /// from a charged thread, the signal handlers a charged thread's writes and fires start, and the
+        /// threads created inside a <c>:Wait()</c> resume a charged fire caused.
+        /// <paramref name="maxInducedThreadsPerSender"/> caps one sender and
+        /// <paramref name="maxInducedThreadsAllSenders"/> all senders together (zero or less restores the
+        /// default derived from the actor quota, see <see cref="MaxInducedThreadsAllSenders"/>). A signal
+        /// handler invocation (or a <c>:Wait()</c> resume) that finds its sender's budget full is never
+        /// dropped at once: it waits, and the sender's waiting invocations start in the order they were
+        /// fired, at the next resumption point after the sender's induced threads end. A <c>Once</c>
+        /// connection is consumed only when its invocation starts. Only past
+        /// <paramref name="maxDeferredInvocationsPerSender"/> or <paramref name="maxDeferredInvocationsAllSenders"/>
+        /// waiting invocations is one dropped, counted in <see cref="InducedListenerDrops"/> and raised
+        /// through <see cref="InducedListenerDropped"/>; its owner is not faulted. The other limits are
+        /// clamped to at least one.
+        /// </summary>
+        public void ConfigureInducedThreadBudget(int maxInducedThreadsPerSender, int maxInducedThreadsAllSenders,
+            int maxDeferredInvocationsPerSender, int maxDeferredInvocationsAllSenders)
+        {
+            MaxInducedThreadsPerSender = Math.Max(1, maxInducedThreadsPerSender);
+            _configuredMaxInducedThreadsAllSenders = Math.Max(0, maxInducedThreadsAllSenders);
+            MaxDeferredListenerInvocationsPerSender = Math.Max(1, maxDeferredInvocationsPerSender);
+            MaxDeferredListenerInvocationsAllSenders = Math.Max(1, maxDeferredInvocationsAllSenders);
+            _deferredListenersMayStart = true;
+        }
+
         /// <summary>Current logical frame number; the first <see cref="Advance"/> enters frame one.</summary>
         public long FrameIndex => _frameIndex;
 
@@ -701,25 +811,74 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         internal string CurrentSignalQuotaActorId => _currentInvocationQuotaActorId;
 
         /// <summary>
-        /// Live threads <see cref="CurrentSignalQuotaActorId"/>'s budget allows the handler the invocation
-        /// being dispatched starts, carried from the charged thread that fired the signal (B1-02); zero
-        /// when the invocation was tagged by <see cref="BeginSignalsOnBehalfOf"/>, which leaves the limit
-        /// to the caller, and outside a tagged dispatch.
+        /// True while the invocation being dispatched was fired by a thread charged to
+        /// <see cref="CurrentSignalQuotaActorId"/> (or inside a <c>:Wait()</c> resume such a fire caused):
+        /// the handler it starts belongs to that sender's induced budget and is started with
+        /// <see cref="SpawnInducedSignal"/>. False for an invocation <see cref="BeginSignalsOnBehalfOf"/>
+        /// tagged, the sender's own remote invocation, and outside a tagged dispatch (C1-01).
         /// </summary>
-        internal int CurrentSignalQuotaLimit => _currentInvocationQuotaLimit;
+        internal bool CurrentSignalIsInduced => _currentInvocationInduced;
 
-        /// <summary>Live threads charged to <paramref name="quotaActorId"/>'s induced-thread budget (MP-10).</summary>
+        /// <summary>
+        /// True once the invocation being dispatched asked this scheduler to start its handler and was
+        /// refused (a full remote admission or induced budget, the actor quota, the emergency ceiling). A
+        /// refused <c>Once</c> connection is not consumed: it stays connected for a later fire (C1-02).
+        /// </summary>
+        internal bool CurrentSignalInvocationRefused => _currentInvocationRefused;
+
+        /// <summary>
+        /// Every live thread charged to <paramref name="quotaActorId"/> (MP-10): its remote admission
+        /// budget (<see cref="CountRemoteHandlerThreads"/>) and its induced budget
+        /// (<see cref="CountInducedPoolThreads"/>) together.
+        /// </summary>
         internal int CountInducedThreads(string quotaActorId)
         {
-            return quotaActorId != null
-                   && _inducedThreadsByQuotaActor.TryGetValue(quotaActorId.Trim(), out int count)
-                ? count
-                : 0;
+            return CountRemoteHandlerThreads(quotaActorId) + CountInducedPoolThreads(quotaActorId);
         }
 
         /// <summary>
+        /// Live handlers <paramref name="quotaActorId"/>'s own remote invocations started: its remote
+        /// admission budget, which nothing those handlers cause ever counts against (C1-01).
+        /// </summary>
+        internal int CountRemoteHandlerThreads(string quotaActorId)
+        {
+            return ReadSenderCount(_admittedThreadsBySender, quotaActorId);
+        }
+
+        /// <summary>
+        /// Live threads charged to <paramref name="quotaActorId"/>'s induced budget; see
+        /// <see cref="ConfigureInducedThreadBudget"/>.
+        /// </summary>
+        internal int CountInducedPoolThreads(string quotaActorId)
+        {
+            return ReadSenderCount(_inducedThreadsBySender, quotaActorId);
+        }
+
+        /// <summary>Live threads in every sender's induced budget together.</summary>
+        internal int InducedPoolThreadTotal => _inducedThreadTotal;
+
+        /// <summary>
+        /// Signal handler invocations <paramref name="quotaActorId"/>'s charged threads caused that wait
+        /// for room in its induced budget (C1-02).
+        /// </summary>
+        internal int CountDeferredListenerInvocations(string quotaActorId)
+        {
+            return ReadSenderCount(_deferredListenersBySender, quotaActorId);
+        }
+
+        /// <summary>Deferred signal handler invocations across all senders.</summary>
+        internal int DeferredListenerInvocationTotal => _deferredListeners.Count;
+
+        /// <summary>
+        /// Signal handler invocations dropped because their sender's deferred queue, or the queue of all
+        /// senders, was full; see <see cref="ConfigureInducedThreadBudget"/>.
+        /// </summary>
+        internal long InducedListenerDrops { get; private set; }
+
+        /// <summary>
         /// <c>task.spawn</c>, <c>task.defer</c> and <c>task.delay</c> calls refused because the thread
-        /// making them is charged to another actor whose induced-thread budget was full (A4-01).
+        /// making them is charged to another actor whose induced budget, or the induced ceiling of all
+        /// senders, was full (A4-01, C1-01).
         /// </summary>
         internal long InducedThreadRefusals { get; private set; }
 
@@ -739,6 +898,16 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
         {
             add => _inducedThreadRefused += value;
             remove => _inducedThreadRefused -= value;
+        }
+
+        /// <summary>
+        /// Raised with the sender and a description each time <see cref="InducedListenerDrops"/> grows. A
+        /// subscriber that throws is reported through <see cref="HostFaulted"/>.
+        /// </summary>
+        internal event Action<string, RbxError> InducedListenerDropped
+        {
+            add => _inducedListenerDropped += value;
+            remove => _inducedListenerDropped -= value;
         }
 
         /// <summary>
@@ -900,7 +1069,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             return thread;
         }
 
-        /// <summary>Creates a scheduler-owned signal callback with its destruction tombstone scope.</summary>
+        /// <summary>
+        /// Creates a scheduler-owned signal callback with its destruction tombstone scope. A <c>Once</c>
+        /// connection whose invocation is being dispatched is consumed when this starts its handler, and
+        /// kept when the start is refused (see <see cref="CurrentSignalInvocationRefused"/>).
+        /// </summary>
         internal IRbxScriptThread SpawnSignal(string ownerModId, object callable, object[] args)
         {
             ThreadRecord record;
@@ -910,26 +1083,26 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
             catch (RbxError error)
             {
+                _currentInvocationRefused = true;
                 ReportThreadFault(ownerModId, error);
                 return null;
             }
 
-            IRbxScriptThread thread = record.Thread;
-            record.ReadableTombstone = _currentSignalTombstone;
-            ResumeThread(record, CopyArguments(args));
-            TryReleaseRecord(record);
-            return thread;
+            return StartSignalRecord(record, args);
         }
 
         /// <summary>
-        /// Starts a signal callback on behalf of another actor (MP-10): the thread still runs as
-        /// <paramref name="ownerModId"/>'s code, but it is charged to <paramref name="quotaActorId"/>'s
-        /// induced-thread budget, which allows <paramref name="maxLiveThreads"/> such threads at once,
-        /// instead of the owner's actor quota, and so is every thread it starts in turn (see
-        /// <see cref="CreateScheduledRecord"/>). A remote caller can therefore exhaust only its own budget,
-        /// never the host's. Over that budget (or at <see cref="EmergencyMaxThreads"/>) nothing starts,
-        /// null is returned with <paramref name="refusal"/> set, and nothing is reported to the owner:
-        /// the owner did nothing wrong, so the caller answers the remote side instead. A null or blank
+        /// Starts a handler of a remote invocation <paramref name="quotaActorId"/> made itself (MP-10): an
+        /// OnServerEvent handler or an OnServerInvoke callback. The thread still runs as
+        /// <paramref name="ownerModId"/>'s code, but it is charged to the sender's remote admission
+        /// budget, which allows <paramref name="maxLiveThreads"/> such handlers at once, instead of the
+        /// owner's actor quota. Everything the handler causes goes to the sender's separate induced budget
+        /// (see <see cref="ConfigureInducedThreadBudget"/>), so the host's own listeners can never use up
+        /// the budget that admits the sender's next remote call (C1-01). A remote caller can therefore
+        /// exhaust only its own budgets, never the host's. Over this budget (or at
+        /// <see cref="EmergencyMaxThreads"/>) nothing starts, null is returned with
+        /// <paramref name="refusal"/> set, and nothing is reported to the owner: the owner did nothing
+        /// wrong, so the caller answers the remote side instead. A null or blank
         /// <paramref name="quotaActorId"/> behaves exactly like the three-argument overload.
         /// </summary>
         internal IRbxScriptThread SpawnSignal(string ownerModId, object callable, object[] args,
@@ -945,15 +1118,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             int limit = Math.Max(1, maxLiveThreads);
             if (_records.Count >= EmergencyMaxThreads)
             {
-                refusal = new RbxError(
-                    RbxErrorCode.ThreadCap,
-                    "actor '" + quotaActor + "' cannot start a handler of mod '" + ownerModId
-                    + "': emergency live scheduler threads ceiling reached (" + EmergencyMaxThreads + ")",
-                    "retry after the server's running handlers finish");
-                return null;
+                refusal = EmergencyHandlerRefusal(quotaActor, ownerModId);
             }
-
-            if (CountInducedThreads(quotaActor) >= limit)
+            else if (CountRemoteHandlerThreads(quotaActor) >= limit)
             {
                 refusal = new RbxError(
                     RbxErrorCode.BudgetExceeded,
@@ -961,66 +1128,163 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                     + " handler threads in flight that its remote calls started; mod '" + ownerModId
                     + "' did not start another one",
                     "wait for earlier remote calls to finish before sending more");
+            }
+
+            return StartChargedSignal(ownerModId, callable, args, quotaActor, SenderPool.RemoteAdmission,
+                ref refusal);
+        }
+
+        /// <summary>
+        /// Starts a signal handler that a thread charged to <paramref name="quotaActorId"/> caused, by a
+        /// write or a fire (B1-02), in that sender's induced budget (C1-01); the handler and every thread
+        /// it starts stay charged to the sender. The signal drain only dispatches such an invocation when
+        /// the budget has room and otherwise defers it (see <see cref="ConfigureInducedThreadBudget"/>), so
+        /// a refusal here means a caller started the handler outside that drain. Refused, nothing starts,
+        /// null is returned with <paramref name="refusal"/> set, and the owner is not faulted.
+        /// </summary>
+        internal IRbxScriptThread SpawnInducedSignal(string ownerModId, object callable, object[] args,
+            string quotaActorId, out RbxError refusal)
+        {
+            refusal = null;
+            if (string.IsNullOrWhiteSpace(quotaActorId))
+            {
+                return SpawnSignal(ownerModId, callable, args);
+            }
+
+            string quotaActor = quotaActorId.Trim();
+            refusal = _records.Count >= EmergencyMaxThreads
+                ? EmergencyHandlerRefusal(quotaActor, ownerModId)
+                : DescribeFullInducedBudget(quotaActor, "mod '" + ownerModId + "' did not start a signal handler");
+            return StartChargedSignal(ownerModId, callable, args, quotaActor, SenderPool.Induced, ref refusal);
+        }
+
+        private IRbxScriptThread StartChargedSignal(string ownerModId, object callable, object[] args,
+            string quotaActor, SenderPool pool, ref RbxError refusal)
+        {
+            if (refusal != null)
+            {
+                _currentInvocationRefused = true;
                 return null;
             }
 
             ThreadRecord record;
             try
             {
-                record = CreateRecord(ownerModId, callable, quotaActor, limit);
+                record = CreateRecord(ownerModId, callable, quotaActor, pool);
             }
             catch (RbxError error)
             {
+                _currentInvocationRefused = true;
                 ReportThreadFault(ownerModId, error);
                 return null;
             }
 
+            return StartSignalRecord(record, args);
+        }
+
+        private IRbxScriptThread StartSignalRecord(ThreadRecord record, object[] args)
+        {
             IRbxScriptThread thread = record.Thread;
             record.ReadableTombstone = _currentSignalTombstone;
+            // WHY consumed here and not before the handler was asked to start: a Once whose start was
+            // refused or deferred never ran, so it must stay connected for a later fire (C1-02); consumed
+            // before the resume, its handler still sees it disconnected, as in Roblox.
+            _currentInvocationConnection?.ConsumeOnce();
             ResumeThread(record, CopyArguments(args));
             TryReleaseRecord(record);
             return thread;
         }
 
+        private static RbxError EmergencyHandlerRefusal(string quotaActor, string ownerModId)
+        {
+            return new RbxError(
+                RbxErrorCode.ThreadCap,
+                "actor '" + quotaActor + "' cannot start a handler of mod '" + ownerModId
+                + "': emergency live scheduler threads ceiling reached (" + EmergencyMaxThreads + ")",
+                "retry after the server's running handlers finish");
+        }
+
+        /// <summary>
+        /// The refusal of one more thread in <paramref name="quotaActor"/>'s induced budget, naming
+        /// <paramref name="outcome"/>; null while that sender and all senders together have room.
+        /// </summary>
+        private RbxError DescribeFullInducedBudget(string quotaActor, string outcome)
+        {
+            if (CountInducedPoolThreads(quotaActor) >= MaxInducedThreadsPerSender)
+            {
+                return new RbxError(
+                    RbxErrorCode.BudgetExceeded,
+                    "actor '" + quotaActor + "' already has " + MaxInducedThreadsPerSender
+                    + " threads in flight that its remote calls started; " + outcome,
+                    "wait for earlier remote calls to finish before sending more");
+            }
+
+            if (_inducedThreadTotal >= MaxInducedThreadsAllSenders)
+            {
+                return new RbxError(
+                    RbxErrorCode.BudgetExceeded,
+                    "remote senders already have " + MaxInducedThreadsAllSenders
+                    + " threads in flight that their remote calls started, the most the server runs for "
+                    + "all senders together; for actor '" + quotaActor + "', " + outcome,
+                    "wait for earlier remote calls to finish before sending more");
+            }
+
+            return null;
+        }
+
+        private bool HasInducedRoom(string quotaActor)
+        {
+            return _records.Count < EmergencyMaxThreads
+                   && CountInducedPoolThreads(quotaActor) < MaxInducedThreadsPerSender
+                   && _inducedThreadTotal < MaxInducedThreadsAllSenders;
+        }
+
+        /// <summary>
+        /// The sender the code running right now is charged to: the running thread's own sender, or, for
+        /// an uncharged thread, the sender whose fire resumed it from <c>:Wait()</c> in this resume (C1-03);
+        /// null outside a resume.
+        /// </summary>
+        private string RunningChargeActorId => _runningRecord == null
+            ? null
+            : _runningRecord.QuotaActorId ?? _runningResumeChargeActorId;
+
         /// <summary>
         /// Creates the record of a new <c>task.spawn</c>, <c>task.defer</c> or <c>task.delay</c>
-        /// thread. Started from a thread charged to another actor's induced-thread budget, the new
-        /// thread is charged to that same actor and held to the same limit; over that limit nothing is
-        /// created and <see cref="RbxErrorCode.BudgetExceeded"/> is raised to the calling script.
+        /// thread. Started from a thread charged to a remote sender, or inside a <c>:Wait()</c> resume a
+        /// charged fire caused, the new thread is charged to that sender's induced budget; over that
+        /// budget nothing is created and <see cref="RbxErrorCode.BudgetExceeded"/> is raised to the
+        /// calling script.
         /// </summary>
         /// <remarks>
         /// WHY inherited: a handler a remote client's call started runs that client's request, and
         /// what it schedules is still that request. Charged to the handler's owner instead, one client
         /// firing at a handler that calls <c>task.delay(60, f)</c> filled the host's whole thread quota
-        /// and got the host's gameplay mod quarantined (A4-01). WHY the refusal is remembered on the
-        /// running record: when it ends the thread, the thread died of the sender's budget, not of a
-        /// fault in its owner's code, and <see cref="ResumeThread"/> must not charge it to the owner.
+        /// and got the host's gameplay mod quarantined (A4-01). WHY the induced budget and not the one
+        /// that admits the sender's remote calls: charged there, the host's own listeners that park
+        /// used up the budget and an honest player's next remote calls were refused (C1-01). WHY the
+        /// refusal is remembered on the running record: when it ends the thread, the thread died of the
+        /// sender's budget, not of a fault in its owner's code, and <see cref="ResumeThread"/> must not
+        /// charge it to the owner.
         /// </remarks>
         private ThreadRecord CreateScheduledRecord(string ownerModId, object callable, string operation)
         {
-            ThreadRecord running = _runningRecord;
-            string quotaActor = running?.QuotaActorId;
+            string quotaActor = RunningChargeActorId;
             if (quotaActor == null)
             {
                 return CreateRecord(ownerModId, callable);
             }
 
-            int limit = Math.Max(1, running.QuotaLimit);
-            if (CountInducedThreads(quotaActor) >= limit)
+            RbxError refusal = DescribeFullInducedBudget(quotaActor,
+                operation + " in mod '" + ownerModId + "' did not start another one");
+            if (refusal != null)
             {
-                RbxError refusal = new(
-                    RbxErrorCode.BudgetExceeded,
-                    "actor '" + quotaActor + "' already has " + limit
-                    + " threads in flight that its remote calls started; " + operation
-                    + " in mod '" + ownerModId + "' did not start another one",
-                    "wait for earlier remote calls to finish before sending more");
-                running.InducedRefusalMessage = refusal.RawMessage;
+                _runningRecord.InducedRefusalMessage = refusal.RawMessage;
                 InducedThreadRefusals++;
                 RaiseInducedThreadRefused(quotaActor, refusal);
                 throw refusal;
             }
 
-            return CreateRecord(ownerModId, callable, quotaActor, limit);
+            return CreateRecord(ownerModId, callable, quotaActor, SenderPool.Induced);
         }
 
         private void RaiseInducedThreadRefused(string quotaActorId, RbxError refusal)
@@ -1043,12 +1307,13 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
 
         /// <summary>
         /// True when <paramref name="error"/> is the induced-budget refusal raised inside the record's
-        /// own thread: the thread died of its sender's budget, which is not its owner's fault.
+        /// own thread: the thread died of its sender's budget, which is not its owner's fault. The thread
+        /// may be uncharged itself when the refusal came from a <c>:Wait()</c> resume a charged fire
+        /// caused (C1-03).
         /// </summary>
         private static bool DiedOfInducedRefusal(ThreadRecord record, RbxError error)
         {
-            return record.QuotaActorId != null
-                   && record.InducedRefusalMessage != null
+            return record.InducedRefusalMessage != null
                    && error != null
                    && error.Code == RbxErrorCode.BudgetExceeded
                    && string.Equals(error.RawMessage, record.InducedRefusalMessage,
@@ -1341,7 +1606,12 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             record.TimedSequence = entry.Sequence;
         }
 
-        /// <summary>Resumes one signal waiter with the arguments captured at fire time.</summary>
+        /// <summary>
+        /// Resumes one signal waiter with the arguments captured at fire time. When the fire was charged
+        /// to a remote sender (its own remote invocation, or a thread charged to it), the threads the
+        /// waiter creates and the signals it fires during this one resume are charged to that sender's
+        /// induced budget; the waiter itself keeps its own charge and is never moved to the sender (C1-03).
+        /// </summary>
         internal void ResumeSignalWait(IRbxScriptThread caller, object[] arguments)
         {
             if (caller == null || !_records.TryGetValue(caller, out ThreadRecord record)
@@ -1350,9 +1620,14 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 return;
             }
 
+            // WHY the fire's sender scopes this resume: a host loop `local p = remote.OnServerEvent:Wait()
+            // task.spawn(work, p)` runs the client's request just like a handler would; charged to the
+            // host, one client filled the host's thread quota through the loop (C1-03).
+            string resumeCharge = record.QuotaActorId == null ? _currentInvocationQuotaActorId : null;
+            _currentInvocationConnection?.ConsumeOnce();
             AbandonTimedEntry(record);
             record.ReadableTombstone = _currentSignalTombstone;
-            ResumeThread(record, CopyArguments(arguments));
+            ResumeThread(record, CopyArguments(arguments), resumeCharge);
         }
 
         /// <summary>
@@ -1432,18 +1707,17 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             // was charged to the listener's owner, and one client filled the host's thread quota
             // through that one indirection (B1-02).
             string quotaActorId = _enqueueQuotaActorId;
-            int quotaLimit = 0;
-            ThreadRecord running = _runningRecord;
-            if (quotaActorId == null && running != null && running.QuotaActorId != null)
+            bool induced = false;
+            if (quotaActorId == null)
             {
-                quotaActorId = running.QuotaActorId;
-                quotaLimit = running.QuotaLimit;
+                quotaActorId = RunningChargeActorId;
+                induced = quotaActorId != null;
             }
 
             string[] chain = BuildSignalChain(connection.SignalName);
             _signalQueue.Enqueue(new SignalInvocation(
                 connection, CopyArguments(arguments), readableTombstone, generation, chain,
-                quotaActorId, quotaLimit));
+                quotaActorId, induced));
         }
 
         /// <summary>
@@ -1706,8 +1980,10 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 for (int round = 0; round < MaxDrainRoundsPerResumptionPoint; round++)
                 {
                     DrainDeferred();
+                    DrainDeferredListeners();
                     DrainSignals();
-                    if (_deferredQueue.Count == 0 && _signalQueue.Count == 0)
+                    if (_deferredQueue.Count == 0 && _signalQueue.Count == 0
+                        && !(_deferredListenersMayStart && _deferredListeners.Count > 0))
                     {
                         break;
                     }
@@ -1808,24 +2084,17 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                     for (int index = 0; index < _signalDrainBuffer.Count; index++)
                     {
                         SignalInvocation invocation = _signalDrainBuffer[index];
-                        _currentSignalChain = invocation.Chain;
-                        _currentSignalTombstone = invocation.ReadableTombstone;
-                        _currentInvocationOwnerModId = invocation.Connection.OwnerModId;
-                        _currentInvocationQuotaActorId = invocation.QuotaActorId;
-                        _currentInvocationQuotaLimit = invocation.QuotaLimit;
-                        try
+                        // WHY a sender that already holds deferred invocations defers this one too, even
+                        // with room: its invocations start in the order its threads fired them.
+                        if (NeedsInducedRoom(invocation)
+                            && (CountDeferredListenerInvocations(invocation.QuotaActorId) > 0
+                                || !HasInducedRoom(invocation.QuotaActorId)))
                         {
-                            invocation.Connection.InvokePending(invocation.Arguments);
+                            DeferListenerInvocation(invocation);
+                            continue;
                         }
-                        catch (Exception exception)
-                        {
-                            ReportSignalHandlerFailure(invocation.Connection, exception);
-                        }
-                        finally
-                        {
-                            _currentInvocationQuotaActorId = null;
-                            _currentInvocationQuotaLimit = 0;
-                        }
+
+                        DispatchSignalInvocation(invocation);
                     }
 
                     _currentInvocationOwnerModId = null;
@@ -1839,10 +2108,191 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
                 _currentSignalChain = null;
                 _currentSignalTombstone = null;
                 _currentInvocationOwnerModId = null;
-                _currentInvocationQuotaActorId = null;
-                _currentInvocationQuotaLimit = 0;
                 _drainingSignals = false;
             }
+        }
+
+        private void DispatchSignalInvocation(SignalInvocation invocation)
+        {
+            _currentSignalChain = invocation.Chain;
+            _currentSignalTombstone = invocation.ReadableTombstone;
+            _currentInvocationOwnerModId = invocation.Connection.OwnerModId;
+            _currentInvocationQuotaActorId = invocation.QuotaActorId;
+            _currentInvocationInduced = invocation.Induced;
+            _currentInvocationConnection = invocation.Connection;
+            _currentInvocationRefused = false;
+            try
+            {
+                invocation.Connection.InvokePending(invocation.Arguments);
+            }
+            catch (Exception exception)
+            {
+                ReportSignalHandlerFailure(invocation.Connection, exception);
+            }
+            finally
+            {
+                _currentInvocationQuotaActorId = null;
+                _currentInvocationInduced = false;
+                _currentInvocationConnection = null;
+                _currentInvocationRefused = false;
+            }
+        }
+
+        /// <summary>
+        /// True for an invocation whose dispatch takes a thread from its sender's induced budget: a
+        /// handler that a charged thread's write or fire starts, and every <c>:Wait()</c> resume of a
+        /// charged fire (the threads that resume creates are the sender's, C1-03). A handler the sender's
+        /// own remote invocation starts is held to the remote admission budget instead, when it starts.
+        /// </summary>
+        private static bool NeedsInducedRoom(SignalInvocation invocation)
+        {
+            RbxScriptConnection connection = invocation.Connection;
+            return invocation.QuotaActorId != null
+                   && !connection.IsExplicitlyDisconnected
+                   && (connection.IsSignalWaiter
+                       || invocation.Induced && connection.StartsSchedulerThread);
+        }
+
+        /// <summary>
+        /// Holds an invocation whose sender's induced budget is full (or whose sender already holds
+        /// deferred invocations, so its fire order is kept) until the budget has room (C1-02). Past the
+        /// sender's deferred queue, or the queue of all senders, it is dropped instead: counted, raised
+        /// through <see cref="InducedListenerDropped"/>, and its owner is not faulted; a dropped
+        /// <c>Once</c> stays connected for a later fire.
+        /// </summary>
+        /// <remarks>
+        /// WHY held instead of dropped: the write that fired the signal was already applied when the
+        /// budget was found full, so a dropped invocation left the host's listeners (a leaderboard, a
+        /// save, a round state) out of step with the world for good; Roblox never drops a listener
+        /// invocation. WHY one queue in fire order for all senders: when room frees under the ceiling of
+        /// all senders, the invocation that waited longest starts first, whichever sender it belongs to.
+        /// </remarks>
+        private void DeferListenerInvocation(SignalInvocation invocation)
+        {
+            string sender = invocation.QuotaActorId;
+            int held = CountDeferredListenerInvocations(sender);
+            if (held < MaxDeferredListenerInvocationsPerSender
+                && _deferredListeners.Count < MaxDeferredListenerInvocationsAllSenders)
+            {
+                _deferredListenersBySender[sender] = held + 1;
+                _deferredListeners.Add(invocation);
+                return;
+            }
+
+            invocation.Connection.DropQueuedInvocation();
+            InducedListenerDrops++;
+            RaiseInducedListenerDropped(sender, new RbxError(
+                RbxErrorCode.BudgetExceeded,
+                (held >= MaxDeferredListenerInvocationsPerSender
+                    ? "actor '" + sender + "' already has " + MaxDeferredListenerInvocationsPerSender
+                      + " signal handler invocations waiting for room in its induced thread budget"
+                    : "the server already holds " + MaxDeferredListenerInvocationsAllSenders
+                      + " signal handler invocations waiting for room in remote senders' induced thread budgets")
+                + "; dropped a " + invocation.Connection.SignalName + " invocation of "
+                + (string.IsNullOrWhiteSpace(invocation.Connection.OwnerModId)
+                    ? "a connection owned by no mod"
+                    : "mod '" + invocation.Connection.OwnerModId + "'"),
+                "wait for earlier remote calls to finish before sending more"));
+        }
+
+        private void RaiseInducedListenerDropped(string quotaActorId, RbxError drop)
+        {
+            Action<string, RbxError> handlers = _inducedListenerDropped;
+            if (handlers == null)
+            {
+                return;
+            }
+
+            try
+            {
+                handlers(quotaActorId, drop);
+            }
+            catch (Exception exception)
+            {
+                ReportHostFault("InducedListenerDropped subscriber", exception);
+            }
+        }
+
+        /// <summary>
+        /// Starts deferred invocations whose sender's induced budget has room again, oldest first, and
+        /// never ahead of an older one of the same sender; one whose connection was disconnected
+        /// meanwhile runs nothing and is let through in the same pass. Runs only after an induced thread
+        /// ended or the budget changed since the last pass.
+        /// </summary>
+        private void DrainDeferredListeners()
+        {
+            if (_deferredListeners.Count == 0)
+            {
+                _deferredListenersMayStart = false;
+                return;
+            }
+
+            _drainingSignals = true;
+            try
+            {
+                while (_deferredListenersMayStart && _deferredListeners.Count > 0)
+                {
+                    _deferredListenersMayStart = false;
+                    StartDeferredListenersThatMayStart();
+                }
+            }
+            finally
+            {
+                _blockedDeferredSenders.Clear();
+                _currentSignalGeneration = 0;
+                _currentSignalChain = null;
+                _currentSignalTombstone = null;
+                _currentInvocationOwnerModId = null;
+                _drainingSignals = false;
+            }
+        }
+
+        private void StartDeferredListenersThatMayStart()
+        {
+            _blockedDeferredSenders.Clear();
+            int kept = 0;
+            int visited = 0;
+            try
+            {
+                for (; visited < _deferredListeners.Count; visited++)
+                {
+                    SignalInvocation invocation = _deferredListeners[visited];
+                    string sender = invocation.QuotaActorId;
+                    if (!NeedsInducedRoom(invocation)
+                        || !_blockedDeferredSenders.Contains(sender) && HasInducedRoom(sender))
+                    {
+                        ForgetDeferredListener(invocation);
+                        _currentSignalGeneration = invocation.Generation;
+                        DispatchSignalInvocation(invocation);
+                        _currentInvocationOwnerModId = null;
+                        FlushPendingSignalFaults();
+                        continue;
+                    }
+
+                    _blockedDeferredSenders.Add(sender);
+                    _deferredListeners[kept] = invocation;
+                    kept++;
+                }
+            }
+            finally
+            {
+                // WHY the unvisited tail is kept: a failure while one invocation ran must not lose the
+                // invocations still waiting behind it.
+                for (int index = Math.Min(visited + 1, _deferredListeners.Count);
+                     index < _deferredListeners.Count;
+                     index++)
+                {
+                    _deferredListeners[kept] = _deferredListeners[index];
+                    kept++;
+                }
+
+                _deferredListeners.RemoveRange(kept, _deferredListeners.Count - kept);
+            }
+        }
+
+        private void ForgetDeferredListener(SignalInvocation invocation)
+        {
+            ReleaseSenderCount(_deferredListenersBySender, invocation.QuotaActorId);
         }
 
         private void ReportSignalHandlerFailure(RbxScriptConnection connection, Exception exception)
@@ -2275,7 +2725,12 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             return entry.EarliestFrame <= _frameIndex && entry.Deadline <= CurrentTime;
         }
 
-        private void ResumeThread(ThreadRecord record, object[] arguments)
+        /// <summary>
+        /// Resumes <paramref name="record"/>'s thread once. <paramref name="resumeChargeActorId"/> names the
+        /// remote sender the code this resume runs is charged to when the thread itself is uncharged: a
+        /// <c>:Wait()</c> resume a charged fire caused (C1-03). The charge ends with the resume.
+        /// </summary>
+        private void ResumeThread(ThreadRecord record, object[] arguments, string resumeChargeActorId = null)
         {
             if (!_records.ContainsKey(record.Thread))
             {
@@ -2302,13 +2757,20 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             _runningOwnerModId = record.OwnerModId;
             ThreadRecord previousRunningRecord = _runningRecord;
             _runningRecord = record;
+            string previousResumeCharge = _runningResumeChargeActorId;
+            _runningResumeChargeActorId = resumeChargeActorId;
             // WHY cleared for the resume: the invocation's quota actor marks the one handler the
-            // invocation starts. The threads that handler's code starts in turn inherit the charge
-            // through the running record instead (see CreateScheduledRecord).
+            // invocation starts, and its Once and refusal state belong to that start alone. The threads
+            // that handler's code starts in turn inherit the charge through the running record instead
+            // (see CreateScheduledRecord).
             string previousQuotaActor = _currentInvocationQuotaActorId;
-            int previousQuotaLimit = _currentInvocationQuotaLimit;
+            bool previousInduced = _currentInvocationInduced;
+            RbxScriptConnection previousConnection = _currentInvocationConnection;
+            bool previousRefused = _currentInvocationRefused;
             _currentInvocationQuotaActorId = null;
-            _currentInvocationQuotaLimit = 0;
+            _currentInvocationInduced = false;
+            _currentInvocationConnection = null;
+            _currentInvocationRefused = false;
             RbxScriptThreadResumeResult result;
             try
             {
@@ -2322,7 +2784,10 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             finally
             {
                 _currentInvocationQuotaActorId = previousQuotaActor;
-                _currentInvocationQuotaLimit = previousQuotaLimit;
+                _currentInvocationInduced = previousInduced;
+                _currentInvocationConnection = previousConnection;
+                _currentInvocationRefused = previousRefused;
+                _runningResumeChargeActorId = previousResumeCharge;
                 _runningRecord = previousRunningRecord;
                 _runningOwnerModId = previousRunningOwner;
                 RbxScriptSignal.ExitTombstoneScope(previousTombstone);
@@ -2545,17 +3010,27 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
 
             _records.Remove(thread);
-            string quotaActorId = record.QuotaActorId;
-            if (quotaActorId != null
-                && _inducedThreadsByQuotaActor.TryGetValue(quotaActorId, out int induced))
+            // WHY only these retirements wake the deferred signal handlers: room for them comes back
+            // only when an induced thread ends or the emergency ceiling frees up, and a scan of the
+            // queue on every retirement cost a flood's whole queue per resumption point.
+            if (record.Pool == SenderPool.Induced || _records.Count + 1 >= EmergencyMaxThreads)
             {
-                if (induced <= 1)
+                _deferredListenersMayStart = true;
+            }
+
+            string quotaActorId = record.QuotaActorId;
+            if (quotaActorId != null)
+            {
+                if (record.Pool == SenderPool.Induced)
                 {
-                    _inducedThreadsByQuotaActor.Remove(quotaActorId);
+                    if (ReleaseSenderCount(_inducedThreadsBySender, quotaActorId))
+                    {
+                        _inducedThreadTotal--;
+                    }
                 }
                 else
                 {
-                    _inducedThreadsByQuotaActor[quotaActorId] = induced - 1;
+                    ReleaseSenderCount(_admittedThreadsBySender, quotaActorId);
                 }
             }
 
@@ -2664,8 +3139,34 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
         }
 
+        private static int ReadSenderCount(Dictionary<string, int> counts, string quotaActorId)
+        {
+            return quotaActorId != null && counts.TryGetValue(quotaActorId.Trim(), out int count)
+                ? count
+                : 0;
+        }
+
+        private static bool ReleaseSenderCount(Dictionary<string, int> counts, string quotaActorId)
+        {
+            if (!counts.TryGetValue(quotaActorId, out int count))
+            {
+                return false;
+            }
+
+            if (count <= 1)
+            {
+                counts.Remove(quotaActorId);
+            }
+            else
+            {
+                counts[quotaActorId] = count - 1;
+            }
+
+            return true;
+        }
+
         private ThreadRecord CreateRecord(string ownerModId, object callable,
-            string quotaActorId = null, int quotaLimit = 0)
+            string quotaActorId = null, SenderPool pool = SenderPool.None)
         {
             ValidateOwnerModId(ownerModId);
             if (callable == null)
@@ -2743,9 +3244,16 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             if (quotaActorId != null)
             {
                 record.QuotaActorId = quotaActorId;
-                record.QuotaLimit = quotaLimit;
-                _inducedThreadsByQuotaActor.TryGetValue(quotaActorId, out int induced);
-                _inducedThreadsByQuotaActor[quotaActorId] = induced + 1;
+                record.Pool = pool == SenderPool.Induced ? SenderPool.Induced : SenderPool.RemoteAdmission;
+                Dictionary<string, int> counts = record.Pool == SenderPool.Induced
+                    ? _inducedThreadsBySender
+                    : _admittedThreadsBySender;
+                counts.TryGetValue(quotaActorId, out int charged);
+                counts[quotaActorId] = charged + 1;
+                if (record.Pool == SenderPool.Induced)
+                {
+                    _inducedThreadTotal++;
+                }
             }
 
             return record;

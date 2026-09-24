@@ -422,7 +422,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
             ActorContext flooder = new LocalActorIdentityProvider("a4-01-flooder")
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
-            int budget = LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender;
+            int inducedBudget = bindings.Scheduler.MaxInducedThreadsPerSender;
             stack.Runtime.LoadMod(host, "server", @"
                 local remote = Instance.new('RemoteEvent')
                 remote.Name = 'Cooldown'
@@ -456,15 +456,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 "the host's own thread quota is untouched by what the client's calls scheduled");
             Assert.AreEqual("310", store.Get("server", "handled"),
                 "every fire under the rate limit still reaches the handler");
-            // WHY one below the budget: each handler holds a slot of its own while it runs, so the
-            // handler that finds budget - 1 delayed threads in flight is refused its task.delay.
-            Assert.AreEqual(budget - 1, bindings.Scheduler.CountInducedThreads(flooder.ActorId),
-                "the delayed threads are the sender's, held to the sender's budget");
+            // WHY the whole induced budget: the handlers are held to the sender's remote admission
+            // budget and hold none of the induced one, so exactly that many delayed threads start (C1-01).
+            Assert.AreEqual(inducedBudget, bindings.Scheduler.CountInducedThreads(flooder.ActorId),
+                "the delayed threads are the sender's, held to the sender's induced budget");
+            Assert.AreEqual(inducedBudget, bindings.Scheduler.CountInducedPoolThreads(flooder.ActorId));
+            Assert.AreEqual(0, bindings.Scheduler.CountRemoteHandlerThreads(flooder.ActorId),
+                "every handler finished; none holds a remote admission slot");
             Assert.IsFalse(IsQuarantined(stack, host, "server"),
                 "one client's flood must not quarantine the host's gameplay mod");
             Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors(host, "server"),
                 "a task.delay refused for the sender's budget is not the handler owner's fault");
-            Assert.AreEqual(310L - (budget - 1), bindings.RemoteHandlerRefusalCount,
+            Assert.AreEqual(310L - inducedBudget, bindings.RemoteHandlerRefusalCount,
                 "every refused start is counted against the sender");
         }
 
@@ -508,7 +511,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
             ActorContext flooder = new LocalActorIdentityProvider("b1-02-flooder")
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
-            int budget = LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender;
+            int inducedBudget = bindings.Scheduler.MaxInducedThreadsPerSender;
             stack.Runtime.LoadMod(host, "server", @"
                 local remote = Instance.new('RemoteEvent')
                 remote.Name = 'Cooldown'
@@ -539,15 +542,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 "every fire under the rate limit still reaches the remote event's handler");
             Assert.AreEqual("true", store.Get("host-work", "ok"), store.Get("host-work", "err"));
             Assert.AreEqual("yes", store.Get("host-work", "ran"));
-            Assert.AreEqual(budget, bindings.Scheduler.CountInducedThreads(flooder.ActorId),
-                "the listener threads the sender's handlers caused are the sender's, held to its budget");
+            Assert.AreEqual(inducedBudget, bindings.Scheduler.CountInducedThreads(flooder.ActorId),
+                "the listener threads the sender's handlers caused are the sender's, held to its induced budget");
             Assert.AreEqual(0,
                 bindings.Scheduler.LiveThreadCount - bindings.Scheduler.CountInducedThreads(flooder.ActorId),
                 "no thread the flood caused is left on the host's own quota");
-            Assert.AreEqual(300L - budget, bindings.RemoteHandlerRefusalCount,
-                "every listener start over the sender's budget is refused and counted against the sender");
+            Assert.AreEqual(300 - inducedBudget,
+                bindings.Scheduler.CountDeferredListenerInvocations(flooder.ActorId),
+                "every listener over the sender's induced budget waits for room instead of being dropped (C1-02)");
+            Assert.AreEqual(0L, bindings.Scheduler.InducedListenerDrops);
+            Assert.AreEqual(0L, bindings.RemoteHandlerRefusalCount,
+                "no remote call of the sender and no listener its calls caused was refused");
             Assert.IsFalse(IsQuarantined(stack, host, "server"),
-                "a listener refused for the sender's budget is not its owner's fault");
+                "a listener that waits for the sender's budget is not its owner's fault");
             Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors(host, "server"));
         }
 
@@ -590,6 +597,527 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             return variant == "property"
                 ? "state.Name = 'hit-' .. tostring(handled)"
                 : "state:SetAttribute('Hits', handled)";
+        }
+
+        private static ActorContext HostActor()
+        {
+            return CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+        }
+
+        private static ActorContext ClientActor(string actorId)
+        {
+            return new LocalActorIdentityProvider(actorId).GetActorContext(BuiltInAgentRoleIds.Programmer);
+        }
+
+        /// <summary>Loads a host mod that starts one thread and asserts that the host could.</summary>
+        private static void AssertTheHostCanStillSpawn(LuaCsModStack stack, ActorContext host, MemoryStore store)
+        {
+            Assert.DoesNotThrow(() => stack.Runtime.LoadMod(host, "host-work", @"
+                local ok, err = pcall(function() task.spawn(function() store_set('ran', 'yes') end) end)
+                store_set('ok', tostring(ok))
+                store_set('err', tostring(err))", LuaCapabilities.All, persistToStore: false),
+                "a remote client must leave the host able to load a mod");
+            Assert.AreEqual("true", store.Get("host-work", "ok"), store.Get("host-work", "err"));
+            Assert.AreEqual("yes", store.Get("host-work", "ran"));
+        }
+
+        [Test]
+        public void Lua_C1_01_AnHonestPlayersCollectsAtTenHertz_AreAllApplied_WhileTheHostsOwnListenerParks()
+        {
+            // WHY: the listener a remote handler's write started was held to the same budget that admits
+            // the sender's remote calls. A host Changed listener that parks (a debounced save) used that
+            // budget up, and an honest player collecting at 10 Hz lost every collect after the 32nd (C1-01).
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = HostActor();
+            ActorContext player = ClientActor("c1-01-honest");
+            stack.Runtime.LoadMod(host, "server", @"
+                local remote = Instance.new('RemoteEvent')
+                remote.Name = 'Collect'
+                remote.Parent = workspace
+                local coins = Instance.new('IntValue')
+                coins.Name = 'Coins'
+                coins.Parent = workspace
+                local saves = 0
+                coins.Changed:Connect(function()
+                    task.wait(10)
+                    saves = saves + 1
+                    store_set('saves', tostring(saves))
+                end)
+                remote.OnServerEvent:Connect(function(player)
+                    coins.Value = coins.Value + 1
+                    store_set('coins', tostring(coins.Value))
+                end)", LuaCapabilities.All, persistToStore: false);
+            stack.Runtime.LoadMod(player, "client", @"
+                local remote = workspace:FindFirstChild('Collect')
+                local frames = 0
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    frames = frames + 1
+                    if frames <= 200 and frames % 5 == 0 then remote:FireServer() end
+                end)", LuaCapabilities.All, persistToStore: false);
+
+            PumpFrames(bindings, stack, host, 205, 0.02d);
+
+            Assert.AreEqual("40", store.Get("server", "coins"), "every collect a player fires at 10 Hz is applied");
+            Assert.AreEqual(0L, bindings.RemoteHandlerRefusalCount, "no remote call of an honest player is refused");
+            Assert.AreEqual(0, bindings.Scheduler.CountRemoteHandlerThreads(player.ActorId),
+                "the collect handlers finished; the parked listeners hold none of the admission budget");
+            Assert.AreEqual(40, bindings.Scheduler.CountInducedPoolThreads(player.ActorId),
+                "the host's parked listeners are work the player caused, held in the player's induced budget");
+
+            PumpFrames(bindings, stack, host, 600, 0.02d);
+
+            Assert.AreEqual("40", store.Get("server", "saves"), "every listener ran to its end");
+            Assert.AreEqual(0, bindings.Scheduler.CountInducedThreads(player.ActorId));
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors(host, "server"));
+        }
+
+        [Test]
+        public void Lua_C1_01_EightFloodingSenders_TogetherHoldNoMoreThanTheAllSendersCeiling()
+        {
+            // WHY: each sender's induced budget alone bounds one client; many clients flooding at once
+            // must still leave the server's thread count bounded, so their induced threads share one
+            // ceiling below the host's own quota (C1-01).
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = HostActor();
+            stack.Runtime.LoadMod(host, "server", @"
+                local remote = Instance.new('RemoteEvent')
+                remote.Name = 'Cooldown'
+                remote.Parent = workspace
+                local state = Instance.new('Folder')
+                state.Parent = workspace
+                state:GetAttributeChangedSignal('Hits'):Connect(function() task.wait(60) end)
+                local handled = 0
+                remote.OnServerEvent:Connect(function(player)
+                    handled = handled + 1
+                    store_set('handled', tostring(handled))
+                    state:SetAttribute('Hits', handled)
+                end)", LuaCapabilities.All, persistToStore: false);
+            List<ActorContext> flooders = new();
+            for (int index = 0; index < 8; index++)
+            {
+                ActorContext flooder = ClientActor("c1-01-flooder-" + index.ToString(CultureInfo.InvariantCulture));
+                flooders.Add(flooder);
+                stack.Runtime.LoadMod(flooder, "flooder-" + index.ToString(CultureInfo.InvariantCulture), @"
+                    local remote = workspace:FindFirstChild('Cooldown')
+                    for index = 1, 300 do remote:FireServer(index) end",
+                    LuaCapabilities.All, persistToStore: false);
+            }
+
+            PumpFrames(bindings, stack, host, 3);
+
+            Assert.AreEqual("2400", store.Get("server", "handled"), "every remote call is still handled");
+            Assert.AreEqual(bindings.Scheduler.MaxInducedThreadsAllSenders,
+                bindings.Scheduler.InducedPoolThreadTotal,
+                "all senders together hold the all-senders ceiling of induced threads, no more");
+            int charged = 0;
+            foreach (ActorContext flooder in flooders)
+            {
+                Assert.LessOrEqual(bindings.Scheduler.CountInducedPoolThreads(flooder.ActorId),
+                    bindings.Scheduler.MaxInducedThreadsPerSender);
+                Assert.LessOrEqual(bindings.Scheduler.CountDeferredListenerInvocations(flooder.ActorId),
+                    bindings.Scheduler.MaxDeferredListenerInvocationsPerSender);
+                charged += bindings.Scheduler.CountInducedThreads(flooder.ActorId);
+            }
+
+            Assert.AreEqual(0, bindings.Scheduler.LiveThreadCount - charged,
+                "no thread the flood caused is left on the host's own quota");
+            Assert.AreEqual(2400L - bindings.Scheduler.MaxInducedThreadsAllSenders,
+                bindings.Scheduler.DeferredListenerInvocationTotal + bindings.Scheduler.InducedListenerDrops,
+                "a listener over the ceiling waits for room, or is dropped and counted past its sender's queue");
+            AssertTheHostCanStillSpawn(stack, host, store);
+            Assert.IsFalse(IsQuarantined(stack, host, "server"));
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors(host, "server"));
+        }
+
+        [Test]
+        public void Lua_C1_02_EveryWriteAFloodedHandlerApplied_ReachesTheHostsListeners()
+        {
+            // WHY: 40 fires in one frame. The 32 handlers the sender's budget admitted wrote and then
+            // parked in a cooldown, and every Changed invocation their writes caused was refused: the host's
+            // listener saw none of the 32 applied writes, and its Once listener was lost (C1-02).
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = HostActor();
+            ActorContext flooder = ClientActor("c1-02-buyer");
+            stack.Runtime.LoadMod(host, "server", @"
+                local remote = Instance.new('RemoteEvent')
+                remote.Name = 'Buy'
+                remote.Parent = workspace
+                local coins = Instance.new('IntValue')
+                coins.Name = 'Coins'
+                coins.Parent = workspace
+                local seen = 0
+                coins.Changed:Connect(function(value)
+                    seen = seen + 1
+                    store_set('seen', tostring(seen))
+                    store_set('seenValue', tostring(value))
+                end)
+                coins.Changed:Once(function(value)
+                    store_set('once', value == 1 and 'first write' or tostring(value))
+                end)
+                remote.OnServerEvent:Connect(function(player)
+                    coins.Value = coins.Value + 1
+                    store_set('coins', tostring(coins.Value))
+                    task.wait(5)
+                end)", LuaCapabilities.All, persistToStore: false);
+            stack.Runtime.LoadMod(flooder, "flooder", @"
+                local remote = workspace:FindFirstChild('Buy')
+                for index = 1, 40 do remote:FireServer() end", LuaCapabilities.All, persistToStore: false);
+
+            PumpFrames(bindings, stack, host, 3);
+
+            int admitted = LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender;
+            Assert.AreEqual(admitted.ToString(CultureInfo.InvariantCulture), store.Get("server", "coins"),
+                "the sender's remote admission budget admits its first handlers");
+            Assert.AreEqual(store.Get("server", "coins"), store.Get("server", "seen"),
+                "every write the host applied reaches the host's Changed listener");
+            Assert.AreEqual(store.Get("server", "coins"), store.Get("server", "seenValue"));
+            Assert.AreEqual("first write", store.Get("server", "once"), "the Once listener runs once, for the first write");
+            Assert.AreEqual((long)(40 - admitted), bindings.RemoteHandlerRefusalCount,
+                "only the sender's own calls over its admission budget are refused");
+            Assert.AreEqual(0L, bindings.Scheduler.InducedListenerDrops);
+        }
+
+        [Test]
+        public void Lua_C1_02_ListenersOverTheSendersInducedBudget_WaitAndRunInFireOrder()
+        {
+            // WHY: a listener that finds the sender's induced budget full was dropped although the write
+            // that fired it was already applied; it must wait for room and then run, in fire order (C1-02).
+            LuaCsRbxApiBindings bindings = new();
+            bindings.Scheduler.ConfigureInducedThreadBudget(4, 0, 256, 4096);
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = HostActor();
+            ActorContext flooder = ClientActor("c1-02-ordered");
+            stack.Runtime.LoadMod(host, "server", @"
+                local remote = Instance.new('RemoteEvent')
+                remote.Name = 'Buy'
+                remote.Parent = workspace
+                local coins = Instance.new('IntValue')
+                coins.Name = 'Coins'
+                coins.Parent = workspace
+                local order = {}
+                coins.Changed:Connect(function(value)
+                    table.insert(order, tostring(value))
+                    store_set('order', table.concat(order, ','))
+                    task.wait(1)
+                end)
+                remote.OnServerEvent:Connect(function(player)
+                    coins.Value = coins.Value + 1
+                    task.wait(5)
+                end)", LuaCapabilities.All, persistToStore: false);
+            stack.Runtime.LoadMod(flooder, "flooder", @"
+                local remote = workspace:FindFirstChild('Buy')
+                for index = 1, 12 do remote:FireServer() end", LuaCapabilities.All, persistToStore: false);
+
+            PumpFrames(bindings, stack, host, 1);
+
+            Assert.AreEqual("1,2,3,4", store.Get("server", "order"), "the induced budget of four runs the first listeners");
+            Assert.AreEqual(8, bindings.Scheduler.CountDeferredListenerInvocations(flooder.ActorId),
+                "the other eight wait for room instead of being dropped");
+
+            PumpFrames(bindings, stack, host, 30, 0.1d);
+
+            Assert.AreEqual("1,2,3,4,5,6,7,8,9,10,11,12", store.Get("server", "order"),
+                "every applied write reaches the listener, in the order the writes were made");
+            Assert.AreEqual(0, bindings.Scheduler.CountDeferredListenerInvocations(flooder.ActorId));
+            Assert.AreEqual(0L, bindings.Scheduler.InducedListenerDrops);
+            Assert.AreEqual(0L, bindings.RemoteHandlerRefusalCount);
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors(host, "server"));
+        }
+
+        [Test]
+        public void Lua_C1_02_AHostOnceListener_RunsForTheFirstWrite_WhileTheSendersHandlersFillTheirBudget()
+        {
+            // WHY: 31 parked handlers and one that set an attribute filled the sender's only budget, so the
+            // host's Once listener on that attribute was refused, and Once disconnected it before the refused
+            // start: the listener never ran, not even for the host's own later change (C1-02).
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = HostActor();
+            ActorContext flooder = ClientActor("c1-02-once");
+            stack.Runtime.LoadMod(host, "server", @"
+                local park = Instance.new('RemoteEvent')
+                park.Name = 'Park'
+                park.Parent = workspace
+                local touch = Instance.new('RemoteEvent')
+                touch.Name = 'Touch'
+                touch.Parent = workspace
+                local state = Instance.new('Folder')
+                state.Name = 'State'
+                state.Parent = workspace
+                local runs = 0
+                state:GetAttributeChangedSignal('Round'):Once(function()
+                    runs = runs + 1
+                    store_set('once', tostring(state:GetAttribute('Round')) .. ' runs=' .. tostring(runs))
+                end)
+                park.OnServerEvent:Connect(function() task.wait(600) end)
+                touch.OnServerEvent:Connect(function() state:SetAttribute('Round', 2) task.wait(1) end)",
+                LuaCapabilities.All, persistToStore: false);
+            stack.Runtime.LoadMod(flooder, "flooder", @"
+                local park = workspace:FindFirstChild('Park')
+                local touch = workspace:FindFirstChild('Touch')
+                for index = 1, 31 do park:FireServer() end
+                touch:FireServer()", LuaCapabilities.All, persistToStore: false);
+            PumpFrames(bindings, stack, host, 3);
+
+            stack.Runtime.LoadMod(host, "host-later", "workspace.State:SetAttribute('Round', 3)",
+                LuaCapabilities.All, persistToStore: false);
+            PumpFrames(bindings, stack, host, 3);
+
+            Assert.AreEqual("2 runs=1", store.Get("server", "once"),
+                "a host's Once listener runs once, for the first change");
+            Assert.AreEqual(0L, bindings.RemoteHandlerRefusalCount);
+        }
+
+        [Test]
+        public void Lua_C1_02_AOnceListenerDroppedPastTheSendersQueue_StaysConnectedForTheNextWrite()
+        {
+            // WHY: a refused or dropped start used to consume a Once connection without running it (C1-02).
+            // Past the sender's deferred queue an invocation is dropped, counted and logged once per sender,
+            // and a dropped Once stays connected: it runs for the next write.
+            List<string> log = new();
+            LuaCsRbxApiBindings bindings = new(log: log.Add);
+            bindings.Scheduler.ConfigureInducedThreadBudget(1, 0, 1, 4096);
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = HostActor();
+            ActorContext flooder = ClientActor("c1-02-dropped");
+            stack.Runtime.LoadMod(host, "server", @"
+                local remote = Instance.new('RemoteEvent')
+                remote.Name = 'Touch'
+                remote.Parent = workspace
+                local state = Instance.new('Folder')
+                state.Name = 'State'
+                state.Parent = workspace
+                local signal = state:GetAttributeChangedSignal('Round')
+                signal:Connect(function() task.wait(60) end)
+                signal:Connect(function() task.wait(60) end)
+                signal:Once(function() store_set('once', tostring(state:GetAttribute('Round'))) end)
+                remote.OnServerEvent:Connect(function() state:SetAttribute('Round', 2) end)",
+                LuaCapabilities.All, persistToStore: false);
+            stack.Runtime.LoadMod(flooder, "flooder", "workspace:FindFirstChild('Touch'):FireServer()",
+                LuaCapabilities.All, persistToStore: false);
+            PumpFrames(bindings, stack, host, 2);
+
+            Assert.AreEqual("", store.Get("server", "once"), "the Once found the sender's budget and queue full");
+            Assert.AreEqual(1L, bindings.Scheduler.InducedListenerDrops);
+            Assert.AreEqual(1, bindings.Scheduler.CountDeferredListenerInvocations(flooder.ActorId),
+                "the second listener waits in the sender's queue of one");
+            Assert.AreEqual(1, log.Count(line => line.Contains("was dropped") && line.Contains(flooder.ActorId)),
+                "the drop is logged once, naming the sender");
+            Assert.IsFalse(IsQuarantined(stack, host, "server"), "a dropped invocation is not its owner's fault");
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors(host, "server"));
+
+            stack.Runtime.LoadMod(host, "host-later", "workspace.State:SetAttribute('Round', 3)",
+                LuaCapabilities.All, persistToStore: false);
+            PumpFrames(bindings, stack, host, 1);
+
+            Assert.AreEqual("3", store.Get("server", "once"), "the dropped Once never ran, so it runs for the next write");
+        }
+
+        [Test]
+        public void Lua_C1_02_AnOnServerEventOnceRefusedForTheSendersBudget_RunsForTheSendersNextCall()
+        {
+            // WHY: the Once was disconnected before its handler's start was refused for the sender's full
+            // remote admission budget, so it was consumed without ever running (C1-02).
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = HostActor();
+            ActorContext client = ClientActor("c1-02-join");
+            stack.Runtime.LoadMod(host, "server", @"
+                local park = Instance.new('RemoteEvent')
+                park.Name = 'Park'
+                park.Parent = workspace
+                local join = Instance.new('RemoteEvent')
+                join.Name = 'Join'
+                join.Parent = workspace
+                park.OnServerEvent:Connect(function() task.wait(2) end)
+                join.OnServerEvent:Once(function(player, n) store_set('once', tostring(n)) end)",
+                LuaCapabilities.All, persistToStore: false);
+            stack.Runtime.LoadMod(client, "client", @"
+                local park = workspace:FindFirstChild('Park')
+                for index = 1, " + LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender.ToString(
+                    CultureInfo.InvariantCulture) + @" do park:FireServer() end
+                workspace:FindFirstChild('Join'):FireServer(1)", LuaCapabilities.All, persistToStore: false);
+            PumpFrames(bindings, stack, host, 1);
+
+            Assert.AreEqual("", store.Get("server", "once"));
+            Assert.AreEqual(1L, bindings.RemoteHandlerRefusalCount, "the Join call found the sender's budget full");
+
+            PumpFrames(bindings, stack, host, 25, 0.1d);
+            stack.Runtime.LoadMod(client, "client-again", "workspace:FindFirstChild('Join'):FireServer(2)",
+                LuaCapabilities.All, persistToStore: false);
+            PumpFrames(bindings, stack, host, 1);
+
+            Assert.AreEqual("2", store.Get("server", "once"), "the refused Once never ran, so it runs for the next call");
+        }
+
+        [Test]
+        public void Lua_C1_03_AWaitLoopOnOnServerEvent_ChargesWhatEachResumeStartsToTheSender_NotTheHost()
+        {
+            // WHY: a host thread in `remote.OnServerEvent:Wait()` resumed uncharged, so what it started for
+            // each call was the host's: one client firing once a frame filled the host's thread quota and the
+            // host could no longer start a thread or load a mod (C1-03).
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = HostActor();
+            ActorContext flooder = ClientActor("c1-03-flooder");
+            stack.Runtime.LoadMod(host, "server", @"
+                local remote = Instance.new('RemoteEvent')
+                remote.Name = 'Queue'
+                remote.Parent = workspace
+                task.spawn(function()
+                    while true do
+                        local player, n = remote.OnServerEvent:Wait()
+                        store_set('last', tostring(n))
+                        task.spawn(function() task.wait(600) end)
+                    end
+                end)", LuaCapabilities.All, persistToStore: false);
+            stack.Runtime.LoadMod(flooder, "flooder", @"
+                local remote = workspace:FindFirstChild('Queue')
+                local n = 0
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    n = n + 1
+                    if n <= 300 then remote:FireServer(n) end
+                end)", LuaCapabilities.All, persistToStore: false);
+
+            PumpFrames(bindings, stack, host, 320);
+
+            int inducedBudget = bindings.Scheduler.MaxInducedThreadsPerSender;
+            AssertTheHostCanStillSpawn(stack, host, store);
+            Assert.AreEqual(inducedBudget, bindings.Scheduler.CountInducedPoolThreads(flooder.ActorId),
+                "what each resume started is the sender's, held to its induced budget");
+            Assert.AreEqual(inducedBudget.ToString(CultureInfo.InvariantCulture), store.Get("server", "last"));
+            Assert.AreEqual(1, bindings.Scheduler.CountDeferredListenerInvocations(flooder.ActorId),
+                "the loop's next resume waits for room in the sender's budget instead of charging the host");
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors(host, "server"));
+
+            bindings.Scheduler.Advance(600d);
+            PumpFrames(bindings, stack, host, 2);
+
+            Assert.AreEqual((inducedBudget + 1).ToString(CultureInfo.InvariantCulture), store.Get("server", "last"),
+                "once the sender's threads end, the loop resumes with the call it was waiting for");
+        }
+
+        [Test]
+        public void Lua_C1_03_AWaitLoopOnASignalAChargedHandlerFires_ChargesWhatItStartsToTheSender()
+        {
+            // WHY: the same loop on a signal a remote handler fires by setting an attribute resumed
+            // uncharged too, and the host ran out of threads (C1-03).
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = HostActor();
+            ActorContext flooder = ClientActor("c1-03-bus-flooder");
+            stack.Runtime.LoadMod(host, "server", @"
+                local remote = Instance.new('RemoteEvent')
+                remote.Name = 'Cooldown'
+                remote.Parent = workspace
+                local bus = Instance.new('Folder')
+                bus.Name = 'Bus'
+                bus.Parent = workspace
+                local resumes = 0
+                task.spawn(function()
+                    while true do
+                        bus:GetAttributeChangedSignal('Ping'):Wait()
+                        resumes = resumes + 1
+                        store_set('resumes', tostring(resumes))
+                        task.spawn(function() task.wait(60) end)
+                    end
+                end)
+                remote.OnServerEvent:Connect(function(player, n) bus:SetAttribute('Ping', n) end)",
+                LuaCapabilities.All, persistToStore: false);
+            stack.Runtime.LoadMod(flooder, "flooder", @"
+                local remote = workspace:FindFirstChild('Cooldown')
+                local n = 0
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    n = n + 1
+                    if n <= 300 then remote:FireServer(n) end
+                end)", LuaCapabilities.All, persistToStore: false);
+
+            PumpFrames(bindings, stack, host, 320);
+
+            int inducedBudget = bindings.Scheduler.MaxInducedThreadsPerSender;
+            AssertTheHostCanStillSpawn(stack, host, store);
+            Assert.AreEqual(inducedBudget, bindings.Scheduler.CountInducedPoolThreads(flooder.ActorId));
+            Assert.AreEqual(inducedBudget.ToString(CultureInfo.InvariantCulture), store.Get("server", "resumes"));
+            Assert.IsEmpty(stack.Runtime.GetRecentHandlerErrors(host, "server"));
+        }
+
+        [Test]
+        public void Lua_C1_11_TaskCancelOfACoroutineRunningValue_SaysWhichThreadsItTakes()
+        {
+            // WHY: task.cancel(coroutine.running()) answered "task.cancel expects a thread" about a value that
+            // is a thread; R4.10 keeps coroutine.running() values outside the scheduler, and the refusal
+            // must say so and what to do instead (C1-11).
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            stack.Runtime.LoadMod("m", @"
+                local ok, err = pcall(task.cancel, coroutine.running())
+                store_set('ok', tostring(ok))
+                store_set('err', tostring(err))
+                local wrongOk, wrongErr = pcall(task.cancel, 5)
+                store_set('wrong', tostring(wrongErr))");
+
+            Assert.AreEqual("false", store.Get("m", "ok"));
+            StringAssert.Contains("task.cancel cannot cancel a coroutine.create thread or a coroutine.running() value",
+                store.Get("m", "err"));
+            StringAssert.Contains("task.spawn, task.defer or task.delay", store.Get("m", "err"));
+            StringAssert.DoesNotContain("expects a thread", store.Get("m", "err"));
+            StringAssert.Contains("task.cancel expects a thread at argument 1", store.Get("m", "wrong"),
+                "a value that is no thread at all keeps its type refusal");
+        }
+
+        [TestCase("error('boom')", "boom")]
+        [TestCase("error('boom', 2)", "boom")]
+        [TestCase("local t = nil; return t.x", "attempt to index a nil value (local 't')")]
+        [TestCase("error({})", "table: ")]
+        public void Lua_B3_06_AnOnServerInvokeThatRaises_AnswersTheCallerWithTheErrorValue_NotTheEnginesRendering(
+            string body, string expected)
+        {
+            // WHY (audit B3-06): the caller - on a server, a remote client - was answered with the exception's
+            // Message, Lua-CSharp's rendering: "Lua-CSharp: [string "sandbox_chunk"]:5: boom", the engine's name
+            // and the host's internal chunk name in front of what the callback raised.
+            LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            ActorContext host = HostActor();
+            ActorContext client = ClientActor("b3-06-client");
+            bindings.ConnectActor(client);
+            stack.Runtime.LoadMod(host, "raising", @"
+                local remote = Instance.new('RemoteFunction')
+                remote.Name = 'Raise'
+                remote.Parent = workspace
+                remote.OnServerInvoke = function(player) " + body + @" end",
+                LuaCapabilities.All, persistToStore: false);
+
+            RbxNetworkResponse answer = InvokeServer(bindings, WorkspaceChild(bindings, "Raise"),
+                client.ActorId);
+
+            Assert.IsNotNull(answer);
+            Assert.IsFalse(answer.Succeeded);
+            if (expected.EndsWith(" ", System.StringComparison.Ordinal))
+            {
+                StringAssert.StartsWith(expected, answer.Error);
+            }
+            else
+            {
+                Assert.AreEqual(expected, answer.Error);
+            }
+
+            StringAssert.DoesNotContain("Lua-CSharp", answer.Error);
+            StringAssert.DoesNotContain("sandbox_chunk", answer.Error);
         }
 
         [Test]
@@ -900,7 +1428,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     return 'ok'
                 end", LuaCapabilities.All, persistToStore: false);
             RbxInstance remote = WorkspaceChild(bindings, "Delays");
-            for (int call = 1; call < LuaCsRbxApiBindings.MaxRemoteHandlerThreadsPerSender; call++)
+            for (int call = 0; call < bindings.Scheduler.MaxInducedThreadsPerSender; call++)
             {
                 RbxNetworkResponse served = BeginInvokeServer(bindings, remote, client.ActorId).Response;
                 Assert.IsTrue(served != null && served.Succeeded, "call " + call + ": " + served?.Error);
@@ -1013,10 +1541,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         private static void PumpFrames(LuaCsRbxApiBindings bindings, LuaCsModStack stack,
             ActorContext host, int frames)
         {
+            PumpFrames(bindings, stack, host, frames, 0.016d);
+        }
+
+        private static void PumpFrames(LuaCsRbxApiBindings bindings, LuaCsModStack stack,
+            ActorContext host, int frames, double deltaSeconds)
+        {
             for (int frame = 0; frame < frames; frame++)
             {
-                bindings.Scheduler.Advance(0.016d);
-                stack.Runtime.Tick(host, 0.016d);
+                bindings.Scheduler.Advance(deltaSeconds);
+                stack.Runtime.Tick(host, deltaSeconds);
             }
         }
 

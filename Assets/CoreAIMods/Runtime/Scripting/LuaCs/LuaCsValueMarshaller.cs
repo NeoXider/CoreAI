@@ -393,7 +393,8 @@ namespace CoreAI.Scripting.LuaCs
         /// base-16 retry): optional surrounding C whitespace and sign; a decimal with optional point and
         /// exponent (<c>"5"</c>, <c>".5"</c>, <c>"1e3"</c>); a <c>0x</c> hexadecimal with optional fraction
         /// and binary exponent (<c>" 0x10 "</c>, <c>"0x1p4"</c>); <c>inf</c>, <c>infinity</c> or <c>nan</c>
-        /// in any case. An out-of-range decimal becomes an infinity, as <c>strtod</c> answers it.
+        /// in any case. An out-of-range decimal becomes an infinity, as <c>strtod</c> answers it. Only the
+        /// text before an embedded NUL is read, as C reads the string (<c>"5\0x"</c> is 5).
         /// </summary>
         internal static bool TryParseNumber(string text, out double number)
         {
@@ -404,7 +405,10 @@ namespace CoreAI.Scripting.LuaCs
             }
 
             int start = 0;
-            int end = text.Length;
+            // WHY the NUL ends the text: luaO_str2d hands the string to strtod as a C string, so Luau's
+            // tonumber("5\0x") is 5; refusing it converted the same string differently from Roblox (C1-09).
+            int nul = text.IndexOf('\0');
+            int end = nul >= 0 ? nul : text.Length;
             while (start < end && IsCSpace(text[start]))
             {
                 start++;

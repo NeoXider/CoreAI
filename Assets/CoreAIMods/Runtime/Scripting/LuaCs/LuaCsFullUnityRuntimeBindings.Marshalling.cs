@@ -111,7 +111,16 @@ namespace CoreAI.Ai.LuaCs
             return ConvertArg(value, targetType);
         }
 
-        private static object ConvertArg(LuaValue value, Type targetType)
+        /// <summary>
+        /// Converts a script value for a reflected member or parameter of <paramref name="targetType"/> by
+        /// the one rule set of every script surface (<see cref="LuaCsValueMarshaller"/>, C1-07): a string
+        /// takes a string or a number's <c>tostring</c> text; a number takes a number or a numeric string;
+        /// an integer takes the number truncated toward zero and refuses NaN and a value its type cannot
+        /// hold (a <c>ulong</c> at most <see cref="long.MaxValue"/>); a boolean takes only true or false; an
+        /// enum takes a member name spelled exactly or an integer. Nil is the type's default. Unity value
+        /// shapes (Vector3, Color, ...) keep their table and text forms.
+        /// </summary>
+        internal static object ConvertArg(LuaValue value, Type targetType)
         {
             if (value.Type == LuaValueType.Nil)
             {
@@ -125,12 +134,16 @@ namespace CoreAI.Ai.LuaCs
 
             if (targetType == typeof(bool))
             {
-                return value.Type == LuaValueType.Boolean ? value.Read<bool>() : value.Read<double>() != 0d;
+                // WHY only true and false: a number became a boolean by != 0 and a string threw an engine
+                // cast error, while every other surface refuses both with one message (C1-07).
+                return value.Type == LuaValueType.Boolean
+                    ? value.Read<bool>()
+                    : throw new ArgumentException($"value must be a boolean, got {value.TypeToString()}.");
             }
 
             if (targetType == typeof(int))
             {
-                return (int)ReadNumber(value);
+                return (int)ReadInteger(value, int.MinValue, int.MaxValue);
             }
 
             if (targetType == typeof(float))
@@ -145,47 +158,47 @@ namespace CoreAI.Ai.LuaCs
 
             if (targetType == typeof(long))
             {
-                return (long)ReadNumber(value);
+                return ReadInteger(value, long.MinValue, long.MaxValue);
             }
 
             if (targetType == typeof(uint))
             {
-                return (uint)ReadNumber(value);
+                return (uint)ReadInteger(value, uint.MinValue, uint.MaxValue);
             }
 
             if (targetType == typeof(ulong))
             {
-                return (ulong)ReadNumber(value);
+                return (ulong)ReadInteger(value, 0L, long.MaxValue);
             }
 
             if (targetType == typeof(short))
             {
-                return (short)ReadNumber(value);
+                return (short)ReadInteger(value, short.MinValue, short.MaxValue);
             }
 
             if (targetType == typeof(ushort))
             {
-                return (ushort)ReadNumber(value);
+                return (ushort)ReadInteger(value, ushort.MinValue, ushort.MaxValue);
             }
 
             if (targetType == typeof(byte))
             {
-                return (byte)ReadNumber(value);
+                return (byte)ReadInteger(value, byte.MinValue, byte.MaxValue);
             }
 
             if (targetType == typeof(sbyte))
             {
-                return (sbyte)ReadNumber(value);
+                return (sbyte)ReadInteger(value, sbyte.MinValue, sbyte.MaxValue);
             }
 
             if (targetType.IsEnum && value.Type == LuaValueType.String)
             {
-                return Enum.Parse(targetType, value.Read<string>(), true);
+                return ReadEnumName(value.Read<string>(), targetType);
             }
 
             if (targetType.IsEnum && value.Type == LuaValueType.Number)
             {
-                return Enum.ToObject(targetType, (long)ReadNumber(value));
+                return Enum.ToObject(targetType, ReadInteger(value, long.MinValue, long.MaxValue));
             }
 
             if (targetType == typeof(Vector3) && value.Type == LuaValueType.Table)
@@ -288,16 +301,16 @@ namespace CoreAI.Ai.LuaCs
                 {
                     LuaTable t = value.Read<LuaTable>();
                     return new Color32(
-                        (byte)ReadRequiredTableNumber(t, "r"),
-                        (byte)ReadRequiredTableNumber(t, "g"),
-                        (byte)ReadRequiredTableNumber(t, "b"),
-                        (byte)ReadOptionalTableNumber(t, "a", 255f));
+                        ReadRequiredTableByte(t, "r"),
+                        ReadRequiredTableByte(t, "g"),
+                        ReadRequiredTableByte(t, "b"),
+                        t["a"].Type == LuaValueType.Nil ? (byte)255 : ReadRequiredTableByte(t, "a"));
                 }
             }
 
             if (typeof(UnityEngine.Object).IsAssignableFrom(targetType) && value.Type == LuaValueType.Number)
             {
-                return ResolveUnityObject((int)ReadNumber(value), targetType);
+                return ResolveUnityObject((int)ReadInteger(value, int.MinValue, int.MaxValue), targetType);
             }
 
             object obj = value.Read<object>();
@@ -308,24 +321,68 @@ namespace CoreAI.Ai.LuaCs
 
         private static double ReadNumber(LuaValue value)
         {
-            if (value.Type != LuaValueType.Number)
+            if (!LuaCsValueMarshaller.TryCoerceNumber(value, out double number))
             {
-                throw new ArgumentException($"value must be a number, got {value.Type}.");
+                throw new ArgumentException($"value must be a number, got {value.TypeToString()}.");
             }
 
-            return value.Read<double>();
+            return number;
+        }
+
+        /// <summary>
+        /// <see cref="LuaCsValueMarshaller.TryCoerceInteger"/>: truncated toward zero, and refused when NaN or
+        /// outside [<paramref name="minimum"/>, <paramref name="maximum"/>].
+        /// </summary>
+        /// <remarks>
+        /// WHY checked: an unchecked cast is undefined for such a value (x64 turned 1e300 into int.MinValue)
+        /// and (uint)-1 wrapped to 4294967295, so a script's write depended on the host's CPU (C1-07).
+        /// </remarks>
+        private static long ReadInteger(LuaValue value, long minimum, long maximum)
+        {
+            if (LuaCsValueMarshaller.TryCoerceInteger(value, minimum, maximum, out long integer))
+            {
+                return integer;
+            }
+
+            if (!LuaCsValueMarshaller.TryCoerceNumber(value, out double number))
+            {
+                throw new ArgumentException($"value must be a number, got {value.TypeToString()}.");
+            }
+
+            throw new ArgumentException(
+                "value must be a whole number from " + minimum.ToString(CultureInfo.InvariantCulture) + " to "
+                + maximum.ToString(CultureInfo.InvariantCulture) + ", got "
+                + number.ToString("R", CultureInfo.InvariantCulture) + ".");
+        }
+
+        /// <summary>
+        /// An enum member by its exact name; a different case, a numeric string or a flag list is refused,
+        /// as the Rbx surface refuses them for its Enum members.
+        /// </summary>
+        private static object ReadEnumName(string name, Type enumType)
+        {
+            string[] names = Enum.GetNames(enumType);
+            for (int index = 0; index < names.Length; index++)
+            {
+                if (string.Equals(names[index], name, StringComparison.Ordinal))
+                {
+                    return Enum.Parse(enumType, name, false);
+                }
+            }
+
+            throw new ArgumentException($"value must name a member of {enumType.Name}, got '{name}'.");
         }
 
         private static string ReadStringValue(LuaValue value)
         {
-            return value.Type switch
+            // WHY no boolean: Luau converts only numbers to strings, and every other surface refuses the
+            // rest with one message (C1-07).
+            if (LuaCsValueMarshaller.TryCoerceString(value, out string text))
             {
-                LuaValueType.String => value.Read<string>(),
-                LuaValueType.Number => value.Read<double>().ToString(CultureInfo.InvariantCulture),
-                LuaValueType.Boolean => value.Read<bool>() ? "true" : "false",
-                LuaValueType.Nil => "",
-                _ => value.ToString()
-            };
+                return text;
+            }
+
+            throw new ArgumentException($"value must be a string, got {value.TypeToString()}.");
         }
 
         private static LuaTable ReadRequiredTable(LuaTable table, string key)
@@ -342,12 +399,23 @@ namespace CoreAI.Ai.LuaCs
         private static double ReadRequiredTableNumber(LuaTable table, string key)
         {
             LuaValue value = table[key];
-            if (value.Type != LuaValueType.Number)
+            if (!LuaCsValueMarshaller.TryCoerceNumber(value, out double number))
             {
                 throw new ArgumentException($"'{key}' must be a number.");
             }
 
-            return value.Read<double>();
+            return number;
+        }
+
+        private static byte ReadRequiredTableByte(LuaTable table, string key)
+        {
+            LuaValue value = table[key];
+            if (!LuaCsValueMarshaller.TryCoerceInteger(value, byte.MinValue, byte.MaxValue, out long channel))
+            {
+                throw new ArgumentException($"'{key}' must be a whole number from 0 to 255.");
+            }
+
+            return (byte)channel;
         }
 
         private static float ReadOptionalTableNumber(LuaTable table, string key, float defaultValue)

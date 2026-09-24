@@ -176,8 +176,8 @@ namespace CoreAI.Ai.LuaCs
             methods["GenerateGUID"] = Fn("HttpService.GenerateGUID", ctx =>
             {
                 RequireHttpService(ctx, context, 0);
-                LuaValue bracesValue = Arg(ctx, 1);
-                bool braces = bracesValue.Type == LuaValueType.Nil || bracesValue.ToBoolean();
+                bool braces = LuaCsRbxDatatypeBindings.ReadOptionalBoolean(ctx, 1, "HttpService:GenerateGUID", 1,
+                    whenOmitted: true);
                 string guid = Guid.NewGuid().ToString("D");
                 return new LuaValue(braces ? "{" + guid + "}" : guid);
             }, context);
@@ -300,9 +300,7 @@ namespace CoreAI.Ai.LuaCs
                 headers["Content-Type"] = ReadPostContentType(Arg(ctx, 4));
             }
 
-            LuaValue compressValue = Arg(ctx, 5);
-            bool compress = compressValue.Type != LuaValueType.Nil
-                            && compressValue.ToBoolean();
+            bool compress = LuaCsRbxDatatypeBindings.ReadOptionalBoolean(ctx, 5, "HttpService:PostAsync", 4);
             return new RbxHttpRequest("POST", uri, headers, body, compress);
         }
 
