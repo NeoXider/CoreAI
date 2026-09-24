@@ -109,7 +109,7 @@ The real `CoreServicesInstaller` is a VContainer/MessagePipe installer, but the 
 
 Linked from `Assets/CoreAIMods/Tests/EditMode` (75 fixture files, 4 helpers, 1 derived helper), plus `Assets/CoreAiUnity/Tests/EditMode/LuaModAutoRepairPolicyEditModeTests.cs` (a Lua-tier policy tested through public API only). The explicit list is in the project file. 36 files of the same folder already run in the engine-free suite and are not linked again.
 
-Linked fixtures still contain tests that do not run here. Counted on 2026-09-24, the Lua-tier run is 1464 passed (11 of them the runner self-tests above), 0 failed, 37 not executed:
+Linked fixtures still contain tests that do not run here. Counted on 2026-09-24 at `07264057`, the Lua-tier run is 1575 passed (11 of them the runner self-tests above), 0 failed, 37 not executed:
 
 | Not executed | Fixture | Tests | Why |
 |---|---|---|---|

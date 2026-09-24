@@ -202,9 +202,10 @@ executed) 1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_EN
       nest at most 200 deep per thread (a catchable `C stack overflow (…)` instead of an unwind of seconds); a raw
       coroutine is held to the memory budget of the run that resumes it.
 - [x] **Docs (DOCS-3)** — the guard, the portable runner and every audit-round-1 fix above are in `RBX_API.md`,
-      `LUA_SANDBOX_SECURITY.md`, `WORLD_PACKAGE.md`, `mod-system.md`, `mod-authoring.md`, `RBX_API_SKILL.md`
-      (including where the skill text is now behind the runtime), the roadmaps, `AGENT_ROLES_AND_TOOLS.md`, the
-      Mirror and Hub READMEs and both changelogs. The report-style files
+      `LUA_SANDBOX_SECURITY.md`, `WORLD_PACKAGE.md`, `mod-system.md`, `mod-authoring.md`, the "Rbx API" skill
+      text (`RbxApi.txt` and `BuiltInRbxApiSkillText.cs`, still byte-identical) with `RBX_API_SKILL.md`, the
+      roadmaps, `AGENT_ROLES_AND_TOOLS.md`, the Mirror, Hub and Instances READMEs, the portable-suite READMEs and
+      both changelogs. The report-style files
       `dev-docs/ALLOC_SIGNALS_FINDING_2026-09-05.md` and `dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md` were folded
       into this file (their open findings are items below) and deleted (A5-11).
 
@@ -453,13 +454,6 @@ executed) 1575 passed / 0 failed / 37 not executed (32 Inconclusive `PORTABLE_EN
 - [ ] **MVP2 DoD item 13 ("reaches `OnServerEvent` next drain")** — check that a test asserts the handler has NOT
       run before the drain; if none does, a synchronous dispatch would pass (from the 2026-09-06 closure audit, not
       re-checked since). *Owner:* test hygiene. *Plan:* add the pre-drain assertion to the loopback remote test.
-- [ ] **The skill text is behind the runtime** (after audit round 1): `GetPropertyChangedSignal`'s near-miss rule,
-      uncatchable budget trips, `os.time(t)` returning `nil` before 1970, the client clock hold — listed in
-      `Docs/CoreAIMods/RBX_API_SKILL.md`, "Where the runtime has moved past the skill text". The Instances README
-      (`Assets/CoreAIMods/Runtime/RbxApi/Instances/README.md`) also still lacks the destruction tombstone of
-      `ChildRemoved`/`DescendantRemoving`/the tag removed signal and the 100-character tag rule. *Owner:* the next
-      docs pass. *Plan:* edit `RbxApi.txt` and `BuiltInRbxApiSkillText.cs` together (they stay byte-identical) and
-      the Instances README, then fold that subsection of `RBX_API_SKILL.md` back into its list.
 - [ ] **Stale MVP1 paths in the roadmap** (from the 2026-09-06 closure audit): the §5.1.1 and §5.2.1 task
       breakdowns still name planned `RobloxApi/…` files (`RobloxApi/Spatial/RobloxSpace.cs`,
       `RobloxApi/Scheduling/TaskLibrary.cs`, …); the code lives under `Assets/CoreAIMods/Runtime/RbxApi/` with other

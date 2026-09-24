@@ -589,9 +589,12 @@ A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for that roun
   section now documents the `[mod:<id> script:main.lua line:N]` prefix it used to deny. It also covers task handles
   and native `coroutine.yield`, the clocks, `typeof`/`warn` and the loud global stubs, the 1,000-byte unreliable
   ceiling, `ClickDetector`, the tag globals, `Humanoid:Clone`, the non-archivable character,
-  `Player:Kick(message)`, new attribute names, and that a player's mods leave with the player. It has not caught up
-  with the first audit round yet: `Docs/CoreAIMods/RBX_API_SKILL.md`, "Where the runtime has moved past the skill
-  text", lists the gaps (`GetPropertyChangedSignal`, uncatchable budget trips, the clocks).
+  `Player:Kick(message)`, new attribute names, and that a player's mods leave with the player. After the first
+  audit round it also states that a budget cut cannot be caught by `pcall`/`xpcall`, the `GetPropertyChangedSignal`
+  near-miss rule, `os.time(t)` returning `nil` before 1970 and the client clock hold, the `coroutine.resume` refusal
+  of task threads (use `task.spawn(t)`), the 200-deep library call cap, the instance quota's `BUDGET_EXCEEDED`, the
+  100-character tag rule, readable removal handlers and the Lua-style `bad argument` errors of the mod-core
+  functions.
 
 ## [7.45.0] - 2026-09-24
 

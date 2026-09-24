@@ -88,11 +88,17 @@ Keep these in step with the runtime when the skill text is edited:
   another mod's task or a `coroutine.create` thread is `BAD_ARGUMENT`), native `coroutine.yield`
   (parks a task until `task.spawn(t, ...)`, whose arguments it returns; `CONTEXT_VIOLATION` in a
   handler or the main chunk), `CONTEXT_VIOLATION` for `task.wait`/`signal:Wait`/`WaitForChild`/
-  `InvokeServer` inside `coroutine.create`, `typeof` with Roblox type names, `warn` into the mod log
-  at `Warn`, the clocks (`os.time(t)` reads the table as UTC with `hour` defaulting to 12;
-  `GetServerTimeNow` follows the server once a client has joined and never goes backwards from then
-  on; `DateTime` is not implemented), that a read-only script's `Instance.new` raises the capability
-  error, and that a player's mods are unloaded when that player leaves.
+  `InvokeServer` inside `coroutine.create`, that `coroutine.resume` refuses a task, handler or
+  main-chunk thread (resume a parked task with `task.spawn(t)`), `typeof` with Roblox type names,
+  `warn` into the mod log at `Warn`, the clocks (`os.time(t)` reads the table as UTC with `hour`
+  defaulting to 12, a non-number field counts as missing and a date before 1970 is `nil`;
+  `GetServerTimeNow` follows the server once a client has joined, never goes backwards from then on
+  and stands still while the server's clock does; there is no `os.date` and `DateTime` is not
+  implemented), that a read-only script's `Instance.new` raises the capability error, and that a
+  player's mods are unloaded when that player leaves. Its budget rules say that a budget cut cannot
+  be caught by `pcall`/`xpcall` (only the resumer of a cut `coroutine.create` coroutine sees it),
+  that such a coroutine shares its resumer's memory budget, and that library calls back into Lua
+  nest at most 200 deep before a catchable "C stack overflow".
 - Section 2 lists `Vector2:Angle`, the CFrame `components`/`ToEulerAngles`/`ToOrientation`/
   `ToAxisAngle`/`AngleBetween` family and `CFrame.fromRotationBetweenVectors`, `Color3.toHSV`, the
   constructor coercion rule (numeric string → number, nil → 0, anything else `BAD_ARGUMENT`), 32-bit
@@ -103,10 +109,12 @@ Keep these in step with the runtime when the skill text is edited:
   player, measures `MaxActivationDistance` from that player's character (from the camera when there
   is none) and works for a detector under a `Model` or `Folder` (the deepest detector wins), and that
   `CollectionService.TagAdded`/`TagRemoved`/`GetAllTags` count only holders inside the DataModel.
-- Section 4 also states the instance-core rules: `Instance.Changed` on every instance and
-  `GetPropertyChangedSignal` refusing an unknown or wrong-case name (script, tween and `PivotTo`
-  writes fire both; an equal assignment and physics movement fire nothing), `AncestryChanged` on every
-  descendant, `game:IsLoaded()`, the 100-character `Name`, the 2,048-level depth limit, `Clone`
+- Section 4 also states the instance-core rules: the per-actor instance quota (2,048; 4,032 per
+  WebGL world) and its `BUDGET_EXCEEDED` refusal naming the call, `Instance.Changed` on every instance
+  and `GetPropertyChangedSignal` refusing an event, a method or a near-miss typo of a known property
+  while a real unmodelled property gets a never-firing signal (script, tween and `PivotTo` writes fire
+  both; an equal assignment and physics movement fire nothing), removal handlers of a destroyed
+  instance reading the instance they were handed, `AncestryChanged` on every descendant, `game:IsLoaded()`, the 100-character `Name`, the 2,048-level depth limit, `Clone`
   remapping `PrimaryPart`/`ObjectValue.Value` onto the copies, `game:Clone()`/`player:Clone()` → nil,
   the Debris refusals (services, `game`, the camera, a `Player`) and the TweenService rules
   (WorldEdit, tweenable types, per-actor retention of 256 finished tweens with the WRONG/RIGHT pair).
@@ -120,10 +128,12 @@ Keep these in step with the runtime when the skill text is edited:
   health and movement values). Section 8 adds the non-archivable character (`character:Clone()` is
   nil until the script sets `Archivable = true`) and `Player:Kick(message)` (the text reaches the
   kicked client, cut to 1,024 UTF-8 bytes; a non-string is `BAD_ARGUMENT`). Section 12 caps
-  attributes and tags at 256 per instance and limits a new attribute name to ASCII letters, digits,
-  `.`, `-`, `/` and `_`. Section 13 documents the `[mod:<id> script:main.lua line:N]` prefix on errors
-  raised inside a mod, argument numbers that do not count `self`, and that `pcall`, `xpcall` and
-  `coroutine.resume` all receive exactly that one line. Section 14 lists the loud global stubs
+  attributes and tags at 256 per instance, limits a new attribute name to ASCII letters, digits,
+  `.`, `-`, `/` and `_`, and a new tag to 100 characters. Section 13 documents the
+  `[mod:<id> script:main.lua line:N]` prefix on errors raised inside a mod, argument numbers that do
+  not count `self`, that `pcall`, `xpcall` and `coroutine.resume` all receive exactly that one line
+  (a budget cut excepted), and the Lua-style `bad argument #n to 'fn' (x expected, got y)` of the
+  mod-core functions, which never turn a number into a string. Section 14 lists the loud global stubs
   (`BrickColor`, `NumberSequence`, `ColorSequence`, `NumberRange`, `Ray`, `Region3`, `Rect`,
   `PhysicalProperties`, `OverlapParams`, `DateTime`, `shared`), each with its workaround.
 - `BasePart` exposes `Shape`, `Material`, `MaterialVariant` (string; `""` for none), `Orientation`, and `Rotation` in addition to the MVP1
@@ -149,24 +159,6 @@ Keep these in step with the runtime when the skill text is edited:
 
 A ratchet test reads the shipped-versus-stubbed truth out of `ServiceCatalog` at test time, so a
 future rung cannot ship a service while the skill text still calls it unimplemented.
-
-### Where the runtime has moved past the skill text
-
-The skill text has not been edited since these runtime changes, so it is behind the runtime in three
-places (the edit is tracked in `TODO.md`; `RBX_API.md` already describes the runtime):
-
-- **`GetPropertyChangedSignal`.** Section 4 says it refuses an unknown or wrong-case name. The runtime
-  refuses only an event, a method or a callback, a near miss of a known property name (one letter of
-  the wrong case, missing, added, changed or swapped; never a digit) and a name over 100 characters;
-  a real property CoreAI does not model gets a signal that never fires and one log note.
-- **Budget trips.** Section 13 says to catch errors with `pcall`. A budget trip (steps, time, memory)
-  cannot be caught: `pcall`/`xpcall` inside the tripped run let it through and `xpcall`'s handler
-  does not run; only a raw coroutine's resumer sees it (`coroutine.resume` returns `false`, the
-  coroutine is dead). An instance-quota `BUDGET_EXCEEDED` refusal and the per-call pattern-step
-  refusal are ordinary errors and are caught.
-- **Clocks.** Section 1 does not say that `os.time(t)` returns `nil` for a date before 1970, that a
-  non-number field counts as missing, or that a client's `GetServerTimeNow` holds while the server's
-  clock holds.
 
 The user-facing companion to this skill is
 [`Assets/CoreAI/Docs/RBX_API.md`](../../Assets/CoreAI/Docs/RBX_API.md); world saving/loading is

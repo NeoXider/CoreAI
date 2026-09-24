@@ -44,7 +44,8 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   throttled network reports and the clock hold; `mod-system.md` and `mod-authoring.md` cover the failed-build
   rollback, the streak rule and the `mods_call` budget; the Mirror README covers the pre-admission drop, the
   clock-hold anchors, the world-released connection, the loud host-mode refusal and the limits of the version check.
-  `RBX_API_SKILL.md` lists where the runtime has moved past the skill text. The roadmaps list
+  The "Rbx API" skill text and `RBX_API_SKILL.md` follow the audit round too, and so do the Instances README and the
+  portable-suite READMEs. The roadmaps list
   `ClickDetector.MouseHoverEnter`/`MouseHoverLeave` as backlog (they exist and never fire).
   `dev-docs/ALLOC_SIGNALS_FINDING_2026-09-05.md` and `dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md` were folded into
   `TODO.md` and removed.

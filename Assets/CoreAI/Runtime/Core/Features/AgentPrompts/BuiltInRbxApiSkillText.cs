@@ -66,20 +66,33 @@ Contents: 1. Space & rules  2. Datatypes  3. Enum  4. Instances  5. Part propert
   parks it until `task.spawn(t, ...)`, whose extra args are what yield returns; inside a handler
   or the main chunk it is CONTEXT_VIOLATION. `task.wait`, `signal:Wait`, `WaitForChild` and `InvokeServer`
   inside a `coroutine.create` coroutine raise CONTEXT_VIOLATION — use `task.spawn` instead.
+- `coroutine.resume` only resumes a `coroutine.create` coroutine. Given a task, handler or main-chunk
+  thread (a `coroutine.running()` value) it returns `false, ""cannot resume a task or signal-handler
+  thread with coroutine.resume; ...""` and leaves the thread alone: resume a parked task with
+  `task.spawn(t)`, where `t` is the handle task.spawn/defer/delay returned.
 - `typeof(v)` returns Roblox type names (""Instance"", ""Vector3"", ""EnumItem"", ...). `warn(...)`
   writes to the mod log at Warn level (get_mod_logs shows it).
 - Clocks: `os.time()` (Unix seconds; `os.time({year=,month=,day=[,hour=,min=,sec=]})` reads the
-  table as UTC, hour defaults to 12), `os.clock()`, `time()` (scaled game time), and
-  `workspace:GetServerTimeNow()` (Unix seconds every player agrees on: a client reads the server's
-  clock once joined, and from then on it never goes backwards). `DateTime` is not implemented.
+  table as UTC, hour defaults to 12, a field that is not a number counts as missing — a missing
+  year/month/day is BAD_ARGUMENT — and a date before 1970 returns nil), `os.clock()`, `time()`
+  (scaled game time), and `workspace:GetServerTimeNow()` (Unix seconds every player agrees on: a
+  client reads the server's clock once joined, from then on it never goes backwards, and it stands
+  still while the server's clock does). There is no `os.date`; `DateTime` is not implemented.
 - A player who leaves takes the mods loaded for them along: they are unloaded (after their running
   code returns) and start again on the next world load.
 - Budgets are per resume: a thread may loop forever as long as it yields
   (`while true do task.wait() end` is fine); one resume that never yields, or that keeps too much
-  memory alive, is cut with BUDGET_EXCEEDED. `string.find/match/gmatch/gsub` stop after 5,000,000
-  matcher steps per call; `gsub`/`string.format` results are capped at 1,000,000 chars. Yielding
+  memory alive, is cut with BUDGET_EXCEEDED. The cut CANNOT be caught: `pcall`/`xpcall` inside the
+  cut code let it through (an xpcall handler does not run) — fix the loop, do not wrap it. Only the
+  code that `coroutine.resume`d a `coroutine.create` coroutine that was cut sees `false, err`, and
+  that coroutine is dead. A `coroutine.create` body shares the memory budget of the code that
+  resumes it. `string.find/match/gmatch/gsub` stop after 5,000,000 matcher steps per call and
+  `gsub`/`string.format` results are capped at 1,000,000 chars (both catchable errors). Yielding
   inside a `__tostring`/`__index` or a gsub replacement function raises ""attempt to yield across
-  a C-call boundary"".
+  a C-call boundary"". Library functions that call back into your Lua (a `table.sort` comparator,
+  `__tostring` via tostring/print/string.format, a gsub function, `__pairs`/`__ipairs`,
+  `coroutine.resume`) nest at most 200 deep; the next raises a catchable ""C stack overflow (...)"".
+  Plain recursion is not limited this way.
 
 ## 2. Datatypes (immutable value types; assigning a field errors)
 
@@ -140,6 +153,9 @@ alias).
   Weld, Attachment, ...) raises NOT_IMPLEMENTED; any other name errors (a Camera is not creatable —
   reach the world camera through `workspace.CurrentCamera`).
   The parent argument is deprecated (logs once); set `.Parent` after configuring instead.
+  The actor a mod runs for may own at most 2,048 instances (a WebGL world at most 4,032 in total):
+  one more `Instance.new`, `Clone` or `TweenService:Create` raises BUDGET_EXCEEDED naming the call
+  — `Destroy()` what you no longer need (Debris below) instead of retrying.
 - `RemoteEvent`/`UnreliableRemoteEvent` fire one-way; an `UnreliableRemoteEvent` payload over
   1,000 bytes raises PAYLOAD_TOO_LARGE, in solo too. `RemoteFunction:InvokeServer/InvokeClient`
   yields for a reply and is bounded to 30 scheduler seconds: a missing or stalled receiver raises
@@ -208,10 +224,14 @@ alias).
   needs WorldEdit. Name keeps its first 100 characters. A Parent deeper than 2,048 levels is
   BAD_ARGUMENT. A Player cannot be destroyed or re-parented (use `player:Kick()`).
 - `inst.Changed(propertyName)` fires on every instance (a value object passes the new Value);
-  `inst:GetPropertyChangedSignal(""Name"")` fires with no args and refuses an unknown or
-  wrong-case name. Writes by a script, a tween or PivotTo fire them (derived members too: a CFrame
+  `inst:GetPropertyChangedSignal(""Name"")` fires with no args. It refuses an event or method name
+  and a typo of a known property (wrong case or one letter off: ""position"" -> ""did you mean
+  Position""); a real Roblox property CoreAI does not model yet gets a signal that never fires (logged
+  once). Writes by a script, a tween or PivotTo fire them (derived members too: a CFrame
   write fires Position/Orientation/Rotation); an equal assignment fires nothing and physics
   movement never does. `AncestryChanged(movedInstance, newParent)` fires on every descendant.
+  ChildRemoved/DescendantRemoving and a tag's removed-signal handlers fired by `Destroy()` can
+  still read the destroyed instance they were handed (e.g. its Name), as Destroying handlers can.
   `game:IsLoaded()` is true; `game.Loaded` never fires.
 - Navigation: `FindFirstChild(name[,recursive])`, `FindFirstChildOfClass(cls)`,
   `FindFirstChildWhichIsA(cls[,recursive])`, `FindFirstAncestor(name)`,
@@ -457,7 +477,8 @@ under gravity and a dense stack shoves itself apart. Drive the whole game from o
   rejected with BAD_ARGUMENT. SetAttribute needs WorldEdit. A new attribute name uses only ASCII
   letters, digits, `.`, `-`, `/` and `_` (at most 100 chars, no ""RBX"" prefix); anything else is
   BAD_ARGUMENT.
-- `inst:AddTag(t)` / `RemoveTag(t)` / `HasTag(t)` / `GetTags()`. Add/Remove need WorldEdit.
+- `inst:AddTag(t)` / `RemoveTag(t)` / `HasTag(t)` / `GetTags()`. Add/Remove need WorldEdit. A new tag
+  is at most 100 characters (BAD_ARGUMENT beyond).
 - At most 256 attributes and 256 tags per instance; one more is BAD_ARGUMENT (a world must stay
   savable).
 
@@ -467,7 +488,10 @@ Every failure is a Lua error whose message is `CODE: message | fix: suggestion`;
 it starts with `[mod:<id> script:main.lua line:N] ` (one-off execute_lua errors have no prefix).
 Argument numbers do not count `self` (in `part:SetAttribute(name, value)` the name is argument 1). Catch
 with `pcall`; `pcall`, `xpcall` and `coroutine.resume` all receive exactly that one line (no stack
-trace). Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE, INSTANCE_DESTROYED,
+trace). A budget cut (section 1) is the exception: it cannot be caught. The mod-core functions
+(`store_set`, `hooks_on`, `mods_call`, ...) report a wrong argument the way Lua does —
+`bad argument #1 to 'store_set' (string expected, got table)` — and never turn a number into a
+string. Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE, INSTANCE_DESTROYED,
 PARENT_LOCKED, NOT_IMPLEMENTED, WORLD_DETACHED, BUDGET_EXCEEDED, SIGNAL_CASCADE,
 CONTEXT_VIOLATION, NOT_AUTHORITY, THREAD_CAP, PAYLOAD_TOO_LARGE.
 

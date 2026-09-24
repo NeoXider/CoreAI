@@ -55,19 +55,32 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
   marshalling layer. Inside a destruction-queued handler (`Destroying`, `AncestryChanged`, and the
   `Parent` change the destruction raises) a destroyed `BasePart` also reads its last-known property
   values: both part sinks keep the most recent 2,048 destroyed parts, and older ones are forgotten.
+  `ChildRemoved`, `DescendantRemoving` and the `CollectionService` removed signal that a `Destroy`
+  raises hand their handler the same readable tombstone — of the instance that handler was given,
+  never of another destroyed one.
 - Tags: `InstanceTagStore` answers for every registered instance, and its first-use/last-use flag
   (`IsTagInUse`, `InstanceRegistry.TagAdded`/`TagRemoved`) is store-wide and informational.
   `RbxCollectionService` keeps its own count of holders inside the DataModel and fires the Roblox
   `TagAdded`/`TagRemoved` (and answers `GetAllTags`) from that count, so a tagged nil-parented
-  instance counts for nothing there.
+  instance counts for nothing there. A tag is at most `InstanceTagStore.MaxTagLength` (100)
+  characters when it is created (`ValidateNewTag`: script `AddTag`, and the per-tag signal getters
+  for a tag no instance holds); the store itself accepts any non-empty tag, so a longer tag from a
+  world saved before the limit still restores, replicates, clones, reads and can be removed. The
+  per-tag and per-attribute signal tables (`KeyedSignalTable`) hold a connected signal strongly and,
+  past 64 keys, a signal without connections only weakly, so asking for many distinct keys leaves
+  nothing behind while a signal a script still holds keeps firing (C# code that keeps neither the
+  signal nor its connection is the uncovered case, see `TODO.md`).
 - Attribute names: `AttributeContract.ValidateNewName` (ASCII letters and digits plus `.`, `-`, `/`,
   `_`) guards a name a script creates; `ValidateName` (letters and digits of any script) guards
   restore, replication and reads, so a world saved with an older non-ASCII name still loads.
 - Registration admission: `IInstanceRegistrationAdmission` checks installed with
   `InstanceRegistry.AddRegistrationAdmission` run, in order, before a new record is added or
-  `Registered` fires; the first refusal aborts the creation with an `InvalidOperationException`
-  carrying its text, earlier admissions are revoked, and nothing is registered, announced or
-  destroyed. The mod runtime's per-actor instance quota is one such check.
+  `Registered` fires; the first refusal aborts the creation, earlier admissions are revoked, and
+  nothing is registered, announced or destroyed. A refusal written as a §5.2.7 line fails the
+  creation with that coded `RbxError`, led by the creation that was refused (`Instance.new("Part")`,
+  `cloning Part`, `TweenService:Create`, `restoring Part`, `creating Part`); any other text fails it
+  with an `InvalidOperationException` carrying exactly that text. The mod runtime's per-actor
+  instance quota is one such check and refuses with `BUDGET_EXCEEDED` and a `Destroy()` hint.
 - `RbxError` lives in this assembly for now; it moves to a shared RobloxApi contracts assembly
   when the Datatypes slice needs it.
 - Instances are created only through `InstanceRegistry` (no public `Register(instance)`)—

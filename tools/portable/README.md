@@ -45,7 +45,7 @@ The same job also builds and tests the three engine-free assemblies of the Mods 
 
 Each project keeps the Unity assembly name and references only what the asmdef references, and compiles as C# 9 with nullable off, like Unity does. A C# 10 feature or a `UnityEngine` reference in those folders therefore breaks the Linux build too. They exist for this gate, not as a library for plain .NET apps: in a game the Rbx API is only reachable through the Lua binding and the Unity world backing, which stay in the Unity packages.
 
-The test project lists its sources file by file rather than by glob, so a new engine-free fixture must be added to `Tests/CoreAI.Portable.Tests.csproj` explicitly or it never runs in this leg.
+The test project lists its sources file by file rather than by glob, so a new engine-free fixture must be added to `Tests/CoreAI.Portable.Tests.csproj` explicitly or it never runs in this leg. It compiles as C# 9 too (`LangVersion` 9.0, not `latest`): Unity compiles every linked test file as C# 9, so a newer language feature in one of them must break this build as it breaks the editor's.
 
 The Lua tier (the Lua-CSharp VM, the Lua bindings, the mod runtime, the scheduler adapters and the scene-free acceptance fixtures) has a separate suite, [`LuaTests`](LuaTests/README.md). It needs a small UnityEngine shim and is not part of the `portable-core` job; its README explains what the shim does and does not stand in for.
 

@@ -19,7 +19,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
     /// attribution, while a second well-behaved mod's handler still runs the SAME frame.
     /// </summary>
     /// <remarks>
-    /// WHY this file exists: <c>dev-docs/MVP_CLOSURE_AUDIT_2026-09-06.md</c> finding "MVP2 #1" is that
+    /// WHY this file exists: the 2026-09-06 closure audit's finding "MVP2 #1" (now the <c>TODO.md</c> item
+    /// "MVP2 criterion 14" under "Left on MVP2.5") is that
     /// criterion 14 was previously proven only by a test that INJECTS a pre-made
     /// <see cref="RbxErrorCode.BudgetExceeded"/> <see cref="RbxError"/> into a fake scheduler thread
     /// (<c>ModSchedulerEditModeTests.DEV3_BudgetKillTargetsOnlyOwningModAndOtherModRunsSameFrame</c> —
