@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using CoreAI.Hub;
 using UnityEngine.UIElements;
 
@@ -23,6 +24,7 @@ namespace CoreAI.Ai.Hub
         private const int MaxDisplayedLines = 200;
 
         private readonly IHubModService _service;
+        private readonly Action<Action> _deferToPanel;
 
         private VisualElement _root;
         private ScrollView _logScroll;
@@ -31,13 +33,26 @@ namespace CoreAI.Ai.Hub
         private Toggle _reportsToggle;
         private string _filter = "";
         private bool _subscribed;
+        private int _refreshQueued;
 
         /// <param name="service">VM-agnostic mod CRUD/query surface (built by <see cref="HubModsPages"/>).</param>
         /// <param name="order">Sort priority for the Hub tab (defaults to 350).</param>
         public HubModLogsPage(IHubModService service, int order = 350)
+            : this(service, order, null)
+        {
+        }
+
+        /// <param name="service">VM-agnostic mod CRUD/query surface.</param>
+        /// <param name="order">Sort priority for the Hub tab.</param>
+        /// <param name="deferToPanel">
+        /// Runs an action on the panel's next update; null uses the page root's scheduler. Tests pass a
+        /// recorder, since a page that is not attached to a panel never runs its scheduled work.
+        /// </param>
+        internal HubModLogsPage(IHubModService service, int order, Action<Action> deferToPanel)
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
             Order = order;
+            _deferToPanel = deferToPanel;
         }
 
         /// <inheritdoc />
@@ -290,7 +305,30 @@ namespace CoreAI.Ai.Hub
             // WHY: LogsChanged may arrive off the UI thread (Tick-time handler errors / mod reports);
             // marshal the refresh onto the panel's scheduler so VisualElement mutations always run on
             // the main thread.
-            _root.schedule.Execute(Refresh);
+            // WHY at most one queued: the runtime raises one event per handler error and per report, and
+            // a noisy mod raises hundreds in one frame (500 erroring Heartbeat handlers raised 500; a
+            // print loop with report logging on raises one per line). Each used to queue a full rebuild
+            // of every kept line, so the open Logs tab rebuilt the same list hundreds of times a frame
+            // and stalled the game; the one queued rebuild reads the latest entries anyway.
+            if (Interlocked.Exchange(ref _refreshQueued, 1) != 0)
+            {
+                return;
+            }
+
+            if (_deferToPanel != null)
+            {
+                _deferToPanel(RunQueuedRefresh);
+            }
+            else
+            {
+                _root.schedule.Execute(RunQueuedRefresh);
+            }
+        }
+
+        private void RunQueuedRefresh()
+        {
+            Interlocked.Exchange(ref _refreshQueued, 0);
+            Refresh();
         }
 
         private void Subscribe()

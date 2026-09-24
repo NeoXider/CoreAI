@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using CoreAI.Hub;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -22,6 +23,7 @@ namespace CoreAI.Ai.Hub
         public const string DefaultPageId = "coreai.hub.mods";
 
         private readonly IHubModService _service;
+        private readonly Action<Action> _deferToPanel;
 
         private VisualElement _root;
         private VisualElement _listRoot;
@@ -32,6 +34,7 @@ namespace CoreAI.Ai.Hub
         private string _search = "";
         private bool _subscribed;
         private bool _editorOpen;
+        private int _refreshQueued;
 
         // WHY: ListMods() re-parses every mod's @coreai header, so results are cached here and only
         // reloaded on Refresh / ModsChanged / a mutating action — typing in the search box just
@@ -43,9 +46,21 @@ namespace CoreAI.Ai.Hub
         /// <param name="service">VM-agnostic mod CRUD/query surface (built by <see cref="HubModsPages"/>).</param>
         /// <param name="order">Sort priority for the Hub tab (defaults to 300).</param>
         public HubModsPage(IHubModService service, int order = 300)
+            : this(service, order, null)
+        {
+        }
+
+        /// <param name="service">VM-agnostic mod CRUD/query surface.</param>
+        /// <param name="order">Sort priority for the Hub tab.</param>
+        /// <param name="deferToPanel">
+        /// Runs an action on the panel's next update; null uses the page root's scheduler. Tests pass a
+        /// recorder, since a page that is not attached to a panel never runs its scheduled work.
+        /// </param>
+        internal HubModsPage(IHubModService service, int order, Action<Action> deferToPanel)
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
             Order = order;
+            _deferToPanel = deferToPanel;
         }
 
         /// <inheritdoc />
@@ -510,6 +525,37 @@ namespace CoreAI.Ai.Hub
         private void OnModsChanged()
         {
             // WHY: Only refresh the list when it is the visible view; the editor manages its own state.
+            if (_editorOpen || _root == null)
+            {
+                return;
+            }
+
+            // WHY deferred: ModsChanged is raised on the thread that loaded or unloaded the mod (the
+            // manage_mods tool included), and VisualElement mutations must run on the main thread, as
+            // the Logs page and the Hub window already marshal their own events.
+            // WHY at most one queued: the runtime raises one event per mod, so a rehydrate of N stored
+            // mods raised N events and each re-read every mod's source and header and rebuilt the whole
+            // tree (30 mods: 30 rebuilds reading 900 records); the one queued rebuild reads the end state.
+            if (Interlocked.Exchange(ref _refreshQueued, 1) != 0)
+            {
+                return;
+            }
+
+            if (_deferToPanel != null)
+            {
+                _deferToPanel(RunQueuedRefresh);
+            }
+            else
+            {
+                _root.schedule.Execute(RunQueuedRefresh);
+            }
+        }
+
+        private void RunQueuedRefresh()
+        {
+            Interlocked.Exchange(ref _refreshQueued, 0);
+
+            // WHY re-checked: the editor may have opened after the change was queued; closing it refreshes.
             if (_editorOpen)
             {
                 return;

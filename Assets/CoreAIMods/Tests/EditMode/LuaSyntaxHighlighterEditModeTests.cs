@@ -1,4 +1,7 @@
 #if COREAI_HAS_HUB
+using System;
+using System.Collections.Generic;
+using CoreAI.Ai;
 using CoreAI.Ai.Hub;
 using NUnit.Framework;
 
@@ -84,6 +87,225 @@ namespace CoreAI.Tests.EditMode
             const string source = "-- tick\nlocal t = 1.5\nhooks_every(t, function() end)";
 
             Assert.AreEqual(LuaSyntaxHighlighter.Highlight(source), LuaSyntaxHighlighter.Highlight(source));
+        }
+    }
+
+    /// <summary>
+    /// The Hub Mods and Logs pages rebuild their lists from runtime events. Those events come one per
+    /// mod change, handler error or report, hundreds in a frame from a noisy mod, and may arrive off the
+    /// main thread; the pages must hand them to the panel and rebuild once per panel update, not once
+    /// per event on the raising thread.
+    /// </summary>
+    public sealed class HubModPagesRefreshEditModeTests
+    {
+        private sealed class CountingHubModService : IHubModService
+        {
+            public int ListModsCalls;
+            public int ErrorEntryReads;
+            public int ReportReads;
+
+            public bool IsSupported => true;
+
+            public event Action ModsChanged;
+
+            public event Action LogsChanged;
+
+            public void RaiseModsChanged()
+            {
+                ModsChanged?.Invoke();
+            }
+
+            public void RaiseLogsChanged()
+            {
+                LogsChanged?.Invoke();
+            }
+
+            public IReadOnlyList<HubModRecord> ListMods()
+            {
+                ListModsCalls++;
+                return new[] { new HubModRecord { Id = "noisy", Name = "Noisy", IsLoaded = true } };
+            }
+
+            public bool TryGetSource(string id, out string source)
+            {
+                source = "";
+                return false;
+            }
+
+            public bool IsLoaded(string id)
+            {
+                return false;
+            }
+
+            public void SaveOrReload(string id, string code)
+            {
+            }
+
+            public void Enable(string id)
+            {
+            }
+
+            public void Disable(string id)
+            {
+            }
+
+            public bool Delete(string id)
+            {
+                return false;
+            }
+
+            public IReadOnlyList<LuaScriptRevision> ListModVersions(string id)
+            {
+                return Array.Empty<LuaScriptRevision>();
+            }
+
+            public bool TryRevertMod(string id, int revisionIndex, out string restoredSource)
+            {
+                restoredSource = null;
+                return false;
+            }
+
+            public string ExportMod(string id)
+            {
+                return null;
+            }
+
+            public bool ImportMod(string bundleJson)
+            {
+                return false;
+            }
+
+            public bool ApplyBundledUpdate(string id)
+            {
+                return false;
+            }
+
+            public string RecentErrors(string id)
+            {
+                return "";
+            }
+
+            public IReadOnlyList<LuaModHandlerError> RecentErrorEntries(string modId = null)
+            {
+                ErrorEntryReads++;
+                return new[]
+                {
+                    new LuaModHandlerError
+                    {
+                        ModId = "noisy", Error = "boom", ConsecutiveCount = 1, AtUtc = DateTime.UtcNow
+                    }
+                };
+            }
+
+            public IReadOnlyList<LuaModReport> RecentReports(string modId = null)
+            {
+                ReportReads++;
+                return new[] { new LuaModReport { ModId = "noisy", Message = "tick", AtUtc = DateTime.UtcNow } };
+            }
+
+            public void ClearReports()
+            {
+            }
+
+            public void ClearErrors()
+            {
+            }
+
+            public bool GetReportLoggingEnabled(string modId)
+            {
+                return true;
+            }
+
+            public bool SetReportLoggingEnabled(string modId, bool enabled)
+            {
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// A mod with 500 erroring Heartbeat handlers raises 500 LogsChanged in one frame; the open Logs
+        /// tab queued a full rebuild of every kept line for each of them.
+        /// </summary>
+        [Test]
+        public void LogsPage_ManyLogEventsBeforeThePanelUpdates_QueueOneRebuild()
+        {
+            CountingHubModService service = new();
+            List<Action> queued = new();
+            HubModLogsPage page = new(service, 350, queued.Add);
+            Assert.IsNotNull(page.CreatePageContent(), "The Logs page must build its content.");
+            int errorReadsAfterBuild = service.ErrorEntryReads;
+            int reportReadsAfterBuild = service.ReportReads;
+
+            for (int i = 0; i < 500; i++)
+            {
+                service.RaiseLogsChanged();
+            }
+
+            Assert.AreEqual(1, queued.Count,
+                "500 log events before the panel updates must queue one list rebuild, not one per event.");
+            Assert.AreEqual(errorReadsAfterBuild, service.ErrorEntryReads,
+                "A log event must not rebuild the list on the thread that raised it.");
+
+            queued[0]();
+
+            Assert.AreEqual(errorReadsAfterBuild + 1, service.ErrorEntryReads,
+                "The queued rebuild must read the errors once.");
+            Assert.AreEqual(reportReadsAfterBuild + 1, service.ReportReads,
+                "The queued rebuild must read the reports once.");
+
+            service.RaiseLogsChanged();
+
+            Assert.AreEqual(2, queued.Count,
+                "A log event after the queued rebuild ran must queue the next one, or the page goes stale.");
+        }
+
+        /// <summary>
+        /// A rehydrate of N stored mods raises N ModsChanged; the visible Mods list re-read every mod and
+        /// rebuilt the whole tree for each, synchronously on the raising thread.
+        /// </summary>
+        [Test]
+        public void ModsPage_ManyModChangesBeforeThePanelUpdates_ListTheModsOnce()
+        {
+            CountingHubModService service = new();
+            List<Action> queued = new();
+            HubModsPage page = new(service, 300, queued.Add);
+            Assert.IsNotNull(page.CreatePageContent(), "The Mods page must build its content.");
+            int listCallsAfterBuild = service.ListModsCalls;
+
+            for (int i = 0; i < 30; i++)
+            {
+                service.RaiseModsChanged();
+            }
+
+            Assert.AreEqual(listCallsAfterBuild, service.ListModsCalls,
+                "A mod change must not rebuild the list on the thread that raised it.");
+            Assert.AreEqual(1, queued.Count,
+                "30 mod changes before the panel updates must queue one list rebuild, not one per change.");
+
+            queued[0]();
+
+            Assert.AreEqual(listCallsAfterBuild + 1, service.ListModsCalls,
+                "The queued rebuild must list the mods once.");
+
+            service.RaiseModsChanged();
+
+            Assert.AreEqual(2, queued.Count,
+                "A mod change after the queued rebuild ran must queue the next one, or the list goes stale.");
+        }
+
+        [Test]
+        public void ModsPage_ChangeBeforeTheContentIsBuilt_QueuesNothing()
+        {
+            CountingHubModService service = new();
+            List<Action> queued = new();
+            HubModsPage page = new(service, 300, queued.Add);
+            page.OnActivated();
+
+            service.RaiseModsChanged();
+
+            Assert.AreEqual(0, queued.Count, "A page without content has no list to rebuild.");
+            Assert.AreEqual(0, service.ListModsCalls, "A page without content must not list the mods.");
+            page.OnDestroyed();
         }
     }
 }
