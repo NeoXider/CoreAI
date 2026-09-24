@@ -247,8 +247,12 @@ namespace CoreAI.Mods.Rbx.Instances
                 "keep shared content in ReplicatedStorage; there is no early client loading phase");
             catalog.RegisterBacklogStub("Teams",
                 "track sides with an attribute on each Player");
+            // WHY not "use CanCollide": a CanCollide = false part still fires Touched and is still
+            // hit by raycasts (Roblox semantics), so it replaces none of what collision groups do.
             catalog.RegisterBacklogStub("PhysicsService",
-                "use CanCollide and host-side layers until collision groups land");
+                "set CanCollide = false where bodies should pass through (the part still fires "
+                + "Touched and is hit by raycasts), and filter raycasts with RaycastParams until "
+                + "collision groups land");
             catalog.RegisterBacklogStub("ProximityPromptService",
                 "use a ClickDetector on the part for interaction");
             catalog.RegisterBacklogStub("ContentProvider",

@@ -159,7 +159,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         }
 
         /// <summary>
-        /// M1-05: real Roblox members of Object, Instance, Model, WorldRoot, Camera, DataModel and
+        /// M1-05: real Roblox members of Instance, Model, WorldRoot, Camera, DataModel and
         /// BasePart that no binding answers are catalogued, so Lua raises a loud NOT_IMPLEMENTED
         /// naming the declaring class instead of "X is not a valid member". The lookup is the
         /// flattened one the Lua dispatch uses, so each row also proves the inheritance walk.
@@ -180,8 +180,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [TestCase("Camera", "Focus", "Camera", false)]
         [TestCase("Camera", "ScreenPointToRay", "Camera", true)]
         [TestCase("Camera", "WorldToViewportPoint", "Camera", true)]
-        [TestCase("DataModel", "IsLoaded", "DataModel", true)]
-        [TestCase("DataModel", "Loaded", "DataModel", false)]
         [TestCase("DataModel", "PlaceId", "DataModel", false)]
         [TestCase("DataModel", "JobId", "DataModel", false)]
         [TestCase("Part", "BrickColor", "BasePart", false)]
@@ -192,7 +190,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [TestCase("Folder", "FindFirstDescendant", "Instance", true)]
         [TestCase("Folder", "QueryDescendants", "Instance", true)]
         [TestCase("Folder", "GetActor", "Instance", true)]
-        [TestCase("Part", "Changed", "Object", false)]
         public void KnownMemberCatalog_AnswersAnUnboundRobloxMemberWithTheLoudStub(
             string className, string memberName, string declaringClassName, bool isMethod)
         {
@@ -216,7 +213,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         /// Negative twin: the catalog is consulted before the child lookup and after the bindings,
         /// so it must never list a member a binding answers, a child the standard DataModel
         /// bootstraps (<c>game.Workspace</c> has to keep resolving), a member of another class
-        /// (a Folder has no MoveTo or GetService), or a deprecated lowercase alias.
+        /// (a Folder has no MoveTo or GetService), or a deprecated lowercase alias. Members the
+        /// binding pass bound (IB-2: Changed on every Instance, game:IsLoaded, game.Loaded, the
+        /// Camera's PVInstance pivot) leave the catalog with it.
         /// </summary>
         [Test]
         public void KnownMemberCatalog_NeverShadowsABoundMemberAChildOrAnotherClassesMember()
@@ -226,23 +225,24 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             {
                 ("DataModel", "Workspace"), ("DataModel", "RunService"), ("DataModel", "Players"),
                 ("DataModel", "GetService"), ("DataModel", "FindService"),
-                ("DataModel", "BindToClose"),
+                ("DataModel", "BindToClose"), ("DataModel", "IsLoaded"), ("DataModel", "Loaded"),
                 ("Model", "PrimaryPart"), ("Model", "WorldPivot"), ("Model", "GetPivot"),
                 ("Model", "PivotTo"),
                 ("Workspace", "Raycast"), ("Workspace", "CurrentCamera"), ("Workspace", "Gravity"),
                 ("Workspace", "GetServerTimeNow"), ("Workspace", "Camera"),
                 ("Camera", "CFrame"), ("Camera", "CameraType"), ("Camera", "CameraSubject"),
+                ("Camera", "GetPivot"), ("Camera", "PivotTo"), ("Camera", "Changed"),
                 ("Part", "Position"), ("Part", "Size"), ("Part", "CFrame"), ("Part", "Color"),
                 ("Part", "Transparency"), ("Part", "Anchored"), ("Part", "CanCollide"),
                 ("Part", "Material"), ("Part", "MaterialVariant"), ("Part", "Shape"),
                 ("Part", "Orientation"), ("Part", "Rotation"), ("Part", "Touched"),
-                ("Part", "TouchEnded"),
+                ("Part", "TouchEnded"), ("Part", "Changed"),
                 ("Folder", "Name"), ("Folder", "Parent"), ("Folder", "ClassName"),
                 ("Folder", "Archivable"), ("Folder", "ChildAdded"), ("Folder", "Destroying"),
                 ("Folder", "AttributeChanged"), ("Folder", "FindFirstChild"),
                 ("Folder", "GetChildren"), ("Folder", "Clone"), ("Folder", "Destroy"),
                 ("Folder", "IsA"), ("Folder", "GetPropertyChangedSignal"),
-                ("Folder", "WaitForChild"),
+                ("Folder", "WaitForChild"), ("Folder", "Changed"), ("IntValue", "Changed"),
                 ("Folder", "GetService"), ("Folder", "PivotTo"), ("Folder", "GetPivot"),
                 ("Folder", "MoveTo"), ("Folder", "BrickColor"), ("Folder", "FieldOfView"),
                 ("Humanoid", "MoveTo"),

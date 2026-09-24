@@ -692,23 +692,26 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
         public void Negative_CorruptedTierBFixtures_Fail()
         {
             // The zero-work counter for the gate above: if the runner reported success for anything,
-            // these three deliberately broken twins of the named MVP8 fixtures would pass too.
-            (string Id, string Source, string Expected)[] corrupted =
+            // these three deliberately broken twins of the named MVP8 fixtures would pass too. Each
+            // also has to fail with ITS code: tweening CanCollide is valid Roblox CoreAI cannot do
+            // yet, so it is the NOT_IMPLEMENTED stub the stub counter classifies, never a
+            // BAD_ARGUMENT that reads as the author's mistake (M8-14).
+            (string Id, string Source, string Expected, string ExpectedCode)[] corrupted =
             {
                 ("TBC-001-kill-brick",
                     "local h = Instance.new('Humanoid')\nh.Parent = workspace\nh:Vaporize()",
-                    "Vaporize"),
+                    "Vaporize", "BAD_ARGUMENT"),
                 ("TBC-002-touch-pickup-with-leaderstats",
                     "local v = Instance.new('IntValue')\nv.Parent = workspace\nv.Value = 'gold'",
-                    "IntValue"),
+                    "IntValue", "BAD_ARGUMENT"),
                 ("TBC-003-door-tween",
                     "local t = game:GetService('TweenService')\n"
                     + "local p = Instance.new('Part')\np.Parent = workspace\n"
                     + "t:Create(p, TweenInfo.new(1), { CanCollide = false }):Play()",
-                    "CanCollide")
+                    "CanCollide", "NOT_IMPLEMENTED")
             };
 
-            foreach ((string id, string source, string expected) in corrupted)
+            foreach ((string id, string source, string expected, string expectedCode) in corrupted)
             {
                 RuntimeHarness harness = new(_capturingLog);
                 bool failed = false;
@@ -735,6 +738,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                 Assert.IsTrue(failed, "corrupted " + id + " was accepted: " + detail);
                 StringAssert.Contains(expected, detail,
                     "corrupted " + id + " must fail for its own reason, not an unrelated one");
+                StringAssert.Contains(expectedCode + ":", detail,
+                    "corrupted " + id + " must fail with " + expectedCode);
             }
         }
 

@@ -488,7 +488,7 @@ namespace CoreAI.Mods.Rbx.Instances
         /// Flattens one registered class's own and inherited entries, nearest declaration first.
         /// </summary>
         /// <remarks>
-        /// WHY per class and on demand: Object and Instance declare members every class inherits, so
+        /// WHY per class and on demand: Instance declares members every class inherits, so
         /// flattening all classes up front copied those entries into every class of every registry —
         /// a cost each world and each test paid at construction, while the lookup only ever runs on
         /// the rare path where a Lua member access has already missed every binding.
@@ -612,9 +612,11 @@ namespace CoreAI.Mods.Rbx.Instances
                 descriptor => new RbxBasePart(descriptor)));
             // WHY: one canonical Camera per world (bootstrap creates it under Workspace and the
             // Lua layer routes its CFrame to the camera rig), so scripted creation stays off.
+            // Camera.yaml inherits PVInstance, so camera:IsA("PVInstance") holds and GetPivot/
+            // PivotTo answer with the camera's CFrame.
             // TODO: MVP-later — creatable Cameras with per-instance state once multiple
             // viewports/cameras are meaningful.
-            catalog.Register(new ClassDescriptor("Camera", "Instance", false, false, false));
+            catalog.Register(new ClassDescriptor("Camera", "PVInstance", false, false, false));
             catalog.Register(new ClassDescriptor("ServiceProvider", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor("DataModel", "ServiceProvider", false, false, false,
                 descriptor => new RbxDataModel(descriptor)));
@@ -705,8 +707,19 @@ namespace CoreAI.Mods.Rbx.Instances
                 + "character-rig slice";
             string physicsWorkaround =
                 "keep the part Anchored and animate CFrame, or use host physics until this bridge lands";
+            // WHY this wording: CanCollide = false lets bodies pass through a part but still fires
+            // Touched and is still hit by raycasts (Roblox semantics since BINDER-A), so it is not
+            // a substitute for CanTouch, CanQuery or collision groups; the stub names what is.
             string collisionWorkaround =
-                "use CanCollide and host-side layers until the extended collision controls land";
+                "set CanCollide = false where bodies should pass through (the part still fires "
+                + "Touched and is hit by raycasts), filter raycasts with RaycastParams, and ignore "
+                + "unwanted hits inside the Touched handler until collision groups land";
+            const string queryWorkaround =
+                "exclude the part from raycasts with RaycastParams.FilterDescendantsInstances "
+                + "(FilterType Exclude) or RaycastParams:AddToFilter(part)";
+            const string touchWorkaround =
+                "ignore the part inside the Touched handler (check the hit part or an attribute), "
+                + "or Disconnect the Touched connection while it should not report";
             string surfaceWorkaround =
                 "use Material, Color, and geometry; legacy surface joints are not currently scheduled";
             // WHY network ownership is a loud stub rather than absent: the MVP2.5 plan defers it
@@ -736,9 +749,9 @@ namespace CoreAI.Mods.Rbx.Instances
                     "Massless",
                     "keep parts Anchored or configure mass through host physics until this bridge lands"),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
-                    "CanQuery", collisionWorkaround),
+                    "CanQuery", queryWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
-                    "CanTouch", collisionWorkaround),
+                    "CanTouch", touchWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "CollisionGroup", collisionWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
@@ -945,8 +958,8 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         /// <summary>
-        /// Real, script-visible members of the core classes (Object, Instance, Model, WorldRoot,
-        /// Camera, DataModel, ServiceProvider, BasePart) that no binding answers yet (M1-05).
+        /// Real, script-visible members of the core classes (Instance, Model, WorldRoot, Camera,
+        /// DataModel, ServiceProvider, BasePart) that no binding answers yet (M1-05).
         /// </summary>
         /// <remarks>
         /// WHY hand-listed from the mirror yaml instead of generated: the mirror is not shipped with
@@ -991,13 +1004,6 @@ namespace CoreAI.Mods.Rbx.Instances
             const string solidModelingWorkaround =
                 "solid modeling is not implemented; compose shapes from separate parts";
 
-            catalog.RegisterKnownUnimplementedMembers("Object",
-                // WHY: ValueBase.Changed is bound, and a bound member is dispatched before this
-                // entry is consulted, so value objects keep their live Changed signal.
-                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
-                    "Changed",
-                    "connect instance:GetPropertyChangedSignal(\"Name\") for each property you "
-                    + "watch; ValueBase.Changed already fires"));
             catalog.RegisterKnownUnimplementedMembers("Instance",
                 RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
                     "FindFirstDescendant", "use FindFirstChild(name, true) for a recursive search"),
@@ -1143,12 +1149,6 @@ namespace CoreAI.Mods.Rbx.Instances
                     "ServiceRemoving",
                     "services live for the whole world; resolve them with game:GetService"));
             catalog.RegisterKnownUnimplementedMembers("DataModel",
-                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
-                    "IsLoaded",
-                    "a mod runs after its world has loaded; drop the IsLoaded/Loaded guard"),
-                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
-                    "Loaded",
-                    "a mod runs after its world has loaded; drop the IsLoaded/Loaded guard"),
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
                     "PlaceId", placeIdentityWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
@@ -1304,7 +1304,8 @@ namespace CoreAI.Mods.Rbx.Instances
                     "keep the offset as a CFrame relative to the part and apply it with "
                     + "part.CFrame * offset"),
                 RbxKnownUnimplementedClassDescriptor.Backlog("NoCollisionConstraint",
-                    "set CanCollide = false on one of the two parts"),
+                    "set CanCollide = false on one of the two parts; it then passes through every "
+                    + "part, and still fires Touched and is hit by raycasts"),
                 RbxKnownUnimplementedClassDescriptor.Backlog("HingeConstraint", physicsWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("RopeConstraint", physicsWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("RodConstraint", physicsWorkaround),

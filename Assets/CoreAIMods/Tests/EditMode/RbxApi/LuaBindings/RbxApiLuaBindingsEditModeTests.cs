@@ -2964,9 +2964,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 badArgumentStack, "bad", "game:BindToClose('not a function')");
             StringAssert.Contains("BAD_ARGUMENT", FullText(badArgument));
             StringAssert.Contains(
-                "game:BindToClose expects a function at argument 1, got string",
+                "game:BindToClose expects a function at argument 1",
                 FullText(badArgument));
-            StringAssert.Contains("pass the function to run at shutdown", FullText(badArgument));
+            StringAssert.Contains("pass a function, got string at argument 1", FullText(badArgument));
 
             LuaCsModStack notImplementedStack = BuildStack(new LuaCsRbxApiBindings());
             Exception notImplemented = LoadFails(

@@ -1,7 +1,12 @@
+using System;
 using System.Threading;
+using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using Lua;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -489,6 +494,414 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             StringAssert.Contains("NOT_IMPLEMENTED", camera,
                 "CurrentCamera is writable in Roblox, so its assignment is a loud stub");
             Assert.AreEqual("Part", _world.Workspace.FindFirstChild("ReadOnlyPart").ClassName);
+        }
+
+        // ---- Audit follow-ups, binding pass two (MVP1 M1-03/05/07/31, MVP2 M2-10/24) ---------
+
+        [Test]
+        public void PartChanged_FiresWithEachChangedPropertyName_AndPositionFollowsACFrameMove()
+        {
+            // WHY (M1-03): Instance.Changed did not exist on a Part and spatial writes fired no
+            // property signal, so `part:GetPropertyChangedSignal("Position")` stayed silent while
+            // another script moved the part by CFrame.
+            _world.Stack.Runtime.LoadMod("watcher", @"
+                local p = Instance.new('Part')
+                p.Name = 'Watched'
+                p.Anchored = true
+                p.Parent = workspace
+                local names = {}
+                local positionFires = 0
+                local transparencyFires = 0
+                p.Changed:Connect(function(name)
+                    table.insert(names, name)
+                    store_set('names', table.concat(names, ','))
+                end)
+                p:GetPropertyChangedSignal('Position'):Connect(function()
+                    positionFires = positionFires + 1
+                    store_set('position', tostring(positionFires))
+                end)
+                p:GetPropertyChangedSignal('Transparency'):Connect(function()
+                    transparencyFires = transparencyFires + 1
+                    store_set('transparency', tostring(transparencyFires))
+                end)
+                p.Transparency = 0.5
+                p.Transparency = 0.5
+                p.CFrame = CFrame.new(1, 2, 3)
+                local folder = Instance.new('Folder')
+                folder.Changed:Connect(function(name) store_set('folder', name) end)
+                folder.Name = 'Renamed'");
+
+            Assert.AreEqual("", _world.Store.Get("watcher", "names"),
+                "Changed is deferred: nothing runs before the scheduler resumes");
+            _world.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("Transparency,CFrame,Position", _world.Store.Get("watcher", "names"),
+                "the written member first, then what it moved; the equal write fires nothing and "
+                + "an unrotated move leaves Orientation and Rotation alone");
+            Assert.AreEqual("1", _world.Store.Get("watcher", "position"),
+                "a CFrame move changes Position, so its property signal fires");
+            Assert.AreEqual("1", _world.Store.Get("watcher", "transparency"),
+                "assigning the value a property already holds is not a change");
+            Assert.AreEqual("Name", _world.Store.Get("watcher", "folder"),
+                "every Instance has Changed, not only parts and value objects");
+        }
+
+        [Test]
+        public void GetPropertyChangedSignal_RefusesAnUnknownName_AcceptsBoundAndCataloguedOnes()
+        {
+            // WHY (M1-03): any string used to return a signal that never fired, so a typo such as
+            // "Positoin" silently did nothing. A real property CoreAI has not bound yet (it is in
+            // the known-member catalog) stays a valid name.
+            _world.Stack.Runtime.LoadMod("names", @"
+                local p = Instance.new('Part')
+                local function try(label, target, name)
+                    local ok, err = pcall(function() return target:GetPropertyChangedSignal(name) end)
+                    store_set(label, tostring(ok) .. '|' .. tostring(err))
+                end
+                try('typo', p, 'Positoin')
+                try('event', p, 'Touched')
+                try('method', p, 'Destroy')
+                try('wrongCase', p, 'position')
+                try('bound', p, 'Position')
+                try('inherited', p, 'Name')
+                try('catalogued', p, 'BrickColor')
+                try('camera', workspace.CurrentCamera, 'FieldOfView')
+                try('value', Instance.new('IntValue'), 'Value')");
+
+            foreach (string label in new[] { "typo", "event", "method", "wrongCase" })
+            {
+                string refused = _world.Store.Get("names", label);
+                StringAssert.StartsWith("false|", refused, label + " must be refused");
+                StringAssert.Contains("BAD_ARGUMENT", refused, label);
+                StringAssert.Contains("is not a valid property name.", refused, label);
+            }
+
+            StringAssert.Contains("Positoin is not a valid property name.",
+                _world.Store.Get("names", "typo"));
+            foreach (string label in new[] { "bound", "inherited", "catalogued", "camera", "value" })
+            {
+                StringAssert.StartsWith("true|", _world.Store.Get("names", label),
+                    label + " is a real property and must be accepted");
+            }
+        }
+
+        [Test]
+        public void GameIsLoaded_IsTrue_AndTheRobloxLoadingGuardRunsStraightThrough()
+        {
+            // WHY (M1-05): `if not game:IsLoaded() then game.Loaded:Wait() end` is the first line of
+            // countless LocalScripts; it raised a stub, so the whole script never ran.
+            _world.Stack.Runtime.LoadMod("loader", @"
+                if not game:IsLoaded() then
+                    game.Loaded:Wait()
+                end
+                store_set('loaded', tostring(game:IsLoaded()))
+                local connection = game.Loaded:Connect(function() store_set('fired', 'yes') end)
+                store_set('connected', tostring(connection.Connected))
+                local ok, err = pcall(function() return workspace:IsLoaded() end)
+                store_set('workspace', tostring(ok) .. '|' .. tostring(err))");
+            _world.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("true", _world.Store.Get("loader", "loaded"));
+            Assert.AreEqual("true", _world.Store.Get("loader", "connected"));
+            Assert.AreEqual("", _world.Store.Get("loader", "fired"),
+                "the world loaded before the mod ran, so Loaded never fires for it");
+            string workspace = _world.Store.Get("loader", "workspace");
+            StringAssert.StartsWith("false|", workspace);
+            StringAssert.Contains("IsLoaded is not a valid member of Workspace", workspace,
+                "IsLoaded is declared on DataModel only");
+        }
+
+        [Test]
+        public void ModelMoveTo_IsTheLoudStub_WhileHumanoidMoveToStaysBound()
+        {
+            // WHY (M1-05, M1-31): Model:MoveTo is real Roblox API CoreAI does not implement; it must
+            // name itself as a stub rather than borrow Humanoid:MoveTo or read as a typo, and the
+            // Humanoid's own MoveTo must keep resolving next to it.
+            _world.Stack.Runtime.LoadMod("movers", @"
+                local m = Instance.new('Model')
+                m.Parent = workspace
+                local h = Instance.new('Humanoid')
+                local ok, err = pcall(function() m:MoveTo(Vector3.new(1, 2, 3)) end)
+                store_set('model', tostring(ok) .. '|' .. tostring(err))
+                store_set('humanoid', type(h.MoveTo))
+                local folderOk, folderErr = pcall(function() return Instance.new('Folder').MoveTo end)
+                store_set('folder', tostring(folderOk) .. '|' .. tostring(folderErr))");
+
+            string model = _world.Store.Get("movers", "model");
+            StringAssert.StartsWith("false|", model);
+            StringAssert.Contains("NOT_IMPLEMENTED", model);
+            StringAssert.Contains("Model:MoveTo", model);
+            Assert.AreEqual("function", _world.Store.Get("movers", "humanoid"));
+            string folder = _world.Store.Get("movers", "folder");
+            StringAssert.Contains("MoveTo is not a valid member of Folder", folder);
+            StringAssert.DoesNotContain("NOT_IMPLEMENTED", folder);
+        }
+
+        [Test]
+        public void MethodTable_SameNameOnTwoClasses_BothResolve_NearestDeclarationWins()
+        {
+            // WHY (M1-31): the method table was keyed by name alone, so a second MoveTo (Model next
+            // to Humanoid) silently replaced the first and broke every character script.
+            InstanceRegistry registry = new();
+            LuaCsRbxMethodTable table = new(registry.Catalog);
+            table.Add("MoveTo", "humanoid-move", "Humanoid");
+            table.Add("MoveTo", "model-move", "Model");
+            table.Add("GetPivot", "pvinstance-pivot", "PVInstance");
+            table.Add("GetPivot", "model-pivot", "Model");
+            table.Add("GetFullName", "instance-name", null);
+            RbxInstance humanoid = registry.Create("Humanoid");
+            RbxInstance model = registry.Create("Model");
+            RbxInstance part = registry.Create("Part");
+            RbxInstance folder = registry.Create("Folder");
+
+            Assert.AreEqual("humanoid-move", Resolve(table, humanoid, "MoveTo"));
+            Assert.AreEqual("model-move", Resolve(table, model, "MoveTo"));
+            Assert.IsNull(Resolve(table, part, "MoveTo"), "a Part declares no MoveTo");
+            Assert.AreEqual("model-pivot", Resolve(table, model, "GetPivot"),
+                "the nearest declaring class wins over an ancestor's");
+            Assert.AreEqual("pvinstance-pivot", Resolve(table, part, "GetPivot"));
+            Assert.IsNull(Resolve(table, folder, "GetPivot"), "a Folder is not a PVInstance");
+            Assert.AreEqual("instance-name", Resolve(table, folder, "GetFullName"));
+            Assert.AreEqual(5, table.Count);
+            Assert.Throws<InvalidOperationException>(
+                () => table.Add("MoveTo", "second-model-move", "Model"),
+                "binding one name twice on one class is a build error, never a silent replace");
+        }
+
+        [Test]
+        public void MethodArgumentErrors_NumberArgumentsWithoutSelf_PropertyWritesNameTheProperty()
+        {
+            // WHY (M1-07): readers named `index + 1`, counting self, so `p:SetAttribute(5, true)`
+            // blamed argument 2 — the value — and a property write named an argument it has none of.
+            _world.Stack.Runtime.LoadMod("positions", @"
+                local p = Instance.new('Part')
+                p.Parent = workspace
+                local tags = game:GetService('CollectionService')
+                local function try(label, action)
+                    local ok, err = pcall(action)
+                    store_set(label, tostring(ok) .. '|' .. tostring(err))
+                end
+                try('findFirstChild', function() return p:FindFirstChild(5) end)
+                try('setAttribute', function() p:SetAttribute(5, true) end)
+                try('addTagInstance', function() tags:AddTag(5, 'x') end)
+                try('addTagName', function() tags:AddTag(p, 5) end)
+                try('bindToClose', function() game:BindToClose('later') end)
+                try('debris', function() game:GetService('Debris'):AddItem(p, 'soon') end)
+                try('name', function() p.Name = 5 end)
+                try('position', function() p.Position = 'up' end)");
+
+            (string Label, string Expected)[] cases =
+            {
+                ("findFirstChild", "Instance:FindFirstChild expects a string at argument 1"),
+                ("setAttribute", "Instance:SetAttribute expects a string at argument 1"),
+                ("addTagInstance", "CollectionService:AddTag expects an Instance at argument 1"),
+                ("addTagName", "CollectionService:AddTag expects a string at argument 2"),
+                ("bindToClose", "game:BindToClose expects a function at argument 1"),
+                ("debris", "Debris:AddItem expects a number at argument 2"),
+                ("name", "Part.Name expects a string, got number"),
+                ("position", "Part.Position expects a Vector3, got string")
+            };
+            foreach ((string label, string expected) in cases)
+            {
+                string failure = _world.Store.Get("positions", label);
+                StringAssert.StartsWith("false|", failure, label);
+                StringAssert.Contains("BAD_ARGUMENT", failure, label);
+                StringAssert.Contains(expected, failure, label);
+            }
+
+            StringAssert.DoesNotContain("argument", _world.Store.Get("positions", "name"),
+                "a property write has no argument list to point into");
+            StringAssert.DoesNotContain("at argument 2", _world.Store.Get("positions", "findFirstChild"),
+                "the old reader counted self and blamed argument 2");
+        }
+
+        [Test]
+        public void Clone_CopiesPartStatePastASkippedServiceChild_AndDownADeepChain()
+        {
+            // WHY: Clone skips a service below the cloned root, but the part-sink copy walk did
+            // not, so every later sibling was paired with the wrong copy and kept default state; the
+            // walk was also recursive over a tree as deep as the snapshot cap. The headless sink
+            // here is separate from the registry's binder, so this walk is the only copy path.
+            using HeadlessWorld headless = new HeadlessWorld();
+            InstanceRegistry registry = headless.Registry;
+            IPartPropertySink sink = headless.Bindings.PartSink;
+            RbxInstance rig = registry.Create("Model");
+            rig.Name = "Rig";
+            rig.Parent = registry.WorldRoot;
+            RbxInstance service = registry.Create("ServerStorage");
+            service.Parent = rig;
+            RbxInstance limb = registry.Create("Part");
+            limb.Name = "Limb";
+            limb.Parent = rig;
+            sink.SetPosition(limb.Id, new RbxVector3(7f, 8f, 9f));
+            RbxInstance chainParent = limb;
+            for (int depth = 0; depth < 64; depth++)
+            {
+                RbxInstance link = registry.Create("Folder");
+                link.Name = "Link";
+                link.Parent = chainParent;
+                chainParent = link;
+            }
+
+            RbxInstance tip = registry.Create("Part");
+            tip.Name = "Tip";
+            tip.Parent = chainParent;
+            sink.SetPosition(tip.Id, new RbxVector3(1f, 2f, 3f));
+
+            headless.Stack.Runtime.LoadMod("cloner", @"
+                local copy = workspace.Rig:Clone()
+                copy.Name = 'RigCopy'
+                copy.Parent = workspace", persistToStore: false);
+
+            RbxInstance copy = registry.WorldRoot.FindFirstChild("RigCopy");
+            Assert.IsNotNull(copy);
+            Assert.IsNull(copy.FindFirstChildOfClass("ServerStorage"),
+                "precondition: Clone skips the service child");
+            RbxInstance limbCopy = copy.FindFirstChild("Limb");
+            Assert.IsNotNull(limbCopy);
+            AssertPosition(new RbxVector3(7f, 8f, 9f),
+                sink.GetPartPropertiesOrDefault(limbCopy.Id).Position,
+                "the part after the skipped service keeps its own state");
+            RbxInstance tipCopy = copy.FindFirstChild("Tip", true);
+            Assert.IsNotNull(tipCopy);
+            Assert.AreNotEqual(tip.Id, tipCopy.Id);
+            AssertPosition(new RbxVector3(1f, 2f, 3f),
+                sink.GetPartPropertiesOrDefault(tipCopy.Id).Position,
+                "the deepest part of the chain is paired with its own copy");
+        }
+
+        [Test]
+        public void ResumeActor_IsCachedPerMod_AndNeverFallsBackToTheHostForAReleasedActor()
+        {
+            // WHY (M2-24): the disconnect seam releases an actor's attribution but leaves its mods
+            // loaded, and resolving their actor then fell back to the HOST, opening a host envelope
+            // around that actor's code. WHY (M2-10): every resolve built a new identity provider
+            // with a fresh GUID session, two strings and a provider per scheduler resume.
+            using HeadlessWorld headless = new HeadlessWorld();
+            ActorContext actor = new LocalActorIdentityProvider(
+                    "resume-actor", "session-resume-actor", headless.Registry.WorldId,
+                    ActorGrantSet.None, AgentMemoryScope.Empty)
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            headless.Stack.Runtime.LoadMod(actor, "actor-mod", "store_set('loaded', 'actor')",
+                persistToStore: false);
+            Assert.AreEqual("actor", headless.Store.Get("actor-mod", "loaded"));
+
+            ActorContext first = headless.Bindings.ResolveOwnerActorContext("actor-mod");
+            ActorContext second = headless.Bindings.ResolveOwnerActorContext("actor-mod");
+            Assert.AreEqual("resume-actor", first.ActorId);
+            Assert.IsFalse(first.Grants.IsUnrestricted);
+            Assert.AreEqual(first.SessionId, second.SessionId,
+                "the resume context is built once per attributed actor, not once per resume");
+
+            headless.Registry.BindActorAttribution("actor-mod", OriginTag.FromMod("actor-mod"),
+                "other-actor");
+            Assert.AreEqual("other-actor",
+                headless.Bindings.ResolveOwnerActorContext("actor-mod").ActorId,
+                "a re-attributed mod resolves to its new actor, never a stale cached one");
+
+            headless.Registry.ClearActorAttribution("actor-mod", OriginTag.FromMod("actor-mod"));
+            RbxError refusal = Assert.Throws<RbxError>(
+                () => headless.Bindings.ResolveOwnerActorContext("actor-mod"));
+            Assert.AreEqual(RbxErrorCode.NotAuthority, refusal.Code);
+            StringAssert.Contains("resume-actor", refusal.Message);
+
+            Assert.IsTrue(headless.Stack.Runtime.UnloadMod("actor-mod"));
+            headless.Stack.Runtime.LoadMod("actor-mod", "store_set('loaded', 'host')",
+                persistToStore: false);
+            Assert.AreEqual("host", headless.Store.Get("actor-mod", "loaded"));
+            Assert.IsTrue(
+                headless.Bindings.ResolveOwnerActorContext("actor-mod").Grants.IsUnrestricted,
+                "a new host load of the mod is the host's again");
+
+            headless.Stack.Runtime.LoadMod("host-mod", "store_set('loaded', 'host')",
+                persistToStore: false);
+            Assert.IsTrue(
+                headless.Bindings.ResolveOwnerActorContext("host-mod").Grants.IsUnrestricted,
+                "a mod the host loaded keeps resolving to the host");
+        }
+
+        [Test]
+        public void LoudStubWorkarounds_NeverOfferCanCollideAsATouchOrQueryFilter()
+        {
+            // WHY: since BINDER-A a CanCollide = false part still fires Touched and is still hit by
+            // raycasts, so "use CanCollide" was advice that silently does not work for CanTouch,
+            // CanQuery and collision groups.
+            ClassCatalog catalog = ClassCatalog.CreateMvp1();
+            foreach (string member in new[] { "CanQuery", "CanTouch", "CollisionGroup" })
+            {
+                Assert.IsTrue(catalog.TryGetKnownUnimplementedMember("Part", member,
+                    RbxKnownUnimplementedMemberAccess.Read, out _,
+                    out RbxKnownUnimplementedMemberDescriptor descriptor), member);
+                AssertHonestCanCollideAdvice(member, descriptor.Workaround);
+            }
+
+            Assert.IsTrue(catalog.TryGetKnownUnimplementedMember("Workspace",
+                "RegisterCollisionGroup", RbxKnownUnimplementedMemberAccess.Read, out _,
+                out RbxKnownUnimplementedMemberDescriptor groups));
+            AssertHonestCanCollideAdvice("RegisterCollisionGroup", groups.Workaround);
+            RbxStubService physics =
+                (RbxStubService)ServiceCatalog.CreateMvp2().GetService("PhysicsService");
+            AssertHonestCanCollideAdvice("PhysicsService", physics.WorkaroundHint);
+        }
+
+        private static void AssertHonestCanCollideAdvice(string subject, string workaround)
+        {
+            StringAssert.DoesNotStartWith("use CanCollide", workaround, subject);
+            if (workaround.IndexOf("CanCollide", StringComparison.Ordinal) >= 0)
+            {
+                StringAssert.Contains("Touched", workaround,
+                    subject + ": CanCollide advice must say the part still fires Touched");
+            }
+        }
+
+        /// <summary>
+        /// A world with no scene: the part sink is separate from the registry's binder, and the
+        /// headless defaults spawn nothing into a Unity scene.
+        /// </summary>
+        private sealed class HeadlessWorld : IDisposable
+        {
+            public HeadlessWorld()
+            {
+                Registry = new InstanceRegistry(worldId: "mvp1-headless");
+                RbxDataModel game = DataModelBootstrap.CreateGame(Registry);
+                Bindings = new LuaCsRbxApiBindings(Registry, game);
+                Store = new Mvp1AcceptanceMemoryStore();
+                Stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+                {
+                    Logger = new Mvp1AcceptanceNullLogger(),
+                    ModStore = Store,
+                    Capabilities = LuaCapabilities.All,
+                    OneOffCapabilities = LuaCapabilities.All,
+                    RbxApi = Bindings
+                });
+            }
+
+            public InstanceRegistry Registry { get; }
+
+            public LuaCsRbxApiBindings Bindings { get; }
+
+            public Mvp1AcceptanceMemoryStore Store { get; }
+
+            public LuaCsModStack Stack { get; }
+
+            public void Dispose()
+            {
+                Bindings.Dispose();
+            }
+        }
+
+        private static string Resolve(LuaCsRbxMethodTable table, RbxInstance instance, string name)
+        {
+            return table.TryResolve(instance, name, out LuaValue value)
+                ? value.Read<string>()
+                : null;
+        }
+
+        private static void AssertPosition(RbxVector3 expected, RbxVector3 actual, string message)
+        {
+            Assert.AreEqual(expected.X, actual.X, Epsilon, message + " (X)");
+            Assert.AreEqual(expected.Y, actual.Y, Epsilon, message + " (Y)");
+            Assert.AreEqual(expected.Z, actual.Z, Epsilon, message + " (Z)");
         }
 
         private void AssertStoredPosition(RbxVector3 expected, RbxInstance part, string message)

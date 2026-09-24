@@ -104,6 +104,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             public LuaCsRbxApiBindings Roblox;
             public UnityCameraRig Rig;
             public LuaCsModStack Stack;
+            public MemoryStore Store;
         }
 
         /// <summary>Materialized world (binder + fabricated camera rig) behind a real mod stack.</summary>
@@ -116,10 +117,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             world.Rig = new UnityCameraRig(_cameraGo.transform, world.Binder);
             world.Roblox = new LuaCsRbxApiBindings(
                 world.Registry, world.Game, partSink: world.Binder, cameraRig: world.Rig);
+            world.Store = new MemoryStore();
             world.Stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
                 Logger = new FakeGameLogger(),
-                ModStore = new MemoryStore(),
+                ModStore = world.Store,
                 Capabilities = caps,
                 OneOffCapabilities = caps,
                 RbxApi = world.Roblox
@@ -186,6 +188,85 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 cam.CameraSubject = p
                 assert(cam.CameraSubject == p)");
             Assert.IsTrue(world.Stack.Runtime.IsLoaded("m"));
+        }
+
+        // ---- Camera as a PVInstance, change notifications (MVP1 M1-21, M1-03) ---------------
+
+        [Test]
+        public void Lua_Camera_IsAPVInstance_GetPivotReadsAndPivotToMovesTheCamera()
+        {
+            // WHY (M1-21): Camera.yaml inherits PVInstance, but the catalog rooted Camera on
+            // Instance, so camera:IsA("PVInstance") was false and camera:GetPivot() raised.
+            World world = BuildWorld();
+            world.Stack.Runtime.LoadMod("m", @"
+                local function near(a, b) return math.abs(a - b) < 1e-3 end
+                local cam = workspace.CurrentCamera
+                assert(cam:IsA('PVInstance'), 'Camera inherits PVInstance')
+                cam.CFrame = CFrame.new(10, 5, -4)
+                local pivot = cam:GetPivot()
+                assert(near(pivot.X, 10) and near(pivot.Y, 5) and near(pivot.Z, -4),
+                    'GetPivot reads the camera CFrame')
+                cam:PivotTo(CFrame.new(20, 5, -4))
+                store_set('pivotX', string.format('%.3f', cam:GetPivot().X))");
+
+            Assert.AreEqual("20.000", world.Store.Get("m", "pivotX"));
+            Vector3 position = _cameraGo.transform.position;
+            Assert.AreEqual(5.6f, position.x, Epsilon, "PivotTo moves the Unity camera (20 studs)");
+            Assert.AreEqual(1.4f, position.y, Epsilon);
+            Assert.AreEqual(1.12f, position.z, Epsilon);
+        }
+
+        [Test]
+        public void Lua_CameraWrites_FireChangedAndTheCFrameSignal_OnlyOnRealChanges()
+        {
+            // WHY (M1-03): Camera state lives on the rig, not the instance, so no setter fired
+            // Changed and `camera:GetPropertyChangedSignal("CFrame")` never ran for a cutscene.
+            World world = BuildWorld();
+            world.Stack.Runtime.LoadMod("m", @"
+                local cam = workspace.CurrentCamera
+                local names = {}
+                local cframeFires = 0
+                cam.Changed:Connect(function(name)
+                    table.insert(names, name)
+                    store_set('names', table.concat(names, ','))
+                end)
+                cam:GetPropertyChangedSignal('CFrame'):Connect(function()
+                    cframeFires = cframeFires + 1
+                    store_set('cframe', tostring(cframeFires))
+                end)
+                cam.CFrame = CFrame.new(1, 2, 3)
+                cam.CameraType = Enum.CameraType.Scriptable
+                cam.CameraType = Enum.CameraType.Scriptable
+                cam:PivotTo(CFrame.new(4, 5, 6))");
+            world.Roblox.Scheduler.Advance(0d);
+
+            Assert.AreEqual("CFrame,CameraType,CFrame", world.Store.Get("m", "names"),
+                "the repeated CameraType assignment is not a change");
+            Assert.AreEqual("2", world.Store.Get("m", "cframe"),
+                "the property write and PivotTo both move the camera");
+        }
+
+        [Test]
+        public void Lua_CameraFieldOfView_IsTheLoudStub_ButAValidPropertyName()
+        {
+            // WHY (M1-03/M1-05): FieldOfView is real Roblox API with no backing in the rig; reading
+            // it is the loud stub, and watching it must not be refused as a typo.
+            World world = BuildWorld();
+            world.Stack.Runtime.LoadMod("m", @"
+                local cam = workspace.CurrentCamera
+                local ok, err = pcall(function() return cam.FieldOfView end)
+                store_set('read', tostring(ok) .. '|' .. tostring(err))
+                local watchOk = pcall(function() return cam:GetPropertyChangedSignal('FieldOfView') end)
+                store_set('watch', tostring(watchOk))
+                local typoOk, typoErr = pcall(function() return cam:GetPropertyChangedSignal('CFrameX') end)
+                store_set('typo', tostring(typoOk) .. '|' .. tostring(typoErr))");
+
+            string read = world.Store.Get("m", "read");
+            StringAssert.StartsWith("false|", read);
+            StringAssert.Contains("NOT_IMPLEMENTED", read);
+            StringAssert.Contains("Camera.FieldOfView", read);
+            Assert.AreEqual("true", world.Store.Get("m", "watch"));
+            StringAssert.Contains("CFrameX is not a valid property name.", world.Store.Get("m", "typo"));
         }
 
         // ---- camera_set_cframe / camera_follow ----------------------------------------------

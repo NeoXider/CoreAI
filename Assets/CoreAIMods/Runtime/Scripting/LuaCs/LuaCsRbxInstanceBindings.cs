@@ -36,7 +36,7 @@ namespace CoreAI.Ai.LuaCs
         public LuaCsRbxModContext(LuaCsRbxApiBindings bindings, LuaCapabilities capabilities,
             string ownerModId, string originTag)
             : this(bindings, capabilities, ownerModId, originTag,
-                ResolveActorContext(bindings, ownerModId, originTag), null, false)
+                ResolveLoadActorContext(bindings, ownerModId, originTag), null, false)
         {
         }
 
@@ -87,6 +87,8 @@ namespace CoreAI.Ai.LuaCs
                 bindings.Registry.BindActorAttribution(ownerModId, originTag, actorContext.ActorId);
             }
 
+            ModActorLedger.For(bindings).RecordLoad(ownerModId, IsHost ? null : actorContext.ActorId);
+
             // WHY: stamp this load's connection generation BEFORE the mod chunk runs, so every Connect
             // the chunk makes is tracked under it. On reload a fresh context bumps the generation first
             // (BuildMod runs before the reload teardown), letting teardown disconnect only the previous
@@ -96,23 +98,175 @@ namespace CoreAI.Ai.LuaCs
             ProxyCachePruner.Attach(bindings.Registry, this);
         }
 
+        /// <summary>
+        /// The actor a mod's code runs as when it resumes: a scheduler thread, a legacy hook, an
+        /// exported function another mod calls. The attributed actor when one is bound; the host
+        /// only for a mod whose current load was the host's.
+        /// </summary>
+        /// <remarks>
+        /// WHY a mod loaded for an actor never falls back to the host: the disconnect seam releases
+        /// the actor's attribution but leaves its mods loaded, and the fallback then opened a HOST
+        /// envelope around that actor's legacy hooks. It only failed closed because the envelope
+        /// and the context disagreed; a refusal here is closed by construction (M2-24).
+        /// </remarks>
         internal static ActorContext ResolveActorContext(LuaCsRbxApiBindings bindings,
+            string ownerModId, string originTag)
+        {
+            ModActorLedger ledger = ModActorLedger.For(bindings);
+            if (bindings.Registry.TryGetActorAttribution(
+                    ownerModId, originTag, out string ownerActorId))
+            {
+                return ledger.GetAttributedContext(ownerModId, ownerActorId,
+                    bindings.Registry.WorldId);
+            }
+
+            if (ledger.TryGetReleasedOwner(ownerModId, out string releasedActorId))
+            {
+                throw new RbxError(
+                    RbxErrorCode.NotAuthority,
+                    "mod '" + ownerModId + "' was loaded for actor '" + releasedActorId
+                    + "', whose attribution has been released; its code cannot run as the host",
+                    "reload the mod under its owner once the actor reconnects, or unload it");
+            }
+
+            return CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+        }
+
+        /// <summary>
+        /// The actor a NEW load of a mod runs as: whoever the composition attributed it to, or the
+        /// host when nothing is attributed. A load is where ownership is decided, so unlike
+        /// <see cref="ResolveActorContext"/> it may hand an unattributed mod to the host.
+        /// </summary>
+        private static ActorContext ResolveLoadActorContext(LuaCsRbxApiBindings bindings,
             string ownerModId, string originTag)
         {
             if (bindings.Registry.TryGetActorAttribution(
                     ownerModId, originTag, out string ownerActorId))
             {
+                return ModActorLedger.CreateAttributedContext(ownerActorId,
+                    bindings.Registry.WorldId);
+            }
+
+            return CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+        }
+
+        /// <summary>
+        /// Per-bindings memory of which actor each mod was loaded for, plus the actor context its
+        /// resumes run under, built once per attributed actor instead of once per resume.
+        /// </summary>
+        /// <remarks>
+        /// WHY cached: every scheduler resume, legacy hook and cross-mod call resolves its actor,
+        /// and building a fresh identity provider with a new GUID session id each time was two
+        /// strings and a provider per resume on the hottest path in the runtime (M2-10). The entry
+        /// is rebuilt only when the attributed actor or the world changes.
+        /// </remarks>
+        private sealed class ModActorLedger
+        {
+            private static readonly ConditionalWeakTable<LuaCsRbxApiBindings, ModActorLedger>
+                Ledgers = new();
+
+            private readonly Dictionary<string, Entry> _byModId = new(StringComparer.Ordinal);
+
+            public static ModActorLedger For(LuaCsRbxApiBindings bindings)
+            {
+                return Ledgers.GetValue(bindings, _ => new ModActorLedger());
+            }
+
+            /// <summary>Records the actor a mod's current load belongs to; null for the host.</summary>
+            public void RecordLoad(string ownerModId, string loadedActorId)
+            {
+                if (string.IsNullOrWhiteSpace(ownerModId))
+                {
+                    return;
+                }
+
+                lock (_byModId)
+                {
+                    GetOrAddEntry(ownerModId).LoadedActorId = loadedActorId;
+                }
+            }
+
+            /// <summary>True when the mod's current load belongs to a non-host actor.</summary>
+            public bool TryGetReleasedOwner(string ownerModId, out string actorId)
+            {
+                actorId = null;
+                if (string.IsNullOrWhiteSpace(ownerModId))
+                {
+                    return false;
+                }
+
+                lock (_byModId)
+                {
+                    if (_byModId.TryGetValue(ownerModId, out Entry entry))
+                    {
+                        actorId = entry.LoadedActorId;
+                    }
+                }
+
+                return actorId != null;
+            }
+
+            /// <summary>The restricted context for an attributed actor, reused while unchanged.</summary>
+            public ActorContext GetAttributedContext(string ownerModId, string ownerActorId,
+                string worldId)
+            {
+                if (string.IsNullOrWhiteSpace(ownerModId))
+                {
+                    return CreateAttributedContext(ownerActorId, worldId);
+                }
+
+                lock (_byModId)
+                {
+                    Entry entry = GetOrAddEntry(ownerModId);
+                    if (!entry.HasAttributedContext
+                        || !string.Equals(entry.AttributedActorId, ownerActorId,
+                            StringComparison.Ordinal)
+                        || !string.Equals(entry.AttributedWorldId, worldId,
+                            StringComparison.Ordinal))
+                    {
+                        entry.AttributedContext = CreateAttributedContext(ownerActorId, worldId);
+                        entry.AttributedActorId = ownerActorId;
+                        entry.AttributedWorldId = worldId;
+                        entry.HasAttributedContext = true;
+                    }
+
+                    return entry.AttributedContext;
+                }
+            }
+
+            /// <summary>A fresh restricted context with its own connection session id.</summary>
+            public static ActorContext CreateAttributedContext(string ownerActorId, string worldId)
+            {
                 LocalActorIdentityProvider provider = new(
                     ownerActorId,
                     Guid.NewGuid().ToString("N"),
-                    bindings.Registry.WorldId,
+                    worldId,
                     ActorGrantSet.None,
                     AgentMemoryScope.Empty);
                 return provider.GetActorContext(BuiltInAgentRoleIds.Programmer);
             }
 
-            return CoreServicesInstaller.DefaultLocalHostIdentityProvider
-                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            private Entry GetOrAddEntry(string ownerModId)
+            {
+                if (!_byModId.TryGetValue(ownerModId, out Entry entry))
+                {
+                    entry = new Entry();
+                    _byModId.Add(ownerModId, entry);
+                }
+
+                return entry;
+            }
+
+            private sealed class Entry
+            {
+                public string LoadedActorId;
+                public bool HasAttributedContext;
+                public string AttributedActorId;
+                public string AttributedWorldId;
+                public ActorContext AttributedContext;
+            }
         }
 
         public LuaCsRbxApiBindings Bindings { get; }
@@ -411,14 +565,21 @@ namespace CoreAI.Ai.LuaCs
 
         public void RequirePivotMutation(RbxInstance target)
         {
-            RequireWorldEdit(target.ClassName + ":PivotTo");
+            if (!CanWorldEdit)
+            {
+                RequireWorldEdit(target.ClassName + ":PivotTo");
+            }
+
             RequireMutationTarget(target, "pivot");
             Bindings.Registry.AuthorizeMutation(ActorContext.ActorId,
                 ActorContext.Grants.IsUnrestricted, ActorContext.WorldId, target,
                 RegistryWorldAclDecision.WriteProperty, "pivot");
+            // WHY parts and models rather than every PVInstance: those are the descendants PivotTo
+            // moves; the Camera is a PVInstance too, and demanding write rights over the world
+            // camera for a pivot that never moves it would refuse a restricted actor for nothing.
             foreach (RbxInstance descendant in target.GetDescendants())
             {
-                if (descendant.IsA("PVInstance"))
+                if (descendant.IsA("BasePart") || descendant is RbxModel)
                 {
                     Bindings.Registry.AuthorizeMutation(ActorContext.ActorId,
                         ActorContext.Grants.IsUnrestricted, ActorContext.WorldId,
@@ -594,22 +755,9 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     internal static class LuaCsRbxInstanceBindings
     {
-        private readonly struct RbxMethodBinding
-        {
-            public RbxMethodBinding(LuaValue value, string declaringClassName)
-            {
-                Value = value;
-                DeclaringClassName = declaringClassName;
-            }
-
-            public LuaValue Value { get; }
-
-            public string DeclaringClassName { get; }
-        }
-
         public static LuaTable BuildInstanceMeta(LuaCsRbxModContext context)
         {
-            Dictionary<string, RbxMethodBinding> methods = BuildMethods(context);
+            LuaCsRbxMethodTable methods = BuildMethods(context);
             RbxEnumItem deferredSignalBehavior = EnsureDeferredSignalBehavior(context.Bindings.Enums);
 
             LuaTable meta = new();
@@ -637,6 +785,12 @@ namespace CoreAI.Ai.LuaCs
                         return LuaCsRbxDatatypeBindings.Wrap(self.AncestryChanged, context);
                     case "AttributeChanged":
                         return LuaCsRbxDatatypeBindings.Wrap(self.AttributeChanged, context);
+                    case "Changed":
+                        // WHY: a value object's Changed carries the new Value (Object.yaml); every
+                        // other instance's carries the name of the property that changed.
+                        return LuaCsRbxDatatypeBindings.Wrap(
+                            self is RbxValueBase changedValue ? changedValue.Changed : self.Changed,
+                            context);
                     case "TagAdded":
                     case "TagRemoved":
                         if (self is RbxCollectionService tagSignalService)
@@ -670,15 +824,26 @@ namespace CoreAI.Ai.LuaCs
                     return networkValue;
                 }
 
-                if (methods.TryGetValue(key, out RbxMethodBinding method)
-                    && (method.DeclaringClassName == null || self.IsA(method.DeclaringClassName)))
+                if (methods.TryResolve(self, key, out LuaValue method))
                 {
-                    return method.Value;
+                    return method;
                 }
 
                 if (key == "SignalBehavior" && self.IsA("Workspace"))
                 {
                     return LuaCsRbxDatatypeBindings.Wrap(deferredSignalBehavior);
+                }
+
+                // WHY a signal that never fires: a mod only runs once its world has loaded, so the
+                // Roblox header `if not game:IsLoaded() then game.Loaded:Wait() end` must pass
+                // straight through, and a late Connect waits for a load that already happened,
+                // exactly as it does in Roblox.
+                if (key == "Loaded" && self is RbxDataModel loadedDataModel)
+                {
+                    return LuaCsRbxDatatypeBindings.Wrap(
+                        LoadedSignals.GetValue(loadedDataModel,
+                            _ => new RbxScriptSignal("DataModel.Loaded")),
+                        context);
                 }
 
                 if (TryReadCamera(context, self, key, out LuaValue cameraValue))
@@ -758,13 +923,13 @@ namespace CoreAI.Ai.LuaCs
                         case "Name":
                             ThrowIfDestroyedForLua(self, key);
                             context.RequireWorldEditForWrite(self, "Name");
-                            self.Name = ReadString(ctx, 2, "Instance.Name assignment");
+                            self.Name = ReadAssignedString(value, self.ClassName, "Name");
                             return LuaValue.Nil;
                         case "Parent":
                         // WHY: no destroyed pre-check here — the Domain setter raises the exact
                         // D6 PARENT_LOCKED message for destroyed instances.
-                        RbxInstance destination = ReadOptionalInstance(
-                            value, "Instance.Parent assignment");
+                        RbxInstance destination = ReadAssignedOptionalInstance(
+                            value, self.ClassName, "Parent");
                         if (self is RbxPlayer)
                         {
                             // WHY: a Player leaves only through the leave teardown (PlayerRemoving,
@@ -794,7 +959,7 @@ namespace CoreAI.Ai.LuaCs
                         case "Archivable":
                             ThrowIfDestroyedForLua(self, key);
                             context.RequireWorldEditForWrite(self, "Archivable");
-                            self.Archivable = ReadBooleanValue(value, "Instance.Archivable assignment");
+                            self.Archivable = ReadAssignedBoolean(value, self.ClassName, "Archivable");
                             return LuaValue.Nil;
                     }
 
@@ -1091,12 +1256,12 @@ namespace CoreAI.Ai.LuaCs
                 {
                     case "CharacterAutoLoads":
                         context.RequireWorldEditForWrite(instance, "CharacterAutoLoads");
-                        playersTarget.CharacterAutoLoads = ReadBooleanValue(
-                            value, "Players.CharacterAutoLoads assignment");
+                        playersTarget.CharacterAutoLoads = ReadAssignedBoolean(
+                            value, instance.ClassName, "CharacterAutoLoads");
                         return true;
                     case "RespawnTime":
                         context.RequireWorldEditForWrite(instance, "RespawnTime");
-                        playersTarget.RespawnTime = ReadRespawnTime(value);
+                        playersTarget.RespawnTime = ReadRespawnTime(value, instance.ClassName);
                         return true;
                     case "MaxPlayers":
                         // WHY refused rather than silently ignored: the mirror tags MaxPlayers
@@ -1111,8 +1276,16 @@ namespace CoreAI.Ai.LuaCs
             if (member == "Gravity" && instance.IsA("Workspace"))
             {
                 context.RequireWorldEditForWrite(instance, "Gravity");
-                context.Bindings.WorldPhysics.Gravity =
-                    ReadDoubleValue(value, "Workspace.Gravity assignment");
+                double gravity = ReadAssignedNumber(value, instance.ClassName, "Gravity");
+                double previousGravity = context.Bindings.WorldPhysics.Gravity;
+                context.Bindings.WorldPhysics.Gravity = gravity;
+                // WHY here and not in a setter: gravity lives on the physics facade, not on the
+                // Workspace instance, so this write is the only place that knows it changed.
+                if (!previousGravity.Equals(context.Bindings.WorldPhysics.Gravity))
+                {
+                    instance.NotifyPropertyChanged("Gravity");
+                }
+
                 return true;
             }
 
@@ -1122,50 +1295,50 @@ namespace CoreAI.Ai.LuaCs
                 {
                     case "Health":
                         context.RequireWorldEditForWrite(instance, "Health");
-                        humanoidTarget.Health = ReadDoubleValue(value, "Humanoid.Health assignment");
+                        humanoidTarget.Health = ReadAssignedNumber(value, instance.ClassName, "Health");
                         context.RecordMutation(instance);
                         return true;
                     case "MaxHealth":
                         context.RequireWorldEditForWrite(instance, "MaxHealth");
                         humanoidTarget.MaxHealth =
-                            ReadDoubleValue(value, "Humanoid.MaxHealth assignment");
+                            ReadAssignedNumber(value, instance.ClassName, "MaxHealth");
                         context.RecordMutation(instance);
                         return true;
                     case "WalkSpeed":
                         context.RequireWorldEditForWrite(instance, "WalkSpeed");
                         humanoidTarget.WalkSpeed =
-                            ReadDoubleValue(value, "Humanoid.WalkSpeed assignment");
+                            ReadAssignedNumber(value, instance.ClassName, "WalkSpeed");
                         context.RecordMutation(instance);
                         return true;
                     case "JumpPower":
                         context.RequireWorldEditForWrite(instance, "JumpPower");
                         humanoidTarget.JumpPower =
-                            ReadDoubleValue(value, "Humanoid.JumpPower assignment");
+                            ReadAssignedNumber(value, instance.ClassName, "JumpPower");
                         context.RecordMutation(instance);
                         return true;
                     case "JumpHeight":
                         context.RequireWorldEditForWrite(instance, "JumpHeight");
                         humanoidTarget.JumpHeight =
-                            ReadDoubleValue(value, "Humanoid.JumpHeight assignment");
+                            ReadAssignedNumber(value, instance.ClassName, "JumpHeight");
                         context.RecordMutation(instance);
                         return true;
                     case "UseJumpPower":
                         context.RequireWorldEditForWrite(instance, "UseJumpPower");
-                        humanoidTarget.UseJumpPower = ReadBooleanValue(
-                            value, "Humanoid.UseJumpPower assignment");
+                        humanoidTarget.UseJumpPower = ReadAssignedBoolean(
+                            value, instance.ClassName, "UseJumpPower");
                         context.RecordMutation(instance);
                         return true;
                     case "DisplayName":
                         context.RequireWorldEditForWrite(instance, "DisplayName");
                         humanoidTarget.DisplayName =
-                            ReadStringValue(value, "Humanoid.DisplayName assignment");
+                            ReadAssignedString(value, instance.ClassName, "DisplayName");
                         context.RecordMutation(instance);
                         return true;
                     // WHY a write and not a method: the mirror's jump request IS an assignment
                     // (humanoid.Jump = true), and scripts written for Roblox spell it that way.
                     case "Jump":
                         context.RequireWorldEditForWrite(instance, "Jump");
-                        if (ReadBooleanValue(value, "Humanoid.Jump assignment"))
+                        if (ReadAssignedBoolean(value, instance.ClassName, "Jump"))
                         {
                             humanoidTarget.RequestJump();
                         }
@@ -1180,12 +1353,13 @@ namespace CoreAI.Ai.LuaCs
                 {
                     case "DisplayName":
                         context.RequireWorldEditForWrite(player, "DisplayName");
-                        player.DisplayName = ReadStringValue(value, "Player.DisplayName assignment");
+                        player.DisplayName = ReadAssignedString(value, player.ClassName, "DisplayName");
                         context.RecordMutation(player);
                         return true;
                     case "Character":
                         context.RequireWorldEditForWrite(player, "Character");
-                        player.Character = ReadOptionalInstance(value, "Player.Character assignment");
+                        player.Character = ReadAssignedOptionalInstance(
+                            value, player.ClassName, "Character");
                         context.RecordMutation(player);
                         return true;
                     default:
@@ -1244,50 +1418,59 @@ namespace CoreAI.Ai.LuaCs
             return bridge;
         }
 
-        private static Dictionary<string, RbxMethodBinding> BuildMethods(LuaCsRbxModContext context)
+        private static LuaCsRbxMethodTable BuildMethods(LuaCsRbxModContext context)
         {
-            Dictionary<string, RbxMethodBinding> methods = new(StringComparer.Ordinal);
+            LuaCsRbxMethodTable methods = new(context.Bindings.Registry.Catalog);
 
+            // WHY argument numbers exclude self: VM slot 0 is the instance a colon call passes, and
+            // Roblox numbers method arguments without it — `part:SetAttribute(5, true)` must blame
+            // argument 1, the name, not the value the author then edits by mistake (M1-07).
             void Method(string name, Func<LuaFunctionExecutionContext, RbxInstance, LuaValue> body,
                 string declaringClassName = null)
             {
+                bool mutating = IsMutatingMethod(name);
+                string operation = mutating ? "invoke Instance:" + name : null;
                 LuaValue value = new(Fn("Instance." + name, ctx =>
                     {
                         RbxInstance self = Self(ctx, context);
                         ThrowIfDestroyedForLua(self, name);
-                        if (!IsMutatingMethod(name))
+                        if (!mutating)
                         {
                             return body(ctx, self);
                         }
 
                         return context.ApplyServerGeneratedMutation(
-                            "invoke Instance:" + name,
+                            operation,
                             () => body(ctx, self));
                     }, context));
-                methods[name] = new RbxMethodBinding(value, declaringClassName);
+                methods.Add(name, value, declaringClassName);
             }
 
             // ---- Navigation ----
             Method("FindFirstChild", (ctx, self) => context.WrapInstance(self.FindFirstChild(
-                ReadString(ctx, 1, "FindFirstChild"), Arg(ctx, 2).ToBoolean())));
+                ReadString(ctx, 1, "Instance:FindFirstChild", 1), Arg(ctx, 2).ToBoolean())));
             Method("FindFirstChildOfClass", (ctx, self) => context.WrapInstance(
-                self.FindFirstChildOfClass(ReadString(ctx, 1, "FindFirstChildOfClass"))));
+                self.FindFirstChildOfClass(
+                    ReadString(ctx, 1, "Instance:FindFirstChildOfClass", 1))));
             Method("FindFirstChildWhichIsA", (ctx, self) => context.WrapInstance(
                 self.FindFirstChildWhichIsA(
-                    ReadString(ctx, 1, "FindFirstChildWhichIsA"), Arg(ctx, 2).ToBoolean())));
+                    ReadString(ctx, 1, "Instance:FindFirstChildWhichIsA", 1),
+                    Arg(ctx, 2).ToBoolean())));
             Method("FindFirstAncestor", (ctx, self) => context.WrapInstance(
-                self.FindFirstAncestor(ReadString(ctx, 1, "FindFirstAncestor"))));
+                self.FindFirstAncestor(ReadString(ctx, 1, "Instance:FindFirstAncestor", 1))));
             Method("FindFirstAncestorOfClass", (ctx, self) => context.WrapInstance(
-                self.FindFirstAncestorOfClass(ReadString(ctx, 1, "FindFirstAncestorOfClass"))));
+                self.FindFirstAncestorOfClass(
+                    ReadString(ctx, 1, "Instance:FindFirstAncestorOfClass", 1))));
             Method("FindFirstAncestorWhichIsA", (ctx, self) => context.WrapInstance(
-                self.FindFirstAncestorWhichIsA(ReadString(ctx, 1, "FindFirstAncestorWhichIsA"))));
+                self.FindFirstAncestorWhichIsA(
+                    ReadString(ctx, 1, "Instance:FindFirstAncestorWhichIsA", 1))));
             Method("GetChildren", (_, self) => WrapList(context, self.GetChildren()));
             Method("GetDescendants", (_, self) => WrapList(context, self.GetDescendants()));
-            Method("IsA", (ctx, self) => self.IsA(ReadString(ctx, 1, "IsA")));
+            Method("IsA", (ctx, self) => self.IsA(ReadString(ctx, 1, "Instance:IsA", 1)));
             Method("IsDescendantOf", (ctx, self) => self.IsDescendantOf(
-                ReadOptionalInstance(Arg(ctx, 1), "IsDescendantOf")));
+                ReadOptionalInstanceArgument(ctx, 1, "Instance:IsDescendantOf", 1)));
             Method("IsAncestorOf", (ctx, self) => self.IsAncestorOf(
-                ReadOptionalInstance(Arg(ctx, 1), "IsAncestorOf")));
+                ReadOptionalInstanceArgument(ctx, 1, "Instance:IsAncestorOf", 1)));
             Method("GetFullName", (_, self) => self.GetFullName());
 
             // ---- Lifecycle ----
@@ -1388,18 +1571,7 @@ namespace CoreAI.Ai.LuaCs
                 context.RequireWorldEdit("Debris:AddItem");
                 RbxDebris debris = (RbxDebris)self;
                 debris.EnsureHost(context.Bindings.Scheduler, context.Bindings.LogSink);
-                RbxInstance item;
-                if (TryGetInstance(Arg(ctx, 1), out LuaCsRbxInstanceProxy itemProxy))
-                {
-                    item = itemProxy.Instance;
-                }
-                else
-                {
-                    throw RbxError.BadArgument(
-                        "Debris:AddItem expects an Instance at argument 1",
-                        "pass an Instance, got " + Describe(Arg(ctx, 1)) + " at argument 1");
-                }
-
+                RbxInstance item = ReadTargetInstance(Arg(ctx, 1), "Debris:AddItem", 1);
                 LuaValue lifetimeValue = Arg(ctx, 2);
                 double lifetime;
                 if (lifetimeValue.Type == LuaValueType.Nil)
@@ -1412,9 +1584,7 @@ namespace CoreAI.Ai.LuaCs
                 }
                 else
                 {
-                    throw RbxError.BadArgument(
-                        "Debris:AddItem expects a number at argument 2",
-                        "pass a number, got " + Describe(lifetimeValue) + " at argument 2");
+                    throw ExpectedArgument("Debris:AddItem", "a number", lifetimeValue, 2);
                 }
 
                 // WHY: the caller identity is copied from the trusted ActorContext issued at mod
@@ -1436,7 +1606,7 @@ namespace CoreAI.Ai.LuaCs
             Method("SetTimeout", (ctx, self) =>
             {
                 context.RequireUnrestricted("ScriptContext:SetTimeout");
-                double seconds = ReadDouble(ctx, 1, "ScriptContext:SetTimeout");
+                double seconds = ReadDouble(ctx, 1, "ScriptContext:SetTimeout", 1);
                 if (double.IsNaN(seconds) || double.IsInfinity(seconds))
                 {
                     throw RbxError.BadArgument(
@@ -1501,7 +1671,7 @@ namespace CoreAI.Ai.LuaCs
             }, "TweenService");
             Method("GetValue", (ctx, self) =>
             {
-                double alpha = ReadDouble(ctx, 1, "TweenService:GetValue");
+                double alpha = ReadDouble(ctx, 1, "TweenService:GetValue", 1);
                 if (double.IsNaN(alpha) || double.IsInfinity(alpha))
                 {
                     throw RbxError.BadArgument(
@@ -1544,12 +1714,12 @@ namespace CoreAI.Ai.LuaCs
 
             // ---- Attributes / tags ----
             Method("GetAttribute", (ctx, self) => AttributeToLua(
-                self.GetAttribute(ReadString(ctx, 1, "GetAttribute"))));
+                self.GetAttribute(ReadString(ctx, 1, "Instance:GetAttribute", 1))));
             Method("SetAttribute", (ctx, self) =>
             {
                 context.RequireMetadataMutation(self, "set attribute");
                 self.SetAttribute(
-                    ReadString(ctx, 1, "SetAttribute"), AttributeFromLua(Arg(ctx, 2)));
+                    ReadString(ctx, 1, "Instance:SetAttribute", 1), AttributeFromLua(Arg(ctx, 2)));
                 return LuaValue.Nil;
             });
             Method("GetAttributes", (_, self) =>
@@ -1568,15 +1738,15 @@ namespace CoreAI.Ai.LuaCs
                 {
                     addTagService.EnsureHost(context.Bindings.Scheduler);
                     RbxInstance addTagTarget =
-                        ReadTargetInstance(Arg(ctx, 1), "CollectionService:AddTag", 2);
-                    string addTagName = ReadString(ctx, 2, "CollectionService:AddTag");
+                        ReadTargetInstance(Arg(ctx, 1), "CollectionService:AddTag", 1);
+                    string addTagName = ReadString(ctx, 2, "CollectionService:AddTag", 2);
                     context.RequireMetadataMutation(addTagTarget, "add tag");
                     addTagService.AddTag(addTagTarget, addTagName);
                     return LuaValue.Nil;
                 }
 
                 context.RequireMetadataMutation(self, "add tag");
-                self.AddTag(ReadString(ctx, 1, "AddTag"));
+                self.AddTag(ReadString(ctx, 1, "Instance:AddTag", 1));
                 return LuaValue.Nil;
             });
             Method("RemoveTag", (ctx, self) =>
@@ -1585,15 +1755,15 @@ namespace CoreAI.Ai.LuaCs
                 {
                     removeTagService.EnsureHost(context.Bindings.Scheduler);
                     RbxInstance removeTagTarget =
-                        ReadTargetInstance(Arg(ctx, 1), "CollectionService:RemoveTag", 2);
-                    string removeTagName = ReadString(ctx, 2, "CollectionService:RemoveTag");
+                        ReadTargetInstance(Arg(ctx, 1), "CollectionService:RemoveTag", 1);
+                    string removeTagName = ReadString(ctx, 2, "CollectionService:RemoveTag", 2);
                     context.RequireMetadataMutation(removeTagTarget, "remove tag");
                     removeTagService.RemoveTag(removeTagTarget, removeTagName);
                     return LuaValue.Nil;
                 }
 
                 context.RequireMetadataMutation(self, "remove tag");
-                self.RemoveTag(ReadString(ctx, 1, "RemoveTag"));
+                self.RemoveTag(ReadString(ctx, 1, "Instance:RemoveTag", 1));
                 return LuaValue.Nil;
             });
             Method("HasTag", (ctx, self) =>
@@ -1602,12 +1772,12 @@ namespace CoreAI.Ai.LuaCs
                 {
                     hasTagService.EnsureHost(context.Bindings.Scheduler);
                     RbxInstance hasTagTarget =
-                        ReadTargetInstance(Arg(ctx, 1), "CollectionService:HasTag", 2);
+                        ReadTargetInstance(Arg(ctx, 1), "CollectionService:HasTag", 1);
                     return hasTagService.HasTag(
-                        hasTagTarget, ReadString(ctx, 2, "CollectionService:HasTag"));
+                        hasTagTarget, ReadString(ctx, 2, "CollectionService:HasTag", 2));
                 }
 
-                return self.HasTag(ReadString(ctx, 1, "HasTag"));
+                return self.HasTag(ReadString(ctx, 1, "Instance:HasTag", 1));
             });
             Method("GetTags", (ctx, self) =>
             {
@@ -1615,7 +1785,7 @@ namespace CoreAI.Ai.LuaCs
                 {
                     getTagsService.EnsureHost(context.Bindings.Scheduler);
                     RbxInstance getTagsTarget =
-                        ReadTargetInstance(Arg(ctx, 1), "CollectionService:GetTags", 2);
+                        ReadTargetInstance(Arg(ctx, 1), "CollectionService:GetTags", 1);
                     LuaTable serviceTags = new();
                     int serviceTagsIndex = 1;
                     foreach (string serviceTag in getTagsService.GetTags(getTagsTarget))
@@ -1640,7 +1810,7 @@ namespace CoreAI.Ai.LuaCs
                 RbxCollectionService taggedService = (RbxCollectionService)self;
                 taggedService.EnsureHost(context.Bindings.Scheduler);
                 return WrapList(context, taggedService.GetTagged(
-                    ReadString(ctx, 1, "CollectionService:GetTagged")));
+                    ReadString(ctx, 1, "CollectionService:GetTagged", 1)));
             }, "CollectionService");
             Method("GetAllTags", (_, self) =>
             {
@@ -1661,7 +1831,7 @@ namespace CoreAI.Ai.LuaCs
                 addedSignalService.EnsureHost(context.Bindings.Scheduler);
                 return LuaCsRbxDatatypeBindings.Wrap(
                     addedSignalService.GetInstanceAddedSignal(
-                        ReadString(ctx, 1, "CollectionService:GetInstanceAddedSignal")),
+                        ReadString(ctx, 1, "CollectionService:GetInstanceAddedSignal", 1)),
                     context);
             }, "CollectionService");
             Method("GetInstanceRemovedSignal", (ctx, self) =>
@@ -1670,49 +1840,56 @@ namespace CoreAI.Ai.LuaCs
                 removedSignalService.EnsureHost(context.Bindings.Scheduler);
                 return LuaCsRbxDatatypeBindings.Wrap(
                     removedSignalService.GetInstanceRemovedSignal(
-                        ReadString(ctx, 1, "CollectionService:GetInstanceRemovedSignal")),
+                        ReadString(ctx, 1, "CollectionService:GetInstanceRemovedSignal", 1)),
                     context);
             }, "CollectionService");
             Method("GetAttributeChangedSignal", (ctx, self) => LuaCsRbxDatatypeBindings.Wrap(
-                self.GetAttributeChangedSignal(ReadString(ctx, 1, "GetAttributeChangedSignal")), context));
-            Method("GetPropertyChangedSignal", (ctx, self) => LuaCsRbxDatatypeBindings.Wrap(
-                self.GetPropertyChangedSignal(ReadString(ctx, 1, "GetPropertyChangedSignal")), context));
+                self.GetAttributeChangedSignal(
+                    ReadString(ctx, 1, "Instance:GetAttributeChangedSignal", 1)), context));
+            Method("GetPropertyChangedSignal", (ctx, self) =>
+            {
+                string property = ReadString(ctx, 1, "Instance:GetPropertyChangedSignal", 1);
+                RequireKnownPropertyName(context, self, property);
+                return LuaCsRbxDatatypeBindings.Wrap(self.GetPropertyChangedSignal(property), context);
+            });
 
             Method("GetPivot", (_, self) => LuaCsRbxDatatypeBindings.Wrap(
-                GetPivot(context.PartSink, self)), "PVInstance");
+                GetPivot(context, self)), "PVInstance");
             Method("PivotTo", (ctx, self) =>
             {
                 context.RequirePivotMutation(self);
-                PivotTo(context, self,
-                    ReadPartCFrameValue(Arg(ctx, 1), "PVInstance:PivotTo argument 1"));
+                PivotTo(context, self, ReadPartCFrameArgument(ctx, 1, "PVInstance:PivotTo", 1));
                 return LuaValue.Nil;
             }, "PVInstance");
 
             // ---- ServiceProvider (DataModel) ----
             Method("GetService", (ctx, self) => context.WrapInstance(
-                    RequireDataModel(self, "GetService").GetService(ReadString(ctx, 1, "GetService"))),
+                    RequireDataModel(self, "GetService").GetService(
+                        ReadString(ctx, 1, "game:GetService", 1))),
                 "ServiceProvider");
             Method("FindService", (ctx, self) => context.WrapInstance(
-                    RequireDataModel(self, "FindService").FindService(ReadString(ctx, 1, "FindService"))),
+                    RequireDataModel(self, "FindService").FindService(
+                        ReadString(ctx, 1, "game:FindService", 1))),
                 "ServiceProvider");
             Method("BindToClose", (ctx, self) =>
             {
                 LuaValue callback = Arg(ctx, 1);
                 if (callback.Type != LuaValueType.Function)
                 {
-                    throw RbxError.BadArgument(
-                        "game:BindToClose expects a function at argument 1, got " + Describe(callback),
-                        "pass the function to run at shutdown");
+                    throw ExpectedArgument("game:BindToClose", "a function", callback, 1);
                 }
 
                 RequireDataModel(self, "BindToClose").BindToClose(callback.Read<LuaFunction>());
                 return LuaValue.Nil;
             }, "DataModel");
+            // WHY always true: a mod's chunk only runs against a world that has finished loading,
+            // so the Roblox loading guard answers "loaded" and game.Loaded never has to fire.
+            Method("IsLoaded", (_, _) => true, "DataModel");
 
             Method("GetPlayers", (_, self) => WrapList(
                 context, ((RbxPlayers)self).GetPlayers()), "Players");
             Method("GetPlayerByUserId", (ctx, self) => context.WrapInstance(
-                    ((RbxPlayers)self).GetPlayerByUserId(ReadUserId(ctx, 1))), "Players");
+                    ((RbxPlayers)self).GetPlayerByUserId(ReadUserId(ctx))), "Players");
             Method("GetPlayerFromCharacter", (ctx, self) =>
             {
                 LuaValue characterArg = Arg(ctx, 1);
@@ -1723,10 +1900,8 @@ namespace CoreAI.Ai.LuaCs
 
                 if (!TryGetInstance(characterArg, out LuaCsRbxInstanceProxy characterProxy))
                 {
-                    throw RbxError.BadArgument(
-                        "Players:GetPlayerFromCharacter expects a Model at argument 1, got "
-                        + Describe(characterArg),
-                        "pass a character Model or nil");
+                    throw ExpectedArgument("Players:GetPlayerFromCharacter",
+                        "a character Model or nil", characterArg, 1);
                 }
 
                 return context.WrapInstance(
@@ -1738,7 +1913,7 @@ namespace CoreAI.Ai.LuaCs
                 LuaValue messageArg = Arg(ctx, 1);
                 if (messageArg.Type != LuaValueType.Nil)
                 {
-                    ReadString(ctx, 1, "Player:Kick");
+                    ReadString(ctx, 1, "Player:Kick", 1);
                 }
 
                 // WHY: kicking destroys the player's whole subtree (Player + empty containers),
@@ -1753,8 +1928,7 @@ namespace CoreAI.Ai.LuaCs
 
             Method("DistanceFromCharacter", (ctx, self) =>
             {
-                RbxVector3 point = ReadVector3Value(
-                    Arg(ctx, 1), "Player:DistanceFromCharacter point");
+                RbxVector3 point = ReadVector3(ctx, 1, "Player:DistanceFromCharacter", 1);
                 return ((RbxPlayer)self).DistanceFromCharacter(point);
             }, "Player");
 
@@ -1765,8 +1939,7 @@ namespace CoreAI.Ai.LuaCs
             Method("TakeDamage", (ctx, self) =>
             {
                 context.RequireWorldEditForWrite(self, "Health");
-                ((RbxHumanoid)self).TakeDamage(
-                    ReadDoubleValue(Arg(ctx, 1), "Humanoid:TakeDamage amount"));
+                ((RbxHumanoid)self).TakeDamage(ReadDouble(ctx, 1, "Humanoid:TakeDamage", 1));
                 context.RecordMutation(self);
                 return LuaValue.Nil;
             }, "Humanoid");
@@ -1782,8 +1955,7 @@ namespace CoreAI.Ai.LuaCs
                         "pass only the destination Vector3; re-issue MoveTo as the target moves");
                 }
 
-                ((RbxHumanoid)self).MoveTo(
-                    ReadVector3Value(Arg(ctx, 1), "Humanoid:MoveTo location"));
+                ((RbxHumanoid)self).MoveTo(ReadVector3(ctx, 1, "Humanoid:MoveTo", 1));
                 return LuaValue.Nil;
             }, "Humanoid");
             Method("GetState", (_, self) =>
@@ -1812,8 +1984,8 @@ namespace CoreAI.Ai.LuaCs
             // any future WorldModel gets it from the same declaration rather than a copy.
             Method("Raycast", (ctx, self) =>
             {
-                RbxVector3 origin = ReadVector3Value(Arg(ctx, 1), "WorldRoot:Raycast origin");
-                RbxVector3 direction = ReadVector3Value(Arg(ctx, 2), "WorldRoot:Raycast direction");
+                RbxVector3 origin = ReadVector3(ctx, 1, "WorldRoot:Raycast", 1);
+                RbxVector3 direction = ReadVector3(ctx, 2, "WorldRoot:Raycast", 2);
                 LuaValue paramsArgument = Arg(ctx, 3);
                 RbxRaycastParams raycastParams = paramsArgument.Type == LuaValueType.Nil
                     ? null
@@ -1876,33 +2048,33 @@ namespace CoreAI.Ai.LuaCs
                    || name == "ChangeState";
         }
 
-        private static long ReadUserId(LuaFunctionExecutionContext ctx, int index)
+        private static long ReadUserId(LuaFunctionExecutionContext ctx)
         {
-            double rawUserId = ReadDoubleValue(
-                Arg(ctx, index), "Players:GetPlayerByUserId argument " + index);
+            double rawUserId = ReadDouble(ctx, 1, "Players:GetPlayerByUserId", 1);
             if (double.IsNaN(rawUserId) || double.IsInfinity(rawUserId))
             {
                 throw RbxError.BadArgument(
-                    "Players:GetPlayerByUserId expects a finite UserId at argument " + index
-                    + ", got " + Describe(Arg(ctx, index)),
+                    "Players:GetPlayerByUserId expects a finite UserId at argument 1, got "
+                    + rawUserId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     "pass the numeric UserId, e.g. Players:GetPlayerByUserId(player.UserId)");
             }
 
             return (long)rawUserId;
         }
 
+        /// <summary>A Player argument of a method; <paramref name="index"/> is both the VM slot
+        /// and the author's argument number, since slot 0 is self.</summary>
         private static RbxPlayer ReadPlayer(LuaFunctionExecutionContext ctx,
             int index, string functionName)
         {
-            if (TryGetInstance(Arg(ctx, index), out LuaCsRbxInstanceProxy proxy)
+            LuaValue value = Arg(ctx, index);
+            if (TryGetInstance(value, out LuaCsRbxInstanceProxy proxy)
                 && proxy.Instance is RbxPlayer player)
             {
                 return player;
             }
 
-            throw RbxError.BadArgument(
-                functionName + " expects a Player at argument " + index,
-                "pass a Player returned by Players:GetPlayers()");
+            throw ExpectedArgument(functionName, "a Player", value, index);
         }
 
         private static RbxInstance Self(LuaFunctionExecutionContext ctx, LuaCsRbxModContext context)
@@ -1925,6 +2097,90 @@ namespace CoreAI.Ai.LuaCs
         private static bool IsProtectedSingleton(RbxInstance instance)
         {
             return instance.IsService || instance is RbxDataModel || instance.ClassName == "Camera";
+        }
+
+        /// <summary>game.Loaded per DataModel; weak so a torn-down world takes its signal with it.</summary>
+        private static readonly ConditionalWeakTable<RbxDataModel, RbxScriptSignal> LoadedSignals =
+            new();
+
+        /// <summary>
+        /// Every property the Lua member dispatch answers, by the class that declares it. Methods,
+        /// events and children are not properties, so GetPropertyChangedSignal refuses them.
+        /// </summary>
+        private static readonly (string ClassName, HashSet<string> Properties)[] BoundProperties =
+        {
+            ("Instance", Names("Name", "ClassName", "Parent", "Archivable")),
+            ("Workspace", Names("Gravity", "CurrentCamera", "SignalBehavior")),
+            ("Model", Names("PrimaryPart", "WorldPivot")),
+            ("BasePart", Names("Shape", "Material", "MaterialVariant", "Position", "Size", "CFrame",
+                "Orientation", "Rotation", "Color", "Transparency", "Anchored", "CanCollide")),
+            ("Camera", Names("CFrame", "CameraType", "CameraSubject")),
+            ("Humanoid", Names("Health", "MaxHealth", "WalkSpeed", "JumpPower", "JumpHeight",
+                "UseJumpPower", "DisplayName", "MoveDirection", "RootPart", "Jump")),
+            ("Player", Names("UserId", "DisplayName", "Character")),
+            ("Players", Names("LocalPlayer", "CharacterAutoLoads", "RespawnTime", "MaxPlayers")),
+            ("UserInputService", Names("MouseBehavior")),
+            ("ClickDetector", Names("MaxActivationDistance")),
+            ("MaterialVariant", Names("BaseMaterial", "ColorMap", "NormalMap", "RoughnessMap",
+                "MetalnessMap", "StudsPerTile")),
+            ("ValueBase", Names("Value")),
+            ("Tween", Names("Instance", "TweenInfo", "PlaybackState"))
+        };
+
+        private static HashSet<string> Names(params string[] names)
+        {
+            return new HashSet<string>(names, StringComparer.Ordinal);
+        }
+
+        /// <summary>
+        /// Refuses a GetPropertyChangedSignal name that is neither a bound property nor a catalogued
+        /// real property of the instance's class. The catalog counts because a real Roblox property
+        /// CoreAI has not bound yet is still a valid name — the author is not told it made a typo.
+        /// </summary>
+        /// <remarks>
+        /// WHY refused at all: every distinct string used to mint a new signal that never fired, so a
+        /// typo (<c>"position"</c>) silently did nothing and each one grew the instance's signal
+        /// table (M1-03).
+        /// </remarks>
+        private static void RequireKnownPropertyName(LuaCsRbxModContext context, RbxInstance instance,
+            string property)
+        {
+            if (string.IsNullOrEmpty(property))
+            {
+                return;
+            }
+
+            for (int index = 0; index < BoundProperties.Length; index++)
+            {
+                if (BoundProperties[index].Properties.Contains(property)
+                    && instance.IsA(BoundProperties[index].ClassName))
+                {
+                    return;
+                }
+            }
+
+            ClassCatalog catalog = context.Bindings.Registry.Catalog;
+            if (IsCataloguedProperty(catalog, instance, property,
+                    RbxKnownUnimplementedMemberAccess.Read)
+                || IsCataloguedProperty(catalog, instance, property,
+                    RbxKnownUnimplementedMemberAccess.Write))
+            {
+                return;
+            }
+
+            throw RbxError.BadArgument(
+                property + " is not a valid property name.",
+                "pass the exact name of a " + instance.ClassName
+                + " property, e.g. GetPropertyChangedSignal(\"Name\"); property names are "
+                + "case-sensitive");
+        }
+
+        private static bool IsCataloguedProperty(ClassCatalog catalog, RbxInstance instance,
+            string property, RbxKnownUnimplementedMemberAccess access)
+        {
+            return catalog.TryGetKnownUnimplementedMember(instance.ClassName, property, access,
+                       out _, out RbxKnownUnimplementedMemberDescriptor descriptor)
+                   && !descriptor.IsMethod;
         }
 
         /// <summary>
@@ -1992,7 +2248,8 @@ namespace CoreAI.Ai.LuaCs
 
         // WHY: Clone deep-copies identity/attributes/tags, but BasePart spatial/appearance state
         // lives in the external part sink keyed by id (D2 keeps RbxInstance engine-free) and must
-        // be walked and copied separately; Clone preserves archivable child order, so the trees align.
+        // be walked and copied separately; Clone preserves the order of the children it copies, so
+        // the trees align as long as this walk skips exactly the children Clone skips.
         // TODO: MVP2 — move this sink-copy into a registry-level clone seam so completeness no
         // longer depends on each Clone call site (the registry already owns the binder/sink).
         private static void CopyPartSinkState(IPartPropertySink sink, RbxInstance source,
@@ -2003,26 +2260,44 @@ namespace CoreAI.Ai.LuaCs
                 return;
             }
 
-            if (sink.TryGetPartProperties(source.Id, out PartProperties properties))
+            // WHY iterative: a live tree may be as deep as the snapshot depth cap, and a recursive
+            // walk over it is the stack overflow CORE-A removed from Clone itself (M1-13).
+            Stack<KeyValuePair<RbxInstance, RbxInstance>> pending = new();
+            pending.Push(new KeyValuePair<RbxInstance, RbxInstance>(source, copy));
+            while (pending.Count > 0)
             {
-                sink.SetPartProperties(copy.Id, in properties);
-            }
-
-            IReadOnlyList<RbxInstance> sourceChildren = source.GetChildren();
-            IReadOnlyList<RbxInstance> copyChildren = copy.GetChildren();
-            int copyIndex = 0;
-            for (int i = 0; i < sourceChildren.Count && copyIndex < copyChildren.Count; i++)
-            {
-                // WHY: Clone drops Archivable == false subtrees, so a non-archivable source child
-                // has no counterpart in the copy — advance only the source side past it.
-                if (!sourceChildren[i].Archivable)
+                KeyValuePair<RbxInstance, RbxInstance> pair = pending.Pop();
+                if (sink.TryGetPartProperties(pair.Key.Id, out PartProperties properties))
                 {
-                    continue;
+                    sink.SetPartProperties(pair.Value.Id, in properties);
                 }
 
-                CopyPartSinkState(sink, sourceChildren[i], copyChildren[copyIndex]);
-                copyIndex++;
+                IReadOnlyList<RbxInstance> sourceChildren = pair.Key.GetChildren();
+                IReadOnlyList<RbxInstance> copyChildren = pair.Value.GetChildren();
+                int copyIndex = 0;
+                for (int index = 0; index < sourceChildren.Count && copyIndex < copyChildren.Count;
+                     index++)
+                {
+                    if (!IsClonedChild(sourceChildren[index]))
+                    {
+                        continue;
+                    }
+
+                    pending.Push(new KeyValuePair<RbxInstance, RbxInstance>(
+                        sourceChildren[index], copyChildren[copyIndex]));
+                    copyIndex++;
+                }
             }
+        }
+
+        /// <summary>
+        /// The children <see cref="RbxInstance.Clone()"/> copies: archivable ones that are not a
+        /// service or the DataModel. A non-archivable child and a world singleton have no
+        /// counterpart in the copy, so the walk advances only the source side past them.
+        /// </summary>
+        private static bool IsClonedChild(RbxInstance child)
+        {
+            return child.Archivable && !child.IsService && !(child is RbxDataModel);
         }
 
         private static RbxDataModel RequireDataModel(RbxInstance instance, string member)
@@ -2086,7 +2361,27 @@ namespace CoreAI.Ai.LuaCs
             return signalBehavior["Deferred"];
         }
 
-        private static RbxInstance ReadOptionalInstance(LuaValue value, string what)
+        /// <summary>An Instance-or-nil method argument; nil reads as null.</summary>
+        private static RbxInstance ReadOptionalInstanceArgument(LuaFunctionExecutionContext ctx,
+            int index, string what, int argumentNumber)
+        {
+            LuaValue value = Arg(ctx, index);
+            if (value.Type == LuaValueType.Nil)
+            {
+                return null;
+            }
+
+            if (TryGetInstance(value, out LuaCsRbxInstanceProxy proxy))
+            {
+                return proxy.Instance;
+            }
+
+            throw ExpectedArgument(what, "an Instance or nil", value, argumentNumber);
+        }
+
+        /// <summary>An Instance-or-nil property write (Parent, Character, PrimaryPart, ...).</summary>
+        private static RbxInstance ReadAssignedOptionalInstance(LuaValue value, string ownerName,
+            string property)
         {
             if (value.Type == LuaValueType.Nil)
             {
@@ -2098,14 +2393,13 @@ namespace CoreAI.Ai.LuaCs
                 return proxy.Instance;
             }
 
-            throw RbxError.BadArgument(
-                what + " expects an Instance or nil",
-                "pass an Instance, got " + Describe(value));
+            throw PropertyAssignmentError(ownerName, property, "an Instance or nil", value);
         }
 
         /// <summary>
-        /// Reads the target instance of a CollectionService method (argument 1 after self);
-        /// destroyed proxies are rejected by the service call itself, so only shape is checked here.
+        /// Reads the Instance a service method acts on (argument 1 after self, e.g.
+        /// CollectionService:AddTag, Debris:AddItem); destroyed proxies are rejected by the service
+        /// call itself, so only shape is checked here.
         /// </summary>
         private static RbxInstance ReadTargetInstance(LuaValue value, string what,
             int argumentNumber)
@@ -2116,9 +2410,7 @@ namespace CoreAI.Ai.LuaCs
                 return proxy.Instance;
             }
 
-            throw RbxError.BadArgument(
-                what + " expects an Instance at argument " + argumentNumber,
-                "pass an Instance, got " + Describe(value) + " at argument " + argumentNumber);
+            throw ExpectedArgument(what, "an Instance", value, argumentNumber);
         }
 
         private static LuaValue WrapList(LuaCsRbxModContext context,
@@ -2224,13 +2516,13 @@ namespace CoreAI.Ai.LuaCs
             {
                 case "PrimaryPart":
                     context.RequireWorldEditForWrite(self, "PrimaryPart");
-                    model.SetPrimaryPart(ReadOptionalInstance(
-                        value, "Model.PrimaryPart assignment"));
+                    model.SetPrimaryPart(ReadAssignedOptionalInstance(
+                        value, self.ClassName, "PrimaryPart"));
                     return true;
                 case "WorldPivot":
                     context.RequireWorldEditForWrite(self, "WorldPivot");
-                    RbxCFrame worldPivot = ReadPartCFrameValue(
-                        value, "Model.WorldPivot assignment");
+                    RbxCFrame worldPivot = ReadAssignedPartCFrame(
+                        value, self.ClassName, "WorldPivot");
                     model.SetWorldPivot(in worldPivot);
                     return true;
                 default:
@@ -2238,8 +2530,13 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        private static RbxCFrame GetPivot(IPartPropertySink sink, RbxInstance instance)
+        /// <summary>
+        /// Mirror <c>PVInstance:GetPivot</c>: a part's CFrame, a Model's PrimaryPart CFrame or
+        /// WorldPivot, and the camera's CFrame (Camera inherits PVInstance, M1-21).
+        /// </summary>
+        private static RbxCFrame GetPivot(LuaCsRbxModContext context, RbxInstance instance)
         {
+            IPartPropertySink sink = context.PartSink;
             if (instance.IsA("BasePart"))
             {
                 return sink.GetPartPropertiesOrDefault(instance.Id).CFrame;
@@ -2253,9 +2550,14 @@ namespace CoreAI.Ai.LuaCs
                     : GetWorldPivot(sink, model);
             }
 
+            if (instance.ClassName == "Camera")
+            {
+                return context.Bindings.CameraRig.GetCFrame();
+            }
+
             throw RbxError.BadArgument(
                 "GetPivot is not available on " + instance.ClassName,
-                "call GetPivot on a BasePart or Model");
+                "call GetPivot on a BasePart, Model or Camera");
         }
 
         private static RbxCFrame GetWorldPivot(IPartPropertySink sink, RbxModel model)
@@ -2309,17 +2611,18 @@ namespace CoreAI.Ai.LuaCs
         {
             IPartPropertySink sink = context.PartSink;
             bool isPart = instance.IsA("BasePart");
+            bool isCamera = instance.ClassName == "Camera";
             RbxModel model = instance as RbxModel;
-            if (!isPart && model == null)
+            if (!isPart && model == null && !isCamera)
             {
                 throw RbxError.BadArgument(
                     "PivotTo is not available on " + instance.ClassName,
-                    "call PivotTo on a BasePart or Model");
+                    "call PivotTo on a BasePart, Model or Camera");
             }
 
-            RbxCFrame transform = target * GetPivot(sink, instance).Inverse();
+            RbxCFrame transform = target * GetPivot(context, instance).Inverse();
             List<RbxInstance> parts = new();
-            List<RbxCFrame> partCFrames = new();
+            List<PartProperties> partsBefore = new();
             List<RbxModel> models = new();
             List<RbxCFrame> modelWorldPivots = new();
             if (model != null)
@@ -2333,7 +2636,7 @@ namespace CoreAI.Ai.LuaCs
                 if (descendant.IsA("BasePart"))
                 {
                     parts.Add(descendant);
-                    partCFrames.Add(sink.GetPartPropertiesOrDefault(descendant.Id).CFrame);
+                    partsBefore.Add(sink.GetPartPropertiesOrDefault(descendant.Id));
                 }
 
                 if (descendant is RbxModel descendantModel)
@@ -2347,15 +2650,27 @@ namespace CoreAI.Ai.LuaCs
             {
                 // WHY the root takes the target verbatim: target * cf^-1 * cf is only equal to the
                 // target up to float error, and the part the script pivoted must land exactly there.
+                PartProperties rootBefore = sink.GetPartPropertiesOrDefault(instance.Id);
                 sink.SetCFrame(instance.Id, target);
+                context.RecordMutation(instance);
+                NotifyPartChanges(instance, "CFrame", in rootBefore,
+                    sink.GetPartPropertiesOrDefault(instance.Id));
+            }
+
+            if (isCamera)
+            {
+                SetCameraCFrame(context.Bindings.CameraRig, instance, in target);
                 context.RecordMutation(instance);
             }
 
             for (int partIndex = 0; partIndex < parts.Count; partIndex++)
             {
                 RbxInstance part = parts[partIndex];
-                sink.SetCFrame(part.Id, transform * partCFrames[partIndex]);
+                PartProperties partBefore = partsBefore[partIndex];
+                sink.SetCFrame(part.Id, transform * partBefore.CFrame);
                 context.RecordMutation(part);
+                NotifyPartChanges(part, "CFrame", in partBefore,
+                    sink.GetPartPropertiesOrDefault(part.Id));
             }
 
             for (int modelIndex = 0; modelIndex < models.Count; modelIndex++)
@@ -2429,7 +2744,8 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>Writes a wired BasePart property through the sink (Roblox Part semantics:
-        /// setting Position keeps orientation, setting CFrame sets both).</summary>
+        /// setting Position keeps orientation, setting CFrame sets both), then fires Changed and
+        /// the property signals for every member the write actually changed.</summary>
         private static bool TryWriteSpatial(LuaCsRbxModContext context, RbxInstance self, string key,
             LuaValue value)
         {
@@ -2440,99 +2756,180 @@ namespace CoreAI.Ai.LuaCs
 
             IPartPropertySink sink = context.PartSink;
             InstanceId id = self.Id;
+            string className = self.ClassName;
+            PartProperties before;
             switch (key)
             {
                 case "Shape":
                     context.RequireWorldEditForWrite(self, "Shape");
-                    sink.SetShape(id, ReadPartShapeValue(value));
-                    context.RecordMutation(self);
-                    return true;
+                    RbxPartShape shape = (RbxPartShape)ReadAssignedEnumItem(
+                        value, className, "Shape", "PartType").Value;
+                    before = sink.GetPartPropertiesOrDefault(id);
+                    sink.SetShape(id, shape);
+                    break;
                 case "Material":
                     context.RequireWorldEditForWrite(self, "Material");
-                    RbxMaterialId material = ReadMaterialValue(value);
+                    RbxMaterialId material = ReadAssignedMaterial(value, className, "Material");
+                    before = sink.GetPartPropertiesOrDefault(id);
                     sink.SetMaterial(id, in material);
-                    context.RecordMutation(self);
-                    return true;
+                    break;
                 case "MaterialVariant":
                     context.RequireWorldEditForWrite(self, "MaterialVariant");
-                    sink.SetMaterialVariant(id,
-                        ReadOptionalString(value, "Part.MaterialVariant assignment"));
-                    context.RecordMutation(self);
-                    return true;
+                    string variantName =
+                        ReadAssignedOptionalString(value, className, "MaterialVariant");
+                    before = sink.GetPartPropertiesOrDefault(id);
+                    sink.SetMaterialVariant(id, variantName);
+                    break;
                 case "Position":
                     context.RequireWorldEditForWrite(self, "Position");
-                    sink.SetPosition(id,
-                        ReadFiniteVector3Value(value, "Part.Position assignment"));
+                    RbxVector3 position = ReadAssignedFiniteVector3(value, className, "Position");
+                    before = sink.GetPartPropertiesOrDefault(id);
+                    sink.SetPosition(id, position);
                     // WHY every positional assignment is noted: the mirror's Touched fires only for
                     // physical movement, so a part MOVED by a script must not report the overlap it
                     // lands in as a collision. The physics relay drops contacts for parts noted here.
                     context.Bindings.WorldPhysics.NoteTeleport(id);
-                    context.RecordMutation(self);
-                    return true;
+                    break;
                 case "Size":
                     context.RequireWorldEditForWrite(self, "Size");
-                    sink.SetSize(id, ClampPartSize(
-                        ReadFiniteVector3Value(value, "Part.Size assignment")));
-                    context.RecordMutation(self);
-                    return true;
+                    RbxVector3 size = ClampPartSize(
+                        ReadAssignedFiniteVector3(value, className, "Size"));
+                    before = sink.GetPartPropertiesOrDefault(id);
+                    sink.SetSize(id, size);
+                    break;
                 case "CFrame":
                     context.RequireWorldEditForWrite(self, "CFrame");
-                    sink.SetCFrame(id,
-                        ReadPartCFrameValue(value, "Part.CFrame assignment"));
+                    RbxCFrame cframe = ReadAssignedPartCFrame(value, className, "CFrame");
+                    before = sink.GetPartPropertiesOrDefault(id);
+                    sink.SetCFrame(id, cframe);
                     context.Bindings.WorldPhysics.NoteTeleport(id);
-                    context.RecordMutation(self);
-                    return true;
+                    break;
                 case "Orientation":
                     context.RequireWorldEditForWrite(self, "Orientation");
                     RbxVector3 orientation =
-                        ReadFiniteVector3Value(value, "Part.Orientation assignment");
-                    PartProperties orientationProperties = sink.GetPartPropertiesOrDefault(id);
+                        ReadAssignedFiniteVector3(value, className, "Orientation");
+                    before = sink.GetPartPropertiesOrDefault(id);
                     RbxCFrame orientationCFrame = RbxCFrame.FromOrientation(
                         orientation.X * MathF.PI / 180f,
                         orientation.Y * MathF.PI / 180f,
                         orientation.Z * MathF.PI / 180f);
                     sink.SetCFrame(id,
-                        RbxCFrame.FromPosition(orientationProperties.Position) * orientationCFrame);
+                        RbxCFrame.FromPosition(before.Position) * orientationCFrame);
                     // A rotation is a scripted move like any other: it can spin a part into an
                     // overlap, and that overlap is not a collision.
                     context.Bindings.WorldPhysics.NoteTeleport(id);
-                    context.RecordMutation(self);
-                    return true;
+                    break;
                 case "Rotation":
                     context.RequireWorldEditForWrite(self, "Rotation");
-                    RbxVector3 rotation =
-                        ReadFiniteVector3Value(value, "Part.Rotation assignment");
-                    PartProperties rotationProperties = sink.GetPartPropertiesOrDefault(id);
+                    RbxVector3 rotation = ReadAssignedFiniteVector3(value, className, "Rotation");
+                    before = sink.GetPartPropertiesOrDefault(id);
                     RbxCFrame rotationCFrame = RbxCFrame.FromEulerAnglesXYZ(
                         rotation.X * MathF.PI / 180f,
                         rotation.Y * MathF.PI / 180f,
                         rotation.Z * MathF.PI / 180f);
                     sink.SetCFrame(id,
-                        RbxCFrame.FromPosition(rotationProperties.Position) * rotationCFrame);
+                        RbxCFrame.FromPosition(before.Position) * rotationCFrame);
                     context.Bindings.WorldPhysics.NoteTeleport(id);
-                    context.RecordMutation(self);
-                    return true;
+                    break;
                 case "Color":
                     context.RequireWorldEditForWrite(self, "Color");
-                    sink.SetColor(id, ReadColor3Value(value, "Part.Color assignment"));
-                    context.RecordMutation(self);
-                    return true;
+                    RbxColor3 color = ReadAssignedColor3(value, className, "Color");
+                    before = sink.GetPartPropertiesOrDefault(id);
+                    sink.SetColor(id, color);
+                    break;
                 case "Transparency":
                     context.RequireWorldEditForWrite(self, "Transparency");
-                    sink.SetTransparency(id, ReadNumberValue(value, "Part.Transparency assignment"));
-                    context.RecordMutation(self);
-                    return true;
+                    float transparency = ReadAssignedFloat(value, className, "Transparency");
+                    before = sink.GetPartPropertiesOrDefault(id);
+                    sink.SetTransparency(id, transparency);
+                    break;
                 case "Anchored":
                     context.RequireWorldEditForWrite(self, "Anchored");
-                    sink.SetAnchored(id, ReadBooleanValue(value, "Part.Anchored assignment"));
-                    context.RecordMutation(self);
-                    return true;
+                    bool anchored = ReadAssignedBoolean(value, className, "Anchored");
+                    before = sink.GetPartPropertiesOrDefault(id);
+                    sink.SetAnchored(id, anchored);
+                    break;
                 case "CanCollide":
                     context.RequireWorldEditForWrite(self, "CanCollide");
-                    sink.SetCanCollide(id,
-                        ReadBooleanValue(value, "Part.CanCollide assignment"));
-                    context.RecordMutation(self);
-                    return true;
+                    bool canCollide = ReadAssignedBoolean(value, className, "CanCollide");
+                    before = sink.GetPartPropertiesOrDefault(id);
+                    sink.SetCanCollide(id, canCollide);
+                    break;
+                default:
+                    return false;
+            }
+
+            context.RecordMutation(self);
+            NotifyPartChanges(self, key, in before, sink.GetPartPropertiesOrDefault(id));
+            return true;
+        }
+
+        /// <summary>
+        /// Fires Changed and the property signal for every BasePart member that differs between
+        /// two sink snapshots, the member the script or tween wrote first. An equal assignment
+        /// changes nothing and fires nothing.
+        /// </summary>
+        /// <remarks>
+        /// WHY derived members fire too: Position, Orientation and Rotation are views of CFrame, so
+        /// moving a part by CFrame changes its Position — a script watching
+        /// GetPropertyChangedSignal("Position") on a part another script tweens by CFrame must see
+        /// it move (M1-03). Part state lives in the sink, not on the instance, so no setter on
+        /// <see cref="RbxInstance"/> could fire these.
+        /// </remarks>
+        internal static void NotifyPartChanges(RbxInstance part, string writtenMember,
+            in PartProperties before, in PartProperties after)
+        {
+            if (writtenMember != null && PartMemberChanged(writtenMember, in before, in after))
+            {
+                part.NotifyPropertyChanged(writtenMember);
+            }
+
+            for (int index = 0; index < NotifiedPartMembers.Length; index++)
+            {
+                string member = NotifiedPartMembers[index];
+                if (!string.Equals(member, writtenMember, StringComparison.Ordinal)
+                    && PartMemberChanged(member, in before, in after))
+                {
+                    part.NotifyPropertyChanged(member);
+                }
+            }
+        }
+
+        private static readonly string[] NotifiedPartMembers =
+        {
+            "CFrame", "Position", "Orientation", "Rotation", "Size", "Color", "Transparency",
+            "Anchored", "CanCollide", "Shape", "Material", "MaterialVariant"
+        };
+
+        private static bool PartMemberChanged(string member, in PartProperties before,
+            in PartProperties after)
+        {
+            switch (member)
+            {
+                case "CFrame":
+                    return before.CFrame != after.CFrame;
+                case "Position":
+                    return before.CFrame.Position != after.CFrame.Position;
+                case "Orientation":
+                case "Rotation":
+                    return before.CFrame.Rotation != after.CFrame.Rotation;
+                case "Size":
+                    return before.Size != after.Size;
+                case "Color":
+                    return before.Color != after.Color;
+                case "Transparency":
+                    return !before.Transparency.Equals(after.Transparency);
+                case "Anchored":
+                    return before.Anchored != after.Anchored;
+                case "CanCollide":
+                    return before.CanCollide != after.CanCollide;
+                case "Shape":
+                    return before.Shape != after.Shape;
+                case "Material":
+                    return before.Material != after.Material;
+                case "MaterialVariant":
+                    return !string.Equals(before.MaterialVariant, after.MaterialVariant,
+                        StringComparison.Ordinal);
                 default:
                     return false;
             }
@@ -2550,19 +2947,6 @@ namespace CoreAI.Ai.LuaCs
             return LuaValue.Nil;
         }
 
-        private static RbxPartShape ReadPartShapeValue(LuaValue value)
-        {
-            if (TryUnbox(value, out RbxEnumItem item) && item.EnumType.Name == "PartType")
-            {
-                return (RbxPartShape)item.Value;
-            }
-
-            throw RbxError.BadArgument(
-                "Part.Shape assignment expects an Enum.PartType item",
-                "pass Enum.PartType.Block/Ball/Cylinder/Wedge/CornerWedge, got "
-                + Describe(value));
-        }
-
         /// <summary>Part.Material as its interned Enum.Material item.</summary>
         private static LuaValue WrapMaterial(LuaCsRbxModContext context, in RbxMaterialId material)
         {
@@ -2575,16 +2959,11 @@ namespace CoreAI.Ai.LuaCs
             return LuaValue.Nil;
         }
 
-        private static RbxMaterialId ReadMaterialValue(LuaValue value)
+        private static RbxMaterialId ReadAssignedMaterial(LuaValue value, string ownerName,
+            string property)
         {
-            if (TryUnbox(value, out RbxEnumItem item) && item.EnumType.Name == "Material")
-            {
-                return new RbxMaterialId(item.Name, item.Value);
-            }
-
-            throw RbxError.BadArgument(
-                "Part.Material assignment expects an Enum.Material item",
-                "pass an item like Enum.Material.Plastic/Neon/Wood, got " + Describe(value));
+            RbxEnumItem item = ReadAssignedEnumItem(value, ownerName, property, "Material");
+            return new RbxMaterialId(item.Name, item.Value);
         }
 
         // ---- UserInputService (input signals + poll surface over IInputSource) ---------------
@@ -2682,19 +3061,14 @@ namespace CoreAI.Ai.LuaCs
             }
 
             context.RequireWorldEditForWrite(self, "MouseBehavior");
-            if (TryUnbox(value, out RbxEnumItem item) && item.EnumType.Name == "MouseBehavior")
-            {
-                service.MouseBehavior = item;
-                context.RecordMutation(self);
-                return true;
-            }
-
-            throw RbxError.BadArgument(
-                "UserInputService.MouseBehavior assignment expects an Enum.MouseBehavior item",
-                "pass Enum.MouseBehavior.Default/LockCenter/LockCurrentPosition, got "
-                + Describe(value));
+            service.MouseBehavior = ReadAssignedEnumItem(
+                value, self.ClassName, "MouseBehavior", "MouseBehavior");
+            context.RecordMutation(self);
+            return true;
         }
 
+        /// <summary>An Enum.KeyCode method argument; <paramref name="index"/> is both the VM slot
+        /// and the author's argument number, since slot 0 is self.</summary>
         private static RbxEnumItem ReadKeyCodeArg(LuaFunctionExecutionContext ctx, int index,
             string what)
         {
@@ -2703,10 +3077,7 @@ namespace CoreAI.Ai.LuaCs
                 return item;
             }
 
-            throw RbxError.BadArgument(
-                what + " expects an Enum.KeyCode item at argument " + index,
-                "pass e.g. Enum.KeyCode.Space, got " + Describe(Arg(ctx, index))
-                                                     + " at argument " + index);
+            throw ExpectedArgument(what, "an Enum.KeyCode item", Arg(ctx, index), index);
         }
 
         // ---- RunService (per-frame game-loop signals over the host Step pump) ----------------
@@ -2798,7 +3169,8 @@ namespace CoreAI.Ai.LuaCs
             }
 
             context.RequireWorldEditForWrite(self, "MaxActivationDistance");
-            detector.MaxActivationDistance = ReadNumberValue(value, "ClickDetector.MaxActivationDistance");
+            detector.MaxActivationDistance =
+                ReadAssignedFloat(value, self.ClassName, "MaxActivationDistance");
             context.RecordMutation(self);
             return true;
         }
@@ -2855,40 +3227,40 @@ namespace CoreAI.Ai.LuaCs
             {
                 case "BaseMaterial":
                     context.RequireWorldEditForWrite(self, "BaseMaterial");
-                    variant.BaseMaterial = ReadMaterialValue(value);
+                    variant.BaseMaterial = ReadAssignedMaterial(value, self.ClassName, "BaseMaterial");
                     context.RecordMutation(self);
                     context.PartSink.RefreshMaterialVariant(variant.Name);
                     return true;
                 case "ColorMap":
                     context.RequireWorldEditForWrite(self, "ColorMap");
-                    variant.ColorMap = ReadStringValue(value, "MaterialVariant.ColorMap assignment");
+                    variant.ColorMap = ReadAssignedString(value, self.ClassName, "ColorMap");
                     context.RecordMutation(self);
                     context.PartSink.RefreshMaterialVariant(variant.Name);
                     return true;
                 case "NormalMap":
                     context.RequireWorldEditForWrite(self, "NormalMap");
-                    variant.NormalMap = ReadStringValue(value, "MaterialVariant.NormalMap assignment");
+                    variant.NormalMap = ReadAssignedString(value, self.ClassName, "NormalMap");
                     context.RecordMutation(self);
                     context.PartSink.RefreshMaterialVariant(variant.Name);
                     return true;
                 case "RoughnessMap":
                     context.RequireWorldEditForWrite(self, "RoughnessMap");
                     variant.RoughnessMap =
-                        ReadStringValue(value, "MaterialVariant.RoughnessMap assignment");
+                        ReadAssignedString(value, self.ClassName, "RoughnessMap");
                     context.RecordMutation(self);
                     context.PartSink.RefreshMaterialVariant(variant.Name);
                     return true;
                 case "MetalnessMap":
                     context.RequireWorldEditForWrite(self, "MetalnessMap");
                     variant.MetalnessMap =
-                        ReadStringValue(value, "MaterialVariant.MetalnessMap assignment");
+                        ReadAssignedString(value, self.ClassName, "MetalnessMap");
                     context.RecordMutation(self);
                     context.PartSink.RefreshMaterialVariant(variant.Name);
                     return true;
                 case "StudsPerTile":
                     context.RequireWorldEditForWrite(self, "StudsPerTile");
                     variant.StudsPerTile =
-                        ReadNumberValue(value, "MaterialVariant.StudsPerTile assignment");
+                        ReadAssignedFloat(value, self.ClassName, "StudsPerTile");
                     context.RecordMutation(self);
                     context.PartSink.RefreshMaterialVariant(variant.Name);
                     return true;
@@ -2899,8 +3271,9 @@ namespace CoreAI.Ai.LuaCs
 
         // ---- ValueBase (Value + Changed over the engine-free value classes) -----------------
 
-        /// <summary>Value/Changed reads. Reads are ungated; writes take the WorldEdit+ACL gate
-        /// in <see cref="TryWriteValue"/> like every other part property.</summary>
+        /// <summary>Value reads (Changed is dispatched with every other Instance signal). Reads
+        /// are ungated; writes take the WorldEdit+ACL gate in <see cref="TryWriteValue"/> like
+        /// every other part property.</summary>
         private static bool TryReadValue(LuaCsRbxModContext context, RbxInstance self,
             string key, out LuaValue value)
         {
@@ -2914,9 +3287,6 @@ namespace CoreAI.Ai.LuaCs
             {
                 case "Value":
                     value = ValueToLua(context, valueBase);
-                    return true;
-                case "Changed":
-                    value = LuaCsRbxDatatypeBindings.Wrap(valueBase.Changed, context);
                     return true;
                 default:
                     value = LuaValue.Nil;
@@ -2960,42 +3330,29 @@ namespace CoreAI.Ai.LuaCs
             switch (valueBase)
             {
                 case RbxIntValue intValue:
-                    intValue.SetFromDouble(
-                        ReadDoubleValue(value, "IntValue.Value assignment"));
+                    intValue.SetFromDouble(ReadAssignedNumber(value, self.ClassName, "Value"));
                     break;
                 case RbxNumberValue numberValue:
-                    numberValue.Value =
-                        ReadDoubleValue(value, "NumberValue.Value assignment");
+                    numberValue.Value = ReadAssignedNumber(value, self.ClassName, "Value");
                     break;
                 case RbxStringValue stringValue:
-                    stringValue.Value =
-                        ReadStringValue(value, "StringValue.Value assignment");
+                    stringValue.Value = ReadAssignedString(value, self.ClassName, "Value");
                     break;
                 case RbxBoolValue boolValue:
-                    if (value.Type != LuaValueType.Boolean)
-                    {
-                        throw RbxError.BadArgument(
-                            "BoolValue.Value assignment expects a boolean",
-                            "pass true or false, got " + Describe(value));
-                    }
-
-                    boolValue.Value = value.Read<bool>();
+                    boolValue.Value = ReadAssignedBoolean(value, self.ClassName, "Value");
                     break;
                 case RbxObjectValue objectValue:
                     objectValue.Value =
-                        ReadOptionalInstance(value, "ObjectValue.Value assignment");
+                        ReadAssignedOptionalInstance(value, self.ClassName, "Value");
                     break;
                 case RbxVector3Value vector3Value:
-                    vector3Value.Value =
-                        ReadVector3Value(value, "Vector3Value.Value assignment");
+                    vector3Value.Value = ReadAssignedVector3(value, self.ClassName, "Value");
                     break;
                 case RbxCFrameValue cframeValue:
-                    cframeValue.Value =
-                        ReadCFrameValue(value, "CFrameValue.Value assignment");
+                    cframeValue.Value = ReadAssignedCFrame(value, self.ClassName, "Value");
                     break;
                 case RbxColor3Value color3Value:
-                    color3Value.Value =
-                        ReadColor3Value(value, "Color3Value.Value assignment");
+                    color3Value.Value = ReadAssignedColor3(value, self.ClassName, "Value");
                     break;
                 default:
                     return false;
@@ -3072,8 +3429,10 @@ namespace CoreAI.Ai.LuaCs
             return (double)(int)state;
         }
 
-        /// <summary>Reads the Create property table into goal boxes (double, Vector3, CFrame,
-        /// Color3, UDim2); anything else is refused before the service sees it.</summary>
+        /// <summary>Reads the Create property table into goal boxes: the tweenable types (double,
+        /// Vector3, CFrame, Color3, UDim2) and the Roblox-tweenable types CoreAI cannot tween yet
+        /// (boolean, EnumItem, UDim, Vector2), which the service answers per member. Anything else
+        /// is not tweenable in Roblox either and is refused here.</summary>
         private static List<KeyValuePair<string, object>> ReadPropertyTable(LuaValue value)
         {
             if (value.Type != LuaValueType.Table)
@@ -3131,15 +3490,29 @@ namespace CoreAI.Ai.LuaCs
                 return udim2;
             }
 
-            if (value.Type == LuaValueType.Boolean || TryUnbox(value, out RbxEnumItem _)
-                || TryUnbox(value, out RbxUDim _) || TryUnbox(value, out RbxVector2 _))
+            // WHY handed to the service instead of refused here: only the service samples the
+            // member, so only it can tell `{CanCollide = false}` (a real boolean member it cannot
+            // tween yet: the NOT_IMPLEMENTED stub) from `{Transparency = true}` (a type mistake:
+            // BAD_ARGUMENT) and `{Nope = true}` (no such member). One raise site keeps the stub's
+            // wording identical whether a script or host code creates the tween (M8-14).
+            if (value.Type == LuaValueType.Boolean)
             {
-                throw RbxError.BadArgument(
-                    "TweenService:Create does not tween " + Describe(value)
-                    + " goals (MVP-later tweenable backlog: boolean, EnumItem, Rect,"
-                    + " UDim, Vector2, Vector2int16)",
-                    "pass a number, Vector3, CFrame, Color3, or UDim2 goal for '"
-                    + propertyName + "'");
+                return value.Read<bool>();
+            }
+
+            if (TryUnbox(value, out RbxEnumItem enumItem))
+            {
+                return enumItem;
+            }
+
+            if (TryUnbox(value, out RbxUDim udim))
+            {
+                return udim;
+            }
+
+            if (TryUnbox(value, out RbxVector2 vector2))
+            {
+                return vector2;
             }
 
             throw RbxError.BadArgument(
@@ -3236,113 +3609,234 @@ namespace CoreAI.Ai.LuaCs
                 return false;
             }
 
+            // WHY the camera notifies here: its state lives on the rig and the bindings, not on
+            // the Camera instance, so no setter of the instance could fire Changed for it.
             switch (key)
             {
                 case "CFrame":
                     context.RequireWorldEditForWrite(self, "CFrame");
-                    context.Bindings.CameraRig.SetCFrame(
-                        ReadCFrameValue(value, "Camera.CFrame assignment"));
+                    RbxCFrame cameraCFrame = ReadAssignedCFrame(value, self.ClassName, "CFrame");
+                    SetCameraCFrame(context.Bindings.CameraRig, self, in cameraCFrame);
                     context.RecordMutation(self);
                     return true;
                 case "CameraType":
                     context.RequireWorldEditForWrite(self, "CameraType");
-                    context.Bindings.CameraTypeItem = ReadCameraTypeValue(value);
+                    RbxEnumItem cameraType = ReadAssignedEnumItem(
+                        value, self.ClassName, "CameraType", "CameraType");
+                    RbxEnumItem previousType = context.Bindings.CameraTypeItem;
+                    context.Bindings.CameraTypeItem = cameraType;
                     context.RecordMutation(self);
+                    if (!ReferenceEquals(previousType, context.Bindings.CameraTypeItem))
+                    {
+                        self.NotifyPropertyChanged("CameraType");
+                    }
+
                     return true;
                 case "CameraSubject":
                     context.RequireWorldEditForWrite(self, "CameraSubject");
-                    context.Bindings.SetCameraSubject(
-                        ReadOptionalInstance(value, "Camera.CameraSubject assignment"));
+                    RbxInstance subject = ReadAssignedOptionalInstance(
+                        value, self.ClassName, "CameraSubject");
+                    RbxInstance previousSubject = context.Bindings.CameraSubject;
+                    context.Bindings.SetCameraSubject(subject);
                     context.RecordMutation(self);
+                    if (!ReferenceEquals(previousSubject, context.Bindings.CameraSubject))
+                    {
+                        self.NotifyPropertyChanged("CameraSubject");
+                    }
+
                     return true;
                 default:
                     return false;
             }
         }
 
-        private static RbxEnumItem ReadCameraTypeValue(LuaValue value)
+        /// <summary>
+        /// Moves the camera rig and fires Camera's CFrame change when the pose actually moved;
+        /// shared by the property write, PivotTo and the tween host so all three notify alike.
+        /// </summary>
+        internal static void SetCameraCFrame(IRbxCameraRig rig, RbxInstance camera,
+            in RbxCFrame cframe)
         {
-            if (TryUnbox(value, out RbxEnumItem item) && item.EnumType.Name == "CameraType")
+            RbxCFrame before = rig.GetCFrame();
+            rig.SetCFrame(in cframe);
+            if (before != rig.GetCFrame())
+            {
+                camera.NotifyPropertyChanged("CFrame");
+            }
+        }
+
+        // ---- Property-assignment readers ----------------------------------------------------
+        // WHY a family of their own: a property write has no argument list, so its BAD_ARGUMENT
+        // names the property ("Part.Position expects a Vector3, got string") through
+        // PropertyAssignmentError instead of a position the author never typed (M1-07). The owner
+        // name is the instance's ClassName, read on the failure path only.
+
+        private static RbxEnumItem ReadAssignedEnumItem(LuaValue value, string ownerName,
+            string property, string enumName)
+        {
+            if (TryUnbox(value, out RbxEnumItem item) && item.EnumType != null
+                && item.EnumType.Name == enumName)
             {
                 return item;
             }
 
-            throw RbxError.BadArgument(
-                "Camera.CameraType assignment expects an Enum.CameraType item",
-                "pass e.g. Enum.CameraType.Scriptable, got " + Describe(value));
+            throw PropertyAssignmentError(ownerName, property, "an Enum." + enumName + " item",
+                value);
         }
 
-        private static RbxVector3 ReadVector3Value(LuaValue value, string what)
+        private static RbxVector3 ReadAssignedVector3(LuaValue value, string ownerName,
+            string property)
         {
             if (TryUnbox(value, out RbxVector3 vector))
             {
                 return vector;
             }
 
-            throw RbxError.BadArgument(
-                what + " expects a Vector3",
-                "pass a Vector3, got " + Describe(value));
+            throw PropertyAssignmentError(ownerName, property, "a Vector3", value);
         }
 
-        private static RbxCFrame ReadCFrameValue(LuaValue value, string what)
+        private static RbxCFrame ReadAssignedCFrame(LuaValue value, string ownerName,
+            string property)
         {
             if (TryUnbox(value, out RbxCFrame cframe))
             {
                 return cframe;
             }
 
-            throw RbxError.BadArgument(
-                what + " expects a CFrame",
-                "pass a CFrame, got " + Describe(value));
+            throw PropertyAssignmentError(ownerName, property, "a CFrame", value);
+        }
+
+        private static RbxColor3 ReadAssignedColor3(LuaValue value, string ownerName,
+            string property)
+        {
+            if (TryUnbox(value, out RbxColor3 color))
+            {
+                return color;
+            }
+
+            throw PropertyAssignmentError(ownerName, property, "a Color3", value);
+        }
+
+        private static float ReadAssignedFloat(LuaValue value, string ownerName, string property)
+        {
+            return (float)ReadAssignedNumber(value, ownerName, property);
+        }
+
+        /// <summary>Nil or empty clears to no override (null); otherwise the variant name.</summary>
+        private static string ReadAssignedOptionalString(LuaValue value, string ownerName,
+            string property)
+        {
+            if (value.Type == LuaValueType.Nil)
+            {
+                return null;
+            }
+
+            if (value.Type == LuaValueType.String)
+            {
+                string text = value.Read<string>();
+                return string.IsNullOrEmpty(text) ? null : text;
+            }
+
+            throw PropertyAssignmentError(ownerName, property, "a string or nil", value);
         }
 
         /// <summary>
         /// Reads a Vector3 for a spatial write, refusing NaN and infinite components: the engine
         /// refuses such a pose while the registry would keep answering it, so the two diverge.
         /// </summary>
-        private static RbxVector3 ReadFiniteVector3Value(LuaValue value, string what)
+        private static RbxVector3 ReadAssignedFiniteVector3(LuaValue value, string ownerName,
+            string property)
         {
-            RbxVector3 vector = ReadVector3Value(value, what);
+            RbxVector3 vector = ReadAssignedVector3(value, ownerName, property);
             if (!IsFinite(vector))
             {
                 throw RbxError.BadArgument(
-                    what + " expects a Vector3 with finite components, got NaN or infinity",
+                    ownerName + "." + property
+                    + " expects a Vector3 with finite components, got NaN or infinity",
                     "check the arithmetic that produced it (0/0, math.huge) before assigning");
             }
 
             return vector;
         }
 
+        /// <summary>A CFrame property write that becomes a part's pose (Part.CFrame, WorldPivot).</summary>
+        private static RbxCFrame ReadAssignedPartCFrame(LuaValue value, string ownerName,
+            string property)
+        {
+            RbxCFrame cframe = ReadAssignedCFrame(value, ownerName, property);
+            PartPoseCheck check = TryMakePartPose(cframe, out RbxCFrame pose);
+            if (check != PartPoseCheck.Valid)
+            {
+                throw PartPoseError(check, ownerName + "." + property, "");
+            }
+
+            return pose;
+        }
+
+        /// <summary>A CFrame method argument that becomes a pose (PVInstance:PivotTo).</summary>
+        private static RbxCFrame ReadPartCFrameArgument(LuaFunctionExecutionContext ctx, int index,
+            string what, int argumentNumber)
+        {
+            RbxCFrame cframe = ReadCFrame(ctx, index, what, argumentNumber);
+            PartPoseCheck check = TryMakePartPose(cframe, out RbxCFrame pose);
+            if (check != PartPoseCheck.Valid)
+            {
+                throw PartPoseError(check, what, " at argument " + argumentNumber);
+            }
+
+            return pose;
+        }
+
+        private enum PartPoseCheck
+        {
+            Valid,
+            NonFinite,
+            DegenerateRotation
+        }
+
         /// <summary>
-        /// Reads a CFrame that becomes a part's pose: finite components required, and a rotation
-        /// that is scaled, skewed or mirrored is orthonormalized as the mirror does for
+        /// Turns a CFrame into a part pose: finite components required, and a rotation that is
+        /// scaled, skewed or mirrored is orthonormalized as the mirror does for
         /// <c>BasePart.CFrame</c>. An already orthonormal CFrame is kept bit-for-bit.
         /// </summary>
-        private static RbxCFrame ReadPartCFrameValue(LuaValue value, string what)
+        private static PartPoseCheck TryMakePartPose(RbxCFrame cframe, out RbxCFrame pose)
         {
-            RbxCFrame cframe = ReadCFrameValue(value, what);
+            pose = cframe;
             if (!IsFinite(cframe))
             {
-                throw RbxError.BadArgument(
-                    what + " expects a CFrame with finite components, got NaN or infinity",
-                    "check the arithmetic that produced it (0/0, math.huge) before assigning");
+                return PartPoseCheck.NonFinite;
             }
 
             if (IsOrthonormal(cframe))
             {
-                return cframe;
+                return PartPoseCheck.Valid;
             }
 
             RbxCFrame orthonormal = cframe.Orthonormalize();
             if (!IsFinite(orthonormal))
             {
-                throw RbxError.BadArgument(
-                    what + " expects a CFrame with a usable rotation; its axes are zero or parallel",
-                    "build it with CFrame.new, CFrame.lookAt or CFrame.fromMatrix using two "
-                    + "non-zero, non-parallel axes");
+                return PartPoseCheck.DegenerateRotation;
             }
 
-            return orthonormal;
+            pose = orthonormal;
+            return PartPoseCheck.Valid;
+        }
+
+        private static RbxError PartPoseError(PartPoseCheck check, string subject, string position)
+        {
+            if (check == PartPoseCheck.NonFinite)
+            {
+                return RbxError.BadArgument(
+                    subject + " expects a CFrame with finite components" + position
+                    + ", got NaN or infinity",
+                    "check the arithmetic that produced it (0/0, math.huge) before assigning");
+            }
+
+            return RbxError.BadArgument(
+                subject + " expects a CFrame with a usable rotation" + position
+                + "; its axes are zero or parallel",
+                "build it with CFrame.new, CFrame.lookAt or CFrame.fromMatrix using two "
+                + "non-zero, non-parallel axes");
         }
 
         private static bool IsFinite(float component)
@@ -3395,60 +3889,6 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Reads a boolean property assignment. Roblox refuses a non-boolean here, and Lua
-        /// truthiness turned <c>part.Anchored = "false"</c> into true and <c>= nil</c> into false.
-        /// </summary>
-        private static bool ReadBooleanValue(LuaValue value, string what)
-        {
-            if (value.Type == LuaValueType.Boolean)
-            {
-                return value.Read<bool>();
-            }
-
-            throw RbxError.BadArgument(
-                what + " expects a boolean",
-                "pass true or false, got " + Describe(value));
-        }
-
-        private static RbxColor3 ReadColor3Value(LuaValue value, string what)
-        {
-            if (TryUnbox(value, out RbxColor3 color))
-            {
-                return color;
-            }
-
-            throw RbxError.BadArgument(
-                what + " expects a Color3",
-                "pass a Color3, got " + Describe(value));
-        }
-
-        private static float ReadNumberValue(LuaValue value, string what)
-        {
-            if (value.Type == LuaValueType.Number)
-            {
-                return (float)value.Read<double>();
-            }
-
-            throw RbxError.BadArgument(
-                what + " expects a number",
-                "pass a number, got " + Describe(value));
-        }
-
-        /// <summary>Double-precision number reader for NumberValue/IntValue (float would
-        /// lose the mirror's documented integer range).</summary>
-        private static double ReadDoubleValue(LuaValue value, string what)
-        {
-            if (value.Type == LuaValueType.Number)
-            {
-                return value.Read<double>();
-            }
-
-            throw RbxError.BadArgument(
-                what + " expects a number",
-                "pass a number, got " + Describe(value));
-        }
-
-        /// <summary>
         /// Reads Players.RespawnTime, refusing anything a respawn timer could not honour.
         /// </summary>
         /// <remarks>
@@ -3456,51 +3896,19 @@ namespace CoreAI.Ai.LuaCs
         /// duration, and a script that computed one wrongly gets told so at the assignment instead
         /// of discovering it when nothing ever respawns.
         /// </remarks>
-        private static double ReadRespawnTime(LuaValue value)
+        private static double ReadRespawnTime(LuaValue value, string ownerName)
         {
-            double seconds = ReadDoubleValue(value, "Players.RespawnTime assignment");
+            double seconds = ReadAssignedNumber(value, ownerName, "RespawnTime");
             if (seconds < 0d || double.IsNaN(seconds) || double.IsInfinity(seconds))
             {
                 throw RbxError.BadArgument(
-                    "Players.RespawnTime expects a finite number of seconds >= 0",
+                    ownerName + ".RespawnTime expects a finite number of seconds >= 0",
                     "pass a duration in seconds, got " + seconds.ToString(
                         System.Globalization.CultureInfo.InvariantCulture));
             }
 
             return seconds;
         }
-
-        private static string ReadStringValue(LuaValue value, string what)
-        {
-            if (value.Type == LuaValueType.String)
-            {
-                return value.Read<string>();
-            }
-
-            throw RbxError.BadArgument(
-                what + " expects a string",
-                "pass a string, got " + Describe(value));
-        }
-
-        /// <summary>Nil or empty clears to no override (null); otherwise the variant name.</summary>
-        private static string ReadOptionalString(LuaValue value, string what)
-        {
-            if (value.Type == LuaValueType.Nil)
-            {
-                return null;
-            }
-
-            if (value.Type == LuaValueType.String)
-            {
-                string text = value.Read<string>();
-                return string.IsNullOrEmpty(text) ? null : text;
-            }
-
-            throw RbxError.BadArgument(
-                what + " expects a string or nil",
-                "pass a variant name, \"\" or nil for plain material, got " + Describe(value));
-        }
-
 
         // ---- Raycast userdata ---------------------------------------------------------------
 
@@ -3532,9 +3940,8 @@ namespace CoreAI.Ai.LuaCs
                 return item;
             }
 
-            throw RbxError.BadArgument(
-                "Humanoid:ChangeState expects an Enum.HumanoidStateType",
-                "pass Enum.HumanoidStateType.Jumping, got " + Describe(value));
+            throw ExpectedArgument("Humanoid:ChangeState", "an Enum.HumanoidStateType item",
+                value, 1);
         }
 
         private static RbxError NotAValidMember(string key, string typeName)
@@ -3626,20 +4033,20 @@ namespace CoreAI.Ai.LuaCs
                         self.FilterType = ReadFilterType(value);
                         return LuaValue.Nil;
                     case "IgnoreWater":
-                        self.IgnoreWater = ReadBooleanValue(
-                            value, "RaycastParams.IgnoreWater assignment");
+                        self.IgnoreWater = ReadAssignedBoolean(
+                            value, "RaycastParams", "IgnoreWater");
                         return LuaValue.Nil;
                     case "BruteForceAllSlow":
-                        self.BruteForceAllSlow = ReadBooleanValue(
-                            value, "RaycastParams.BruteForceAllSlow assignment");
+                        self.BruteForceAllSlow = ReadAssignedBoolean(
+                            value, "RaycastParams", "BruteForceAllSlow");
                         return LuaValue.Nil;
                     case "RespectCanCollide":
-                        self.RespectCanCollide = ReadBooleanValue(
-                            value, "RaycastParams.RespectCanCollide assignment");
+                        self.RespectCanCollide = ReadAssignedBoolean(
+                            value, "RaycastParams", "RespectCanCollide");
                         return LuaValue.Nil;
                     case "CollisionGroup":
-                        self.CollisionGroup = ReadStringValue(
-                            value, "RaycastParams.CollisionGroup assignment");
+                        self.CollisionGroup = ReadAssignedString(
+                            value, "RaycastParams", "CollisionGroup");
                         return LuaValue.Nil;
                     case "FilterDescendantsInstances":
                         self.SetFilterDescendantsInstances(ReadInstanceList(
@@ -3817,6 +4224,124 @@ namespace CoreAI.Ai.LuaCs
             public LuaCsRbxModContext Context { get; }
 
             public RbxRaycastResult Result { get; }
+        }
+    }
+
+    /// <summary>
+    /// The Instance method table: bindings keyed by member name AND declaring class, resolved for
+    /// an instance by its nearest declaring class (a Model method before a PVInstance one before
+    /// an Instance-wide one).
+    /// </summary>
+    /// <remarks>
+    /// WHY not one entry per name: a name-keyed table let the second <c>MoveTo</c> registration
+    /// silently replace the first, so binding <c>Model:MoveTo</c> next to <c>Humanoid:MoveTo</c>
+    /// would have broken every character script (M1-31). A repeated name and class is a build
+    /// error instead.
+    /// </remarks>
+    internal sealed class LuaCsRbxMethodTable
+    {
+        private readonly ClassCatalog _catalog;
+        private readonly Dictionary<string, List<Binding>> _byName = new(StringComparer.Ordinal);
+
+        public LuaCsRbxMethodTable(ClassCatalog catalog)
+        {
+            _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
+        }
+
+        /// <summary>Number of bindings, every class counted.</summary>
+        public int Count { get; private set; }
+
+        /// <summary>
+        /// Adds a method declared on <paramref name="declaringClassName"/>; null declares it on
+        /// every Instance.
+        /// </summary>
+        public void Add(string name, LuaValue value, string declaringClassName)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                throw new ArgumentException("A method name is required.", nameof(name));
+            }
+
+            if (!_byName.TryGetValue(name, out List<Binding> bindings))
+            {
+                bindings = new List<Binding>(1);
+                _byName.Add(name, bindings);
+            }
+
+            for (int index = 0; index < bindings.Count; index++)
+            {
+                if (string.Equals(bindings[index].DeclaringClassName, declaringClassName,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Instance method " + (declaringClassName ?? "Instance") + ":" + name
+                        + " is already bound");
+                }
+            }
+
+            bindings.Add(new Binding(value, declaringClassName));
+            Count++;
+        }
+
+        /// <summary>The binding of <paramref name="name"/> nearest to the instance's class.</summary>
+        public bool TryResolve(RbxInstance instance, string name, out LuaValue value)
+        {
+            value = LuaValue.Nil;
+            if (instance == null || name == null
+                || !_byName.TryGetValue(name, out List<Binding> bindings))
+            {
+                return false;
+            }
+
+            bool found = false;
+            string foundClassName = null;
+            for (int index = 0; index < bindings.Count; index++)
+            {
+                Binding binding = bindings[index];
+                string declaringClassName = binding.DeclaringClassName;
+                if (declaringClassName != null && !instance.IsA(declaringClassName))
+                {
+                    continue;
+                }
+
+                if (found && !IsNearer(declaringClassName, foundClassName))
+                {
+                    continue;
+                }
+
+                value = binding.Value;
+                foundClassName = declaringClassName;
+                found = true;
+            }
+
+            return found;
+        }
+
+        /// <summary>True when <paramref name="candidate"/> is a more derived declaration than
+        /// <paramref name="current"/>; both are ancestors of the same instance class.</summary>
+        private bool IsNearer(string candidate, string current)
+        {
+            if (candidate == null)
+            {
+                return false;
+            }
+
+            return current == null
+                   || (!string.Equals(candidate, current, StringComparison.Ordinal)
+                       && _catalog.IsA(candidate, current));
+        }
+
+        private readonly struct Binding
+        {
+            public Binding(LuaValue value, string declaringClassName)
+            {
+                Value = value;
+                DeclaringClassName = declaringClassName;
+            }
+
+            public LuaValue Value { get; }
+
+            public string DeclaringClassName { get; }
         }
     }
 }

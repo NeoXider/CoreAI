@@ -680,6 +680,138 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.LessOrEqual(service.LiveTweenCount, RbxTweenService.MaxIdleTweensPerActor);
         }
 
+        [Test]
+        public void Create_UntweenableGoalFromLua_RaisesTheServiceStub_TypeMistakesStayBadArgument()
+        {
+            // WHY (M8-14): the binding refused every boolean/EnumItem goal itself with a
+            // BAD_ARGUMENT, so `{CanCollide = false}` — valid Roblox that CoreAI cannot tween yet —
+            // read as a mistake and never counted as a stub hit. Only the service samples the
+            // member, so only it can tell a known-but-untweenable member from a type mistake.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("stub-goal-a");
+            harness.Stack.Runtime.LoadMod(actor, "stub-goal-setup", @"
+                local part = Instance.new('Part')
+                part.Name = 'StubGoalPart'
+                part.Parent = workspace
+                local ts = game:GetService('TweenService')
+                local info = TweenInfo.new(1)
+                local function grab(fn, key)
+                    local ok, err = pcall(fn)
+                    store_set(key .. '_ok', tostring(ok))
+                    store_set(key .. '_err', tostring(err))
+                end
+                grab(function() return ts:Create(part, info, {CanCollide = false}) end, 'boolean')
+                grab(function() return ts:Create(part, info, {Material = Enum.Material.Neon}) end, 'enum')
+                grab(function() return ts:Create(part, info, {Transparency = true}) end, 'mismatch')
+                grab(function() return ts:Create(part, info, {Nope = true}) end, 'unknown')
+                grab(function() return ts:Create(part, info, {Transparency = 0/0}) end, 'nan')",
+                persistToStore: false);
+
+            RbxInstance part = harness.Registry.WorldRoot.FindFirstChild("StubGoalPart");
+            Assert.IsNotNull(part);
+            TweenCaller caller = new TweenCaller("stub-goal-a", false, harness.Registry.WorldId);
+            foreach ((string key, string property, object goal) in new[]
+                     {
+                         ("boolean", "CanCollide", (object)false),
+                         ("enum", "Material", (object)ResolveEnumItem(harness, "Material", "Neon"))
+                     })
+            {
+                RbxError expected = Assert.Throws<RbxError>(() => harness.Bindings.TweenService.Create(
+                    part, new RbxTweenInfo(), new[] { new KeyValuePair<string, object>(property, goal) },
+                    caller));
+                Assert.AreEqual(RbxErrorCode.NotImplemented, expected.Code, key);
+                Assert.AreEqual("false", harness.Store.Get("stub-goal-setup", key + "_ok"), key);
+                StringAssert.Contains(
+                    "NOT_IMPLEMENTED: " + expected.RawMessage + " | fix: " + expected.Fix,
+                    harness.Store.Get("stub-goal-setup", key + "_err"),
+                    key + ": a script sees the service's own stub, word for word");
+            }
+
+            StringAssert.Contains("TweenService:Create tweening Part.CanCollide (boolean)",
+                harness.Store.Get("stub-goal-setup", "boolean_err"));
+            StringAssert.Contains("TweenService:Create tweening Part.Material (EnumItem)",
+                harness.Store.Get("stub-goal-setup", "enum_err"));
+            string mismatch = harness.Store.Get("stub-goal-setup", "mismatch_err");
+            StringAssert.Contains("BAD_ARGUMENT", mismatch);
+            StringAssert.Contains("goal for 'Transparency' expects number, got boolean", mismatch);
+            string unknown = harness.Store.Get("stub-goal-setup", "unknown_err");
+            StringAssert.Contains("BAD_ARGUMENT", unknown);
+            StringAssert.Contains("Nope is not a valid member of Part", unknown);
+            string nan = harness.Store.Get("stub-goal-setup", "nan_err");
+            StringAssert.Contains("BAD_ARGUMENT", nan);
+            StringAssert.Contains("must be finite, got nan", nan);
+            Assert.AreEqual(0, harness.Bindings.TweenService.LiveTweenCount,
+                "no refused Create leaves a tween behind");
+        }
+
+        [Test]
+        public void Tween_FromLua_BelongsToItsModsTeardown_AndPlayOrPauseByAnotherActorIsRefused()
+        {
+            // WHY (M8-20): whoever calls Play/Pause must hold the write right over the target, not
+            // the actor that created the tween, and the creating mod must own the tween so its
+            // unload tears it down; both come from the calling context, never a Lua argument.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext owner = harness.Actor("tween-owner");
+            harness.Stack.Runtime.LoadMod(owner, "tween-owner-mod", @"
+                local part = Instance.new('Part')
+                part.Name = 'OwnerModTarget'
+                part.Parent = workspace
+                local ts = game:GetService('TweenService')
+                local playing = ts:Create(part, TweenInfo.new(10), {Transparency = 1})
+                playing:Play()
+                local idle = ts:Create(part, TweenInfo.new(10), {Transparency = 0.5})
+                local function publish(name, tween)
+                    local ref = Instance.new('ObjectValue')
+                    ref.Name = name
+                    ref.Value = tween
+                    ref.Parent = workspace
+                end
+                publish('PlayingTweenRef', playing)
+                publish('IdleTweenRef', idle)", persistToStore: false);
+
+            RbxTween playing = (harness.Registry.WorldRoot.FindFirstChild("PlayingTweenRef")
+                as RbxObjectValue)?.Value as RbxTween;
+            RbxTween idle = (harness.Registry.WorldRoot.FindFirstChild("IdleTweenRef")
+                as RbxObjectValue)?.Value as RbxTween;
+            Assert.IsNotNull(playing);
+            Assert.IsNotNull(idle);
+            Assert.IsTrue(harness.Registry.TryGetRecord(playing.Id, out InstanceRecord record));
+            Assert.AreEqual("tween-owner-mod", record.OwnerModId,
+                "the Lua-created tween is torn down with the mod that created it");
+            Assert.AreEqual(RbxTweenPlaybackState.Playing, playing.PlaybackState);
+
+            ActorContext intruder = harness.Actor("tween-intruder");
+            harness.Stack.Runtime.LoadMod(intruder, "tween-intruder-mod", @"
+                local playing = workspace:FindFirstChild('PlayingTweenRef').Value
+                local idle = workspace:FindFirstChild('IdleTweenRef').Value
+                local pauseOk, pauseErr = pcall(function() playing:Pause() end)
+                store_set('pause', tostring(pauseOk) .. '|' .. tostring(pauseErr))
+                local playOk, playErr = pcall(function() idle:Play() end)
+                store_set('play', tostring(playOk) .. '|' .. tostring(playErr))",
+                persistToStore: false);
+
+            string pause = harness.Store.Get("tween-intruder-mod", "pause");
+            StringAssert.StartsWith("false|", pause);
+            StringAssert.Contains("actor 'tween-intruder' cannot pause a tween", pause);
+            string play = harness.Store.Get("tween-intruder-mod", "play");
+            StringAssert.StartsWith("false|", play);
+            StringAssert.Contains("actor 'tween-intruder'", play);
+            Assert.AreEqual(RbxTweenPlaybackState.Playing, playing.PlaybackState,
+                "a refused Pause leaves the owner's tween playing");
+            Assert.AreEqual(RbxTweenPlaybackState.Begin, idle.PlaybackState,
+                "a refused Play starts nothing");
+            Assert.AreEqual(2, harness.Bindings.TweenService.CancelAndReleaseOwnedBy("tween-owner-mod"),
+                "both Lua-created tweens belong to the creating mod's teardown");
+        }
+
+        private static RbxEnumItem ResolveEnumItem(ProductionHarness harness, string enumName,
+            string itemName)
+        {
+            Assert.IsTrue(harness.Bindings.Enums.TryGet(enumName, out RbxEnum enumType));
+            Assert.IsTrue(enumType.TryGetItem(itemName, out RbxEnumItem item));
+            return item;
+        }
+
         private sealed class ProductionHarness : IDisposable
         {
             public ProductionHarness()
@@ -1684,6 +1816,33 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             StringAssert.Contains("TweenService:Create tweening " + described, stub.Message);
         }
 
+        [Test]
+        public void TweenedPartAndCameraWrites_FireChangedAndTheirPropertySignals()
+        {
+            // WHY (M1-03): a tween writes through the part sink and the camera rig, which live
+            // outside the instance, so nothing fired Changed or GetPropertyChangedSignal for a
+            // tweened move — a script watching a door's Position never saw it open.
+            HostWorld world = new HostWorld();
+            RbxBasePart part = world.NewPart("Watched");
+            RbxInstance camera = world.Workspace.FindFirstChildOfClass("Camera");
+            Assert.IsNotNull(camera);
+            List<string> partChanges = world.RecordChanged(part);
+            List<string> cameraChanges = world.RecordChanged(camera);
+            Func<int> positions = world.CountPropertySignal(part, "Position");
+
+            world.Host.Write(part, "CFrame", RbxCFrame.FromPosition(new RbxVector3(0f, 5f, 0f)));
+            world.Host.Write(part, "Transparency", 0.5d);
+            world.Host.Write(part, "Transparency", 0.5d);
+            world.Host.Write(camera, "CFrame", RbxCFrame.FromPosition(new RbxVector3(1f, 2f, 3f)));
+            Assert.AreEqual(0, positions(), "signals are deferred until the scheduler resumes");
+            world.Scheduler.Advance(0d);
+
+            CollectionAssert.AreEqual(new[] { "CFrame", "Position", "Transparency" }, partChanges,
+                "the tweened member first, then what it moved; an unchanged write fires nothing");
+            Assert.AreEqual(1, positions(), "a tweened CFrame move fires Position's signal");
+            CollectionAssert.AreEqual(new[] { "CFrame" }, cameraChanges);
+        }
+
         private sealed class HostWorld
         {
             private readonly RbxEnumRegistry _enums = RbxEnumRegistry.CreateWithBuiltins();
@@ -1741,6 +1900,24 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 return Service.Create(target, new RbxTweenInfo(1d, RbxEasingStyle.Linear,
                     RbxEasingDirection.Out, 0, false, 0d), list,
                     new TweenCaller(ActorA, false, WorldId));
+            }
+
+            public List<string> RecordChanged(RbxInstance instance)
+            {
+                List<string> names = new List<string>();
+                instance.Changed.BindScheduler(Scheduler);
+                instance.Changed.Connect(new Action<object[]>(arguments =>
+                    names.Add((string)arguments[0])));
+                return names;
+            }
+
+            public Func<int> CountPropertySignal(RbxInstance instance, string property)
+            {
+                int fires = 0;
+                RbxScriptSignal signal = instance.GetPropertyChangedSignal(property);
+                signal.BindScheduler(Scheduler);
+                signal.Connect(new Action<object[]>(_ => fires++));
+                return () => fires;
             }
 
             public List<string> RecordTouches(RbxBasePart part)

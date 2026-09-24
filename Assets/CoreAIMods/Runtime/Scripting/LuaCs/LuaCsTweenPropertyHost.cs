@@ -12,7 +12,8 @@ namespace CoreAI.Ai.LuaCs
     /// setters advance the revision here, value-object setters advance it themselves on real
     /// changes — mirroring TryWriteSpatial/TryWriteValue so a tweened write is
     /// indistinguishable from a scripted one, including the teleport note a scripted
-    /// Position/CFrame/Orientation/Rotation write leaves for the physics relay).
+    /// Position/CFrame/Orientation/Rotation write leaves for the physics relay and the
+    /// Changed/GetPropertyChangedSignal notifications a scripted part or camera write fires).
     /// </summary>
     internal sealed class LuaCsTweenPropertyHost : ITweenPropertyHost
     {
@@ -230,6 +231,7 @@ namespace CoreAI.Ai.LuaCs
         {
             InstanceId id = target.Id;
             bool movesPart = false;
+            PartProperties before = _sink.GetPartPropertiesOrDefault(id);
             switch (propertyName)
             {
                 case "Position":
@@ -245,8 +247,7 @@ namespace CoreAI.Ai.LuaCs
                     break;
                 case "Orientation":
                     RbxVector3 orientation = (RbxVector3)value;
-                    PartProperties orientationProperties = _sink.GetPartPropertiesOrDefault(id);
-                    _sink.SetCFrame(id, RbxCFrame.FromPosition(orientationProperties.Position)
+                    _sink.SetCFrame(id, RbxCFrame.FromPosition(before.Position)
                         * RbxCFrame.FromOrientation(
                             orientation.X * MathF.PI / 180f,
                             orientation.Y * MathF.PI / 180f,
@@ -255,8 +256,7 @@ namespace CoreAI.Ai.LuaCs
                     break;
                 case "Rotation":
                     RbxVector3 rotation = (RbxVector3)value;
-                    PartProperties rotationProperties = _sink.GetPartPropertiesOrDefault(id);
-                    _sink.SetCFrame(id, RbxCFrame.FromPosition(rotationProperties.Position)
+                    _sink.SetCFrame(id, RbxCFrame.FromPosition(before.Position)
                         * RbxCFrame.FromEulerAnglesXYZ(
                             rotation.X * MathF.PI / 180f,
                             rotation.Y * MathF.PI / 180f,
@@ -286,6 +286,8 @@ namespace CoreAI.Ai.LuaCs
             }
 
             _registry.AdvanceRevision(id);
+            LuaCsRbxInstanceBindings.NotifyPartChanges(target, propertyName, in before,
+                _sink.GetPartPropertiesOrDefault(id));
         }
 
         private static void WriteValue(RbxInstance target, string propertyName, object value)
@@ -383,7 +385,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             RbxCFrame cframe = (RbxCFrame)value;
-            _cameraRig.SetCFrame(in cframe);
+            LuaCsRbxInstanceBindings.SetCameraCFrame(_cameraRig, camera, in cframe);
             _registry.AdvanceRevision(camera.Id);
         }
     }
