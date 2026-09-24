@@ -263,28 +263,27 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
-        public void U7_ReplicatedFirstScriptOrder_IsUntestable_TheServiceIsNotRegisteredAtAll()
+        public void U7_ReplicatedFirstScriptOrder_IsUntestable_TheServiceIsABacklogStub()
         {
             // WHY untestable: U7 is about inter-script START ORDER for ReplicatedFirst
-            // LocalScripts, but ReplicatedFirst is not registered in ServiceCatalog at all —
-            // unlike RunService/DataStoreService/UserInputService/etc it has no
-            // RegisterStub("ReplicatedFirst", ...) entry and no MVP assigned, so there is no
-            // runtime surface to script an ordering test against. What IS pinned: resolving it
-            // fails as an entirely UNKNOWN service (RbxErrorCode.UnknownService), not as a
-            // "planned, errors at the member" stub the way criterion 11's frozen example
-            // (a still-planned service) does. The day ReplicatedFirst is scaffolded as a planned
-            // stub, this assertion goes red and flags that U7 then needs a real ordering test.
+            // LocalScripts, and ReplicatedFirst is only a Backlog stub in ServiceCatalog (no
+            // runtime surface to script an ordering test against). What IS pinned: it resolves as
+            // a known service and errors loudly at the member, like every other stub. The day it
+            // gets a real implementation, this assertion goes red and U7 needs a real ordering test.
             LuaCsRbxApiBindings bindings = new();
             MemoryStore store = new();
             LuaCsModStack stack = BuildStack(bindings, store);
 
             stack.Runtime.LoadMod("m", @"
-                local ok, err = pcall(function() return game:GetService('ReplicatedFirst') end)
+                local ok, service = pcall(function() return game:GetService('ReplicatedFirst') end)
                 store_set('ok', tostring(ok))
+                local memberOk, err = pcall(function() return service.RemoveDefaultLoadingScreen end)
+                store_set('memberOk', tostring(memberOk))
                 store_set('err', tostring(err))");
 
-            Assert.AreEqual("false", store.Get("m", "ok"));
-            StringAssert.Contains("UNKNOWN_SERVICE", store.Get("m", "err"));
+            Assert.AreEqual("true", store.Get("m", "ok"));
+            Assert.AreEqual("false", store.Get("m", "memberOk"));
+            StringAssert.Contains("NOT_IMPLEMENTED", store.Get("m", "err"));
         }
 
         [Test]

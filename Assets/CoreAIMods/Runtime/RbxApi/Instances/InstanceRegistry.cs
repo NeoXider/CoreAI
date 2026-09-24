@@ -101,8 +101,22 @@ namespace CoreAI.Mods.Rbx.Instances
 
         public const int CurrentWorldAclVersion = 1;
 
-        /// <summary>Maximum completed mutation results retained for each durable actor.</summary>
+        /// <summary>
+        /// Maximum completed mutation results retained for each durable actor, and separately the
+        /// maximum server-generated operations counted for that actor.
+        /// </summary>
         public const int DefaultMutationReplayCapacityPerActor = 64;
+
+        /// <summary>
+        /// Operation id carried by every server-generated envelope. It is reserved: a caller-generated
+        /// envelope that uses it is refused, because a server-generated operation is never replayable.
+        /// </summary>
+        /// <remarks>
+        /// WHY one constant rather than a fresh id per call: a server-generated operation is never
+        /// looked up again (no caller holds its id), so a per-call GUID bought nothing and cost two
+        /// allocations on every scheduler resume, the hottest mutation path there is.
+        /// </remarks>
+        internal const string ServerGeneratedOperationId = "coreai:server-generated";
 
         private readonly Dictionary<InstanceId, InstanceRecord> _byId = new();
         private readonly Dictionary<uint, InstanceRecord> _byNetId = new();
@@ -113,6 +127,10 @@ namespace CoreAI.Mods.Rbx.Instances
             _mutationOperations = new();
         private readonly Dictionary<string, Queue<MutationOperationKey>>
             _mutationOperationOrderByActor = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> _serverGeneratedOperationCountByActor =
+            new(StringComparer.Ordinal);
+        private readonly List<RbxModel> _models = new();
+        private readonly Dictionary<InstanceId, int> _modelIndexById = new();
         private readonly object _mutationGate = new();
         private readonly IInstanceBackingBinder _binder;
         private readonly IWorldInstanceAdapter _worldInstanceAdapter;
@@ -124,6 +142,8 @@ namespace CoreAI.Mods.Rbx.Instances
         private ReplicationApplyScope _replicationApplyScope;
         private readonly List<PendingRevisionAdvance> _pendingRevisionAdvances = new();
         private int _mutationGateDepth;
+        private int _serverGeneratedOperationCount;
+        private long _preSimulationVisitCount;
 
         public InstanceRegistry(ClassCatalog catalog = null, IInstanceBackingBinder binder = null,
             InstanceIdAllocator allocator = null, int? worldAclVersion = null, string worldId = "",
@@ -292,17 +312,23 @@ namespace CoreAI.Mods.Rbx.Instances
                 IsDetached = true;
                 _mutationOperations.Clear();
                 _mutationOperationOrderByActor.Clear();
+                _serverGeneratedOperationCountByActor.Clear();
+                _serverGeneratedOperationCount = 0;
             }
         }
 
-        /// <summary>Number of idempotency results retained across all actors in the live world.</summary>
+        /// <summary>
+        /// Completed operations the idempotency ledger holds across all actors in the live world:
+        /// every retained caller-generated result, plus the server-generated operations counted in
+        /// each actor's own server window (see <see cref="ApplyServerGeneratedMutation{T}"/>).
+        /// </summary>
         public int RetainedMutationOperationCount
         {
             get
             {
                 lock (_mutationGate)
                 {
-                    return _mutationOperations.Count;
+                    return _mutationOperations.Count + _serverGeneratedOperationCount;
                 }
             }
         }
@@ -374,9 +400,17 @@ namespace CoreAI.Mods.Rbx.Instances
         /// in that actor's FIFO retention window. Once evicted, the result is unavailable and the
         /// request is evaluated against its original expected revision as a first-seen request. A
         /// state-changing replay is therefore rejected as stale; a true no-op whose target revision
-        /// never advanced may execute again.
+        /// never advanced may execute again. Only caller-generated operations occupy this window:
+        /// server-generated ones are counted in a window of their own and never evict a result a
+        /// caller may still retry. <see cref="ServerGeneratedOperationId"/> is refused here.
         /// </summary>
         public T ApplyMutation<T>(MutationEnvelope envelope, Func<T> operation)
+        {
+            return ApplyMutationCore(envelope, operation, false);
+        }
+
+        private T ApplyMutationCore<T>(MutationEnvelope envelope, Func<T> operation,
+            bool serverGenerated)
         {
             if (operation == null)
             {
@@ -390,7 +424,7 @@ namespace CoreAI.Mods.Rbx.Instances
                     _mutationGateDepth++;
                     try
                     {
-                        return ApplyMutationLocked(envelope, operation);
+                        return ApplyMutationLocked(envelope, operation, serverGenerated);
                     }
                     finally
                     {
@@ -406,7 +440,8 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
-        private T ApplyMutationLocked<T>(MutationEnvelope envelope, Func<T> operation)
+        private T ApplyMutationLocked<T>(MutationEnvelope envelope, Func<T> operation,
+            bool serverGenerated)
         {
             if (IsDetached)
             {
@@ -415,18 +450,30 @@ namespace CoreAI.Mods.Rbx.Instances
                     + envelope.OperationId + "'");
             }
 
-            MutationOperationKey key = new(envelope.ActorId, envelope.OperationId);
-            if (_mutationOperations.TryGetValue(
-                    key, out MutationOperationRecord completed))
+            MutationOperationKey key = default;
+            if (!serverGenerated)
             {
-                EnsureReplayMatches(envelope, completed);
-                if (completed.ResultType != typeof(T))
+                if (string.Equals(envelope.OperationId, ServerGeneratedOperationId,
+                        StringComparison.Ordinal))
                 {
                     throw MutationDenied(envelope,
-                        "the operation id was already completed with a different result type");
+                        "the operation id is reserved for server-generated envelopes, which are "
+                        + "never replayable");
                 }
 
-                return completed.Result == null ? default : (T)completed.Result;
+                key = new MutationOperationKey(envelope.ActorId, envelope.OperationId);
+                if (_mutationOperations.TryGetValue(
+                        key, out MutationOperationRecord completed))
+                {
+                    EnsureReplayMatches(envelope, completed);
+                    if (completed.ResultType != typeof(T))
+                    {
+                        throw MutationDenied(envelope,
+                            "the operation id was already completed with a different result type");
+                    }
+
+                    return completed.Result == null ? default : (T)completed.Result;
+                }
             }
 
             if (!_byId.TryGetValue(
@@ -444,13 +491,30 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             T result = operation();
+            if (serverGenerated)
+            {
+                CountServerGeneratedOperation(envelope.ActorId);
+                return result;
+            }
+
             _mutationOperations.Add(
                 key, new MutationOperationRecord(envelope, typeof(T), result));
             RetainMutationOperation(envelope.ActorId, key);
             return result;
         }
 
-        /// <summary>Runs one production entry batch under a server-generated ambient envelope.</summary>
+        /// <summary>
+        /// Runs one production entry batch under a server-generated ambient envelope. The operation
+        /// is ledgered in the actor's server window, which is bounded like the caller window but kept
+        /// apart from it, and its result is not retained: no caller can ever replay it.
+        /// </summary>
+        /// <remarks>
+        /// WHY a separate window rather than the caller one (M2-10): every scheduler resume of an
+        /// actor's mods lands here, so a single Heartbeat handler pushed about sixty operations a
+        /// second through a 64-entry window shared with that actor's network intents. A client
+        /// retrying an intent after a one-second hiccup found its cached result evicted and was
+        /// refused as stale instead of answered, which is exactly the retry idempotency exists for.
+        /// </remarks>
         public T ApplyServerGeneratedMutation<T>(string actorId, bool actorIsUnrestricted,
             string actorWorldId, string operation, Func<T> mutation)
         {
@@ -473,12 +537,12 @@ namespace CoreAI.Mods.Rbx.Instances
             MutationEnvelope envelope = new MutationEnvelope(
                 actor,
                 anchor.Id,
-                Guid.NewGuid().ToString("N"),
+                ServerGeneratedOperationId,
                 anchor.Revision);
             using (BeginMutationEnvelopeScope(
                        envelope, actorIsUnrestricted, actorWorldId))
             {
-                return ApplyMutation(envelope, mutation);
+                return ApplyMutationCore(envelope, mutation, true);
             }
         }
 
@@ -581,6 +645,22 @@ namespace CoreAI.Mods.Rbx.Instances
                 MutationOperationKey evicted = actorOperations.Dequeue();
                 _mutationOperations.Remove(evicted);
             }
+        }
+
+        /// <summary>
+        /// Ledgers one server-generated operation in the actor's server window: the newest one
+        /// replaces the oldest once the window is full, so the count stays bounded per actor.
+        /// </summary>
+        private void CountServerGeneratedOperation(string actorId)
+        {
+            _serverGeneratedOperationCountByActor.TryGetValue(actorId, out int counted);
+            if (counted >= _mutationReplayCapacityPerActor)
+            {
+                return;
+            }
+
+            _serverGeneratedOperationCountByActor[actorId] = counted + 1;
+            _serverGeneratedOperationCount++;
         }
 
         /// <summary>
@@ -738,16 +818,49 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
-        /// <summary>Applies Model state cleanup whose documented boundary is the next simulation step.</summary>
+        /// <summary>
+        /// Applies Model state cleanup whose documented boundary is the next simulation step. Only
+        /// live Models are visited, so the per-frame cost does not grow with the part count (M1-36).
+        /// </summary>
         public void ProcessPreSimulation()
         {
-            foreach (InstanceRecord record in _byId.Values)
+            // WHY an index loop over the live list: clearing a PrimaryPart advances a revision, and a
+            // RevisionAdvanced subscriber may create or destroy instances meanwhile. A removal swaps
+            // the last Model into the freed slot, so at worst that Model is checked on the next step
+            // instead of this one — still inside the documented boundary — and nothing throws.
+            for (int index = 0; index < _models.Count; index++)
             {
-                if (record.Instance is RbxModel model)
-                {
-                    model.ResetInvalidPrimaryPart();
-                }
+                _preSimulationVisitCount++;
+                _models[index].ResetInvalidPrimaryPart();
             }
+        }
+
+        /// <summary>Records <see cref="ProcessPreSimulation"/> has visited, summed over every call.</summary>
+        internal long PreSimulationVisitCount => _preSimulationVisitCount;
+
+        private void TrackModel(InstanceId id, RbxModel model)
+        {
+            _modelIndexById[id] = _models.Count;
+            _models.Add(model);
+        }
+
+        private void UntrackModel(InstanceId id)
+        {
+            if (!_modelIndexById.TryGetValue(id, out int index))
+            {
+                return;
+            }
+
+            int lastIndex = _models.Count - 1;
+            if (index != lastIndex)
+            {
+                RbxModel moved = _models[lastIndex];
+                _models[index] = moved;
+                _modelIndexById[moved.Id] = index;
+            }
+
+            _models.RemoveAt(lastIndex);
+            _modelIndexById.Remove(id);
         }
 
         private static void EnsureReplayMatches(MutationEnvelope envelope,
@@ -790,7 +903,8 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         /// <summary>Roblox Instance.new semantics: unknown/abstract/non-creatable class names
-        /// raise BAD_ARGUMENT with the Roblox message shape.</summary>
+        /// raise BAD_ARGUMENT with the Roblox message shape; a real, script-creatable Roblox class
+        /// CoreAI does not implement yet raises the loud NOT_IMPLEMENTED stub from the catalog.</summary>
         public RbxInstance CreateScripted(string className, string ownerModId = null,
             string originTag = null, InstanceIdAuthority authority = InstanceIdAuthority.Server,
             string ownerActorId = null, InstanceAccessScope? accessScope = null)
@@ -803,7 +917,17 @@ namespace CoreAI.Mods.Rbx.Instances
                 throw RbxError.WorldDetached("Instance.new(\"" + className + "\")");
             }
 
+            // WHY before the BAD_ARGUMENT below: "Unable to create an Instance of type 'WeldConstraint'"
+            // with "pass Part, Folder, or Model" tells the self-repair loop the class does not exist,
+            // and it then invents a workaround for a class every Roblox tutorial uses.
             if (!Catalog.TryGet(className, out ClassDescriptor descriptor)
+                && Catalog.TryGetKnownUnimplementedClass(
+                    className, out RbxKnownUnimplementedClassDescriptor knownClass))
+            {
+                throw knownClass.CreateInstanceNewError();
+            }
+
+            if (descriptor == null
                 || descriptor.IsAbstract
                 || !descriptor.IsCreatable)
             {
@@ -897,6 +1021,11 @@ namespace CoreAI.Mods.Rbx.Instances
             InstanceRecord record = new(id, instance, ownerModId, originTag, resolvedOwnerActorId,
                 resolvedAccessScope, isRuntimeInfrastructure);
             _byId.Add(id, record);
+            if (instance is RbxModel model)
+            {
+                TrackModel(id, model);
+            }
+
             Registered?.Invoke(record);
             return instance;
         }
@@ -1169,37 +1298,79 @@ namespace CoreAI.Mods.Rbx.Instances
 
         // ---- Identity binding ---------------------------------------------------------------
 
-        /// <summary>MVP12 seam: binds the Mirror netId. Only server-assigned ids replicate (§3.3).</summary>
+        /// <summary>
+        /// MVP12 seam: binds the Mirror netId. Only server-assigned ids replicate (§3.3). The last
+        /// bind of a netId wins: a record that held it before loses it, so no two records ever claim
+        /// one key and a later destroy of the old holder cannot unbind the new one.
+        /// </summary>
         public void BindNetId(InstanceId id, uint netId)
         {
             InstanceIdWireContract.EnsureWireSafe(id);
             InstanceRecord record = RequireRecord(id);
-            if (record.NetId != 0)
+            ReleaseNetId(record);
+            if (netId == 0)
+            {
+                return;
+            }
+
+            if (_byNetId.TryGetValue(netId, out InstanceRecord previousHolder))
+            {
+                previousHolder.NetId = 0;
+            }
+
+            record.NetId = netId;
+            _byNetId[netId] = record;
+        }
+
+        /// <summary>
+        /// Binds the CoreAI world-command name so world queries and Lua resolve to one record. The
+        /// last bind of a name wins, exactly as for <see cref="BindNetId"/>.
+        /// </summary>
+        public void BindWorldName(InstanceId id, string worldName)
+        {
+            InstanceRecord record = RequireRecord(id);
+            ReleaseWorldName(record);
+            if (worldName == null)
+            {
+                return;
+            }
+
+            if (_byWorldName.TryGetValue(worldName, out InstanceRecord previousHolder))
+            {
+                previousHolder.WorldName = null;
+            }
+
+            record.WorldName = worldName;
+            _byWorldName[worldName] = record;
+        }
+
+        /// <summary>
+        /// Clears the record's netId and drops the map entry only while it still points at this
+        /// record (M1-27: an entry another record re-bound must survive this record's release).
+        /// </summary>
+        private void ReleaseNetId(InstanceRecord record)
+        {
+            if (record.NetId != 0
+                && _byNetId.TryGetValue(record.NetId, out InstanceRecord holder)
+                && ReferenceEquals(holder, record))
             {
                 _byNetId.Remove(record.NetId);
             }
 
-            record.NetId = netId;
-            if (netId != 0)
-            {
-                _byNetId[netId] = record;
-            }
+            record.NetId = 0;
         }
 
-        /// <summary>Binds the CoreAI world-command name so world queries and Lua resolve to one record.</summary>
-        public void BindWorldName(InstanceId id, string worldName)
+        /// <summary>World-name twin of <see cref="ReleaseNetId"/>.</summary>
+        private void ReleaseWorldName(InstanceRecord record)
         {
-            InstanceRecord record = RequireRecord(id);
-            if (record.WorldName != null)
+            if (record.WorldName != null
+                && _byWorldName.TryGetValue(record.WorldName, out InstanceRecord holder)
+                && ReferenceEquals(holder, record))
             {
                 _byWorldName.Remove(record.WorldName);
             }
 
-            record.WorldName = worldName;
-            if (worldName != null)
-            {
-                _byWorldName[worldName] = record;
-            }
+            record.WorldName = null;
         }
 
         private InstanceRecord RequireRecord(InstanceId id)
@@ -1374,12 +1545,20 @@ namespace CoreAI.Mods.Rbx.Instances
             IReadOnlyList<string> clearedTags = Tags.GetTags(instance.Id);
             Tags.ClearInstance(instance.Id);
             _byId.Remove(instance.Id);
-            if (record.NetId != 0)
+            UntrackModel(instance.Id);
+            // WHY the record keeps its keys and only the map entries go: an Unregistered subscriber
+            // still reads the dead record's identity, and an entry another record re-bound in the
+            // meantime belongs to that record (M1-27).
+            if (record.NetId != 0
+                && _byNetId.TryGetValue(record.NetId, out InstanceRecord netHolder)
+                && ReferenceEquals(netHolder, record))
             {
                 _byNetId.Remove(record.NetId);
             }
 
-            if (record.WorldName != null)
+            if (record.WorldName != null
+                && _byWorldName.TryGetValue(record.WorldName, out InstanceRecord nameHolder)
+                && ReferenceEquals(nameHolder, record))
             {
                 _byWorldName.Remove(record.WorldName);
             }

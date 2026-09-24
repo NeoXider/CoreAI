@@ -95,6 +95,99 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual(1, harness.Registry.RetainedMutationOperationCount);
         }
 
+        /// <summary>
+        /// M2-10 through the production stack: an actor's intent is applied with its own operation
+        /// id, then the same actor's Heartbeat handler resumes more times than the replay window
+        /// holds. The network-style retry of that intent must still be answered from the cache and
+        /// never run twice. Every resume used to land in the same 64-entry window and evict it, so
+        /// the retry was refused as stale.
+        /// </summary>
+        [Test]
+        public async Task ClientIntentRetry_AfterMoreHeartbeatResumesThanTheWindowHolds_ReturnsTheCachedResult()
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("player-7");
+            RbxInstance target = harness.Registry.Create(
+                "Folder",
+                ownerActorId: actor.ActorId,
+                accessScope: InstanceAccessScope.Owned);
+            target.Name = "RetryTarget";
+            target.Parent = harness.Registry.WorldRoot;
+            MutationEnvelope intent = new(
+                actor.ActorId, target.Id, "client-op-42",
+                harness.Registry.GetRecord(target.Id).Revision);
+            const string code = @"
+                local target = workspace:FindFirstChild('RetryTarget')
+                local count = target:GetAttribute('Count') or 0
+                target:SetAttribute('Count', count + 1)
+                return target:GetAttribute('Count')";
+
+            LuaTool.LuaResult first = await harness.Stack.ToolExecutor.ExecuteAsync(
+                code, actor, intent, CancellationToken.None);
+            Assert.IsTrue(first.Success, first.Error);
+
+            harness.Stack.Runtime.LoadMod(actor, "player-heartbeat", @"
+                local marker = Instance.new('Folder')
+                marker.Name = 'HeartbeatTicks'
+                marker.Parent = workspace
+                local ticks = 0
+                game:GetService('RunService').Heartbeat:Connect(function()
+                    ticks = ticks + 1
+                    marker:SetAttribute('Ticks', ticks)
+                end)", persistToStore: false);
+            int frames = InstanceRegistry.DefaultMutationReplayCapacityPerActor + 8;
+            for (int frame = 0; frame < frames; frame++)
+            {
+                harness.Bindings.PumpHeartbeat(0.016f);
+                harness.Bindings.Scheduler.Advance(0d);
+            }
+
+            RbxInstance marker = harness.Registry.WorldRoot.FindFirstChild("HeartbeatTicks");
+            Assert.IsNotNull(marker, "precondition: the player's mod loaded");
+            Assert.GreaterOrEqual(Convert.ToDouble(marker.GetAttribute("Ticks")), (double)frames,
+                "precondition: the handler resumed once per frame, more often than the window holds");
+
+            LuaTool.LuaResult retry = await harness.Stack.ToolExecutor.ExecuteAsync(
+                code, actor, intent, CancellationToken.None);
+
+            Assert.IsTrue(retry.Success, retry.Error);
+            Assert.AreEqual("1", retry.Output, "the retry must return the first result");
+            Assert.AreEqual(1d, target.GetAttribute("Count"), "the intent must be applied exactly once");
+            Assert.Greater(harness.Registry.RetainedMutationOperationCount,
+                InstanceRegistry.DefaultMutationReplayCapacityPerActor,
+                "the resumes are still ledgered, in the actor's server window beside the intent");
+        }
+
+        /// <summary>
+        /// M1-05 through the production executor: a known Roblox member, class or service answers
+        /// with the loud NOT_IMPLEMENTED stub, never with "not a valid member", "Unable to create"
+        /// or UNKNOWN_SERVICE. <c>model:MoveTo</c> also proves the Humanoid-only MoveTo binding no
+        /// longer lets the Model call fall through to "not a valid member".
+        /// </summary>
+        [TestCase("local model = Instance.new('Model')\nmodel:MoveTo(Vector3.new(0, 5, 0))",
+            "Model:MoveTo")]
+        [TestCase("local weld = Instance.new('WeldConstraint')", "WeldConstraint")]
+        [TestCase("local gui = game:GetService('StarterGui')\nlocal setCore = gui.SetCore",
+            "StarterGui:SetCore")]
+        [TestCase("local part = Instance.new('Part')\nlocal color = part.BrickColor",
+            "BasePart.BrickColor")]
+        public async Task KnownRobloxSurface_ThroughTheProductionExecutor_RaisesTheLoudStub(
+            string code, string feature)
+        {
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("known-surface-actor");
+
+            LuaTool.LuaResult result = await harness.Stack.ToolExecutor.ExecuteAsync(
+                code, actor, CancellationToken.None);
+
+            Assert.IsFalse(result.Success);
+            StringAssert.Contains("NOT_IMPLEMENTED", result.Error);
+            StringAssert.Contains(feature, result.Error);
+            StringAssert.DoesNotContain("not a valid member", result.Error);
+            StringAssert.DoesNotContain("Unable to create", result.Error);
+            StringAssert.DoesNotContain("UNKNOWN_SERVICE", result.Error);
+        }
+
         [Test]
         public async Task MutationOutsideEnvelope_InAclWorld_IsRefused()
         {

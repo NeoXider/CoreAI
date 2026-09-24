@@ -255,5 +255,326 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
 
             Assert.DoesNotThrow(() => registry.Create("Part"));
         }
+
+        /// <summary>
+        /// M2-10: every scheduler resume of an actor's mods is a server-generated operation. They
+        /// used to share the actor's replay window with its network intents, so a Heartbeat handler
+        /// evicted a client intent within a second and the client's retry was refused as stale
+        /// instead of answered from the cache. Server operations now keep a window of their own.
+        /// </summary>
+        [Test]
+        public void ApplyServerGeneratedMutation_ManyResumesOfTheSameActor_KeepItsClientIntentReplayable()
+        {
+            const int capacity = 4;
+            InstanceRegistry registry = new(mutationReplayCapacityPerActor: capacity);
+            RbxInstance target = registry.Create("Folder");
+            Assert.IsTrue(registry.TryGetRecord(target.Id, out InstanceRecord record));
+            MutationEnvelope intent = new("player-7", target.Id, "client-op-42", record.Revision);
+            int applied = 0;
+
+            string first = registry.ApplyMutation(intent, () =>
+            {
+                applied++;
+                registry.AdvanceRevision(target.Id);
+                return "applied";
+            });
+            for (int resume = 0; resume < capacity * 3; resume++)
+            {
+                int captured = resume;
+                registry.ApplyServerGeneratedMutation("player-7", false, "",
+                    "resume Lua scheduler thread", () => captured);
+            }
+
+            string retry = registry.ApplyMutation(intent, () =>
+            {
+                applied++;
+                return "applied again";
+            });
+
+            Assert.AreEqual("applied", first);
+            Assert.AreEqual("applied", retry, "the retry must be answered from the cached result");
+            Assert.AreEqual(1, applied, "the intent must run exactly once");
+        }
+
+        /// <summary>
+        /// Twin of the replay test: server-generated operations are still ledgered, in a bounded
+        /// window per actor that neither evicts nor is evicted by the caller window, and a world
+        /// teardown clears both.
+        /// </summary>
+        [Test]
+        public void ApplyServerGeneratedMutation_CountsInABoundedPerActorWindowBesideTheCallerWindow()
+        {
+            const int capacity = 2;
+            InstanceRegistry registry = new(mutationReplayCapacityPerActor: capacity);
+            RbxInstance target = registry.Create("Folder");
+
+            for (int index = 0; index < 5; index++)
+            {
+                registry.ApplyServerGeneratedMutation("actor-a", false, "", "server op", () => 0);
+            }
+
+            Assert.AreEqual(capacity, registry.RetainedMutationOperationCount,
+                "the server window is bounded per actor");
+
+            for (int index = 0; index < capacity; index++)
+            {
+                Assert.IsTrue(registry.TryGetRecord(target.Id, out InstanceRecord record));
+                int captured = index;
+                registry.ApplyMutation(
+                    new MutationEnvelope("actor-a", target.Id, "caller-op-" + index, record.Revision),
+                    () => captured);
+            }
+
+            Assert.AreEqual(capacity * 2, registry.RetainedMutationOperationCount,
+                "caller results are retained beside the server window, not instead of it");
+
+            registry.ApplyServerGeneratedMutation("actor-a", false, "", "server op", () => 0);
+            Assert.AreEqual(capacity * 2, registry.RetainedMutationOperationCount,
+                "a full server window replaces its oldest entry and evicts no caller result");
+
+            registry.ApplyServerGeneratedMutation("actor-b", false, "", "server op", () => 0);
+            Assert.AreEqual(capacity * 2 + 1, registry.RetainedMutationOperationCount,
+                "each actor has its own server window");
+
+            registry.MarkDetached();
+            Assert.AreEqual(0, registry.RetainedMutationOperationCount);
+        }
+
+        /// <summary>
+        /// The operation id every server-generated envelope carries is reserved: a caller cannot
+        /// submit it, so a replay of it can never be mistaken for a first-seen caller operation.
+        /// </summary>
+        [Test]
+        public void ApplyMutation_CallerEnvelopeCarryingTheServerGeneratedId_IsRefusedBeforeItRuns()
+        {
+            InstanceRegistry registry = new();
+            RbxInstance target = registry.Create("Folder");
+            Assert.IsTrue(registry.TryGetRecord(target.Id, out InstanceRecord record));
+            MutationEnvelope forged = new(
+                "actor-a", target.Id, InstanceRegistry.ServerGeneratedOperationId, record.Revision);
+            bool ran = false;
+
+            RbxError error = Assert.Throws<RbxError>(() => registry.ApplyMutation(forged, () =>
+            {
+                ran = true;
+                return 0;
+            }));
+
+            Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
+            StringAssert.Contains("reserved for server-generated envelopes", error.RawMessage);
+            Assert.IsFalse(ran);
+            Assert.AreEqual(0, registry.RetainedMutationOperationCount);
+        }
+
+        /// <summary>
+        /// M1-27: binding a world name another record holds moves it; destroying the old holder later
+        /// must not unbind the new one, which it used to by removing the key it no longer owned.
+        /// </summary>
+        [Test]
+        public void BindWorldName_Rebind_KeepsTheLiveHolderResolvable()
+        {
+            InstanceRegistry registry = new();
+            RbxInstance first = registry.Create("Part");
+            RbxInstance second = registry.Create("Part");
+
+            registry.BindWorldName(first.Id, "Crate");
+            registry.BindWorldName(second.Id, "Crate");
+
+            Assert.IsTrue(registry.TryGetRecord(first.Id, out InstanceRecord firstRecord));
+            Assert.IsNull(firstRecord.WorldName, "the previous holder must lose the name");
+            first.Destroy();
+
+            Assert.IsTrue(registry.TryGetByWorldName("Crate", out RbxInstance resolved));
+            Assert.AreSame(second, resolved);
+        }
+
+        /// <summary>NetId twin of <see cref="BindWorldName_Rebind_KeepsTheLiveHolderResolvable"/>.</summary>
+        [Test]
+        public void BindNetId_Rebind_KeepsTheLiveHolderResolvable()
+        {
+            InstanceRegistry registry = new();
+            RbxInstance first = registry.Create("Part");
+            RbxInstance second = registry.Create("Part");
+
+            registry.BindNetId(first.Id, 7u);
+            registry.BindNetId(second.Id, 7u);
+
+            Assert.IsTrue(registry.TryGetRecord(first.Id, out InstanceRecord firstRecord));
+            Assert.AreEqual(0u, firstRecord.NetId, "the previous holder must lose the netId");
+            first.Destroy();
+
+            Assert.IsTrue(registry.TryGetByNetId(7u, out RbxInstance resolved));
+            Assert.AreSame(second, resolved);
+        }
+
+        /// <summary>
+        /// M1-27: re-binding the old holder to another name must not remove the entry a newer holder
+        /// took over, and an ordinary rename of a sole holder still moves its key.
+        /// </summary>
+        [Test]
+        public void BindWorldName_RebindingTheOldHolder_LeavesTheNewHolderBound()
+        {
+            InstanceRegistry registry = new();
+            RbxInstance first = registry.Create("Part");
+            RbxInstance second = registry.Create("Part");
+            registry.BindWorldName(first.Id, "Crate");
+            registry.BindWorldName(second.Id, "Crate");
+
+            registry.BindWorldName(first.Id, "Barrel");
+
+            Assert.IsTrue(registry.TryGetByWorldName("Crate", out RbxInstance crate));
+            Assert.AreSame(second, crate);
+            Assert.IsTrue(registry.TryGetByWorldName("Barrel", out RbxInstance barrel));
+            Assert.AreSame(first, barrel);
+
+            registry.BindWorldName(second.Id, "Box");
+            Assert.IsFalse(registry.TryGetByWorldName("Crate", out _),
+                "a renamed sole holder must release its old name");
+            Assert.IsTrue(registry.TryGetByWorldName("Box", out RbxInstance box));
+            Assert.AreSame(second, box);
+
+            registry.BindWorldName(second.Id, null);
+            Assert.IsFalse(registry.TryGetByWorldName("Box", out _));
+        }
+
+        /// <summary>
+        /// M1-36: the pre-simulation pass visits Models only, so its per-frame cost no longer grows
+        /// with the number of parts in the world. It used to walk every record every frame.
+        /// </summary>
+        [Test]
+        public void ProcessPreSimulation_VisitsModelsOnly_NotEveryRecord()
+        {
+            InstanceRegistry registry = new();
+            RbxModel model = (RbxModel)registry.Create("Model");
+            for (int index = 0; index < 1000; index++)
+            {
+                registry.Create("Part");
+            }
+
+            long before = registry.PreSimulationVisitCount;
+            registry.ProcessPreSimulation();
+
+            Assert.AreEqual(1L, registry.PreSimulationVisitCount - before,
+                "one Model in a world of a thousand parts must cost one visit");
+            Assert.IsNull(model.PrimaryPart);
+        }
+
+        /// <summary>
+        /// Functional twin of the cost test: an invalid PrimaryPart is still cleared at the next
+        /// pre-simulation step, a Model created after the parts is still visited, and a destroyed
+        /// Model leaves the pass.
+        /// </summary>
+        [Test]
+        public void ProcessPreSimulation_StillClearsAnInvalidPrimaryPart_AndDropsDestroyedModels()
+        {
+            InstanceRegistry registry = new();
+            registry.Create("Part");
+            RbxModel model = (RbxModel)registry.Create("Model");
+            RbxInstance primary = registry.Create("Part");
+            primary.Parent = model;
+            model.SetPrimaryPart(primary);
+            RbxModel doomed = (RbxModel)registry.Create("Model");
+
+            primary.Destroy();
+            doomed.Destroy();
+            long before = registry.PreSimulationVisitCount;
+            registry.ProcessPreSimulation();
+
+            Assert.IsNull(model.PrimaryPart, "a destroyed PrimaryPart is cleared at pre-simulation");
+            Assert.AreEqual(1L, registry.PreSimulationVisitCount - before,
+                "the destroyed Model must no longer be visited");
+
+            RbxInstance escapee = registry.Create("Part");
+            escapee.Parent = model;
+            model.SetPrimaryPart(escapee);
+            escapee.Parent = null;
+            registry.ProcessPreSimulation();
+            Assert.IsNull(model.PrimaryPart, "a PrimaryPart that left the Model is cleared too");
+        }
+
+        /// <summary>
+        /// M1-05 (class half): Instance.new of a real, creatable Roblox class CoreAI does not
+        /// implement raises the loud NOT_IMPLEMENTED stub, not "Unable to create an Instance of type"
+        /// with advice to pass a Part. Nothing is registered on the way.
+        /// </summary>
+        [TestCase("WeldConstraint", "no roadmap rung is assigned")]
+        [TestCase("SpawnLocation", "no roadmap rung is assigned")]
+        [TestCase("WedgePart", "no roadmap rung is assigned")]
+        [TestCase("Sound", "is planned for MVP15")]
+        [TestCase("ScreenGui", "is planned for MVP14")]
+        [TestCase("BodyVelocity", "deliberately unsupported by CoreAI")]
+        public void CreateScripted_KnownUnimplementedClass_RaisesTheLoudStub(string className,
+            string statusWording)
+        {
+            InstanceRegistry registry = new();
+            int countBefore = registry.Count;
+
+            RbxError error = Assert.Throws<RbxError>(() => registry.CreateScripted(className));
+
+            Assert.AreEqual(RbxErrorCode.NotImplemented, error.Code);
+            StringAssert.Contains("Instance.new(\"" + className + "\")", error.RawMessage);
+            StringAssert.Contains(statusWording, error.RawMessage);
+            StringAssert.DoesNotContain("Unable to create", error.RawMessage);
+            Assert.AreEqual(countBefore, registry.Count, "a refused class registers nothing");
+        }
+
+        /// <summary>
+        /// Negative twin: services, abstract classes and names Roblox does not have keep the Roblox
+        /// "Unable to create" BAD_ARGUMENT, and a class that ships for real supersedes its stub.
+        /// </summary>
+        [Test]
+        public void CreateScripted_ServicesAbstractAndUnknownClasses_StayBadArgument()
+        {
+            InstanceRegistry registry = new();
+            foreach (string className in new[] { "Workspace", "StarterGui", "BasePart",
+                         "FormFactorPart", "Object", "Bogus" })
+            {
+                RbxError error = Assert.Throws<RbxError>(() => registry.CreateScripted(className));
+                Assert.AreEqual(RbxErrorCode.BadArgument, error.Code, className);
+                StringAssert.Contains("Unable to create an Instance of type '" + className + "'",
+                    error.RawMessage);
+            }
+
+            ClassCatalog catalog = ClassCatalog.CreateMvp1();
+            catalog.Register(new ClassDescriptor("WeldConstraint", "Instance", false, true, false));
+            InstanceRegistry shipped = new(catalog);
+            Assert.IsFalse(catalog.TryGetKnownUnimplementedClass("WeldConstraint", out _),
+                "registering the real class retires its stub");
+            Assert.AreEqual("WeldConstraint", shipped.CreateScripted("WeldConstraint").ClassName);
+            Assert.Throws<System.InvalidOperationException>(() => catalog.RegisterKnownUnimplementedClasses(
+                RbxKnownUnimplementedClassDescriptor.Backlog("Part", "a real class is never a stub")));
+        }
+
+        /// <summary>
+        /// M1-21: the hierarchy is rooted at Object as in the mirror, and Part sits under the
+        /// abstract FormFactorPart, so IsA answers both the way Roblox does.
+        /// </summary>
+        [Test]
+        public void ClassHierarchy_IsRootedAtObject_AndPartIsAFormFactorPart()
+        {
+            InstanceRegistry registry = new();
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            RbxInstance part = registry.Create("Part");
+            RbxInstance folder = registry.Create("Folder");
+
+            Assert.IsTrue(part.IsA("Object"));
+            Assert.IsTrue(folder.IsA("Object"));
+            Assert.IsTrue(game.IsA("Object"));
+            Assert.IsTrue(registry.WorldRoot.IsA("Object"));
+            Assert.IsTrue(part.IsA("FormFactorPart"));
+            Assert.IsTrue(part.IsA("BasePart"));
+            Assert.IsTrue(part.IsA("Instance"));
+            Assert.IsFalse(folder.IsA("FormFactorPart"));
+            Assert.IsFalse(folder.IsA("BasePart"));
+
+            Assert.IsTrue(registry.Catalog.TryGet("Object", out ClassDescriptor objectClass));
+            Assert.IsNull(objectClass.BaseClassName, "Object is the root");
+            Assert.IsTrue(objectClass.IsAbstract);
+            Assert.IsTrue(registry.Catalog.TryGet("FormFactorPart", out ClassDescriptor formFactor));
+            Assert.AreEqual("BasePart", formFactor.BaseClassName);
+            Assert.IsTrue(formFactor.IsAbstract);
+            Assert.Throws<RbxError>(() => registry.Create("Object"));
+            Assert.Throws<RbxError>(() => registry.Create("FormFactorPart"));
+        }
     }
 }
