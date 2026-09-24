@@ -1370,7 +1370,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 workspace.ChildAdded:Connect(function()
                     store_set('phase', 'waiting')
                     local elapsed = task.wait(0.25)
-                    store_set('phase', 'resumed:' .. tostring(elapsed))
+                    store_set('phase', 'resumed:' .. string.format('%.2f', elapsed))
                 end)
                 Instance.new('Folder', workspace)");
 

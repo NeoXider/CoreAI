@@ -28,8 +28,10 @@ namespace CoreAI.Tests.EditMode
 
             // WHY: the escaped text must not contain an intact "<color" or "</color" run: a zero-width
             // space always follows every '<', which is exactly what breaks tag matching.
-            StringAssert.DoesNotContain("<color", result);
-            StringAssert.DoesNotContain("</color", result);
+            // WHY ordinal: a culture-aware search (NUnit's substring constraint on .NET with ICU) skips
+            // the zero-width space and reports the very run the escape breaks.
+            Assert.Less(result.IndexOf("<color", StringComparison.Ordinal), 0);
+            Assert.Less(result.IndexOf("</color", StringComparison.Ordinal), 0);
             // WHY: the visible characters (once the zero-width markers are stripped back out) are
             // untouched, so nothing is lost from what the user sees.
             Assert.AreEqual("<color=red>evil</color>", result.Replace("​", ""));
