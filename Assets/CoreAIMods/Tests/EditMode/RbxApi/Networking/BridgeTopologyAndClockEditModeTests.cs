@@ -223,6 +223,82 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
                 "an hour-sized correction slows the clock down; it no longer stops it for the hour");
         }
 
+        [TestCase(RbxNetworkTopology.Solo)]
+        [TestCase(RbxNetworkTopology.Host)]
+        [TestCase(RbxNetworkTopology.DedicatedServer)]
+        public void ServerTimeNow_WhereThisProcessIsTheServerClock_IsTheLocalClockHeldAtItsLastReading(
+            RbxNetworkTopology topology)
+        {
+            // WHY: the slew's free-running clock advanced by process time on the server too, so a
+            // world whose injected Unix clock stood still read a later time on every call.
+            FakeClockSource clock = new()
+            {
+                UnixTimeSecondsFractional = 1700000000.25d,
+                ProcessTimeSeconds = 5d
+            };
+            LuaCsRbxApiBindings bindings = new(networkBridge: new FakeBridge(topology),
+                clockSource: clock);
+
+            double first = bindings.GetServerTimeNow();
+            clock.ProcessTimeSeconds = 6d;
+            double aSecondLater = bindings.GetServerTimeNow();
+            clock.UnixTimeSecondsFractional = 1699999990d;
+            clock.ProcessTimeSeconds = 7d;
+            double afterABackwardStep = bindings.GetServerTimeNow();
+            clock.UnixTimeSecondsFractional = 1700000003d;
+            clock.ProcessTimeSeconds = 8d;
+            double afterAForwardStep = bindings.GetServerTimeNow();
+
+            Assert.AreEqual(1700000000.25d, first, topology.ToString());
+            Assert.AreEqual(first, aSecondLater,
+                "a clock that stood still reads the same, whatever real time passed");
+            Assert.AreEqual(first, afterABackwardStep,
+                "a backward step holds the last reading instead of running the clock back");
+            Assert.AreEqual(1700000003d, afterAForwardStep, "a forward step is taken at once");
+        }
+
+        [Test]
+        public void StagedNetworkBridge_QueuesAKickWithItsMessage_AndHandsTheTransportThatMessage()
+        {
+            // WHY: without its own message overload the staged bridge took the interface default,
+            // which drops the text, so every kick in a world loaded from a package showed the client
+            // the transport's default notice.
+            Type staged = typeof(CoreAI.Mods.WorldPackages.RbxWorldRuntimeSessionController)
+                .GetNestedType("StagedNetworkBridge", BindingFlags.NonPublic);
+            Assert.IsNotNull(staged, "the staged bridge wraps the live transport during a world swap");
+            FakeBridge inner = new(RbxNetworkTopology.Host);
+            INetworkBridge wrapper = (INetworkBridge)Activator.CreateInstance(staged,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
+                new object[] { inner }, null);
+            try
+            {
+                wrapper.DisconnectActor("actor-a", "banned for griefing");
+                CollectionAssert.IsEmpty(inner.KicksWithMessage,
+                    "a world that is not live yet must not close a connection the live world serves");
+                CollectionAssert.IsEmpty(inner.KicksWithoutMessage);
+
+                MethodInfo activate = staged.GetMethod("ActivateAfterPublication",
+                    BindingFlags.Instance | BindingFlags.Public);
+                Assert.IsNotNull(activate);
+                Assert.AreEqual("", activate.Invoke(wrapper, null));
+                wrapper.DisconnectActor("actor-b", null);
+                wrapper.DisconnectActor("actor-c");
+
+                CollectionAssert.AreEqual(
+                    new[]
+                    {
+                        new KeyValuePair<string, string>("actor-a", "banned for griefing"),
+                        new KeyValuePair<string, string>("actor-b", null)
+                    },
+                    inner.KicksWithMessage, "each kick reaches the transport with its own message");
+                CollectionAssert.AreEqual(new[] { "actor-c" }, inner.KicksWithoutMessage);
+            }
+            finally
+            {
+                ((IDisposable)wrapper).Dispose();
+            }
+        }
+
         [Test]
         public void StagedNetworkBridge_ForwardsTheInnerBridgesClockSynchronization()
         {
@@ -369,6 +445,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
 
             public bool IsServerClockSynchronized { get; set; } = true;
 
+            /// <summary>Every kick asked for without a message, in order.</summary>
+            public List<string> KicksWithoutMessage { get; } = new();
+
+            /// <summary>Every kick asked for through the message overload, with its message, in order.</summary>
+            public List<KeyValuePair<string, string>> KicksWithMessage { get; } = new();
+
             public event Action<RbxNetworkEventMessage> EventReceived
             {
                 add { }
@@ -393,6 +475,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
 
             public void UnregisterActor(string actorId)
             {
+            }
+
+            public void DisconnectActor(string actorId)
+            {
+                KicksWithoutMessage.Add(actorId);
+            }
+
+            public void DisconnectActor(string actorId, string message)
+            {
+                KicksWithMessage.Add(new KeyValuePair<string, string>(actorId, message));
             }
 
             public void SendEvent(RbxNetworkEventMessage message)

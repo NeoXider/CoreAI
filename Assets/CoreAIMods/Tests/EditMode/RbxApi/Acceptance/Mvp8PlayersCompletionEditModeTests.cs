@@ -437,6 +437,106 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void Kick_HandsTheScriptsMessageToTheTransport_AndNoMessageLeavesTheTransportsDefault()
+        {
+            // WHY: Player:Kick(message) validated the text and then dropped it, so the kicked client
+            // was shown the transport's default notice whatever the script told it.
+            NoticeTransportBridge bridge = new(RbxNetworkTopology.Host);
+            using ProductionHarness harness = new ProductionHarness(networkBridge: bridge);
+            ActorContext told = harness.Actor("kick-told");
+            ActorContext untold = harness.Actor("kick-untold");
+            RbxPlayer toldPlayer = harness.Bindings.ConnectActor(told);
+            RbxPlayer untoldPlayer = harness.Bindings.ConnectActor(untold);
+
+            harness.Stack.Runtime.LoadMod(told, "kick-told-mod",
+                "game:GetService('Players'):GetPlayerByUserId(" + toldPlayer.UserId
+                + "):Kick('banned for griefing')",
+                persistToStore: false);
+            harness.Stack.Runtime.LoadMod(untold, "kick-untold-mod",
+                "game:GetService('Players'):GetPlayerByUserId(" + untoldPlayer.UserId + "):Kick()",
+                persistToStore: false);
+
+            string log = "log: " + string.Join(" || ", harness.LogLines);
+            CollectionAssert.AreEqual(
+                new[]
+                {
+                    new KeyValuePair<string, string>("kick-told", "banned for griefing"),
+                    new KeyValuePair<string, string>("kick-untold", null)
+                },
+                bridge.Kicks, log);
+            CollectionAssert.IsEmpty(bridge.EndedConnections,
+                "a transport that takes the message is not also asked through the kick without one");
+            Assert.IsEmpty(harness.Bindings.Players.GetPlayers(), log);
+        }
+
+        [Test]
+        public void Negative_Kick_OnATransportWithNoWayToTellTheClient_StillEndsTheConnection()
+        {
+            // WHY: the message overload is an interface default that falls back to the kick without
+            // one, so a transport written before it keeps ending every kicked connection.
+            TransportBridge bridge = new(RbxNetworkTopology.Host);
+            using ProductionHarness harness = new ProductionHarness(networkBridge: bridge);
+            ActorContext actor = harness.Actor("kick-legacy");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            harness.Stack.Runtime.LoadMod(actor, "kick-legacy-mod",
+                "game:GetService('Players'):GetPlayerByUserId(" + player.UserId
+                + "):Kick('banned for griefing')",
+                persistToStore: false);
+
+            CollectionAssert.AreEqual(new[] { "kick-legacy" }, bridge.EndedConnections,
+                "log: " + string.Join(" || ", harness.LogLines));
+            Assert.IsTrue(player.IsDestroyed);
+        }
+
+        [Test]
+        public void Kick_ALongMessage_ReachesTheTransportCutToTheWireCeiling()
+        {
+            // WHY: the text becomes a packet on the kicked client's connection, so it is cut to the
+            // transport's notice ceiling here, whole, instead of arriving uncapped or refused.
+            NoticeTransportBridge bridge = new(RbxNetworkTopology.Host);
+            using ProductionHarness harness = new ProductionHarness(networkBridge: bridge);
+            ActorContext actor = harness.Actor("kick-long");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            harness.Stack.Runtime.LoadMod(actor, "kick-long-mod",
+                "game:GetService('Players'):GetPlayerByUserId(" + player.UserId
+                + "):Kick('banned: ' .. string.rep('x', 3000))",
+                persistToStore: false);
+
+            Assert.AreEqual(1, bridge.Kicks.Count, "log: " + string.Join(" || ", harness.LogLines));
+            string message = bridge.Kicks[0].Value;
+            Assert.AreEqual(RbxPlayers.MaxKickMessageBytes, message.Length,
+                "an ASCII message is cut at exactly the ceiling");
+            StringAssert.StartsWith("banned: xxx", message);
+            Assert.IsTrue(player.IsDestroyed, "a long message still kicks");
+        }
+
+        [Test]
+        public void Negative_Kick_WithAMessageThatIsNotAString_IsRefusedBeforeAnythingIsKicked()
+        {
+            NoticeTransportBridge bridge = new(RbxNetworkTopology.Host);
+            using ProductionHarness harness = new ProductionHarness(networkBridge: bridge);
+            ActorContext actor = harness.Actor("kick-table");
+            RbxPlayer player = harness.Bindings.ConnectActor(actor);
+
+            harness.Stack.Runtime.LoadMod(actor, "kick-table-mod", @"
+                local me = game:GetService('Players'):GetPlayerByUserId(" + player.UserId + @")
+                local ok, err = pcall(function() return me:Kick({}) end)
+                store_set('ok', tostring(ok))
+                store_set('err', tostring(err))",
+                persistToStore: false);
+
+            Assert.AreEqual("false", harness.Store.Get("kick-table-mod", "ok"),
+                "log: " + string.Join(" || ", harness.LogLines));
+            StringAssert.Contains("Player:Kick expects a string at argument 1",
+                harness.Store.Get("kick-table-mod", "err"));
+            CollectionAssert.IsEmpty(bridge.Kicks);
+            CollectionAssert.IsEmpty(bridge.EndedConnections);
+            Assert.IsFalse(player.IsDestroyed);
+        }
+
+        [Test]
         public void Negative_LuaDestroyOrReparentOfOwnPlayer_IsRefusedWithAKickHint()
         {
             // WHY (M8-12): a Player is Owned by its actor, so the ACL let a client mod destroy or
@@ -1691,8 +1791,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         /// <summary>
         /// A transport of the given topology whose registered actors stand for its admissions: a
         /// test registers an actor first, as a transport does before it asks the world for a Player.
+        /// It ends a kicked connection through the kick without a message only, as a transport with
+        /// no channel to tell the client anything does, and records each in
+        /// <see cref="EndedConnections"/>.
         /// </summary>
-        private sealed class TransportBridge : INetworkBridge
+        private class TransportBridge : INetworkBridge
         {
             private readonly List<string> _actorIds = new();
 
@@ -1704,6 +1807,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             public RbxNetworkTopology Topology { get; }
 
             public IReadOnlyList<string> ActorIds => _actorIds;
+
+            /// <summary>Every actor whose connection a kick ended here, in order.</summary>
+            public List<string> EndedConnections { get; } = new();
 
             public int MaxPayloadBytes => 65536;
 
@@ -1740,12 +1846,42 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 _actorIds.Remove(actorId);
             }
 
+            public void DisconnectActor(string actorId)
+            {
+                EndedConnections.Add(actorId);
+            }
+
             public void SendEvent(RbxNetworkEventMessage message)
             {
             }
 
             public void SendRequest(RbxNetworkRequestMessage message, Action<RbxNetworkResponse> response)
             {
+            }
+        }
+
+        /// <summary>
+        /// A <see cref="TransportBridge"/> that takes the kick message as well, as a transport with
+        /// a channel to the kicked client does, and records each (actor, message) in
+        /// <see cref="Kicks"/>.
+        /// </summary>
+        /// <remarks>
+        /// WHY it lists <see cref="INetworkBridge"/> again: re-implementing the interface is what
+        /// lets this class's message overload replace the interface default the base class keeps.
+        /// </remarks>
+        private sealed class NoticeTransportBridge : TransportBridge, INetworkBridge
+        {
+            public NoticeTransportBridge(RbxNetworkTopology topology)
+                : base(topology)
+            {
+            }
+
+            /// <summary>Every kick this transport was asked for, with its message, in order.</summary>
+            public List<KeyValuePair<string, string>> Kicks { get; } = new();
+
+            public void DisconnectActor(string actorId, string message)
+            {
+                Kicks.Add(new KeyValuePair<string, string>(actorId, message));
             }
         }
 

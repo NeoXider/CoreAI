@@ -87,7 +87,7 @@ namespace CoreAI.Ai.LuaCs
                 bindings.Registry.BindActorAttribution(ownerModId, originTag, actorContext.ActorId);
             }
 
-            ModActorLedger.For(bindings).RecordLoad(ownerModId, IsHost ? null : actorContext.ActorId);
+            bindings.ActorLedger.RecordLoad(ownerModId, IsHost ? null : actorContext.ActorId);
 
             // WHY: stamp this load's connection generation BEFORE the mod chunk runs, so every Connect
             // the chunk makes is tracked under it. On reload a fresh context bumps the generation first
@@ -107,12 +107,14 @@ namespace CoreAI.Ai.LuaCs
         /// WHY a mod loaded for an actor never falls back to the host: the disconnect seam releases
         /// the actor's attribution but leaves its mods loaded, and the fallback then opened a HOST
         /// envelope around that actor's legacy hooks. It only failed closed because the envelope
-        /// and the context disagreed; a refusal here is closed by construction (M2-24).
+        /// and the context disagreed; a refusal here is closed by construction (M2-24). The memory
+        /// of which actor a load belonged to is <see cref="LuaCsRbxApiBindings.ActorLedger"/>, whose
+        /// entry lasts from the mod's load until it unloads or is quarantined.
         /// </remarks>
         internal static ActorContext ResolveActorContext(LuaCsRbxApiBindings bindings,
             string ownerModId, string originTag)
         {
-            ModActorLedger ledger = ModActorLedger.For(bindings);
+            LuaCsRbxApiBindings.ModActorLedger ledger = bindings.ActorLedger;
             if (bindings.Registry.TryGetActorAttribution(
                     ownerModId, originTag, out string ownerActorId))
             {
@@ -144,129 +146,12 @@ namespace CoreAI.Ai.LuaCs
             if (bindings.Registry.TryGetActorAttribution(
                     ownerModId, originTag, out string ownerActorId))
             {
-                return ModActorLedger.CreateAttributedContext(ownerActorId,
+                return LuaCsRbxApiBindings.ModActorLedger.CreateAttributedContext(ownerActorId,
                     bindings.Registry.WorldId);
             }
 
             return CoreServicesInstaller.DefaultLocalHostIdentityProvider
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
-        }
-
-        /// <summary>
-        /// Per-bindings memory of which actor each mod was loaded for, plus the actor context its
-        /// resumes run under, built once per attributed actor instead of once per resume.
-        /// </summary>
-        /// <remarks>
-        /// WHY cached: every scheduler resume, legacy hook and cross-mod call resolves its actor,
-        /// and building a fresh identity provider with a new GUID session id each time was two
-        /// strings and a provider per resume on the hottest path in the runtime (M2-10). The entry
-        /// is rebuilt only when the attributed actor or the world changes.
-        /// </remarks>
-        private sealed class ModActorLedger
-        {
-            private static readonly ConditionalWeakTable<LuaCsRbxApiBindings, ModActorLedger>
-                Ledgers = new();
-
-            private readonly Dictionary<string, Entry> _byModId = new(StringComparer.Ordinal);
-
-            public static ModActorLedger For(LuaCsRbxApiBindings bindings)
-            {
-                return Ledgers.GetValue(bindings, _ => new ModActorLedger());
-            }
-
-            /// <summary>Records the actor a mod's current load belongs to; null for the host.</summary>
-            public void RecordLoad(string ownerModId, string loadedActorId)
-            {
-                if (string.IsNullOrWhiteSpace(ownerModId))
-                {
-                    return;
-                }
-
-                lock (_byModId)
-                {
-                    GetOrAddEntry(ownerModId).LoadedActorId = loadedActorId;
-                }
-            }
-
-            /// <summary>True when the mod's current load belongs to a non-host actor.</summary>
-            public bool TryGetReleasedOwner(string ownerModId, out string actorId)
-            {
-                actorId = null;
-                if (string.IsNullOrWhiteSpace(ownerModId))
-                {
-                    return false;
-                }
-
-                lock (_byModId)
-                {
-                    if (_byModId.TryGetValue(ownerModId, out Entry entry))
-                    {
-                        actorId = entry.LoadedActorId;
-                    }
-                }
-
-                return actorId != null;
-            }
-
-            /// <summary>The restricted context for an attributed actor, reused while unchanged.</summary>
-            public ActorContext GetAttributedContext(string ownerModId, string ownerActorId,
-                string worldId)
-            {
-                if (string.IsNullOrWhiteSpace(ownerModId))
-                {
-                    return CreateAttributedContext(ownerActorId, worldId);
-                }
-
-                lock (_byModId)
-                {
-                    Entry entry = GetOrAddEntry(ownerModId);
-                    if (!entry.HasAttributedContext
-                        || !string.Equals(entry.AttributedActorId, ownerActorId,
-                            StringComparison.Ordinal)
-                        || !string.Equals(entry.AttributedWorldId, worldId,
-                            StringComparison.Ordinal))
-                    {
-                        entry.AttributedContext = CreateAttributedContext(ownerActorId, worldId);
-                        entry.AttributedActorId = ownerActorId;
-                        entry.AttributedWorldId = worldId;
-                        entry.HasAttributedContext = true;
-                    }
-
-                    return entry.AttributedContext;
-                }
-            }
-
-            /// <summary>A fresh restricted context with its own connection session id.</summary>
-            public static ActorContext CreateAttributedContext(string ownerActorId, string worldId)
-            {
-                LocalActorIdentityProvider provider = new(
-                    ownerActorId,
-                    Guid.NewGuid().ToString("N"),
-                    worldId,
-                    ActorGrantSet.None,
-                    AgentMemoryScope.Empty);
-                return provider.GetActorContext(BuiltInAgentRoleIds.Programmer);
-            }
-
-            private Entry GetOrAddEntry(string ownerModId)
-            {
-                if (!_byModId.TryGetValue(ownerModId, out Entry entry))
-                {
-                    entry = new Entry();
-                    _byModId.Add(ownerModId, entry);
-                }
-
-                return entry;
-            }
-
-            private sealed class Entry
-            {
-                public string LoadedActorId;
-                public bool HasAttributedContext;
-                public string AttributedActorId;
-                public string AttributedWorldId;
-                public ActorContext AttributedContext;
-            }
         }
 
         public LuaCsRbxApiBindings Bindings { get; }
@@ -1919,19 +1804,17 @@ namespace CoreAI.Ai.LuaCs
             Method("Kick", (ctx, self) =>
             {
                 RbxPlayer player = (RbxPlayer)self;
-                LuaValue messageArg = Arg(ctx, 1);
-                if (messageArg.Type != LuaValueType.Nil)
-                {
-                    ReadString(ctx, 1, "Player:Kick", 1);
-                }
+                string message = Arg(ctx, 1).Type == LuaValueType.Nil
+                    ? null
+                    : ReadString(ctx, 1, "Player:Kick", 1);
 
                 // WHY: kicking destroys the player's whole subtree (Player + empty containers),
                 // so it authorizes exactly like Destroy: the host kicks anyone, an actor kicks
                 // its own player, and a cross-actor kick by a plain actor is refused. The
-                // message is validated above and dropped — headless runtime has no surface that
-                // could present it to the kicked user.
+                // message travels with the kick to the transport, which shows it to the kicked
+                // client; nil leaves the transport's default notice, as on Roblox.
                 context.RequireDestroyTree(player, "kick");
-                context.Bindings.KickPlayerWithCreatorKick(player);
+                context.Bindings.KickPlayerWithCreatorKick(player, message);
                 return LuaValue.Nil;
             }, "Player");
 

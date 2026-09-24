@@ -6,6 +6,7 @@ using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using NUnit.Framework;
@@ -101,6 +102,53 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             }
 
             public void LogError(GameLogFeature feature, string message, UnityEngine.Object context = null)
+            {
+            }
+        }
+
+        /// <summary>A client transport synchronized with a server whose clock agrees with its own.</summary>
+        private sealed class SynchronizedClientBridge : INetworkBridge
+        {
+            public RbxNetworkTopology Topology => RbxNetworkTopology.Client;
+
+            public IReadOnlyList<string> ActorIds => Array.Empty<string>();
+
+            public int MaxPayloadBytes => 65536;
+
+            public double ServerClockOffsetSeconds => 0d;
+
+            public event Action<RbxNetworkEventMessage> EventReceived
+            {
+                add { }
+                remove { }
+            }
+
+            public event Action<RbxNetworkRequestMessage, RbxNetworkRequestResponder> RequestReceived
+            {
+                add { }
+                remove { }
+            }
+
+            public event Action<RbxNetworkPeerDisconnected> PeerDisconnected
+            {
+                add { }
+                remove { }
+            }
+
+            public void RegisterActor(string actorId)
+            {
+            }
+
+            public void UnregisterActor(string actorId)
+            {
+            }
+
+            public void SendEvent(RbxNetworkEventMessage message)
+            {
+            }
+
+            public void SendRequest(RbxNetworkRequestMessage message,
+                Action<RbxNetworkResponse> response)
             {
             }
         }
@@ -244,6 +292,34 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
+        public void Lua_GetServerTimeNow_WithoutANetwork_ReadsAClockThatStandsStillTheSameAsRealTimePasses()
+        {
+            // WHY: the slew's free-running clock advanced by process time in a solo world too, so a
+            // game that froze its injected Unix clock read a later server time on every call.
+            FakeClockSource fake = new()
+            {
+                UnixTimeSecondsFractional = 1700000000.25d,
+                ProcessTimeSeconds = 10d
+            };
+            LuaCsRbxApiBindings bindings = BindingsWith(fake);
+            LuaCsModStack stack = BuildStack(bindings);
+            stack.Runtime.LoadMod("s1",
+                "assert(workspace:GetServerTimeNow() == 1700000000.25, " +
+                "'got ' .. string.format('%.6f', workspace:GetServerTimeNow()))");
+            Assert.IsTrue(stack.Runtime.IsLoaded("s1"));
+
+            fake.ProcessTimeSeconds = 11d;
+            stack.Runtime.LoadMod("s2",
+                "assert(workspace:GetServerTimeNow() == 1700000000.25, " +
+                "'a clock that stood still for a real second read ' .. " +
+                "string.format('%.6f', workspace:GetServerTimeNow()))");
+            Assert.IsTrue(stack.Runtime.IsLoaded("s2"));
+
+            fake.ProcessTimeSeconds = 12d;
+            Assert.AreEqual(1700000000.25d, bindings.GetServerTimeNow());
+        }
+
+        [Test]
         public void Lua_GetServerTimeNow_BackwardStepSlewsInsteadOfFreezing()
         {
             FakeClockSource fake = new()
@@ -251,7 +327,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 UnixTimeSecondsFractional = 1700000000d,
                 ProcessTimeSeconds = 100d
             };
-            LuaCsRbxApiBindings bindings = BindingsWith(fake);
+            // WHY a client: only a client slews, onto a server clock it measures from afar; where
+            // this process is the server clock, a backward step holds the last reading instead.
+            LuaCsRbxApiBindings bindings = new(networkBridge: new SynchronizedClientBridge(),
+                clockSource: fake);
             Assert.AreEqual(1700000000d, bindings.GetServerTimeNow());
 
             // WHY: a 10 s NTP correction used to freeze the clock for all 10 s, stalling every timer

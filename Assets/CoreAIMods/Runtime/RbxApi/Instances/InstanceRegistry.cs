@@ -447,16 +447,30 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>
         /// Tag transition on one instance: the instance, the tag, and whether this add made the
-        /// tag used anywhere for the first time. CollectionService layers TagAdded and the
-        /// per-tag added signals here; raised only when the tag was newly applied.
+        /// tag held by any registered instance for the first time (<see cref="InstanceTagStore.IsTagInUse"/>,
+        /// inside the DataModel or not). Raised only when the tag was newly applied, wherever the
+        /// instance is.
         /// </summary>
+        /// <remarks>
+        /// The first-use flag is store-wide and informational. CollectionService subscribes here
+        /// but derives its own TagAdded from a count of holders inside the DataModel (M8-10): it
+        /// ignores an add on an instance outside the tree and fires on that count's first holder,
+        /// as the mirror does; its per-tag added signal fires for in-tree instances only.
+        /// </remarks>
         public event Action<RbxInstance, string, bool> TagAdded;
 
         /// <summary>
         /// Tag transition on one instance: the instance, the tag, and whether this removal left
-        /// the tag used nowhere. CollectionService layers TagRemoved and the per-tag removed
-        /// signals here; raised only when the tag was actually held.
+        /// the tag held by no registered instance (<see cref="InstanceTagStore.IsTagInUse"/>, inside
+        /// the DataModel or not). Raised only when the tag was actually held, wherever the
+        /// instance is — the destroy sweep's tag clearing included.
         /// </summary>
+        /// <remarks>
+        /// The last-use flag is store-wide and informational. CollectionService derives its own
+        /// TagRemoved from its count of holders inside the DataModel (M8-10): it fires when that
+        /// count's last holder loses the tag here or leaves the tree
+        /// (<see cref="SceneMembershipChanged"/>), even while a nil-parented instance still holds it.
+        /// </remarks>
         public event Action<RbxInstance, string, bool> TagRemoved;
 
         /// <summary>

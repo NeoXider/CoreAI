@@ -77,13 +77,16 @@ namespace CoreAI.Ai.LuaCs
         {
             public ModLoadCandidate(string ownerModId, bool hadPreviousGeneration,
                 int previousGeneration, HashSet<RbxScriptConnection> existingConnections,
-                bool hadExecutingScriptBacking)
+                bool hadExecutingScriptBacking, bool hadActorLedgerEntry,
+                string previousLoadedActorId)
             {
                 OwnerModId = ownerModId;
                 HadPreviousGeneration = hadPreviousGeneration;
                 PreviousGeneration = previousGeneration;
                 ExistingConnections = existingConnections;
                 HadExecutingScriptBacking = hadExecutingScriptBacking;
+                HadActorLedgerEntry = hadActorLedgerEntry;
+                PreviousLoadedActorId = previousLoadedActorId;
             }
 
             public string OwnerModId { get; }
@@ -95,6 +98,164 @@ namespace CoreAI.Ai.LuaCs
             public HashSet<RbxScriptConnection> ExistingConnections { get; }
 
             public bool HadExecutingScriptBacking { get; }
+
+            /// <summary>Whether <see cref="ActorLedger"/> held an entry for the mod before this load.</summary>
+            public bool HadActorLedgerEntry { get; }
+
+            /// <summary>The actor that entry recorded (null for the host), restored if the load fails.</summary>
+            public string PreviousLoadedActorId { get; }
+        }
+
+        /// <summary>
+        /// Which actor each loaded mod was loaded for, plus the actor context its resumes run under,
+        /// built once per attributed actor instead of once per resume. One per bindings, so one per
+        /// world; an entry lives from the mod's load until it unloads or is quarantined
+        /// (<see cref="KillAllScheduledOwnedBy"/>), and a load that fails leaves none behind
+        /// (<see cref="RollbackModLoadCandidate"/>).
+        /// </summary>
+        /// <remarks>
+        /// WHY cached: every scheduler resume, legacy hook and cross-mod call resolves its actor,
+        /// and building a fresh identity provider with a new GUID session id each time was two
+        /// strings and a provider per resume on the hottest path in the runtime (M2-10). The entry
+        /// is rebuilt only when the attributed actor or the world changes.
+        /// WHY an entry outlives its actor's disconnect: the disconnect seam releases the actor's
+        /// attribution but leaves its mods loaded, and this entry is what refuses their code the
+        /// host fallback (M2-24). It goes with the mod itself, so the ledger holds one entry per
+        /// loaded mod and never one per mod id a long session ever ran.
+        /// </remarks>
+        internal sealed class ModActorLedger
+        {
+            private readonly Dictionary<string, Entry> _byModId = new(StringComparer.Ordinal);
+
+            /// <summary>Mods holding an entry.</summary>
+            public int Count
+            {
+                get
+                {
+                    lock (_byModId)
+                    {
+                        return _byModId.Count;
+                    }
+                }
+            }
+
+            /// <summary>Records the actor a mod's current load belongs to; null for the host.</summary>
+            public void RecordLoad(string ownerModId, string loadedActorId)
+            {
+                if (string.IsNullOrWhiteSpace(ownerModId))
+                {
+                    return;
+                }
+
+                lock (_byModId)
+                {
+                    GetOrAddEntry(ownerModId).LoadedActorId = loadedActorId;
+                }
+            }
+
+            /// <summary>
+            /// Whether the mod has an entry, and the actor its current load was recorded for (null
+            /// for the host or when there is no entry).
+            /// </summary>
+            public bool TryGetLoad(string ownerModId, out string loadedActorId)
+            {
+                loadedActorId = null;
+                if (string.IsNullOrWhiteSpace(ownerModId))
+                {
+                    return false;
+                }
+
+                lock (_byModId)
+                {
+                    if (!_byModId.TryGetValue(ownerModId, out Entry entry))
+                    {
+                        return false;
+                    }
+
+                    loadedActorId = entry.LoadedActorId;
+                    return true;
+                }
+            }
+
+            /// <summary>True when the mod's current load belongs to a non-host actor.</summary>
+            public bool TryGetReleasedOwner(string ownerModId, out string actorId)
+            {
+                return TryGetLoad(ownerModId, out actorId) && actorId != null;
+            }
+
+            /// <summary>The restricted context for an attributed actor, reused while unchanged.</summary>
+            public ActorContext GetAttributedContext(string ownerModId, string ownerActorId,
+                string worldId)
+            {
+                if (string.IsNullOrWhiteSpace(ownerModId))
+                {
+                    return CreateAttributedContext(ownerActorId, worldId);
+                }
+
+                lock (_byModId)
+                {
+                    Entry entry = GetOrAddEntry(ownerModId);
+                    if (!entry.HasAttributedContext
+                        || !string.Equals(entry.AttributedActorId, ownerActorId,
+                            StringComparison.Ordinal)
+                        || !string.Equals(entry.AttributedWorldId, worldId,
+                            StringComparison.Ordinal))
+                    {
+                        entry.AttributedContext = CreateAttributedContext(ownerActorId, worldId);
+                        entry.AttributedActorId = ownerActorId;
+                        entry.AttributedWorldId = worldId;
+                        entry.HasAttributedContext = true;
+                    }
+
+                    return entry.AttributedContext;
+                }
+            }
+
+            /// <summary>Drops the mod's entry: it unloaded, was quarantined, or its load failed.</summary>
+            public void Forget(string ownerModId)
+            {
+                if (string.IsNullOrWhiteSpace(ownerModId))
+                {
+                    return;
+                }
+
+                lock (_byModId)
+                {
+                    _byModId.Remove(ownerModId);
+                }
+            }
+
+            /// <summary>A fresh restricted context with its own connection session id.</summary>
+            public static ActorContext CreateAttributedContext(string ownerActorId, string worldId)
+            {
+                LocalActorIdentityProvider provider = new(
+                    ownerActorId,
+                    Guid.NewGuid().ToString("N"),
+                    worldId,
+                    ActorGrantSet.None,
+                    AgentMemoryScope.Empty);
+                return provider.GetActorContext(BuiltInAgentRoleIds.Programmer);
+            }
+
+            private Entry GetOrAddEntry(string ownerModId)
+            {
+                if (!_byModId.TryGetValue(ownerModId, out Entry entry))
+                {
+                    entry = new Entry();
+                    _byModId.Add(ownerModId, entry);
+                }
+
+                return entry;
+            }
+
+            private sealed class Entry
+            {
+                public string LoadedActorId;
+                public bool HasAttributedContext;
+                public string AttributedActorId;
+                public string AttributedWorldId;
+                public ActorContext AttributedContext;
+            }
         }
 
         private readonly InstanceRegistry _registry;
@@ -149,6 +310,7 @@ namespace CoreAI.Ai.LuaCs
             new(StringComparer.Ordinal);
         private readonly Dictionary<string, ActorContext> _actorContextsByOwnerModId =
             new(StringComparer.Ordinal);
+        private readonly ModActorLedger _actorLedger = new();
         private readonly Action<string> _log;
         private ILuaLogService _modLog;
         private CoreAI.Ai.IInGameLlmChatServiceFactory _chatFactory;
@@ -905,20 +1067,39 @@ namespace CoreAI.Ai.LuaCs
         internal const double ServerTimeSlewRate = 0.5d;
 
         /// <summary>
-        /// Server-synced epoch seconds behind <c>workspace:GetServerTimeNow()</c>. From the bridge's
+        /// Server-synced epoch seconds behind <c>workspace:GetServerTimeNow()</c>. Where this process
+        /// is the server clock — no bridge, or a Solo, Host or DedicatedServer one — it is the local
+        /// clock, held at its last reading while the clock steps back. On a Client, from the bridge's
         /// first synchronization on it never decreases: an estimate that moves ahead is taken at once,
         /// one that moves behind is slewed onto at <see cref="ServerTimeSlewRate"/> of real time.
-        /// Before the bridge is synchronized it is the local clock, unsmoothed.
+        /// Before that first synchronization it is the local clock, unsmoothed.
         /// </summary>
         internal double GetServerTimeNow()
         {
             // WHY the bridge's offset is added: on a client the local clock is its own machine's,
             // and a player whose system time is an hour off would otherwise disagree with the server
-            // about when everything happened. The offset is zero on a server and on the loopback,
-            // so solo behaviour is byte-identical to before.
+            // about when everything happened. The offset is zero on a server and on the loopback.
             double estimate = _clockSource.UnixTimeSecondsFractional
                               + (_networkBridge?.ServerClockOffsetSeconds ?? 0d);
-            bool synchronized = _networkBridge == null || _networkBridge.IsServerClockSynchronized;
+            if (_networkBridge == null || _networkBridge.Topology != RbxNetworkTopology.Client)
+            {
+                lock (_serverTimeGate)
+                {
+                    // WHY the plain clamp where this process is the server clock: there is no remote
+                    // estimate to converge on, and the slew's free-running clock advances by process
+                    // time, so a solo world whose injected Unix clock stands still (or is stepped by
+                    // the game) read a time that drifted away from that clock by real time.
+                    if (estimate < _lastServerTimeNow)
+                    {
+                        return _lastServerTimeNow;
+                    }
+
+                    _lastServerTimeNow = estimate;
+                    return estimate;
+                }
+            }
+
+            bool synchronized = _networkBridge.IsServerClockSynchronized;
             double processSeconds = _clockSource.ProcessTimeSeconds;
             lock (_serverTimeGate)
             {
@@ -1101,15 +1282,17 @@ namespace CoreAI.Ai.LuaCs
         public RbxPlayers Players => _players;
 
         /// <summary>
-        /// Mirror <c>Player:Kick</c> entry: removes the player with the <c>CreatorKick</c> exit
-        /// reason (the enum item comes from the shared registry so Lua identity comparison
-        /// against <c>Enum.PlayerExitReason.CreatorKick</c> holds). Already-removed players are a
-        /// silent no-op here; the Lua boundary refuses destroyed instances before reaching this.
+        /// Mirror <c>Player:Kick(message)</c> entry: removes the player with the
+        /// <c>CreatorKick</c> exit reason (the enum item comes from the shared registry so Lua
+        /// identity comparison against <c>Enum.PlayerExitReason.CreatorKick</c> holds) and hands
+        /// <paramref name="message"/> to the transport for the kicked client; null means no
+        /// message. Already-removed players are a silent no-op here; the Lua boundary refuses
+        /// destroyed instances before reaching this.
         /// </summary>
-        internal void KickPlayerWithCreatorKick(RbxPlayer player)
+        internal void KickPlayerWithCreatorKick(RbxPlayer player, string message = null)
         {
             RbxEnumItem reason = _enums.Get("PlayerExitReason")["CreatorKick"];
-            _players.KickPlayer(player, reason);
+            _players.KickPlayer(player, reason, message);
         }
 
         internal int CountRemoteFunctionWaitsOwnedBy(string ownerModId)
@@ -1228,7 +1411,10 @@ namespace CoreAI.Ai.LuaCs
             for (int index = 0; index < ownerModIds.Count; index++)
             {
                 string ownerModId = ownerModIds[index];
-                KillAllScheduledOwnedBy(ownerModId);
+                // WHY not KillAllScheduledOwnedBy: that one also forgets which actor the mod was
+                // loaded for, and the mod stays loaded here — its ledger entry is what turns its
+                // later dispatches into NOT_AUTHORITY instead of host code (M2-24).
+                ReleaseScheduledWorkOwnedBy(ownerModId);
                 _connections.DisconnectOwnedBy(ownerModId);
                 _registry.ClearActorAttribution(
                     ownerModId, OriginTag.FromMod(ownerModId));
@@ -1334,11 +1520,13 @@ namespace CoreAI.Ai.LuaCs
             _scheduler.PhaseReached -= PumpSchedulerPhase;
             _networkRequestConnection.Disconnect();
 
+            // WHY the actor ledger is kept: a disposed world's mods are not unloaded by this, and
+            // an entry only ever makes their resolution stricter; it is collected with the bindings.
             List<string> owners = new(_scheduledThreadsByMod.Keys);
             for (int index = 0; index < owners.Count; index++)
             {
                 string ownerModId = owners[index];
-                KillAllScheduledOwnedBy(ownerModId);
+                ReleaseScheduledWorkOwnedBy(ownerModId);
                 _connections.DisconnectOwnedBy(ownerModId);
             }
 
@@ -1365,8 +1553,11 @@ namespace CoreAI.Ai.LuaCs
             HashSet<RbxScriptConnection> existingConnections =
                 new(_connections.GetOwnedBy(owner));
             bool hadExecutingScriptBacking = TryGetExecutingScriptBacking(owner, out _);
+            bool hadActorLedgerEntry = _actorLedger.TryGetLoad(
+                owner, out string previousLoadedActorId);
             return new ModLoadCandidate(owner, hadPreviousGeneration,
-                previousGeneration, existingConnections, hadExecutingScriptBacking);
+                previousGeneration, existingConnections, hadExecutingScriptBacking,
+                hadActorLedgerEntry, previousLoadedActorId);
         }
 
         internal void RollbackModLoadCandidate(ModLoadCandidate candidate)
@@ -1413,6 +1604,18 @@ namespace CoreAI.Ai.LuaCs
                 _executingScriptsByMod.Remove(ownerModId);
                 createdBacking.Script.Destroy();
                 createdBacking.Container.Destroy();
+            }
+
+            // WHY: the failed load's context already recorded its actor. A load that never
+            // happened must neither leave an entry for a mod that is not loaded (the ledger would
+            // grow with every failed id) nor overwrite the entry of the mod a failed reload keeps.
+            if (candidate.HadActorLedgerEntry)
+            {
+                _actorLedger.RecordLoad(ownerModId, candidate.PreviousLoadedActorId);
+            }
+            else
+            {
+                _actorLedger.Forget(ownerModId);
             }
         }
 
@@ -1495,6 +1698,12 @@ namespace CoreAI.Ai.LuaCs
 
             return originTag;
         }
+
+        /// <summary>
+        /// This world's memory of which actor each loaded mod was loaded for, read by
+        /// <see cref="LuaCsRbxModContext"/> to resolve the actor a mod's code runs as.
+        /// </summary>
+        internal ModActorLedger ActorLedger => _actorLedger;
 
         /// <summary>Mods holding an interned resume label or origin tag (both are released with the mod).</summary>
         internal int ResumeCacheModCount
@@ -3929,8 +4138,24 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>
         /// Kills every scheduler thread owned by a mod on unload or quarantine, and destroys the tweens
         /// its scripts created (playing ones stop where they are; nothing fires into the departing mod).
+        /// The mod's <see cref="ActorLedger"/> entry goes with it.
         /// </summary>
         public int KillAllScheduledOwnedBy(string ownerModId)
+        {
+            int killed = ReleaseScheduledWorkOwnedBy(ownerModId);
+            // WHY here and not in the release the disconnect seam shares: a disconnect leaves the
+            // mod loaded and relies on this entry to refuse its code the host fallback (M2-24);
+            // only the mod's own departure ends the entry.
+            _actorLedger.Forget(ownerModId);
+            return killed;
+        }
+
+        /// <summary>
+        /// Everything <see cref="KillAllScheduledOwnedBy"/> releases except the mod's
+        /// <see cref="ActorLedger"/> entry: its threads, tweens, remote waits and callbacks, and its
+        /// interned resume strings.
+        /// </summary>
+        private int ReleaseScheduledWorkOwnedBy(string ownerModId)
         {
             int killed = _scheduler.KillOwnedBy(ownerModId);
             _tweenService?.CancelAndReleaseOwnedBy(ownerModId);

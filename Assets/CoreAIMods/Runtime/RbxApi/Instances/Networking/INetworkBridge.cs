@@ -239,6 +239,22 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         {
         }
 
+        /// <summary>
+        /// <see cref="DisconnectActor(string)"/> carrying the text the kicked client is shown — the
+        /// transport half of <c>Player:Kick(message)</c>. Null or blank leaves the transport's own
+        /// default notice, as a Kick with no message does on Roblox. The Players service cuts the
+        /// text to <see cref="RbxPlayers.MaxKickMessageBytes"/> UTF-8 bytes before it gets here.
+        /// </summary>
+        /// <remarks>
+        /// WHY a default body that ends the connection without the text: a bridge with no channel
+        /// to tell a client anything — the loopback, a test double, a transport written before this
+        /// member — still ends the connection through its one-argument overload, so adding the text
+        /// breaks no implementer. A transport that can deliver a notice implements this
+        /// (MirrorNetworkBridge sends the text before it drops the connection), and the wrappers
+        /// around one forward it.
+        /// </remarks>
+        void DisconnectActor(string actorId, string message) => DisconnectActor(actorId);
+
         void SendEvent(RbxNetworkEventMessage message);
 
         void SendRequest(RbxNetworkRequestMessage message,

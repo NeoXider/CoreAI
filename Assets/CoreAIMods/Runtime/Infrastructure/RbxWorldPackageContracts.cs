@@ -2797,6 +2797,19 @@ namespace CoreAI.Mods.WorldPackages
                 QueueOrRun(() => _inner.DisconnectActor(actorId));
             }
 
+            /// <inheritdoc />
+            /// <remarks>
+            /// Queued with its text exactly like <see cref="DisconnectActor(string)"/>. WHY
+            /// implemented here and not left to the interface default: the default drops the text,
+            /// and a world loaded from a package keeps this bridge for its whole life, so every kick
+            /// in it would show the client the transport's default notice instead of the script's
+            /// message.
+            /// </remarks>
+            public void DisconnectActor(string actorId, string message)
+            {
+                QueueOrRun(() => _inner.DisconnectActor(actorId, message));
+            }
+
             public void SendEvent(RbxNetworkEventMessage message)
             {
                 QueueOrRun(() => _inner.SendEvent(message));

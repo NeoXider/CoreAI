@@ -112,9 +112,12 @@ namespace CoreAI.Mods.Rbx.Instances
     }
 
     /// <summary>
-    /// Mirror <c>NumberValue</c>: a double-precision float (serializable). Non-finite values are
-    /// held in memory; a world capture saves 0 in their place and records a non-finite-value
-    /// diagnostic, so saves and autosaves never fail on them. Default 0 (OURS — the mirror does
+    /// Mirror <c>NumberValue</c>: a double-precision float (serializable). A non-finite value
+    /// (<c>0/0</c>, <c>math.huge</c>) is held in memory as assigned; a world-package capture writes 0
+    /// in its place and records a <c>non-finite-value</c> diagnostic for member <c>Value</c>
+    /// (<see cref="InstanceTreeSerializer.ReplaceNonFiniteValues"/>), so saves and autosaves never
+    /// fail on it. A raw <see cref="InstanceTreeSerializer.Capture"/> snapshot keeps the value, and
+    /// <see cref="InstanceTreeSerializer.Validate"/> rejects it. Default 0 (OURS — the mirror does
     /// not specify defaults).
     /// </summary>
     public sealed class RbxNumberValue : RbxValueBase

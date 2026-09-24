@@ -124,6 +124,37 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
+        public void Kick_WithAMessage_TellsTheKickedClientThatText_AndALongOneWholeUpToTheCeiling()
+        {
+            // WHY: the world's kick dropped the script's message, so every kicked client was told the
+            // default; and a text cut only by the transport would lose two thirds of the ceiling,
+            // because the transport cuts an oversize text to a third of its bytes.
+            RbxPlayer told = Admit(Connection);
+            RbxPlayer toldAtLength = Admit(Connection + 1);
+            RbxEnumItem creatorKick = _bindings.Enums.Get("PlayerExitReason")["CreatorKick"];
+            string longMessage = "banned: " + new string('x', 3000);
+            using SentMessages<CoreAiDisconnectNoticeMessage> notices = new();
+
+            Assert.IsTrue(_bindings.Players.KickPlayer(told, creatorKick, "banned for griefing"));
+            Assert.IsTrue(_bindings.Players.KickPlayer(toldAtLength, creatorKick, longMessage));
+
+            Assert.AreEqual(2, notices.Messages.Count, "each kicked client is told why");
+            Assert.AreEqual((byte)CoreAiDisconnectNoticeKind.Kicked, notices.Messages[0].Kind);
+            Assert.AreEqual("banned for griefing", notices.Messages[0].Message);
+            Assert.AreEqual(longMessage.Substring(0, MirrorNetworkBridge.MaxNoticeMessageBytes),
+                notices.Messages[1].Message,
+                "a long message arrives whole up to the ceiling: the world cut it once, on a character");
+        }
+
+        [Test]
+        public void TheWorldsKickMessageCeiling_IsTheTransportsNoticeCeiling()
+        {
+            // WHY: the world cuts a kick message so that the transport never has to; a world ceiling
+            // above the transport's would have the transport cut the text again, to a third.
+            Assert.AreEqual(MirrorNetworkBridge.MaxNoticeMessageBytes, RbxPlayers.MaxKickMessageBytes);
+        }
+
+        [Test]
         public void Negative_AWorldWhoseTeardownThrows_StillHasTheKickedConnectionDropped_AndTheKickedActorIsNobody()
         {
             // WHY the fixture's host is swapped for one whose disconnect entry point throws: the

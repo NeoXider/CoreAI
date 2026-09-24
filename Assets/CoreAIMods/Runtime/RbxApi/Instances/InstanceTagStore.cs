@@ -91,8 +91,9 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         /// <summary>
-        /// CollectionService:GetAllTags substrate: every tag currently held by any instance,
-        /// sorted for deterministic enumeration.
+        /// Every tag currently held by any registered instance, inside the DataModel or not, sorted
+        /// for deterministic enumeration. CollectionService:GetAllTags is narrower: it lists only
+        /// tags with a holder inside the DataModel, and walks these to seed its counts.
         /// </summary>
         public IReadOnlyList<string> GetAllTags()
         {
@@ -102,9 +103,17 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         /// <summary>
-        /// Whether any instance currently holds the tag; backs the TagAdded/TagRemoved globals,
-        /// which fire only on the first-use/last-use transitions.
+        /// Whether any registered instance holds the tag, inside the DataModel or not: the
+        /// store-wide first-use/last-use flag the registry passes with
+        /// <see cref="InstanceRegistry.TagAdded"/> and <see cref="InstanceRegistry.TagRemoved"/>.
         /// </summary>
+        /// <remarks>
+        /// The flag is informational. CollectionService does not fire its TagAdded/TagRemoved
+        /// from it: it keeps its own count of holders inside the DataModel and fires on that
+        /// count's first and last holder (M8-10), because the mirror counts only instances in the
+        /// DataModel, and a tagged nil-parented instance (a pooled coin) holds the tag here while
+        /// counting for nothing there.
+        /// </remarks>
         public bool IsTagInUse(string tag)
         {
             ValidateTag(tag);

@@ -824,6 +824,90 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void ActorLedger_HoldsAnEntryOnlyWhileItsModIsLoaded()
+        {
+            // WHY: the ledger kept an entry for every mod id a world ever loaded, unloaded or not,
+            // and a load that failed left one behind too, so a long session grew it without bound.
+            using HeadlessWorld headless = new HeadlessWorld();
+            // WHY wired here: the production composition (CoreAiModsInstaller) releases a departing
+            // mod's scheduled work on this event, and a stack built by the bare factory does not.
+            headless.Stack.Runtime.ModTearingDown += (modId, reason) =>
+            {
+                if (reason == LuaModTeardownReason.Reload)
+                {
+                    headless.Bindings.KillOutgoingScheduledGenerations(modId);
+                }
+                else
+                {
+                    headless.Bindings.KillAllScheduledOwnedBy(modId);
+                }
+            };
+            ActorContext actor = new LocalActorIdentityProvider(
+                    "ledger-actor", "session-ledger-actor", headless.Registry.WorldId,
+                    ActorGrantSet.None, AgentMemoryScope.Empty)
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            int before = headless.Bindings.ActorLedger.Count;
+
+            headless.Stack.Runtime.LoadMod(actor, "ledger-mod", "store_set('loaded', 'yes')",
+                persistToStore: false);
+            Assert.AreEqual("yes", headless.Store.Get("ledger-mod", "loaded"));
+            Assert.AreEqual(before + 1, headless.Bindings.ActorLedger.Count,
+                "a loaded mod holds one entry");
+            Assert.AreEqual("ledger-actor",
+                headless.Bindings.ResolveOwnerActorContext("ledger-mod").ActorId);
+            Assert.AreEqual(before + 1, headless.Bindings.ActorLedger.Count,
+                "resolving the mod's actor reuses its entry");
+
+            Assert.IsTrue(headless.Stack.Runtime.UnloadMod("ledger-mod"));
+            Assert.AreEqual(before, headless.Bindings.ActorLedger.Count,
+                "the entry goes with the mod");
+
+            Assert.Catch(() => headless.Stack.Runtime.LoadMod(actor, "ledger-broken",
+                "error('the load fails')", persistToStore: false));
+            Assert.IsFalse(headless.Stack.Runtime.IsLoaded("ledger-broken"));
+            Assert.AreEqual(before, headless.Bindings.ActorLedger.Count,
+                "a load that failed leaves no entry");
+
+            headless.Stack.Runtime.LoadMod(actor, "ledger-mod", "store_set('loaded', 'again')",
+                persistToStore: false);
+            Assert.AreEqual(before + 1, headless.Bindings.ActorLedger.Count);
+            Assert.IsTrue(headless.Bindings.DisconnectActor(actor));
+            Assert.IsFalse(headless.Stack.Runtime.IsLoaded("ledger-mod"),
+                "the runtime unloads the mods of an actor that disconnected");
+            Assert.AreEqual(before, headless.Bindings.ActorLedger.Count,
+                "and their entries go with them");
+        }
+
+        [Test]
+        public void ActorLedger_AFailedReload_LeavesTheOwnerOfTheModThatStaysLoaded()
+        {
+            // WHY: the failed candidate's context records its own actor before the chunk runs; left
+            // in place, the mod that stays loaded was remembered as someone else's, and a later
+            // refusal would name, or fall back for, the wrong load.
+            using HeadlessWorld headless = new HeadlessWorld();
+            ActorContext actor = new LocalActorIdentityProvider(
+                    "ledger-owner", "session-ledger-owner", headless.Registry.WorldId,
+                    ActorGrantSet.None, AgentMemoryScope.Empty)
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            headless.Stack.Runtime.LoadMod(actor, "kept-mod", "store_set('loaded', 'yes')",
+                persistToStore: false);
+            LuaCsRbxApiBindings.ModLoadCandidate candidate =
+                headless.Bindings.BeginModLoadCandidate("kept-mod");
+
+            headless.Bindings.ActorLedger.RecordLoad("kept-mod", null);
+            headless.Bindings.RollbackModLoadCandidate(candidate);
+
+            Assert.IsTrue(headless.Bindings.ActorLedger.TryGetLoad("kept-mod", out string owner));
+            Assert.AreEqual("ledger-owner", owner, "the entry is the loaded mod's again");
+            headless.Registry.ClearActorAttribution("kept-mod", OriginTag.FromMod("kept-mod"));
+            RbxError refusal = Assert.Throws<RbxError>(
+                () => headless.Bindings.ResolveOwnerActorContext("kept-mod"));
+            Assert.AreEqual(RbxErrorCode.NotAuthority, refusal.Code,
+                "a failed host candidate must not hand the actor's loaded mod the host fallback");
+            StringAssert.Contains("ledger-owner", refusal.Message);
+        }
+
+        [Test]
         public void LoudStubWorkarounds_NeverOfferCanCollideAsATouchOrQueryFilter()
         {
             // WHY: since BINDER-A a CanCollide = false part still fires Touched and is still hit by

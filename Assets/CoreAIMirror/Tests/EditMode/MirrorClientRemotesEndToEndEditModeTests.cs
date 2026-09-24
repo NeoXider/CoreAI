@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
@@ -342,6 +343,52 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
+        public void AServerScriptsKickWithAMessage_ReachesTheKickedClient_AsThatText()
+        {
+            // WHY: Player:Kick(message) dropped the text between the script and the transport, so
+            // the kicked client was shown the transport's default notice whatever the script said.
+            // WHY the context is detached: the Lua VM completes its continuations on the thread
+            // pool, and Unity's editor context would queue them behind this very test.
+            SynchronizationContext savedContext = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+            InstanceRegistry serverRegistry = new(
+                worldAclVersion: InstanceRegistry.CurrentWorldAclVersion, worldId: WorldId);
+            LuaCsRbxApiBindings serverWorld = new(serverRegistry,
+                DataModelBootstrap.CreateGame(serverRegistry), networkBridge: _server, log: _ => { });
+            try
+            {
+                serverWorld.Players.IdentitySource = _sessionHost;
+                LuaCsModStack serverMods = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+                {
+                    ModStore = new MemoryModStore(),
+                    Capabilities = LuaCapabilities.Read | LuaCapabilities.WorldEdit,
+                    OneOffCapabilities = LuaCapabilities.Read | LuaCapabilities.WorldEdit,
+                    RbxApi = serverWorld
+                });
+                string admitted = Join(Credential);
+                RbxPlayer kicked = serverWorld.ConnectActor(ActorFor(admitted));
+
+                serverMods.Runtime.LoadMod(ActorFor(admitted), "kick-self",
+                    "game:GetService('Players'):GetPlayerByUserId(" + kicked.UserId
+                    + "):Kick('banned for griefing')",
+                    persistToStore: false);
+                _mirror.PumpLoopback();
+
+                Assert.IsTrue(kicked.IsDestroyed, "the script's kick removed the player on the server");
+                Assert.IsTrue(_client.LastDisconnectNotice.HasValue, "the kicked client is told why");
+                Assert.AreEqual((byte)CoreAiDisconnectNoticeKind.Kicked, _client.LastDisconnectNotice.Value.Kind);
+                Assert.AreEqual("banned for griefing", _client.LastDisconnectNotice.Value.Message,
+                    "in the words of the server's script, not the transport's default");
+                Assert.AreEqual(0, _sessionHost.LiveSessionCount);
+            }
+            finally
+            {
+                serverWorld.Dispose();
+                SynchronizationContext.SetSynchronizationContext(savedContext);
+            }
+        }
+
+        [Test]
         public void Negative_TheWitness_ADropInTheKicksOwnFrame_WouldLoseTheNotice()
         {
             // WHY: the owed drop exists because Mirror discards a dropped connection's unflushed
@@ -490,6 +537,45 @@ namespace CoreAI.Net.Mirror.Tests
             FieldInfo field = target.GetType().GetField(name, Private);
             Assert.IsNotNull(field, name);
             field.SetValue(target, value);
+        }
+
+        /// <summary>The per-mod key-value store a server script's <c>store_set</c> writes to, in memory.</summary>
+        private sealed class MemoryModStore : ILuaModStore
+        {
+            private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+
+            public string Get(string modId, string key)
+            {
+                return _values.TryGetValue(modId + "\n" + key, out string value) ? value : "";
+            }
+
+            public void Set(string modId, string key, string value)
+            {
+                if (value == null)
+                {
+                    _values.Remove(modId + "\n" + key);
+                    return;
+                }
+
+                _values[modId + "\n" + key] = value;
+            }
+
+            public void Clear(string modId)
+            {
+                List<string> keys = new();
+                foreach (string key in _values.Keys)
+                {
+                    if (key.StartsWith(modId + "\n", StringComparison.Ordinal))
+                    {
+                        keys.Add(key);
+                    }
+                }
+
+                for (int index = 0; index < keys.Count; index++)
+                {
+                    _values.Remove(keys[index]);
+                }
+            }
         }
 
         private sealed class TokenProvider : IActorAdmissionProvider

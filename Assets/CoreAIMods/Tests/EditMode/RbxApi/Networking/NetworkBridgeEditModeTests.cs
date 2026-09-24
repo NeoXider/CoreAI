@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
@@ -292,6 +293,54 @@ namespace CoreAI.Tests.EditMode.RbxApi.Networking
             Assert.IsNotNull(failed);
             Assert.IsFalse(failed.Succeeded);
             Assert.AreEqual("receiver exploded", failed.Error);
+        }
+
+        [Test]
+        public void Loopback_AKickWithAMessage_TakesTheInterfaceDefault_AndEndsNothing()
+        {
+            // WHY: the loopback has no connection per actor and no client to tell anything, so the
+            // message overload must reach it as the harmless default, never as a throw.
+            INetworkBridge bridge = CreateBridge();
+            List<RbxNetworkEventMessage> received = new();
+            bridge.EventReceived += received.Add;
+
+            Assert.DoesNotThrow(() => bridge.DisconnectActor(ActorId, "banned for griefing"));
+            Assert.DoesNotThrow(() => bridge.DisconnectActor(ActorId, null));
+            Assert.DoesNotThrow(() => bridge.DisconnectActor("actor-nobody", "never sent"));
+
+            CollectionAssert.AreEqual(new[] { ActorId }, bridge.ActorIds,
+                "a kick on the loopback is the Player teardown only; the registration stays");
+            bridge.SendEvent(Event(new byte[] { 1 }, RbxNetworkReliability.ReliableOrdered));
+            Assert.AreEqual(1, received.Count, "and the loopback keeps delivering");
+        }
+
+        [Test]
+        public void KickMessage_IsCutToTheWireCeiling_AfterTheLastWholeCharacterThatFits()
+        {
+            int ceiling = RbxPlayers.MaxKickMessageBytes;
+            string atCeiling = new string('a', ceiling);
+
+            Assert.IsNull(RbxPlayers.CapKickMessage(null), "no message stays no message");
+            Assert.AreEqual("", RbxPlayers.CapKickMessage(""));
+            Assert.AreSame(atCeiling, RbxPlayers.CapKickMessage(atCeiling), "a message that fits is kept as is");
+            Assert.AreEqual(atCeiling, RbxPlayers.CapKickMessage(atCeiling + "b"));
+
+            AssertCut(new string('a', ceiling - 1) + "\uD83D\uDE00tail", ceiling - 1,
+                "a four-byte character that does not fit whole is left out, never split");
+            AssertCut(new string('a', ceiling - 2) + "\u00E9\u00E9", ceiling - 1,
+                "the first two-byte character fits exactly, the second does not");
+            AssertCut(new string('a', ceiling - 3) + "\u20AC\u20AC", ceiling - 2,
+                "the first three-byte character fits exactly, the second does not");
+            AssertCut(new string('a', ceiling - 3) + "\uD83Dab", ceiling - 2,
+                "a lone surrogate counts as the three bytes of the character that replaces it");
+        }
+
+        private static void AssertCut(string message, int expectedLength, string because)
+        {
+            string cut = RbxPlayers.CapKickMessage(message);
+
+            Assert.AreEqual(message.Substring(0, expectedLength), cut, because);
+            Assert.LessOrEqual(Encoding.UTF8.GetByteCount(cut), RbxPlayers.MaxKickMessageBytes, because);
         }
 
         private static INetworkBridge CreateBridge(

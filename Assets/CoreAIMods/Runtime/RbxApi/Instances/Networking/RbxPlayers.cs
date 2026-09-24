@@ -263,12 +263,28 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         internal Scheduling.ModScheduler Scheduler { get; set; }
 
         /// <summary>
-        /// The transport an admitted actor's connection lives on; <see cref="KickPlayer"/> ends
-        /// that connection through it. Set by the composition next to <see cref="Scheduler"/>;
-        /// null, like the loopback, leaves a kick at the Player teardown, which is all a solo
-        /// world has.
+        /// The transport an admitted actor's connection lives on;
+        /// <see cref="KickPlayer(RbxPlayer, RbxEnumItem, string)"/> ends that connection through
+        /// it. Set by the composition next to <see cref="Scheduler"/>; null, like the loopback,
+        /// leaves a kick at the Player teardown, which is all a solo world has.
         /// </summary>
         internal INetworkBridge NetworkBridge { get; set; }
+
+        /// <summary>
+        /// The most UTF-8 bytes of kick message
+        /// <see cref="KickPlayer(RbxPlayer, RbxEnumItem, string)"/> hands the transport; a longer
+        /// message is cut after the last whole character that fits.
+        /// </summary>
+        /// <remarks>
+        /// WHY a ceiling (OURS — Player.yaml states none): the text is script-supplied and becomes a
+        /// packet on the kicked client's connection, so without one a kick would be the largest
+        /// message a mod can put on the wire. WHY 1024, and cut rather than refused: it is the
+        /// Mirror transport's notice ceiling (MirrorNetworkBridge.MaxNoticeMessageBytes, which a
+        /// Mirror test pins equal), and a kick is moderation that has to happen even when its
+        /// explanation runs long. Cut here, on a character boundary, the text reaches the client
+        /// whole up to the ceiling instead of being cut again by the transport.
+        /// </remarks>
+        public const int MaxKickMessageBytes = 1024;
 
         /// <summary>Mirror default for <c>Players.RespawnTime</c>: 5 seconds.</summary>
         public const double DefaultRespawnTime = 5d;
@@ -659,12 +675,25 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         }
 
         /// <summary>
-        /// Mirror <c>Player:Kick</c>: disconnects the player — it leaves the tree,
+        /// <see cref="KickPlayer(RbxPlayer, RbxEnumItem, string)"/> with no message: the kicked
+        /// client is shown the transport's default notice.
+        /// </summary>
+        public bool KickPlayer(RbxPlayer player, RbxEnumItem kickReason)
+        {
+            return KickPlayer(player, kickReason, null);
+        }
+
+        /// <summary>
+        /// Mirror <c>Player:Kick(message)</c>: disconnects the player — it leaves the tree,
         /// <c>PlayerRemoving</c> fires with the caller-supplied reason (the Lua boundary passes
         /// <c>CreatorKick</c>), and its transport connection is ended through
-        /// <see cref="NetworkBridge"/>. Returns false and fires nothing when the player is null or
-        /// no longer connected (already removed). The kick message is validated at the Lua boundary
-        /// and dropped here: headless runtime has no presentation surface for it.
+        /// <see cref="NetworkBridge"/> with <paramref name="message"/>, the text the kicked client
+        /// is shown. Null or blank leaves the transport's default notice (Player.yaml: no argument
+        /// "provides a default notice message"); a longer text is cut to
+        /// <see cref="MaxKickMessageBytes"/>. Returns false and fires nothing when the player is
+        /// null or no longer connected (already removed). A bridge with no channel to the client
+        /// ends the connection without the text (see
+        /// <see cref="INetworkBridge.DisconnectActor(string, string)"/>).
         /// </summary>
         /// <remarks>
         /// WHY the Player goes before the connection: <see cref="PlayerRemoving"/> is deferred-only
@@ -680,7 +709,7 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// a fresh join: the bridge still lists the actor, so the Player is re-created and
         /// PlayerAdded fires again.
         /// </remarks>
-        public bool KickPlayer(RbxPlayer player, RbxEnumItem kickReason)
+        public bool KickPlayer(RbxPlayer player, RbxEnumItem kickReason, string message)
         {
             if (player == null || kickReason == null)
             {
@@ -692,18 +721,72 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 if (ReferenceEquals(_players[index], player))
                 {
                     string actorId = player.NetworkActorId;
+                    string notice = CapKickMessage(message);
                     try
                     {
                         return RemoveActor(actorId, kickReason);
                     }
                     finally
                     {
-                        NetworkBridge?.DisconnectActor(actorId);
+                        NetworkBridge?.DisconnectActor(actorId, notice);
                     }
                 }
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// <paramref name="message"/> cut to at most <see cref="MaxKickMessageBytes"/> UTF-8 bytes,
+        /// after the last whole character that fits: a surrogate pair is never split. Null stays
+        /// null.
+        /// </summary>
+        internal static string CapKickMessage(string message)
+        {
+            // WHY the length test first: no UTF-16 code unit encodes to more than three UTF-8
+            // bytes, so a message this short fits without being measured.
+            if (message == null || message.Length <= MaxKickMessageBytes / 3)
+            {
+                return message;
+            }
+
+            int bytes = 0;
+            int length = 0;
+            while (length < message.Length)
+            {
+                char current = message[length];
+                int units = 1;
+                int width;
+                if (current < 0x80)
+                {
+                    width = 1;
+                }
+                else if (current < 0x800)
+                {
+                    width = 2;
+                }
+                else if (char.IsHighSurrogate(current) && length + 1 < message.Length
+                         && char.IsLowSurrogate(message[length + 1]))
+                {
+                    units = 2;
+                    width = 4;
+                }
+                else
+                {
+                    // WHY three for a lone surrogate too: the UTF-8 encoder writes U+FFFD for it.
+                    width = 3;
+                }
+
+                if (bytes + width > MaxKickMessageBytes)
+                {
+                    return message.Substring(0, length);
+                }
+
+                bytes += width;
+                length += units;
+            }
+
+            return message;
         }
 
         public bool TryGetByActorId(string actorId, out RbxPlayer player)
