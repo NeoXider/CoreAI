@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
@@ -432,8 +433,252 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual(durableModel.Id.Value, payload.Diagnostics[0].ModelId);
             Assert.AreEqual(ephemeralPart.Id.Value, payload.Diagnostics[0].DroppedPrimaryPartId);
             StringAssert.Contains("mod-ephemeral", payload.Diagnostics[0].Reason);
+            Assert.IsNull(payload.Diagnostics[0].Member);
             Assert.IsNotNull(durableModel.PrimaryPart);
             Assert.AreEqual(ephemeralPart.Id, durableModel.PrimaryPart.Id);
+            JToken entry = ParseJsonLiteral(ReadEntryText(
+                RbxWorldPackageSerializer.WritePackage(payload),
+                RbxWorldPackageSerializer.ManifestEntryName))["diagnostics"][0];
+            CollectionAssert.AreEqual(
+                new[] { "model_id", "dropped_primary_part_id", "reason" },
+                PropertyNames(entry),
+                "A PrimaryPart diagnostic keeps its pre-member shape, so older readers still read it.");
+        }
+
+        [TestCase(double.NaN)]
+        [TestCase(double.PositiveInfinity)]
+        public void Capture_NumberValueHoldingNonFiniteValue_PackagesZeroWithOneDiagnosticAndKeepsLiveValue(
+            double nonFinite)
+        {
+            InstanceRegistry registry = new(worldId: WorldId);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            _games.Add(game);
+            RbxNumberValue score = (RbxNumberValue)registry.Create(
+                "NumberValue",
+                originTag: OriginTag.FromConsole("non-finite-fixture"));
+            score.Name = "Score";
+            score.Parent = registry.WorldRoot;
+            score.Value = nonFinite;
+            RbxWorldPackageCaptureContext context = new(
+                registry,
+                game,
+                new InMemoryPartPropertySink(),
+                NewSettings(),
+                capturedAtUtc: CapturedAtUtc);
+
+            RbxWorldPackagePayload payload = RbxWorldPackageSerializer.Capture(context);
+            byte[] package = RbxWorldPackageSerializer.WritePackage(payload);
+
+            CollectionAssert.AreEqual(
+                package,
+                RbxWorldPackageSerializer.WritePackage(RbxWorldPackageSerializer.ExportSnapshot(context)),
+                "The disk capture and the join snapshot must share one projection.");
+            Assert.AreEqual("0", FindNode(payload, "Score").Value.StringValue);
+            AssertOnlyNonFiniteDiagnostics(payload, score.Id.Value + ":Value");
+            JToken entry = ParseJsonLiteral(
+                ReadEntryText(package, RbxWorldPackageSerializer.ManifestEntryName))["diagnostics"][0];
+            CollectionAssert.AreEqual(
+                new[] { "model_id", "dropped_primary_part_id", "reason", "member" },
+                PropertyNames(entry));
+            Assert.AreEqual(
+                score.Id.Value.ToString(CultureInfo.InvariantCulture), (string)entry["model_id"]);
+            Assert.AreEqual("0", (string)entry["dropped_primary_part_id"]);
+            Assert.AreEqual("non-finite-value", (string)entry["reason"]);
+            Assert.AreEqual("Value", (string)entry["member"]);
+
+            RbxWorldPackagePayload decoded = RbxWorldPackageSerializer.ReadPackage(package);
+            Assert.AreEqual("0", FindNode(decoded, "Score").Value.StringValue);
+            AssertOnlyNonFiniteDiagnostics(decoded, score.Id.Value + ":Value");
+            CollectionAssert.AreEqual(package, RbxWorldPackageSerializer.WritePackage(decoded),
+                "decode -> encode must keep the diagnostic member byte-identical.");
+            RbxWorldPackageRestoreResult restored = RbxWorldPackageSerializer.RestoreFresh(decoded);
+            _games.Add(restored.Game);
+            Assert.IsTrue(restored.Registry.TryGet(score.Id, out RbxInstance restoredScore));
+            Assert.AreEqual(0d, ((RbxNumberValue)restoredScore).Value);
+            Assert.IsTrue(nonFinite.Equals(score.Value),
+                "Only the payload is adjusted; the live NumberValue keeps what the script wrote.");
+        }
+
+        [Test]
+        public void Capture_EveryScriptReachableNonFiniteMember_PackagesItsDefaultWithOneDiagnosticEach()
+        {
+            InstanceRegistry registry = new(worldId: WorldId);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            _games.Add(game);
+            InMemoryPartPropertySink partSink = new();
+            InMemoryCameraRig cameraRig = new();
+            RbxModel model = (RbxModel)registry.Create("Model");
+            model.Name = "Pivoted";
+            model.Parent = registry.WorldRoot;
+            RbxCFrame nonFinitePivot = RbxCFrame.FromPosition(float.NaN, 0f, 0f);
+            model.SetWorldPivot(in nonFinitePivot);
+            model.SetAttribute("Speed", double.NaN);
+            model.SetAttribute("Spawn", new RbxVector3(float.PositiveInfinity, 0f, 0f));
+            model.SetAttribute("Screen", new RbxVector2(0f, float.NaN));
+            model.SetAttribute("Tint", new RbxColor3(float.NaN, 0f, 0f));
+            model.SetAttribute("Pad", new RbxUDim(float.NegativeInfinity, 3));
+            model.SetAttribute("Kept", 7d);
+            RbxInstance part = registry.Create("Part");
+            part.Name = "Brick";
+            part.Parent = model;
+            PartProperties defaults = PartProperties.CreateDefault();
+            partSink.SetPartProperties(part.Id, in defaults);
+            partSink.SetPosition(part.Id, new RbxVector3(float.NaN, 0f, 0f));
+            partSink.SetSize(part.Id, new RbxVector3(1f, float.PositiveInfinity, 1f));
+            partSink.SetColor(part.Id, new RbxColor3(float.NaN, 0f, 0f));
+            partSink.SetTransparency(part.Id, float.NaN);
+            RbxClickDetector detector = (RbxClickDetector)registry.Create("ClickDetector");
+            detector.Parent = part;
+            detector.MaxActivationDistance = double.NaN;
+            RbxMaterialVariant variant = (RbxMaterialVariant)registry.Create("MaterialVariant");
+            variant.Name = "Mossy";
+            variant.Parent = game.FindFirstChildOfClass("MaterialService");
+            variant.StudsPerTile = float.PositiveInfinity;
+            RbxNumberValue number = (RbxNumberValue)registry.Create("NumberValue");
+            number.Parent = model;
+            number.Value = double.NaN;
+            RbxVector3Value vector = (RbxVector3Value)registry.Create("Vector3Value");
+            vector.Parent = model;
+            vector.Value = new RbxVector3(0f, float.NaN, 0f);
+            RbxCFrameValue cframe = (RbxCFrameValue)registry.Create("CFrameValue");
+            cframe.Parent = model;
+            cframe.Value = RbxCFrame.FromPosition(0f, 0f, float.NegativeInfinity);
+            RbxColor3Value color = (RbxColor3Value)registry.Create("Color3Value");
+            color.Parent = model;
+            color.Value = new RbxColor3(0f, 0f, float.PositiveInfinity);
+            RbxNumberValue modOwned = (RbxNumberValue)registry.Create(
+                "NumberValue",
+                "nan-mod",
+                OriginTag.FromMod("nan-mod"));
+            modOwned.Parent = registry.WorldRoot;
+            modOwned.Value = double.NaN;
+            RbxCFrame nonFiniteCamera = RbxCFrame.FromPosition(0f, float.NaN, 0f);
+            cameraRig.SetCFrame(in nonFiniteCamera);
+            RbxInstance camera = registry.WorldRoot.FindFirstChildOfClass("Camera");
+            Assert.IsNotNull(camera);
+            RbxWorldPackageCaptureContext context = new(
+                registry,
+                game,
+                partSink,
+                NewSettings(),
+                cameraRig,
+                capturedAtUtc: CapturedAtUtc);
+
+            RbxWorldPackagePayload payload = RbxWorldPackageSerializer.Capture(context);
+            byte[] package = RbxWorldPackageSerializer.WritePackage(payload);
+
+            string[] expected =
+            {
+                model.Id.Value + ":WorldPivot",
+                model.Id.Value + ":Attributes.Speed",
+                model.Id.Value + ":Attributes.Spawn",
+                model.Id.Value + ":Attributes.Screen",
+                model.Id.Value + ":Attributes.Tint",
+                model.Id.Value + ":Attributes.Pad",
+                part.Id.Value + ":CFrame",
+                part.Id.Value + ":Size",
+                part.Id.Value + ":Color",
+                part.Id.Value + ":Transparency",
+                detector.Id.Value + ":MaxActivationDistance",
+                variant.Id.Value + ":StudsPerTile",
+                number.Id.Value + ":Value",
+                vector.Id.Value + ":Value",
+                cframe.Id.Value + ":Value",
+                color.Id.Value + ":Value",
+                camera.Id.Value + ":CFrame"
+            };
+            AssertOnlyNonFiniteDiagnostics(payload, expected);
+            CollectionAssert.AreEqual(
+                package,
+                RbxWorldPackageSerializer.WritePackage(RbxWorldPackageSerializer.Capture(context)),
+                "Two captures of the same live world must write byte-identical packages.");
+            RbxWorldPackagePayload decoded = RbxWorldPackageSerializer.ReadPackage(package);
+            AssertOnlyNonFiniteDiagnostics(decoded, expected);
+
+            InMemoryCameraRig restoredCamera = new();
+            RbxWorldPackageRestoreResult restored = RbxWorldPackageSerializer.RestoreFresh(
+                decoded,
+                new RbxWorldPackageRestoreOptions { CameraRig = restoredCamera });
+            _games.Add(restored.Game);
+            Assert.IsTrue(restored.Registry.TryGet(model.Id, out RbxInstance restoredModel));
+            Assert.IsFalse(((RbxModel)restoredModel).HasStoredWorldPivot);
+            Assert.IsNull(restoredModel.GetAttribute("Speed"));
+            Assert.IsNull(restoredModel.GetAttribute("Spawn"));
+            Assert.IsNull(restoredModel.GetAttribute("Screen"));
+            Assert.IsNull(restoredModel.GetAttribute("Tint"));
+            Assert.IsNull(restoredModel.GetAttribute("Pad"));
+            Assert.AreEqual(7d, restoredModel.GetAttribute("Kept"));
+            Assert.IsTrue(restored.PartSink.TryGetPartProperties(part.Id, out PartProperties restoredPart));
+            AssertPartPropertiesEqual(in defaults, in restoredPart);
+            Assert.IsTrue(restored.Registry.TryGet(detector.Id, out RbxInstance restoredDetector));
+            Assert.AreEqual(
+                ((RbxClickDetector)registry.Create("ClickDetector")).MaxActivationDistance,
+                ((RbxClickDetector)restoredDetector).MaxActivationDistance);
+            Assert.IsTrue(restored.Registry.TryGet(variant.Id, out RbxInstance restoredVariant));
+            Assert.AreEqual(
+                ((RbxMaterialVariant)registry.Create("MaterialVariant")).StudsPerTile,
+                ((RbxMaterialVariant)restoredVariant).StudsPerTile);
+            Assert.IsTrue(restored.Registry.TryGet(number.Id, out RbxInstance restoredNumber));
+            Assert.AreEqual(0d, ((RbxNumberValue)restoredNumber).Value);
+            Assert.IsTrue(restored.Registry.TryGet(vector.Id, out RbxInstance restoredVector));
+            Assert.AreEqual(RbxVector3.Zero, ((RbxVector3Value)restoredVector).Value);
+            Assert.IsTrue(restored.Registry.TryGet(cframe.Id, out RbxInstance restoredCFrame));
+            Assert.AreEqual(RbxCFrame.Identity, ((RbxCFrameValue)restoredCFrame).Value);
+            Assert.IsTrue(restored.Registry.TryGet(color.Id, out RbxInstance restoredColor));
+            Assert.AreEqual(new RbxColor3(0f, 0f, 0f), ((RbxColor3Value)restoredColor).Value);
+            Assert.AreEqual(RbxCFrame.Identity, restoredCamera.GetCFrame());
+            Assert.IsFalse(restored.Registry.TryGet(modOwned.Id, out RbxInstance _),
+                "A mod-owned value is excluded by the ownership projection, not reported.");
+
+            Assert.IsTrue(model.HasStoredWorldPivot);
+            Assert.IsTrue(float.IsNaN(model.StoredWorldPivot.GetComponents()[0]));
+            Assert.IsTrue(double.IsNaN((double)model.GetAttribute("Speed")));
+            Assert.IsTrue(partSink.TryGetPartProperties(part.Id, out PartProperties livePart));
+            Assert.IsTrue(float.IsNaN(livePart.CFrame.GetComponents()[0]));
+            Assert.IsTrue(float.IsPositiveInfinity(livePart.Size.Y));
+            Assert.IsTrue(float.IsNaN(livePart.Color.R));
+            Assert.IsTrue(livePart.ColorWasExplicitlySet);
+            Assert.IsTrue(float.IsNaN(livePart.Transparency));
+            Assert.IsTrue(double.IsNaN(detector.MaxActivationDistance));
+            Assert.IsTrue(float.IsPositiveInfinity(variant.StudsPerTile));
+            Assert.IsTrue(double.IsNaN(number.Value));
+            Assert.IsTrue(float.IsNaN(vector.Value.Y));
+            Assert.IsTrue(float.IsNegativeInfinity(cframe.Value.GetComponents()[2]));
+            Assert.IsTrue(float.IsPositiveInfinity(color.Value.B));
+            Assert.IsTrue(float.IsNaN(cameraRig.GetCFrame().GetComponents()[1]));
+        }
+
+        [TestCase("\"string_value\": \"5.5\"", "\"string_value\": \"NaN\"", "non-finite Value")]
+        [TestCase("\"number_value\": 2.5", "\"number_value\": NaN", "is not a finite JSON number")]
+        [TestCase("\"number_value\": 2.5", "\"number_value\": Infinity", "is not a finite JSON number")]
+        public void ReadPackage_HandCraftedNonFiniteValue_IsRejectedBeforeRestore(
+            string finiteText,
+            string nonFiniteText,
+            string expectedMessage)
+        {
+            InstanceRegistry registry = new(worldId: WorldId);
+            RbxDataModel game = DataModelBootstrap.CreateGame(registry);
+            _games.Add(game);
+            RbxNumberValue score = (RbxNumberValue)registry.Create("NumberValue");
+            score.Name = "Score";
+            score.Parent = registry.WorldRoot;
+            score.Value = 5.5d;
+            score.SetAttribute("Ratio", 2.5d);
+            byte[] package = RbxWorldPackageSerializer.WritePackage(RbxWorldPackageSerializer.Capture(
+                new RbxWorldPackageCaptureContext(
+                    registry,
+                    game,
+                    new InMemoryPartPropertySink(),
+                    NewSettings(),
+                    capturedAtUtc: CapturedAtUtc)));
+            Assert.DoesNotThrow(() => RbxWorldPackageSerializer.ReadPackage(package));
+            byte[] hostile = ReplaceEntryText(
+                package, RbxWorldPackageSerializer.WorldEntryName, finiteText, nonFiniteText);
+
+            RbxWorldPackageException exception = Assert.Throws<RbxWorldPackageException>(() =>
+                RbxWorldPackageSerializer.ReadPackage(hostile));
+
+            StringAssert.Contains(expectedMessage, exception.Message);
         }
 
         [Test]
@@ -1917,6 +2162,68 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual(0, store.ListManualSlots().Count);
         }
 
+        [Test]
+        public async Task ConfirmedBackup_GatedExecuteLuaAfterModWroteNaN_StillWritesAutosaveAndRuns()
+        {
+            RuntimeWorld world = new(WorldId);
+            _games.Add(world.Game);
+            RbxNumberValue score = (RbxNumberValue)world.Registry.Create(
+                "NumberValue",
+                originTag: OriginTag.FromConsole("non-finite-fixture"));
+            score.Name = "Score";
+            score.Parent = world.Registry.WorldRoot;
+            world.Stack.Runtime.LoadMod(
+                "nan-writer",
+                @"local score = workspace:FindFirstChild('Score')
+                score.Value = 0/0
+                score:SetAttribute('Ratio', math.huge)",
+                LuaCapabilities.All);
+            Assert.IsTrue(double.IsNaN(score.Value), "The mod must have written NaN through Lua.");
+            Assert.IsTrue(double.IsPositiveInfinity((double)score.GetAttribute("Ratio")));
+            string root = NewTemporaryDirectory();
+            FileRbxWorldPackageStore store = new(
+                root,
+                persistenceSyncAsync: cancellationToken => UniTask.FromResult(true),
+                utcNow: () => CapturedAtUtc);
+            ConfirmedWorldMutationGate gate = new(
+                cancellationToken => UniTask.FromResult(Capture(world, CapturedAtUtc)),
+                store);
+            RecordingLuaCsBindings bindings = new();
+            LuaCsGameToolExecutor executor = new(
+                new LuaCsSecureEnvironment(),
+                bindings,
+                new NullLuaExecutionObserver(),
+                null,
+                gate);
+
+            LuaTool.LuaResult first = await executor.ExecuteAsync("mutate_world()", CancellationToken.None);
+            LuaTool.LuaResult second = await executor.ExecuteAsync("mutate_world()", CancellationToken.None);
+
+            Assert.IsTrue(first.Success, "One NaN written by a mod must not refuse execute_lua: " + first.Error);
+            Assert.IsTrue(second.Success, "The next gated execute_lua must not be refused either: " + second.Error);
+            Assert.AreEqual("new-tree", bindings.TreeState);
+            Assert.AreEqual(19, bindings.Revision, "Both gated mutations must have run.");
+            IReadOnlyList<RbxAutoSaveInfo> autosaves = store.ListAutoSaves();
+            Assert.AreEqual(2, autosaves.Count);
+            foreach (RbxAutoSaveInfo autosave in autosaves)
+            {
+                Assert.AreEqual(LuaCsGameToolExecutor.ExecuteLuaBackupTrigger, autosave.Trigger);
+                RbxWorldPackagePayload saved = RbxWorldPackageSerializer.ReadPackage(
+                    File.ReadAllBytes(Path.Combine(root, "Auto", autosave.FileName)));
+                InstanceSnapshot savedScore = FindNode(saved, "Score");
+                Assert.AreEqual("0", savedScore.Value.StringValue);
+                Assert.AreEqual(0, savedScore.Attributes.Count);
+                AssertOnlyNonFiniteDiagnostics(
+                    saved,
+                    score.Id.Value + ":Value",
+                    score.Id.Value + ":Attributes.Ratio");
+            }
+
+            Assert.IsTrue(double.IsNaN(score.Value), "The live world keeps the mod's NaN.");
+            Assert.IsTrue(double.IsPositiveInfinity((double)score.GetAttribute("Ratio")));
+            Assert.AreEqual(0, store.ListManualSlots().Count);
+        }
+
         private RuntimeWorld BuildAuthoredWorld()
         {
             RuntimeWorld world = new(WorldId);
@@ -2399,6 +2706,26 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 }));
             Assert.AreEqual(0, scaleMutations);
             Assert.AreEqual(0, sink.FullStateCalls);
+        }
+
+        /// <summary>
+        /// Asserts the payload carries exactly these non-finite diagnostics ("instanceId:member"), each
+        /// with no dropped PrimaryPart and the <c>non-finite-value</c> reason, and nothing else.
+        /// </summary>
+        private static void AssertOnlyNonFiniteDiagnostics(
+            RbxWorldPackagePayload payload,
+            params string[] expectedMembers)
+        {
+            List<string> actual = new();
+            foreach (RbxWorldPackageDiagnostic diagnostic in payload.Diagnostics)
+            {
+                Assert.AreEqual(0UL, diagnostic.DroppedPrimaryPartId);
+                Assert.AreEqual("non-finite-value", diagnostic.Reason);
+                actual.Add(diagnostic.ModelId.ToString(CultureInfo.InvariantCulture)
+                           + ":" + diagnostic.Member);
+            }
+
+            CollectionAssert.AreEquivalent(expectedMembers, actual);
         }
 
         private static InstanceSnapshot FindNode(RbxWorldPackagePayload payload, string name)

@@ -309,6 +309,182 @@ namespace CoreAI.Mods.Rbx.Instances
             return snapshot;
         }
 
+        /// <summary>Member-name prefix reported for an attribute, e.g. <c>Attributes.Health</c>.</summary>
+        /// <remarks>
+        /// WHY a prefix: an attribute may share its name with a property (an attribute called
+        /// <c>Value</c> on a NumberValue), and no property name contains a period.
+        /// </remarks>
+        public const string AttributeMemberPrefix = "Attributes.";
+
+        /// <summary>The initial <c>ClickDetector.MaxActivationDistance</c> of <see cref="RbxClickDetector"/>.</summary>
+        private const double DefaultMaxActivationDistance = 32d;
+
+        /// <summary>The initial <c>MaterialVariant.StudsPerTile</c> of <see cref="RbxMaterialVariant"/>.</summary>
+        private const float DefaultStudsPerTile = 1f;
+
+        /// <summary>
+        /// Replaces, in <paramref name="snapshot"/> only, every non-finite number that a script can
+        /// leave in live state with that member's default. Each replacement is reported to
+        /// <paramref name="replaced"/> as (instance id, member name), in snapshot order.
+        /// </summary>
+        /// <remarks>
+        /// Defaults: <c>NumberValue.Value</c> 0, <c>Vector3Value.Value</c> (0, 0, 0),
+        /// <c>CFrameValue.Value</c> identity, <c>Color3Value.Value</c> black, <c>Model.WorldPivot</c>
+        /// unset (no stored pivot), <c>ClickDetector.MaxActivationDistance</c> 32 and
+        /// <c>MaterialVariant.StudsPerTile</c> 1. An attribute whose number, or any datatype
+        /// component, is non-finite is omitted, because an attribute's default is absence. It is
+        /// reported as <see cref="AttributeMemberPrefix"/> plus its name.
+        /// WHY the snapshot and never the live instance: Lua produces these values legitimately
+        /// (<c>0/0</c>, <c>math.huge</c>, or a float overflow such as <c>Vector3.new(1e39, 0, 0)</c>),
+        /// and the world format rejects them. Failing the capture would fail every save and every
+        /// confirmed pre-mutation autosave, which refuses every gated tool. Rewriting the live value
+        /// would change the running game under the script that wrote it.
+        /// <see cref="Validate"/> still rejects a non-finite value in any snapshot that did not
+        /// come through this projection.
+        /// </remarks>
+        public static void ReplaceNonFiniteValues(InstanceTreeSnapshot snapshot,
+            Action<ulong, string> replaced)
+        {
+            if (snapshot == null)
+            {
+                throw new ArgumentNullException(nameof(snapshot));
+            }
+
+            if (replaced == null)
+            {
+                throw new ArgumentNullException(nameof(replaced));
+            }
+
+            foreach (InstanceSnapshot node in snapshot.Instances)
+            {
+                if (node == null)
+                {
+                    continue;
+                }
+
+                if (node.Model != null && node.Model.HasStoredWorldPivot
+                    && HasNonFiniteComponent(node.Model.StoredWorldPivot))
+                {
+                    node.Model.HasStoredWorldPivot = false;
+                    node.Model.StoredWorldPivot = null;
+                    replaced(node.Id, "WorldPivot");
+                }
+
+                if (node.ClickDetector != null
+                    && IsNonFiniteNumber(node.ClickDetector.MaxActivationDistance))
+                {
+                    node.ClickDetector.MaxActivationDistance =
+                        DefaultMaxActivationDistance.ToString("R", CultureInfo.InvariantCulture);
+                    replaced(node.Id, "MaxActivationDistance");
+                }
+
+                if (node.MaterialVariant != null
+                    && HasNonFiniteComponent(node.MaterialVariant.StudsPerTile))
+                {
+                    node.MaterialVariant.StudsPerTile = F(DefaultStudsPerTile);
+                    replaced(node.Id, "StudsPerTile");
+                }
+
+                if (node.Value != null)
+                {
+                    string finiteDefault = DefaultForNonFiniteValue(node);
+                    if (finiteDefault != null)
+                    {
+                        node.Value.StringValue = finiteDefault;
+                        replaced(node.Id, "Value");
+                    }
+                }
+
+                if (node.Attributes == null)
+                {
+                    continue;
+                }
+
+                int index = 0;
+                while (index < node.Attributes.Count)
+                {
+                    AttributeSnapshot attribute = node.Attributes[index];
+                    if (attribute != null && IsNonFiniteAttribute(attribute))
+                    {
+                        node.Attributes.RemoveAt(index);
+                        replaced(node.Id, AttributeMemberPrefix + attribute.Name);
+                        continue;
+                    }
+
+                    index++;
+                }
+            }
+        }
+
+        /// <summary>The captured default for a non-finite value payload, or null when it is finite.</summary>
+        private static string DefaultForNonFiniteValue(InstanceSnapshot node)
+        {
+            string raw = node.Value.StringValue;
+            switch (node.ClassName)
+            {
+                case "NumberValue":
+                    return IsNonFiniteNumber(raw)
+                        ? 0d.ToString("R", CultureInfo.InvariantCulture)
+                        : null;
+                case "Vector3Value":
+                    return HasNonFiniteComponent(raw) ? Join(0f, 0f, 0f) : null;
+                case "CFrameValue":
+                    return HasNonFiniteComponent(raw)
+                        ? Join(RbxCFrame.Identity.GetComponents())
+                        : null;
+                case "Color3Value":
+                    return HasNonFiniteComponent(raw) ? Join(0f, 0f, 0f) : null;
+                default:
+                    return null;
+            }
+        }
+
+        private static bool IsNonFiniteAttribute(AttributeSnapshot attribute)
+        {
+            switch (attribute.Kind)
+            {
+                case AttributeValueKind.Number:
+                    return double.IsNaN(attribute.NumberValue)
+                           || double.IsInfinity(attribute.NumberValue);
+                case AttributeValueKind.Vector3:
+                case AttributeValueKind.Vector2:
+                case AttributeValueKind.Color3:
+                case AttributeValueKind.UDim:
+                    return HasNonFiniteComponent(attribute.StringValue);
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>True only for a well-formed NaN or infinity; malformed text is left to <see cref="Validate"/>.</summary>
+        private static bool IsNonFiniteNumber(string serialized)
+        {
+            return double.TryParse(serialized, NumberStyles.Float, CultureInfo.InvariantCulture,
+                       out double value)
+                   && (double.IsNaN(value) || double.IsInfinity(value));
+        }
+
+        /// <summary>True when any comma-separated component is a well-formed NaN or infinity.</summary>
+        private static bool HasNonFiniteComponent(string serialized)
+        {
+            if (serialized == null)
+            {
+                return false;
+            }
+
+            foreach (string component in serialized.Split(','))
+            {
+                if (float.TryParse(component, NumberStyles.Float, CultureInfo.InvariantCulture,
+                        out float value)
+                    && (float.IsNaN(value) || float.IsInfinity(value)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         /// <summary>
         /// Restores a captured subtree into <paramref name="registry"/> under the original ids
         /// and returns the restored root. Two passes: create all nodes, then link parents, so

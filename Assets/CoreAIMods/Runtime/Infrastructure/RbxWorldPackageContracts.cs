@@ -50,21 +50,32 @@ namespace CoreAI.Mods.WorldPackages
         public string Source { get; }
     }
 
-    /// <summary>Diagnostic emitted when capture drops a dangling durable reference in the snapshot.</summary>
+    /// <summary>Diagnostic emitted when capture adjusts the snapshot instead of failing (the live world is untouched).</summary>
     public sealed class RbxWorldPackageDiagnostic
     {
         public RbxWorldPackageDiagnostic(ulong modelId, ulong droppedPrimaryPartId, string reason)
+            : this(modelId, droppedPrimaryPartId, reason, null)
+        {
+        }
+
+        public RbxWorldPackageDiagnostic(ulong modelId, ulong droppedPrimaryPartId, string reason,
+            string member)
         {
             ModelId = modelId;
             DroppedPrimaryPartId = droppedPrimaryPartId;
             Reason = reason ?? "";
+            Member = member;
         }
 
+        /// <summary>The Model of a dropped PrimaryPart, or the instance whose member was adjusted.</summary>
         public ulong ModelId { get; }
 
         public ulong DroppedPrimaryPartId { get; }
 
         public string Reason { get; }
+
+        /// <summary>Member or attribute name the snapshot adjusted; null for a dropped PrimaryPart.</summary>
+        public string Member { get; }
     }
 
     /// <summary>Canonical in-memory payload shared by package files and future join snapshots.</summary>

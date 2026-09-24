@@ -36,6 +36,12 @@ namespace CoreAI.Mods.WorldPackages
 
         private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
+        /// <summary>
+        /// Diagnostic reason for a member whose non-finite live value the payload replaced with the
+        /// member's default; the entry names the instance (<c>model_id</c>) and the member.
+        /// </summary>
+        private const string NonFiniteValueReason = "non-finite-value";
+
         /// <summary>Captures the supported world-owned DataModel projection plus settings and mods.</summary>
         public static RbxWorldPackagePayload Capture(RbxWorldPackageCaptureContext context)
         {
@@ -84,7 +90,7 @@ namespace CoreAI.Mods.WorldPackages
                         + " but its durable Part state is missing from IPartPropertySink.");
                 }
 
-                parts.Add(id, properties);
+                parts.Add(id, ProjectFinitePartState(id, properties, diagnostics));
             }
 
             RbxWorldSettings settings = context.Settings;
@@ -98,7 +104,7 @@ namespace CoreAI.Mods.WorldPackages
 
             DateTime capturedAtUtc = NormalizeUtc(context.CapturedAtUtc ?? DateTime.UtcNow);
             RbxCFrame? cameraCFrame = context.CameraRig != null
-                ? context.CameraRig.GetCFrame()
+                ? ProjectFiniteCameraCFrame(context.CameraRig.GetCFrame(), tree, diagnostics)
                 : (RbxCFrame?)null;
             IReadOnlyList<RbxWorldModSource> mods = CaptureMods(context.ModSourceStore);
             RbxWorldPackagePayload payload = new(
@@ -166,7 +172,125 @@ namespace CoreAI.Mods.WorldPackages
                 node.Model.PrimaryPartId = 0UL;
             }
 
+            InstanceTreeSerializer.ReplaceNonFiniteValues(projectedTree, (instanceId, member) =>
+                diagnostics?.Add(NonFiniteValueDiagnostic(instanceId, member)));
             return projectedTree;
+        }
+
+        /// <summary>
+        /// Replaces, in the captured Part state only, a non-finite CFrame, Size, Color or
+        /// Transparency with the Roblox default Part bundle's value and records one diagnostic each.
+        /// </summary>
+        /// <remarks>
+        /// WHY: scripts reach all four (<c>part.Position = Vector3.new(0/0, 0, 0)</c>, and the
+        /// sinks' Transparency clamp lets NaN through), and the sink returns a copy, so the live
+        /// Part keeps what the script wrote. A replaced Color also clears ColorWasExplicitlySet:
+        /// the member returns to its untouched default, which renders like a Part nobody colored.
+        /// </remarks>
+        private static PartProperties ProjectFinitePartState(
+            InstanceId id,
+            PartProperties properties,
+            List<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            PartProperties defaults = PartProperties.CreateDefault();
+            if (!AreFinite(properties.CFrame.GetComponents()))
+            {
+                properties.CFrame = defaults.CFrame;
+                diagnostics.Add(NonFiniteValueDiagnostic(id.Value, "CFrame"));
+            }
+
+            if (!IsFinite(properties.Size.X) || !IsFinite(properties.Size.Y)
+                || !IsFinite(properties.Size.Z))
+            {
+                properties.Size = defaults.Size;
+                diagnostics.Add(NonFiniteValueDiagnostic(id.Value, "Size"));
+            }
+
+            if (!IsFinite(properties.Color.R) || !IsFinite(properties.Color.G)
+                || !IsFinite(properties.Color.B))
+            {
+                properties.Color = defaults.Color;
+                properties.ColorWasExplicitlySet = defaults.ColorWasExplicitlySet;
+                diagnostics.Add(NonFiniteValueDiagnostic(id.Value, "Color"));
+            }
+
+            if (!IsFinite(properties.Transparency))
+            {
+                properties.Transparency = defaults.Transparency;
+                diagnostics.Add(NonFiniteValueDiagnostic(id.Value, "Transparency"));
+            }
+
+            return properties;
+        }
+
+        /// <summary>
+        /// Returns the camera pose to capture: the live pose, or the in-memory rig's identity
+        /// default when a script left a non-finite component in it (one diagnostic, reported on
+        /// the Workspace camera).
+        /// </summary>
+        private static RbxCFrame ProjectFiniteCameraCFrame(
+            RbxCFrame cameraCFrame,
+            InstanceTreeSnapshot tree,
+            List<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            if (AreFinite(cameraCFrame.GetComponents()))
+            {
+                return cameraCFrame;
+            }
+
+            diagnostics.Add(NonFiniteValueDiagnostic(FindCurrentCameraId(tree), "CFrame"));
+            return RbxCFrame.Identity;
+        }
+
+        /// <summary>The captured id of Workspace's first Camera child, or 0 when none was captured.</summary>
+        private static ulong FindCurrentCameraId(InstanceTreeSnapshot tree)
+        {
+            ulong rootId = tree.Instances.Count > 0 ? tree.Instances[0].Id : 0UL;
+            ulong workspaceId = 0UL;
+            foreach (InstanceSnapshot node in tree.Instances)
+            {
+                if (workspaceId == 0UL)
+                {
+                    if (node.ParentId == rootId && node.ParentId != 0UL
+                        && string.Equals(node.ClassName, "Workspace", StringComparison.Ordinal))
+                    {
+                        workspaceId = node.Id;
+                    }
+
+                    continue;
+                }
+
+                if (node.ParentId == workspaceId
+                    && string.Equals(node.ClassName, "Camera", StringComparison.Ordinal))
+                {
+                    return node.Id;
+                }
+            }
+
+            return 0UL;
+        }
+
+        private static RbxWorldPackageDiagnostic NonFiniteValueDiagnostic(ulong instanceId, string member)
+        {
+            return new RbxWorldPackageDiagnostic(instanceId, 0UL, NonFiniteValueReason, member);
+        }
+
+        private static bool AreFinite(IReadOnlyList<float> values)
+        {
+            for (int index = 0; index < values.Count; index++)
+            {
+                if (!IsFinite(values[index]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
         }
 
         /// <summary>Join-snapshot entry point; returns the disk codec's world-owned payload.</summary>
@@ -425,7 +549,8 @@ namespace CoreAI.Mods.WorldPackages
                 {
                     ModelId = U(diagnostic.ModelId),
                     DroppedPrimaryPartId = U(diagnostic.DroppedPrimaryPartId),
-                    Reason = diagnostic.Reason
+                    Reason = diagnostic.Reason,
+                    Member = diagnostic.Member
                 });
             }
 
@@ -446,7 +571,8 @@ namespace CoreAI.Mods.WorldPackages
                 result.Add(new RbxWorldPackageDiagnostic(
                     ParseUlong(dto.ModelId, "diagnostic model_id"),
                     ParseUlong(dto.DroppedPrimaryPartId, "diagnostic dropped_primary_part_id"),
-                    dto.Reason));
+                    dto.Reason,
+                    dto.Member));
             }
 
             return result;
@@ -1541,6 +1667,16 @@ namespace CoreAI.Mods.WorldPackages
 
             [JsonProperty("reason", Required = Required.Always)]
             public string Reason;
+
+            // WHY no format_version bump: the diagnostics array is optional and additive, and this key
+            // is omitted when null, so every package the previous writer could produce is still
+            // byte-identical and old packages still read. A "non-finite-value" entry, the only one
+            // that carries a member, appears only in a world the previous writer refused to save at
+            // all, because its capture threw. A reader that predates this key rejects such a manifest
+            // (MissingMemberHandling.Error), so it loses nothing it could read before. Every reader
+            // still rejects a non-finite value inside world.json.
+            [JsonProperty("member", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public string Member;
         }
 
         [Serializable]

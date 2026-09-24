@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
@@ -303,6 +304,208 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
 
             Assert.DoesNotThrow(() => InstanceTreeSerializer.Validate(detector, new InstanceRegistry()));
             Assert.DoesNotThrow(() => InstanceTreeSerializer.Validate(vector, new InstanceRegistry()));
+        }
+
+        [TestCase(double.NaN)]
+        [TestCase(double.PositiveInfinity)]
+        [TestCase(double.NegativeInfinity)]
+        public void ReplaceNonFiniteValues_NonFiniteNumberValue_SnapshotHoldsZeroWhileLiveValueKeepsIt(
+            double nonFinite)
+        {
+            InstanceRegistry source = new();
+            RbxDataModel game = DataModelBootstrap.CreateGame(source);
+            RbxNumberValue score = (RbxNumberValue)source.Create("NumberValue");
+            score.Name = "Score";
+            score.Parent = source.WorldRoot;
+            score.Value = nonFinite;
+            InstanceTreeSnapshot snapshot = InstanceTreeSerializer.Capture(game);
+            Assert.Throws<RbxError>(
+                () => InstanceTreeSerializer.Validate(snapshot, new InstanceRegistry()),
+                "precondition: the world format rejects a raw non-finite NumberValue");
+
+            List<string> replaced = new();
+            InstanceTreeSerializer.ReplaceNonFiniteValues(
+                snapshot, (instanceId, member) => replaced.Add(instanceId + ":" + member));
+
+            CollectionAssert.AreEqual(new[] { score.Id.Value + ":Value" }, replaced);
+            Assert.AreEqual(
+                CaptureFresh("NumberValue").Value.StringValue,
+                FindSnapshotNode(snapshot, score.Id).Value.StringValue,
+                "the snapshot must hold exactly what a fresh NumberValue captures");
+            Assert.AreEqual("0", FindSnapshotNode(snapshot, score.Id).Value.StringValue);
+            Assert.DoesNotThrow(() => InstanceTreeSerializer.Validate(snapshot, new InstanceRegistry()));
+            Assert.IsTrue(nonFinite.Equals(score.Value),
+                "the live NumberValue must keep the value the script wrote");
+
+            InstanceRegistry target = new();
+            InstanceTreeSerializer.Restore(snapshot, target);
+            Assert.IsTrue(target.TryGet(score.Id, out RbxInstance restored));
+            Assert.AreEqual(0d, ((RbxNumberValue)restored).Value);
+        }
+
+        [Test]
+        public void ReplaceNonFiniteValues_EveryScriptReachableTreeMember_ProjectsItsDefaultAndSparesFiniteTwins()
+        {
+            InstanceRegistry source = new();
+            RbxDataModel game = DataModelBootstrap.CreateGame(source);
+            RbxModel holder = (RbxModel)source.Create("Model");
+            holder.Name = "Holder";
+            holder.Parent = source.WorldRoot;
+            RbxCFrame nonFinitePivot = RbxCFrame.FromPosition(float.NaN, 0f, 0f);
+            holder.SetWorldPivot(in nonFinitePivot);
+            holder.SetAttribute("Speed", double.NaN);
+            holder.SetAttribute("Spawn", new RbxVector3(float.PositiveInfinity, 0f, 0f));
+            holder.SetAttribute("Screen", new RbxVector2(0f, float.NaN));
+            holder.SetAttribute("Tint", new RbxColor3(float.NegativeInfinity, 0f, 0f));
+            holder.SetAttribute("Pad", new RbxUDim(float.NaN, 3));
+            holder.SetAttribute("Kept", 2.5d);
+            holder.SetAttribute("Label", "boss");
+            RbxVector3Value vector = (RbxVector3Value)CreateChild(source, "Vector3Value", holder);
+            vector.Value = new RbxVector3(float.NaN, 1f, 2f);
+            RbxCFrameValue cframe = (RbxCFrameValue)CreateChild(source, "CFrameValue", holder);
+            cframe.Value = RbxCFrame.FromPosition(0f, float.PositiveInfinity, 0f);
+            RbxColor3Value color = (RbxColor3Value)CreateChild(source, "Color3Value", holder);
+            color.Value = new RbxColor3(0.5f, float.NaN, 0.5f);
+            RbxClickDetector detector = (RbxClickDetector)CreateChild(source, "ClickDetector", holder);
+            detector.MaxActivationDistance = double.PositiveInfinity;
+            RbxMaterialVariant variant = (RbxMaterialVariant)CreateChild(source, "MaterialVariant", holder);
+            variant.StudsPerTile = float.NaN;
+            RbxVector3Value finiteVector = (RbxVector3Value)CreateChild(source, "Vector3Value", holder);
+            finiteVector.Value = new RbxVector3(1f, 2f, 3f);
+            RbxNumberValue finiteNumber = (RbxNumberValue)CreateChild(source, "NumberValue", holder);
+            finiteNumber.Value = 4.5d;
+            RbxClickDetector finiteDetector = (RbxClickDetector)CreateChild(source, "ClickDetector", holder);
+            finiteDetector.MaxActivationDistance = 12.5d;
+
+            InstanceTreeSnapshot snapshot = InstanceTreeSerializer.Capture(game);
+            string finiteVectorBefore = FindSnapshotNode(snapshot, finiteVector.Id).Value.StringValue;
+            List<string> replaced = new();
+            InstanceTreeSerializer.ReplaceNonFiniteValues(
+                snapshot, (instanceId, member) => replaced.Add(instanceId + ":" + member));
+
+            ulong holderId = holder.Id.Value;
+            CollectionAssert.AreEquivalent(
+                new[]
+                {
+                    holderId + ":WorldPivot",
+                    holderId + ":Attributes.Speed",
+                    holderId + ":Attributes.Spawn",
+                    holderId + ":Attributes.Screen",
+                    holderId + ":Attributes.Tint",
+                    holderId + ":Attributes.Pad",
+                    vector.Id.Value + ":Value",
+                    cframe.Id.Value + ":Value",
+                    color.Id.Value + ":Value",
+                    detector.Id.Value + ":MaxActivationDistance",
+                    variant.Id.Value + ":StudsPerTile"
+                },
+                replaced,
+                "every non-finite member is reported exactly once and no finite one is");
+
+            InstanceSnapshot holderNode = FindSnapshotNode(snapshot, holder.Id);
+            Assert.IsFalse(holderNode.Model.HasStoredWorldPivot);
+            Assert.IsNull(holderNode.Model.StoredWorldPivot);
+            List<string> keptAttributes = new();
+            foreach (AttributeSnapshot attribute in holderNode.Attributes)
+            {
+                keptAttributes.Add(attribute.Name);
+            }
+
+            CollectionAssert.AreEqual(new[] { "Kept", "Label" }, keptAttributes,
+                "a non-finite attribute is omitted and every finite one is kept in sorted order");
+            Assert.AreEqual(CaptureFresh("Vector3Value").Value.StringValue,
+                FindSnapshotNode(snapshot, vector.Id).Value.StringValue);
+            Assert.AreEqual(CaptureFresh("CFrameValue").Value.StringValue,
+                FindSnapshotNode(snapshot, cframe.Id).Value.StringValue);
+            Assert.AreEqual(CaptureFresh("Color3Value").Value.StringValue,
+                FindSnapshotNode(snapshot, color.Id).Value.StringValue);
+            Assert.AreEqual(CaptureFresh("ClickDetector").ClickDetector.MaxActivationDistance,
+                FindSnapshotNode(snapshot, detector.Id).ClickDetector.MaxActivationDistance);
+            Assert.AreEqual(CaptureFresh("MaterialVariant").MaterialVariant.StudsPerTile,
+                FindSnapshotNode(snapshot, variant.Id).MaterialVariant.StudsPerTile);
+            Assert.AreEqual(finiteVectorBefore, FindSnapshotNode(snapshot, finiteVector.Id).Value.StringValue);
+            Assert.AreEqual("4.5", FindSnapshotNode(snapshot, finiteNumber.Id).Value.StringValue);
+            Assert.AreEqual("12.5",
+                FindSnapshotNode(snapshot, finiteDetector.Id).ClickDetector.MaxActivationDistance);
+            Assert.DoesNotThrow(() => InstanceTreeSerializer.Validate(snapshot, new InstanceRegistry()));
+
+            Assert.IsTrue(holder.HasStoredWorldPivot, "the live Model keeps its stored pivot");
+            Assert.IsTrue(float.IsNaN(holder.StoredWorldPivot.GetComponents()[0]));
+            Assert.IsTrue(double.IsNaN((double)holder.GetAttribute("Speed")));
+            Assert.IsTrue(float.IsNaN(((RbxUDim)holder.GetAttribute("Pad")).Scale));
+            Assert.IsTrue(float.IsNaN(vector.Value.X));
+            Assert.IsTrue(float.IsInfinity(cframe.Value.GetComponents()[1]));
+            Assert.IsTrue(float.IsNaN(color.Value.G));
+            Assert.IsTrue(double.IsPositiveInfinity(detector.MaxActivationDistance));
+            Assert.IsTrue(float.IsNaN(variant.StudsPerTile));
+
+            InstanceRegistry target = new();
+            InstanceTreeSerializer.Restore(snapshot, target);
+            Assert.IsTrue(target.TryGet(holder.Id, out RbxInstance restoredHolder));
+            Assert.IsFalse(((RbxModel)restoredHolder).HasStoredWorldPivot);
+            Assert.IsNull(restoredHolder.GetAttribute("Speed"));
+            Assert.IsNull(restoredHolder.GetAttribute("Spawn"));
+            Assert.IsNull(restoredHolder.GetAttribute("Screen"));
+            Assert.IsNull(restoredHolder.GetAttribute("Tint"));
+            Assert.IsNull(restoredHolder.GetAttribute("Pad"));
+            Assert.AreEqual(2.5d, restoredHolder.GetAttribute("Kept"));
+            Assert.AreEqual("boss", restoredHolder.GetAttribute("Label"));
+            Assert.IsTrue(target.TryGet(vector.Id, out RbxInstance restoredVector));
+            Assert.AreEqual(RbxVector3.Zero, ((RbxVector3Value)restoredVector).Value);
+            Assert.IsTrue(target.TryGet(cframe.Id, out RbxInstance restoredCFrame));
+            Assert.AreEqual(RbxCFrame.Identity, ((RbxCFrameValue)restoredCFrame).Value);
+            Assert.IsTrue(target.TryGet(color.Id, out RbxInstance restoredColor));
+            Assert.AreEqual(new RbxColor3(0f, 0f, 0f), ((RbxColor3Value)restoredColor).Value);
+            Assert.IsTrue(target.TryGet(detector.Id, out RbxInstance restoredDetector));
+            Assert.AreEqual(32d, ((RbxClickDetector)restoredDetector).MaxActivationDistance);
+            Assert.IsTrue(target.TryGet(variant.Id, out RbxInstance restoredVariant));
+            Assert.AreEqual(1f, ((RbxMaterialVariant)restoredVariant).StudsPerTile);
+        }
+
+        [TestCase("NumberValue", "NaN")]
+        [TestCase("NumberValue", "-Infinity")]
+        [TestCase("Vector3Value", "1,NaN,3")]
+        [TestCase("CFrameValue", "0,0,0,1,0,0,0,1,0,0,0,Infinity")]
+        [TestCase("Color3Value", "Infinity,0,0")]
+        public void Validate_NonFiniteValueOutsideTheCaptureProjection_IsStillRejected(
+            string className, string serialized)
+        {
+            InstanceTreeSnapshot snapshot = SingleNodeSnapshot(className);
+            snapshot.Instances[0].Value = new ValueSnapshot { StringValue = serialized };
+
+            RbxError error = Assert.Throws<RbxError>(
+                () => InstanceTreeSerializer.Validate(snapshot, new InstanceRegistry()),
+                className + " '" + serialized + "' must still be refused: only capture projects defaults");
+            Assert.AreEqual(RbxErrorCode.BadArgument, error.Code);
+            StringAssert.Contains("non-finite", error.RawMessage);
+        }
+
+        private static RbxInstance CreateChild(InstanceRegistry registry, string className, RbxInstance parent)
+        {
+            RbxInstance child = registry.Create(className);
+            child.Parent = parent;
+            return child;
+        }
+
+        /// <summary>Captures a freshly created, never-written instance: the member defaults the projection must reproduce.</summary>
+        private static InstanceSnapshot CaptureFresh(string className)
+        {
+            InstanceRegistry registry = new();
+            return InstanceTreeSerializer.CaptureNode(registry.Create(className));
+        }
+
+        private static InstanceSnapshot FindSnapshotNode(InstanceTreeSnapshot snapshot, InstanceId id)
+        {
+            foreach (InstanceSnapshot node in snapshot.Instances)
+            {
+                if (node.Id == id.Value)
+                {
+                    return node;
+                }
+            }
+
+            Assert.Fail("Missing snapshot node " + id.Value + ".");
+            return null;
         }
 
         private static InstanceTreeSnapshot SingleNodeSnapshot(string className)
