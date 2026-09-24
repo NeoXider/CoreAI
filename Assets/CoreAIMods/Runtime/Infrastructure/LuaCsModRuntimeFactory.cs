@@ -54,7 +54,10 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>
         /// Optional Roblox API surface (roadmap §5.1.3: datatype constructors, Enum, Instance.new,
         /// game/workspace). One shared instance means every mod and the one-off executor operate on
-        /// the same instance world. Null = the Roblox globals are not installed.
+        /// the same instance world. The runtime unloads the mods of every actor this surface
+        /// disconnects (<see cref="LuaCsRbxApiBindings.DisconnectActor"/>), leaving their stored
+        /// packages as they were, and <see cref="LogService"/>, when set, becomes the log a mod's
+        /// <c>warn</c> writes to. Null = the Roblox globals are not installed.
         /// </summary>
         public LuaCsRbxApiBindings RbxApi;
 
@@ -110,7 +113,8 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>
         /// When true (default), a successful load/reload persists source + manifest to
-        /// <see cref="ModSourceStore"/> and unload marks the stored package dormant.
+        /// <see cref="ModSourceStore"/> and unload marks the stored package dormant. A mod unloaded
+        /// because the actor it ran as disconnected leaves its package as it was.
         /// </summary>
         public bool AutoPersistMods = true;
 
@@ -120,8 +124,10 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>
         /// Optional mod-log ring buffer the persistent runtime appends <c>print</c>/<c>report</c>
         /// output, handler/dispatch failures, load (parse) failures, and quarantine events to — the
-        /// data the <c>get_mod_logs</c> tool reads back for the self-repair loop. Null = only the
-        /// Unity-console/event pipeline (the previous behavior).
+        /// data the <c>get_mod_logs</c> tool reads back for the self-repair loop. With
+        /// <see cref="RbxApi"/> set, a mod's <c>warn</c> is appended here at
+        /// <see cref="LuaLogLevel.Warn"/> too. Null = only the Unity-console/event pipeline, and
+        /// <c>warn</c> keeps whatever log the Roblox surface already has (its log sink by default).
         /// </summary>
         public ILuaLogService LogService;
 
@@ -166,10 +172,18 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public LuaCapabilities OneOffCapabilities = LuaCapabilities.All;
 
-        /// <summary>Wall-clock budget per persistent handler/timer call.</summary>
+        /// <summary>
+        /// Wall-clock budget per persistent handler/timer call and, with <see cref="RbxApi"/> set, per
+        /// resume of a mod's main chunk. <c>task.*</c> threads and signal handlers use
+        /// <see cref="CoroutineResumeBudget"/> instead.
+        /// </summary>
         public int HandlerTimeoutMs = LuaCsModRuntime.DefaultHandlerTimeoutMs;
 
-        /// <summary>Instruction budget per persistent handler/timer call.</summary>
+        /// <summary>
+        /// Instruction budget per persistent handler/timer call and, with <see cref="RbxApi"/> set, per
+        /// resume of a mod's main chunk. <c>task.*</c> threads and signal handlers use
+        /// <see cref="CoroutineResumeBudget"/> instead.
+        /// </summary>
         public long HandlerMaxSteps = LuaCsModRuntime.DefaultHandlerMaxSteps;
 
         /// <summary>
@@ -189,16 +203,19 @@ namespace CoreAI.Ai.LuaCs
         public int MaxEventSubscriptionsPerActor = LuaCsModRuntime.DefaultMaxEventSubscriptionsPerActor;
 
         /// <summary>
-        /// Consecutive-error streak (reset by any success) at which a persistent mod is quarantined —
-        /// dispatch suspended, mod kept loaded and repairable via reload. See
-        /// <see cref="LuaCsModRuntime.MaxErrorsBeforeQuarantine"/>.
+        /// Consecutive-error streak at which a persistent mod is quarantined — dispatch suspended, mod
+        /// kept loaded and repairable via reload. A failed hook/timer call adds one and a successful one
+        /// resets it; scheduler threads count per frame (a frame with any fault adds one, a frame whose
+        /// threads ran cleanly resets it). See <see cref="LuaCsModRuntime.MaxErrorsBeforeQuarantine"/>.
         /// </summary>
         public int MaxErrorsBeforeQuarantine = LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine;
 
         /// <summary>
-        /// Per-handler/timer-call GC allocation budget (the process-heap allocation-bomb backstop). A trip
-        /// cuts the offending call and is charged to the same consecutive-error quarantine streak as any
-        /// failure (reset on success). Defaults to
+        /// Live-heap growth allowed in one execution of a mod's code (the allocation-bomb backstop): every
+        /// guarded hook/timer call and, with <see cref="RbxApi"/> set, every resume of the mod's main
+        /// chunk, its <c>task.*</c> threads and its signal handlers. It starts over with each call or
+        /// resume and never accumulates across them. A trip cuts that call or resume and is charged toward
+        /// <see cref="MaxErrorsBeforeQuarantine"/> like any failure. Defaults to
         /// <see cref="LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget"/>.
         /// </summary>
         public long HandlerMaxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget;
@@ -306,6 +323,15 @@ namespace CoreAI.Ai.LuaCs
             if (options == null)
             {
                 throw new ArgumentNullException(nameof(options));
+            }
+
+            // WHY: warn belongs in the mod's own log next to its print output, where get_mod_logs and the
+            // repair loop read it; unattached, the Rbx surface sent every mod's warn to the host's log
+            // sink. Only a configured log is attached, so a stack built without one leaves a log the host
+            // attached to the bindings itself in place instead of detaching it.
+            if (options.RbxApi != null && options.LogService != null)
+            {
+                options.RbxApi.AttachModLog(options.LogService);
             }
 
             LuaCsGameplayBindings bindings = new(

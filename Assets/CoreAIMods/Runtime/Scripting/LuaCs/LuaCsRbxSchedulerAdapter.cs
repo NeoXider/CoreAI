@@ -763,9 +763,6 @@ namespace CoreAI.Ai.LuaCs
             return _coroutine.Resume();
         }
 
-        // TODO: LuaCsCoroutineHandle.Resume drops its arguments and hands coroutine.yield the previous
-        // resume's results instead, so a parked thread resumed by task.spawn(handle, ...) does not yet
-        // receive those values; once the handle pushes them, this path delivers them unchanged.
         private ScriptResumeResult ResumeWithValuesForYield()
         {
             return _coroutine.Resume(_resumeArguments);

@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using CoreAI.Ai;
+using CoreAI.Ai.Logging;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
+using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Datatypes;
@@ -148,9 +150,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
-        public void DisconnectActor_ASubscriberUnloadingTheReleasedMods_StopsTheirDispatch()
+        public void DisconnectActor_ASubscriberThrowingAheadOfTheRuntime_DoesNotKeepTheReleasedModsLoaded()
         {
-            using ProductionHarness harness = new ProductionHarness();
+            // WHY a throwing subscriber registered before the runtime's own: the actor is gone by the
+            // time the event runs, and one failing listener must not keep the runtime from releasing
+            // the actor's mods.
+            bool brokenListenerRan = false;
+            using ProductionHarness harness = new ProductionHarness(beforeRuntime: bindings =>
+                bindings.ActorModsDisconnected += (actorId, mods) =>
+                {
+                    brokenListenerRan = true;
+                    throw new InvalidOperationException("a broken listener");
+                });
             ActorContext actorA = harness.Actor("disconnect-a");
             ActorContext actorB = harness.Actor("disconnect-b");
             harness.Bindings.ConnectActor(actorA);
@@ -159,26 +170,275 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 "task.spawn(function() task.wait(1000) end)", persistToStore: false);
             harness.Stack.Runtime.LoadMod(actorB, "kept-mod-b",
                 "task.spawn(function() task.wait(1000) end)", persistToStore: false);
-            // WHY a throwing subscriber first: the actor is gone by the time the event runs, and one
-            // failing listener must not keep the next one from releasing the actor's mods.
-            harness.Bindings.ActorModsDisconnected += (actorId, mods) =>
-                throw new InvalidOperationException("a broken listener");
-            harness.Bindings.ActorModsDisconnected += (actorId, mods) =>
-            {
-                foreach (string modId in mods)
-                {
-                    harness.Stack.Runtime.UnloadMod(modId);
-                }
-            };
 
             Assert.IsTrue(harness.Bindings.DisconnectActor(actorA));
             harness.Bindings.Scheduler.Advance(0d);
 
+            Assert.IsTrue(brokenListenerRan, "precondition: the broken listener ran first");
             Assert.IsFalse(harness.Stack.Runtime.IsLoaded("released-mod-a"),
                 "the departed actor's mod no longer dispatches at all (M2-24)");
             Assert.IsTrue(harness.Stack.Runtime.IsLoaded("kept-mod-b"),
                 "another actor's mod is untouched");
         }
+
+        [Test]
+        public void DisconnectActor_UnloadsThatActorsMods_ThroughTheProductionRuntime_AndLeavesTheOthersRunning()
+        {
+            // WHY (M2-24): a departed actor's mods can never dispatch again, so left loaded they only
+            // held the actor's and the world's mod quota and failed NOT_AUTHORITY on every call.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actorA = harness.Actor("disconnect-a");
+            ActorContext actorB = harness.Actor("disconnect-b");
+            harness.Bindings.ConnectActor(actorA);
+            harness.Bindings.ConnectActor(actorB);
+            harness.Stack.Runtime.LoadMod(actorA, "released-mod-a", PingCountingMod, persistToStore: false);
+            harness.Stack.Runtime.LoadMod(actorA, "released-mod-a2", PingCountingMod, persistToStore: false);
+            harness.Stack.Runtime.LoadMod(actorB, "kept-mod-b", PingCountingMod, persistToStore: false);
+            harness.Bindings.Scheduler.Advance(0d);
+            RbxInstance releasedPart = harness.Registry.WorldRoot.FindFirstChild("released-mod-a-part");
+            RbxInstance keptPart = harness.Registry.WorldRoot.FindFirstChild("kept-mod-b-part");
+            Assert.IsNotNull(releasedPart, "precondition: the released mod built its part");
+            Assert.IsNotNull(keptPart, "precondition: the kept mod built its part");
+
+            Assert.IsTrue(harness.Bindings.DisconnectActor(actorA));
+
+            Assert.IsFalse(harness.Stack.Runtime.IsLoaded("released-mod-a"),
+                "the departed actor's mod is unloaded as the disconnect returns");
+            Assert.IsFalse(harness.Stack.Runtime.IsLoaded("released-mod-a2"),
+                "every mod loaded for the departed actor goes");
+            Assert.IsTrue(harness.Stack.Runtime.IsLoaded("kept-mod-b"), "another actor's mod stays");
+            Assert.IsTrue(releasedPart.IsDestroyed,
+                "the unload swept the instances the departed actor's mod created");
+            Assert.AreEqual(0, harness.Registry.GetTeardownOwnedBy("released-mod-a").Count);
+            Assert.IsFalse(keptPart.IsDestroyed, "another actor's instances are untouched");
+
+            harness.Stack.Runtime.EmitEvent("ping");
+            harness.Stack.Runtime.Tick(0.1d);
+            harness.Bindings.Scheduler.Advance(0.1d);
+
+            Assert.AreEqual("1", harness.Store.Get("kept-mod-b", "pings"), "the remaining mod dispatches");
+            Assert.AreEqual("", harness.Store.Get("released-mod-a", "pings"),
+                "the unloaded mod received nothing");
+            CollectionAssert.IsEmpty(harness.Log.Errors,
+                "releasing a departed actor's mods is not an error");
+            CollectionAssert.IsEmpty(harness.Stack.Runtime.GetRecentHandlerErrors(),
+                "no call of a released mod failed as its departed actor");
+            CollectionAssert.IsEmpty(
+                harness.ModLog.Query(new LuaLogQuery { MinLevel = LuaLogLevel.Error }),
+                "the mod log holds no failure either");
+        }
+
+        [Test]
+        public void DisconnectActor_LeavesAModLoadedWithHostAuthority_Loaded()
+        {
+            // WHY the negative twin: a mod loaded with host authority runs as the host, not as the
+            // actor that loaded it, so it is never refused NOT_AUTHORITY and that actor leaving is no
+            // reason to unload it.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext host = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ActorContext actorA = harness.Actor("disconnect-a");
+            harness.Bindings.ConnectActor(actorA);
+            harness.Stack.Runtime.LoadMod(host, "host-mod", TimerAndPingMod, persistToStore: false);
+            harness.Stack.Runtime.LoadMod(actorA, "actor-mod-a", TimerAndPingMod, persistToStore: false);
+            Assert.AreEqual(host.ActorId, harness.Stack.Runtime.GetModOwnerActorId("host-mod"),
+                "precondition: the host mod was loaded for the host's actor id");
+            List<string> released = new();
+            harness.Bindings.ActorModsDisconnected += (actorId, mods) => released.AddRange(mods);
+
+            Assert.IsTrue(harness.Bindings.DisconnectActor(host));
+            harness.Stack.Runtime.Tick(0.1d);
+
+            CollectionAssert.AreEqual(new[] { "host-mod" }, released,
+                "precondition: the runtime was told the host mod ran as the departed actor");
+
+            Assert.IsTrue(harness.Stack.Runtime.IsLoaded("host-mod"));
+            Assert.AreEqual("yes", harness.Store.Get("host-mod", "timer"), "and it keeps dispatching");
+            Assert.IsTrue(harness.Stack.Runtime.IsLoaded("actor-mod-a"), "another actor's mod stays");
+            CollectionAssert.IsEmpty(harness.Log.Errors);
+        }
+
+        [Test]
+        public void DisconnectActor_KeepsTheStoredPackageActive_SoTheModRehydratesWhenTheActorRejoins()
+        {
+            // WHY: nobody chose to stop a departed actor's mod, and a world package saves the store's
+            // active flags; a dormant mark would keep the mod from ever starting again for that actor.
+            MemorySourceStore sources = new MemorySourceStore();
+            using ProductionHarness harness = new ProductionHarness(sources);
+            ActorContext actorA = harness.Actor("disconnect-a");
+            ActorContext actorB = harness.Actor("disconnect-b");
+            harness.Bindings.ConnectActor(actorA);
+            harness.Bindings.ConnectActor(actorB);
+            harness.Stack.Runtime.LoadMod(actorA, "released-mod-a", PingCountingMod);
+            harness.Stack.Runtime.LoadMod(actorB, "kept-mod-b", PingCountingMod);
+            harness.Stack.Runtime.EmitEvent("ping");
+            harness.Stack.Runtime.Tick(0.1d);
+            Assert.AreEqual("1", harness.Store.Get("released-mod-a", "pings"), "precondition");
+
+            Assert.IsTrue(harness.Bindings.DisconnectActor(actorA));
+
+            Assert.IsFalse(harness.Stack.Runtime.IsLoaded("released-mod-a"));
+            Assert.IsTrue(sources.TryLoad("released-mod-a", out string storedSource,
+                    out LuaModManifest storedManifest),
+                "the departed actor's package is still stored");
+            Assert.AreEqual(PingCountingMod, storedSource);
+            Assert.IsTrue(storedManifest.Active, "and still marked active");
+            Assert.AreEqual("disconnect-a", storedManifest.OwnerActorId);
+
+            harness.Bindings.ConnectActor(actorA);
+            Assert.AreEqual(1, harness.Stack.Runtime.RehydrateFromStore(Capabilities),
+                "a rehydrate after the actor rejoins starts exactly the released mod");
+            Assert.IsTrue(harness.Stack.Runtime.IsLoaded("released-mod-a"));
+            Assert.AreEqual("disconnect-a", harness.Stack.Runtime.GetModOwnerActorId("released-mod-a"),
+                "it runs as its actor again");
+            harness.Stack.Runtime.EmitEvent("ping");
+            harness.Stack.Runtime.Tick(0.1d);
+            Assert.AreEqual("2", harness.Store.Get("released-mod-a", "pings"),
+                "and resumes from the data it stored before its actor left");
+            CollectionAssert.IsEmpty(harness.Log.Errors);
+
+            Assert.IsTrue(harness.Stack.Runtime.UnloadMod("kept-mod-b"));
+            Assert.IsTrue(sources.TryLoad("kept-mod-b", out _, out LuaModManifest unloadedManifest));
+            Assert.IsFalse(unloadedManifest.Active,
+                "the negative twin: an unload someone asked for still marks the package dormant");
+        }
+
+        [Test]
+        public void DisconnectActor_ReachedFromAModHook_ReleasesTheActorsModsOnlyOnceTheHookReturned()
+        {
+            // WHY: a kick ends the connection synchronously, so a mod's own hook can disconnect its
+            // actor. Unloaded under its feet, the rest of the hook ran with its actor forgotten, and a
+            // thread it scheduled on the way out later resumed as the host.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actorA = harness.Actor("kick-a");
+            ActorContext actorB = harness.Actor("kick-b");
+            harness.Bindings.ConnectActor(actorA);
+            harness.Bindings.ConnectActor(actorB);
+            harness.Stack.Runtime.LoadMod(actorA, "kicker-a", @"
+                hooks_every(0.05, function()
+                    kick_actor('kick-a')
+                    store_set('loaded_after_kick', tostring(is_loaded('kicker-a')))
+                    task.defer(function() store_set('deferred_ran', 'yes') end)
+                    store_set('finished', 'yes')
+                end)", persistToStore: false);
+            harness.Stack.Runtime.LoadMod(actorA, "later-a", TimerAndPingMod, persistToStore: false);
+            harness.Stack.Runtime.LoadMod(actorB, "bystander-b", TimerAndPingMod, persistToStore: false);
+            harness.Stack.Runtime.EmitEvent("ping");
+
+            harness.Stack.Runtime.Tick(0.1d);
+            harness.Bindings.Scheduler.Advance(0.1d);
+            harness.Stack.Runtime.Tick(0.1d);
+
+            Assert.AreEqual("true", harness.Store.Get("kicker-a", "loaded_after_kick"),
+                "the hook that disconnected its own actor ran to its end with its mod still loaded");
+            Assert.AreEqual("yes", harness.Store.Get("kicker-a", "finished"));
+            Assert.IsFalse(harness.Stack.Runtime.IsLoaded("kicker-a"));
+            Assert.IsFalse(harness.Stack.Runtime.IsLoaded("later-a"));
+            Assert.AreEqual("", harness.Store.Get("kicker-a", "deferred_ran"),
+                "the thread scheduled after the kick died with its mod instead of resuming as the host");
+            Assert.AreEqual("", harness.Store.Get("later-a", "timer"),
+                "a released mod later in the same tick runs no timer");
+            Assert.AreEqual("", harness.Store.Get("later-a", "pinged"),
+                "and no queued event");
+            Assert.AreEqual("yes", harness.Store.Get("bystander-b", "timer"));
+            Assert.AreEqual("yes", harness.Store.Get("bystander-b", "pinged"));
+            Assert.IsTrue(harness.Stack.Runtime.IsLoaded("bystander-b"));
+            CollectionAssert.IsEmpty(harness.Log.Errors);
+            CollectionAssert.IsEmpty(harness.Stack.Runtime.GetRecentHandlerErrors());
+        }
+
+        [Test]
+        public void DisconnectActor_ReachedFromAnExportCalledOnAnotherModsThread_ReleasesTheModOnlyAtTheNextTick()
+        {
+            // WHY: a kick ends the connection synchronously, and the thread running at that moment may
+            // belong to another mod: here actor B's thread calls into actor A's export, which kicks
+            // actor A. Unloaded right then, the rest of the export ran with its actor forgotten, and the
+            // thread it scheduled on the way out resumed later as the host.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actorA = harness.Actor("export-a");
+            ActorContext actorB = harness.Actor("caller-b");
+            harness.Bindings.ConnectActor(actorA);
+            harness.Bindings.ConnectActor(actorB);
+            harness.Stack.Runtime.LoadMod(actorA, "exporter-a", @"
+                mods_export('leave', function()
+                    kick_actor('export-a')
+                    store_set('loaded_after_kick', tostring(is_loaded('exporter-a')))
+                    task.defer(function() store_set('deferred_ran', 'yes') end)
+                    store_set('finished', 'yes')
+                end)", persistToStore: false);
+            harness.Stack.Runtime.LoadMod(actorB, "caller-b", @"
+                task.spawn(function()
+                    task.wait(0.05)
+                    mods_call('exporter-a', 'leave')
+                    store_set('call_returned', 'yes')
+                end)", persistToStore: false);
+
+            harness.Bindings.Scheduler.Advance(0.1d);
+            harness.Stack.Runtime.Tick(0.1d);
+            harness.Bindings.Scheduler.Advance(0.1d);
+
+            Assert.AreEqual("true", harness.Store.Get("exporter-a", "loaded_after_kick"),
+                "the export that disconnected its own actor ran to its end with its mod still loaded");
+            Assert.AreEqual("yes", harness.Store.Get("exporter-a", "finished"));
+            Assert.AreEqual("yes", harness.Store.Get("caller-b", "call_returned"),
+                "the calling thread of another actor carried on");
+            Assert.IsFalse(harness.Stack.Runtime.IsLoaded("exporter-a"),
+                "the next tick released the departed actor's mod");
+            Assert.AreEqual("", harness.Store.Get("exporter-a", "deferred_ran"),
+                "the thread the export scheduled after the kick never ran as the host");
+            Assert.IsTrue(harness.Stack.Runtime.IsLoaded("caller-b"));
+        }
+
+        [Test]
+        public void DisconnectActor_RaisedWhileAnotherActorsModsAreTornDown_IsReleasedAfterThem()
+        {
+            // WHY: an unload's teardown runs host listeners that may disconnect another actor; tearing
+            // that actor's mods down inside the first teardown would take a second mod down halfway
+            // through the first one.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actorA = harness.Actor("nested-a");
+            ActorContext actorB = harness.Actor("nested-b");
+            ActorContext actorC = harness.Actor("nested-c");
+            harness.Bindings.ConnectActor(actorA);
+            harness.Bindings.ConnectActor(actorB);
+            harness.Bindings.ConnectActor(actorC);
+            harness.Stack.Runtime.LoadMod(actorA, "mod-a1", TimerAndPingMod, persistToStore: false);
+            harness.Stack.Runtime.LoadMod(actorA, "mod-a2", TimerAndPingMod, persistToStore: false);
+            harness.Stack.Runtime.LoadMod(actorC, "mod-c", TimerAndPingMod, persistToStore: false);
+            harness.Stack.Runtime.LoadMod(actorB, "mod-b", TimerAndPingMod, persistToStore: false);
+            List<string> order = new();
+            harness.Stack.Runtime.ModTearingDown += (modId, reason) =>
+            {
+                order.Add(modId);
+                if (modId == "mod-a1")
+                {
+                    Assert.IsTrue(harness.Bindings.DisconnectActor(actorC));
+                    order.Add("nested-disconnect-returned");
+                }
+            };
+
+            Assert.IsTrue(harness.Bindings.DisconnectActor(actorA));
+
+            CollectionAssert.AreEqual(
+                new[] { "mod-a1", "nested-disconnect-returned", "mod-a2", "mod-c" }, order,
+                "each teardown finishes before the next begins, and the nested actor's mods follow");
+            Assert.IsFalse(harness.Stack.Runtime.IsLoaded("mod-c"));
+            Assert.IsTrue(harness.Stack.Runtime.IsLoaded("mod-b"));
+            CollectionAssert.IsEmpty(harness.Log.Errors);
+        }
+
+        private const string PingCountingMod = @"
+            local part = Instance.new('Part')
+            part.Name = mod_id() .. '-part'
+            part.Parent = workspace
+            hooks_on('ping', function()
+                store_set('pings', tostring((tonumber(store_get('pings')) or 0) + 1))
+            end)
+            task.spawn(function() task.wait(1000) end)";
+
+        private const string TimerAndPingMod = @"
+            hooks_every(0.05, function() store_set('timer', 'yes') end)
+            hooks_on('ping', function() store_set('pinged', 'yes') end)";
 
         private static void Increment(Dictionary<string, int> counts, string actorId)
         {
@@ -187,9 +447,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 : 1;
         }
 
+        /// <summary>
+        /// The production stack (<see cref="LuaCsModRuntimeFactory"/>) over one Rbx world, with the
+        /// installer's ModTearingDown cleanup and two host bindings a mod can call: <c>kick_actor(id)</c>
+        /// disconnects an actor synchronously, as a transport reporting a kick's drop does, and
+        /// <c>is_loaded(id)</c> reads the runtime.
+        /// </summary>
         private sealed class ProductionHarness : IDisposable
         {
-            public ProductionHarness()
+            /// <param name="sourceStore">The package store the runtime persists to; null keeps none.</param>
+            /// <param name="beforeRuntime">Runs on the bindings before the runtime is built.</param>
+            public ProductionHarness(ILuaModSourceStore sourceStore = null,
+                Action<LuaCsRbxApiBindings> beforeRuntime = null)
             {
                 Registry = new InstanceRegistry(
                     worldAclVersion: InstanceRegistry.CurrentWorldAclVersion,
@@ -200,14 +469,29 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     Registry, game, networkBridge: Bridge);
                 ChatFactory = new RecordingChatFactory();
                 Bindings.AttachChatFactory(ChatFactory);
+                beforeRuntime?.Invoke(Bindings);
+                Store = new MemoryStore();
+                Log = new RecordingLog();
+                ModLog = new LuaLogService();
                 Stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
                 {
                     Logger = new SilentGameLogger(),
-                    ModStore = new MemoryStore(),
+                    ModStore = Store,
+                    ModSourceStore = sourceStore,
+                    Log = Log,
+                    LogService = ModLog,
                     Capabilities = Capabilities,
                     OneOffCapabilities = Capabilities,
-                    RbxApi = Bindings
+                    RbxApi = Bindings,
+                    AdditionalGameplayBindings = (registry, capabilities) =>
+                    {
+                        registry.Register("kick_actor", new Func<string, bool>(actorId =>
+                            Bindings.DisconnectActor(Actor(actorId))));
+                        registry.Register("is_loaded", new Func<string, bool>(modId =>
+                            Stack.Runtime.IsLoaded(modId)));
+                    }
                 });
+                WireInstallerTeardown();
             }
 
             public InstanceRegistry Registry { get; }
@@ -217,6 +501,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             public LuaCsRbxApiBindings Bindings { get; }
 
             public RecordingChatFactory ChatFactory { get; }
+
+            public MemoryStore Store { get; }
+
+            public RecordingLog Log { get; }
+
+            public LuaLogService ModLog { get; }
 
             public LuaCsModStack Stack { get; }
 
@@ -242,6 +532,105 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             public void Dispose()
             {
                 Bindings.Dispose();
+            }
+
+            /// <summary>The same ModTearingDown cleanup CoreAiModsInstaller wires in production.</summary>
+            private void WireInstallerTeardown()
+            {
+                Stack.Runtime.ModTearingDown += (modId, reason) =>
+                {
+                    if (reason == LuaModTeardownReason.Reload)
+                    {
+                        Bindings.KillOutgoingScheduledGenerations(modId);
+                    }
+                    else
+                    {
+                        Bindings.KillAllScheduledOwnedBy(modId);
+                    }
+
+                    Bindings.Connections.DisconnectOwnedBy(modId, reason == LuaModTeardownReason.Reload);
+                    if (reason != LuaModTeardownReason.Unload)
+                    {
+                        return;
+                    }
+
+                    foreach (RbxInstance owned in Registry.GetTeardownOwnedBy(modId))
+                    {
+                        owned?.Destroy();
+                    }
+                };
+            }
+        }
+
+        private sealed class RecordingLog : ILog
+        {
+            public List<string> Errors { get; } = new();
+
+            public void Debug(string message, string tag = null)
+            {
+            }
+
+            public void Info(string message, string tag = null)
+            {
+            }
+
+            public void Warn(string message, string tag = null)
+            {
+            }
+
+            public void Error(string message, string tag = null)
+            {
+                Errors.Add(message);
+            }
+        }
+
+        private sealed class MemorySourceStore : ILuaModSourceStore
+        {
+            private readonly Dictionary<string, KeyValuePair<string, LuaModManifest>> _packages =
+                new(StringComparer.Ordinal);
+
+            public void Save(string id, string source, LuaModManifest manifest)
+            {
+                _packages[id] = new KeyValuePair<string, LuaModManifest>(source, manifest);
+            }
+
+            public bool TryLoad(string id, out string source, out LuaModManifest manifest)
+            {
+                if (_packages.TryGetValue(id, out KeyValuePair<string, LuaModManifest> package))
+                {
+                    source = package.Key;
+                    manifest = package.Value;
+                    return true;
+                }
+
+                source = "";
+                manifest = null;
+                return false;
+            }
+
+            public IReadOnlyList<LuaModManifest> List()
+            {
+                List<LuaModManifest> manifests = new();
+                foreach (KeyValuePair<string, LuaModManifest> package in _packages.Values)
+                {
+                    manifests.Add(package.Value);
+                }
+
+                return manifests;
+            }
+
+            public void SetActive(string id, bool active)
+            {
+                if (_packages.TryGetValue(id, out KeyValuePair<string, LuaModManifest> package)
+                    && package.Value != null)
+                {
+                    package.Value.Active = active;
+                }
+            }
+
+            public void Delete(string id)
+            {
+                _packages.Remove(id);
             }
         }
 

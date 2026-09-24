@@ -1233,6 +1233,95 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void MoveTo_EndsFalse_WhenATweenMovesTheRootPart_ByCFramePositionOrOrientation()
+        {
+            // WHY (M8-18): a tween moves a part by assigning its CFrame every frame, as a script loop
+            // does, so it ends the walk like a scripted RootPart write. The tweened NPC kept walking
+            // toward its old goal, and MoveToFinished stayed silent until the eight-second timeout.
+            using ProductionHarness harness = new ProductionHarness();
+            ActorContext actor = harness.Actor("tweener");
+
+            harness.Stack.Runtime.LoadMod(actor, "tween-teleport-mod", @"
+                local TweenService = game:GetService('TweenService')
+                local function spawnWalker(name)
+                    local npc = Instance.new('Model')
+                    npc.Name = name
+                    local root = Instance.new('Part')
+                    root.Name = 'HumanoidRootPart'
+                    root.Parent = npc
+                    local torso = Instance.new('Part')
+                    torso.Name = 'Torso'
+                    torso.Parent = npc
+                    local h = Instance.new('Humanoid')
+                    h.Parent = npc
+                    npc.Parent = workspace
+                    store_set(name .. '.bound', tostring(h.RootPart == root))
+                    h.MoveToFinished:Connect(function(reached)
+                        store_set(name .. '.finished',
+                            (store_get(name .. '.finished') or '') .. tostring(reached) .. ';')
+                    end)
+                    h:MoveTo(Vector3.new(100, 0, 0))
+                    return root, torso
+                end
+
+                local info = TweenInfo.new(1)
+                local cframeRoot = spawnWalker('ByCFrame')
+                TweenService:Create(cframeRoot, info, {CFrame = CFrame.new(0, 10, 0)}):Play()
+                local positionRoot = spawnWalker('ByPosition')
+                TweenService:Create(positionRoot, info, {Position = Vector3.new(3, 4, 5)}):Play()
+                local orientationRoot = spawnWalker('ByOrientation')
+                TweenService:Create(orientationRoot, info, {Orientation = Vector3.new(0, 90, 0)}):Play()
+                local _, torso = spawnWalker('ByTorso')
+                TweenService:Create(torso, info, {CFrame = CFrame.new(7, 8, 9)}):Play()
+                local sameRoot = spawnWalker('BySameCFrame')
+                TweenService:Create(sameRoot, info, {CFrame = sameRoot.CFrame}):Play()
+                local fadingRoot = spawnWalker('ByTransparency')
+                TweenService:Create(fadingRoot, info, {Transparency = 0.5}):Play()",
+                persistToStore: false);
+            harness.Bindings.Scheduler.Advance(0d);
+            string[] walkers =
+            {
+                "ByCFrame", "ByPosition", "ByOrientation", "ByTorso", "BySameCFrame", "ByTransparency"
+            };
+            foreach (string walker in walkers)
+            {
+                Assert.AreEqual("true", harness.Store.Get("tween-teleport-mod", walker + ".bound"),
+                    walker + ": precondition, the Humanoid's RootPart is its sibling HumanoidRootPart; log: "
+                    + string.Join(" || ", harness.LogLines));
+                Assert.AreEqual("", harness.Store.Get("tween-teleport-mod", walker + ".finished"),
+                    walker + ": precondition, the walk is still running before any tween frame");
+            }
+
+            harness.Bindings.Scheduler.Advance(0.1d);
+            harness.Bindings.Scheduler.Advance(0.1d);
+
+            Assert.AreEqual("false;", harness.Store.Get("tween-teleport-mod", "ByCFrame.finished"),
+                "a tween frame that changes the RootPart's CFrame ends the walk, unreached; log: "
+                + string.Join(" || ", harness.LogLines));
+            Assert.AreEqual("false;", harness.Store.Get("tween-teleport-mod", "ByPosition.finished"),
+                "a tweened Position changes the CFrame too");
+            Assert.AreEqual("false;", harness.Store.Get("tween-teleport-mod", "ByOrientation.finished"),
+                "so does a tweened Orientation");
+            Assert.AreEqual("", harness.Store.Get("tween-teleport-mod", "ByTorso.finished"),
+                "the negative twin: tweening another part of the character is not moving its RootPart");
+            Assert.AreEqual("", harness.Store.Get("tween-teleport-mod", "BySameCFrame.finished"),
+                "a tween whose frames leave the CFrame where it was changes nothing");
+            Assert.AreEqual("", harness.Store.Get("tween-teleport-mod", "ByTransparency.finished"),
+                "a tween of a property that does not move the RootPart changes nothing");
+
+            harness.Bindings.Scheduler.Advance(RbxHumanoid.MoveToTimeoutSeconds + 0.5d);
+            harness.Bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual("false;", harness.Store.Get("tween-teleport-mod", "ByCFrame.finished"),
+                "a walk the tween ended is not reported again, by the later frames or the timeout");
+            Assert.AreEqual("false;", harness.Store.Get("tween-teleport-mod", "ByOrientation.finished"));
+            Assert.AreEqual("false;", harness.Store.Get("tween-teleport-mod", "ByTorso.finished"),
+                "the untouched walk kept running until the mirror's eight-second timeout");
+            Assert.AreEqual("false;", harness.Store.Get("tween-teleport-mod", "BySameCFrame.finished"));
+            Assert.AreEqual("false;", harness.Store.Get("tween-teleport-mod", "ByTransparency.finished"));
+        }
+
+        [Test]
         public void Character_IsNotArchivable_SoCloneIsNil_UntilAScriptSetsArchivableTrue()
         {
             // WHY: Roblox spawns a character Model with Archivable false, so character:Clone() is nil

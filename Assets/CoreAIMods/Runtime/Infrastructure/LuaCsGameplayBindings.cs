@@ -201,8 +201,9 @@ namespace CoreAI.Ai.LuaCs
                 _worldQuery?.RegisterGameplayApis(registry);
             }
 
-            // WHY: the Roblox surface trims itself (Read gate inside, Instance.new under WorldEdit)
-            // and threads the owner mod id so created instances land in the ownership ledger.
+            // WHY: the Roblox surface trims itself (nothing without Read; the Instance global exists on
+            // every Read tier and Instance.new refuses a caller without WorldEdit) and threads the owner
+            // mod id so created instances land in the ownership ledger.
             if (_roblox != null)
             {
                 if (actorContext.HasValue)

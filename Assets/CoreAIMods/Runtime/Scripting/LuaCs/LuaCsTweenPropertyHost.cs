@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Networking;
 
 namespace CoreAI.Ai.LuaCs
 {
@@ -12,8 +14,9 @@ namespace CoreAI.Ai.LuaCs
     /// setters advance the revision here, value-object setters advance it themselves on real
     /// changes — mirroring TryWriteSpatial/TryWriteValue so a tweened write is
     /// indistinguishable from a scripted one, including the teleport note a scripted
-    /// Position/CFrame/Orientation/Rotation write leaves for the physics relay and the
-    /// Changed/GetPropertyChangedSignal notifications a scripted part or camera write fires).
+    /// Position/CFrame/Orientation/Rotation write leaves for the physics relay, the
+    /// Changed/GetPropertyChangedSignal notifications a scripted part or camera write fires, and the
+    /// end of a Humanoid's MoveTo when its RootPart is moved).
     /// </summary>
     internal sealed class LuaCsTweenPropertyHost : ITweenPropertyHost
     {
@@ -286,8 +289,45 @@ namespace CoreAI.Ai.LuaCs
             }
 
             _registry.AdvanceRevision(id);
-            LuaCsRbxInstanceBindings.NotifyPartChanges(target, propertyName, in before,
-                _sink.GetPartPropertiesOrDefault(id));
+            PartProperties after = _sink.GetPartPropertiesOrDefault(id);
+            LuaCsRbxInstanceBindings.NotifyPartChanges(target, propertyName, in before, in after);
+            if (movesPart && before.CFrame != after.CFrame)
+            {
+                EndWalksOfMovedRootPart(target);
+            }
+        }
+
+        /// <summary>
+        /// Ends the MoveTo of every Humanoid whose RootPart is <paramref name="part"/>, after a tween
+        /// changed that part's CFrame (Humanoid.yaml MoveTo: the walk "ends if ... a script changes the
+        /// CFrame property of the humanoid's RootPart"; a tween is a script assigning it every frame).
+        /// </summary>
+        private static void EndWalksOfMovedRootPart(RbxInstance part)
+        {
+            // WHY a copy of LuaCsRbxInstanceBindings.EndWalksOfMovedRootPart, which is private to the
+            // scripted-write path: a tweened move must end walks under exactly the same rule (only a
+            // part named HumanoidRootPart, and only the Humanoids among its siblings, which is where the
+            // character pipeline finds a RootPart), so a change to one belongs in both.
+            if (!string.Equals(part.Name, RbxCharacterFactory.RootPartName, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            RbxInstance character = part.Parent;
+            if (character == null || character.IsDestroyed)
+            {
+                return;
+            }
+
+            IReadOnlyList<RbxInstance> siblings = character.GetChildren();
+            for (int index = 0; index < siblings.Count; index++)
+            {
+                if (siblings[index] is RbxHumanoid humanoid
+                    && ReferenceEquals(humanoid.RootPart, part))
+                {
+                    humanoid.EndWalkForScriptedRootPartMove();
+                }
+            }
         }
 
         private static void WriteValue(RbxInstance target, string propertyName, object value)

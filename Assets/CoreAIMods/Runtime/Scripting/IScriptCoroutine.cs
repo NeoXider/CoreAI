@@ -37,8 +37,9 @@ namespace CoreAI.Scripting
     }
 
     /// <summary>
-    /// One host-driven script coroutine advanced one yield per <see cref="Resume"/>, with per-resume and
-    /// lifetime budgets enforced by the engine adapter. Created via
+    /// One host-driven script coroutine advanced one yield per <see cref="Resume"/>, with a budget the
+    /// engine adapter enforces on EACH resume (instruction steps, wall clock, allocated bytes) and no cap
+    /// across resumes, so a coroutine that yields in time may run for as long as it likes. Created via
     /// <see cref="IScriptEngine.CreateCoroutine"/>.
     /// </summary>
     public interface IScriptCoroutine
@@ -52,7 +53,11 @@ namespace CoreAI.Scripting
         /// <summary>True once the coroutine has finished or been killed.</summary>
         bool IsFinished { get; }
 
-        /// <summary>Advances to the next yield (or completion), passing resume arguments.</summary>
+        /// <summary>
+        /// Advances to the next yield (or completion). <paramref name="args"/> become the function's
+        /// arguments on the first resume and the values the pending <c>coroutine.yield</c> returns on
+        /// every later one.
+        /// </summary>
         ScriptResumeResult Resume(params object[] args);
 
         /// <summary>Stops the coroutine permanently.</summary>

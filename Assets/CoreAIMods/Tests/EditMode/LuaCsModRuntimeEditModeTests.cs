@@ -859,6 +859,74 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void LuaCs_Warn_IsAppendedToLogServiceAtWarnLevel_WhenTheFactoryWiresTheRbxApi()
+        {
+            // WHY: warn belongs in the mod's own log next to its print output, where get_mod_logs and
+            // the repair loop read it; the factory left the Rbx surface unattached, so every mod's
+            // warn went to the host's log sink instead.
+            LuaLogService logService = new();
+            List<string> hostLog = new();
+            LuaCsRbxApiBindings bindings = new(log: hostLog.Add);
+            try
+            {
+                LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+                {
+                    Logger = new FakeGameLogger(),
+                    ModStore = new MemoryStore(),
+                    Capabilities = LuaCapabilities.All,
+                    OneOffCapabilities = LuaCapabilities.All,
+                    LogService = logService,
+                    RbxApi = bindings
+                });
+
+                stack.Runtime.LoadMod("warn_mod", "print('p')\nwarn('x', 1)", persistToStore: false);
+
+                IReadOnlyList<LuaLogEntry> entries = logService.Query(new LuaLogQuery { ModId = "warn_mod" });
+                Assert.AreEqual(2, entries.Count, "print and warn each append one entry");
+                Assert.AreEqual(LuaLogLevel.Print, entries[0].Level);
+                Assert.AreEqual(LuaLogLevel.Warn, entries[1].Level, "warn is appended at the Warn level");
+                Assert.AreEqual("warn_mod", entries[1].ModId);
+                Assert.AreEqual("x 1", entries[1].Message, "arguments are joined by a space, as on Roblox");
+                Assert.IsFalse(hostLog.Any(line => line.Contains("warn from")),
+                    "a warn that reached the mod log is not written to the host's log sink as well; host log: "
+                    + string.Join(" || ", hostLog));
+            }
+            finally
+            {
+                bindings.Dispose();
+            }
+        }
+
+        [Test]
+        public void LuaCs_Warn_WithoutALogService_StaysOnTheRbxApiLogSink()
+        {
+            List<string> hostLog = new();
+            LuaCsRbxApiBindings bindings = new(log: hostLog.Add);
+            try
+            {
+                LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+                {
+                    Logger = new FakeGameLogger(),
+                    ModStore = new MemoryStore(),
+                    Capabilities = LuaCapabilities.All,
+                    OneOffCapabilities = LuaCapabilities.All,
+                    RbxApi = bindings
+                });
+
+                stack.Runtime.LoadMod("warn_mod", "warn('x')", persistToStore: false);
+
+                Assert.IsTrue(hostLog.Any(line => line.Contains("warn from mod 'warn_mod'")
+                                                  && line.EndsWith(": x", StringComparison.Ordinal)),
+                    "with no mod log configured the stack attaches none, so warn keeps its log sink; host log: "
+                    + string.Join(" || ", hostLog));
+            }
+            finally
+            {
+                bindings.Dispose();
+            }
+        }
+
+        [Test]
         public void LuaCs_HandlerError_IsAppendedToLogServiceAsRuntimeError()
         {
             LuaLogService logService = new();

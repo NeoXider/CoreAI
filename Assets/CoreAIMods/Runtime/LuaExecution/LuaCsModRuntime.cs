@@ -19,7 +19,10 @@ namespace CoreAI.Ai.LuaCs
     /// </summary>
     public enum LuaModTeardownReason
     {
-        /// <summary>The mod is being removed from the runtime (<see cref="LuaCsModRuntime.UnloadMod"/>).</summary>
+        /// <summary>
+        /// The mod is being removed from the runtime (<see cref="LuaCsModRuntime.UnloadMod"/>, or because
+        /// the actor it ran as disconnected).
+        /// </summary>
         Unload,
 
         /// <summary>The mod is being replaced by a new instance (<see cref="LuaCsModRuntime.ReloadMod"/>); fired before the swap.</summary>
@@ -67,7 +70,8 @@ namespace CoreAI.Ai.LuaCs
     /// rehydrate and forget/revert are now ported from the MoonSharp runtime and behave identically
     /// (a successful <see cref="LoadMod"/>/<see cref="ReloadMod"/> saves source+manifest to the
     /// <see cref="ILuaModSourceStore"/> and records a revision in the <see cref="ILuaScriptVersionStore"/>;
-    /// <see cref="UnloadMod"/> marks the package dormant; <see cref="ForgetMod"/> deletes it), so
+    /// <see cref="UnloadMod"/> marks the package dormant; <see cref="ForgetMod"/> deletes it; a mod unloaded
+    /// because the actor it ran as disconnected leaves its package as it was), so
     /// <c>manage_mods</c> can later run on this VM. Both stores default to no-op implementations, so a
     /// host that wires neither keeps the prior in-memory-only behaviour.
     /// </summary>
@@ -260,6 +264,13 @@ namespace CoreAI.Ai.LuaCs
 
             /// <summary>A scheduler thread of this mod yielded or completed cleanly during this frame.</summary>
             public bool SchedulerSucceededThisFrame;
+
+            /// <summary>
+            /// True once an unload took this instance out of the registry. A <see cref="Tick"/> that
+            /// snapshotted it earlier in the same frame skips it from then on instead of dispatching
+            /// into a mod that is gone.
+            /// </summary>
+            public bool Removed;
         }
 
         private readonly object _gate = new();
@@ -297,6 +308,9 @@ namespace CoreAI.Ai.LuaCs
         private readonly Dictionary<string, int> _buildDepthByModId = new(StringComparer.Ordinal);
         private readonly object _hostFaultGate = new();
         private readonly HashSet<string> _loggedHostFaults = new(StringComparer.Ordinal);
+        private readonly Queue<KeyValuePair<string, string[]>> _pendingActorModReleases = new();
+        private bool _releasingActorMods;
+        private int _guardedCallDepth;
 
         private int _registeredInstanceCount;
         private bool _hostFaultOverflowLogged;
@@ -319,7 +333,7 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Raised after a mod source is successfully loaded or reloaded: (modId, source, caps).</summary>
         internal event Action<string, string, LuaCapabilities> ModSourceLoaded;
 
-        /// <summary>Raised after a mod is unloaded via <see cref="UnloadMod"/>/<see cref="ForgetMod"/>: (modId, source, caps). Repeated errors never unload — see <see cref="ModQuarantined"/>.</summary>
+        /// <summary>Raised after a mod is unloaded via <see cref="UnloadMod"/>/<see cref="ForgetMod"/>, or because the actor it ran as disconnected: (modId, source, caps). Repeated errors never unload — see <see cref="ModQuarantined"/>.</summary>
         internal event Action<string, string, LuaCapabilities> ModSourceUnloaded;
 
         /// <summary>
@@ -399,8 +413,14 @@ namespace CoreAI.Ai.LuaCs
         /// </param>
         /// <param name="store">Optional persistent per-mod k/v store backing <c>store_set/get</c>.</param>
         /// <param name="log">Optional logger.</param>
-        /// <param name="handlerTimeoutMs">Wall-clock budget per handler/timer call.</param>
-        /// <param name="handlerMaxSteps">Instruction budget per handler/timer call.</param>
+        /// <param name="handlerTimeoutMs">
+        /// Wall-clock budget per handler/timer call and, with an Rbx API wired, per resume of a mod's main
+        /// chunk (its <c>task.*</c> threads and signal handlers use the engine's coroutine resume budget).
+        /// </param>
+        /// <param name="handlerMaxSteps">
+        /// Instruction budget per handler/timer call and, with an Rbx API wired, per resume of a mod's main
+        /// chunk (its <c>task.*</c> threads and signal handlers use the engine's coroutine resume budget).
+        /// </param>
         /// <param name="sourceStore">
         /// Optional package store persisting mod source + manifest so mods survive a restart and can be
         /// shared. Distinct from <paramref name="store"/> (which is per-mod runtime k/v). Null falls back
@@ -427,14 +447,15 @@ namespace CoreAI.Ai.LuaCs
         /// world commands of later handlers/timers.
         /// </param>
         /// <param name="handlerMaxAllocatedBytes">
-        /// Per-handler/timer-call GC allocation budget (the process-heap allocation-bomb backstop). A trip
-        /// (<see cref="LuaCsExecutionGuard.IsMemoryBudgetTrip"/>) cuts the offending call and is charged to the
-        /// same consecutive-error streak as any failure (<see cref="MaxErrorsBeforeQuarantine"/>, reset on success).
-        /// This is a PER-CALL first-growth backstop, not a cross-call cumulative limiter: because
-        /// GC.GetTotalMemory reports the committed-heap high-water mark, only the first oversized allocation
-        /// trips — later calls reuse that committed space and no longer cross the budget — so a lone trip is
-        /// forgiven by the next success and a mod that keeps allocating within the committed envelope is bounded
-        /// by the per-call step/time budgets instead. Defaults to
+        /// Live-heap growth allowed in ONE execution of a mod's code (the allocation-bomb backstop): every
+        /// guarded hook/timer call and, with an Rbx API wired, every resume of the mod's main chunk, its
+        /// <c>task.*</c> threads and its signal handlers. The budget starts over with each call or resume
+        /// and never accumulates across them; a sampled heap reading only raises a suspicion, and a forced
+        /// full collection has to confirm the growth is live before it trips
+        /// (<see cref="LuaCsAllocationBudget"/>). A trip (<see cref="LuaCsExecutionGuard.IsMemoryBudgetTrip"/>)
+        /// cuts that call or resume and is charged like any failure toward
+        /// <see cref="MaxErrorsBeforeQuarantine"/>: a hook/timer trip adds one to the streak, a scheduler-thread
+        /// trip makes its frame a faulting one. Defaults to
         /// <see cref="LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget"/>.
         /// </param>
         /// <param name="maxErrorsBeforeQuarantine">
@@ -531,6 +552,7 @@ namespace CoreAI.Ai.LuaCs
                 _rbxApi.Registry.AddRegistrationAdmission(_instanceQuotaAdmission);
                 _rbxApi.Registry.Unregistered += OnInstanceUnregistered;
                 SeedRegisteredInstanceCounts(_rbxApi.Registry);
+                _rbxApi.ActorModsDisconnected += OnActorModsDisconnected;
             }
 
             _logicSlots = logicSlots;
@@ -1495,7 +1517,22 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Unloads a mod and drops its handlers/timers/queued events.</summary>
         internal bool UnloadMod(string id)
         {
-            string modId = Normalize(id);
+            return RemoveLoadedMod(Normalize(id), null);
+        }
+
+        /// <summary>
+        /// Takes a loaded mod out of the runtime: drops its handlers, timers and queued events, tears its
+        /// effects down as an <see cref="LuaModTeardownReason.Unload"/> and raises
+        /// <see cref="ModSourceUnloaded"/>. False when no mod with this id is loaded.
+        /// </summary>
+        /// <param name="disconnectedActorId">
+        /// Null for an unload someone asked for, which marks the stored package dormant so it does not
+        /// start again on the next rehydrate. Otherwise the actor that disconnected: only a mod loaded
+        /// for that actor without host authority is removed (false for any other), and its stored
+        /// package is left as it was.
+        /// </param>
+        private bool RemoveLoadedMod(string modId, string disconnectedActorId)
+        {
             string source;
             LuaCapabilities caps;
             Mod mod;
@@ -1506,8 +1543,19 @@ namespace CoreAI.Ai.LuaCs
                     return false;
                 }
 
+                // WHY host-authority mods stay: their code runs as the host, not as the actor that
+                // loaded them, so it is never refused NOT_AUTHORITY and that actor leaving is no reason
+                // to stop it.
+                if (disconnectedActorId != null
+                    && (mod.OwnerHasHostAuthority
+                        || !string.Equals(mod.OwnerActorId, disconnectedActorId, StringComparison.Ordinal)))
+                {
+                    return false;
+                }
+
                 source = mod.Source;
                 caps = mod.Caps;
+                mod.Removed = true;
                 _mods.Remove(modId);
                 _modsInLoadOrder.Remove(mod);
                 lock (_subscriptionGate)
@@ -1518,12 +1566,14 @@ namespace CoreAI.Ai.LuaCs
             }
 
             TeardownModEffects(modId, LuaModTeardownReason.Unload);
-            _log?.Info($"[LuaCsModRuntime] Mod '{modId}' unloaded.");
+            _log?.Info(disconnectedActorId == null
+                ? $"[LuaCsModRuntime] Mod '{modId}' unloaded."
+                : $"[LuaCsModRuntime] Mod '{modId}' unloaded: its actor '{disconnectedActorId}' disconnected; its stored package, if any, is left as it was.");
 
             // WHY: Keep the persisted package but mark it dormant so it does not auto-reload next start; the
             // source is not lost (use ForgetMod to delete it). Best-effort: a store failure must not
             // break unloading.
-            if (_autoPersistMods)
+            if (disconnectedActorId == null && _autoPersistMods)
             {
                 try
                 {
@@ -1775,6 +1825,7 @@ namespace CoreAI.Ai.LuaCs
                 return;
             }
 
+            ReleaseDisconnectedActorMods();
             lock (_gate)
             {
                 if (_mods.Count == 0)
@@ -1804,6 +1855,15 @@ namespace CoreAI.Ai.LuaCs
             {
                 Mod mod = _tickScratch[i];
 
+                // WHY: a handler of this tick can unload a mod of the snapshot (a kick ends the
+                // connection synchronously, and the actor's mods go as soon as the handler returns). A
+                // removed mod must never run again: its teardown forgot the actor it ran as, so its
+                // hooks would resolve to the host fallback.
+                if (mod.Removed)
+                {
+                    continue;
+                }
+
                 try
                 {
                     completedThisTick += TickTimers(mod, deltaSeconds, completedThisTick);
@@ -1822,6 +1882,10 @@ namespace CoreAI.Ai.LuaCs
             for (int i = 0; i < count; i++)
             {
                 Mod mod = _tickScratch[i];
+                if (mod.Removed)
+                {
+                    continue;
+                }
 
                 try
                 {
@@ -1994,6 +2058,7 @@ namespace CoreAI.Ai.LuaCs
                 outgoing = new List<Mod>(_modsInLoadOrder);
                 _mods.Clear();
                 _modsInLoadOrder.Clear();
+                _pendingActorModReleases.Clear();
                 lock (_subscriptionGate)
                 {
                     for (int index = 0; index < outgoing.Count; index++)
@@ -2017,6 +2082,7 @@ namespace CoreAI.Ai.LuaCs
                 _rbxApi.Scheduler.HostFaulted -= OnSchedulerHostFaulted;
                 _rbxApi.Registry.RemoveRegistrationAdmission(_instanceQuotaAdmission);
                 _rbxApi.Registry.Unregistered -= OnInstanceUnregistered;
+                _rbxApi.ActorModsDisconnected -= OnActorModsDisconnected;
             }
 
             if (_logicSlots != null)
@@ -2041,6 +2107,145 @@ namespace CoreAI.Ai.LuaCs
                 throw new ObjectDisposedException(
                     nameof(LuaCsModRuntime),
                     "The Lua runtime belongs to a replaced world session.");
+            }
+        }
+
+        /// <summary>
+        /// Queues the mods <see cref="LuaCsRbxApiBindings.ActorModsDisconnected"/> reports for an actor
+        /// that has just disconnected (M2-24) and unloads them at once, unless mod code is running, in
+        /// which case they are unloaded at the next point where none is
+        /// (<see cref="ReleaseDisconnectedActorMods"/>). Each is unloaded only while it is still loaded
+        /// for that actor, and its stored package keeps its active flag, so a rehydrate after the actor
+        /// rejoins starts it again as it was saved.
+        /// </summary>
+        private void OnActorModsDisconnected(string actorId, IReadOnlyList<string> modIds)
+        {
+            if (string.IsNullOrEmpty(actorId) || modIds == null || modIds.Count == 0)
+            {
+                return;
+            }
+
+            // WHY copied: the list is the bindings' own, and a deferred release reads it after the
+            // bindings have moved on.
+            string[] released = new string[modIds.Count];
+            for (int index = 0; index < released.Length; index++)
+            {
+                released[index] = modIds[index];
+            }
+
+            lock (_gate)
+            {
+                if (_shutdown)
+                {
+                    return;
+                }
+
+                _pendingActorModReleases.Enqueue(new KeyValuePair<string, string[]>(actorId, released));
+            }
+
+            ReleaseDisconnectedActorMods();
+        }
+
+        /// <summary>
+        /// Unloads every queued mod of a disconnected actor, unless mod code is running or a release is
+        /// already in progress. Runs when the disconnect arrives, after each guarded hook/timer call,
+        /// and at the start of <see cref="Tick"/>, which picks up a disconnect reached from a scheduler
+        /// thread.
+        /// </summary>
+        /// <remarks>
+        /// WHY not while mod code runs: a mod's script can disconnect an actor itself (Player:Kick ends
+        /// the connection, and the bridge reports the drop synchronously), possibly its own, from a
+        /// hook or from an export another mod's thread called. The unload's teardown forgets which
+        /// actor the mod was loaded for, so the rest of that code would resolve to the host fallback
+        /// instead of being refused NOT_AUTHORITY, and a thread it scheduled on its way out would later
+        /// run as the host. Waiting until the code has returned keeps it refused until the teardown
+        /// kills what is left.
+        /// WHY one release at a time: an unload's teardown (instance sweeps, host listeners) can
+        /// disconnect another actor, and unloading that actor's mods in the middle of the first
+        /// teardown would take a second mod down halfway through the first; the loop below releases
+        /// it next instead.
+        /// </remarks>
+        private void ReleaseDisconnectedActorMods()
+        {
+            lock (_gate)
+            {
+                if (_releasingActorMods || _pendingActorModReleases.Count == 0 || IsModCodeRunning())
+                {
+                    return;
+                }
+
+                _releasingActorMods = true;
+            }
+
+            try
+            {
+                while (TryDequeueActorModRelease(out KeyValuePair<string, string[]> release))
+                {
+                    ReleaseModsOfDisconnectedActor(release.Key, release.Value);
+                }
+            }
+            finally
+            {
+                lock (_gate)
+                {
+                    _releasingActorMods = false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// True while a guarded hook/timer call of this runtime, or a scheduler thread (a main chunk,
+        /// a <c>task.*</c> thread, a signal handler), is executing.
+        /// </summary>
+        private bool IsModCodeRunning()
+        {
+            return _guardedCallDepth > 0 || _rbxApi?.SchedulerThreadFactory.CurrentThread != null;
+        }
+
+        private bool TryDequeueActorModRelease(out KeyValuePair<string, string[]> release)
+        {
+            lock (_gate)
+            {
+                if (_pendingActorModReleases.Count == 0)
+                {
+                    release = default;
+                    return false;
+                }
+
+                release = _pendingActorModReleases.Dequeue();
+                return true;
+            }
+        }
+
+        private void ReleaseModsOfDisconnectedActor(string actorId, string[] modIds)
+        {
+            for (int index = 0; index < modIds.Length; index++)
+            {
+                string modId = Normalize(modIds[index]);
+                if (modId.Length == 0)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    // WHY unload and not quarantine: the actor is gone, so its mods can never dispatch
+                    // again (every resume of theirs is refused NOT_AUTHORITY), while a quarantined mod
+                    // stays loaded and keeps its VM state and a slot of the actor's and the world's mod
+                    // quota for every player who ever left. WHY the stored package keeps its active
+                    // flag, unlike an unload someone asked for: nobody chose to stop the mod, and a
+                    // world package saves those flags, so a dormant mark would keep it from starting
+                    // with the next world load or a rehydrate after the actor rejoins. Its source,
+                    // revisions and store_set data stay; the instances it created are swept like any
+                    // unloaded mod's, which loses nothing saved: a world package never holds
+                    // mod-owned instances, and the mod builds them again when it next starts.
+                    RemoveLoadedMod(modId, actorId);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error(
+                        $"[LuaCsModRuntime] Unloading mod '{modId}' of disconnected actor '{actorId}' failed: {ex}");
+                }
             }
         }
 
@@ -2197,7 +2402,7 @@ namespace CoreAI.Ai.LuaCs
         {
             int remaining = DefaultMaxEventsDispatchedPerTickGlobal - alreadyCompletedThisTick;
             int dispatched = 0;
-            for (int i = 0; i < mod.Timers.Count; i++)
+            for (int i = 0; i < mod.Timers.Count && !mod.Removed; i++)
             {
                 TimerEntry timer = mod.Timers[i];
                 timer.DueIn -= dt;
@@ -2231,7 +2436,7 @@ namespace CoreAI.Ai.LuaCs
                 object[] handlerSnapshot;
                 lock (mod.EventGate)
                 {
-                    if (mod.Pending.Count == 0)
+                    if (mod.Pending.Count == 0 || mod.Removed)
                     {
                         return dispatched;
                     }
@@ -2256,6 +2461,11 @@ namespace CoreAI.Ai.LuaCs
 
                 foreach (object fn in handlerSnapshot)
                 {
+                    if (mod.Removed)
+                    {
+                        return dispatched;
+                    }
+
                     InvokeGuarded(mod, fn, evt.Key, evt.Value);
                     dispatched++;
                 }
@@ -2270,6 +2480,7 @@ namespace CoreAI.Ai.LuaCs
             // LuaCsGameToolExecutor) so a transaction opened inside one invocation is discarded with the
             // frame on exit and cannot leak into the next handler/timer/tick — and a nested mods_call runs
             // on its OWN frame instead of corrupting this call's still-open transaction.
+            _guardedCallDepth++;
             PushTransactionScope();
             try
             {
@@ -2299,11 +2510,12 @@ namespace CoreAI.Ai.LuaCs
             }
             catch (Exception ex)
             {
-                // WHY: An allocation-budget trip charges the same consecutive-error streak as any failure
-                // (see the handlerMaxAllocatedBytes param doc above for why a lone trip self-forgives —
-                // GC.GetTotalMemory's committed high-water mark makes it a once-per-lifetime event, verified
-                // empirically). Classified by TYPE (see IsMemoryBudgetTrip) for the log label only — a mod
-                // cannot forge the marker in its own error text to change how it is charged.
+                // WHY: An allocation-budget trip charges the same consecutive-error streak as any failure: the
+                // budget is per call and confirmed against live bytes (see the handlerMaxAllocatedBytes param
+                // doc above), so a handler that keeps building an oversized value keeps tripping and is
+                // quarantined like any other repeated failure. Classified by TYPE (see IsMemoryBudgetTrip) for
+                // the log label only — a mod cannot forge the marker in its own error text to change how it
+                // is charged.
                 bool memoryTrip = ScriptExecutionErrors.IsMemoryBudgetTrip(ex);
                 mod.ErrorCount++;
                 mod.FaultedThisFrame = true;
@@ -2325,7 +2537,10 @@ namespace CoreAI.Ai.LuaCs
             finally
             {
                 PopTransactionScope();
+                _guardedCallDepth--;
             }
+
+            ReleaseDisconnectedActorMods();
         }
 
         /// <summary>
