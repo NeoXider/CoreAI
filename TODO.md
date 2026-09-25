@@ -1,11 +1,16 @@
 # TODO
 
-> Updated 2026-09-24. Status: audit rounds 1–3 complete (round 3 fixed by `7cf2891e`, `d4d7f95b`, `055aed29`);
-> MVP3 code complete and closed on the Linux suites (at `055aed29`: engine-free 2137 passed / 0 failed / 3 skipped,
-> Lua tier 1837 passed / 0 failed / 38 not executed), its release and tag waiting for the owner's Unity gate; MVP4
-> (script contexts) next, not started. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
+> Updated 2026-09-25. Status: audit rounds 1–3 complete (round 3 fixed by `7cf2891e`, `d4d7f95b`, `055aed29`);
+> **MVP3 closed 2026-09-25 and released in 7.47.0** on the Unity gate (Unity 6000.3.14f1): EditMode full 6550 total /
+> 6539 passed / 0 failed / 11 skipped, `core` 5266/5254/0/12, `llm` 6234/6221/0/13, `lua` 5582/5572/0/10, `MIRROR`
+> 6550/6539/0/11; PlayMode `FastNoLlm` 95/94/0/1; portable engine-free 2172 passed / 0 failed, Lua tier 1848 total /
+> 1846 passed / 0 failed / 2 not run. Not green: the live-model PlayMode suite (last run 165/156/4 failed, all four
+> live timeouts on an unresponsive LM Studio server; to be re-run). Decision (tech lead, 2026-09-25): MVP3 is closed
+> on the Unity EditMode/PlayMode `FastNoLlm` gate; spikes S1/S2 and the IL2CPP/WebGL player checks are open
+> follow-ups that gate the next networked rung, not MVP3's product scope. MVP4 (script contexts) next, not started. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`; the current status in `PLAN.md`.
-> Latest release: 7.45.0 (2026-09-24, all seven packages in lockstep). Earlier: 7.3.1 (2026-09-02, the six
+> Latest release: 7.47.0 (2026-09-25, all seven packages in lockstep — MVP3 and the audit fix waves, merged with
+> 7.46.0). Earlier: 7.46.0 and 7.45.0 (2026-09-24, lockstep); 7.3.1 (2026-09-02, the six
 > packages of that time in lockstep — WebGL tool-turn fix); 7.3.0 (2026-09-02, lockstep — MVP2.5 persistence
 > release); 7.2.0 (2026-09-02, `com.neoxider.coreai` + `.coreaiunity` only); 7.1.1 (2026-08-31,
 > `com.neoxider.coreai` + `.coreaiunity`); 7.1.0 (2026-08-30, all six packages in lockstep); 7.0.7 (2026-08-27);
@@ -52,10 +57,15 @@ Old numbers also stay in test class prefixes (`Mvp1*`, `Mvp2*`, `Mvp3*`, `Mvp8*`
 New items the ladder names are written out here with an owner and a plan; the open items that already exist
 further down are listed by their bold title and stay where they are.
 
-**MVP3 close (current rung)**
+**MVP3 follow-ups (the rung closed 2026-09-25 in 7.47.0; these gate the next networked rung, not MVP3's product
+scope)**
 
-- The Unity verification gate, **Check the tests** and the **Real WebGL page-reload gate**: the next section.
-  Audit rounds 1–3 are complete (round 3 fixed by `7cf2891e`, `d4d7f95b`, `055aed29`).
+- The Unity verification gate is green (numbers at the top and in the next section). Still open there: the
+  IL2CPP/WebGL player checks of **Check the tests** (the native-stack mod `local function f() pcall(f) end f()`
+  ending in "C stack overflow", the `__concat` chain, three **Save & run** of `sample_castle3d`, the budget guard
+  on IL2CPP), the **Real WebGL page-reload smoke** of the world package, and the live-model PlayMode re-run (an
+  OpenRouter free model is planned, since LM Studio was unresponsive). Audit rounds 1–3 are complete (round 3
+  fixed by `7cf2891e`, `d4d7f95b`, `055aed29`).
 - [ ] **Spike S1: guarded VM cost on the target runtimes (risk R1).** *Owner:* Lua runtime + performance.
       *Plan:* run the `tools/vmbench` workload and the `tools/ScaleHarness` N=100 workload in an IL2CPP Linux
       server build and a Standalone Mono x64 build; record VM instructions/s per guard batch, the per-resume
@@ -66,8 +76,8 @@ further down are listed by their bold title and stay where they are.
       `LuaCsRbxNetworkCodec` (JSON) and as a hand-packed binary record (id, revision, quantized position and
       rotation); record both sizes and the encode/decode cost here; they set the bytes-per-patch bar of MVP6's
       delta codec (the draft bar is ≤24 B).
-- [ ] Bump (`python tools/bump_version.py <version>`) and tag after the gate.
-- Follow-ups that do not gate the release: "Persistence (MVP3 tail)" in the next section.
+- [x] Bump and release: 7.47.0 (2026-09-25), together with main's 7.46.0.
+- Further follow-ups: "Persistence (MVP3 tail)" in the next section.
 
 **MVP4 — script contexts & client runtime (next)**
 
@@ -194,9 +204,11 @@ further down are listed by their bold title and stay where they are.
       consumes the packages over UPM Git URLs from its own project; it needs the Git-URL install fixed (MVP10
       item above); until it exists, this repository's samples and harnesses stand in for it.
 
-## MVP3 closure and the MVP1/MVP2/MVP8/multiplayer audit fix waves (2026-09-24, unreleased)
+## MVP3 closure and the MVP1/MVP2/MVP8/multiplayer audit fix waves (released in 7.47.0, 2026-09-25)
 
-MVP3 is **code complete; its Unity verification gate is pending**. Five read-only audits of the 7.45.0 tree (MVP1
+MVP3 is **closed (2026-09-25) and released in 7.47.0** on the Unity EditMode/PlayMode `FastNoLlm` gate (numbers in
+the checklist below); spikes S1/S2 and the IL2CPP/WebGL player checks are open follow-ups that gate the next
+networked rung, not MVP3's product scope. Five read-only audits of the 7.45.0 tree (MVP1
 instance core, 37 findings; MVP2 scheduler/signals/budgets/sandbox, 28; MVP8 gameplay services, 28; multiplayer
 foundation, 24, plus MP-25 found while fixing; newcomer ergonomics, triaged in the next section) were followed by
 fix waves W1–W6; each fix ships with a regression test that fails on the old code. A first audit round over the
@@ -212,12 +224,21 @@ Verified without Unity only: the Roslyn compile gate (C# 9, every asmdef, six co
 error against 7.45.0 besides the known false positive of `Rigidbody.linearVelocity`, a Unity 6 member the 2021.3
 reference assemblies lack) and the two portable `dotnet test` suites on Linux — engine-free 2137 passed / 0 failed /
 3 skipped, Lua tier (`tools/portable/LuaTests`, CI job `portable-lua`, floor 1,400 passed, ceiling 42 not
-executed) 1837 passed / 0 failed / 38 not executed, both at `055aed29` and counted from the TRX logs. MVP3 is code
-complete and closed on those suites; its release and tag wait for the owner's Unity gate, and MVP4 (script
-contexts) is next and not started. This section records everything landed up to `055aed29`.
+executed) 1837 passed / 0 failed / 38 not executed, both at `055aed29` and counted from the TRX logs. The Unity gate
+followed on 2026-09-25 (below) and MVP3 shipped in 7.47.0; MVP4 (script contexts) is next and not started. This
+section records everything landed up to `055aed29` and the merge check that followed it (the lone-surrogate and
+unencodable-world lock, the `gsub` level weight on Windows x64, the two 7.46.0 tests moved so the portable suite
+and the `core`/`lua` legs compile, the Mirror local-event freeze and varint envelope ceilings, the sandbox tests'
+first run on Mono).
 
-- [ ] **Unity verification gate (owner/CI), then bump and tag:** full EditMode 0 failed and PlayMode `FastNoLlm`
-      0 failed on this tree. Every EditMode fixture named below was written without a Unity run.
+- [x] **Unity verification gate (owner/CI), then bump and tag:** full EditMode 0 failed and PlayMode `FastNoLlm`
+      0 failed on this tree. Green 2026-09-25 in Unity 6000.3.14f1 (numbers in the two items checked below);
+      released as 7.47.0. The live-model PlayMode suite is not part of this gate and is not green: the last run of
+      this branch had 165 total / 156 passed / 4 failed, all four live-model timeouts while the LM Studio server was
+      unresponsive (castle showcase at 3000 s, built-in roles, the backend switch probe at 120 s, crafting memory);
+      the same four passed on the 7.45.0 tree the day before.
+- [ ] **Live PlayMode re-run** (qwen3.8-27b on LM Studio failed four live timeouts; an OpenRouter free model is
+      planned): record the numbers here; any failure that is not a provider timeout is a bug.
 - [ ] **Check the tests (owner, in Unity 6000.3.14f1).** Run each suite below and fix, never skip or weaken, any
       failure; the Linux suites already pass but prove nothing about Mono/IL2CPP or engine-bound code:
   - [x] EditMode, every package, in all four positive-module legs (`core`, `llm`, `lua`, `full`) and with Mirror
@@ -228,7 +249,8 @@ contexts) is next and not started. This section records everything landed up to 
         module and leg-gated cases). One earlier `MIRROR` run failed 4 `LlmToolChannelEditModeTests.UnityHttpAdapters_*`
         cases on a transient loopback refusal (`Curl error 7: Failed to connect to 127.0.0.1`, every other run of the
         same tree passed them): watch for a repeat.
-  - [ ] The suites that have never run anywhere: every `CoreAIMirror/Tests/EditMode` fixture (compile-only so far;
+  - [x] The suites that had never run anywhere — ran in the 2026-09-25 Unity EditMode gate (`full` and `MIRROR`
+        legs 0 failed): every `CoreAIMirror/Tests/EditMode` fixture (compile-only so far;
         audit round 1 added 13 cases in `MirrorBridgeRulesEditModeTests`, `MirrorClientRemoteRulesEditModeTests`,
         `MirrorClientRemotesEndToEndEditModeTests`, `MirrorKickEditModeTests` and
         `MirrorProviderAdmissionFailureEditModeTests`, `70a4d1ab`), `Mvp3WorldPackageFollowUpEditModeTests` (MVP3 DoD
@@ -280,7 +302,8 @@ contexts) is next and not started. This section records everything landed up to 
         (`-assemblyNames CoreAI.Tests.PlayMode.FastNoLlm`, as CI): 95/94/0/1, the skip being the WaitForEndOfFrame
         marshaler case batchmode cannot run.
   - [ ] The 38 Lua-tier cases the Linux runner reports as not executed at `055aed29` (listed in
-        `tools/portable/LuaTests/README.md`).
+        `tools/portable/LuaTests/README.md`). 2026-09-25: the Lua tier reports 1848 total / 1846 passed / 0 failed /
+        2 not run.
   - [ ] Guard behaviour on Mono and IL2CPP: a budget trip cannot be caught by `pcall`/`xpcall` and the state stays
         guarded (`LuaCsGuardFrameAndAllocationEditModeTests`, `LuaCsSecureSandboxEditModeTests`,
         `LuaCs_RunawayHandlerAfterAnEarlierTrip_IsStillCut_AndTheStreakQuarantines` in `LuaCsModRuntimeEditModeTests`)
@@ -301,7 +324,7 @@ contexts) is next and not started. This section records everything landed up to 
         confirmation) took 0.8-1.9 s there, so an allocation-heavy mod meets its wall clock before its memory budget
         (cut either way). IL2CPP is still open.
   - [ ] A WebGL build smoke of the world package (save → reload the page → load), see the item below.
-- [ ] **Real WebGL page-reload gate** for the world package: save → reload the page → the bytes and the startup
+- [ ] **Real WebGL page-reload smoke** for the world package (an open MVP3 follow-up since the 2026-09-25 close): save → reload the page → the bytes and the startup
       selection survive (`Docs/CoreAIMods/WORLD_PACKAGE.md`, "Acceptance status").
 
 ### Closed
@@ -937,13 +960,12 @@ with numbers (both CHANGELOGs, 7.46.0), including the audit round's fixes (pruni
 `MaxChatHistoryMessages` cap is reported, the compaction payload no longer marks unsent messages folded).
 
 - [x] **`MirrorBroadcastEditModeTests.Mirror_PingsTheStrangerBelowAdmission_AndTheWitnessTellsThatFromTheBroadcast`**
+      failed when its class ran alone (no `NetworkPingMessage` reached the stranger: expected 12, got empty); in the
+      2026-09-24 full EditMode run after the 7.46.0 audit fixes it passed, so it depended on order or timing. The test
+      runs at all only because of a local `MIRROR` scripting define in the uncommitted
+      `ProjectSettings/ProjectSettings.asset`; CI without that define skips it.
       Fixed 2026-09-25: the test sets `NetworkTime.PingInterval` to 0 for its flush, so every connection pings
       whatever the editor's clock; passes alone and in the full `MIRROR` leg.
-      fails when its class runs alone (no `NetworkPingMessage` reaches the stranger: expected 12, got empty); in the
-      2026-09-24 full EditMode run after the 7.46.0 audit fixes it passed, so it depends on order or timing. 7.46.0 does
-      not touch Mirror; check whether Mirror's ping interval depends on editor uptime / `NetworkTime` in a fresh
-      editor, and make the test drive the ping explicitly. Note: the test runs at all only because of a local `MIRROR`
-      scripting define in the uncommitted `ProjectSettings/ProjectSettings.asset`; CI without that define skips it.
 
 ## 7.45.0 audit wave: 7.44.x re-audited, pipeline cancellation unified, docs swept (2026-09-24)
 
@@ -1292,8 +1314,7 @@ before reaching them. The earlier figure on this line was 4424/4415 on 2026-09-1
 release; `dev-docs/MVP25_BUILD_PLAN_2026-09-04.md` :3, "the three remaining MVP2.5 rungs (MVP8,
 MVP11, MVP12)"; entry gates P1–P5, with P4 a full pass of the MVP2 manifest). The persistence
 release 7.3.0 (see below) shipped save/load; MVP3 as the roadmap defines it now — the world/place
-package — is code complete and closed on the Linux suites, and its release waits for the Unity gate
-(top section); MVP8 is acceptance-manifested in the next item;
+package — closed on the Unity gate on 2026-09-25 and shipped in 7.47.0 (top section); MVP8 is acceptance-manifested in the next item;
 **MVP11 and MVP12 are unimplemented as rungs** — concretely, verified against the tree:
 `INetworkBridge` has no `SendIntent`/`IntentReceived`/`SendDelta`/`DeltaReceived`, there is no
 `ReplicationPublisher` type, `LuaModManifest` has no context field (and no raise site checks a

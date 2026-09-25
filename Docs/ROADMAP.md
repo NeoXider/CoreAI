@@ -77,7 +77,7 @@ shareable.
 
 ## 2. Package map
 
-Seven UPM packages, released in lockstep (all currently 7.46.0):
+Seven UPM packages, released in lockstep (all currently 7.47.0):
 
 | Package | What it is |
 |---|---|
@@ -117,7 +117,7 @@ resumption points), the service catalog with loud stubs, the shared JSON contrac
 not closed: the G10 capacity gate fails on the AI backend (not code), and `BindToRenderStep` is still a
 loud stub. The "Gameplay services I" slice (the old MVP8: Players, Humanoid, Touched, Debris,
 TweenService, Raycast, CollectionService) has landed too. The 2026-09-24 audits and their fix waves
-(unreleased, after 7.45.0) made one mod's fault stop breaking the frame for others, budgeted string
+(released in 7.47.0) made one mod's fault stop breaking the frame for others, budgeted string
 patterns and memory per resume, made budget trips uncatchable by `pcall`, and brought `CanCollide`,
 `Instance.Changed` and TweenService in line with Roblox. Three audit rounds over those waves followed.
 Both script surfaces now convert arguments and property writes by one Luau/Roblox rule (numbers ↔
@@ -154,7 +154,7 @@ newest-wins reconnects, per-channel payload limits, a readiness handshake, serve
 (held clocks reach clients, also from a world loaded from a package), kick and supersede notices,
 per-sender budgets — 32 remote-started handlers apart from 128 threads of induced work, with signal
 listeners deferred in a bounded queue instead of dropped — and reliable sends held until admission
-(unreleased fix waves and audit rounds 1–3). The engine-free replication core (member-level change reporting, dirty set,
+(the fix waves and audit rounds 1–3, released in 7.47.0). The engine-free replication core (member-level change reporting, dirty set,
 per-recipient Spawn/Patch/Remove planning, replica-side applier) and the authority model
 (`WorldAclAuthorizer`, `WriteGrantLedger`, `IntentGateway`, `ClientWritePolicy`) are built and tested
 in process. Missing: script contexts, host mode, the join snapshot over the wire, world-state
@@ -183,10 +183,15 @@ player-owned slots plus an autosave before every AI mutation. Model packages and
 let the AI and Creators start from templates; Roblox interchange makes existing Roblox content an
 on-ramp and an export target.
 
-**Current state.** **MVP3 is code complete (2026-09-24); its Unity verification gate is pending** —
-EditMode 0 failed and PlayMode `FastNoLlm` 0 failed still have to be run in Unity (on Linux the
-portable suites are green: engine-free 2137 passed / 0 failed / 3 skipped, Lua tier 1837 passed / 0
-failed / 38 not executed at `055aed29`, after audit rounds 1–3). Built: the `.world` ZIP place package,
+**Current state.** **MVP3 is closed (2026-09-25, released in 7.47.0)** on the Unity gate (Unity
+6000.3.14f1, 2026-09-25): EditMode full 6550 total / 6539 passed / 0 failed / 11 skipped, the `core`,
+`llm` and `lua` legs 0 failed (5266, 6234 and 5582 total), the Mirror leg 6550 / 0 failed; PlayMode
+`FastNoLlm` 95 total / 94 passed / 0 failed / 1 skipped; the engine-free portable suite 2172 passed /
+0 failed, the Lua tier 1846 of 1848 passed / 0 failed / 2 not run. The live-model PlayMode suite is
+not green: the last run of this branch had 4 of 165 failing, all live-model timeouts while the LM
+Studio server was unresponsive (the same four passed on 7.45.0), and it is to be re-run. The
+IL2CPP/WebGL player checks, the WebGL page-reload smoke and spikes S1/S2 are open follow-ups that gate
+the next networked rung, not MVP3's product scope. Built: the `.world` ZIP place package,
 `FileRbxWorldPackageStore` with create-once manual slots (capped at 64 / 256 MiB) and a
 two-phase-durable autosave ring, `ConfirmedWorldMutationGate` in front of every `execute_lua` and
 mutating `manage_mods` action, `RbxWorldRuntimeSessionController` for transactional session
@@ -198,10 +203,11 @@ sources per world, and — since audit round 2 — mods restarting and restoring
 edits of the mod sources, records world-tree changes at most every 5 s and never for physics or camera
 motion, and tells the caller when a change will not reopen. Each MVP3 DoD item is proven by a named
 test ([`WORLD_PACKAGE.md`](CoreAIMods/WORLD_PACKAGE.md#acceptance-status-mvp3)). The real WebGL
-page-reload gate is open. Model packages, templates and the Roblox formats are not built; the
+page-reload smoke is an open follow-up. Model packages, templates and the Roblox formats are not built; the
 self-contained mod bundle (`ExportMod`) is.
 
-**Next.** The MVP3 Unity gate and release (with spikes S1/S2); MVP13 (`.model` packages, the template
+**Next.** The open MVP3 follow-ups (the IL2CPP/WebGL player checks, the WebGL page-reload smoke,
+spikes S1/S2, the live PlayMode re-run) before the next networked rung; MVP13 (`.model` packages, the template
 library, place templates); MVP14 (rbxl/rbxlx/rbxm/rbxmx both ways, the round-trip parity gate);
 MVP16 (DataStoreService on the shared JSON contract).
 
@@ -326,7 +332,8 @@ on Mono runs about 150 k instructions/s against 24 M on CoreCLR
 R1). Instance ceilings today: 16,384 per desktop world and 2,048 per actor, 4,032 per WebGL world,
 100,000 in the package format.
 
-**Next.** Spikes S1 (VM cost on IL2CPP Linux and Mono) and S2 (bytes per update) with the MVP3 close;
+**Next.** Spikes S1 (VM cost on IL2CPP Linux and Mono) and S2 (bytes per update) — open follow-ups
+of MVP3 (closed 2026-09-25) that gate the next networked rung;
 MVP8 (the Linux dedicated server and the WebGL client); **MVP9** (interest management, a bot client,
 the VM guard cost, the O(N) paths, higher ceilings — proven by the staircase against the D5 targets);
 MVP19 (lazy material textures, incremental JSON/ZIP on WebGL, the WebGL client soak, an Android client,
@@ -345,14 +352,14 @@ release: it ships as a 7.x minor after its gate — its DoD met, EditMode and Pl
 together (`python tools/bump_version.py <version>`). Patch releases carry fixes only. The one-screen
 ladder (detail: [`ROBLOX_API_ROADMAP.md` §4](CoreAIMods/ROBLOX_API_ROADMAP.md#4-mvp-ladder-the-ladder-of-record)):
 
-| # | Rung | Status (2026-09-24) | Size | Test |
+| # | Rung | Status (2026-09-25) | Size | Test |
 |---|---|---|---|---|
 | MVP0 | Engine abstraction seam | landed | M | EM |
 | MVP1 | Instance/DataModel core | landed (6.3.0) | L | EM, PT |
 | MVP2 | Scheduler, signals, clocks, services | surface landed; G10 and `BindToRenderStep` open | L | EM, PL |
 | MVP2.5 | Online foundation + persistence release | landed 7.3.0–7.43.0 (history) | — | EM |
 | — | Gameplay services I (the old MVP8) | landed slice | L | EM, PM, PL |
-| **MVP3** | World/place package + backups (+ spikes S1/S2) | **closing**: code complete, audits 1–3 done, Linux suites green; Unity gate and tag pending | S | EM, PM, WebGL |
+| **MVP3** | World/place package + backups (+ spikes S1/S2) | **closed 2026-09-25 (7.47.0)**: Unity gate EditMode and PlayMode `FastNoLlm` 0 failed, audits 1–3 done; S1/S2, IL2CPP/WebGL player checks and the live PlayMode re-run are open follow-ups | S | EM, PM, WebGL |
 | **MVP4** | Script contexts & client runtime | **next**, not started | M | PL, EM, PT |
 | MVP5 | Host mode over a real socket + join snapshot | planned | L | EM, MP, MS |
 | MVP6 | World-state replication + write authority | planned | L | PT, EM, MP |
@@ -457,14 +464,14 @@ into measured numbers early ([`ROBLOX_API_ROADMAP.md` §4.3](CoreAIMods/ROBLOX_A
 
 | Risk | What could go wrong | Evidence | Mitigation (rung) |
 |---|---|---|---|
-| R1 | Guarded Lua CPU on a Mono/IL2CPP server makes 100 players infeasible | The production guard fires every 4 instructions and reads the heap each time: Mono 148–158 k instructions/s vs 24.4 M on CoreCLR ([`tools/vmbench/RESULTS.md`](../tools/vmbench/RESULTS.md)); the N=100 workload is 9,434 guarded steps per frame (`dev-docs/SCALE_CHARACTERIZATION.md`), ≈63 ms per frame on Mono (estimate) | **Spike S1** (MVP3 close); an adaptive batch with an allocation bound or per-thread accounting, thin-Lua guidance in the skill (MVP9); the server-only native Luau fallback (plan decision D8) |
-| R2 | Replication bandwidth | JSON codec, no interest management, whole-node marks, synchronous `FireAllClients`; ~30–50 MB/s server out with JSON at 100 players (estimate) | **Spike S2** (MVP3 close); binary quantized deltas (MVP6); interest tiers (MVP9) |
+| R1 | Guarded Lua CPU on a Mono/IL2CPP server makes 100 players infeasible | The production guard fires every 4 instructions and reads the heap each time: Mono 148–158 k instructions/s vs 24.4 M on CoreCLR ([`tools/vmbench/RESULTS.md`](../tools/vmbench/RESULTS.md)); the N=100 workload is 9,434 guarded steps per frame (`dev-docs/SCALE_CHARACTERIZATION.md`), ≈63 ms per frame on Mono (estimate) | **Spike S1** (open MVP3 follow-up, gates the next networked rung); an adaptive batch with an allocation bound or per-thread accounting, thin-Lua guidance in the skill (MVP9); the server-only native Luau fallback (plan decision D8) |
+| R2 | Replication bandwidth | JSON codec, no interest management, whole-node marks, synchronous `FireAllClients`; ~30–50 MB/s server out with JSON at 100 players (estimate) | **Spike S2** (open MVP3 follow-up, gates the next networked rung); binary quantized deltas (MVP6); interest tiers (MVP9) |
 | R3 | Join snapshot size and time | Non-incremental JSON/ZIP; WebGL budget 4 MiB / 4,032 instances; kcp's reliable message size unverified | A chunked, streamed snapshot (MVP5); incremental decode (MVP19); **spike S3**: a 5 MB snapshot over real kcp (MVP5) |
 | R4 | Character feel with server-owned physics | Owner decision 5; `SetNetworkOwner` is a loud stub | Client-owned own character with server validation (plan decision D3, MVP7) |
 | R5 | Instance ceilings vs Roblox-scale places | 16,384 per desktop world / 2,048 per actor; WebGL 4,032; `ProcessPreSimulation` visits every instance | Dirty-only processing, ceilings raised with measurement (MVP9) |
 | R6 | A single-threaded world with one mutation gate held across operations | `InstanceRegistry`'s gate (`TODO.md`) | One room per process; per-tick batching; contention measured with the publisher (MVP6) |
 | R7 | LLM capacity for per-player AI | G10 FAILED: 17.4–38.5 s p95 on one lane; 12–25 lanes needed for 40 requests per 60 s | Role-gate the human AI to Creators, a queue and HUD, `AIService` quotas (MVP11); small local models for routine work |
-| R8 | A large unverified surface | Mirror fixtures compile-only; Lua-tier cases not executed on Linux; no Unity run of this wave | The MVP3 Unity gate; a licensed CI runner (F-12) |
+| R8 | A large unverified surface | Before the MVP3 gate: Mirror fixtures compile-only, no Unity run of the wave. The 2026-09-25 gate ran every leg in Unity (EditMode 0 failed, Mirror leg included; PlayMode `FastNoLlm` 0 failed); still unverified: IL2CPP/WebGL players, the live-model PlayMode suite (4 live timeouts to re-run), 2 Lua-tier cases not run on Linux | The MVP3 player-build follow-ups; a licensed CI runner (F-12) |
 | R9 | Protocol security and compatibility | No inbound rate limit on decode/dispatch; no version negotiation | Both in MVP5 |
 | R10 | Studio scope creep (XL) | Absent today; many UI panels | Mechanisms in the packages, UX in the flagship (plan decision D7); Explorer, Properties, gizmos, undo and Play/Stop first (MVP12) |
 | R11 | Plan drift across ROADMAP, ROBLOX_API_ROADMAP, TODO, PLAN and dev-docs | 28 stale or contradictory statements found on 2026-09-24 (fixed the same day) | One ladder of record, one status table here; dev-docs plans marked as history |

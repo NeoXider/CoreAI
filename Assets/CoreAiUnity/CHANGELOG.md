@@ -4,8 +4,15 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.47.0] - 2026-09-25
+
 ### Fixed
 
+- **Two 7.46.0 tests broke the portable suite and the `core`/`lua` legs.** The two `MeaiLlmClient.ClipFailedToolDetail`
+  cases lived in `DeterministicToolContractEditModeTests`, which the portable suite links and the legs without
+  `COREAI_LLM` compile, while `MeaiLlmClient` exists only in Unity under `COREAI_LLM` (main's CI "Portable Core" was
+  red on 7.46.0). They moved to `MeaiLlmClientEditModeTests` unchanged, and the schema-clip test of 7.46.0 to
+  `ToolExecutionPolicyEditModeTests`.
 - **The `core` and `lua` module legs (no `COREAI_LLM`) did not compile, nor did WebGL `core`.** Twenty-three
   unguarded references to LLM-only types in seven files: `LlmPipelineInstaller` used
   `MeaiOpenAiChatClient.DefaultAsyncMarshaler` outside `COREAI_LLM`, `FetchSseOpenAiTransport` lacked the guard its
@@ -151,8 +158,9 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
   (`LuaCsGuardFrameAndAllocationEditModeTests`, `LuaCsSecureSandboxEditModeTests`), the first audit round's world
   package, instance, runtime and network fixtures, and a PlayMode check that a character above a
   `CanCollide = false` part does not stand on it.
-  None of the new EditMode and PlayMode fixtures has run in Unity yet; the Lua-tier ones that the portable runner
-  links have run on Linux.
+  They first ran in Unity at the 2026-09-25 gate (Unity 6000.3.14f1): EditMode `full` 6550 total / 6539 passed / 0
+  failed / 11 skipped, `core` 5266/5254/0/12, `llm` 6234/6221/0/13, `lua` 5582/5572/0/10, `MIRROR` 6550/6539/0/11;
+  PlayMode `FastNoLlm` 95/94/0/1.
 - **Second audit round.** Regression tests, each red on the old code: the mod load order through both restart
   paths, the world package, the Hub and the seeder (`LuaCsModRuntimePersistenceEditModeTests`,
   `Mvp3WorldPackageFollowUpEditModeTests`, `CoreAiModsHubBinderFullTierEditModeTests`,

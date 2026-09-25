@@ -69,8 +69,8 @@ its twins is not measuring anything.
 ## Gameplay-service audit (2026-09-24)
 
 The 2026-09-24 audit of the MVP8 services found defects under several gates of
-`dev-docs/MVP25_BUILD_PLAN_2026-09-04.md`; the fixes are unreleased and verified by EditMode tests that
-still have to be run in Unity. The corpus above is unchanged.
+`dev-docs/MVP25_BUILD_PLAN_2026-09-04.md`; the fixes shipped in 7.47.0 and are verified by EditMode tests that
+ran green in the 2026-09-25 Unity gate. The corpus above is unchanged.
 
 - **Gate P8.4 (`Debris:AddItem`).** Capability: a mod without `WorldEdit` is refused
   (`AddItem_ReadOnlyMod_IsRefusedForMissingWorldEdit`). Subtree: the caller must be allowed to destroy

@@ -78,8 +78,8 @@ still gets its full budget. Yielding inside a library callback — a `__tostring
 `__index` — raises `attempt to yield across a C-call boundary`, as in Luau; yielding inside `pcall` works.
 Calls from library functions back into Lua share one cap of 128 levels along a chain of nested runs
 (`LuaCsSecureEnvironment.MaxCCallDepth`, Luau's `LUAI_MAXCCALLS`), weighted by the native stack they take:
-a `pcall` or `xpcall` body and a `gsub` replacement function open one level; a `__tostring` run by
-`tostring`, `print`, `warn` or `string.format`, a `table.sort` comparator, `__pairs`/`__ipairs`, a `gsub`
+a `pcall` or `xpcall` body opens one level; a `gsub` replacement function (two since 7.47.0), a `__tostring`
+run by `tostring`, `print`, `warn` or `string.format`, a `table.sort` comparator, `__pairs`/`__ipairs`, a `gsub`
 `__index`, `coroutine.resume`, a thread `task.spawn` runs at once and a guarded call that starts inside a
 run (a `mods_call` export included) open two. So `pcall` nests 128 deep and `table.sort` or `tostring` 63,
 and a resumed thread continues its resumer's count. The call past the cap raises `C stack overflow

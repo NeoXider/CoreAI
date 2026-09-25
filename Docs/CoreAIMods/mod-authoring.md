@@ -238,9 +238,9 @@ authoritative channel) over direct mutation — it stays deterministic and multi
   that exceeds it is cut with `BUDGET_EXCEEDED` / `EXCEEDED_MEMORY_BUDGET` and the fix hint "keep less
   memory alive between two yields" — build big data across several yields, or keep less of it.
 - **Library calls back into Lua share one cap of 128 levels along a chain of nested runs.** A `pcall` or
-  `xpcall` body and a `gsub` replacement function open one level; a `__tostring` run by `tostring`, `print`,
-  `warn` or `string.format` (your own `tostring` included, so `tostring = warn; warn(1)` raises the catchable
-  error below instead of crashing the game), a `table.sort` comparator, a `gsub` `__index`, a
+  `xpcall` body opens one level; a `gsub` replacement function (two since 7.47.0), a `__tostring` run by
+  `tostring`, `print`, `warn` or `string.format` (your own `tostring` included, so `tostring = warn; warn(1)`
+  raises the catchable error below instead of crashing the game), a `table.sort` comparator, a `gsub` `__index`, a
   `__pairs`/`__ipairs` metamethod, a coroutine run by `coroutine.resume`, a thread `task.spawn` runs at once
   and a guarded call that starts inside a run (a `mods_call` export included) open two — so `pcall` nests 128
   deep and `table.sort` or `tostring` 63. A resumed thread, and a `mods_call` export, continue the count of

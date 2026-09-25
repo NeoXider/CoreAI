@@ -214,8 +214,9 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
 - **Calls from library functions back into Lua share one cap of 128 weighted levels per chain of nested runs**
   (`LuaCsSecureEnvironment.MaxCCallDepth`, Luau's `LUAI_MAXCCALLS` scaled to native frame size). A call whose
   native frames take up to about 4 KB opens one level (`LightCallLevels`): a function run by `pcall` or `xpcall`
-  (whose message handler runs inside the same call) and a `gsub` replacement function. One that takes up to
-  about 8 KB opens two (`HeavyCallLevels`): a `__tostring` run by `tostring`, `print`, `warn` or `string.format`
+  (whose message handler runs inside the same call). One that takes up to about 8 KB opens two
+  (`HeavyCallLevels`): a `gsub` replacement function (one level until 7.47.0; it measured 4,288 B a level on
+  Windows x64, over the 4 KB of one level, and a chain at the cap took 531 KB there), a `__tostring` run by `tostring`, `print`, `warn` or `string.format`
   (a mod's own `tostring` included, so `tostring = warn; warn(1)` stops at the cap instead of overflowing the
   .NET stack and ending the process), a `table.sort` comparator, a `gsub` `__index`, a `__pairs`/`__ipairs`
   metamethod, a coroutine run by `coroutine.resume`, a scheduler thread `task.spawn` runs at once and a guarded

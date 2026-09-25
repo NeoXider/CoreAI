@@ -17,11 +17,11 @@ camera slice (§MVP1); the Lua log service core has **landed** in
 Since then **MVP2's functional surface has landed** (scheduler, deferred signals, services framework,
 loopback remotes, the shared JSON contract, the clocks, the Model pivot slice, and the complete 45-item
 `Enum.Material` catalog; two items keep it open — the G10 capacity gate and `BindToRenderStep`, §MVP2),
-so has the "Gameplay services I" slice (the old MVP8), and **MVP3 (the world/place package) is code
-complete (2026-09-24)** with its Unity verification gate pending; its contract and acceptance evidence
-are in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md). Audits of MVP1, MVP2, the gameplay services and the
-multiplayer foundation (2026-09-24) were followed by fix waves and three audit rounds over them, recorded
-in the rung sections below and in `TODO.md`; they are unreleased. Next is MVP4 (script contexts),
+so has the "Gameplay services I" slice (the old MVP8), and **MVP3 (the world/place package) is
+closed (2026-09-25, released in 7.47.0)** on the Unity EditMode/PlayMode `FastNoLlm` gate; its contract
+and acceptance evidence are in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md). Audits of MVP1, MVP2, the gameplay
+services and the multiplayer foundation (2026-09-24) were followed by fix waves and three audit rounds
+over them, recorded in the rung sections below and in `TODO.md`; they shipped in 7.47.0. Next is MVP4 (script contexts),
 the first of the multiplayer rungs.
 
 **Architecture (normative)**: every deliverable in this ladder is built to
@@ -444,7 +444,7 @@ Rules of the ladder:
 
 - **Strictly sequential.** Each rung depends only on earlier rungs and ends testable on its own. A rung
   ships as one minor release after its gate (`Docs/ROADMAP.md` §4).
-- **Multiplayer first.** After MVP3 closes, MVP4–MVP9 finish multiplayer — script contexts, host mode,
+- **Multiplayer first.** With MVP3 closed, MVP4–MVP9 finish multiplayer — script contexts, host mode,
   replication, characters, the dedicated server and scale — before the framework consolidation
   (MVP10), roles (MVP11) and the Studio (MVP12).
 - **Every rung states** its goal, what is done so far (with paths), what remains, how it is tested, a
@@ -482,7 +482,7 @@ execution order.
 | MVP1 | Instance/DataModel core | **MVP1** (landed) | unchanged |
 | MVP2 | Scheduler, signals, clocks, services | **MVP2** (surface landed; two items open) | unchanged |
 | MVP2.5 | "MVP3 + MVP8 + MVP11 + MVP12" and the 7.3.0 persistence release | **MVP2.5** (history) | its parts are MVP3, Gameplay services I, MVP5 and MVP6 |
-| MVP3 | World file + two-tier backups | **MVP3** (closing) | + spikes S1/S2 |
+| MVP3 | World file + two-tier backups | **MVP3** (closed 2026-09-25) | + spikes S1/S2 (open follow-ups) |
 | MVP4 | RBXL import/export | **MVP14** | widened to rbxl/rbxlx/rbxm/rbxmx both ways + the round-trip parity gate |
 | MVP5 | Mod system UX | **MVP4** + **MVP16** + **MVP18** | contexts, `require`, script instances and `CONTEXT_VIOLATION` → MVP4; `game:BindToClose` → MVP16; folder mods, `api_version`, enable/disable, hot-reload latency and the AI tools → MVP18 |
 | MVP6 | AI Lua skill = the documentation | **MVP18** | generated manifest + CI diff; until then every rung updates the hand-written skill |
@@ -508,14 +508,14 @@ this table: a stub that names "MVP9" means DataStore, which is MVP16 now.
 
 ### 4.2 The ladder at a glance
 
-| # | Rung | Status (2026-09-24) | Size | Test | Old |
+| # | Rung | Status (2026-09-25) | Size | Test | Old |
 |---|---|---|---|---|---|
 | MVP0 | Engine abstraction seam | landed 2026-07-22 | M | EM | MVP0 |
 | MVP1 | Instance/DataModel core | landed in 6.3.0 | L | EM, PT | MVP1 |
 | MVP2 | Scheduler, signals, clocks, services | surface landed; G10 and `BindToRenderStep` open | L | EM, PL | MVP2 |
 | MVP2.5 | Online foundation + persistence release | landed 7.3.0–7.43.0 (history) | — | EM | MVP2.5 |
 | — | Gameplay services I | landed slice | L | EM, PM, PL | MVP8 |
-| MVP3 | World/place package + two-tier backups (+ spikes S1/S2) | **closing**: code complete, audits 1–3 done, closed on the Linux suites; Unity gate and tag pending | S | EM, PM, manual WebGL | MVP3 |
+| MVP3 | World/place package + two-tier backups (+ spikes S1/S2) | **closed 2026-09-25 (7.47.0)**: Unity EditMode and PlayMode `FastNoLlm` 0 failed, audits 1–3 done; S1/S2 and the IL2CPP/WebGL player checks are open follow-ups | S | EM, PM, manual WebGL | MVP3 |
 | MVP4 | Script contexts & client runtime | **next**, not started | M | PL, EM, PT | MVP5 (part) |
 | MVP5 | Host mode over a real socket + join snapshot | planned | L | EM, MP, MS | MVP11 |
 | MVP6 | World-state replication + write authority | planned | L | PT, EM, MP | MVP12 |
@@ -539,8 +539,8 @@ Three spikes turn the largest unknowns into measured numbers before the rungs th
 
 | Spike | Where | What is measured | What it decides |
 |---|---|---|---|
-| **S1** VM cost | MVP3 close | Guarded VM throughput and per-resume cost in an IL2CPP **Linux server** build and a Standalone Mono x64 build, on the `tools/vmbench` workload and the `tools/ScaleHarness` N=100 workload | Whether the cheaper guard (plan decision D8 (a)) is enough for MVP9, or the server-only native Luau fallback (plan decision D8 (b)) is needed |
-| **S2** bytes per update | MVP3 close | Bytes per CFrame patch through `Scripting/LuaCs/LuaCsRbxNetworkCodec.cs` (JSON) vs a hand-packed binary record | The bytes-per-patch bar of MVP6's binary delta codec |
+| **S1** VM cost | open MVP3 follow-up; gates the next networked rung | Guarded VM throughput and per-resume cost in an IL2CPP **Linux server** build and a Standalone Mono x64 build, on the `tools/vmbench` workload and the `tools/ScaleHarness` N=100 workload | Whether the cheaper guard (plan decision D8 (a)) is enough for MVP9, or the server-only native Luau fallback (plan decision D8 (b)) is needed |
+| **S2** bytes per update | open MVP3 follow-up; gates the next networked rung | Bytes per CFrame patch through `Scripting/LuaCs/LuaCsRbxNetworkCodec.cs` (JSON) vs a hand-packed binary record | The bytes-per-patch bar of MVP6's binary delta codec |
 | **S3** big snapshot | MVP5 | A 5 MB join snapshot over real kcp | The snapshot chunk size and the reliable-message path |
 
 S1 and S2 are recorded measurements (no pass/fail); their numbers go into `TODO.md`.
@@ -644,7 +644,7 @@ old ones, and 4.1 maps them:
 - **DoD (met)**: the §5.1.8 list is green, including the `RbxSpace` round-trip property tests, the
   golden fixtures and the conversion lint; a mod builds, queries, clones and destroys an instance tree
   that materializes as GameObjects and is visible to CoreAI world queries. The audit fix waves of
-  2026-09-24 (M1-xx, A3-xx; `TODO.md`) are unreleased.
+  2026-09-24 (M1-xx, A3-xx; `TODO.md`) shipped in 7.47.0.
 
 ### MVP2 — Scheduler, signals, clocks, services framework (detail: §5.2) *(surface landed; two items open)*
 
@@ -711,7 +711,7 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   `BasePart.Touched`/`TouchEnded` through CoreAI's own `RbxApi/Binding/RbxContactRelay.cs` (not a
   NeoxiderTools dependency); `Debris:AddItem`; `TweenService`, `TweenInfo`, `Tween:Play/Pause/Cancel`
   and `Completed`; `workspace:Raycast`; per-body gravity (DEV-6); `CollectionService` tag queries and
-  signals. After the 2026-09-24 audit fix waves (unreleased): TweenService advances in O(1) per step,
+  signals. After the 2026-09-24 audit fix waves (7.47.0): TweenService advances in O(1) per step,
   refuses non-finite goals, contains a faulting tween, plays `Reverses` as two legs, never fires
   `Touched` for a tweened move, and charges each tween to the creating actor with at most 256 finished
   tweens kept per actor; `Humanoid:TakeDamage`/`MoveTo`/`ChangeState`, `Debris:AddItem` and the Tween
@@ -730,7 +730,7 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   (enforced by `TierACorpusEditModeTests` over the frozen Tier-B catalog); the skill's TweenService
   section and its wrong→right pair are verified.
 
-### MVP3 — World/place package + two-tier backups + spikes S1/S2 *(closing: code complete 2026-09-24, Unity gate pending)* (S)
+### MVP3 — World/place package + two-tier backups + spikes S1/S2 *(closed 2026-09-25, 7.47.0)* (S)
 
 - **Goal**: the world is a savable, shareable artifact — the single serializer that disk save, backups
   and the multiplayer join snapshot share (§2, world file / backups) — released, with the two unknowns
@@ -766,22 +766,32 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   caller's call count and allowance), refused yields through every counted call (Luau parity) and gave
   the guard's trip lines the `sandbox: ` prefix. Audit rounds 1–3 are complete. Portable suites on Linux
   at `055aed29` (TRX-counted): engine-free 2137 passed / 0 failed / 3 skipped; Lua tier 1837 passed /
-  0 failed / 38 not executed (engine-bound cases Inconclusive by design). MVP3 is code complete and closed
-  on the Linux suites; the release and tag wait for the owner's Unity gate.
-- **To do**:
-  - Nothing of the audits: rounds 1–3 and their fixes are done; the follow-ups they filed are in
-    `TODO.md`.
-  - Run the Unity checklist in `TODO.md` ("Check the tests"): EditMode in the four module legs plus
-    `MIRROR`, PlayMode `FastNoLlm`, and the fixtures that have never run.
-  - Run the real WebGL page-reload gate (save → reload the page → the bytes and the startup selection
-    survive).
-  - Bump and tag (`python tools/bump_version.py <version>`).
+  0 failed / 38 not executed (engine-bound cases Inconclusive by design). **MVP3 closed on 2026-09-25 and shipped in
+  7.47.0** on the Unity gate (Unity 6000.3.14f1, the tree released): EditMode full 6550 total / 6539
+  passed / 0 failed / 11 skipped, the `core` leg 5266 / 0 failed, `llm` 6234 / 0 failed, `lua` 5582 / 0
+  failed, the `MIRROR` leg 6550 / 0 failed (its first run had four loopback-HTTP flakes in
+  `LlmToolChannelEditModeTests.UnityHttpAdapters_*`, clean on rerun, a watch item in `TODO.md`);
+  PlayMode `FastNoLlm` 95 total / 94 passed / 0 failed / 1 skipped (the batchmode `WaitForEndOfFrame`
+  skip); portable engine-free 2172 passed / 0 failed, Lua tier 1848 total / 1846 passed / 0 failed / 2
+  not run. The live-model PlayMode suite is not green: the last run of this branch had 165 total / 156
+  passed / 4 failed, all four live-model timeouts while the LM Studio server was unresponsive (they
+  passed on the 7.45.0 tree the day before); it is to be re-run. Decision (tech lead, 2026-09-25): MVP3
+  is closed on the Unity EditMode/PlayMode `FastNoLlm` gate; spikes S1/S2 and the player-build checks
+  move to open follow-ups that gate the next networked rung, not MVP3's product scope.
+- **Open follow-ups** (they gate the next networked rung, not MVP3's product scope; tracked in
+  `TODO.md`):
+  - The IL2CPP/WebGL player checks: the native-stack mod `local function f() pcall(f) end f()` ends in
+    "C stack overflow", a `__concat` chain, three Save & run of `sample_castle3d`, the budget guard on
+    IL2CPP.
+  - The real WebGL page-reload smoke of the world package (save → reload the page → the bytes and the
+    startup selection survive).
   - **S1** and **S2** (§4.3); record the numbers in `TODO.md`.
-  - The MVP3 tail items in `TODO.md` ("Persistence (MVP3 tail)") are follow-ups; they do not gate the
-    release.
+  - The live-model PlayMode re-run (four live timeouts on an unresponsive LM Studio server).
+  - The MVP3 tail items in `TODO.md` ("Persistence (MVP3 tail)").
 - **Test**: EM, PM, manual WebGL; S1 and S2 as recorded measurements.
-- **DoD**: EditMode 0 failed and PlayMode `FastNoLlm` 0 failed on Unity 6000.3.14f1; the WebGL reload
-  survives; the release tag exists; the S1 and S2 numbers are in `TODO.md`. The original DoD — save →
+- **DoD**: EditMode 0 failed and PlayMode `FastNoLlm` 0 failed on Unity 6000.3.14f1 (met 2026-09-25);
+  the release exists (7.47.0). The WebGL reload and the S1 and S2 numbers were part of this DoD until the
+  2026-09-25 decision moved them to the open follow-ups above. The original DoD — save →
   load round-trips the world-owned tree with stable ids (golden comparison); mods restart clean on
   load; a manual slot is provably untouchable by AI tools (negative test); the autosave ring rotates and
   records triggers; a save is durable on WebGL (since Unity 6.3 the engine's automatic
@@ -800,7 +810,7 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   `ListAutoSaves_HyphenatedTriggers_RoundTripExactly`, `ListAutoSavesTool_ReturnsExactNameTriggerTimestampAndSize`,
   `ConfirmedBackup_GatedExecuteLua_WritesExactlyOneExecuteLuaAutosaveToFileStore`;
   (e) persistence after save — `FileStores_WithoutInjectedHook_DefaultToCoreAiWebGlPersistenceSyncAsync`
-  (the real-browser reload is the open gate above);
+  (the real-browser reload is an open follow-up above);
   (f) invalid names as JSON results — `SaveWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService`,
   `LoadWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService`,
   `LoadAutoSave_InvalidName_IsRefusedAsResult_WithoutCallingService`.
@@ -953,7 +963,7 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   - Old MVP11 DoD, kept inside the DoD above: host + client playtest — chat-via-RemoteEvent fixture,
     server-authoritative kill brick, `RemoteFunction` round trip with timeout; all solo corpus fixtures
     still pass with `MIRROR` absent.
-  - State of the bridge before this rung (7.45.0 plus the unreleased fix waves): one connection per
+  - State of the bridge before this rung (7.47.0: 7.45.0 plus the fix waves): one connection per
     actor with the newest winning on reconnect (teardown keyed by connection); one admission attempt per
     connection and an admission deadline (10 s); per-channel payload limits; client handlers that do not
     require Mirror authentication; stale answers, malformed envelopes and orphaned requests dropped and

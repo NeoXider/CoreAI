@@ -255,11 +255,12 @@ The byte and text budgets are not bounded at the source.
 The durability mechanics (the `false`-is-failure rule, rollback, and the startup selection below) are
 covered by deterministic reload-model tests, and
 `FileStores_WithoutInjectedHook_DefaultToCoreAiWebGlPersistenceSyncAsync` pins that both file stores
-default to `CoreAiWebGlPersistence.SyncAsync`. The real-browser gate — a WebGL build that saves,
-reloads the page and proves the bytes and the startup selection survive — is still open. Production
+default to `CoreAiWebGlPersistence.SyncAsync`. The real-browser smoke — a WebGL build that saves,
+reloads the page and proves the bytes and the startup selection survive — is still open (an MVP3
+follow-up in `TODO.md`). Production
 composition injects one shared W3.4 gate into both the initial/replacement `execute_lua` stacks and
 the production `manage_mods` tool. The declared mutating actions of both tool contracts are covered;
-Unity acceptance still requires the owner-run focused/full EditMode gate.
+the full Unity EditMode gate ran green on 2026-09-25 (see "Acceptance status (MVP3)").
 
 ### Startup selection (the world that opens on the next start)
 
@@ -464,13 +465,19 @@ through the Hub page.
 
 ## Acceptance status (MVP3)
 
-**Code complete (2026-09-24); the Unity verification gate is pending.** EditMode (0 failed) and PlayMode
-`FastNoLlm` (0 failed) must still be run in Unity. On Linux, the portable `dotnet test` suites report
-2137 passed / 0 failed / 3 skipped for the engine-free tests and 1837 passed / 0 failed / 38 not
-executed for the Lua tier at `055aed29`, after audit rounds 1–3 (`tools/portable/LuaTests`, which runs
-`Mvp3WorldPackageEditModeTests` and `Mvp3WorldPackageQaEditModeTests` against a UnityEngine shim; a case
-that reaches the engine, a file-store load included, is Inconclusive by design and counts as not
-executed). MVP3 is not closed until that gate is green and the release is tagged.
+**Closed (2026-09-25), released in 7.47.0; the Unity verification gate is green.** Unity 6000.3.14f1,
+on the released tree: EditMode full 6550 total / 6539 passed / 0 failed / 11 skipped; the `core` leg
+5266 / 5254 passed / 0 failed / 12 skipped, `llm` 6234 / 6221 / 0 / 13, `lua` 5582 / 5572 / 0 / 10, the
+`MIRROR` leg 6550 / 6539 / 0 / 11; PlayMode `FastNoLlm` 95 total / 94 passed / 0 failed / 1 skipped (the
+batchmode `WaitForEndOfFrame` skip). The portable `dotnet test` suites report 2172 passed / 0 failed for
+the engine-free tests and 1848 total / 1846 passed / 0 failed / 2 not run for the Lua tier
+(`tools/portable/LuaTests`, which runs `Mvp3WorldPackageEditModeTests` and
+`Mvp3WorldPackageQaEditModeTests` against a UnityEngine shim; a case that reaches the engine, a
+file-store load included, is Inconclusive by design and counts as not executed). The live-model
+PlayMode suite is not part of this gate and is not green: its last run on this branch had 4 of 165
+failing, all live-model timeouts while the LM Studio server was unresponsive; it is to be re-run. The
+real-browser WebGL page-reload smoke and the IL2CPP/WebGL player checks are open follow-ups that gate
+the next networked rung, not MVP3's product scope (`TODO.md`).
 
 Each item of the roadmap's MVP3 Definition of Done is proven by a named test that fails on a wrong
 implementation (EditMode fixtures: `Mvp3WorldPackageEditModeTests`, `Mvp3WorldPackageFollowUpEditModeTests`,
@@ -482,7 +489,7 @@ implementation (EditMode fixtures: `Mvp3WorldPackageEditModeTests`, `Mvp3WorldPa
 | (b) mods restart clean on load | `ConfirmedPackageLoad_SwapsEveryFacadeAndRestartsOnlyActiveModsOnce` (active mods start once; the outgoing registry keeps no `OldCallback` and the outgoing scheduler's `LiveThreadCount` is 0) |
 | (c) a manual slot is untouchable by AI tools; restore only with player confirmation | `SaveWorldTool_SecondSaveToSameSlot_IsRefusedAsResultAndKeepsFirstBytes` (the second save differs), `WorldPersistenceSurface_ExposesNoDeleteOverwriteRemoveOrReplacePath`, `ProgrammerRole_WorldTools_AreExactlySaveLoadListAndLoadAutosave`, positive confirm on the real controller in `StartupSelection_ConfirmedManualLoad_RestartRestoresSameTreeAndExactSources` |
 | (d) the autosave ring rotates and records triggers | `FileStore_DefaultAutosaveCapacity_IsTenAndRotatesOnlyTheOldest`, `ListAutoSaves_HyphenatedTriggers_RoundTripExactly`, `ListAutoSavesTool_ReturnsExactNameTriggerTimestampAndSize`, `ConfirmedBackup_GatedExecuteLua_WritesExactlyOneExecuteLuaAutosaveToFileStore` |
-| (e) WebGL persistence after save | `FileStores_WithoutInjectedHook_DefaultToCoreAiWebGlPersistenceSyncAsync`; the `false`-is-failure rule by the store durability tests; the real-browser reload gate stays open |
+| (e) WebGL persistence after save | `FileStores_WithoutInjectedHook_DefaultToCoreAiWebGlPersistenceSyncAsync`; the `false`-is-failure rule by the store durability tests; the real-browser reload smoke is an open follow-up |
 | (f) an invalid slot or autosave name is a JSON result (7.45.0) | `SaveWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService`, `LoadWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService`, `LoadAutoSave_InvalidName_IsRefusedAsResult_WithoutCallingService` (now including `null` and the echoed slot) |
 
 The residue closed alongside the DoD:

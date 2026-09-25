@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
-MVP3 (the world/place package) is code complete; its Unity verification gate (EditMode 0 failed, PlayMode
-`FastNoLlm` 0 failed) is still to be run. The entries below also cover the fix waves that followed the
-2026-09-24 audits of the MVP1 instance core, the MVP2 scheduler and sandbox, the MVP8 gameplay services and the
+## [7.47.0] - 2026-09-25
+
+MVP3 (the world/place package) is closed on the Unity verification gate (Unity 6000.3.14f1, 2026-09-25): EditMode
+full 6550 total / 6539 passed / 0 failed / 11 skipped, the `core`, `llm` and `lua` legs and the `MIRROR` leg 0
+failed; PlayMode `FastNoLlm` 95 total / 94 passed / 0 failed / 1 skipped; the portable engine-free suite 2172 passed
+/ 0 failed and the Lua tier 1846 of 1848 passed / 0 failed / 2 not run. The live-model PlayMode suite is not part of
+the gate and is still to be re-run (its last run had four live-model timeouts on an unresponsive LM Studio server);
+the IL2CPP/WebGL player checks and spikes S1/S2 are open follow-ups (`TODO.md`). The branch was merged with 7.46.0
+before the gate. The entries below also cover the fix waves that followed the 2026-09-24 audits of the MVP1 instance core, the MVP2 scheduler and sandbox, the MVP8 gameplay services and the
 multiplayer foundation, and the three audit rounds over those waves (audit ids in parentheses — A1-xx world
 package, A2-xx Lua runtime, A3-xx instances and bindings, A4-xx multiplayer for round 1; B1-xx network and bindings,
 B2-xx world package and mod runtime, B3-xx sandbox for round 2; C1-xx multiplayer and coercion, C2-xx world package
@@ -69,8 +75,8 @@ and runtime, C3-xx sandbox for round 3; details in `TODO.md`).
   same state — got its own full budget, so twelve nested levels of 12 MB each kept 138 MB alive under a 16 MB guard;
   it now gets its own budget or what the enclosing run has left, whichever is smaller, for steps, time and memory,
   its steps are charged back, and exhausting a lent limit ends the whole chain (cut in 152 ms). The C-call cap is one
-  count of 128 weighted levels per chain of nested runs — `pcall`/`xpcall` bodies and `gsub` callbacks open one,
-  every other call back into Lua two — and a resumed thread continues its resumer's count, so any mix stays under
+  count of 128 weighted levels per chain of nested runs — `pcall`/`xpcall` bodies open one, every other call
+  back into Lua two (a `gsub` callback too since the merge check, below) — and a resumed thread continues its resumer's count, so any mix stays under
   about 512 KB of native stack (474 KB measured then, 428 KB after C3-02 below), which an IL2CPP or WebGL player
   may not bound itself;
   before, the count ran 200 per channel and restarted in every task thread, and 250 nested `task.spawn` levels plus
@@ -174,6 +180,11 @@ and runtime, C3-xx sandbox for round 3; details in `TODO.md`).
   ceiling was one byte over and Mirror dropped it after the bridge counted it sent. The envelopes are sized for the
   widest varint now, which lowers each ceiling by one byte (two for a `RemoteFunction` request): a 600-byte
   unreliable packet carries 575 payload bytes instead of 576.
+- **A `gsub` replacement chain at the C-call cap passed the native-stack envelope on Windows x64.** A replacement
+  function opened one level of the 128-level weighted cap, sized for about 4 KB of native stack a level; it measured
+  3,872 B on Linux CoreCLR but 4,288 B on Windows x64, so a chain at the cap took 531 KB there, past the 512 KB the
+  weights exist to keep. A `string.gsub` replacement function now opens two levels (`HeavyCallLevels`), so it nests
+  63 deep instead of 128; the error at the cap is unchanged.
 - **Half an emoji locked the world: no save, no autosave, no gated tool, not even `forget` or a load.** Lua strings
   are cut by UTF-16 code unit, so `s:sub(1, 1)` on a string that starts with an emoji hands the CLR a lone
   surrogate; written to a name, a `StringValue`, a string attribute or a tag it captured fine, and then the strict

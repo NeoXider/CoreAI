@@ -1,16 +1,21 @@
 # Current status and next steps
 
-Checkpoint: 2026-09-24. Branch `claude/dazzling-noether-im5m79`, base `main` 1ef27101 (release 7.45.0).
+Checkpoint: 2026-09-25. Branch `merge/mvp3` (MVP3 merged with main's 7.46.0), released as 7.47.0.
 The one MVP ladder of record is `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4 (renumbered on 2026-09-24:
 §4.1 maps the old numbers; `Docs/ROADMAP.md` §4 is the one-screen table). Open work is in `TODO.md`,
 filed under the same rung names.
 
 ## Where we are
 
-- **MVP3 (world/place package) is code complete and closed on the Linux suites; its release and tag
-  wait for the owner's Unity verification gate.** Portable suites at `055aed29` (TRX-counted):
-  engine-free 2137 passed / 0 failed / 3 skipped; Lua tier 1837 passed / 0 failed / 38 not executed
-  (engine-bound cases Inconclusive by design, listed in `tools/portable/LuaTests/README.md`).
+- **MVP3 (world/place package) is closed (2026-09-25) and released in 7.47.0** on the Unity gate
+  (Unity 6000.3.14f1): EditMode full 6550 total / 6539 passed / 0 failed / 11 skipped, `core`
+  5266/5254/0/12, `llm` 6234/6221/0/13, `lua` 5582/5572/0/10, `MIRROR` 6550/6539/0/11; PlayMode
+  `FastNoLlm` 95/94/0/1; portable engine-free 2172 passed / 0 failed, Lua tier 1848 total / 1846 passed /
+  0 failed / 2 not run. The live-model PlayMode suite is not green (last run 4 of 165 failed, all
+  live-model timeouts on an unresponsive LM Studio server) and is to be re-run. Decision (tech lead,
+  2026-09-25): MVP3 is closed on the Unity EditMode/PlayMode `FastNoLlm` gate; spikes S1/S2 and the
+  IL2CPP/WebGL player checks are open follow-ups that gate the next networked rung, not MVP3's product
+  scope.
 - **Audit rounds 1–3 are complete, and every finding is fixed or filed in `TODO.md`.** Round 3's
   findings are fixed by C1F (`7cf2891e`), C2F (`d4d7f95b`) and C3F (`055aed29`: nested-run steps reach
   every ancestor, the enclosing run is the innermost executing run on the OS thread, `mods_call`
@@ -43,14 +48,14 @@ filed under the same rung names.
 
 ## Next three rungs
 
-1. **MVP3 close** (S) — first steps:
-   - audit rounds 1–3 and their fixes are done (`TODO.md`, top section, lists the follow-ups);
-   - run the "Check the tests" checklist in Unity 6000.3.14f1 (EditMode in all four legs plus `MIRROR`,
-     PlayMode `FastNoLlm`, the never-run fixtures) and fix, never skip, any failure;
-   - run the real WebGL page-reload gate;
+1. **MVP3 follow-ups** (the rung closed 2026-09-25 in 7.47.0; these gate the next networked rung):
+   - the IL2CPP/WebGL player checks of "Check the tests" in `TODO.md` (the native-stack mod
+     `local function f() pcall(f) end f()` ends in "C stack overflow", the `__concat` chain, three
+     Save & run of `sample_castle3d`, the budget guard on IL2CPP);
+   - the real WebGL page-reload smoke of the world package;
    - spikes **S1** (guarded VM cost on an IL2CPP Linux server build and Mono x64) and **S2** (bytes per
      CFrame patch, JSON vs binary); record the numbers in `TODO.md`;
-   - bump (`python tools/bump_version.py <version>`) and tag.
+   - the live-model PlayMode re-run (an OpenRouter free model is planned).
 2. **MVP4 — script contexts & client runtime** (M) — first steps:
    - design note for plan decision D1 (c): `Script`/`LocalScript`/`ModuleScript` as instances whose
      `Source` is a view over the mod source store; decide the package `format_version` question and
