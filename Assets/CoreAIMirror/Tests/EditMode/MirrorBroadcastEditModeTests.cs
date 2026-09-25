@@ -114,12 +114,26 @@ namespace CoreAI.Net.Mirror.Tests
         [Test]
         public void Mirror_PingsTheStrangerBelowAdmission_AndTheWitnessTellsThatFromTheBroadcast()
         {
-            Admit(11, "actor-a");
+            // WHY a zero ping interval: a connection pings on a flush only once NetworkTime.localTime (the editor's
+            // unscaled time) has passed its interval, so whether this flush pinged anybody depended on the editor's
+            // clock, and the test failed when its class ran alone. With no interval every flush pings every connection.
+            float pingInterval = NetworkTime.PingInterval;
+            NetworkTime.PingInterval = 0f;
+            List<int> pinged;
+            try
+            {
+                Admit(11, "actor-a");
 
-            _bridge.SendEvent(FireAllClients());
-            _mirror.FlushServer();
+                _bridge.SendEvent(FireAllClients());
+                _mirror.FlushServer();
 
-            List<int> pinged = _mirror.ServerSendTargetsOf<NetworkPingMessage>();
+                pinged = _mirror.ServerSendTargetsOf<NetworkPingMessage>();
+            }
+            finally
+            {
+                NetworkTime.PingInterval = pingInterval;
+            }
+
             CollectionAssert.Contains(pinged, Stranger,
                 "the transport does reach the stranger — with Mirror's ping, never with the bridge's event");
             CollectionAssert.Contains(pinged, 11);

@@ -572,6 +572,16 @@ namespace CoreAI.Tests.EditMode
             LuaCsCoroutineBudgetSettings liveResumeBudget = null)
         {
             LuaCsApiRegistry registry = new();
+            RegisterRecordAndEcho(registry, rows);
+            return env.Create(registry, liveResumeBudget);
+        }
+
+        /// <summary>
+        /// Registers the <c>record(...)</c> and <c>echo(...)</c> host functions described on
+        /// <see cref="RunRecordingChunk"/>.
+        /// </summary>
+        private static void RegisterRecordAndEcho(LuaCsApiRegistry registry, List<string> rows)
+        {
             registry.RegisterCallback("record", (ctx, ct) =>
             {
                 List<string> parts = new();
@@ -586,7 +596,6 @@ namespace CoreAI.Tests.EditMode
             });
             registry.RegisterCallback("echo", (ctx, ct) =>
                 new System.Threading.Tasks.ValueTask<int>(ctx.Return(ctx.Arguments.ToArray())));
-            return env.Create(registry, liveResumeBudget);
         }
 
         /// <summary>
@@ -605,6 +614,45 @@ namespace CoreAI.Tests.EditMode
         internal static LuaCsCoroutineBudgetSettings UnhurriedRawResumes()
         {
             return new LuaCsCoroutineBudgetSettings(LuaCsCoroutineHandle.DefaultBudgetPerResume, 30_000);
+        }
+
+        /// <summary>The native stack <see cref="OnADeepStack"/> gives the tests that nest up to the C-call limit.</summary>
+        internal const int DeepStackBytes = 16 * 1024 * 1024;
+
+        /// <summary>
+        /// Runs <paramref name="body"/> on a thread with a <see cref="DeepStackBytes"/> stack and rethrows on the calling
+        /// thread whatever it threw, a failed assertion included.
+        /// </summary>
+        /// <remarks>
+        /// WHY: the tests that run this pin the sandbox's own C-call limit
+        /// (<see cref="LuaCsSecureEnvironment.MaxCCallDepth"/>), so their chains must be able to reach it. On CoreCLR they
+        /// do on any test thread. Unity's Mono lays out frames about three times larger (11-18 KB a level at the limit,
+        /// NativeStack_EveryChannelStaysWithinItsWeight_AtTheCap), and on the editor's main thread Lua-CSharp's own
+        /// stack check (<c>RuntimeHelpers.TryEnsureSufficientExecutionStack</c>) raised its catchable "stack overflow"
+        /// after 38-40 pcall levels, long before the limit these tests pin. What a chain does on the calling thread,
+        /// whichever of the two stops it there, is pinned by
+        /// NativeStack_OnTheCallingThread_EveryChannelEndsInACatchableLine_AndGivesItsLevelsBack.
+        /// </remarks>
+        internal static void OnADeepStack(System.Action body)
+        {
+            System.Exception thrown = null;
+            System.Threading.Thread worker = new(() =>
+            {
+                try
+                {
+                    body();
+                }
+                catch (System.Exception ex)
+                {
+                    thrown = ex;
+                }
+            }, DeepStackBytes);
+            worker.Start();
+            worker.Join();
+            if (thrown != null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(thrown).Throw();
+            }
         }
 
         [Test]
@@ -1452,29 +1500,32 @@ namespace CoreAI.Tests.EditMode
             // its wall time depends on the host, so the capped run is timed against the same shape failing on its
             // own at 40 levels on the same host. Capped, the ratio is about (63/40)^2 = 2.5, well inside the bound;
             // uncapped at 1,000 it was about (1000/40)^2 = 625.
-            string referenceChunk = CStackPrelude(40) + shape;
-            string cappedChunk = CStackPrelude(1000) + shape + "\nrecord(maxDepth)";
-            List<string> reference = new();
-            long referenceMs = TimeCStackRun(referenceChunk, reference, out LuaRuntimeException referenceEnded);
-            Assert.IsNull(referenceEnded, referenceEnded?.Message);
-            Assert.AreEqual(new[] { "boolean:false|string:mod cap" }, reference.ToArray(),
-                "the reference run fails on the mod's own cap, below the C-stack limit");
+            OnADeepStack(() =>
+            {
+                string referenceChunk = CStackPrelude(40) + shape;
+                string cappedChunk = CStackPrelude(1000) + shape + "\nrecord(maxDepth)";
+                List<string> reference = new();
+                long referenceMs = TimeCStackRun(referenceChunk, reference, out LuaRuntimeException referenceEnded);
+                Assert.IsNull(referenceEnded, referenceEnded?.Message);
+                Assert.AreEqual(new[] { "boolean:false|string:mod cap" }, reference.ToArray(),
+                    "the reference run fails on the mod's own cap, below the C-stack limit");
 
-            List<string> rows = new();
-            long cappedMs = TimeCStackRun(cappedChunk, rows, out LuaRuntimeException ended);
+                List<string> rows = new();
+                long cappedMs = TimeCStackRun(cappedChunk, rows, out LuaRuntimeException ended);
 
-            Assert.IsNull(ended, "the error is an ordinary one that pcall catches: " + ended?.Message);
-            Assert.AreEqual(2, rows.Count, string.Join(" / ", rows));
-            string expectedLine = LuaCsSecureEnvironment.CStackOverflowMessage + " (" + boundary + ": more than "
-                                  + LuaCsSecureEnvironment.MaxCCallDepth
-                                  + " levels of nested calls from library functions back into Lua)";
-            Assert.AreEqual("boolean:false|string:" + expectedLine, rows[0]);
-            AssertIsOnlyTheErrorLine(expectedLine);
-            Assert.AreEqual("number:" + deepestLuaLevel, rows[1],
-                "the nesting stops at the limit, not at the mod's own cap of 1,000");
-            AssertCappedNestingUnwindsLikeItsReference(referenceMs, cappedMs,
-                () => RunCStackChunkAgain(referenceChunk, reference),
-                () => RunCStackChunkAgain(cappedChunk, rows));
+                Assert.IsNull(ended, "the error is an ordinary one that pcall catches: " + ended?.Message);
+                Assert.AreEqual(2, rows.Count, string.Join(" / ", rows));
+                string expectedLine = LuaCsSecureEnvironment.CStackOverflowMessage + " (" + boundary + ": more than "
+                                      + LuaCsSecureEnvironment.MaxCCallDepth
+                                      + " levels of nested calls from library functions back into Lua)";
+                Assert.AreEqual("boolean:false|string:" + expectedLine, rows[0]);
+                AssertIsOnlyTheErrorLine(expectedLine);
+                Assert.AreEqual("number:" + deepestLuaLevel, rows[1],
+                    "the nesting stops at the limit, not at the mod's own cap of 1,000");
+                AssertCappedNestingUnwindsLikeItsReference(referenceMs, cappedMs,
+                    () => RunCStackChunkAgain(referenceChunk, reference),
+                    () => RunCStackChunkAgain(cappedChunk, rows));
+            });
         }
 
         /// <summary>How many times each C-stack shape is timed; the fastest run of each is what is compared.</summary>
@@ -1580,35 +1631,38 @@ namespace CoreAI.Tests.EditMode
             // of 200 took 0.6 s under load), and the time budget is not what this test measures.
             // WHY max: the pcall around each chain opens one level and each sort or resume two (see
             // LuaCsSecureEnvironment.MaxCCallDepth).
-            List<string> rows = new();
-            int max = (LuaCsSecureEnvironment.MaxCCallDepth - LuaCsSecureEnvironment.LightCallLevels)
-                      / LuaCsSecureEnvironment.HeavyCallLevels;
-            LuaRuntimeException ended = RunRecordingChunk(
-                NestSort +
-                "local function chain(n)\n" +
-                "  if n == 0 then return 0 end\n" +
-                "  local ok, v = coroutine.resume(coroutine.create(chain), n - 1)\n" +
-                "  if not ok then error(v, 0) end\n" +
-                "  return v + 1\n" +
-                "end\n" +
-                "record(pcall(nest, " + max + "))\n" +
-                "record(pcall(nest, " + (max + 1) + "))\n" +
-                "record(pcall(nest, " + max + "))\n" +
-                "record(pcall(chain, " + max + "))\n" +
-                "record(pcall(chain, " + (max + 1) + "))\n" +
-                "record(pcall(chain, " + max + "))",
-                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows, UnhurriedRawResumes());
+            OnADeepStack(() =>
+            {
+                List<string> rows = new();
+                int max = (LuaCsSecureEnvironment.MaxCCallDepth - LuaCsSecureEnvironment.LightCallLevels)
+                          / LuaCsSecureEnvironment.HeavyCallLevels;
+                LuaRuntimeException ended = RunRecordingChunk(
+                    NestSort +
+                    "local function chain(n)\n" +
+                    "  if n == 0 then return 0 end\n" +
+                    "  local ok, v = coroutine.resume(coroutine.create(chain), n - 1)\n" +
+                    "  if not ok then error(v, 0) end\n" +
+                    "  return v + 1\n" +
+                    "end\n" +
+                    "record(pcall(nest, " + max + "))\n" +
+                    "record(pcall(nest, " + (max + 1) + "))\n" +
+                    "record(pcall(nest, " + max + "))\n" +
+                    "record(pcall(chain, " + max + "))\n" +
+                    "record(pcall(chain, " + (max + 1) + "))\n" +
+                    "record(pcall(chain, " + max + "))",
+                    new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows, UnhurriedRawResumes());
 
-            Assert.IsNull(ended, ended?.Message);
-            Assert.AreEqual(6, rows.Count, string.Join(" / ", rows));
-            Assert.AreEqual("boolean:true|number:" + max, rows[0], max + " nested table.sort calls are allowed");
-            StringAssert.StartsWith("boolean:false|string:" + LuaCsSecureEnvironment.CStackOverflowMessage
-                                    + " (table.sort:", rows[1]);
-            Assert.AreEqual("boolean:true|number:" + max, rows[2], "the refusal released every level");
-            Assert.AreEqual("boolean:true|number:" + max, rows[3], max + " nested resumes are allowed");
-            StringAssert.StartsWith("boolean:false|string:" + LuaCsSecureEnvironment.CStackOverflowMessage
-                                    + " (coroutine.resume:", rows[4]);
-            Assert.AreEqual("boolean:true|number:" + max, rows[5]);
+                Assert.IsNull(ended, ended?.Message);
+                Assert.AreEqual(6, rows.Count, string.Join(" / ", rows));
+                Assert.AreEqual("boolean:true|number:" + max, rows[0], max + " nested table.sort calls are allowed");
+                StringAssert.StartsWith("boolean:false|string:" + LuaCsSecureEnvironment.CStackOverflowMessage
+                                        + " (table.sort:", rows[1]);
+                Assert.AreEqual("boolean:true|number:" + max, rows[2], "the refusal released every level");
+                Assert.AreEqual("boolean:true|number:" + max, rows[3], max + " nested resumes are allowed");
+                StringAssert.StartsWith("boolean:false|string:" + LuaCsSecureEnvironment.CStackOverflowMessage
+                                        + " (coroutine.resume:", rows[4]);
+                Assert.AreEqual("boolean:true|number:" + max, rows[5]);
+            });
         }
 
         [Test]
@@ -1624,27 +1678,30 @@ namespace CoreAI.Tests.EditMode
             // 1 s wall-clock allowance is not what this test measures.
             // WHY max: the pcall on the main thread opens one level and each sort two; the coroutine starts after
             // its resume's two, so it nests the same max sorts only once the suspended pcall gave its level back.
-            List<string> rows = new();
-            int max = (LuaCsSecureEnvironment.MaxCCallDepth - LuaCsSecureEnvironment.LightCallLevels)
-                      / LuaCsSecureEnvironment.HeavyCallLevels;
-            LuaRuntimeException ended = RunRecordingChunk(
-                NestSort +
-                "local co = coroutine.create(function()\n" +
-                "  pcall(function() coroutine.yield('inside pcall') end)\n" +
-                "  return nest(" + max + ")\n" +
-                "end)\n" +
-                "record(coroutine.resume(co))\n" +
-                "record(pcall(nest, " + max + "))\n" +
-                "record(coroutine.resume(co))",
-                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows, UnhurriedRawResumes());
-
-            Assert.IsNull(ended, ended?.Message);
-            CollectionAssert.AreEqual(new[]
+            OnADeepStack(() =>
             {
-                "boolean:true|string:inside pcall",
-                "boolean:true|number:" + max,
-                "boolean:true|number:" + max
-            }, rows, "the suspended pcall neither limits the main thread nor stays counted once it finished");
+                List<string> rows = new();
+                int max = (LuaCsSecureEnvironment.MaxCCallDepth - LuaCsSecureEnvironment.LightCallLevels)
+                          / LuaCsSecureEnvironment.HeavyCallLevels;
+                LuaRuntimeException ended = RunRecordingChunk(
+                    NestSort +
+                    "local co = coroutine.create(function()\n" +
+                    "  pcall(function() coroutine.yield('inside pcall') end)\n" +
+                    "  return nest(" + max + ")\n" +
+                    "end)\n" +
+                    "record(coroutine.resume(co))\n" +
+                    "record(pcall(nest, " + max + "))\n" +
+                    "record(coroutine.resume(co))",
+                    new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows, UnhurriedRawResumes());
+
+                Assert.IsNull(ended, ended?.Message);
+                CollectionAssert.AreEqual(new[]
+                {
+                    "boolean:true|string:inside pcall",
+                    "boolean:true|number:" + max,
+                    "boolean:true|number:" + max
+                }, rows, "the suspended pcall neither limits the main thread nor stays counted once it finished");
+            });
         }
 
         [Test]
@@ -1697,29 +1754,32 @@ namespace CoreAI.Tests.EditMode
             // 200 ms trip of the loop at the bottom then unwound through every level with no hook able to fire:
             // 71 s. The pcall past the limit now returns the C-stack line, and the trip crosses the levels below it
             // as the cancellation no pcall catches.
-            List<string> rows = new();
-            LuaRuntimeException ended = null;
+            OnADeepStack(() =>
+            {
+                List<string> rows = new();
+                LuaRuntimeException ended = null;
 
-            long elapsedMs = ElapsedMs(() => ended = RunRecordingChunk(
-                "depth = 0\n" +
-                "local function f()\n" +
-                "  depth = depth + 1\n" +
-                "  local ok, e = pcall(f)\n" +
-                "  if not ok and not reported then reported = true record('deepest', depth, e) end\n" +
-                "  while true do end\n" +
-                "end\n" +
-                "f()\n" +
-                "record('after the trip')",
-                new LuaCsExecutionGuard(200, 50_000_000, 0), rows));
+                long elapsedMs = ElapsedMs(() => ended = RunRecordingChunk(
+                    "depth = 0\n" +
+                    "local function f()\n" +
+                    "  depth = depth + 1\n" +
+                    "  local ok, e = pcall(f)\n" +
+                    "  if not ok and not reported then reported = true record('deepest', depth, e) end\n" +
+                    "  while true do end\n" +
+                    "end\n" +
+                    "f()\n" +
+                    "record('after the trip')",
+                    new LuaCsExecutionGuard(200, 50_000_000, 0), rows));
 
-            CollectionAssert.AreEqual(
-                new[] { "string:deepest|number:" + (MaxNestedPcalls + 1) + "|string:" + CStackLimitLine("pcall") },
-                rows, "the pcall past the limit returns the C-stack line, and nothing runs after the trip");
-            Assert.IsNotNull(ended, "the trip must end the run");
-            Assert.AreEqual("sandbox: Lua exceeded 200 ms.", ended.Message);
-            AssertIsOnlyTheErrorLine(ended.Message);
-            Assert.Less(elapsedMs, 3000,
-                "backstop: the capped levels unwind in a fraction of a second, the uncounted recursion took a minute");
+                CollectionAssert.AreEqual(
+                    new[] { "string:deepest|number:" + (MaxNestedPcalls + 1) + "|string:" + CStackLimitLine("pcall") },
+                    rows, "the pcall past the limit returns the C-stack line, and nothing runs after the trip");
+                Assert.IsNotNull(ended, "the trip must end the run");
+                Assert.AreEqual("sandbox: Lua exceeded 200 ms.", ended.Message);
+                AssertIsOnlyTheErrorLine(ended.Message);
+                Assert.Less(elapsedMs, 3000,
+                    "backstop: the capped levels unwind in a fraction of a second, the uncounted recursion took a minute");
+            });
         }
 
         [Test]
@@ -1729,26 +1789,29 @@ namespace CoreAI.Tests.EditMode
             // WHY (audit B3-01, B3-08): the xpcall variant of the recursion above. Its handler got nil for the
             // engine's own stack overflow at depth 2,684, where pcall got text. At the limit the handler now gets
             // the C-stack line, as a Luau xpcall's handler gets "C stack overflow"; after the trip it never runs.
-            List<string> rows = new();
-            LuaRuntimeException ended = null;
+            OnADeepStack(() =>
+            {
+                List<string> rows = new();
+                LuaRuntimeException ended = null;
 
-            long elapsedMs = ElapsedMs(() => ended = RunRecordingChunk(
-                "depth = 0\n" +
-                "local function f()\n" +
-                "  depth = depth + 1\n" +
-                "  xpcall(f, function(e) record('handler', depth, e) return e end)\n" +
-                "  while true do end\n" +
-                "end\n" +
-                "f()\n" +
-                "record('after the trip')",
-                new LuaCsExecutionGuard(200, 50_000_000, 0), rows));
+                long elapsedMs = ElapsedMs(() => ended = RunRecordingChunk(
+                    "depth = 0\n" +
+                    "local function f()\n" +
+                    "  depth = depth + 1\n" +
+                    "  xpcall(f, function(e) record('handler', depth, e) return e end)\n" +
+                    "  while true do end\n" +
+                    "end\n" +
+                    "f()\n" +
+                    "record('after the trip')",
+                    new LuaCsExecutionGuard(200, 50_000_000, 0), rows));
 
-            CollectionAssert.AreEqual(
-                new[] { "string:handler|number:" + (MaxNestedPcalls + 1) + "|string:" + CStackLimitLine("xpcall") },
-                rows, "the handler runs once, with the C-stack line, and never after the trip");
-            Assert.IsNotNull(ended, "the trip must end the run");
-            Assert.AreEqual("sandbox: Lua exceeded 200 ms.", ended.Message);
-            Assert.Less(elapsedMs, 3000, "backstop: the capped nesting unwinds in a fraction of a second");
+                CollectionAssert.AreEqual(
+                    new[] { "string:handler|number:" + (MaxNestedPcalls + 1) + "|string:" + CStackLimitLine("xpcall") },
+                    rows, "the handler runs once, with the C-stack line, and never after the trip");
+                Assert.IsNotNull(ended, "the trip must end the run");
+                Assert.AreEqual("sandbox: Lua exceeded 200 ms.", ended.Message);
+                Assert.Less(elapsedMs, 3000, "backstop: the capped nesting unwinds in a fraction of a second");
+            });
         }
 
         [Test]
@@ -1757,42 +1820,45 @@ namespace CoreAI.Tests.EditMode
         {
             // WHY the negative twin: legitimate nesting below Luau's own limit costs nothing, and a refused call
             // gives back every level the calls under it held. pcall of a host function is unchanged.
-            List<string> rows = new();
-            int max = MaxNestedPcalls;
-            LuaRuntimeException ended = RunRecordingChunk(
-                "local function nest(n)\n" +
-                "  if n == 0 then return 'bottom' end\n" +
-                "  local ok, v = pcall(nest, n - 1)\n" +
-                "  if not ok then error(v, 0) end\n" +
-                "  return v\n" +
-                "end\n" +
-                "local function xnest(n)\n" +
-                "  if n == 0 then return 'bottom' end\n" +
-                "  local ok, v = xpcall(xnest, function(e) return e end, n - 1)\n" +
-                "  if not ok then error(v, 0) end\n" +
-                "  return v\n" +
-                "end\n" +
-                "record(pcall(nest, 99))\n" +
-                "record(pcall(nest, " + (max - 1) + "))\n" +
-                "record(pcall(nest, " + max + "))\n" +
-                "record(pcall(nest, " + (max - 1) + "))\n" +
-                "record(xpcall(xnest, function(e) return e end, " + (max - 1) + "))\n" +
-                "record(xpcall(xnest, function(e) return e end, " + max + "))\n" +
-                "record(pcall(echo, 'host', 2))",
-                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows);
-
-            Assert.IsNull(ended, ended?.Message);
-            CollectionAssert.AreEqual(new[]
+            OnADeepStack(() =>
             {
-                "boolean:true|string:bottom",
-                "boolean:true|string:bottom",
-                "boolean:false|string:" + CStackLimitLine("pcall"),
-                "boolean:true|string:bottom",
-                "boolean:true|string:bottom",
-                "boolean:false|string:" + CStackLimitLine("xpcall"),
-                "boolean:true|string:host|number:2"
-            }, rows, "100 and " + max + " nested calls succeed, " + (max + 1) + " return the limit line");
-            AssertIsOnlyTheErrorLine(CStackLimitLine("pcall"));
+                List<string> rows = new();
+                int max = MaxNestedPcalls;
+                LuaRuntimeException ended = RunRecordingChunk(
+                    "local function nest(n)\n" +
+                    "  if n == 0 then return 'bottom' end\n" +
+                    "  local ok, v = pcall(nest, n - 1)\n" +
+                    "  if not ok then error(v, 0) end\n" +
+                    "  return v\n" +
+                    "end\n" +
+                    "local function xnest(n)\n" +
+                    "  if n == 0 then return 'bottom' end\n" +
+                    "  local ok, v = xpcall(xnest, function(e) return e end, n - 1)\n" +
+                    "  if not ok then error(v, 0) end\n" +
+                    "  return v\n" +
+                    "end\n" +
+                    "record(pcall(nest, 99))\n" +
+                    "record(pcall(nest, " + (max - 1) + "))\n" +
+                    "record(pcall(nest, " + max + "))\n" +
+                    "record(pcall(nest, " + (max - 1) + "))\n" +
+                    "record(xpcall(xnest, function(e) return e end, " + (max - 1) + "))\n" +
+                    "record(xpcall(xnest, function(e) return e end, " + max + "))\n" +
+                    "record(pcall(echo, 'host', 2))",
+                    new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows);
+
+                Assert.IsNull(ended, ended?.Message);
+                CollectionAssert.AreEqual(new[]
+                {
+                    "boolean:true|string:bottom",
+                    "boolean:true|string:bottom",
+                    "boolean:false|string:" + CStackLimitLine("pcall"),
+                    "boolean:true|string:bottom",
+                    "boolean:true|string:bottom",
+                    "boolean:false|string:" + CStackLimitLine("xpcall"),
+                    "boolean:true|string:host|number:2"
+                }, rows, "100 and " + max + " nested calls succeed, " + (max + 1) + " return the limit line");
+                AssertIsOnlyTheErrorLine(CStackLimitLine("pcall"));
+            });
         }
 
         [Test]
@@ -1802,19 +1868,22 @@ namespace CoreAI.Tests.EditMode
             // WHY: at the limit xpcall still runs its message handler, as Luau's does, so a handler that calls xpcall
             // again would nest once more per level; like Luau's it gets an eighth more room and then the call ends
             // with "error in error handling" instead of recursing through handlers until the .NET stack gives out.
-            List<string> rows = new();
-            LuaRuntimeException ended = RunRecordingChunk(
-                "local function handler(e) local ok, v = xpcall(error, handler, e) return v end\n" +
-                "local function nest(n)\n" +
-                "  if n == 0 then return xpcall(error, handler, 'bottom') end\n" +
-                "  local ok, a, b = pcall(nest, n - 1)\n" +
-                "  return a, b\n" +
-                "end\n" +
-                "record(nest(" + MaxNestedPcalls + "))",
-                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows);
+            OnADeepStack(() =>
+            {
+                List<string> rows = new();
+                LuaRuntimeException ended = RunRecordingChunk(
+                    "local function handler(e) local ok, v = xpcall(error, handler, e) return v end\n" +
+                    "local function nest(n)\n" +
+                    "  if n == 0 then return xpcall(error, handler, 'bottom') end\n" +
+                    "  local ok, a, b = pcall(nest, n - 1)\n" +
+                    "  return a, b\n" +
+                    "end\n" +
+                    "record(nest(" + MaxNestedPcalls + "))",
+                    new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows);
 
-            Assert.IsNull(ended, ended?.Message);
-            CollectionAssert.AreEqual(new[] { "boolean:false|string:error in error handling" }, rows);
+                Assert.IsNull(ended, ended?.Message);
+                CollectionAssert.AreEqual(new[] { "boolean:false|string:error in error handling" }, rows);
+            });
         }
 
         /// <summary>
@@ -1890,44 +1959,47 @@ namespace CoreAI.Tests.EditMode
             // wrappers keep both, keep a suspended pcall counted on its own thread only, and give its level back
             // once it completes: the coroutine, which starts after its resume's own levels, can then nest exactly
             // up to the limit.
-            List<string> rows = new();
-            int max = MaxNestedPcalls;
-            LuaRuntimeException ended = RunRecordingChunk(
-                "local function nest(n)\n" +
-                "  if n == 0 then return 'bottom' end\n" +
-                "  local ok, v = pcall(nest, n - 1)\n" +
-                "  if not ok then error(v, 0) end\n" +
-                "  return v\n" +
-                "end\n" +
-                "local co = coroutine.create(function()\n" +
-                "  local ok, v = pcall(function() local got = coroutine.yield('inside pcall') return got * 2 end)\n" +
-                "  record('pcall', ok, v)\n" +
-                "  local ok2, v2 = xpcall(function() return coroutine.yield('inside xpcall') end,\n" +
-                "    function(e) return 'handled: ' .. tostring(e) end)\n" +
-                "  record('xpcall', ok2, v2)\n" +
-                "  local ok3, v3 = pcall(function() coroutine.yield('before the error') error('after the yield', 0) end)\n" +
-                "  record('pcall error', ok3, v3)\n" +
-                "  return nest(" + (max - LuaCsSecureEnvironment.HeavyCallLevels) + ")\n" +
-                "end)\n" +
-                "record(coroutine.resume(co))\n" +
-                "record(pcall(nest, " + (max - 1) + "))\n" +
-                "record(coroutine.resume(co, 21))\n" +
-                "record(coroutine.resume(co))\n" +
-                "record(coroutine.status(co))",
-                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows, UnhurriedRawResumes());
-
-            Assert.IsNull(ended, ended?.Message);
-            CollectionAssert.AreEqual(new[]
+            OnADeepStack(() =>
             {
-                "boolean:true|string:inside pcall",
-                "boolean:true|string:bottom",
-                "string:pcall|boolean:true|number:42",
-                "string:xpcall|boolean:false|string:handled: attempt to yield across a C#-call boundary",
-                "boolean:true|string:before the error",
-                "string:pcall error|boolean:false|string:after the yield",
-                "boolean:true|string:bottom",
-                "string:dead"
-            }, rows, "the suspended pcall holds its level on its own thread only and gives it back when it ends");
+                List<string> rows = new();
+                int max = MaxNestedPcalls;
+                LuaRuntimeException ended = RunRecordingChunk(
+                    "local function nest(n)\n" +
+                    "  if n == 0 then return 'bottom' end\n" +
+                    "  local ok, v = pcall(nest, n - 1)\n" +
+                    "  if not ok then error(v, 0) end\n" +
+                    "  return v\n" +
+                    "end\n" +
+                    "local co = coroutine.create(function()\n" +
+                    "  local ok, v = pcall(function() local got = coroutine.yield('inside pcall') return got * 2 end)\n" +
+                    "  record('pcall', ok, v)\n" +
+                    "  local ok2, v2 = xpcall(function() return coroutine.yield('inside xpcall') end,\n" +
+                    "    function(e) return 'handled: ' .. tostring(e) end)\n" +
+                    "  record('xpcall', ok2, v2)\n" +
+                    "  local ok3, v3 = pcall(function() coroutine.yield('before the error') error('after the yield', 0) end)\n" +
+                    "  record('pcall error', ok3, v3)\n" +
+                    "  return nest(" + (max - LuaCsSecureEnvironment.HeavyCallLevels) + ")\n" +
+                    "end)\n" +
+                    "record(coroutine.resume(co))\n" +
+                    "record(pcall(nest, " + (max - 1) + "))\n" +
+                    "record(coroutine.resume(co, 21))\n" +
+                    "record(coroutine.resume(co))\n" +
+                    "record(coroutine.status(co))",
+                    new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows, UnhurriedRawResumes());
+
+                Assert.IsNull(ended, ended?.Message);
+                CollectionAssert.AreEqual(new[]
+                {
+                    "boolean:true|string:inside pcall",
+                    "boolean:true|string:bottom",
+                    "string:pcall|boolean:true|number:42",
+                    "string:xpcall|boolean:false|string:handled: attempt to yield across a C#-call boundary",
+                    "boolean:true|string:before the error",
+                    "string:pcall error|boolean:false|string:after the yield",
+                    "boolean:true|string:bottom",
+                    "string:dead"
+                }, rows, "the suspended pcall holds its level on its own thread only and gives it back when it ends");
+            });
         }
 
         [Test]
@@ -2035,22 +2107,27 @@ namespace CoreAI.Tests.EditMode
 
         /// <summary>
         /// A mod stack over <paramref name="bindings"/> and <paramref name="store"/> with CoreAI's default
-        /// budgets, except a main-chunk step budget of <paramref name="handlerMaxSteps"/> and an allocation budget
-        /// of <paramref name="handlerMaxAllocatedBytes"/> for every thread of the mod.
+        /// budgets, except a main-chunk step budget of <paramref name="handlerMaxSteps"/>, a main-chunk wall clock of
+        /// <paramref name="handlerTimeoutMs"/> and an allocation budget of <paramref name="handlerMaxAllocatedBytes"/>
+        /// for every thread of the mod. Every coroutine of the stack
+        /// reads the per-resume budget of <paramref name="bindings"/>, as the factory asks of a composition.
         /// </summary>
         internal static LuaCsModStack NewNestedRunModStack(LuaCsRbxApiBindings bindings, NestedRunModStore store,
             long handlerMaxSteps = CoreAI.Ai.LuaCs.LuaCsModRuntime.DefaultHandlerMaxSteps,
-            long handlerMaxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget)
+            long handlerMaxAllocatedBytes = LuaCsExecutionGuard.DefaultMaxAllocatedBytesBudget,
+            int handlerTimeoutMs = CoreAI.Ai.LuaCs.LuaCsModRuntime.DefaultHandlerTimeoutMs)
         {
             return LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
+                HandlerTimeoutMs = handlerTimeoutMs,
                 Logger = new NestedRunSilentLogger(),
                 ModStore = store,
                 Capabilities = CoreAI.Ai.LuaCapabilities.All,
                 OneOffCapabilities = CoreAI.Ai.LuaCapabilities.All,
                 RbxApi = bindings,
                 HandlerMaxSteps = handlerMaxSteps,
-                HandlerMaxAllocatedBytes = handlerMaxAllocatedBytes
+                HandlerMaxAllocatedBytes = handlerMaxAllocatedBytes,
+                CoroutineResumeBudget = bindings.CoroutineResumeBudget
             });
         }
 
@@ -2074,27 +2151,30 @@ namespace CoreAI.Tests.EditMode
             // until the 10,000-step resume budget tripped deep inside, and the uncounted unwind held that one
             // frame for 5.7 s (33 s on a loaded host), every frame until the mod was quarantined. The recursion
             // now stops at the C-stack limit, like Luau's, and the handler simply returns.
-            LuaCsRbxApiBindings bindings = new();
-            NestedRunModStore store = new();
-            LuaCsModStack stack = NewNestedRunModStack(bindings, store);
-            stack.Runtime.LoadMod("m",
-                "game:GetService('RunService').Heartbeat:Connect(function()\n" +
-                "  local depth = 0\n" +
-                "  local function f()\n" +
-                "    depth = depth + 1\n" +
-                "    local ok, e = pcall(f)\n" +
-                "    if not ok and store_get('deepest') == '' then store_set('deepest', depth .. ' ' .. e) end\n" +
-                "  end\n" +
-                "  f()\n" +
-                "  store_set('handler returned', 'yes')\n" +
-                "end)");
+            OnADeepStack(() =>
+            {
+                LuaCsRbxApiBindings bindings = new();
+                NestedRunModStore store = new();
+                LuaCsModStack stack = NewNestedRunModStack(bindings, store);
+                stack.Runtime.LoadMod("m",
+                    "game:GetService('RunService').Heartbeat:Connect(function()\n" +
+                    "  local depth = 0\n" +
+                    "  local function f()\n" +
+                    "    depth = depth + 1\n" +
+                    "    local ok, e = pcall(f)\n" +
+                    "    if not ok and store_get('deepest') == '' then store_set('deepest', depth .. ' ' .. e) end\n" +
+                    "  end\n" +
+                    "  f()\n" +
+                    "  store_set('handler returned', 'yes')\n" +
+                    "end)");
 
-            long elapsedMs = ElapsedMs(() => bindings.Scheduler.Advance(1d / 60d));
+                long elapsedMs = ElapsedMs(() => bindings.Scheduler.Advance(1d / 60d));
 
-            Assert.AreEqual((MaxNestedPcalls + 1) + " " + CStackLimitLine("pcall"), store.Get("m", "deepest"));
-            Assert.AreEqual("yes", store.Get("m", "handler returned"), HandlerErrorsOf(stack));
-            Assert.AreEqual("", HandlerErrorsOf(stack));
-            Assert.Less(elapsedMs, 3000, "backstop: the frame must not be held for seconds");
+                Assert.AreEqual((MaxNestedPcalls + 1) + " " + CStackLimitLine("pcall"), store.Get("m", "deepest"));
+                Assert.AreEqual("yes", store.Get("m", "handler returned"), HandlerErrorsOf(stack));
+                Assert.AreEqual("", HandlerErrorsOf(stack));
+                Assert.Less(elapsedMs, 3000, "backstop: the frame must not be held for seconds");
+            });
         }
 
         [Test]
@@ -2135,25 +2215,28 @@ namespace CoreAI.Tests.EditMode
             // the end of the process. A spawned thread now continues its spawner's count, so the tostring nesting
             // at the bottom of 20 spawns gets only what the spawns left. What a level of each channel takes on the
             // native stack is measured by NativeStack_EveryChannelStaysWithinItsWeight_AtTheCap.
-            LuaCsRbxApiBindings bindings = new();
-            NestedRunModStore store = new();
-            LuaCsModStack stack = NewNestedRunModStack(bindings, store);
-            stack.Runtime.LoadMod("m",
-                "local mt = {}\n" +
-                "local levels = 0\n" +
-                "mt.__tostring = function() levels = levels + 1 return tostring(setmetatable({}, mt)) end\n" +
-                "local function f(n)\n" +
-                "  if n < 20 then task.spawn(f, n + 1) return end\n" +
-                "  local ok, err = pcall(tostring, setmetatable({}, mt))\n" +
-                "  store_set('result', tostring(ok) .. '|' .. levels .. '|' .. tostring(err))\n" +
-                "end\n" +
-                "task.spawn(f, 1)");
+            OnADeepStack(() =>
+            {
+                LuaCsRbxApiBindings bindings = new();
+                NestedRunModStore store = new();
+                LuaCsModStack stack = NewNestedRunModStack(bindings, store);
+                stack.Runtime.LoadMod("m",
+                    "local mt = {}\n" +
+                    "local levels = 0\n" +
+                    "mt.__tostring = function() levels = levels + 1 return tostring(setmetatable({}, mt)) end\n" +
+                    "local function f(n)\n" +
+                    "  if n < 20 then task.spawn(f, n + 1) return end\n" +
+                    "  local ok, err = pcall(tostring, setmetatable({}, mt))\n" +
+                    "  store_set('result', tostring(ok) .. '|' .. levels .. '|' .. tostring(err))\n" +
+                    "end\n" +
+                    "task.spawn(f, 1)");
 
-            int spawnLevels = 20 * LuaCsSecureEnvironment.HeavyCallLevels;
-            int toStringLevels = (LuaCsSecureEnvironment.MaxCCallDepth - spawnLevels - LuaCsSecureEnvironment.LightCallLevels)
-                                 / LuaCsSecureEnvironment.HeavyCallLevels;
-            Assert.AreEqual("false|" + toStringLevels + "|" + CStackLimitLine("tostring"), store.Get("m", "result"),
-                HandlerErrorsOf(stack));
+                int spawnLevels = 20 * LuaCsSecureEnvironment.HeavyCallLevels;
+                int toStringLevels = (LuaCsSecureEnvironment.MaxCCallDepth - spawnLevels - LuaCsSecureEnvironment.LightCallLevels)
+                                     / LuaCsSecureEnvironment.HeavyCallLevels;
+                Assert.AreEqual("false|" + toStringLevels + "|" + CStackLimitLine("tostring"), store.Get("m", "result"),
+                    HandlerErrorsOf(stack));
+            });
         }
 
         [Test]
@@ -2163,25 +2246,28 @@ namespace CoreAI.Tests.EditMode
             // WHY: without the count a chain of task.spawn calls that each run their thread at once was bounded
             // only by the 256-thread quota, 1.85 MB of native stack. The spawn past the limit now fails its new
             // thread with the C-stack line, and the chain above it simply returns.
-            LuaCsRbxApiBindings bindings = new();
-            NestedRunModStore store = new();
-            LuaCsModStack stack = NewNestedRunModStack(bindings, store);
-            stack.Runtime.LoadMod("m",
-                "local spawned = 0\n" +
-                "local function f(n)\n" +
-                "  spawned = spawned + 1\n" +
-                "  store_set('spawned', tostring(spawned))\n" +
-                "  if n < 100 then task.spawn(f, n + 1) end\n" +
-                "end\n" +
-                "task.spawn(f, 1)\n" +
-                "store_set('chunk end', 'yes')");
+            OnADeepStack(() =>
+            {
+                LuaCsRbxApiBindings bindings = new();
+                NestedRunModStore store = new();
+                LuaCsModStack stack = NewNestedRunModStack(bindings, store);
+                stack.Runtime.LoadMod("m",
+                    "local spawned = 0\n" +
+                    "local function f(n)\n" +
+                    "  spawned = spawned + 1\n" +
+                    "  store_set('spawned', tostring(spawned))\n" +
+                    "  if n < 100 then task.spawn(f, n + 1) end\n" +
+                    "end\n" +
+                    "task.spawn(f, 1)\n" +
+                    "store_set('chunk end', 'yes')");
 
-            int maxSpawns = LuaCsSecureEnvironment.MaxCCallDepth / LuaCsSecureEnvironment.HeavyCallLevels;
-            string errors = HandlerErrorsOf(stack);
-            Assert.AreEqual(maxSpawns.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                store.Get("m", "spawned"), errors);
-            Assert.AreEqual("yes", store.Get("m", "chunk end"), errors);
-            StringAssert.Contains(CStackLimitLine("task.spawn"), errors);
+                int maxSpawns = LuaCsSecureEnvironment.MaxCCallDepth / LuaCsSecureEnvironment.HeavyCallLevels;
+                string errors = HandlerErrorsOf(stack);
+                Assert.AreEqual(maxSpawns.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    store.Get("m", "spawned"), errors);
+                Assert.AreEqual("yes", store.Get("m", "chunk end"), errors);
+                StringAssert.Contains(CStackLimitLine("task.spawn"), errors);
+            });
         }
 
         [Test]
@@ -2192,31 +2278,34 @@ namespace CoreAI.Tests.EditMode
             // mod itself) nests one more run on the native stack; uncounted, a script could recurse through it
             // until the process's stack gave out. It is counted like a resume, and past the limit the host function
             // raises the same catchable line.
-            LuaCsSecureEnvironment env = new();
-            List<string> rows = new();
-            LuaState state = CreateRecordingState(env, rows);
-            LuaCsExecutionGuard guard = new(30_000, 50_000_000, 0);
-            state.Environment["reenter"] = new LuaFunction("reenter", (ctx, ct) =>
+            OnADeepStack(() =>
             {
-                LuaValue[] results = guard.Execute(ctx.State, ctx.GetArgument<LuaFunction>(0), ct);
-                return new System.Threading.Tasks.ValueTask<int>(ctx.Return(results));
+                LuaCsSecureEnvironment env = new();
+                List<string> rows = new();
+                LuaState state = CreateRecordingState(env, rows);
+                LuaCsExecutionGuard guard = new(30_000, 50_000_000, 0);
+                state.Environment["reenter"] = new LuaFunction("reenter", (ctx, ct) =>
+                {
+                    LuaValue[] results = guard.Execute(ctx.State, ctx.GetArgument<LuaFunction>(0), ct);
+                    return new System.Threading.Tasks.ValueTask<int>(ctx.Return(results));
+                });
+
+                env.RunChunk(state,
+                    "depth = 0\n" +
+                    "local function g() depth = depth + 1 local r = reenter(g) return r end\n" +
+                    "local ok, err = pcall(reenter, g)\n" +
+                    "record(ok, err, depth)\n" +
+                    "record(reenter(function() return 'still nests' end))",
+                    guard);
+
+                int maxReentries = (LuaCsSecureEnvironment.MaxCCallDepth - LuaCsSecureEnvironment.LightCallLevels)
+                                   / LuaCsSecureEnvironment.HeavyCallLevels;
+                CollectionAssert.AreEqual(new[]
+                {
+                    "boolean:false|string:" + CStackLimitLine("nested guarded call") + "|number:" + maxReentries,
+                    "string:still nests"
+                }, rows, "the refusal released every level it held");
             });
-
-            env.RunChunk(state,
-                "depth = 0\n" +
-                "local function g() depth = depth + 1 local r = reenter(g) return r end\n" +
-                "local ok, err = pcall(reenter, g)\n" +
-                "record(ok, err, depth)\n" +
-                "record(reenter(function() return 'still nests' end))",
-                guard);
-
-            int maxReentries = (LuaCsSecureEnvironment.MaxCCallDepth - LuaCsSecureEnvironment.LightCallLevels)
-                               / LuaCsSecureEnvironment.HeavyCallLevels;
-            CollectionAssert.AreEqual(new[]
-            {
-                "boolean:false|string:" + CStackLimitLine("nested guarded call") + "|number:" + maxReentries,
-                "string:still nests"
-            }, rows, "the refusal released every level it held");
         }
 
         #endregion
@@ -2317,6 +2406,10 @@ namespace CoreAI.Tests.EditMode
         /// booleans, strings, functions, threads, tables with __name, __tostring and __pairs, a non-string __tostring
         /// result, extra arguments and the bad-argument errors. Addresses are cut, since they differ between states.
         /// </summary>
+        /// <remarks>
+        /// WHY the sign is cut with the address: Lua-CSharp prints a table's address as a signed number, which in the
+        /// editor's Mono came out negative for one state and positive for the other ("table: -N" against "table: N").
+        /// </remarks>
         private const string CountedLibrarySweep =
             "local out = {}\n" +
             "local function add(...)\n" +
@@ -2334,7 +2427,7 @@ namespace CoreAI.Tests.EditMode
             "add(select('#', tostring(1, 2, 3)))\n" +
             "add((tostring(print):match('^(%a+):')))\n" +
             "add((tostring(coroutine.create(print)):match('^(%a+):')))\n" +
-            "add((tostring(setmetatable({}, {__name = 'MyType'})):gsub('%x+$', 'N')))\n" +
+            "add((tostring(setmetatable({}, {__name = 'MyType'})):gsub('%-?%x+$', 'N')))\n" +
             "add(tostring(setmetatable({}, {__tostring = function() return 'custom' end})))\n" +
             "add(pcall(tostring, setmetatable({}, {__tostring = function() return 42 end})))\n" +
             "add(pcall(tostring, setmetatable({}, {__tostring = function() error('in tostring', 0) end})))\n" +
@@ -2712,6 +2805,107 @@ namespace CoreAI.Tests.EditMode
             CollectionAssert.IsEmpty(failures, string.Join("\n", report));
         }
 
+        [Test]
+        [Timeout(300000)]
+        public void NativeStack_OnTheCallingThread_EveryChannelEndsInACatchableLine_AndGivesItsLevelsBack()
+        {
+            // WHY: the tests that pin the C-call limit run on a deep stack (OnADeepStack), because on the editor's Mono
+            // Lua-CSharp's own stack check stops a chain on the main thread first. This is what holds on the thread a
+            // mod really runs on, whichever of the two stops a chain there: the chain's own pcall gets a line naming a
+            // stack overflow - Lua-CSharp's "stack overflow" or the sandbox's "C stack overflow (...)" - nothing
+            // escapes the run, the process lives, and every level is given back, so the same state nests pcall again.
+            const int levelsAfterwards = 16;
+            List<string> report = new();
+            List<string> failures = new();
+            foreach ((string channel, _, string chain) in NativeStackChannels)
+            {
+                int outerCall = chain.LastIndexOf("\npcall(", System.StringComparison.Ordinal);
+                Assert.Greater(outerCall, 0, channel + ": every chain ends in the pcall that must catch it");
+                string recorded = chain.Substring(0, outerCall + 1) + "record(" + chain.Substring(outerCall + 1) + ")\n" +
+                                  "local function nest(n)\n" +
+                                  "  if n == 0 then return 'bottom' end\n" +
+                                  "  local ok, v = pcall(nest, n - 1)\n" +
+                                  "  if not ok then error(v, 0) end\n" +
+                                  "  return v\n" +
+                                  "end\n" +
+                                  "record(pcall(nest, " + levelsAfterwards + "))";
+                NativeStackRecorder recorder = new();
+                List<string> rows = new();
+                LuaCsSecureEnvironment env = new();
+                LuaState state = CreateChainState(env, recorder, rows);
+                recorder.Start();
+                try
+                {
+                    env.RunChunk(state, recorded, new LuaCsExecutionGuard(60_000, 5_000_000_000L, 0));
+                }
+                catch (LuaRuntimeException ex)
+                {
+                    failures.Add(channel + ": the error escaped the chain's pcall: " + ex.Message);
+                    continue;
+                }
+
+                report.Add(channel + ": level " + recorder.Deepest + ", " + string.Join(" / ", rows));
+                if (rows.Count != 2)
+                {
+                    failures.Add(channel + ": " + string.Join(" / ", rows));
+                    continue;
+                }
+
+                // WHY "error in error handling" too: a chain the engine's own check stops runs its xpcall handler at
+                // the same depth, where the handler overflows as well, and Lua ends such an xpcall with that line.
+                bool overflowLine = rows[0].Contains("stack overflow")
+                                    || (channel == "xpcall" && rows[0].EndsWith("|string:error in error handling",
+                                        System.StringComparison.Ordinal));
+                if (!rows[0].StartsWith("boolean:false|string:", System.StringComparison.Ordinal) || !overflowLine)
+                {
+                    failures.Add(channel + " ended with " + rows[0]);
+                }
+
+                if (recorder.Deepest < 16)
+                {
+                    failures.Add(channel + " stopped at level " + recorder.Deepest);
+                }
+
+                if (rows[1] != "boolean:true|string:bottom")
+                {
+                    failures.Add(channel + ": " + levelsAfterwards + " nested pcalls afterwards gave " + rows[1]);
+                }
+            }
+
+            TestContext.WriteLine(string.Join("\n", report));
+            CollectionAssert.IsEmpty(failures, string.Join("\n", report));
+        }
+
+        /// <summary>
+        /// A sandboxed state for the chains of <see cref="NativeStackChannels"/>: <c>probe(level)</c> reports to
+        /// <paramref name="recorder"/>, <c>reenter(f, ...)</c> runs <c>f</c> as a guarded call on the same state, and,
+        /// given <paramref name="rows"/>, <c>record(...)</c> and <c>echo(...)</c> work as on
+        /// <see cref="RunRecordingChunk"/>. Raw resumes are unhurried (<see cref="UnhurriedRawResumes"/>).
+        /// </summary>
+        private static LuaState CreateChainState(LuaCsSecureEnvironment env, NativeStackRecorder recorder,
+            List<string> rows)
+        {
+            LuaCsApiRegistry registry = new();
+            LuaCsExecutionGuard reentry = new(60_000, 5_000_000_000L, 0);
+            registry.RegisterCallback("probe", (ctx, ct) =>
+            {
+                recorder.Record((int)ctx.GetArgument(0).Read<double>());
+                return new System.Threading.Tasks.ValueTask<int>(ctx.Return());
+            });
+            registry.RegisterCallback("reenter", (ctx, ct) =>
+            {
+                LuaValue[] results = reentry.Execute(ctx.State, ctx.GetArgument<LuaFunction>(0), ct,
+                    ctx.GetArgument(1));
+                return new System.Threading.Tasks.ValueTask<int>(ctx.Return(results));
+            });
+            if (rows != null)
+            {
+                RegisterRecordAndEcho(registry, rows);
+            }
+
+            return env.Create(registry, UnhurriedRawResumes());
+        }
+
         /// <summary>Runs every chain of <see cref="NativeStackChannels"/> and the mod channels, recording each.</summary>
         private static void MeasureNativeStackChannels(
             List<(string Channel, int Levels, NativeStackRecorder Recorder, string Outcome)> measured)
@@ -2720,20 +2914,7 @@ namespace CoreAI.Tests.EditMode
             {
                 NativeStackRecorder recorder = new();
                 LuaCsSecureEnvironment env = new();
-                LuaCsApiRegistry registry = new();
-                LuaCsExecutionGuard reentry = new(60_000, 5_000_000_000L, 0);
-                registry.RegisterCallback("probe", (ctx, ct) =>
-                {
-                    recorder.Record((int)ctx.GetArgument(0).Read<double>());
-                    return new System.Threading.Tasks.ValueTask<int>(ctx.Return());
-                });
-                registry.RegisterCallback("reenter", (ctx, ct) =>
-                {
-                    LuaValue[] results = reentry.Execute(ctx.State, ctx.GetArgument<LuaFunction>(0), ct,
-                        ctx.GetArgument(1));
-                    return new System.Threading.Tasks.ValueTask<int>(ctx.Return(results));
-                });
-                LuaState state = env.Create(registry, UnhurriedRawResumes());
+                LuaState state = CreateChainState(env, recorder, null);
                 string outcome = "completed";
                 recorder.Start();
                 try
@@ -2794,26 +2975,29 @@ namespace CoreAI.Tests.EditMode
             // then ran its handler on top of that full stack, where the handler overflowed it again: the overflow
             // escaped the xpcall and ended the run, while pcall of the same function returned false. The handler
             // now runs where it runs for any other error; one that overflows the stack itself ends as Luau's does.
-            List<string> rows = new();
-            LuaRuntimeException ended = RunRecordingChunk(
-                "local function f() return 1 + f() end\n" +
-                "record('xpcall', xpcall(f, function(m) return 'H:' .. type(m) .. ':' .. tostring(m) end))\n" +
-                "record('pcall', pcall(f))\n" +
-                "local function r() return 1 + r() end\n" +
-                "record('overflowing handler', xpcall(f, function(m) return r() end))\n" +
-                "local function nest(n) if n == 0 then return 'bottom' end\n" +
-                "  local ok, v = pcall(nest, n - 1) if not ok then error(v, 0) end return v end\n" +
-                "record('levels', pcall(nest, " + (MaxNestedPcalls - 1) + "))",
-                new LuaCsExecutionGuard(120_000, 5_000_000_000L, 0), rows);
+            OnADeepStack(() =>
+            {
+                List<string> rows = new();
+                LuaRuntimeException ended = RunRecordingChunk(
+                    "local function f() return 1 + f() end\n" +
+                    "record('xpcall', xpcall(f, function(m) return 'H:' .. type(m) .. ':' .. tostring(m) end))\n" +
+                    "record('pcall', pcall(f))\n" +
+                    "local function r() return 1 + r() end\n" +
+                    "record('overflowing handler', xpcall(f, function(m) return r() end))\n" +
+                    "local function nest(n) if n == 0 then return 'bottom' end\n" +
+                    "  local ok, v = pcall(nest, n - 1) if not ok then error(v, 0) end return v end\n" +
+                    "record('levels', pcall(nest, " + (MaxNestedPcalls - 1) + "))",
+                    new LuaCsExecutionGuard(120_000, 5_000_000_000L, 0), rows);
 
-            Assert.IsNull(ended, "the overflow must not end the run: " + ended?.Message);
-            Assert.AreEqual(4, rows.Count, string.Join(" / ", rows));
-            Assert.AreEqual("string:xpcall|boolean:false|string:H:string:stack overflow", rows[0]);
-            StringAssert.StartsWith("string:pcall|boolean:false|string:", rows[1]);
-            StringAssert.EndsWith("stack overflow", rows[1], "pcall is the negative twin: unchanged");
-            Assert.AreEqual("string:overflowing handler|boolean:false|string:error in error handling", rows[2]);
-            Assert.AreEqual("string:levels|boolean:true|string:bottom", rows[3],
-                "every xpcall gave its level back: pcall still nests to the limit afterwards");
+                Assert.IsNull(ended, "the overflow must not end the run: " + ended?.Message);
+                Assert.AreEqual(4, rows.Count, string.Join(" / ", rows));
+                Assert.AreEqual("string:xpcall|boolean:false|string:H:string:stack overflow", rows[0]);
+                StringAssert.StartsWith("string:pcall|boolean:false|string:", rows[1]);
+                StringAssert.EndsWith("stack overflow", rows[1], "pcall is the negative twin: unchanged");
+                Assert.AreEqual("string:overflowing handler|boolean:false|string:error in error handling", rows[2]);
+                Assert.AreEqual("string:levels|boolean:true|string:bottom", rows[3],
+                    "every xpcall gave its level back: pcall still nests to the limit afterwards");
+            });
         }
 
         [Test]
@@ -2880,38 +3064,41 @@ namespace CoreAI.Tests.EditMode
             // function that calls back into Lua - a script that yielded through tostring here failed on Roblox. Every
             // counted call now raises the same line, and the coroutine, whose thread the fence left running, yields
             // normally afterwards; its levels are back too.
-            List<string> rows = new();
-            LuaRuntimeException ended = RunRecordingChunk(
-                YieldingMetamethods +
-                "local co = coroutine.create(function()\n" +
-                "  local ok, e = pcall(function() return " + call + " end)\n" +
-                "  record('call', ok, e)\n" +
-                "  coroutine.yield('second')\n" +
-                "  record('body end')\n" +
-                "end)\n" +
-                "record(coroutine.resume(co))\n" +
-                "record(coroutine.status(co))\n" +
-                "record(coroutine.resume(co))\n" +
-                "record(coroutine.status(co))\n" +
-                "local function nest(n) if n == 0 then return 'bottom' end\n" +
-                "  local ok, v = pcall(nest, n - 1) if not ok then error(v, 0) end return v end\n" +
-                "record(pcall(nest, " + (MaxNestedPcalls - 1) + "))",
-                new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows);
-
-            Assert.IsNull(ended, ended?.Message);
-            Assert.AreEqual(7, rows.Count, string.Join(" / ", rows));
-            StringAssert.StartsWith("string:call|boolean:false|string:", rows[0], "the yield must not reach the resumer");
-            StringAssert.Contains(LuaCsSecureEnvironment.YieldAcrossCallBoundaryMessage + " (" + boundary
-                                  + " called a Lua function that yielded)", rows[0]);
-            CollectionAssert.AreEqual(new[]
+            OnADeepStack(() =>
             {
-                "boolean:true|string:second",
-                "string:suspended",
-                "string:body end",
-                "boolean:true",
-                "string:dead",
-                "boolean:true|string:bottom"
-            }, rows.GetRange(1, 6), "the refused yield must leave the coroutine running on normally");
+                List<string> rows = new();
+                LuaRuntimeException ended = RunRecordingChunk(
+                    YieldingMetamethods +
+                    "local co = coroutine.create(function()\n" +
+                    "  local ok, e = pcall(function() return " + call + " end)\n" +
+                    "  record('call', ok, e)\n" +
+                    "  coroutine.yield('second')\n" +
+                    "  record('body end')\n" +
+                    "end)\n" +
+                    "record(coroutine.resume(co))\n" +
+                    "record(coroutine.status(co))\n" +
+                    "record(coroutine.resume(co))\n" +
+                    "record(coroutine.status(co))\n" +
+                    "local function nest(n) if n == 0 then return 'bottom' end\n" +
+                    "  local ok, v = pcall(nest, n - 1) if not ok then error(v, 0) end return v end\n" +
+                    "record(pcall(nest, " + (MaxNestedPcalls - 1) + "))",
+                    new LuaCsExecutionGuard(30_000, 50_000_000, 0), rows);
+
+                Assert.IsNull(ended, ended?.Message);
+                Assert.AreEqual(7, rows.Count, string.Join(" / ", rows));
+                StringAssert.StartsWith("string:call|boolean:false|string:", rows[0], "the yield must not reach the resumer");
+                StringAssert.Contains(LuaCsSecureEnvironment.YieldAcrossCallBoundaryMessage + " (" + boundary
+                                      + " called a Lua function that yielded)", rows[0]);
+                CollectionAssert.AreEqual(new[]
+                {
+                    "boolean:true|string:second",
+                    "string:suspended",
+                    "string:body end",
+                    "boolean:true",
+                    "string:dead",
+                    "boolean:true|string:bottom"
+                }, rows.GetRange(1, 6), "the refused yield must leave the coroutine running on normally");
+            });
         }
 
         [TestCase("tostring", "tostring(o)", false)]

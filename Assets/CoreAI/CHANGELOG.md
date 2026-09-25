@@ -163,6 +163,17 @@ and runtime, C3-xx sandbox for round 3; details in `TODO.md`).
 
 ### Fixed
 
+- **A host-local `FireServer` with no handler connected froze the Mirror host.** `MirrorNetworkBridge` delivered
+  in-process events with `EventReceived?.Invoke(queue.Dequeue())`, whose argument is skipped when nobody listens,
+  so the event never left the queue and the main thread spun forever (found by the first Unity run of the Mirror
+  EditMode suite, which hung in `Negative_ClientTrafficPastTheBudget_IsRefused`). The event is dequeued first;
+  one nobody heard is dropped, never replayed to a later listener.
+- **A remote payload at the Mirror ceiling could be dropped by Mirror once ids grew.** The bridge sized its payload
+  ceilings for a fixed 8-byte remote id and 4-byte correlation id, but Mirror's weaver writes both as varints (up to
+  9 and 5 bytes), so past correlation id 16,777,215 (or a remote id of 2^56) a `RemoteFunction` payload at the
+  ceiling was one byte over and Mirror dropped it after the bridge counted it sent. The envelopes are sized for the
+  widest varint now, which lowers each ceiling by one byte (two for a `RemoteFunction` request): a 600-byte
+  unreliable packet carries 575 payload bytes instead of 576.
 - **Half an emoji locked the world: no save, no autosave, no gated tool, not even `forget` or a load.** Lua strings
   are cut by UTF-16 code unit, so `s:sub(1, 1)` on a string that starts with an emoji hands the CLR a lone
   surrogate; written to a name, a `StringValue`, a string attribute or a tag it captured fine, and then the strict

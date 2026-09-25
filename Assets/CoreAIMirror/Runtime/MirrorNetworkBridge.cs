@@ -254,19 +254,35 @@ namespace CoreAI.Net.Mirror
         public const int UnreliablePayloadCeilingBytes = 1000;
 
         /// <summary>
-        /// Wire bytes of an event envelope besides its payload: RemoteId, Direction, Reliability.
+        /// The most wire bytes Mirror writes for a <c>ulong</c> field of a message: 9, its varint.
         /// </summary>
-        private const int EventEnvelopeBytes = 8 + 1 + 1;
+        /// <remarks>
+        /// WHY the varint's worst case: Mirror's weaver writes every <c>ulong</c> and <c>uint</c> field
+        /// through its <c>[WeaverPriority]</c> varint writers, not as fixed 8 and 4 bytes, so a remote id
+        /// takes 1-9 bytes and a correlation id 1-5. Sized for fixed widths, the ceilings let a payload
+        /// through that Mirror drops once a correlation id passes 16,777,215 or a remote id 2^56 - 1;
+        /// sized for the worst case they hold for every id and are one byte lower (two for a request):
+        /// in Unity a 600-byte unreliable packet carried 576 payload bytes before and 575 now.
+        /// </remarks>
+        private const int MaxVarULongBytes = 9;
+
+        /// <summary>The most wire bytes Mirror writes for a <c>uint</c> field of a message: 5, its varint.</summary>
+        private const int MaxVarUIntBytes = 5;
 
         /// <summary>
-        /// Wire bytes of a request envelope besides its payload: RemoteId, Direction, CorrelationId.
+        /// Wire bytes of an event envelope besides its payload, at most: RemoteId, Direction, Reliability.
         /// </summary>
-        private const int RequestEnvelopeBytes = 8 + 1 + 4;
+        private const int EventEnvelopeBytes = MaxVarULongBytes + 1 + 1;
 
         /// <summary>
-        /// Wire bytes of a response envelope besides its payload and strings: CorrelationId, Success.
+        /// Wire bytes of a request envelope besides its payload, at most: RemoteId, Direction, CorrelationId.
         /// </summary>
-        private const int ResponseEnvelopeBytes = 4 + 1;
+        private const int RequestEnvelopeBytes = MaxVarULongBytes + 1 + MaxVarUIntBytes;
+
+        /// <summary>
+        /// Wire bytes of a response envelope besides its payload and strings, at most: CorrelationId, Success.
+        /// </summary>
+        private const int ResponseEnvelopeBytes = MaxVarUIntBytes + 1;
 
         /// <summary>Mirror's length header in front of every string.</summary>
         private const int StringHeaderBytes = 2;
@@ -2532,7 +2548,11 @@ namespace CoreAI.Net.Mirror
             {
                 while (_localEvents.Count > 0)
                 {
-                    EventReceived?.Invoke(_localEvents.Dequeue());
+                    // WHY dequeued before the call: with nobody listening, `EventReceived?.Invoke(...)`
+                    // skips its argument, so the event was never taken off the queue and a local fire
+                    // spun here forever, freezing the host's main thread.
+                    RbxNetworkEventMessage next = _localEvents.Dequeue();
+                    EventReceived?.Invoke(next);
                 }
             }
             finally

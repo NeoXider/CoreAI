@@ -3316,7 +3316,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             System.GC.WaitForPendingFinalizers();
             System.GC.Collect();
             const long megabyte = 1024 * 1024;
-            LuaCsRbxApiBindings bindings = new();
+            // WHY a minute of wall clock for the raw resume and the main chunk: each confirmation of the allocation
+            // budget is a forced full collection, which took 1.15 s in the editor (Mono, a 1.2 GB heap) and more late
+            // in a full EditMode run, so the raw resume's default 1 s cut the body first, after 2 of its 40 strings,
+            // and the mod loaded holding nothing. That cut is safe too, but the 16 MB budget is what this test pins.
+            LuaCsRbxApiBindings bindings = new(coroutineResumeBudget: new LuaCsCoroutineBudgetSettings(
+                LuaCsCoroutineHandle.DefaultBudgetPerResume, 60_000));
             MemoryStore store = new();
             LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
@@ -3325,10 +3330,15 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 Capabilities = LuaCapabilities.All,
                 OneOffCapabilities = LuaCapabilities.All,
                 RbxApi = bindings,
+                CoroutineResumeBudget = bindings.CoroutineResumeBudget,
+                HandlerTimeoutMs = 60_000,
                 HandlerMaxAllocatedBytes = 16 * megabyte
             });
 
-            System.Exception error = Assert.Catch<System.Exception>(() => stack.Runtime.LoadMod("m", @"
+            System.Exception error = null;
+            try
+            {
+                stack.Runtime.LoadMod("m", @"
                 local co = coroutine.create(function()
                     local kept = {}
                     for i = 1, 40 do
@@ -3338,8 +3348,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     return #kept
                 end)
                 local ok, err = coroutine.resume(co)
-                store_set('resume', tostring(ok) .. '|' .. tostring(err))"));
+                store_set('resume', tostring(ok) .. '|' .. tostring(err))");
+            }
+            catch (System.Exception ex)
+            {
+                error = ex;
+            }
 
+            Assert.IsNotNull(error, "the load must fail on the mod's 16 MB; the body built "
+                                    + store.Get("m", "built") + " strings and its resume gave "
+                                    + store.Get("m", "resume"));
             int built = int.Parse(store.Get("m", "built"), CultureInfo.InvariantCulture);
             Assert.Less(built, 24, "the body must be cut near 16 MB, not keep 40 strings (80 MB)");
             StringAssert.Contains(LuaCsExecutionGuard.MemoryBudgetTripMarker + " (" + 16 * megabyte + " bytes)",

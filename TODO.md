@@ -220,8 +220,14 @@ contexts) is next and not started. This section records everything landed up to 
       0 failed on this tree. Every EditMode fixture named below was written without a Unity run.
 - [ ] **Check the tests (owner, in Unity 6000.3.14f1).** Run each suite below and fix, never skip or weaken, any
       failure; the Linux suites already pass but prove nothing about Mono/IL2CPP or engine-bound code:
-  - [ ] EditMode, every package, in all four positive-module legs (`core`, `llm`, `lua`, `full`) and with Mirror
-        installed (`MIRROR` define): 0 failed. Compare the counts with the 2026-08-01 matrix above.
+  - [x] EditMode, every package, in all four positive-module legs (`core`, `llm`, `lua`, `full`) and with Mirror
+        installed (`MIRROR` define): 0 failed. Compare the counts with the 2026-08-01 matrix above. Verified
+        2026-09-25 on the `merge/mvp3` worktree with `Assets/Mirror` present (total/passed/failed/skipped): `full`
+        6550/6539/0/11, `core` 5266/5254/0/12, `llm` 6234/6221/0/13, `lua` 5582/5572/0/10, `MIRROR` 6550/6539/0/11
+        (all 209 `CoreAI.Net.Mirror.Tests` cases pass; the skips are the live 4B checks, the absent Neoxider Pages
+        module and leg-gated cases). One earlier `MIRROR` run failed 4 `LlmToolChannelEditModeTests.UnityHttpAdapters_*`
+        cases on a transient loopback refusal (`Curl error 7: Failed to connect to 127.0.0.1`, every other run of the
+        same tree passed them): watch for a repeat.
   - [ ] The suites that have never run anywhere: every `CoreAIMirror/Tests/EditMode` fixture (compile-only so far;
         audit round 1 added 13 cases in `MirrorBridgeRulesEditModeTests`, `MirrorClientRemoteRulesEditModeTests`,
         `MirrorClientRemotesEndToEndEditModeTests`, `MirrorKickEditModeTests` and
@@ -270,7 +276,9 @@ contexts) is next and not started. This section records everything landed up to 
         uncounted by the cap — it must end on its budget, never crash);
         and **Save & run** of `sample_castle3d` three times in a row on the Hub (the castle must not duplicate, the
         editor must stay responsive, no crash). Record the outcome here.
-  - [ ] PlayMode `FastNoLlm` (incl. `Mvp8PhysicsPlayModeTests`): 0 failed.
+  - [x] PlayMode `FastNoLlm` (incl. `Mvp8PhysicsPlayModeTests`): 0 failed. Verified 2026-09-25
+        (`-assemblyNames CoreAI.Tests.PlayMode.FastNoLlm`, as CI): 95/94/0/1, the skip being the WaitForEndOfFrame
+        marshaler case batchmode cannot run.
   - [ ] The 38 Lua-tier cases the Linux runner reports as not executed at `055aed29` (listed in
         `tools/portable/LuaTests/README.md`).
   - [ ] Guard behaviour on Mono and IL2CPP: a budget trip cannot be caught by `pcall`/`xpcall` and the state stays
@@ -286,6 +294,12 @@ contexts) is next and not started. This section records everything landed up to 
         continuation, the `sandbox: ` trip lines). `NativeStack_EveryChannelStaysWithinItsWeight_AtTheCap`
         (`LuaCsSecureSandboxEditModeTests`) measures the native stack with a `DynamicMethod` and cannot run in an
         AOT player; on Mono it must stay within its weights (about 1.38 MB for the worst chain at the cap).
+        Mono (editor) half verified 2026-09-25: both fixtures pass in Unity 6000.3.14f1. On the editor's main thread
+        Lua-CSharp's own stack check stops every C-call channel at 24-39 levels with a catchable line before the
+        128-level cap (`NativeStack_OnTheCallingThread_EveryChannelEndsInACatchableLine_AndGivesItsLevelsBack`), so
+        the cap's own tests run on a 16 MB thread (`OnADeepStack`); a forced full collection (each allocation-budget
+        confirmation) took 0.8-1.9 s there, so an allocation-heavy mod meets its wall clock before its memory budget
+        (cut either way). IL2CPP is still open.
   - [ ] A WebGL build smoke of the world package (save → reload the page → load), see the item below.
 - [ ] **Real WebGL page-reload gate** for the world package: save → reload the page → the bytes and the startup
       selection survive (`Docs/CoreAIMods/WORLD_PACKAGE.md`, "Acceptance status").
@@ -922,7 +936,9 @@ The cuts an audit of every package found on the way to the model or a store are 
 with numbers (both CHANGELOGs, 7.46.0), including the audit round's fixes (pruning is not a loss, the
 `MaxChatHistoryMessages` cap is reported, the compaction payload no longer marks unsent messages folded).
 
-- [ ] **`MirrorBroadcastEditModeTests.Mirror_PingsTheStrangerBelowAdmission_AndTheWitnessTellsThatFromTheBroadcast`**
+- [x] **`MirrorBroadcastEditModeTests.Mirror_PingsTheStrangerBelowAdmission_AndTheWitnessTellsThatFromTheBroadcast`**
+      Fixed 2026-09-25: the test sets `NetworkTime.PingInterval` to 0 for its flush, so every connection pings
+      whatever the editor's clock; passes alone and in the full `MIRROR` leg.
       fails when its class runs alone (no `NetworkPingMessage` reaches the stranger: expected 12, got empty); in the
       2026-09-24 full EditMode run after the 7.46.0 audit fixes it passed, so it depends on order or timing. 7.46.0 does
       not touch Mirror; check whether Mirror's ping interval depends on editor uptime / `NetworkTime` in a fresh

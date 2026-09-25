@@ -643,6 +643,7 @@ namespace CoreAI.Tests.EditMode
                     task.wait(10)
                     return 'done'
                 end", persistToStore: false);
+            long refusalsBefore = harness.Bindings.RemoteHandlerRefusalCount;
             harness.Runtime.LoadMod(flooder, "mp10-flooder", @"
                 local remote = workspace:FindFirstChild('FloodRemote')
                 for index = 1, " + calls + @" do
@@ -663,8 +664,14 @@ namespace CoreAI.Tests.EditMode
                 harness.Store.Get("mp10-server", "started"),
                 "at most the sender's budget of handler threads runs at once");
             Assert.AreEqual("8", harness.Store.Get("mp10-flooder", "refused"));
-            StringAssert.Contains("BUDGET_EXCEEDED", harness.Store.Get("mp10-flooder", "refusal"));
-            StringAssert.Contains(flooder.ActorId, harness.Store.Get("mp10-flooder", "refusal"));
+            Assert.AreEqual(8L, harness.Bindings.RemoteHandlerRefusalCount - refusalsBefore,
+                "every call over the sender's budget is counted as a refusal of that sender");
+            // WHY the caller's own line (B1-05): the budget refusal names the host mod, and the caller is a
+            // remote client, so it reads a line of its own; the host log keeps the refusal.
+            StringAssert.Contains(LuaCsRbxApiBindings.RemoteFunctionCallRefusedMessage,
+                harness.Store.Get("mp10-flooder", "refusal"));
+            StringAssert.DoesNotContain("mp10-server", harness.Store.Get("mp10-flooder", "refusal"),
+                "a line sent to a remote caller names no host mod");
 
             harness.Runtime.LoadMod(secondClient, "mp10-second", @"
                 local remote = workspace:FindFirstChild('FloodRemote')

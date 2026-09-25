@@ -761,21 +761,25 @@ end)",
                 Assert.IsNull(world.HostObject.transform.Find("CoreAI_RbxWorld_Staging"),
                     "the refusal must come before anything is staged");
 
+                // WHY a refused request rather than a refused confirmation: a manual slot this session
+                // would refuse to load is refused before the player is asked to confirm it (audit R1 A1,
+                // RequestManualLoadAsync), so there is no request to confirm.
                 world.PackageStore.ManualPayload = legacy;
                 ActorContext trustedHost = CoreServicesInstaller.DefaultLocalHostIdentityProvider
                     .GetActorContext(BuiltInAgentRoleIds.Programmer);
-                RbxWorldLoadRequest request = world.Service.RequestManualLoadAsync(
-                        trustedHost, "legacy-slot")
-                    .GetAwaiter().GetResult();
-                RbxWorldLoadResult confirmed = world.Service.ConfirmManualLoadAsync(
-                        request.RequestId, true)
-                    .GetAwaiter().GetResult();
+                int asked = 0;
+                world.Service.ManualLoadConfirmationRequested += _ => asked++;
+                RbxWorldLoadRefusedException requestRefused = Assert.Throws<RbxWorldLoadRefusedException>(
+                    () => world.Service.RequestManualLoadAsync(trustedHost, "legacy-slot")
+                        .GetAwaiter().GetResult(),
+                    "a legacy manual slot must be refused on the same rule before the player is asked");
 
-                Assert.IsFalse(confirmed.Success,
-                    "a player-confirmed legacy package must be refused on the same load path");
+                Assert.AreEqual(RbxWorldLoadRefusedException.IncompatiblePackageStatus, requestRefused.Status);
+                StringAssert.Contains("no world ACL version", requestRefused.Message);
                 StringAssert.Contains(
                     "compose the session with worldAclVersion: null to open a legacy world",
-                    confirmed.Error);
+                    requestRefused.Message);
+                Assert.AreEqual(0, asked, "the player is never asked to confirm a world that cannot open");
                 Assert.AreEqual(0, world.PackageStore.AutoTriggers.Count);
                 Assert.AreSame(outgoing, world.Host.Registry);
                 Assert.IsFalse(outgoing.IsDetached);

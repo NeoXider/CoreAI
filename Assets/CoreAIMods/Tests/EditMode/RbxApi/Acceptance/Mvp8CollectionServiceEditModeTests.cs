@@ -776,13 +776,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             // WHY: GetService runs at the top of nearly every script and inside hot handlers, and it
             // used to copy the DataModel's child list on every call (M1-36).
-            Assert.That(() =>
+            // WHY one warm-up run of the measured delegate: on Mono the first run of a newly compiled
+            // lambda calling into the tree was charged 1-2 GC.Alloc blocks (one calling only the catalog
+            // got 1, an empty one 0) and every later run 0, so only the steady state measures GetService.
+            TestDelegate repeatedGetService = () =>
             {
                 for (int call = 0; call < 100; call++)
                 {
                     game.GetService("CollectionService");
                 }
-            }, Is.Not.AllocatingGCMemory(), "a repeated GetService must not allocate");
+            };
+            repeatedGetService();
+            Assert.That(repeatedGetService, Is.Not.AllocatingGCMemory(), "a repeated GetService must not allocate");
         }
 
         private static RbxInstance SingleHolder(ProductionHarness harness, string tag)

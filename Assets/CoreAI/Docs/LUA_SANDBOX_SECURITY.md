@@ -243,8 +243,12 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
   `gsub` was an async method chain (B3-03); it is synchronous again and continues asynchronously only when the
   callback did not complete (C3-02). Mono's JIT lays out frames about 2.8 times larger (9,696 B a `pcall`
   level), so a chain at the cap takes up to about 1.38 MB there, where Unity's Mono stack check turns anything
-  deeper into a catchable engine `stack overflow`; IL2CPP and WebGL are unmeasured (`TODO.md`, "Check the
-  tests"). The count used to run 200 per channel and restart in every task thread, and 250 nested `task.spawn`
+  deeper into a catchable engine `stack overflow`. On the editor's main thread that check comes first: measured
+  in Unity 6000.3.14f1 (`NativeStack_OnTheCallingThread_EveryChannelEndsInACatchableLine_AndGivesItsLevelsBack`),
+  every channel stops after 24-39 levels with a line `pcall` catches (`stack overflow`; an `xpcall` whose handler
+  overflows too ends with `error in error handling`) and gives every level back, so a mod in the editor nests
+  `pcall` about 39 deep, not 128; the tests that pin the cap itself run on a 16 MB thread. IL2CPP and WebGL are
+  unmeasured (`TODO.md`, "Check the tests"). The count used to run 200 per channel and restart in every task thread, and 250 nested `task.spawn`
   levels plus 200 `tostring` levels took 2.56 MB. WHY a cap at all: an error raised N levels deep is rethrown
   once per level with a growing stack trace, so unwinding cost about N² with no instruction running and no hook
   able to fire — a comparator re-entering `table.sort` 1,000 deep took 8.1 s to fail, and unbounded it ran 64 s

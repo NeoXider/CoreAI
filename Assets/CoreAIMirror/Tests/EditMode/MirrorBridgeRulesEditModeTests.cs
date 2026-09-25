@@ -284,6 +284,25 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
+        public void Negative_ALocalFireWithNobodyListening_Returns_AndIsNeverReplayedToALaterListener()
+        {
+            // WHY: the local delivery loop called `EventReceived?.Invoke(queue.Dequeue())`, whose argument
+            // is skipped when nobody listens, so the event stayed queued and a host-local actor's
+            // FireServer before any handler connected spun the host's main thread forever.
+            _bridge.RegisterActor("actor-local");
+
+            _bridge.SendEvent(ClientEventFrom("actor-local", 1));
+            List<RbxNetworkEventMessage> delivered = new();
+            _bridge.EventReceived += delivered.Add;
+            _bridge.SendEvent(ClientEventFrom("actor-local", 2));
+
+            Assert.AreEqual(2, _bridge.LocalDeliveries);
+            Assert.AreEqual(1, delivered.Count, "the fire nobody heard is gone, not held for the next listener");
+            CollectionAssert.AreEqual(new byte[] { 2 }, delivered[0].Payload);
+            Assert.AreEqual("actor-local", delivered[0].SenderActorId);
+        }
+
+        [Test]
         public void Negative_ClientTrafficPastTheBudget_IsRefused()
         {
             // WHY a server bridge: it charges the client-to-server traffic of the actors running in
@@ -1021,17 +1040,32 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         /// <summary>The size Mirror's own packer gives an unreliable fire of this many payload bytes.</summary>
+        /// <summary>
+        /// What Mirror packs for an unreliable event of <paramref name="payloadBytes"/> under the widest remote
+        /// id: Mirror writes the id as a varint, so the largest id is the envelope a ceiling must hold for.
+        /// </summary>
         private static int PackedSize(int payloadBytes)
         {
             NetworkWriter writer = new();
             NetworkMessages.Pack(new CoreAiRemoteEventMessage
             {
-                RemoteId = 4UL,
+                RemoteId = ulong.MaxValue,
                 Direction = (byte)RbxNetworkDirection.ServerToClient,
                 Reliability = (byte)RbxNetworkReliability.UnreliableUnordered,
                 Payload = new byte[payloadBytes]
             }, writer);
             return writer.Position;
+        }
+
+        private static RbxNetworkEventMessage ClientEventFrom(string actorId, byte payload)
+        {
+            return new RbxNetworkEventMessage(
+                new InstanceId(5UL),
+                RbxNetworkDirection.ClientToServer,
+                RbxNetworkReliability.ReliableOrdered,
+                actorId,
+                null,
+                new[] { payload });
         }
 
         private static RbxNetworkEventMessage ClientEvent()

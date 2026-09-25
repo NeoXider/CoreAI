@@ -1230,11 +1230,18 @@ namespace CoreAI.Tests.EditMode
             // thread got a fresh per-resume allocation budget, so 12 nested levels of 12 MB held 137 MB live
             // under a mod's 16 MB HandlerMaxAllocatedBytes. The spawned thread is now held to what is left of
             // the caller's allowance.
+            // WHY a minute of wall clock for the main chunk and every task thread: each confirmation of the allocation
+            // budget is a forced full collection, which took 0.8-1.9 s in the editor (Mono, a 1.2 GB heap) and more
+            // late in a full EditMode run, so the 500 ms of a task thread's resume and then the main chunk's 10 s
+            // tripped before the 16 MB budget did. The chain was cut either way; the budget that cuts it is what
+            // this test pins, and the wall clock has tests of its own.
             CollectGarbage();
-            CoreAI.Ai.LuaCs.LuaCsRbxApiBindings bindings = new();
+            CoreAI.Ai.LuaCs.LuaCsRbxApiBindings bindings = new(
+                coroutineResumeBudget: new LuaCsCoroutineBudgetSettings(LuaCsCoroutineHandle.DefaultBudgetPerResume,
+                    60_000));
             LuaCsSecureSandboxEditModeTests.NestedRunModStore store = new();
             CoreAI.Ai.LuaCs.LuaCsModStack stack = LuaCsSecureSandboxEditModeTests.NewNestedRunModStack(bindings, store,
-                handlerMaxAllocatedBytes: 16 * MB);
+                handlerMaxAllocatedBytes: 16 * MB, handlerTimeoutMs: 60_000);
             string loadError = "";
 
             try
@@ -1689,44 +1696,47 @@ namespace CoreAI.Tests.EditMode
             // a fresh count on the same native stack: 8 hops reached 707 levels, 4 MB. The count now runs on through
             // every hop: the first hop nests 118 pcalls, the export's guarded call and its resume open two levels
             // each, and the second hop gets what is left of the limit.
-            CoreAI.Ai.LuaCs.LuaCsRbxApiBindings bindings = new();
-            LuaCsSecureSandboxEditModeTests.NestedRunModStore store = new();
-            CoreAI.Ai.LuaCs.LuaCsModStack stack = LuaCsSecureSandboxEditModeTests.NewNestedRunModStack(bindings, store);
-            stack.Runtime.LoadMod("m",
-                "local total = 0\n" +
-                "local function deep(n, hop)\n" +
-                "  total = total + 1\n" +
-                "  if n < 118 then\n" +
-                "    local ok, e = pcall(deep, n + 1, hop)\n" +
-                "    if not ok then error(e, 0) end\n" +
-                "  elseif hop < 8 then\n" +
-                "    mods_call('m', 'hop', hop + 1)\n" +
-                "  end\n" +
-                "end\n" +
-                "mods_export('hop', function(hop)\n" +
-                "  local ok, e = coroutine.resume(coroutine.create(function() deep(1, hop) end))\n" +
-                "  if not ok then store_set('refused', tostring(e)) error(e, 0) end\n" +
-                "end)\n" +
-                "hooks_every(0.05, function()\n" +
-                "  if store_get('fired') == 'yes' then return end\n" +
-                "  store_set('fired', 'yes')\n" +
-                "  coroutine.resume(coroutine.create(function() deep(1, 1) end))\n" +
-                "  store_set('levels', tostring(total))\n" +
-                "end)");
-
-            for (int tick = 0; tick < 3; tick++)
+            LuaCsSecureSandboxEditModeTests.OnADeepStack(() =>
             {
-                stack.Runtime.Tick(0.1d);
-            }
+                CoreAI.Ai.LuaCs.LuaCsRbxApiBindings bindings = new();
+                LuaCsSecureSandboxEditModeTests.NestedRunModStore store = new();
+                CoreAI.Ai.LuaCs.LuaCsModStack stack = LuaCsSecureSandboxEditModeTests.NewNestedRunModStack(bindings, store);
+                stack.Runtime.LoadMod("m",
+                    "local total = 0\n" +
+                    "local function deep(n, hop)\n" +
+                    "  total = total + 1\n" +
+                    "  if n < 118 then\n" +
+                    "    local ok, e = pcall(deep, n + 1, hop)\n" +
+                    "    if not ok then error(e, 0) end\n" +
+                    "  elseif hop < 8 then\n" +
+                    "    mods_call('m', 'hop', hop + 1)\n" +
+                    "  end\n" +
+                    "end\n" +
+                    "mods_export('hop', function(hop)\n" +
+                    "  local ok, e = coroutine.resume(coroutine.create(function() deep(1, hop) end))\n" +
+                    "  if not ok then store_set('refused', tostring(e)) error(e, 0) end\n" +
+                    "end)\n" +
+                    "hooks_every(0.05, function()\n" +
+                    "  if store_get('fired') == 'yes' then return end\n" +
+                    "  store_set('fired', 'yes')\n" +
+                    "  coroutine.resume(coroutine.create(function() deep(1, 1) end))\n" +
+                    "  store_set('levels', tostring(total))\n" +
+                    "end)");
 
-            const int firstHop = 118;
-            int secondHopFrom = LuaCsSecureEnvironment.HeavyCallLevels + (firstHop - 1) * LuaCsSecureEnvironment.LightCallLevels
-                                + LuaCsSecureEnvironment.HeavyCallLevels + LuaCsSecureEnvironment.HeavyCallLevels;
-            int secondHop = (LuaCsSecureEnvironment.MaxCCallDepth - secondHopFrom) / LuaCsSecureEnvironment.LightCallLevels + 1;
-            string errors = LuaCsSecureSandboxEditModeTests.HandlerErrorsOf(stack);
-            Assert.AreEqual((firstHop + secondHop).ToString(System.Globalization.CultureInfo.InvariantCulture),
-                store.Get("m", "levels"), errors);
-            StringAssert.Contains(LuaCsSecureSandboxEditModeTests.CStackLimitLine("pcall"), store.Get("m", "refused"));
+                for (int tick = 0; tick < 3; tick++)
+                {
+                    stack.Runtime.Tick(0.1d);
+                }
+
+                const int firstHop = 118;
+                int secondHopFrom = LuaCsSecureEnvironment.HeavyCallLevels + (firstHop - 1) * LuaCsSecureEnvironment.LightCallLevels
+                                    + LuaCsSecureEnvironment.HeavyCallLevels + LuaCsSecureEnvironment.HeavyCallLevels;
+                int secondHop = (LuaCsSecureEnvironment.MaxCCallDepth - secondHopFrom) / LuaCsSecureEnvironment.LightCallLevels + 1;
+                string errors = LuaCsSecureSandboxEditModeTests.HandlerErrorsOf(stack);
+                Assert.AreEqual((firstHop + secondHop).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    store.Get("m", "levels"), errors);
+                StringAssert.Contains(LuaCsSecureSandboxEditModeTests.CStackLimitLine("pcall"), store.Get("m", "refused"));
+            });
         }
 
         [Test]
@@ -1738,51 +1748,54 @@ namespace CoreAI.Tests.EditMode
             // same native stack, and an export could spend what its caller no longer had. The export is now nested in
             // the caller's run: it continues the caller's count, and a runaway export that uses up the caller's
             // allowance ends the caller with its trip, which no pcall there can catch.
-            CoreAI.Ai.LuaCs.LuaCsRbxApiBindings bindings = new();
-            LuaCsSecureSandboxEditModeTests.NestedRunModStore store = new();
-            CoreAI.Ai.LuaCs.LuaCsModStack stack = LuaCsSecureSandboxEditModeTests.NewNestedRunModStack(bindings, store,
-                handlerMaxSteps: 200_000);
-            stack.Runtime.LoadMod("b",
-                "mods_export('deep', function()\n" +
-                "  local depth = 0\n" +
-                "  local function f() depth = depth + 1 pcall(f) end\n" +
-                "  f()\n" +
-                "  return depth\n" +
-                "end)\n" +
-                "mods_export('spin', function() while true do end end)");
-            stack.Runtime.LoadMod("a",
-                "hooks_on('deep', function()\n" +
-                "  local function nest(n)\n" +
-                "    if n == 0 then store_set('b depth', tostring(mods_call('b', 'deep'))) return end\n" +
-                "    local ok, e = pcall(nest, n - 1)\n" +
-                "    if not ok then error(e, 0) end\n" +
-                "  end\n" +
-                "  nest(40)\n" +
-                "end)\n" +
-                "hooks_on('spin', function()\n" +
-                "  pcall(mods_call, 'b', 'spin')\n" +
-                "  store_set('after the spin', 'yes')\n" +
-                "end)");
-
-            stack.Runtime.EmitEvent("deep", "");
-            stack.Runtime.Tick(0);
-            stack.Runtime.EmitEvent("spin", "");
-            stack.Runtime.Tick(0);
-
-            int exportFrom = 40 * LuaCsSecureEnvironment.LightCallLevels + LuaCsSecureEnvironment.HeavyCallLevels;
-            int exportDepth = (LuaCsSecureEnvironment.MaxCCallDepth - exportFrom) / LuaCsSecureEnvironment.LightCallLevels + 1;
-            Assert.AreEqual(exportDepth.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                store.Get("a", "b depth"), "the export nests only what the caller's 40 pcalls left of the limit");
-            Assert.AreEqual("", store.Get("a", "after the spin"),
-                "the runaway export used up the caller's allowance, so no pcall in the caller may survive it");
-            List<string> callerErrors = new();
-            foreach (CoreAI.Ai.LuaModHandlerError error in stack.Runtime.GetRecentHandlerErrors("a"))
+            LuaCsSecureSandboxEditModeTests.OnADeepStack(() =>
             {
-                callerErrors.Add(error.Error);
-            }
+                CoreAI.Ai.LuaCs.LuaCsRbxApiBindings bindings = new();
+                LuaCsSecureSandboxEditModeTests.NestedRunModStore store = new();
+                CoreAI.Ai.LuaCs.LuaCsModStack stack = LuaCsSecureSandboxEditModeTests.NewNestedRunModStack(bindings, store,
+                    handlerMaxSteps: 200_000);
+                stack.Runtime.LoadMod("b",
+                    "mods_export('deep', function()\n" +
+                    "  local depth = 0\n" +
+                    "  local function f() depth = depth + 1 pcall(f) end\n" +
+                    "  f()\n" +
+                    "  return depth\n" +
+                    "end)\n" +
+                    "mods_export('spin', function() while true do end end)");
+                stack.Runtime.LoadMod("a",
+                    "hooks_on('deep', function()\n" +
+                    "  local function nest(n)\n" +
+                    "    if n == 0 then store_set('b depth', tostring(mods_call('b', 'deep'))) return end\n" +
+                    "    local ok, e = pcall(nest, n - 1)\n" +
+                    "    if not ok then error(e, 0) end\n" +
+                    "  end\n" +
+                    "  nest(40)\n" +
+                    "end)\n" +
+                    "hooks_on('spin', function()\n" +
+                    "  pcall(mods_call, 'b', 'spin')\n" +
+                    "  store_set('after the spin', 'yes')\n" +
+                    "end)");
 
-            StringAssert.Contains("sandbox: " + LuaCsExecutionGuard.StepBudgetTripMarker + " (200000)",
-                string.Join(" / ", callerErrors), "the caller ends with its own budget's line");
+                stack.Runtime.EmitEvent("deep", "");
+                stack.Runtime.Tick(0);
+                stack.Runtime.EmitEvent("spin", "");
+                stack.Runtime.Tick(0);
+
+                int exportFrom = 40 * LuaCsSecureEnvironment.LightCallLevels + LuaCsSecureEnvironment.HeavyCallLevels;
+                int exportDepth = (LuaCsSecureEnvironment.MaxCCallDepth - exportFrom) / LuaCsSecureEnvironment.LightCallLevels + 1;
+                Assert.AreEqual(exportDepth.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    store.Get("a", "b depth"), "the export nests only what the caller's 40 pcalls left of the limit");
+                Assert.AreEqual("", store.Get("a", "after the spin"),
+                    "the runaway export used up the caller's allowance, so no pcall in the caller may survive it");
+                List<string> callerErrors = new();
+                foreach (CoreAI.Ai.LuaModHandlerError error in stack.Runtime.GetRecentHandlerErrors("a"))
+                {
+                    callerErrors.Add(error.Error);
+                }
+
+                StringAssert.Contains("sandbox: " + LuaCsExecutionGuard.StepBudgetTripMarker + " (200000)",
+                    string.Join(" / ", callerErrors), "the caller ends with its own budget's line");
+            });
         }
 
         [Test]

@@ -2346,40 +2346,43 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             // depends on the host, so the capped run is timed against the same shape failing on the mod's own
             // cap at 40 levels, as CallsBackIntoLua_NestedPastTheCStackLimit_FailFastWithOneCatchableLine does,
             // through the same comparison of the fastest of several runs of each.
-            MemoryStore store = new();
-            List<string> log = new();
-            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(log: log.Add), store);
-            long referenceMs = LuaCsSecureSandboxEditModeTests.ElapsedMs(
-                () => stack.Runtime.LoadMod("reference", WarnReenteredFromTheModsTostring(40)));
-            Assert.AreEqual("false", store.Get("reference", "ok"));
-            Assert.AreEqual("mod cap", store.Get("reference", "err"),
-                "the reference run fails on the mod's own cap, below the C-stack limit");
+            LuaCsSecureSandboxEditModeTests.OnADeepStack(() =>
+            {
+                MemoryStore store = new();
+                List<string> log = new();
+                LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings(log: log.Add), store);
+                long referenceMs = LuaCsSecureSandboxEditModeTests.ElapsedMs(
+                    () => stack.Runtime.LoadMod("reference", WarnReenteredFromTheModsTostring(40)));
+                Assert.AreEqual("false", store.Get("reference", "ok"));
+                Assert.AreEqual("mod cap", store.Get("reference", "err"),
+                    "the reference run fails on the mod's own cap, below the C-stack limit");
 
-            long cappedMs = LuaCsSecureSandboxEditModeTests.ElapsedMs(
-                () => stack.Runtime.LoadMod("deep", WarnReenteredFromTheModsTostring(1000)));
+                long cappedMs = LuaCsSecureSandboxEditModeTests.ElapsedMs(
+                    () => stack.Runtime.LoadMod("deep", WarnReenteredFromTheModsTostring(1000)));
 
-            Assert.IsTrue(stack.Runtime.IsLoaded("deep"), "pcall catches the error, so the mod loads");
-            Assert.AreEqual("false", store.Get("deep", "ok"));
-            string expectedLine = LuaCsSecureEnvironment.CStackOverflowMessage + " (warn: more than "
-                                  + LuaCsSecureEnvironment.MaxCCallDepth
-                                  + " levels of nested calls from library functions back into Lua)";
-            string error = store.Get("deep", "err");
-            Assert.AreEqual(expectedLine, error);
-            LuaCsSecureSandboxEditModeTests.AssertIsOnlyTheErrorLine(error);
-            // WHY this depth: the pcall around warn opens one level and each warn two (see
-            // LuaCsSecureEnvironment.MaxCCallDepth).
-            int deepest = (LuaCsSecureEnvironment.MaxCCallDepth - LuaCsSecureEnvironment.LightCallLevels)
-                          / LuaCsSecureEnvironment.HeavyCallLevels;
-            Assert.AreEqual(deepest.ToString(CultureInfo.InvariantCulture),
-                store.Get("deep", "deepest"), "the nesting stops at the limit, not at the mod's own cap of 1,000");
-            Assert.IsFalse(log.Exists(line => line.Contains("warn from")),
-                "no nested warn finished, so none of them logged: " + string.Join(" | ", log));
-            int rerun = 0;
-            LuaCsSecureSandboxEditModeTests.AssertCappedNestingUnwindsLikeItsReference(referenceMs, cappedMs,
-                () => LoadWarnReentryAgain(stack, store, "reference", 40, "reference-" + ++rerun),
-                () => LoadWarnReentryAgain(stack, store, "deep", 1000, "deep-" + ++rerun));
-            Assert.IsFalse(log.Exists(line => line.Contains("warn from")),
-                "no nested warn of a timed run finished either: " + string.Join(" | ", log));
+                Assert.IsTrue(stack.Runtime.IsLoaded("deep"), "pcall catches the error, so the mod loads");
+                Assert.AreEqual("false", store.Get("deep", "ok"));
+                string expectedLine = LuaCsSecureEnvironment.CStackOverflowMessage + " (warn: more than "
+                                      + LuaCsSecureEnvironment.MaxCCallDepth
+                                      + " levels of nested calls from library functions back into Lua)";
+                string error = store.Get("deep", "err");
+                Assert.AreEqual(expectedLine, error);
+                LuaCsSecureSandboxEditModeTests.AssertIsOnlyTheErrorLine(error);
+                // WHY this depth: the pcall around warn opens one level and each warn two (see
+                // LuaCsSecureEnvironment.MaxCCallDepth).
+                int deepest = (LuaCsSecureEnvironment.MaxCCallDepth - LuaCsSecureEnvironment.LightCallLevels)
+                              / LuaCsSecureEnvironment.HeavyCallLevels;
+                Assert.AreEqual(deepest.ToString(CultureInfo.InvariantCulture),
+                    store.Get("deep", "deepest"), "the nesting stops at the limit, not at the mod's own cap of 1,000");
+                Assert.IsFalse(log.Exists(line => line.Contains("warn from")),
+                    "no nested warn finished, so none of them logged: " + string.Join(" | ", log));
+                int rerun = 0;
+                LuaCsSecureSandboxEditModeTests.AssertCappedNestingUnwindsLikeItsReference(referenceMs, cappedMs,
+                    () => LoadWarnReentryAgain(stack, store, "reference", 40, "reference-" + ++rerun),
+                    () => LoadWarnReentryAgain(stack, store, "deep", 1000, "deep-" + ++rerun));
+                Assert.IsFalse(log.Exists(line => line.Contains("warn from")),
+                    "no nested warn of a timed run finished either: " + string.Join(" | ", log));
+            });
         }
 
         /// <summary>
