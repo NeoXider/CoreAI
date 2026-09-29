@@ -3,6 +3,8 @@
 using System;
 using CoreAI.Benchmarking;
 using CoreAI.Infrastructure.Llm;
+using CoreAI.Messaging;
+using Newtonsoft.Json;
 using NUnit.Framework;
 using UnityEngine;
 using static CoreAI.Tests.PlayMode.Benchmarks.GameCreationBenchmarkHarness;
@@ -11,6 +13,26 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 {
     public sealed class GameObserveActScenariosG8PlayModeTests
     {
+        [Test]
+        public void TidyScene_PrepareMakesDescribedObjectsVisibleToListObjects()
+        {
+            WithEnvironment((scenario, env) =>
+            {
+                scenario.Prepare(env);
+                Assert.AreEqual(0, env.World.Commands.Count);
+                Assert.IsTrue(env.World.TryExecute(new ApplyAiGameCommand
+                {
+                    CommandTypeId = AiGameCommandTypeIds.WorldCommand,
+                    JsonPayload = JsonConvert.SerializeObject(new
+                    {
+                        action = "list_objects",
+                        stringValue = "Debris"
+                    })
+                }));
+                Assert.AreEqual(2, env.World.LastListedObjects.Count);
+            }, "g8_tidy_scene");
+        }
+
         [Test]
         public void SelectiveRaise_ExactScaleOnlyChanges_Pass()
         {
@@ -74,6 +96,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 ScenarioGrading polluted = scenario.Grade(env, SuccessfulRun(4));
                 AssertCheckpoint(polluted, "only_debris", false);
                 Assert.Greater(polluted.Penalties.Count, 0);
+            }, "g8_tidy_scene");
+        }
+
+        [Test]
+        public void TidyScene_ObservationOnlyDoesNotReceiveCollateralDamagePenalty()
+        {
+            WithEnvironment((scenario, env) =>
+            {
+                env.World.Commands.Add(new RecordedWorldCommand { Action = "list_objects" });
+                ScenarioGrading grading = scenario.Grade(env, SuccessfulRun(1));
+                AssertCheckpoint(grading, "removed_debris1", false);
+                Assert.AreEqual(0, grading.Penalties.Count);
             }, "g8_tidy_scene");
         }
 

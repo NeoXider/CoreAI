@@ -298,6 +298,25 @@ namespace CoreAI.Tests.EditMode
                 "The model must be told how much it is NOT seeing");
         }
 
+        [Test]
+        public async Task ExecuteSingle_CameraImage_SurvivesTextLimitForImageLifting()
+        {
+            string payload = "{\"ok\":true,\"dataUrl\":\"data:image/jpeg;base64," +
+                             new string('A', 500) + "\"}";
+            MEAI.AIFunction camera = Function("camera_capture", (Func<string>)(() => payload));
+            ToolExecutionPolicy policy = MakePolicy(new StubSettings { MaxToolResultChars = 100 });
+
+            ToolExecutionPolicy.ToolCallResult result = await policy.ExecuteSingleAsync(
+                new MEAI.FunctionCallContent("camera-call", "camera_capture", new Dictionary<string, object>()),
+                OptionsFor(camera), CancellationToken.None);
+
+            Assert.IsTrue(result.Succeeded);
+            Assert.AreEqual(payload, result.Result.Result.ToString(),
+                "The policy must leave the data URL intact for the next provider image message");
+            StringAssert.DoesNotContain("dataUrl", policy.ExecutedTraces[0].Detail,
+                "Image bytes should stay out of the text trace");
+        }
+
         /// <summary>
         /// An empty result is not replaced by an invented "Success" with an execution message: the envelope says
         /// <c>empty:true</c> outright, so the model can tell "nothing to say" apart from an answer.

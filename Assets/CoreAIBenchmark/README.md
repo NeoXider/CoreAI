@@ -19,7 +19,7 @@ The benchmark answers the practical production question: is this model usable fo
 | G5 - Strict instruction-following | 3/5 | Subtractive compliance under explicit constraints | Never touch a protected object, use spawn only, obey exact counts/order, avoid forbidden tools, and stay within a tool budget. |
 | G6 - Free-build castle hero | 5/5 | Open-ended visual building with real scene output | Build a castle through the Roblox API (`execute_lua`, `Instance.new('Part')` with `Enum.Material`/`Enum.PartType`) from the model's own positions; graded on 40+ named parts inside the build volume, 12+ distinct materials and all five shapes (composition and colour are not scored), kept as the report hero image. |
 | G7 - Comprehensive integration | 5/5 (hardest) | World-building and Lua logic staying cross-consistent in one session | A key-and-gate puzzle: spawn Player/Gate/Key to an exact plan, install a `key_found` proximity slot, and keep the spawned world and the logic describing it in agreement end to end. |
-| G8 - Described-state selection | 4/5 | Reasoning over a GIVEN textual world state, not live scene sensing | The prompt describes an already-populated scene; the model selects named objects, clears only junk, raises only undersized towers, and encodes the described wave-scaling rule as Lua. It is a single-turn conditional-selection test, not sustained multi-turn recovery. |
+| G8 - Described-state selection | 4/5 | Reasoning over a given textual world state | The prompt describes an already-populated scene; the benchmark recorder seeds the named objects so `list_objects` agrees with that description. The model selects named objects, clears only junk, raises only undersized towers, and encodes the described wave-scaling rule as Lua. |
 
 Groups are implemented as real PlayMode benchmark scenarios under `Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks`. Only G6 (the free-build castle) captures a hero scene screenshot, because the built scene is itself the result; all other groups — including G7 — are graded purely through world state, logic execution and tool-call traces, so no screenshot is taken for them.
 
@@ -41,6 +41,12 @@ The six benchmark dimensions are:
 Penalties subtract from the base score for failed tool calls, invalid world commands, over-building, disallowed actions, forbidden tools, repeated violations, and scenario-specific mistakes. Hard caps prevent misleading scores: an incomplete timeout/fault or final-state failure can cap at 60, and a prose-only run that never fires a tool can cap at 40.
 
 World commands are graded from the recorded command stream. Since suite v1.8 a `spawn_batch` is expanded there into one `spawn` per item, named as the production executor names them (`item.name`, else `targetName_i`, else `prefab_i`), so batch-spawned objects count toward spawn totals in every group and a batch satisfies G5's spawn-only constraint; under v1.7 a batch was one opaque non-spawn command, invisible to the spawn graders and a violation in the spawn-only scenario.
+
+Suite v1.12 also returns the recorded per-item batch outcome to the model. Earlier runs could report zero batch spawns despite recording all items, causing the model to repeat those spawns and the grader to count duplicates. The recorder now answers `list_objects` from its seeded/spawned inventory, including G8's described scene. Compare scores only within the same suite version.
+
+Suite v1.14 names the two removable G8 objects explicitly, avoids a collateral-damage penalty when an agent only inspects the scene, and preserves complete tool arguments and result previews in a `.tools.jsonl` file next to each run. It writes the G6 model-authored `execute_lua` calls in order to a `_g6_replay.lua` file, even for the image-feedback variant. Camera result bytes are excluded from the JSONL trace; the runtime forwards captured bytes as a real image part with a text prompt to a vision-capable provider on the next request. A post-run regression found that generic text-result truncation removed the camera base64 before this handoff. Version 7.47.2 fixes that path and the separate streaming tool loop; the published Bunny v1.14 run predates the fix and does not establish that the model saw its camera frames. The G6 goal and system prompt are recorded in the Markdown report. Compare scores only within the same suite version.
+
+Suite v1.15 removes duplicate error deductions: if a scenario's `clean_tool` or `clean_tools` checkpoint already measures failed calls or invalid commands, the harness does not charge the same error again. G6's clean-tools checkpoint is non-mandatory, so recoverable tool errors lower its score without automatically disqualifying a completed build. The benchmark Lua runtime now implements its advertised read-only world queries (`coreai_world_find`, `coreai_world_pos`, `coreai_world_exists`) against the virtual scene. The camera image history keeps only the latest frame. A provider transport timeout remains an environment failure even after some construction; only cancellation from the benchmark's own time budget can end a built G6 cleanly. In `both` mode the report chooses the vision build as its hero when that run has a screenshot. The v1.14 Bunny result remains historical; v1.15 run artifacts and current scores are indexed in the [leaderboard](../../Docs/BENCHMARK_LEADERBOARD.md).
 
 Bonus is separate from the comparable base score. A scenario can earn up to 20 bonus points only when its base score is at least 90, and the bonus rewards **correctness only** — being more right than the pass bar. Speed/efficiency (tokens and time) is **reported as a tok/s metric, never scored**, so a merely-faster model (e.g. a "spark" tier) cannot look smarter than an equally-correct but slower one. Reports show `Total = Base + Bonus`, but suite rankings compare base score.
 
@@ -100,6 +106,8 @@ For a one-click run, use:
 `CoreAI/Benchmarks/Run Game-Creation Benchmark`
 
 The one-click menu reuses the last saved benchmark-window settings. Results are written to `TestResults/CoreAI/Benchmarks/BENCHMARK_<yyyyMMdd_HHmmss>_<model>.md` and `.json`.
+
+The same directory also contains the `.tools.jsonl` trace of executed tool calls and, for a G6 build, a `_g6_replay.lua` script and castle screenshot. The Markdown transcript retains attempted calls that the orchestration layer deduplicates before execution; compare it with the JSONL trace when auditing exact-call constraints. The Lua script replays every model-authored `execute_lua` call in order with `pcall`, preserving a failed section without stopping later sections. Camera frames are omitted from the text trace; inspect the PNG hero and the camera tool records together when auditing visual feedback.
 
 For batchmode or automation, launch the explicit PlayMode suite through:
 
@@ -215,7 +223,7 @@ _Comparison chart: suite base scores across the newest JSON report for each sele
 
 The [README benchmark section](../../README.md#game-creation-benchmark) shows the historical suite v1.7
 frontier sweep (the same run as the frontier section below). The local-model table here is a historical
-suite v1.6 / G1-G7 baseline. Current v1.8 / G1-G8 runs start a separate leaderboard and must not be mixed
+suite v1.6 / G1-G7 baseline. Current v1.15 / G1-G8 runs start a separate leaderboard and must not be mixed
 with those scores (nor with the v1.7 frontier sweep, whose G6 was the earlier `world_command` castle).
 Historical example (local models, 2026-07-02 sweep):
 

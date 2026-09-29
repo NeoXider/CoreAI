@@ -4,6 +4,25 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.47.2] - 2026-09-29
+
+### Fixed
+
+- Desktop LLM composition calls `DontDestroyOnLoad` only during PlayMode, allowing its EditMode construction test to run without a Unity lifecycle exception.
+- Streaming tool calls now lift camera result bytes into image content before the next model request, with an EditMode regression covering the outgoing message.
+- Live memory-tool PlayMode fixtures now use their asserted memory state as the completion condition, cancel the client model turn after the mutation, and pass a cancellation token through the orchestrator and timeout helper. A provider that keeps chatting after a successful tool call no longer causes a false 240-second timeout in those fixtures.
+
+### Docs
+
+- Released in lockstep with the CoreAI benchmark recorder, G8 fixture corrections, camera image transport and history bounds, and suite 1.15 grading/reporting corrections.
+
+### Tests
+
+- The complete open-Editor EditMode run passed 6561 of 6572 tests with zero failures and 11 expected skips, including the desktop composition regression.
+- The same Lua parity fixture passed in Roblox Studio and CoreAI. A visual variant produced linked screenshots in `Docs/Images/Parity/`.
+- After the live-memory timeout exposed an uncancelled request in a monolithic PlayMode attempt, the 95-case `FastNoLlm` suite passed again in the open Editor. The existing live memory fixtures now exercise the cancellation path when the provider exceeds the deadline.
+- The corrected live memory fixtures passed against the free Space Bunny bridge: append 1/1, then clear and write 2/2. Their tool-state assertions remain unchanged.
+
 ## [7.47.1] - 2026-09-29
 
 ### Fixed

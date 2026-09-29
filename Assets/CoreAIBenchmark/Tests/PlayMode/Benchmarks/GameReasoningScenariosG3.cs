@@ -395,7 +395,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     dimension: BenchmarkDimension.Reasoning);
                 g.Add("sum_400", "HP values sum to exactly 400", 15, sums, true,
                     dimension: BenchmarkDimension.Reasoning,
-                    detail: allResolved ? $"sum={sum}" : "unresolved");
+                    detail: allResolved ? $"sum={sum}; HP=[{string.Join(", ", hp)}]" : "unresolved");
 
                 if (spawns == 4 && inRange && distinct && sums)
                 {

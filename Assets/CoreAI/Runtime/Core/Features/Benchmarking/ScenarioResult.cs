@@ -40,6 +40,12 @@ namespace CoreAI.Benchmarking
         /// <summary>Full model session transcript (per-turn prompt/answer/tool-calls), appended to the report.</summary>
         public string SessionTranscript { get; set; } = string.Empty;
 
+        /// <summary>Complete model-authored Lua call replay for G6, written as a separate .lua artifact.</summary>
+        public string LuaReplayScript { get; set; } = string.Empty;
+
+        /// <summary>One JSON object per completed tool call, including its arguments, for benchmark audits.</summary>
+        public string ToolTraceJsonl { get; set; } = string.Empty;
+
         /// <summary>
         /// PNG bytes of a real Unity screenshot of the scene the model built (world scenarios only, when a
         /// graphics device is available). Null otherwise. The host writes it next to the report and embeds it.

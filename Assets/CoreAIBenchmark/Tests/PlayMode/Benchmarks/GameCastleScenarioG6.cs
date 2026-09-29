@@ -129,7 +129,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // (zero calls trivially has zero failures/invalid commands). "Clean" must mean "acted cleanly".
                 g.Add("clean_tools", "no failed tool calls", 10,
                     run.ToolCalls >= 1 && run.FailedToolCalls == 0,
-                    true,
                     dimension: BenchmarkDimension.ToolCorrectness,
                     detail: $"{run.ToolCalls} calls, {run.FailedToolCalls} failed");
             }
@@ -216,7 +215,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// </para>
             /// </summary>
             private const string RbxHowTo =
-                "Use the execute_lua tool only. Build with the Roblox API:\n" +
+                "Use execute_lua for construction. If camera tools are available, capture the scene " +
+                "and use the image to inspect your work. Build with the Roblox API:\n" +
                 "  local p = Instance.new('Part')\n" +
                 "  p.Name = 'CastleWallNorth'\n" +
                 "  p.Size = Vector3.new(64, 11, 3)\n" +

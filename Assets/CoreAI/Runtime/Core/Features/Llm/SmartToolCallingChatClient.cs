@@ -9,6 +9,7 @@ using CoreAI.Ai;
 using CoreAI.Logging;
 using MEAI = Microsoft.Extensions.AI;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -18,6 +19,112 @@ namespace CoreAI.Infrastructure.Llm
     /// </summary>
     public sealed class SmartToolCallingChatClient : MEAI.IChatClient
     {
+        /// <summary>Move successful camera tool JSON into a provider image message before the next request.</summary>
+        public static void LiftCameraImages(List<MEAI.ChatMessage> messages, ref HashSet<string> liftedCallIds)
+        {
+            HashSet<string> cameraCallIds = null;
+            for (int m = 0; m < messages.Count; m++)
+            {
+                MEAI.ChatMessage message = messages[m];
+                for (int i = 0; i < message.Contents.Count; i++)
+                {
+                    if (message.Contents[i] is MEAI.FunctionCallContent call &&
+                        call.Name is ("camera_capture" or "screenshot") &&
+                        !string.IsNullOrEmpty(call.CallId) &&
+                        (liftedCallIds == null || !liftedCallIds.Contains(call.CallId)))
+                    {
+                        cameraCallIds ??= new HashSet<string>(StringComparer.Ordinal);
+                        cameraCallIds.Add(call.CallId);
+                    }
+                }
+            }
+
+            List<MEAI.AIContent> images = null;
+            for (int m = 0; m < messages.Count; m++)
+            {
+                MEAI.ChatMessage message = messages[m];
+                for (int i = 0; i < message.Contents.Count; i++)
+                {
+                    if (message.Contents[i] is not MEAI.FunctionResultContent result ||
+                        (liftedCallIds != null && liftedCallIds.Contains(result.CallId ?? "")))
+                    {
+                        continue;
+                    }
+
+                    string resultText = result.Result?.ToString() ?? "";
+                    // WHY: Some providers retain the tool result after pruning its call message.
+                    // WHY: The camera JSON still identifies the frame and must reach the image channel.
+                    if ((cameraCallIds == null || !cameraCallIds.Contains(result.CallId ?? "")) &&
+                        (!resultText.Contains("\"dataUrl\"") || !resultText.Contains("\"camera\"")))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        JObject payload = JObject.Parse(resultText);
+                        if (payload.Value<bool?>("ok") != true)
+                        {
+                            continue;
+                        }
+
+                        string dataUrl = payload.Value<string>("dataUrl");
+                        if (string.IsNullOrEmpty(dataUrl) ||
+                            !dataUrl.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        int separator = dataUrl.IndexOf(';');
+                        int comma = dataUrl.IndexOf(',');
+                        if (separator <= 5 || comma <= separator ||
+                            !string.Equals(dataUrl.Substring(separator, comma - separator),
+                                ";base64", StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        string mediaType = dataUrl.Substring(5, separator - 5).ToLowerInvariant();
+                        if (mediaType is not ("image/jpeg" or "image/png" or "image/webp" or "image/gif"))
+                        {
+                            continue;
+                        }
+
+                        byte[] bytes = Convert.FromBase64String(dataUrl.Substring(comma + 1));
+                        if (bytes.Length == 0 || bytes.Length > 4 * 1024 * 1024)
+                        {
+                            continue;
+                        }
+
+                        images ??= new List<MEAI.AIContent>();
+                        images.Add(new MEAI.DataContent(bytes, mediaType));
+                        payload.Remove("dataUrl");
+                        payload["imageAttached"] = true;
+                        message.Contents[i] = new MEAI.FunctionResultContent(result.CallId,
+                            payload.ToString(Formatting.None));
+                        (liftedCallIds ??= new HashSet<string>(StringComparer.Ordinal)).Add(result.CallId);
+                    }
+                    catch (Exception ex) when (ex is JsonException or FormatException)
+                    {
+                        // WHY: A malformed camera response remains ordinary tool feedback.
+                    }
+                }
+            }
+
+            if (images is { Count: > 0 })
+            {
+                List<MEAI.AIContent> contents = new(images.Count + 1)
+                {
+                    new MEAI.TextContent(ToolCallHistoryTrimmer.CameraFeedbackPrompt)
+                };
+                contents.AddRange(images);
+                ToolCallHistoryTrimmer.RemovePriorCameraFeedback(messages);
+                MEAI.ChatMessage feedback = new(MEAI.ChatRole.User, contents);
+                ToolCallHistoryTrimmer.MarkCameraFeedback(feedback);
+                messages.Add(feedback);
+            }
+        }
+
         private readonly MEAI.IChatClient _innerClient;
         private readonly ILog _logger;
         private readonly int _maxConsecutiveErrors;
@@ -270,6 +377,7 @@ namespace CoreAI.Infrastructure.Llm
             /// hand back the service's own answer instead of a policy slot that does not exist.
             /// </summary>
             private readonly Dictionary<string, object> _serviceAnswers = new(StringComparer.Ordinal);
+            private HashSet<string> _liftedCameraCallIds;
 
             public List<MEAI.ChatMessage> LastAssistantMessages { get; private set; } = new();
 
@@ -455,6 +563,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     _owner.TrimToolCallHistory(messages, _owner._settings.MaxToolCallHistoryMessages);
                 }
+                LiftCameraImages(messages, ref _liftedCameraCallIds);
 
                 MEAI.UsageDetails retryUsage = null;
                 while (true)
@@ -629,6 +738,7 @@ namespace CoreAI.Infrastructure.Llm
             CancellationToken cancellationToken = default)
         {
             List<MEAI.ChatMessage> messages = chatMessages.ToList();
+            HashSet<string> liftedCameraCallIds = null;
             int iteration = 0;
             int missingRequiredToolResponses = 0;
             int emptyResponsesAfterToolCall = 0;
@@ -954,6 +1064,7 @@ namespace CoreAI.Infrastructure.Llm
                     MEAI.ChatMessage toolTurn = new(MEAI.ChatRole.Tool, batch.Results);
                     messages.Add(assistantTurn);
                     messages.Add(toolTurn);
+                    LiftCameraImages(messages, ref liftedCameraCallIds);
                     // Track all-failed iterations as removable error feedback; once an iteration
                     // succeeds, drop the obsolete failed pairs (whole Assistant+Tool pairs, so
                     // tool-call / tool-result pairing stays OpenAI-valid).

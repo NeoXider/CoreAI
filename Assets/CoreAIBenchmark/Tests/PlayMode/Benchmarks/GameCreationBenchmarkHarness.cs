@@ -41,12 +41,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             private readonly string _roleId;
             private readonly object _gate = new();
             private readonly StringBuilder _completionText = new();
+            private readonly StringBuilder _toolTraceJsonl = new();
+            private readonly List<string> _luaChunks = new();
+            private readonly string _scenarioId;
             private int _toolCalls;
             private int _failedToolCalls;
 
-            internal ScenarioToolCallObserver(string roleId)
+            internal ScenarioToolCallObserver(string roleId, string scenarioId = "")
             {
                 _roleId = roleId;
+                _scenarioId = scenarioId;
             }
 
             internal int ToolCalls
@@ -62,6 +66,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             internal string CompletionText
             {
                 get { lock (_gate) { return _completionText.ToString(); } }
+            }
+
+            internal string ToolTraceJsonl
+            {
+                get { lock (_gate) { return _toolTraceJsonl.ToString(); } }
             }
 
             internal void Record(LlmToolCallRecord record)
@@ -82,6 +91,64 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                     _completionText.Append(record.Info.ToolName).Append(' ')
                         .Append(record.Info.ArgumentsJson).Append('\n');
+                    // WHY: Audits need exact arguments, while camera payload bytes would bloat the trace.
+                    string resultPreview = record.Info.ToolName is "camera_capture" or "screenshot"
+                        ? "[camera image omitted from log]"
+                        : record.ResultJson;
+                    _toolTraceJsonl.AppendLine(Newtonsoft.Json.JsonConvert.SerializeObject(new
+                    {
+                        scenarioId = _scenarioId,
+                        name = record.Info.ToolName,
+                        status = record.Status,
+                        arguments = record.Info.ArgumentsJson,
+                        result = resultPreview,
+                        error = record.Error,
+                        durationMs = record.DurationMs
+                    }));
+                    if (string.Equals(record.Info.ToolName, "execute_lua", StringComparison.Ordinal))
+                    {
+                        try
+                        {
+                            string code = Newtonsoft.Json.Linq.JObject.Parse(record.Info.ArgumentsJson)
+                                .Value<string>("code");
+                            if (!string.IsNullOrWhiteSpace(code))
+                            {
+                                _luaChunks.Add(code);
+                            }
+                        }
+                        catch (Newtonsoft.Json.JsonException)
+                        {
+                            // WHY: Malformed arguments are still counted as a tool attempt above.
+                        }
+                    }
+                }
+            }
+
+            internal string BuildLuaReplayScript(string modelId, string scenarioId)
+            {
+                lock (_gate)
+                {
+                    if (_luaChunks.Count == 0)
+                    {
+                        return "";
+                    }
+
+                    StringBuilder script = new();
+                    script.AppendLine("-- Model-authored execute_lua calls in original order.");
+                    script.AppendLine($"-- Model: {modelId}; scenario: {scenarioId}; calls: {_luaChunks.Count}");
+                    script.AppendLine("-- pcall keeps later calls running after a failed section, matching the benchmark.");
+                    script.AppendLine("local function run_chunk(index, body)");
+                    script.AppendLine("    local ok, err = pcall(body)");
+                    script.AppendLine("    if not ok then print('G6 chunk ' .. index .. ' failed: ' .. tostring(err)) end");
+                    script.AppendLine("end");
+                    for (int i = 0; i < _luaChunks.Count; i++)
+                    {
+                        script.AppendLine($"\nrun_chunk({i + 1}, function()");
+                        script.AppendLine(_luaChunks[i]);
+                        script.AppendLine("end)");
+                    }
+
+                    return script.ToString();
                 }
             }
         }
@@ -294,6 +361,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public string BuildTranscript(string goal)
             {
                 const int MaxContent = 4000;
+                const int MaxGoalContent = 12000;
                 const int MaxDetail = 600;
                 // The system prompt is not truncated to the same tight budget as per-turn content: it is
                 // captured once per scenario (not per turn), so bloat risk is low, and an auditor reading
@@ -302,7 +370,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 const int MaxSystemPrompt = 12000;
                 StringBuilder sb = new();
                 sb.AppendLine("```text");
-                sb.AppendLine($"GOAL: {Truncate(goal, MaxContent)}");
+                sb.AppendLine($"GOAL: {Truncate(goal, MaxGoalContent)}");
                 foreach (CapturedTurn t in Turns)
                 {
                     sb.AppendLine();
@@ -376,7 +444,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             // for later invocations, mirroring the reused MoonSharp Script this replaced.
             private LuaState _state;
 
-            public BenchmarkLuaExecutor()
+            public BenchmarkLuaExecutor(RecordingWorldExecutor world)
             {
                 LogicSlots.RegisterApis(Registry);
                 // WHY: the execute_lua tool description the model reads ends its worked example with
@@ -386,6 +454,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // installed the slot, so a model that followed the tool contract lost the clean-Lua
                 // checkpoint and the failed-call penalty for a call that did its job.
                 Registry.Register("report", new Action<string>(_ => { }));
+                // WHY: the execute_lua contract advertises these read-only world queries. Bind them to
+                // WHY: the benchmark's virtual scene so inspection works without unrelated Unity objects.
+                Registry.Register("coreai_world_find", new Func<string, List<object>>(world.FindObjectNames));
+                Registry.Register("coreai_world_pos", new Func<string, object>(world.ObjectPosition));
+                Registry.Register("coreai_world_exists", new Func<string, bool>(world.ObjectExists));
             }
 
             public void DeclareSlot(string name)
@@ -469,7 +542,23 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         public class RecordingWorldExecutor : ICoreAiWorldCommandExecutor
         {
             public readonly List<RecordedWorldCommand> Commands = new();
+            private readonly HashSet<string> _knownObjectNames = new(StringComparer.OrdinalIgnoreCase);
+            private readonly Dictionary<string, Vector3> _objectPositions = new(StringComparer.OrdinalIgnoreCase);
             public int InvalidCommandCount { get; private set; }
+            public CoreAiSpawnBatchResult LastSpawnBatchResult { get; private set; }
+
+            /// <summary>Seeds an existing described scene without counting setup as model actions.</summary>
+            public void SeedObjects(params string[] names)
+            {
+                foreach (string name in names)
+                {
+                    if (!string.IsNullOrWhiteSpace(name))
+                    {
+                        _knownObjectNames.Add(name.Trim());
+                        _objectPositions[name.Trim()] = Vector3.zero;
+                    }
+                }
+            }
 
             public bool TryExecute(ApplyAiGameCommand cmd)
             {
@@ -526,6 +615,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         HasFz = env.hasFz
                     };
                     Commands.Add(recorded);
+                    UpdateVirtualObject(recorded);
+                    if (string.Equals(recorded.Action, "list_objects", StringComparison.OrdinalIgnoreCase))
+                    {
+                        RefreshListedObjects(recorded.StringValue);
+                    }
                     OnCommand(recorded);
                 }
                 catch (Exception ex)
@@ -551,6 +645,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             private void RecordSpawnBatch(CoreAiWorldCommandEnvelope env)
             {
                 CoreAiSpawnBatchItem[] items = env.items ?? Array.Empty<CoreAiSpawnBatchItem>();
+                CoreAiSpawnBatchResult result = new();
+                LastSpawnBatchResult = result;
                 if (items.Length == 0)
                 {
                     InvalidCommandCount++;
@@ -564,6 +660,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     if (item == null)
                     {
                         InvalidCommandCount++;
+                        result.Failed++;
                         continue;
                     }
 
@@ -574,6 +671,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     if (!named && namePrefix.Length == 0 && prefab.Length == 0)
                     {
                         InvalidCommandCount++;
+                        result.Failed++;
                         continue;
                     }
 
@@ -610,7 +708,118 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         HasFz = item.rz != 0f
                     };
                     Commands.Add(recorded);
+                    _knownObjectNames.Add(name);
+                    _objectPositions[name] = new Vector3(item.x, item.y, item.z);
+                    result.Spawned++;
+                    if (result.Names.Count < 10)
+                    {
+                        result.Names.Add(name);
+                    }
                     OnCommand(recorded);
+                }
+            }
+
+            private void RefreshListedObjects(string searchPattern)
+            {
+                LastListedObjects.Clear();
+                foreach (string name in _knownObjectNames)
+                {
+                    if (!string.IsNullOrWhiteSpace(searchPattern) &&
+                        name.IndexOf(searchPattern.Trim(), StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        continue;
+                    }
+
+                    LastListedObjects.Add(new Dictionary<string, object>
+                    {
+                        { "name", name },
+                        { "active", true },
+                        { "position", new float[] { 0f, 0f, 0f } },
+                        { "tag", "Untagged" },
+                        { "layer", 0 },
+                        { "childCount", 0 }
+                    });
+                }
+            }
+
+            public bool ObjectExists(string name)
+            {
+                return !string.IsNullOrWhiteSpace(name) && _knownObjectNames.Contains(name.Trim());
+            }
+
+            public object ObjectPosition(string name)
+            {
+                if (string.IsNullOrWhiteSpace(name) ||
+                    !_objectPositions.TryGetValue(name.Trim(), out Vector3 unityPosition))
+                {
+                    return null;
+                }
+
+                // WHY: production coreai_world_pos returns Roblox studs, while world_command uses metres.
+                CoreAI.Mods.Rbx.Datatypes.RbxVector3 studs =
+                    CoreAI.Mods.Rbx.Spatial.RbxSpace.FromUnity(unityPosition);
+                return new Dictionary<string, object>
+                {
+                    { "x", (double)studs.X }, { "y", (double)studs.Y }, { "z", (double)studs.Z }
+                };
+            }
+
+            public List<object> FindObjectNames(string pattern)
+            {
+                string search = (pattern ?? "").Trim();
+                List<string> names = new(_knownObjectNames);
+                names.Sort(StringComparer.Ordinal);
+                List<object> matches = new();
+                foreach (string name in names)
+                {
+                    if (name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        matches.Add(name);
+                        if (matches.Count >= LuaCsWorldQueryBindings.MaxFindResults)
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                return matches;
+            }
+
+            private void UpdateVirtualObject(RecordedWorldCommand command)
+            {
+                string name = command.TargetName;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    return;
+                }
+
+                if (string.Equals(command.Action, "spawn", StringComparison.OrdinalIgnoreCase))
+                {
+                    _knownObjectNames.Add(name);
+                    _objectPositions[name] = new Vector3(command.X, command.Y, command.Z);
+                }
+                else if (string.Equals(command.Action, "destroy", StringComparison.OrdinalIgnoreCase))
+                {
+                    _knownObjectNames.Remove(name);
+                    _objectPositions.Remove(name);
+                }
+                else if (_objectPositions.TryGetValue(name, out Vector3 position))
+                {
+                    if (string.Equals(command.Action, "move", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(command.Action, "set_transform", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _objectPositions[name] = new Vector3(command.X, command.Y, command.Z);
+                    }
+                    else if (string.Equals(command.Action, "change", StringComparison.OrdinalIgnoreCase) &&
+                             (command.HasPosition || command.HasX || command.HasY || command.HasZ))
+                    {
+                        _objectPositions[name] = command.HasPosition &&
+                                                 !command.HasX && !command.HasY && !command.HasZ
+                            ? new Vector3(command.X, command.Y, command.Z)
+                            : new Vector3(command.HasX ? command.X : position.x,
+                                command.HasY ? command.Y : position.y,
+                                command.HasZ ? command.Z : position.z);
+                    }
                 }
             }
 
@@ -620,7 +829,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             public string[] LastListedAnimations => Array.Empty<string>();
-            public List<Dictionary<string, object>> LastListedObjects => new();
+            public List<Dictionary<string, object>> LastListedObjects { get; } = new();
 
             public int Count(string action)
             {
@@ -706,6 +915,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                     _liveCamGo = new GameObject("BenchmarkLivePreviewCamera");
                     Camera cam = _liveCamGo.AddComponent<Camera>();
+                    // WHY: the visual benchmark gives this dedicated camera to the agent; marking it
+                    // WHY: lets camera_look work without granting control over an unrelated player camera.
+                    _liveCamGo.AddComponent<CoreAI.Vision.CoreAiAgentCamera>();
                     cam.clearFlags = CameraClearFlags.SolidColor;
                     cam.backgroundColor = new Color(0.10f, 0.11f, 0.13f);
                     cam.fieldOfView = 50f;
@@ -1203,10 +1415,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 bool canRender = SystemInfo.graphicsDeviceType
                                  != UnityEngine.Rendering.GraphicsDeviceType.Null;
                 World = visual && canRender ? new VisualBenchmarkWorldExecutor() : new RecordingWorldExecutor();
+                Lua = new BenchmarkLuaExecutor(World);
             }
 
             public ICoreAISettings Settings { get; }
-            public BenchmarkLuaExecutor Lua { get; } = new();
+            public BenchmarkLuaExecutor Lua { get; }
             public RecordingWorldExecutor World { get; }
             public RecordingMemoryStore Memory { get; } = new();
 
@@ -1566,14 +1779,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// </para>
         /// </summary>
         private static async Task DrainStreamingAsync(
-            AiOrchestrator orch, AiTaskRequest request, CancellationToken cancellationToken)
+            AiOrchestrator orch, AiTaskRequest request, CancellationToken cancellationToken,
+            Action<string> onError)
         {
-            await foreach (LlmStreamChunk _ in orch.RunStreamingAsync(request, cancellationToken)
+            await foreach (LlmStreamChunk chunk in orch.RunStreamingAsync(request, cancellationToken)
                                .WithCancellation(cancellationToken))
             {
-                // Intentionally empty: SessionCapturingLlmClient already recorded this turn via the
-                // wrapped ILlmClient.CompleteStreamingAsync. We only need to drive the enumerable to
-                // completion so this method's Task carries the terminal fault/cancellation state.
+                // WHY: orchestration can catch a provider exception and surface it only as an error
+                // WHY: chunk. In that case the inner client never reaches its terminal capture record.
+                if (!string.IsNullOrWhiteSpace(chunk?.Error))
+                {
+                    onError?.Invoke(chunk.Error);
+                }
             }
 
             // RunStreamingAsync catches cancellation internally and yields a terminal {IsDone=true,
@@ -1667,7 +1884,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             config.ApplyToPolicy(policy);
 
             SessionCapturingLlmClient capture = new(client);
-            ScenarioToolCallObserver toolObserver = new(scenario.RoleId);
+            ScenarioToolCallObserver toolObserver = new(scenario.RoleId, scenario.Id);
             using IDisposable toolSubscription = CoreAi.SubscribeToolCalls(toolObserver.Record);
             ListSink sink = new();
             AiOrchestrator orch = new(
@@ -1692,6 +1909,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             using CancellationTokenSource cts = new();
             // Streaming, not RunTaskAsync: production callers always stream (see DrainStreamingAsync doc),
             // so the benchmark must exercise that same path rather than the non-streaming convenience.
+            string streamError = null;
             Task StartTurn(string hint) => DrainStreamingAsync(orch, new AiTaskRequest
             {
                 RoleId = scenario.RoleId,
@@ -1703,7 +1921,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 MaxToolCallRoundtrips = scenario.MaxToolCallRoundtripsOverride,
                 // WHY: a call-level cap wins over the agent's explicit unlimited output setting.
                 MaxOutputTokens = ResolveBenchmarkMaxOutputTokens()
-            }, cts.Token);
+            }, cts.Token, error => streamError ??= error);
 
             Task task = StartTurn(scenario.Goal);
 
@@ -1718,7 +1936,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             int previousToolCalls = 0;
             int continuations = 0;
             while (scenario.FreeBuildLayout && !scenario.ExcludeFromScoring && task.IsCompleted &&
-                   !task.IsFaulted && !task.IsCanceled &&
+                   !task.IsFaulted && !task.IsCanceled && string.IsNullOrEmpty(streamError) &&
                    CanContinueFreeBuild(Math.Max(capture.ToolCalls, toolObserver.ToolCalls),
                        previousToolCalls, continuations, sw.Elapsed.TotalSeconds, timeoutSeconds))
             {
@@ -1751,12 +1969,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             sw.Stop();
             obs.LatencyMs = sw.Elapsed.TotalMilliseconds;
 
-            // A cancellation/timeout AFTER the model already built a scene is the build simply ending (the
-            // per-scenario time budget or a single orchestrator turn was cancelled while a good scene already
-            // exists), not an infrastructure failure: treat it as a CLEAN STOP — grade and screenshot what was
-            // built, do NOT set Environment attribution and do NOT trigger the scenario retry (which would wipe
-            // the scene and rebuild from scratch). A cancellation/timeout BEFORE anything was built keeps the
-            // Environment+retry behaviour. "scene built" is defined exactly as the empty-response clean-stop below.
+            // WHY: Only scenario-budget cancellation after a scene exists ends the build cleanly.
+            // WHY: Earlier provider timeouts are environment failures, not model quality.
             bool sceneWasBuilt = env.World.Count("spawn") >= 1 || capture.ToolCalls >= 1 ||
                                  env.World is VisualBenchmarkWorldExecutor { HasRenderableScene: true } ||
                                  env.HasRbxWorld && env.RbxWorld.Measure().Parts >= 1;
@@ -1764,10 +1978,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             if (task.IsFaulted)
             {
                 Exception baseEx = task.Exception?.GetBaseException();
-                bool cancelStop = sceneWasBuilt
-                                  && (baseEx is OperationCanceledException
-                                      || baseEx is LlmOperationTimeoutException
-                                      || IsCancellationError(baseEx?.Message));
+                bool cancelStop = IsCleanBudgetCancellation(cts.IsCancellationRequested, sceneWasBuilt,
+                    (baseEx is OperationCanceledException or LlmOperationTimeoutException) ||
+                    IsCancellationError(baseEx?.Message));
                 if (!cancelStop)
                 {
                     obs.Attribution = ClassifyException(baseEx);
@@ -1778,11 +1991,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 // The scenario time budget elapsed and we cancelled the orchestrator. If a scene already
                 // exists, this is a clean stop — grade what was built, no failure/retry.
-                obs.TimedOut = true;
-                if (!sceneWasBuilt)
+                obs.TimedOut = cts.IsCancellationRequested;
+                if (!IsCleanBudgetCancellation(cts.IsCancellationRequested, sceneWasBuilt, true))
                 {
                     obs.Attribution = FailureAttribution.Environment;
-                    obs.Failure = "timed out";
+                    obs.Failure = obs.TimedOut ? "timed out" : "task canceled before scenario deadline";
                 }
             }
 
@@ -1811,29 +2024,30 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             // and screenshot what was built, and do NOT trigger the scenario retry. A clearly transient
             // transport error (HTTP/crash/timeout) still falls through to the Environment branch below.
             // (sceneWasBuilt is computed above, where the fault/cancel clean-stop also uses it.)
-            bool emptyResponseStop = capture.FailedTurnCount > 0
-                                     && IsEmptyResponseError(capture.FirstProviderError)
-                                     && !LooksTransient(capture.FirstProviderError)
+            string providerError = !string.IsNullOrWhiteSpace(capture.FirstProviderError)
+                ? capture.FirstProviderError
+                : streamError;
+            bool providerFailed = capture.FailedTurnCount > 0 || !string.IsNullOrWhiteSpace(streamError);
+            bool emptyResponseStop = providerFailed
+                                     && IsEmptyResponseError(providerError)
+                                     && !LooksTransient(providerError)
                                      && sceneWasBuilt;
 
-            // Same clean-stop for a cancellation/timeout that surfaced as an Ok=false provider result (rather
-            // than a thrown fault): "A task was canceled." after a scene was built is the build ending, not an
-            // infrastructure failure. This WINS over the transient/Environment classification below.
-            bool cancellationStop = capture.FailedTurnCount > 0
-                                    && IsCancellationError(capture.FirstProviderError)
-                                    && sceneWasBuilt;
+            // WHY: A cooperative cancellation surfaced as Ok=false is clean only after our scenario deadline.
+            bool cancellationStop = providerFailed &&
+                                    IsCleanBudgetCancellation(cts.IsCancellationRequested, sceneWasBuilt,
+                                        IsCancellationError(providerError));
 
-            // A provider/model crash that came back as a failed result (not a thrown fault) — model-load
-            // crash, "model has crashed", HTTP 4xx/5xx — is an Environment failure, not a weak model.
+            // WHY: A provider/model crash returned as a failed result is an environment failure.
             // Classify it (so it is retried and excluded from the model's score) when the error text looks
             // transient OR the run produced no usable output at all despite a failed turn.
             if (!emptyResponseStop && !cancellationStop
                                    && obs.Attribution == FailureAttribution.None && string.IsNullOrEmpty(obs.Failure)
-                                   && capture.FailedTurnCount > 0
-                                   && (LooksTransient(capture.FirstProviderError) || !capture.AnyUsableOutput))
+                                   && providerFailed
+                                   && (LooksTransient(providerError) || !capture.AnyUsableOutput))
             {
                 obs.Attribution = FailureAttribution.Environment;
-                obs.Failure = $"provider error: {capture.FirstProviderError}";
+                obs.Failure = $"provider error: {providerError}";
             }
 
             // Grading is harness territory too: protect the suite from a grader bug.
@@ -1851,21 +2065,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 yield break;
             }
 
-            // Harness-level error penalties on top of the scenario's own checkpoints. Kept small and
-            // CAPPED: failed tool calls are already reflected in the ToolCorrectness dimension, and a model
-            // that self-corrects (a failed call followed by a successful one) must not be tanked — the
-            // scenario's outcome checkpoints are what decide the base.
-            if (obs.FailedToolCalls > 0)
-            {
-                grading.Penalty($"{obs.FailedToolCalls} failed tool call(s)", Math.Min(2 * obs.FailedToolCalls, 8));
-            }
-
-            // Invalid (malformed) world commands are a harder error and never a normal recovery step.
-            if (obs.InvalidCommands > 0)
-            {
-                grading.Penalty($"{obs.InvalidCommands} invalid world command(s)",
-                    Math.Min(5 * obs.InvalidCommands, 15));
-            }
+            ApplyUnscoredToolErrorPenalties(grading, obs);
 
             // An incomplete run (timeout/fault) cannot be a perfect build.
             if (!string.IsNullOrEmpty(obs.Failure))
@@ -1934,6 +2134,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 TimedOut = obs.TimedOut,
                 Failure = obs.Failure,
                 SessionTranscript = capture.BuildTranscript(scenario.Goal)
+                    + (string.IsNullOrEmpty(obs.Failure) ? "" : $"\nRUN FAILURE: {obs.Failure}\n"),
+                LuaReplayScript = scenario.Group == "G6"
+                    ? toolObserver.BuildLuaReplayScript(modelId, scenario.Id)
+                    : "",
+                ToolTraceJsonl = toolObserver.ToolTraceJsonl
             };
 
             Debug.Log($"[Benchmark] {scenario.Group}/{scenario.Name}: base={score.Base:0.#} " +
@@ -3189,7 +3394,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// True when a provider error string looks like a transport/infrastructure failure (HTTP 4xx/5xx,
         /// model crash/load failure, timeout, connection, rate limit) rather than a model-quality issue.
         /// </summary>
-        private static bool LooksTransient(string error)
+        internal static bool LooksTransient(string error)
         {
             if (string.IsNullOrEmpty(error))
             {
@@ -3202,7 +3407,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "http error", "http 4", "http 5", "status 4", "status 5", "crashed", "has crashed",
                 "failed to load model", "model load", "loading model", "timeout", "timed out",
                 "connection", "econnrefused", "rate limit", "429", "500", "502", "503", "504",
-                "unavailable", "overloaded", "no healthy"
+                "unavailable", "overloaded", "no healthy", "canceled", "cancelled"
             };
 
             foreach (string s in signatures)
@@ -3232,12 +3437,50 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         /// <summary>
-        /// True when an error string looks like a cooperative cancellation / time-budget cutoff
-        /// ("A task was canceled.", "timed out", "timeout", …). For a model that has ALREADY built a scene
-        /// this means the build ran out of time, not an infrastructure fault — see the cancellation clean-stop
-        /// in RunScenario. Mirrors <see cref="IsEmptyResponseError"/>.
+        /// True only when our scenario deadline canceled a run after the model built a scene.
         /// </summary>
-        private static bool IsCancellationError(string error)
+        internal static bool IsCleanBudgetCancellation(
+            bool scenarioCancellationRequested, bool sceneWasBuilt, bool cancellationResult)
+        {
+            return scenarioCancellationRequested && sceneWasBuilt && cancellationResult;
+        }
+
+        internal static void ApplyUnscoredToolErrorPenalties(ScenarioGrading grading, RunObservation obs)
+        {
+            bool failedCallsCovered = false;
+            bool invalidCommandsCovered = false;
+            foreach (BenchmarkCheckpoint checkpoint in grading.Checkpoints)
+            {
+                if (checkpoint.Id is not ("clean_tools" or "clean_tool"))
+                {
+                    continue;
+                }
+
+                failedCallsCovered = true;
+                invalidCommandsCovered |= checkpoint.Description.IndexOf("invalid",
+                    StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+
+            // WHY: a failed clean-tools checkpoint already deducts its configured weight. Apply the
+            // WHY: harness penalty only where a scenario has no matching reliability checkpoint.
+            if (obs.FailedToolCalls > 0 && !failedCallsCovered)
+            {
+                grading.Penalty($"{obs.FailedToolCalls} failed tool call(s)",
+                    Math.Min(2 * obs.FailedToolCalls, 8));
+            }
+
+            if (obs.InvalidCommands > 0 && !invalidCommandsCovered)
+            {
+                grading.Penalty($"{obs.InvalidCommands} invalid world command(s)",
+                    Math.Min(5 * obs.InvalidCommands, 15));
+            }
+        }
+
+        /// <summary>
+        /// True when an error string identifies cooperative cancellation ("A task was canceled.").
+        /// A transport timeout is a provider/environment failure even after a scene was built.
+        /// </summary>
+        internal static bool IsCancellationError(string error)
         {
             if (string.IsNullOrEmpty(error))
             {
@@ -3245,7 +3488,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             string e = error.ToLowerInvariant();
-            string[] signatures = { "task was canceled", "canceled", "cancelled", "timed out", "timeout" };
+            // WHY: an HTTP 504 or connection timeout belongs to the provider/environment even when
+            // WHY: a scene already exists. Only cooperative local cancellation ends a build cleanly.
+            if (e.Contains("http ") || e.Contains("status ") || e.Contains("connection") ||
+                e.Contains("econn") || e.Contains("429") || e.Contains("rate limit"))
+            {
+                return false;
+            }
+
+            string[] signatures = { "task was canceled", "canceled", "cancelled" };
             foreach (string s in signatures)
             {
                 if (e.Contains(s))

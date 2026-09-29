@@ -57,6 +57,19 @@ runs in Roblox. It is the explicit DoD of MVP14, prepared by MVP4 (script instan
 `RunContext`) and MVP13 (Luau stdlib extensions, coercion parity, the Luau-only export lint, the
 welds/constraints subset); the gaps RT1–RT13 are listed under §MVP14.
 
+**Measured Lua slice (2026-09-29):** the exact
+[`RobloxCoreAiParity.lua`](../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/RobloxCoreAiParity.lua)
+fixture passed in Roblox Studio `RunScript` and in CoreAI's Unity EditMode acceptance world.
+Both produced `before=2;after=1;clone=ProbeCopy;position=-2,4,9` after creating a
+brick `Part`, cloning it, setting its `CFrame`, checking the clone's size/material/anchor state,
+and destroying the original. A [visual variant](RobloxCoreAiParityVisual.lua) leaves the clone
+visible: [Roblox Studio](../Images/Parity/roblox-studio-parity.jpg) and
+[CoreAI Unity](../Images/Parity/coreai-unity-parity.png). The Unity binder maps studs to metres
+at 0.28 and flips the world Z axis, so its backing GameObject is at
+`(-0.56, 1.12, -2.52)` while Lua still reads `(-2, 4, 9)`. The two brick textures and lighting
+are visibly different; this fixture verifies the listed Lua behavior and properties, not
+pixel-identical rendering or the complete Roblox API.
+
 ---
 
 ## 1. Principles

@@ -11,20 +11,47 @@ Full methodology: [benchmark guide](../Assets/CoreAIBenchmark/README.md) · [ben
 
 Scores are only comparable **within the same suite version**. Scenario sets, checkpoint weights, penalties, and caps change between versions, so a v1.6 score and a hypothetical v1.7 score are different measurements even for the same model. The suite version is stamped into every report JSON (`suiteVersion`) and shown in the report header. When the suite version bumps, the leaderboard starts a new section; older sections are kept for history but never mixed into the current ranking.
 
-**Current suite version: v1.8** (G1-G8, no token caps). No v1.8 rows exist yet; the v1.7 table below is the latest published sweep.
+**Current suite version: v1.15** (G1-G8, 28 scenarios with camera-enabled G6). Results below use one repetition per scenario in the open Unity 6000.3.14f1 Editor. The v1.14 Bunny result is historical and cannot be ranked against v1.15.
 
 ### Suite version history
 
 | Suite | Status | Notes |
 |---|---|---|
-| v1.8 | **Current** | G6 free-build runs on the Roblox API (`execute_lua`, `Instance.new('Part')` with `Enum.Material`/`Enum.PartType`) and is graded on parts, names, volume, material and shape variety; the G6 prompt now matches that runtime (section size, writable Part surface, how `Color` composes with a texture). **In every group** the recording executor now expands a `spawn_batch` into one `spawn` per item, named as the production executor names them (`item.name`, else `targetName_i`, else `prefab_i`); under v1.7 a batch was recorded as a single opaque non-spawn command. So batch-spawned objects now count toward the spawn totals G1, G7 and G8 grade, and a `spawn_batch` satisfies G5's spawn-only constraint instead of violating it. Prompts, weights and penalties of G1-G5, G7, G8 are otherwise unchanged from v1.7. |
+| v1.15 | **Current** | Failed tools and invalid commands are charged once when a clean-tools checkpoint already covers them; G6 clean-tools is non-mandatory. Read-only benchmark Lua world queries use the virtual scene, camera history keeps the latest frame, provider transport timeouts remain environment failures after partial builds, and A/B report heroes prefer a captured vision run. |
+| v1.14 | Historical | G8 explicitly identifies both removable objects; the recorder preserves full tool arguments and G6 Lua replay. CoreAI 7.47.2 forwards captured camera images as image content to the model after a truncation fix; the published Bunny run predates that fix. G6 has a ten-minute wall budget and reserves capture/export time. |
+| v1.9–v1.13 | Historical | Intermediate benchmark and recorder changes; compare reports only when their exact `suiteVersion` matches. |
+| v1.8 | Historical | G6 free-build runs on the Roblox API (`execute_lua`, `Instance.new('Part')` with `Enum.Material`/`Enum.PartType`) and is graded on parts, names, volume, material and shape variety; the G6 prompt now matches that runtime (section size, writable Part surface, how `Color` composes with a texture). **In every group** the recording executor now expands a `spawn_batch` into one `spawn` per item, named as the production executor names them (`item.name`, else `targetName_i`, else `prefab_i`); under v1.7 a batch was recorded as a single opaque non-spawn command. So batch-spawned objects now count toward the spawn totals G1, G7 and G8 grade, and a `spawn_batch` satisfies G5's spawn-only constraint instead of violating it. Prompts, weights and penalties of G1-G5, G7, G8 are otherwise unchanged from v1.7. |
 | v1.7 | Historical | G1-G8; adds described-state conditional selection and benchmark v2 prompts. G6 was the `world_command` primitive castle graded on castle signals. |
 | v1.6 | Historical | G1-G7 scenario groups, six-dimension scoring, role fitness, mean-over-repetitions suite score. |
 | < v1.6 | Retired | Pre-leaderboard development iterations; results were not published and are not comparable. |
 
-## Leaderboard — Suite v1.8
+## Leaderboard — Suite v1.15
 
-No submissions yet. The current G6 (Roblox-API castle, since CoreAI 7.5.0 / 2026-09-03) has **no published
+Maintainer runs use the Neoxider Agents local API bridge: GPT-6 models through Codex CLI, and free Space Bunny through OpenCode. G6 is a separate image-feedback run with a maximum of 570 seconds for model work plus 30 seconds reserved for capture/export; its score replaces the G6 outcome of the other-groups run. The `Runs` column identifies raw JSON, Markdown transcript, executed-tool JSONL, screenshot, and complete Lua replay in the [run archive](BenchmarkRuns/2026-09-29/). Tool-error counts use executed calls in JSONL; the Markdown transcript also retains attempted calls that the tool orchestration deduplicated. The numeric G6 grader does not score visual composition, so inspect the screenshots as well as the score.
+
+| Model | Suite | P/PA/F | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | Tool errors | Tokens | Runs |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `codex/GPT-6 Sol` | **100.00** | 28/0/0 | 100.00 | 100.00 | 100.00 | 100.00 | 100.00 | 100.00 | 100.00 | 100.00 | 0/66 | 20762 | `165050`, `170723` |
+| `codex/GPT-6 Luna` | **99.70** | 28/0/0 | 100.00 | 100.00 | 100.00 | 100.00 | 100.00 | 91.67 | 100.00 | 100.00 | 2/66 | 23162 | `154152`, `163934` |
+| `opencode/space-bunny-free` | **95.89** | 26/1/1 | 100.00 | 100.00 | 100.00 | 100.00 | 83.33 | 85.00 | 100.00 | 100.00 | 1/62 | 21925 | `205051`, `212753` |
+
+Space Bunny's G5 `Exactly three actions` failed because it attempted the required three calls three times. CoreAI deduplicated six repeats, so the world was built only once, but the instruction forbade additional attempts. Its other 26 scenarios passed; the camera-enabled G6 was partial at 85. The same G5 task passed in a separate run that Unity later aborted during an unrelated package import, showing single-repetition variability. The complete published run above retains the failure.
+
+## Historical Leaderboard — Suite v1.14
+
+Maintainer run through the OpenRouter free endpoint with native streaming tools and the G6 camera tools enabled, one repetition, Unity 6000.3.14f1. This row follows benchmark fixes; the earlier v1.12 Bunny run (93.66, 25/2/1) is retained in its original report and is not ranked against v1.14. The run predates the camera base64 truncation fix in 7.47.2, so camera calls here do not prove the model received image pixels. The separate v1.15 OpenCode free run above uses the corrected image route.
+
+| Model | Suite | P/PA/F | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | Tool errors | Tokens | Run |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `stealth/space-bunny-alpha` | **97.76** | 26/2/0 | 96.25 | 100 | 98.54 | 94.67 | 99.67 | 75.33 | 100 | 100 | 13/170 | 301268 | `20260929_141847` |
+
+The G6 numeric grader checks volume, named parts, material and shape variety; inspect the hero PNG to judge composition. Tool traces and model-authored Lua replay are emitted beside each report. Provider failures are tracked separately from model failures.
+
+The older GPT-6 Luna/Sol attempt through a direct OpenRouter paid route was not ranked because that route hit a 402 credit limit. The v1.15 rows above use the working Neoxider Agents Codex CLI bridge instead.
+
+## Historical Leaderboard — Suite v1.8
+
+No submissions yet. That suite's G6 (Roblox-API castle, since CoreAI 7.5.0 / 2026-09-03) has **no published
 score for any model** — the only recorded G6 numbers are the v1.7 rows below, produced by the earlier
 `world_command` castle and its castle-signal grader, so they say nothing about the Lua build.
 
@@ -148,7 +175,7 @@ Add one row to the appropriate table (cloud or local) with your name/handle in *
 | Run id | The `yyyyMMdd_HHmmss` timestamp from the report filename — goes into the **Run** column. |
 | Model identity | Exact model id / file name and, for local models, the quantization (e.g. `Q4_K_M`, `imatrix`) and context length used. |
 | Hardware | For local runs: GPU/CPU, VRAM/RAM, and the runtime (LM Studio / llama.cpp / other) with version. Cloud runs: provider + endpoint type. |
-| Suite version | Must match the leaderboard section you are adding to (currently **v1.8**; check `suiteVersion` in your report JSON). |
+| Suite version | Must match the leaderboard section you are adding to (currently **v1.15**; check `suiteVersion` in your report JSON). |
 | Settings | Groups run (full current submissions must be G1-G8), repetitions, any timeout overrides, and any non-default endpoint settings. |
 
 ### 3. What reviewers check

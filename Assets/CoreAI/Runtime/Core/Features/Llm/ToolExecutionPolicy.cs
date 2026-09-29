@@ -875,8 +875,34 @@ namespace CoreAI.Infrastructure.Llm
                 sw.Stop();
                 string resultText = NormalizeToolResultText(result);
                 bool succeeded = IsToolResultSuccess(resultText);
+                string diagnosticResultText = resultText;
+                bool cameraImageResult = false;
+                if (succeeded && fc.Name is ("camera_capture" or "screenshot"))
+                {
+                    try
+                    {
+                        JObject cameraResult = JObject.Parse(resultText);
+                        string dataUrl = cameraResult.Value<string>("dataUrl");
+                        if (!string.IsNullOrEmpty(dataUrl) &&
+                            dataUrl.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase) &&
+                            dataUrl.Length <= 4 * 1024 * 1024 * 4 / 3 + 128)
+                        {
+                            // WHY: the image must survive until SmartToolCallingChatClient lifts it into
+                            // WHY: a provider image part; diagnostics only need the JSON summary.
+                            cameraResult.Remove("dataUrl");
+                            cameraResult["imageAttached"] = true;
+                            diagnosticResultText = cameraResult.ToString(Formatting.None);
+                            cameraImageResult = true;
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                        // WHY: malformed camera feedback follows the ordinary bounded text path.
+                    }
+                }
+
                 int maxResultChars = _settings.MaxToolResultChars;
-                if (maxResultChars > 0 && resultText.Length > maxResultChars)
+                if (!cameraImageResult && maxResultChars > 0 && resultText.Length > maxResultChars)
                 {
                     int originalLen = resultText.Length;
                     // Truncation is made visible to the model with an explicit marker rather than silently:
@@ -885,6 +911,7 @@ namespace CoreAI.Infrastructure.Llm
                     int shown = char.IsHighSurrogate(resultText[maxResultChars - 1]) ? maxResultChars - 1 : maxResultChars;
                     resultText = resultText.Substring(0, shown) +
                                  $"\n{TruncatedResultMarker}{originalLen} chars total -> {shown} shown]";
+                    diagnosticResultText = resultText;
                     _logger.Info(
                         $"[ToolPolicy] Tool '{fc.Name}' result truncated: {originalLen} -> {shown} chars",
                         LogTag.Llm);
@@ -899,16 +926,16 @@ namespace CoreAI.Infrastructure.Llm
                 double elapsedMs = sw.Elapsed.TotalMilliseconds;
                 if (succeeded)
                 {
-                    _eventPublisher.PublishCompleted(info, SafeResultJson(resultText), elapsedMs);
+                    _eventPublisher.PublishCompleted(info, SafeResultJson(diagnosticResultText), elapsedMs);
                 }
                 else
                 {
-                    _eventPublisher.PublishFailed(info, SafeResultJson(resultText), elapsedMs);
+                    _eventPublisher.PublishFailed(info, SafeResultJson(diagnosticResultText), elapsedMs);
                 }
 
                 AddTrace(new LlmToolCallTrace(fc.Name ?? "", succeeded, elapsedMs, "native",
-                    resultText));
-                LogCallLine(fc, succeeded, elapsedMs, resultText);
+                    diagnosticResultText));
+                LogCallLine(fc, succeeded, elapsedMs, diagnosticResultText);
 
                 // WHY: the flag is raised HERE, on the only path that knows the call actually produced a
                 // successful result. A failing turn-ending tool must keep its ordinary error round: the

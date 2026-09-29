@@ -726,6 +726,32 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteStreamingAsync_CameraResultBecomesImageBeforeNextRequest()
+        {
+            string dataUrl = "data:image/jpeg;base64," + Convert.ToBase64String(new byte[256]);
+            NativeToolCallScripted inner = new(() => true) { ToolName = "camera_capture" };
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(),
+                supportsNativeToolCalling: true, memoryStore: null);
+
+            await foreach (LlmStreamChunk _ in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "inspect",
+                               Tools = new List<ILlmTool> { new CameraTestTool(dataUrl) }
+                           }, CancellationToken.None))
+            {
+            }
+
+            Assert.IsNotNull(inner.SecondCallMessages);
+            Assert.AreEqual(1, inner.SecondCallMessages.SelectMany(message => message.Contents)
+                .OfType<MEAI.DataContent>().Count());
+            MEAI.FunctionResultContent result = inner.SecondCallMessages.SelectMany(message => message.Contents)
+                .OfType<MEAI.FunctionResultContent>().Single();
+            StringAssert.DoesNotContain("dataUrl", result.Result.ToString());
+        }
+
+        [Test]
         public void ContainsCompleteThinkBlockToolCall_NormalThinkWithoutTool_ReturnsFalse()
         {
             Assert.IsFalse(
@@ -998,6 +1024,25 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class CameraTestTool : ILlmTool, IAIFunctionLlmTool
+        {
+            private readonly string _dataUrl;
+
+            public CameraTestTool(string dataUrl) { _dataUrl = dataUrl; }
+            public string Name => "camera_capture";
+            public string Description => "capture a test frame";
+            public string ParametersSchema => "{}";
+            public bool AllowDuplicates => true;
+
+            public MEAI.AIFunction CreateAIFunction()
+            {
+                Func<CancellationToken, Task<string>> capture = _ => Task.FromResult(
+                    "{\"ok\":true,\"camera\":\"Preview\",\"dataUrl\":\"" + _dataUrl + "\"}");
+                return MEAI.AIFunctionFactory.Create(capture,
+                    new MEAI.AIFunctionFactoryOptions { Name = Name, Description = Description });
+            }
+        }
+
         /// <summary>
         /// Tool that hands control to a human: its AIFunction returns the configured result payload and
         /// the tool declares that a successful call ENDS the model's turn.
@@ -1079,6 +1124,8 @@ namespace CoreAI.Tests.EditMode
             public bool SuppressFirstTail { get; set; }
             public bool EmitUsage { get; set; }
             public string FirstVisibleText { get; set; }
+            public string ToolName { get; set; } = "world_tool";
+            public List<MEAI.ChatMessage> SecondCallMessages { get; private set; }
             public bool? ObservedToolExecutedBeforeStreamEnd { get; private set; }
             public int StreamCalls { get; private set; }
 
@@ -1105,7 +1152,7 @@ namespace CoreAI.Tests.EditMode
                     List<MEAI.AIContent> contents = new()
                     {
                         new MEAI.FunctionCallContent(
-                            "call-1", "world_tool", new Dictionary<string, object>())
+                            "call-1", ToolName, new Dictionary<string, object>())
                     };
                     if (!string.IsNullOrEmpty(FirstVisibleText))
                     {
@@ -1135,6 +1182,7 @@ namespace CoreAI.Tests.EditMode
                 }
                 else
                 {
+                    SecondCallMessages = chatMessages.ToList();
                     if (ThrowOnSecondStreamBeforeContent)
                     {
                         throw new InvalidOperationException("second roundtrip failed");

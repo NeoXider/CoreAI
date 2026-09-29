@@ -19,6 +19,137 @@ namespace CoreAI.Tests.EditMode
     [TestFixture]
     public sealed class SmartToolCallingChatClientEditModeTests
     {
+        [Test]
+        public async Task CameraCapture_LiftsJpegAndPromptIntoNextProviderRequest()
+        {
+            string dataUrl = "data:image/jpeg;base64," + Convert.ToBase64String(new byte[256]);
+            ScriptedChatClient inner = new(iteration => iteration == 1
+                ? MakeToolCallResponse("camera_capture", "camera_1")
+                : MakeTextResponse("scene inspected"));
+            MEAI.AIFunction camera = MakeAIFunction("camera_capture", _ =>
+                Task.FromResult<object>("{\"ok\":true,\"summary\":\"captured\",\"dataUrl\":\"" +
+                                        dataUrl + "\"}"));
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance,
+                new CoreAISettingsOptions { MaxToolResultChars = 100 }, true,
+                new List<Ai.ILlmTool>(), "GameMaster", 3);
+
+            await client.GetResponseAsync(
+                new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "Improve this castle") },
+                new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { camera } });
+
+            Assert.AreEqual(2, inner.ObservedMessages.Count);
+            List<MEAI.ChatMessage> followUp = inner.ObservedMessages[1];
+            MEAI.ChatMessage imageMessage = followUp.Last(message =>
+                message.Contents.OfType<MEAI.DataContent>().Any());
+            Assert.AreEqual(MEAI.ChatRole.User, imageMessage.Role);
+            Assert.AreEqual(1, imageMessage.Contents.OfType<MEAI.DataContent>().Count());
+            StringAssert.Contains("Inspect the image", imageMessage.Text);
+            string toolResult = ResultForCall(followUp, "camera_1").Result.ToString();
+            StringAssert.Contains("imageAttached", toolResult);
+            StringAssert.DoesNotContain("dataUrl", toolResult);
+        }
+
+        [Test]
+        public async Task CameraCapture_LiftsStructuredToolResultWithoutCallHistory()
+        {
+            string dataUrl = "data:image/jpeg;base64," + Convert.ToBase64String(new byte[256]);
+            string cameraJson = "{\"ok\":true,\"camera\":\"Preview\",\"dataUrl\":\"" + dataUrl + "\"}";
+            ScriptedChatClient inner = new(_ => MakeTextResponse("inspected"));
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance,
+                new CoreAISettingsOptions(), true, new List<Ai.ILlmTool>(), "GameMaster", 3);
+            MEAI.ChatMessage toolResult = new(MEAI.ChatRole.Tool, new MEAI.AIContent[]
+            {
+                new MEAI.FunctionResultContent("camera_orphan", cameraJson)
+            });
+
+            await client.GetResponseAsync(new[] { toolResult }, new MEAI.ChatOptions());
+
+            List<MEAI.ChatMessage> request = inner.ObservedMessages.Single();
+            Assert.IsTrue(request.SelectMany(message => message.Contents).OfType<MEAI.DataContent>().Any(),
+                "A camera image must survive when the host history has already pruned its call message.");
+            StringAssert.DoesNotContain("dataUrl", ResultForCall(request, "camera_orphan").Result.ToString());
+        }
+
+        [TestCase(0)]
+        [TestCase(2)]
+        public async Task CameraCapture_HistoryRetiresOldFramesAndKeepsLatest(int historyCap)
+        {
+            string dataUrl = "data:image/jpeg;base64," + Convert.ToBase64String(new byte[256]);
+            ScriptedChatClient inner = new(iteration => iteration <= 2
+                ? MakeToolCallResponse("camera_capture", "camera_" + iteration)
+                : MakeTextResponse("done"));
+            MEAI.AIFunction camera = MakeAIFunction("camera_capture", _ =>
+                Task.FromResult<object>("{\"ok\":true,\"dataUrl\":\"" + dataUrl + "\"}"));
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance,
+                new CoreAISettingsOptions { MaxToolResultChars = 100, MaxToolCallHistoryMessages = historyCap },
+                true, new List<Ai.ILlmTool>(), "GameMaster", 3);
+
+            await client.GetResponseAsync(
+                new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "Improve this castle") },
+                new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { camera } });
+
+            Assert.AreEqual(3, inner.ObservedMessages.Count);
+            List<MEAI.ChatMessage> finalRequest = inner.ObservedMessages[2];
+            Assert.IsTrue(finalRequest.Any(message => message.Text == "Improve this castle"));
+            Assert.AreEqual(historyCap == 0, finalRequest.SelectMany(message => message.Contents)
+                .OfType<MEAI.FunctionCallContent>().Any(call => call.CallId == "camera_1"),
+                "Unlimited tool history must retain old command text; a finite cap removes its pair.");
+            Assert.IsTrue(finalRequest.SelectMany(message => message.Contents)
+                .OfType<MEAI.FunctionCallContent>().Any(call => call.CallId == "camera_2"));
+            Assert.AreEqual(1, finalRequest.Count(message =>
+                message.Contents.OfType<MEAI.DataContent>().Any()),
+                "Only the newest camera frame should enter the provider context.");
+        }
+
+        [Test]
+        public void CameraFeedbackTrim_PreservesIntentionalUserImage()
+        {
+            MEAI.ChatMessage oldCall = new(MEAI.ChatRole.Assistant, new MEAI.AIContent[]
+            {
+                new MEAI.FunctionCallContent("old", "camera_capture", new Dictionary<string, object>())
+            });
+            MEAI.ChatMessage oldResult = new(MEAI.ChatRole.Tool, new MEAI.AIContent[]
+            {
+                new MEAI.FunctionResultContent("old", "{\"ok\":true}")
+            });
+            MEAI.ChatMessage oldFeedback = new(MEAI.ChatRole.User, new MEAI.AIContent[]
+            {
+                new MEAI.TextContent(ToolCallHistoryTrimmer.CameraFeedbackPrompt),
+                new MEAI.DataContent(new byte[] { 1 }, "image/jpeg")
+            });
+            ToolCallHistoryTrimmer.MarkCameraFeedback(oldFeedback);
+            MEAI.ChatMessage intentionalImage = new(MEAI.ChatRole.User, new MEAI.AIContent[]
+            {
+                new MEAI.TextContent(ToolCallHistoryTrimmer.CameraFeedbackPrompt),
+                new MEAI.DataContent(new byte[] { 2 }, "image/jpeg")
+            });
+            MEAI.ChatMessage latestCall = new(MEAI.ChatRole.Assistant, new MEAI.AIContent[]
+            {
+                new MEAI.FunctionCallContent("latest", "camera_capture", new Dictionary<string, object>())
+            });
+            MEAI.ChatMessage latestResult = new(MEAI.ChatRole.Tool, new MEAI.AIContent[]
+            {
+                new MEAI.FunctionResultContent("latest", "{\"ok\":true}")
+            });
+            MEAI.ChatMessage latestFeedback = new(MEAI.ChatRole.User, new MEAI.AIContent[]
+            {
+                new MEAI.TextContent(ToolCallHistoryTrimmer.CameraFeedbackPrompt),
+                new MEAI.DataContent(new byte[] { 3 }, "image/jpeg")
+            });
+            ToolCallHistoryTrimmer.MarkCameraFeedback(latestFeedback);
+            List<MEAI.ChatMessage> messages = new()
+            {
+                oldCall, oldResult, oldFeedback, intentionalImage,
+                latestCall, latestResult, latestFeedback
+            };
+
+            Assert.AreEqual(2, ToolCallHistoryTrimmer.Trim(messages, 2));
+            CollectionAssert.AreEqual(new[] { intentionalImage, latestCall, latestResult, latestFeedback },
+                messages);
+            Assert.AreEqual(0, ToolCallHistoryTrimmer.Trim(messages, 1),
+                "A cap below one complete pair must still preserve its newest image.");
+        }
+
         /// <summary>
         /// Three consecutive tool errors abort the agent when the configured limit is three.
         /// </summary>

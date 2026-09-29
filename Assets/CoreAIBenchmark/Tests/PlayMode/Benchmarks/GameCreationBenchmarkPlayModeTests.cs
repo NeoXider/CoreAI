@@ -32,12 +32,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// </summary>
     public sealed class GameCreationBenchmarkPlayModeTests
     {
-        // WHY: Suite 1.11 reserves capture time inside the ten-minute G6 wall budget.
+        // WHY: Suite 1.15 removes duplicate tool-error deductions and supplies advertised Lua world queries.
         // Suite 1.8 rebuilt G6 on the Roblox API (execute_lua, Enum.Material/Enum.PartType) with a
         // new grader, and the free-build prompt now describes that runtime honestly (section size, the
         // writable Part surface, how Color really composes). The versioning policy says scores compare
         // only within a suite version; every published v1.7 G6 number is the old world_command build.
-        private const string SuiteVersion = "1.11";
+        private const string SuiteVersion = "1.15";
         private const float FreeBuildTotalBudgetSeconds = 600f;
         private const float FreeBuildCaptureReserveSeconds = 30f;
         private const float FreeBuildTimeoutSeconds = FreeBuildTotalBudgetSeconds - FreeBuildCaptureReserveSeconds;
@@ -244,6 +244,97 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         [Test]
+        public void BalancedEnemyGrader_AcceptsFourDistinctHpValuesSummingTo400()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                GameBenchmarkScenario scenario = Array.Find(GameReasoningScenariosG3.All(),
+                    candidate => candidate.Id == "g3_balanced_enemies");
+                Assert.IsNotNull(scenario);
+                BenchmarkEnvironment env = new(settings);
+                scenario.Prepare(env);
+                env.Lua.Seed("logic_define('enemy_hp', function(name) " +
+                             "local hp = { Enemy1=70, Enemy2=85, Enemy3=105, Enemy4=140 }; " +
+                             "return hp[name] or 0 end)");
+                Assert.IsTrue(env.Lua.LogicSlots.IsOverridden("enemy_hp"), env.Lua.LastError);
+                for (int i = 1; i <= 4; i++)
+                {
+                    env.World.Commands.Add(new RecordedWorldCommand
+                    {
+                        Action = "spawn",
+                        TargetName = $"Enemy{i}"
+                    });
+                }
+
+                ScenarioGrading grade = scenario.Grade(env, new RunObservation { ToolCalls = 5 });
+                Assert.IsTrue(grade.Checkpoints.Find(c => c.Id == "in_range").Passed);
+                Assert.IsTrue(grade.Checkpoints.Find(c => c.Id == "distinct").Passed);
+                Assert.IsTrue(grade.Checkpoints.Find(c => c.Id == "sum_400").Passed);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
+        }
+
+        [Test]
+        public void LuaWorldQueries_SeeSeededAndRecordedSceneObjects()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                BenchmarkEnvironment env = new(settings);
+                env.World.SeedObjects("TowerA", "Debris1");
+                LuaTool.LuaResult first = env.Lua.ExecuteAsync(
+                    "local names=coreai_world_find('Debris'); local pos=coreai_world_pos('TowerA'); " +
+                    "if #names==1 and names[1]=='Debris1' and pos.x==0 and " +
+                    "coreai_world_exists('TowerA') then return 'ok' else return 'bad' end",
+                    CancellationToken.None).GetAwaiter().GetResult();
+                Assert.IsTrue(first.Success, first.Error);
+                Assert.AreEqual("ok", first.Output);
+
+                env.World.TryExecute(new ApplyAiGameCommand
+                {
+                    CommandTypeId = AiGameCommandTypeIds.WorldCommand,
+                    JsonPayload = "{\"action\":\"destroy\",\"targetName\":\"Debris1\"}"
+                });
+                LuaTool.LuaResult second = env.Lua.ExecuteAsync(
+                    "if not coreai_world_exists('Debris1') and #coreai_world_find('Debris')==0 " +
+                    "and coreai_world_pos('Debris1')==nil then return 'removed' else return 'bad' end",
+                    CancellationToken.None).GetAwaiter().GetResult();
+                Assert.IsTrue(second.Success, second.Error);
+                Assert.AreEqual("removed", second.Output);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
+        }
+
+        [Test]
+        public void ToolErrorPenalties_DoNotChargeFailuresAlreadyCoveredByCleanCheckpoint()
+        {
+            RunObservation errors = new() { FailedToolCalls = 2, InvalidCommands = 1 };
+            ScenarioGrading bothCovered = new();
+            bothCovered.Add("clean_tools", "no failed tool calls or invalid commands", 10, false,
+                dimension: BenchmarkDimension.ToolCorrectness);
+            ApplyUnscoredToolErrorPenalties(bothCovered, errors);
+            Assert.AreEqual(0, bothCovered.Penalties.Count);
+
+            ScenarioGrading failedOnlyCovered = new();
+            failedOnlyCovered.Add("clean_tools", "no failed tool calls", 10, false,
+                dimension: BenchmarkDimension.ToolCorrectness);
+            ApplyUnscoredToolErrorPenalties(failedOnlyCovered, errors);
+            Assert.AreEqual(1, failedOnlyCovered.Penalties.Count);
+            StringAssert.Contains("invalid world command", failedOnlyCovered.Penalties[0].Reason);
+
+            ScenarioGrading uncovered = new();
+            ApplyUnscoredToolErrorPenalties(uncovered, errors);
+            Assert.AreEqual(2, uncovered.Penalties.Count);
+        }
+
+        [Test]
         public void BenchmarkOutputCap_ResolvesOptionalPerCallLimit()
         {
             string previous = Environment.GetEnvironmentVariable("COREAI_BENCHMARK_MAX_OUTPUT_TOKENS");
@@ -263,7 +354,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         [Test]
         public void ScenarioToolCallObserver_RetainsCallsFromAnUnfinishedStream()
         {
-            ScenarioToolCallObserver observer = new("GameMaster");
+            ScenarioToolCallObserver observer = new("GameMaster", "g6_free_build_vision");
             LlmToolCallInfo matching = new("trace", "GameMaster", "call-1", "execute_lua",
                 "{\"code\":\"build()\"}");
             LlmToolCallInfo failed = new("trace", "GameMaster", "call-3", "execute_lua",
@@ -279,6 +370,71 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             Assert.AreEqual(1, observer.FailedToolCalls);
             StringAssert.Contains("execute_lua", observer.CompletionText);
             StringAssert.Contains("build()", observer.CompletionText);
+            string replay = observer.BuildLuaReplayScript("bunny", "g6_free_build_vision");
+            StringAssert.Contains("run_chunk(1, function()", replay);
+            StringAssert.Contains("build()", replay);
+            StringAssert.Contains("bad()", replay);
+            Assert.Less(replay.IndexOf("build()", StringComparison.Ordinal),
+                replay.IndexOf("bad()", StringComparison.Ordinal));
+            string[] traceLines = observer.ToolTraceJsonl.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            Assert.AreEqual(2, traceLines.Length);
+            StringAssert.Contains("g6_free_build_vision", traceLines[0]);
+            StringAssert.Contains("build()", traceLines[0]);
+            StringAssert.Contains("bad()", traceLines[1]);
+        }
+
+        [Test]
+        public void VisionFreeBuild_IsSelectedAsHeroAndExportsLua()
+        {
+            BenchmarkReport report = new();
+            ScenarioResult plain = new()
+            {
+                Group = "G6",
+                ScenarioId = "g6_free_build",
+                SceneScreenshotPng = new byte[] { 2 },
+                LuaReplayScript = "plain build"
+            };
+            report.Add(plain);
+            ScenarioResult expected = new()
+            {
+                Group = "G6",
+                ScenarioId = "g6_free_build_vision",
+                SceneScreenshotPng = new byte[] { 1 },
+                LuaReplayScript = "run_chunk(1, function() end)"
+            };
+            report.Add(expected);
+            Assert.AreSame(expected, FindFreeBuildHeroResult(report));
+        }
+
+        [TestCase("A task was canceled.", true)]
+        [TestCase("The operation was cancelled.", true)]
+        [TestCase("HTTP 504 Gateway Timeout", false)]
+        [TestCase("connection timed out", false)]
+        [TestCase("provider timeout", false)]
+        public void CancellationClassification_DistinguishesLocalStopFromTransportTimeout(
+            string error, bool expected)
+        {
+            Assert.AreEqual(expected, IsCancellationError(error));
+        }
+
+        [TestCase(true, true, true, true)]
+        [TestCase(false, true, true, false)]
+        [TestCase(true, false, true, false)]
+        [TestCase(true, true, false, false)]
+        public void CleanBudgetCancellation_RequiresOwnDeadlineAndBuiltScene(
+            bool scenarioCancelled, bool sceneWasBuilt, bool cancellationResult, bool expected)
+        {
+            Assert.AreEqual(expected,
+                IsCleanBudgetCancellation(scenarioCancelled, sceneWasBuilt, cancellationResult));
+        }
+
+        [Test]
+        public void ProviderCancellation_RemainsAnEnvironmentErrorBeforeOurDeadline()
+        {
+            const string providerError = "A task was canceled.";
+            Assert.IsTrue(IsCancellationError(providerError));
+            Assert.IsTrue(LooksTransient(providerError));
+            Assert.IsFalse(IsCleanBudgetCancellation(false, true, IsCancellationError(providerError)));
         }
 
         [Test]
@@ -737,6 +893,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // Visual results card, embedded near the top of the Markdown report.
                 File.WriteAllText(Path.Combine(dir, svgName), BenchmarkReportFormatter.ToSvg(report));
                 string md = EmbedResultsImage(BenchmarkReportFormatter.ToMarkdown(report), svgName);
+                System.Text.StringBuilder toolTrace = new();
+                foreach (ScenarioResult scenarioResult in report.Results)
+                {
+                    toolTrace.Append(scenarioResult.ToolTraceJsonl);
+                }
+
+                if (toolTrace.Length > 0)
+                {
+                    string traceName = stem + ".tools.jsonl";
+                    File.WriteAllText(Path.Combine(dir, traceName), toolTrace.ToString());
+                    md += $"\n[Tool-call arguments and result previews (up to 2,000 characters each)]({traceName})\n";
+                }
 
                 // The rendered model card (radar + role bars) leads the report when available.
                 if (modelCardPng != null && modelCardPng.Length > 0)
@@ -756,6 +924,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 ScenarioResult hero = FindFreeBuildHeroResult(report);
                 if (hero != null)
                 {
+                    if (!string.IsNullOrWhiteSpace(hero.LuaReplayScript))
+                    {
+                        string luaName = stem + "_g6_replay.lua";
+                        File.WriteAllText(Path.Combine(dir, luaName), hero.LuaReplayScript);
+                        md += $"\n[Replay the model's complete G6 Lua calls]({luaName})\n";
+                    }
+
                     string heroName = stem + "_g6_free_build_hero.png";
                     try
                     {
@@ -792,23 +967,31 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
         }
 
-        private static ScenarioResult FindFreeBuildHeroResult(BenchmarkReport report)
+        internal static ScenarioResult FindFreeBuildHeroResult(BenchmarkReport report)
         {
+            ScenarioResult plainBuild = null;
             foreach (ScenarioResult r in report.Results)
             {
-                if (r.SceneScreenshotPng == null || r.SceneScreenshotPng.Length == 0)
+                if (r.SceneScreenshotPng == null || r.SceneScreenshotPng.Length == 0 ||
+                    !string.Equals(r.Group, "G6", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                if (string.Equals(r.Group, "G6", StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(r.ScenarioId, "g6_free_build", StringComparison.OrdinalIgnoreCase))
+                // WHY: in A/B mode the text-only run is listed first, but the hero/replay should show
+                // WHY: the vision-enabled build when it produced a usable screenshot.
+                if (string.Equals(r.ScenarioId, "g6_free_build_vision", StringComparison.OrdinalIgnoreCase))
                 {
                     return r;
                 }
+
+                if (plainBuild == null && string.Equals(r.ScenarioId, "g6_free_build", StringComparison.OrdinalIgnoreCase))
+                {
+                    plainBuild = r;
+                }
             }
 
-            return null;
+            return plainBuild;
         }
 
         /// <summary>Writes each captured scene screenshot as a PNG and returns a Markdown section linking them.</summary>

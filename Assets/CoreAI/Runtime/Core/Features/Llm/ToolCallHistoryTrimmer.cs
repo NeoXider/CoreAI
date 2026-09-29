@@ -1,5 +1,6 @@
 #if COREAI_LLM
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using MEAI = Microsoft.Extensions.AI;
 
 namespace CoreAI.Infrastructure.Llm
@@ -20,6 +21,31 @@ namespace CoreAI.Infrastructure.Llm
     /// </summary>
     public static class ToolCallHistoryTrimmer
     {
+        private static readonly ConditionalWeakTable<MEAI.ChatMessage, object> CameraFeedbackMessages = new();
+        private static readonly object CameraFeedbackMarker = new();
+
+        internal const string CameraFeedbackPrompt =
+            "Camera frame from your latest capture. Inspect the image and " +
+            "continue the requested scene work using what you see.";
+
+        internal static void MarkCameraFeedback(MEAI.ChatMessage message)
+        {
+            CameraFeedbackMessages.Add(message, CameraFeedbackMarker);
+        }
+
+        internal static void RemovePriorCameraFeedback(List<MEAI.ChatMessage> messages)
+        {
+            // WHY: a benchmark can disable tool-history trimming to retain every build command. Camera
+            // WHY: bytes still need a separate bound; the newest frame supersedes older rendered frames.
+            for (int i = messages.Count - 1; i >= 0; i--)
+            {
+                if (CameraFeedbackMessages.TryGetValue(messages[i], out _))
+                {
+                    messages.RemoveAt(i);
+                }
+            }
+        }
+
         /// <summary>
         /// Removes the oldest tool-call units (an Assistant tool-call turn together with the
         /// Tool result turn(s) that answer it) to keep total tool-related messages within
@@ -55,6 +81,18 @@ namespace CoreAI.Infrastructure.Llm
             int toRemove = toolMessageCount - maxToolMessages;
             int removed = 0;
 
+            // WHY: A limit below one Assistant+Tool pair must still retain the latest result, including
+            // WHY: its image feedback, so a newly captured frame reaches the next provider request.
+            MEAI.ChatMessage newestToolAssistant = null;
+            for (int i = messages.Count - 1; i >= 0; i--)
+            {
+                if (messages[i].Role == MEAI.ChatRole.Assistant && HasFunctionCallContent(messages[i]))
+                {
+                    newestToolAssistant = messages[i];
+                    break;
+                }
+            }
+
             // WHY: Remove oldest tool-call units as coupled blocks. Each unit starts at an Assistant
             // tool-call message and extends through every Tool result message that immediately
             // follows it. Removing the unit as a whole keeps every surviving Tool message paired
@@ -64,6 +102,11 @@ namespace CoreAI.Infrastructure.Llm
             int index = 0;
             while (index < messages.Count && removed < toRemove)
             {
+                if (object.ReferenceEquals(messages[index], newestToolAssistant))
+                {
+                    break;
+                }
+
                 bool isToolAssistant =
                     messages[index].Role == MEAI.ChatRole.Assistant && HasFunctionCallContent(messages[index]);
 
@@ -76,6 +119,13 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         messages.RemoveAt(index);
                         unitToolMessages++;
+                    }
+
+                    // WHY: camera images are inserted as User messages because OpenAI tool results
+                    // WHY: cannot carry image parts. Retire an old image with its source tool exchange.
+                    if (index < messages.Count && CameraFeedbackMessages.TryGetValue(messages[index], out _))
+                    {
+                        messages.RemoveAt(index);
                     }
 
                     removed += unitToolMessages;
@@ -135,6 +185,7 @@ namespace CoreAI.Infrastructure.Llm
 
             return false;
         }
+
     }
 }
 #endif

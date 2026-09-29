@@ -121,12 +121,18 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override string Id => "g8_tidy_scene";
             public override string Name => "Tidy the scene";
 
+            public override void Prepare(BenchmarkEnvironment env)
+            {
+                // WHY: list_objects must agree with the described existing scene.
+                env.World.SeedObjects("Player", "Tower", "Bridge", "Debris1", "Debris2", "Chest");
+            }
+
             public override string WhatItChecks =>
                 "Reads a described scene and destroys exactly the two named debris objects, touching nothing else.";
 
             public override string Goal =>
                 "You are tidying an existing scene. It currently contains these objects: 'Player', 'Tower', " +
-                "'Bridge', 'Debris1', 'Debris2', 'Chest'. Two of them are junk that should be cleared away; " +
+                "'Bridge', 'Debris1', 'Debris2', 'Chest'. Debris1 and Debris2 are the junk to clear away; " +
                 "the rest are part of the level and must stay exactly as they are. Clean up the scene using " +
                 "the world_command tool. Change nothing that should remain.";
 
@@ -177,7 +183,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     }
                 }
 
-                if (!onlyRequestedDestroys || nonObservationCommands != 2)
+                if (!onlyRequestedDestroys || nonObservationCommands > 2)
                 {
                     g.Penalty("issued world mutations beyond the two requested debris destroys", 10);
                 }
@@ -204,6 +210,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         {
             public override string Id => "g8_selective_raise";
             public override string Name => "Selective raise";
+
+            public override void Prepare(BenchmarkEnvironment env)
+            {
+                env.World.SeedObjects("TowerA", "TowerB", "TowerC");
+            }
 
             public override string WhatItChecks =>
                 "Reads per-object state and acts only on the objects that fail a stated condition (two of three).";

@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+## [7.47.2] - 2026-09-29
+
+### Fixed
+
+- Native tool calling now forwards successful `camera_capture`/`screenshot` frames as image content with an explicit inspection prompt on the next model request, instead of leaving the image inside JSON text. Camera base64 bypasses the generic text-result truncation until the image is lifted; the tool result then keeps its non-image summary. Regression tests cover lifting and truncation, and a separate live image-plus-text test verified provider image input. The complete v1.14 Bunny benchmark predates the truncation fix, so its camera calls do not prove visual feedback.
+- The shared camera lift also handles camera tool results whose call message was pruned from history. The Unity streaming tool loop now invokes the same lift before its next provider request; its earlier route sent camera bytes inside text JSON.
+- Benchmark suite 1.14 records complete tool-call arguments in a JSONL artifact and exports every G6 Lua section as a replayable script, including the vision scenario. It identifies the vision castle as the hero result, prints the full G6 goal, allows the dedicated camera to move, and fixes G8's observation-only penalty.
+- The streaming benchmark classifies provider error chunks as provider failures, so a 400/429 response cannot be mistaken for a model score.
+- Benchmark suite 1.12 returns the actual `spawn_batch` item counts and names from its recording executor. The previous executor recorded spawned items but reported zero to the model, which could trigger duplicate spawns and false over-build penalties.
+- The benchmark recorder now answers `list_objects` from its virtual inventory. G8 seeds the objects described in its prompt without counting setup as model commands; an inspecting agent can now see the scene it was asked to edit.
+- Balanced-enemy HP reports the four observed values alongside their sum when grading fails, making model logic mistakes distinguishable from runner errors.
+- A Lua acceptance fixture now runs unchanged in Roblox Studio and CoreAI and checks part creation, clone, transform, child lookup, and destruction against the same output.
+- A visual variant of that fixture was run in the Roblox Studio GUI and the open Unity Editor; its two captured images document equivalent Lua state and the current rendering difference.
+- The benchmark image-feedback path retires earlier camera frames when a newer one arrives, bounding image history even when tool-call history is retained for a long build.
+- Benchmark suite 1.15 avoids a second failure penalty when a clean-tools checkpoint already charges for failed calls or invalid commands. Its Lua executor binds the advertised read-only world queries to the virtual scene. A provider transport timeout remains an environment failure after partial construction; only the benchmark's own elapsed-budget cancellation can cleanly end a built scene. In A/B runs the report hero prefers a captured vision build.
+
+### Tests
+
+- Added image-lifting and G8 observation-only regressions; verified a live OpenRouter image-plus-text request and the G8 scene cleanup in the open Unity Editor.
+- Added PlayMode regressions for batch tool results, seeded object listing and removal, G8 scene setup, and a valid four-enemy HP rule.
+- The comparable suite v1.15 finished in the open Editor through Neoxider Agents: GPT-6 Sol 100.00/100 (28 pass), GPT-6 Luna 99.70/100 (28 pass), and Space Bunny Free 95.89/100 (26 pass, one G6 partial at 85, one G5 fail). The Bunny G5 failure records nine attempted calls for a three-call constraint even though six repeats were deduplicated before execution. Raw JSON, transcript, tool trace, castle screenshots, and complete Lua replays are archived in `Docs/BenchmarkRuns/2026-09-29/`.
+- The full portable suite passed 2178/2178; focused allocation and hot-path checks passed 57/57. The historical direct OpenRouter Bunny v1.14 result remains 97.761149/100 (26 pass, two partial) and predates the camera image transport fix.
+- A live image-plus-text probe sent a compressed G6 screenshot through the free Space Bunny OpenCode bridge; the model identified the visible crenellations, cylindrical turrets, and reddish-brown roof. The benchmark camera record and bridge attachment marker establish the G6 handoff, while this independent probe confirms that image pixels and a text question reach the model together.
+- The complete Unity Editor EditMode run passed 6561 of 6572 tests, with zero failures and 11 expected skips; this includes the formerly failing destruction, autosave-size, and desktop-composition cases.
+
 ## [7.47.1] - 2026-09-29
 
 ### Fixed

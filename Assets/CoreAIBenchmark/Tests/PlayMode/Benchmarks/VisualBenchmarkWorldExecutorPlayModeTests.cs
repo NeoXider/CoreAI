@@ -1,10 +1,16 @@
 #if COREAI_LUA
 #if COREAI_LLM && !UNITY_WEBGL
+using System.Collections;
+using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Llm;
+using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
+using UnityEngine.TestTools;
 using UnityEngine;
 using static CoreAI.Tests.PlayMode.Benchmarks.GameCreationBenchmarkHarness;
 
@@ -84,6 +90,61 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             Assert.AreEqual("Sphere", executor.Commands[2].PrefabKeyOrName);
             Assert.AreEqual("Wall_1", executor.Commands[3].TargetName);
             Assert.AreEqual(4f, executor.Commands[3].X);
+            Assert.AreEqual(1, executor.LastSpawnBatchResult.Spawned);
+            Assert.AreEqual(0, executor.LastSpawnBatchResult.Failed);
+            CollectionAssert.AreEqual(new[] { "Wall_1" }, executor.LastSpawnBatchResult.Names);
+        }
+
+        [Test]
+        public void SeededWorld_ListObjectsReflectsExistingAndDestroyedObjects()
+        {
+            RecordingWorldExecutor executor = new();
+            executor.SeedObjects("Player", "Debris1", "Debris2");
+            Assert.AreEqual(0, executor.Commands.Count, "Fixture setup is not a model action.");
+
+            Execute(executor, new CoreAiWorldCommandEnvelope { action = "list_objects" });
+            Assert.AreEqual(3, executor.LastListedObjects.Count);
+
+            Execute(executor, new CoreAiWorldCommandEnvelope
+            {
+                action = "destroy",
+                targetName = "Debris1"
+            });
+            Execute(executor, new CoreAiWorldCommandEnvelope
+            {
+                action = "list_objects",
+                stringValue = "Debris"
+            });
+
+            Assert.AreEqual(1, executor.LastListedObjects.Count);
+            Assert.AreEqual("Debris2", executor.LastListedObjects[0]["name"]);
+        }
+
+        [UnityTest]
+        public IEnumerator SpawnBatchTool_ReportsActualRecordedSpawns()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                RecordingWorldExecutor executor = new();
+                WorldLlmTool tool = new(executor, settings, new NullGameLogger());
+                Task<string> task = tool.ExecuteAsync("spawn_batch",
+                    itemsJson: "[{\"name\":\"Player\",\"prefabKey\":\"Cube\"}]");
+                while (!task.IsCompleted)
+                {
+                    yield return null;
+                }
+
+                Assert.IsFalse(task.IsFaulted);
+                JObject result = JObject.Parse(task.Result);
+                Assert.IsTrue((bool)result["Success"]);
+                StringAssert.Contains("\"spawned\":1", (string)result["Message"]);
+                Assert.AreEqual(1, executor.Count("spawn"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
         }
 
         private static CoreAiWorldCommandEnvelope Spawn(

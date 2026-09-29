@@ -2,6 +2,7 @@
 using System;
 using System.Collections;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
@@ -24,6 +25,7 @@ namespace CoreAI.Tests.PlayMode
         private const string AppendMarker = "appended value";
         private const string InitialBaseline = "initial value";
         private const string PreClearPayload = "this will be deleted";
+        private const float MemoryTurnTimeoutSeconds = 240f;
 
         [UnityTest]
         [Timeout(300000)]
@@ -48,8 +50,11 @@ namespace CoreAI.Tests.PlayMode
             };
             LogHintToConsole(request);
 
-            Task<string> run = setup.Orchestrator.RunTaskAsync(request);
-            yield return setup.RunAndWait(run, 240f, "memory write");
+            using CancellationTokenSource cts = new();
+            Task<string> run = setup.Orchestrator.RunTaskAsync(request, cts.Token);
+            yield return WaitForMemoryOrTask(setup, run, cts,
+                (string memory) => memory.Contains(WriteExpectedSubstring, StringComparison.OrdinalIgnoreCase),
+                "memory write");
             LogOrchestratorReply(run);
 
             if (!ReadMemoryOrEmpty(setup).Contains(WriteExpectedSubstring, StringComparison.OrdinalIgnoreCase))
@@ -94,8 +99,12 @@ namespace CoreAI.Tests.PlayMode
             };
             LogHintToConsole(appendRequest);
 
-            Task<string> run = setup.Orchestrator.RunTaskAsync(appendRequest);
-            yield return setup.RunAndWait(run, 240f, "memory append");
+            using CancellationTokenSource cts = new();
+            Task<string> run = setup.Orchestrator.RunTaskAsync(appendRequest, cts.Token);
+            yield return WaitForMemoryOrTask(setup, run, cts,
+                (string memory) => memory.Contains(InitialBaseline, StringComparison.Ordinal) &&
+                    memory.Contains(AppendMarker, StringComparison.OrdinalIgnoreCase),
+                "memory append");
             LogOrchestratorReply(run);
             string memAfterFirst = ReadMemoryOrEmpty(setup);
             LogMemorySnapshot(setup, "after first append request");
@@ -147,8 +156,11 @@ namespace CoreAI.Tests.PlayMode
             };
             LogHintToConsole(clearRequest);
 
-            Task<string> run = setup.Orchestrator.RunTaskAsync(clearRequest);
-            yield return setup.RunAndWait(run, 240f, "memory clear");
+            using CancellationTokenSource cts = new();
+            Task<string> run = setup.Orchestrator.RunTaskAsync(clearRequest, cts.Token);
+            yield return WaitForMemoryOrTask(setup, run, cts,
+                (string memory) => string.IsNullOrWhiteSpace(memory),
+                "memory clear");
             LogOrchestratorReply(run);
 
             if (setup.MemoryStore.TryLoad(Role, out AgentMemoryState stillPresent) &&
@@ -246,6 +258,47 @@ namespace CoreAI.Tests.PlayMode
         private static string ReadMemoryOrEmpty(TestAgentSetup setup)
         {
             return setup.MemoryStore.TryLoad(Role, out AgentMemoryState st) ? st.Memory ?? "" : "";
+        }
+
+        private static IEnumerator WaitForMemoryOrTask(
+            TestAgentSetup setup,
+            Task<string> run,
+            CancellationTokenSource cts,
+            Func<string, bool> memoryMatches,
+            string operationName)
+        {
+            float started = Time.realtimeSinceStartup;
+            while (!memoryMatches(ReadMemoryOrEmpty(setup)) && !run.IsCompleted &&
+                   Time.realtimeSinceStartup - started < MemoryTurnTimeoutSeconds)
+            {
+                yield return null;
+            }
+
+            if (memoryMatches(ReadMemoryOrEmpty(setup)))
+            {
+                if (!run.IsCompleted)
+                {
+                    cts.Cancel();
+                    float cancellationStarted = Time.realtimeSinceStartup;
+                    while (!run.IsCompleted && Time.realtimeSinceStartup - cancellationStarted < 5f)
+                    {
+                        yield return null;
+                    }
+
+                    if (!run.IsCompleted)
+                    {
+                        run.ContinueWith(completed => { _ = completed.Exception; },
+                            TaskContinuationOptions.OnlyOnFaulted);
+                        Assert.Fail($"The '{operationName}' tool changed memory, but the request did not observe cancellation within 5s.");
+                    }
+                }
+
+                yield break;
+            }
+
+            float remaining = Mathf.Max(0f,
+                MemoryTurnTimeoutSeconds - (Time.realtimeSinceStartup - started));
+            yield return setup.RunAndWait(run, remaining, operationName, cts);
         }
 
         private static void LogMemorySnapshot(TestAgentSetup setup, string phase)

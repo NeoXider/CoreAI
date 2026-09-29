@@ -104,7 +104,9 @@ namespace CoreAI.Infrastructure.Llm
 
             LlmUnityHostConfigurator.ApplyFromSettings(llm, agent, settings, logger);
 
-            if (settings.LlmUnityDontDestroyOnLoad)
+            // WHY: desktop composition is also exercised by EditMode tests, where Unity rejects
+            // WHY: DontDestroyOnLoad remains active during a PlayMode session.
+            if (settings.LlmUnityDontDestroyOnLoad && Application.isPlaying)
             {
                 UnityEngine.Object.DontDestroyOnLoad(go);
             }

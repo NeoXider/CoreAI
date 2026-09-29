@@ -2,6 +2,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
@@ -247,9 +248,10 @@ namespace CoreAI.Tests.PlayMode
         /// <summary>
         ///     .
         /// </summary>
-        public IEnumerator RunAndWait(Task task, float timeoutSeconds, string label)
+        public IEnumerator RunAndWait(Task task, float timeoutSeconds, string label,
+            CancellationTokenSource cancellationOnTimeout = null)
         {
-            yield return PlayModeTestAwait.WaitTask(task, timeoutSeconds, label);
+            yield return PlayModeTestAwait.WaitTask(task, timeoutSeconds, label, cancellationOnTimeout);
         }
 
         public void Dispose()

@@ -496,6 +496,7 @@ namespace CoreAI.Infrastructure.Llm
                 request.ActorId);
 
             List<MEAI.ChatMessage> chatMessages = BuildMeaiChatMessages(request);
+            HashSet<string>? liftedCameraCallIds = null;
 
             List<MEAI.AIFunction> aiTools = request.ForcedToolMode == LlmToolChoiceMode.None
                 ? new List<MEAI.AIFunction>() : BuildAIFunctions(request.Tools, roleId);
@@ -1279,6 +1280,8 @@ namespace CoreAI.Infrastructure.Llm
                             $"MeaiLlmClient: native tool batch complete (streamed={streamedTurn != null}, anyFailed={batch.AnyFailed}, allFailed={batch.AllFailed}); continuing the turn");
                     }
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
+                    // WHY: Streaming owns its own tool loop, so the native client's image lift never runs.
+                    SmartToolCallingChatClient.LiftCameraImages(chatMessages, ref liftedCameraCallIds);
                     TrimStreamingToolCallHistory(chatMessages);
                     if (!batch.AllFailed)
                     {
@@ -1423,6 +1426,8 @@ namespace CoreAI.Infrastructure.Llm
                     ToolExecutionPolicy.BatchToolCallResult batch =
                         await policy.ExecuteBatchAsync(toolCalls, chatOptions, cancellationToken);
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
+                    // WHY: Text-shaped camera calls need the same image feedback as native calls.
+                    SmartToolCallingChatClient.LiftCameraImages(chatMessages, ref liftedCameraCallIds);
                     TrimStreamingToolCallHistory(chatMessages);
 
                     // WHY: mirror the native path's streamedExecutedCallCount bump for text-extracted tool
