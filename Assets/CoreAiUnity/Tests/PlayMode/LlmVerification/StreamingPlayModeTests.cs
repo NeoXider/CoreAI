@@ -54,7 +54,8 @@ namespace CoreAI.Tests.PlayMode
             // :     main thread  UnityWebRequest    ThreadPool.
             //  async-  ( Task.Run),  continuations
             //   UnitySynchronizationContext.
-            Task streamTask = CollectStreamAsync(_setup.Client, request, CancellationToken.None,
+            using CancellationTokenSource cts = new();
+            Task streamTask = CollectStreamAsync(_setup.Client, request, cts.Token,
                 chunks, done => gotDone = done);
 
             // LLMUnity cold start / first token can exceed 30s; align with RequestTimeoutSeconds + margin
@@ -66,7 +67,7 @@ namespace CoreAI.Tests.PlayMode
                 waitSec = Mathf.Max(120f, settingsAsset.RequestTimeoutSeconds + 30f);
             }
 
-            yield return _setup.RunAndWait(streamTask, waitSec, "Streaming");
+            yield return _setup.RunAndWait(streamTask, waitSec, "Streaming", cts);
 
             Assert.IsTrue(gotDone, "Should receive a chunk with IsDone=true");
             Assert.GreaterOrEqual(chunks.Count, 1, "Should receive at least 1 chunk");
@@ -170,9 +171,10 @@ namespace CoreAI.Tests.PlayMode
         private static async Task CompleteOnMainThreadAsync(
             ILlmClient client,
             LlmCompletionRequest request,
-            LlmResultBox box)
+            LlmResultBox box,
+            CancellationToken cancellationToken)
         {
-            box.Value = await client.CompleteAsync(request, CancellationToken.None);
+            box.Value = await client.CompleteAsync(request, cancellationToken);
         }
 
         // ===================== 3-Layer Prompt =====================
@@ -211,9 +213,17 @@ namespace CoreAI.Tests.PlayMode
             };
 
             LlmResultBox resultBox = new();
-            Task task = CompleteOnMainThreadAsync(_setup.Client, request, resultBox);
+            using CancellationTokenSource cts = new();
+            Task task = CompleteOnMainThreadAsync(_setup.Client, request, resultBox, cts.Token);
 
-            yield return _setup.RunAndWait(task, 30f, "ThreeLayerPrompt");
+            float waitSec = 120f;
+            CoreAISettingsAsset settingsAsset = CoreAISettingsAsset.Instance;
+            if (settingsAsset != null)
+            {
+                waitSec = Mathf.Max(120f, settingsAsset.RequestTimeoutSeconds + 30f);
+            }
+
+            yield return _setup.RunAndWait(task, waitSec, "ThreeLayerPrompt", cts);
 
             LlmCompletionResult result = resultBox.Value;
 
@@ -243,7 +253,8 @@ namespace CoreAI.Tests.PlayMode
             List<LlmStreamChunk> chunks = new();
             StringBuilder response = new();
 
-            Task streamTask = CollectStreamAsync(_setup.Client, request, CancellationToken.None, chunks,
+            using CancellationTokenSource cts = new();
+            Task streamTask = CollectStreamAsync(_setup.Client, request, cts.Token, chunks,
                 _ => { });
 
             // Wait at least as long as UnityWebRequest (RequestTimeoutSeconds) plus slack: a long reasoning_content
@@ -255,7 +266,7 @@ namespace CoreAI.Tests.PlayMode
                 waitSec = Mathf.Max(180f, asset.RequestTimeoutSeconds + 30f);
             }
 
-            yield return _setup.RunAndWait(streamTask, waitSec, "Streaming_ThinkBlock");
+            yield return _setup.RunAndWait(streamTask, waitSec, "Streaming_ThinkBlock", cts);
 
             foreach (LlmStreamChunk c in chunks)
             {

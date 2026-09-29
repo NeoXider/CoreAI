@@ -173,7 +173,9 @@ namespace CoreAI.Tests.PlayMode
                         MaxOutputTokens = 128000
                     }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory write", cts);
+                    yield return WaitForMemoryMutationOrTask(store, t, cts,
+                        memory => memory.Contains("Iron Sword") && HasCompletedMemoryAction("write"),
+                        "memory write");
 
                     Debug.Log($"[AllToolCalls]  MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] Content (FULL):");
@@ -235,7 +237,10 @@ namespace CoreAI.Tests.PlayMode
                         MaxOutputTokens = 128000
                     }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory append", cts);
+                    yield return WaitForMemoryMutationOrTask(store, t, cts,
+                        memory => memory.Contains("Iron Sword") && memory.Contains("Steel Shield") &&
+                                  HasCompletedMemoryAction("append"),
+                        "memory append");
 
                     Debug.Log($"[AllToolCalls]  MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
@@ -292,7 +297,9 @@ namespace CoreAI.Tests.PlayMode
                         MaxOutputTokens = 128000
                     }, cts.Token);
 
-                    yield return PlayModeTestAwait.WaitTask(t, 240f, "memory clear", cts);
+                    yield return WaitForMemoryMutationOrTask(store, t, cts,
+                        memory => string.IsNullOrWhiteSpace(memory) && HasCompletedMemoryAction("clear"),
+                        "memory clear");
 
                     Debug.Log($"[AllToolCalls]  MODEL RESPONSE:");
                     Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
@@ -464,6 +471,51 @@ namespace CoreAI.Tests.PlayMode
                     return false;
                 }
             });
+        }
+
+        private static IEnumerator WaitForMemoryMutationOrTask(
+            IAgentMemoryStore store,
+            Task task,
+            CancellationTokenSource cts,
+            Func<string, bool> matches,
+            string operationName)
+        {
+            const float timeoutSeconds = 240f;
+            float started = Time.realtimeSinceStartup;
+            string CurrentMemory() => store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state)
+                ? state?.Memory ?? ""
+                : "";
+
+            while (!matches(CurrentMemory()) && !task.IsCompleted &&
+                   Time.realtimeSinceStartup - started < timeoutSeconds)
+            {
+                yield return null;
+            }
+
+            if (matches(CurrentMemory()))
+            {
+                if (!task.IsCompleted)
+                {
+                    cts.Cancel();
+                    float cancellationStarted = Time.realtimeSinceStartup;
+                    while (!task.IsCompleted && Time.realtimeSinceStartup - cancellationStarted < 5f)
+                    {
+                        yield return null;
+                    }
+
+                    if (!task.IsCompleted)
+                    {
+                        task.ContinueWith(completed => { _ = completed.Exception; },
+                            TaskContinuationOptions.OnlyOnFaulted);
+                        Assert.Fail($"The '{operationName}' tool changed memory, but the request did not observe cancellation within 5s.");
+                    }
+                }
+
+                yield break;
+            }
+
+            float remaining = Mathf.Max(0f, timeoutSeconds - (Time.realtimeSinceStartup - started));
+            yield return PlayModeTestAwait.WaitTask(task, remaining, operationName, cts);
         }
 
         private static async Task<TestResult> RunAgentTestAsync(

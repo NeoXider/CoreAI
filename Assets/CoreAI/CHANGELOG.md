@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [7.47.3] - 2026-09-30
+
+### Fixed
+
+- The live skill-proxy A/B benchmark reports a speedup only when both model runs finish successfully. A timeout or failed response now makes the timing comparison unavailable while the structural tool-count checks still run.
+- Live streaming PlayMode fixtures pass cancellable tokens through the request and test waiter. The three-layer prompt fixture uses the configured HTTP timeout plus a margin instead of a fixed 30-second deadline, preventing an unfinished request from leaking into later tests.
+- The combined live memory-tool fixture now finishes each write/append/clear step when the required action has completed and the asserted store state is present, then cancels the remaining model turn. A provider continuing to generate text after a successful tool call no longer creates a false 240-second failure.
+
+### Verification
+
+- A long free-model PlayMode sweep exposed the test isolation issue and was stopped after 233 of 271 cases when queued provider requests caused cascading HTTP header timeouts. The material-showcase castle independently failed its 12-material requirement with eight measured materials; the grading threshold was kept. A focused retry confirmed the memory write itself succeeded before the old fixture timed out waiting for more model text.
+- In the open Editor, the corrected combined memory-tool fixture passed write/append/clear in 73.13 seconds; the three-layer prompt passed 1/1 and the two streaming fixtures passed 2/2. The skill-proxy A/B test passed 1/1 in 402.45 seconds: both live responses completed, so its measured 1.1x ratio is valid for that run (195.6s with two meta-tools versus 206.7s with 19 direct tools). The proxy system prompt was 334 characters longer, which is reported rather than hidden.
+
 ## [7.47.2] - 2026-09-29
 
 ### Fixed

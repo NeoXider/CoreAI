@@ -4,6 +4,19 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.47.3] - 2026-09-30
+
+### Fixed
+
+- Live streaming PlayMode tests cancel unfinished model requests on timeout, and the three-layer prompt fixture waits for the configured HTTP budget rather than a fixed 30 seconds. This prevents a timed-out request from continuing into subsequent tests.
+- The combined memory-tool PlayMode test uses completed tool actions and stored memory as its step completion condition, then cancels any remaining response generation.
+- The benchmark skill-proxy timing report now labels an incomplete model comparison unavailable instead of printing a misleading speedup.
+
+### Tests
+
+- An open-Editor free Space Bunny sweep reached 233 of 271 PlayMode cases before being stopped after queued requests caused cascading transport timeouts. The castle materials test measured eight of twelve required materials; this is retained as a model failure.
+- Targeted open-Editor reruns passed: combined memory write/append/clear in 73.13 seconds, three-layer prompt 1/1, streaming fixtures 2/2, and skill-proxy A/B 1/1 in 402.45 seconds.
+
 ## [7.47.2] - 2026-09-29
 
 ### Fixed

@@ -442,10 +442,15 @@ Some merchants only trade specific item types.",
                 Debug.Log($"[SkillBenchmark] Tools saved:    {savedTools}");
                 Debug.Log($"[SkillBenchmark] Prompt saved:   {savedChars} chars ({promptReduction:0.0}% reduction)");
                 Debug.Log($"[SkillBenchmark] Time:           {rA.ElapsedMs}ms vs {rB.ElapsedMs}ms");
-                if (rB.ElapsedMs > 0 && rA.ElapsedMs > 0)
+                if (rA.Ok && rB.Ok && !rA.TimedOut && !rB.TimedOut &&
+                    rB.ElapsedMs > 0 && rA.ElapsedMs > 0)
                 {
                     float speedup = (float)rB.ElapsedMs / rA.ElapsedMs;
                     Debug.Log($"[SkillBenchmark] Speedup:        {speedup:0.0}x");
+                }
+                else
+                {
+                    Debug.Log("[SkillBenchmark] Speedup:        unavailable (one or both model runs did not complete successfully)");
                 }
 
                 Debug.Log("[SkillBenchmark] ═══════════════════════════════════════════");

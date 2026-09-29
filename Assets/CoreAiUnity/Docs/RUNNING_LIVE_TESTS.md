@@ -8,6 +8,11 @@ single configuration surface.
 When the suite is not configured, the live tests `Assert.Ignore(...)` with a message that tells you
 exactly which environment variable or file to set, so unconfigured runs stay green and skip cleanly.
 
+Long-running CLI bridges can serialize requests and delay HTTP response headers. If a live run is
+aborted, clear or restart that bridge before repeating a test; otherwise an earlier provider turn can
+occupy the next test's deadline. The streaming fixtures cancel their own requests on timeout. A
+transport timeout is a provider availability result, not evidence that the model answered incorrectly.
+
 ---
 
 ## The one place to configure everything
