@@ -225,10 +225,20 @@ separately.
 | `FastNoLlm/` | `CoreAI.Tests.PlayMode.FastNoLlm` | Fast checks with **stub** LLMs / orchestrator-only — no model load, CI smoke. Includes `UnityMainThreadLlmAsyncMarshalerPlayModeTests` (`isPlaying`: `SwitchToThreadPool`, then marshaler restores the main `ManagedThreadId`); its EditMode companion covers the `!isPlaying` inline path. |
 | `LlmVerification/` | `CoreAI.Tests.PlayMode.LlmVerification` | Narrow **live-model** probes (streaming, HTTP, memory, pipelines, tooling). `Assert.Ignore` when no backend is configured. |
 | `Scenarios/` | `CoreAI.Tests.PlayMode.Scenarios` | Longer **game-style flows** (multi-agent crafting, merchants, deterministic craft memory). Requires LLM/env per test docs. |
+| `Assets/CoreAIMods/Tests/PlayMode/RbxApi/` | `CoreAI.Mods.PlayModeTests` | Runtime world and mod integration checks. |
+| `Assets/CoreAIMcp/Tests/PlayMode/` | `CoreAI.Mcp.PlayModeTests` | MCP runtime integration checks. |
+| `Assets/CoreAIBenchmark/Tests/PlayMode/` | `CoreAI.Benchmark.Tests` | Benchmark harness checks and the explicit live game-creation benchmark. |
 
 Support DLLs: `Shared/` (`CoreAI.Tests.PlayMode.Shared`), `LlmInfra/`
 (`CoreAI.Tests.PlayMode.LlmInfra` — `SharedLlmUnity`, `PlayModeProductionLikeLlmFactory`,
-`TestAgentSetup`, global LLM teardown).
+`TestAgentSetup`, global LLM teardown). `LlmInfra` also contains configuration and routing tests.
+
+The Test Runner only lists tests compiled for the **active build target**. The WebGL target excludes
+fixtures guarded by `!UNITY_WEBGL`, including most live LLM verification and benchmark tests.
+Run the PlayMode inventory on both WebGL and Standalone after each target finishes compiling to
+cover both sets. Include `[Explicit]` tests for an exhaustive run; report runtime `Assert.Ignore`
+results separately from passes. Editor runs do not cover tests guarded by `!UNITY_EDITOR`, which
+require a player test run.
 
 ## C2. Full-suite discipline
 
@@ -252,10 +262,15 @@ Support DLLs: `Shared/` (`CoreAI.Tests.PlayMode.Shared`), `LlmInfra/`
 
 - `auto` or empty → tries LLMUnity, then HTTP.
 - `llmunity` / `local` / `gguf` → local GGUF model only.
-- `http` / `openai` / `openai_http` → OpenAI-compatible API only (e.g. LM Studio); also set
-  `COREAI_OPENAI_TEST_BASE` (must end with `/v1`) and `COREAI_OPENAI_TEST_MODEL`.
+- `http` / `openai` / `openai_http` → OpenAI-compatible API only (e.g. OpenRouter or LM Studio);
+  configure `COREAI_TEST_BASE_URL` (usually ending in `/v1`) and `COREAI_TEST_MODEL`.
 
-Run via Unity Test Runner → PlayMode, filtered by assembly.
+For the HTTP backend, set `COREAI_TEST_BASE_URL`, `COREAI_TEST_MODEL`, and
+`COREAI_TEST_API_KEY` when required. `COREAI_PLAYMODE_LLM_BACKEND=http` selects HTTP instead of
+LLMUnity. See [Running the LIVE PlayMode test suite](../Docs/RUNNING_LIVE_TESTS.md) for the
+configuration precedence and gitignored local config file. Environment variables must be set
+in the Unity Editor process; changing them in a shell after the Editor starts does not update
+that process. Run via Unity Test Runner → PlayMode, filtered by assembly when narrowing a run.
 
 ---
 

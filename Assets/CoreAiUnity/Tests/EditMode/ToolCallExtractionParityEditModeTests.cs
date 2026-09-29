@@ -24,6 +24,24 @@ namespace CoreAI.Tests.EditMode
     [TestFixture]
     public sealed class ToolCallExtractionParityEditModeTests
     {
+        [Test]
+        public void TextExtractor_RepairsOnlyUnambiguousToolCasing()
+        {
+            string text = "{\"name\":\"MEMORY\",\"arguments\":{\"action\":\"write\"}}";
+
+            Assert.IsTrue(LlmToolCallTextExtractor.TryExtract(text, new[] { "memory" },
+                out List<LlmToolCallTextExtractor.Match> matches, out string cleaned));
+            Assert.AreEqual("MEMORY", matches[0].Name);
+            Assert.AreEqual(string.Empty, cleaned);
+
+            Assert.IsFalse(LlmToolCallTextExtractor.TryExtract(text, new[] { "memory", "Memory" },
+                out matches, out cleaned));
+            Assert.AreEqual(text, cleaned);
+
+            Assert.IsFalse(LlmToolCallTextExtractor.TryExtract(text, new[] { "other_tool" },
+                out matches, out cleaned));
+        }
+
         // ------------ Non-streaming: JSON-in-text fallback ------------
 
         [Test]

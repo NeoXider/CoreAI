@@ -22,12 +22,12 @@ namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
     /// Live end-to-end castle gates that complement <see cref="BuilderAgentCastleBuildLivePlayModeTests"/>
-    /// by exercising the two OTHER production paths a maintainer asked to verify:
+    /// by exercising the Creator path and a host's opt-in classic Lua compatibility path:
     /// <list type="bullet">
     /// <item>the built-in <see cref="BuiltInAgentRoleIds.Creator"/> role building a castle through the real
     /// <c>world_command</c> tool (Creator's system prompt forbids emitting code, so it must place objects itself);</item>
-    /// <item>the built-in <see cref="BuiltInAgentRoleIds.Programmer"/> role building a castle through LUA — the
-    /// model writes Lua that calls the <c>coreai_world_spawn</c> world API; the emitted world commands are
+    /// <item>the built-in <see cref="BuiltInAgentRoleIds.Programmer"/> role building a castle through the
+    /// opt-in classic Lua <c>coreai_world_spawn</c> API; the emitted world commands are
     /// replayed on the main thread into the production <see cref="CoreAiWorldCommandExecutor"/> and must leave
     /// at least 8 "Castle*" objects.</item>
     /// </list>
@@ -46,12 +46,12 @@ namespace CoreAI.Tests.PlayMode
             "on a stone base. Name every part starting with 'Castle'.";
 
         private const string LuaPrompt =
-            "Build a small castle at the world origin using Lua. Write and run Lua that calls the world API " +
-            "coreai_world_spawn{ ... } once per part to place a stone base, four corner towers and four walls " +
-            "connecting them — at least 8 parts total. Give every part a DISTINCT targetName starting with " +
-            "'Castle' (CastleBase, CastleTower1, CastleWallNorth, ...), explicit x/y/z coordinates (1 unit = 1 " +
-            "meter) and scaleX/scaleY/scaleZ for the walls and towers. Do not build a mod or hook the tick loop; " +
-            "just spawn the parts immediately.";
+            "This host explicitly enables the classic Lua world-build API. Use execute_lua now to build " +
+            "a small castle at the origin with coreai_world_spawn once per part. The API requires 'prefab' " +
+            "and 'name', not 'targetName'. Example: coreai_world_spawn({prefab='cube', name='CastleBase', " +
+            "x=0, y=0, z=0, scaleX=20, scaleY=1, scaleZ=20}). Spawn a stone base, four corner towers " +
+            "and four connecting walls (at least 9 distinct parts). Start every name with 'Castle'; " +
+            "provide explicit x/y/z and scaleX/scaleY/scaleZ. Execute immediately; do not build a mod.";
 
         [UnitySetUp]
         public IEnumerator SetUp()
@@ -238,12 +238,12 @@ namespace CoreAI.Tests.PlayMode
         }
 
         // ------------------------------------------------------------------------------------------
-        // TEST B: Programmer role builds a castle through Lua (coreai_world_spawn)
+        // WHY: Keep the opt-in classic Lua world path covered alongside the default Rbx path.
         // ------------------------------------------------------------------------------------------
 
         [UnityTest]
         [Timeout(1_800_000)]
-        public IEnumerator Programmer_BuildsCastle_ViaLuaWorldApi()
+        public IEnumerator Programmer_BuildsCastle_ViaOptInClassicLuaWorldApi()
         {
             LogAssert.ignoreFailingMessages = true;
             TestContext.WriteLine("[LuaCastle] === TEST START ===");
@@ -268,9 +268,8 @@ namespace CoreAI.Tests.PlayMode
 
                 RecordingWorldSink recordingSink = new();
 
-                // WHY: Same production Lua stack as CoreAiModsInstaller (enableFullLuaAccess=false): mods get
-                // LuaCapabilities.All, one-off execute_lua gets All minus Full. The world bindings publish
-                // coreai_world_spawn commands to the sink; we replay them into the real executor below.
+                // WHY: This host opts into classic WorldEdit bindings. Mods get LuaCapabilities.All;
+                // one-off execute_lua gets All minus Full. The emitted commands are replayed below.
                 LuaCapabilities scriptCapabilities = LuaCapabilities.All;
                 LuaCapabilities oneOffCapabilities = scriptCapabilities & ~LuaCapabilities.Full;
 
@@ -282,6 +281,7 @@ namespace CoreAI.Tests.PlayMode
                     Log = Log.Instance,
                     Capabilities = scriptCapabilities,
                     OneOffCapabilities = oneOffCapabilities,
+                    RegisterWorldEditBuildBindings = true,
                     RbxApi = new LuaCsRbxApiBindings()
                 });
 
@@ -291,23 +291,8 @@ namespace CoreAI.Tests.PlayMode
                 AgentMemoryPolicy policy = new();
                 policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
                     new LuaLlmTool(stack.ToolExecutor, settings, Log.Instance, new LuaGenerationRateLimiter()));
-                policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                    new LuaModsLlmTool(
-                        stack.Runtime,
-                        settings,
-                        Log.Instance,
-                        scriptCapabilities,
-                        true,
-                        new LocalActorIdentityProvider("castle-live-test"),
-                        BuiltInAgentRoleIds.Programmer));
-                policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
-                    BuiltInLuaModdingSkillText.SkillName,
-                    BuiltInLuaModdingSkillText.SkillDescription,
-                    BuiltInLuaModdingSkillText.Instructions));
-                policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
-                    BuiltInRbxApiSkillText.SkillName,
-                    BuiltInRbxApiSkillText.SkillDescription,
-                    BuiltInRbxApiSkillText.Instructions));
+                // WHY: this fixture targets the opt-in classic API; production Rbx skill text
+                // describes the default host and would contradict the explicitly enabled binding.
 
                 InMemoryStore store = new();
                 ILlmClient client = handle.WrapWithMemoryStore(store);
@@ -319,10 +304,11 @@ namespace CoreAI.Tests.PlayMode
                 {
                     RoleId = BuiltInAgentRoleIds.Programmer,
                     Hint = LuaPrompt,
-                    MaxOutputTokens = 128000
+                    MaxOutputTokens = 4096,
+                    MaxToolCallRoundtrips = 24
                 }, cts.Token);
 
-                yield return PlayModeTestAwait.WaitTask(task, 1500f, "Programmer lua castle build", cts);
+                yield return PlayModeTestAwait.WaitTask(task, 600f, "Programmer lua castle build", cts);
 
                 // WHY: The model's Lua ran on the worker thread and published its world commands to the sink;
                 // parse them to prove the Lua produced a castle's worth of DISTINCT 'Castle*' spawns. This is

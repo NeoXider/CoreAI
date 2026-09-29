@@ -42,26 +42,15 @@ namespace CoreAI.Tests.PlayMode
         private static bool TryCreateRealMeaiClient(out MEAI.IChatClient meaiClient)
         {
             meaiClient = null;
+            PlayModeOpenAiTestConfig.ResolvedConfig config = PlayModeOpenAiTestConfig.Resolve();
+            if (!config.IsComplete)
+            {
+                return false;
+            }
+
             CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
-            if (settings == null)
-            {
-                return false;
-            }
-
-            if (settings.BackendType != LlmBackendType.OpenAiHttp &&
-                settings.BackendType != LlmBackendType.Auto)
-            {
-                return false;
-            }
-
-            if (string.IsNullOrEmpty(settings.ApiBaseUrl) ||
-                string.IsNullOrEmpty(settings.ModelName))
-            {
-                return false;
-            }
-
             _ = GameLoggerUnscopedFallback.Instance;
-            meaiClient = new MeaiOpenAiChatClient(new SettingsHttpAdapter(settings));
+            meaiClient = new MeaiOpenAiChatClient(new SettingsHttpAdapter(settings, config));
             return true;
         }
 
@@ -69,19 +58,21 @@ namespace CoreAI.Tests.PlayMode
         private sealed class SettingsHttpAdapter : IOpenAiHttpSettings
         {
             private readonly CoreAISettingsAsset _s;
+            private readonly PlayModeOpenAiTestConfig.ResolvedConfig _config;
 
-            public SettingsHttpAdapter(CoreAISettingsAsset s)
+            public SettingsHttpAdapter(CoreAISettingsAsset s, PlayModeOpenAiTestConfig.ResolvedConfig config)
             {
                 _s = s;
+                _config = config;
             }
 
-            public string ApiBaseUrl => _s.ApiBaseUrl;
-            public string ApiKey => _s.ApiKey;
+            public string ApiBaseUrl => _config.BaseUrl;
+            public string ApiKey => _config.ApiKey;
             public string AuthorizationHeader => "";
-            public string Model => _s.ModelName;
-            public float Temperature => _s.Temperature;
-            public int RequestTimeoutSeconds => _s.RequestTimeoutSeconds;
-            public int MaxTokens => _s.MaxTokens;
+            public string Model => _config.Model;
+            public float Temperature => _s != null ? _s.Temperature : 0.2f;
+            public int RequestTimeoutSeconds => _s != null ? _s.RequestTimeoutSeconds : 120;
+            public int MaxTokens => _s != null ? _s.MaxTokens : 4096;
             public bool LogLlmInput => false;
             public bool LogLlmOutput => false;
             public bool EnableHttpDebugLogging => false;
@@ -132,29 +123,21 @@ namespace CoreAI.Tests.PlayMode
             Assert.That(state.Memory, Does.Contain("Wrong casing repaired"),
                 "Memory content should match");
 
-            // Live streaming may concatenate raw tool-shaped JSON into Text before the follow-up turn; execution + memory above are the real invariant.
-            Assert.That(box.FullText, Does.Contain("Data saved"),
-                "Final assistant text should acknowledge save (real LLM turn after tool)");
-
+            // WHY: the model may finish its second turn without visible text; the call and saved
+            // memory prove repair, while StreamCalls proves the real model received the tool result.
             Assert.GreaterOrEqual(hybrid.StreamCalls, 2,
                 "Should have ≥2 stream calls (1st=scripted tool, 2nd=real LLM)");
         }
 
         // =========================================================================
-        // Test 2: unknown tool -> error fed back -> real LLM self-corrects
+        // WHY: an undeclared text-shaped tool must remain visible and never execute.
         // =========================================================================
 
         [UnityTest]
-        [Timeout(600000)]
-        public IEnumerator UnknownTool_ErrorFedBack_RealLlmSelfCorrects()
+        [Timeout(120000)]
+        public IEnumerator UnknownTool_RemainsVisible_AndDoesNotExecute()
         {
-            if (!TryCreateRealMeaiClient(out MEAI.IChatClient realMeai))
-            {
-                Assert.Ignore("HTTP backend not configured");
-            }
-
-            // First call: scripted unknown tool. Subsequent calls: real LLM.
-            SingleShotScriptedMeaiClient hybrid = new(realMeai,
+            SingleShotScriptedMeaiClient hybrid = new(null,
                 "{\"name\":\"nonexistent_tool\",\"arguments\":{\"data\":\"important info\"}}");
 
             StatefulMemoryStore memoryStore = new();
@@ -167,40 +150,24 @@ namespace CoreAI.Tests.PlayMode
             LlmCompletionRequest request = new()
             {
                 AgentRoleId = "Teacher",
-                SystemPrompt =
-                    "You are a teacher with a memory tool for saving information. " +
-                    "If a tool is unavailable, recover by using an available tool instead of retrying the failed name.",
+                SystemPrompt = "You are a teacher with a memory tool for saving information.",
                 UserPayload = "Save this important info to memory.",
-                Tools = new List<ILlmTool> { new MemoryLlmTool() },
-                MaxOutputTokens = 128000
+                Tools = new List<ILlmTool> { new MemoryLlmTool() }
             };
 
             ResultBox box = new();
             using CancellationTokenSource cts = new();
             Task task = CollectStreamAsync(client, request, box, cts.Token);
-            yield return PlayModeTestAwait.WaitTask(task, 600f, "UnknownTool_SelfCorrection", cts);
+            yield return PlayModeTestAwait.WaitTask(task, 120f, "UnknownTool_Isolation", cts);
 
             Debug.Log($"[RepairTest2] Output: '{box.FullText}' | Calls: {hybrid.StreamCalls}");
 
-            // The real LLM should have received the error and self-corrected
-            bool memoryWasSaved = memoryStore.TryLoad("Teacher", out AgentMemoryState state);
-            if (memoryWasSaved)
-            {
-                Debug.Log($"[RepairTest2] ✓ LLM self-corrected. Memory: '{state.Memory}'");
-                Assert.That(state.Memory, Is.Not.Empty,
-                    "Memory should not be empty after self-correction");
-            }
-            else
-            {
-                // Model may not support self-correction — soft failure
-                Debug.LogWarning("[RepairTest2] Model did not self-correct. " +
-                                 "This is acceptable for models without good tool-calling.");
-                Assert.IsNotEmpty(box.FullText, "Should at least have text output");
-            }
-
-            // Aggregated stream Text may still include the scripted unknown-tool JSON before the model self-corrects.
-            Assert.GreaterOrEqual(hybrid.StreamCalls, 2,
-                "Expected scripted first turn then at least one real LLM stream.");
+            Assert.IsFalse(memoryStore.TryLoad("Teacher", out AgentMemoryState _),
+                "An undeclared tool name must not execute any tool.");
+            Assert.That(box.FullText, Does.Contain("nonexistent_tool"),
+                "An undeclared text-shaped call remains visible to the caller.");
+            Assert.AreEqual(1, hybrid.StreamCalls,
+                "The undeclared call must not start a tool-result follow-up turn.");
         }
 
         // =========================================================================
@@ -309,6 +276,11 @@ namespace CoreAI.Tests.PlayMode
                 IEnumerable<MEAI.ChatMessage> messages, MEAI.ChatOptions options = null,
                 CancellationToken ct = default)
             {
+                if (_real == null)
+                {
+                    throw new InvalidOperationException("Unexpected second model turn after an undeclared tool.");
+                }
+
                 return _real.GetResponseAsync(messages, options, ct);
             }
 
@@ -326,6 +298,11 @@ namespace CoreAI.Tests.PlayMode
                 }
                 else
                 {
+                    if (_real == null)
+                    {
+                        throw new InvalidOperationException("Unexpected second model turn after an undeclared tool.");
+                    }
+
                     // Real LLM for all subsequent turns
                     await foreach (MEAI.ChatResponseUpdate u in _real.GetStreamingResponseAsync(messages, options, ct))
                     {

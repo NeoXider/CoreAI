@@ -1,5 +1,9 @@
 # TODO
 
+> Updated 2026-09-29 (7.47.1 PlayMode audit): the open GUI Editor ran the WebGL suite with 165 passed / 1 failed out of 166; the lone Rbx material-variety failure passed on an immediate same-model rerun. Standalone deterministic assemblies passed (LlmInfra 16/16, FastNoLlm 95/95, Mods 20/20, Mcp 6/6). The Space Bunny LlmVerification assembly finished with 65 passed / 3 failed / 1 skipped / 1 inconclusive out of 70; all three failures passed targeted reruns. The final Scenarios assembly passed 26/27, with the GGUF-only case skipped on the HTTP backend. The built-in-role orchestration and two independent concurrent HTTP agents passed. Keep the full-run failures visible as live-model variability rather than weakening scene/tool assertions.
+> The complete game-creation benchmark suite v1.11 on Space Bunny scored 91.75/100 across 28 scenarios (24 pass, 2 partial, 2 fail; no framework or environment failures). G6 now continues an early-ending model in the same scene, budgets up to 570 seconds for generation plus 30 for capture/export, and counts completed calls from unfinished streams. Its standalone PlayMode run finished in 581.75 seconds and saved an 894-part castle using 32 materials and all five shapes. A JSON-escaped Lua `weapon_name` extraction bug was found from a real crafting call and covered by a regression test.
+> OpenRouter GPT-6 Luna and Sol each produced a partial G6 castle before 402 credit limits; Codex CLI through Neoxider Agents also produced both castles but its bridge returned 500 on longer turns. The OpenCode free Space Bunny bridge built a separate 96-part scene; the other tested OpenCode free routes returned upstream 403. The OpenRouter free Ling route passed focused live fixtures. Follow-ups: rerun comparable GPT-6 benchmarks with sufficient provider credit, load a GGUF model for the mixed-backend test, and improve the G6 visual grader beyond part/material/shape counts so composition affects score.
+
 > Updated 2026-09-25. Status: audit rounds 1–3 complete (round 3 fixed by `7cf2891e`, `d4d7f95b`, `055aed29`);
 > **MVP3 closed 2026-09-25 and released in 7.47.0** on the Unity gate (Unity 6000.3.14f1): EditMode full 6550 total /
 > 6539 passed / 0 failed / 11 skipped, `core` 5266/5254/0/12, `llm` 6234/6221/0/13, `lua` 5582/5572/0/10, `MIRROR`
@@ -63,8 +67,8 @@ scope)**
 - The Unity verification gate is green (numbers at the top and in the next section). Still open there: the
   IL2CPP/WebGL player checks of **Check the tests** (the native-stack mod `local function f() pcall(f) end f()`
   ending in "C stack overflow", the `__concat` chain, three **Save & run** of `sample_castle3d`, the budget guard
-  on IL2CPP), the **Real WebGL page-reload smoke** of the world package, and the live-model PlayMode re-run (an
-  OpenRouter free model is planned, since LM Studio was unresponsive). Audit rounds 1–3 are complete (round 3
+  on IL2CPP), the **Real WebGL page-reload smoke** of the world package, and the remaining live-model PlayMode failures
+  and quota-limited retests described above. Audit rounds 1–3 are complete (round 3
   fixed by `7cf2891e`, `d4d7f95b`, `055aed29`).
 - [ ] **Spike S1: guarded VM cost on the target runtimes (risk R1).** *Owner:* Lua runtime + performance.
       *Plan:* run the `tools/vmbench` workload and the `tools/ScaleHarness` N=100 workload in an IL2CPP Linux

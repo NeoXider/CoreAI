@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [7.47.1] - 2026-09-29
+
+### Fixed
+
+- G6 free-build now budgets 570 seconds for model turns and reserves 30 seconds for capture/export inside the ten-minute test window. A shorter benchmark timeout still takes effect, and configured retries do not reset the scene. The default castle prompt asks the model to finish the main structure before adding details. When a scored build ends early after using tools, the runner continues the same scene for up to eight additional turns while time remains.
+- G6 hero screenshots and exported prefabs now include parts created through the Roblox `execute_lua` world. The capture camera frames that geometry and the banner counts its parts. A saved castle prefab can be photographed again without another model call. A timed-out build with real geometry is graded and captured instead of being retried as an empty run. The Roblox world is disposed after each scenario. An optional per-call output cap prevents providers from reserving an unaffordable unlimited response. The benchmark suite version is 1.11 because earlier G6 results may differ under these corrections.
+- The benchmark now counts completed tool calls from lifecycle events when a timed-out streaming turn has no final chunk, and labels its hero token estimate as partial.
+- Text-shaped tool calls with a unique case-only mismatch now reach the existing tool-name repair policy. Unknown and ambiguous names remain visible text and cannot execute.
+
+### Tests
+
+- Added PlayMode regression checks for the G6 time and retry policy and detection of geometry outside the `world_command` object counter.
+- Added a PlayMode regression check for G6 continuation progress and deadline boundaries.
+- Added a regression check for completed tool calls from an unfinished streamed turn.
+- Added a regression check for safe case-insensitive text-call extraction.
+
 ## [7.47.0] - 2026-09-25
 
 MVP3 (the world/place package) is closed on the Unity verification gate (Unity 6000.3.14f1, 2026-09-25): EditMode

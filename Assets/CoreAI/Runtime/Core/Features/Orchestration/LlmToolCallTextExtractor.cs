@@ -78,7 +78,8 @@ namespace CoreAI.Ai
         /// <b>a call is an invocation of a declared tool</b>. A name outside the registry is not treated as
         /// a call in any form and stays visible text: it cannot be executed, and hiding it would take a
         /// line of the lesson away from the learner to guard against something that will not happen. The
-        /// <c>ident(...)</c> form is enabled only with a registry.
+        /// <c>ident(...)</c> form is enabled only with a registry. A unique case-insensitive
+        /// match is accepted so the execution policy can repair model casing; ambiguous names fail closed.
         /// </summary>
         /// <param name="knownToolNames">
         /// The names of the declared tools (<c>ILlmTool.Name</c>). <c>null</c> means there is no registry
@@ -395,8 +396,7 @@ namespace CoreAI.Ai
         /// <summary>
         /// Whether the name belongs to the registry of declared tools. Without a registry (<c>null</c>) the
         /// answer is "yes": the caller gave no list, and deciding by shape on their behalf is all that is
-        /// left. The comparison is ordinal: the executor looks the tool up by its exact name, and a
-        /// "nearly right" name would end in "Unknown tool" anyway.
+        /// left. A unique casing mismatch can be repaired by the execution policy; ambiguous names cannot.
         /// </summary>
         private static bool IsDeclaredTool(string name, IReadOnlyCollection<string> knownToolNames)
         {
@@ -418,7 +418,21 @@ namespace CoreAI.Ai
                 }
             }
 
-            return false;
+            string caseInsensitiveMatch = null;
+            foreach (string known in knownToolNames)
+            {
+                if (string.Equals(known, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (caseInsensitiveMatch != null)
+                    {
+                        return false;
+                    }
+
+                    caseInsensitiveMatch = known;
+                }
+            }
+
+            return caseInsensitiveMatch != null;
         }
 
         /// <summary>

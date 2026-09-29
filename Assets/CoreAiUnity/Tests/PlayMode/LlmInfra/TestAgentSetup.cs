@@ -19,8 +19,8 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode setup that builds an LLM from <see cref="CoreAISettingsAsset"/> for HTTP,
-    /// LLMUnity, or offline modes. <see cref="Initialize"/> also bootstraps global MessagePipe
+    /// PlayMode setup that resolves the configured live HTTP endpoint or the project LLMUnity/offline
+    /// backend. <see cref="Initialize"/> also bootstraps global MessagePipe
     /// diagnostics when the test scene has no <c>CoreAILifetimeScope</c>.
     /// </summary>
     public sealed class TestAgentSetup : IDisposable
@@ -119,10 +119,24 @@ namespace CoreAI.Tests.PlayMode
 
         private void InitializeHttp(CoreAISettingsAsset settings)
         {
-            Debug.Log($"[TestAgentSetup] Initializing HTTP: {settings.ApiBaseUrl}");
             SetupHttpLogAsserts();
-            Client = MeaiLlmClient.CreateHttp(settings, GameLoggerUnscopedFallback.Instance, supportsNativeToolCalling: true, memoryStore: MemoryStore);
-            BackendName = "HTTP";
+            float temperature = settings != null ? settings.Temperature : 0.2f;
+            int timeoutSeconds = settings != null ? settings.EffectiveHttpRequestTimeoutSeconds : 120;
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(
+                    PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
+                    temperature,
+                    timeoutSeconds,
+                    out _handle,
+                    out string ignoreReason))
+            {
+                Debug.LogWarning($"[TestAgentSetup] HTTP unavailable: {ignoreReason}");
+                BackendName = "HTTP unavailable";
+                return;
+            }
+
+            Client = _handle.WrapWithMemoryStore(MemoryStore);
+            BackendName = "HTTP (configured)";
+            Debug.Log($"[TestAgentSetup] Initializing HTTP: {_handle.ResolvedConfig?.BaseUrl ?? settings?.ApiBaseUrl}");
             CreateOrchestrator();
         }
 
@@ -140,7 +154,6 @@ namespace CoreAI.Tests.PlayMode
                 {
                     BackendName = "HTTP (Auto)";
                     Debug.Log("[TestAgentSetup] Using HTTP");
-                    CreateOrchestrator();
                     yield break;
                 }
 
@@ -171,10 +184,11 @@ namespace CoreAI.Tests.PlayMode
                 Debug.Log("[TestAgentSetup] LLMUnity not available, falling back to HTTP...");
                 SetupHttpLogAsserts();
                 InitializeHttp(settings);
-                BackendName = "HTTP (Auto)";
+                if (Client != null)
+                {
+                    BackendName = "HTTP (Auto)";
+                }
             }
-
-            CreateOrchestrator();
         }
 
         private void InitializeOffline()
@@ -195,7 +209,8 @@ namespace CoreAI.Tests.PlayMode
                 new NoAgentUserPromptTemplateProvider(),
                 new NullLuaScriptVersionStore());
 
-            // The same CoreAISettingsAsset the HTTP/Auto client uses, so LLM timeouts and logging flags match Instance.
+            // WHY: Orchestrator policy comes from the project asset; the HTTP client can use a
+            // separate live-test endpoint resolved from environment or local configuration.
             CoreAISettingsAsset orchestratorSettings = CoreAISettingsAsset.Instance;
             if (orchestratorSettings == null)
             {

@@ -102,9 +102,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override double TimeBudgetMs => 45000;
 
             // Per-scenario wall-clock for the visual build. This is also the deadline the model is told about
-            // and counted down to after each spawn, so it can pace itself. 600s (10 min) is intentionally
-            // G6-specific; the whole-suite soft budget is much larger. Override via COREAI_BENCHMARK_TIMEOUT.
-            // The roundtrip cap stays the hard backstop.
+            // and counted down to after each tool call. The runner reserves 30 seconds of the 600-second
+            // wall budget for screenshots and export, and never retries the build.
             public override float TimeoutSeconds => 600f;
 
             public override AgentConfig BuildAgent(BenchmarkEnvironment env)
@@ -184,9 +183,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     // before the deadline rather than being cut off.
                     return baseGoal +
                            "\n\nYou are on a time budget. Every execute_lua result carries a TimeLeft note with " +
-                           "the seconds remaining. Pace yourself: keep building steadily, and when the time is " +
-                           "nearly up, stop building and finish — a complete smaller scene beats a half-built " +
-                           "large one.";
+                           "the seconds remaining. Complete the castle's main silhouette — ground, curtain walls, " +
+                           "towers, gate and keep — during the first half of the budget. Spend the remaining time " +
+                           "on the courtyard, approach, landscape and surface details. Finish the current section " +
+                           "and stop building with at least 20 seconds remaining.";
                 }
             }
 

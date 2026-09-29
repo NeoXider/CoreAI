@@ -422,7 +422,8 @@ namespace CoreAI.Tests.PlayMode
                 Task t3 = orch.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = roleId,
-                    Hint = "A Fire Drake appeared! Fight it.",
+                    Hint = "A Fire Drake appeared! Use the Combat skill: call get_enemy_info for the " +
+                           "Fire Drake, then attack_enemy with the sword you crafted. Report the result.",
                     MaxOutputTokens = LiveModelMaxOutputTokens
                 }, phase3Cts.Token);
                 yield return PlayModeTestAwait.WaitTask(t3, PhaseTimeoutSeconds, "Phase 3: Combat", phase3Cts);

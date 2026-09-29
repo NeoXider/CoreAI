@@ -4,6 +4,23 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.47.1] - 2026-09-29
+
+### Fixed
+
+- Live PlayMode HTTP fixtures now resolve the configured test endpoint and model consistently, including the shared agent setup, direct MEAI probe, and tool-name repair probes. Temporary settings are disposed after tests.
+- The mixed LLMUnity/HTTP concurrency fixture skips cleanly when its local GGUF host is unavailable. A separate live fixture exercises two HTTP agents concurrently with independent clients and memory stores.
+- The Builder castle fixture bounds its small integration task. Programmer scene and mod fixtures judge the built scene or loaded mod even when a provider ends a tool-only turn without closing text. The prompt-cache probe permits enough output tokens for reasoning models, and the NPC chat-only fixture applies the agent policy it builds.
+- The text-shaped tool-name live probes now cover repaired casing; the undeclared-tool isolation probe is deterministic and asserts that no follow-up turn can start.
+- Attachment smoke tests request a small output budget for short answers, avoiding unnecessary provider token reservations.
+- The opt-in classic Lua castle fixture now passes the registered `prefab` and `name` fields, explicitly enables that binding, and exposes only the one-off Lua tool instead of conflicting default Rbx skill guidance.
+- Live crafting determinism and multi-skill combat fixtures now ask for the exact memory-backed item name and explicit combat tool sequence, respectively, while retaining their tool and state assertions.
+- The crafting PlayMode result parser now recognizes a JSON-escaped Lua `weapon_name` assignment in a completed `execute_lua` call; a regression test covers the observed payload shape.
+
+### Docs
+
+- Documented active-target PlayMode coverage, live endpoint configuration, parallel-agent verification, and the G6 ten-minute limit and hero export behavior.
+
 ## [7.47.0] - 2026-09-25
 
 ### Fixed

@@ -35,6 +35,57 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// </summary>
     internal static class GameCreationBenchmarkHarness
     {
+        /// <summary>Counts completed tool calls even when a streamed turn is cancelled before its terminal chunk.</summary>
+        internal sealed class ScenarioToolCallObserver
+        {
+            private readonly string _roleId;
+            private readonly object _gate = new();
+            private readonly StringBuilder _completionText = new();
+            private int _toolCalls;
+            private int _failedToolCalls;
+
+            internal ScenarioToolCallObserver(string roleId)
+            {
+                _roleId = roleId;
+            }
+
+            internal int ToolCalls
+            {
+                get { lock (_gate) { return _toolCalls; } }
+            }
+
+            internal int FailedToolCalls
+            {
+                get { lock (_gate) { return _failedToolCalls; } }
+            }
+
+            internal string CompletionText
+            {
+                get { lock (_gate) { return _completionText.ToString(); } }
+            }
+
+            internal void Record(LlmToolCallRecord record)
+            {
+                if (record == null || !string.Equals(record.Info.RoleId, _roleId, StringComparison.Ordinal)
+                    || record.Status != "completed" && record.Status != "failed")
+                {
+                    return;
+                }
+
+                lock (_gate)
+                {
+                    _toolCalls++;
+                    if (record.Status == "failed")
+                    {
+                        _failedToolCalls++;
+                    }
+
+                    _completionText.Append(record.Info.ToolName).Append(' ')
+                        .Append(record.Info.ArgumentsJson).Append('\n');
+                }
+            }
+        }
+
         // ---------------------------------------------------------------------------------------------
         //  Session-capturing LLM client
         // ---------------------------------------------------------------------------------------------
@@ -618,6 +669,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             public Transform Root { get; }
             public int ObjectCount => _objects.Count;
+            public bool HasRenderableScene => ObjectCount > 0 ||
+                                              Root != null && Root.GetComponentInChildren<Renderer>(true) != null;
 
             // Live preview camera + light so the Game view shows the model building the scene in real time
             // (objects pop in as commands stream), instead of staring at an empty view until the final shot.
@@ -1079,17 +1132,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 Bounds b = new(Vector3.zero, Vector3.one);
                 bool first = true;
 
-                List<GameObject> all = new(_objects.Values);
-                all.AddRange(_ghosts);
-                foreach (GameObject go in all)
+                // WHY: Roblox execute_lua parts are children of Root but absent from the
+                // world_command dictionary. Capture must frame the actual rendered geometry.
+                foreach (Renderer r in Root.GetComponentsInChildren<Renderer>(true))
                 {
-                    if (go == null)
-                    {
-                        continue;
-                    }
-
-                    Renderer r = go.GetComponent<Renderer>();
-                    if (r == null)
+                    if (r == null || r.GetComponent<TextMesh>() != null)
                     {
                         continue;
                     }
@@ -1537,6 +1584,25 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             cancellationToken.ThrowIfCancellationRequested();
         }
 
+        /// <summary>Optional per-call cap for providers that reserve the full requested output budget.</summary>
+        internal static int? ResolveBenchmarkMaxOutputTokens()
+        {
+            string raw = Environment.GetEnvironmentVariable("COREAI_BENCHMARK_MAX_OUTPUT_TOKENS");
+            return int.TryParse(raw, out int cap) && cap >= 64 && cap <= 128000
+                ? cap
+                : (int?)null;
+        }
+
+        internal const int MaxFreeBuildContinuations = 8;
+
+        /// <summary>Allows another build turn only when the previous one used tools and time remains.</summary>
+        internal static bool CanContinueFreeBuild(int toolCalls, int previousToolCalls,
+            int continuations, double elapsedSeconds, float timeoutSeconds)
+        {
+            return toolCalls > previousToolCalls && continuations < MaxFreeBuildContinuations &&
+                   timeoutSeconds - elapsedSeconds > 45.0;
+        }
+
         /// <summary>
         /// Drives one scenario through the model and reports a graded <see cref="ScenarioResult"/> via
         /// <paramref name="onResult"/>. Never throws on model/timeout/fault — it records the failure and
@@ -1601,6 +1667,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             config.ApplyToPolicy(policy);
 
             SessionCapturingLlmClient capture = new(client);
+            ScenarioToolCallObserver toolObserver = new(scenario.RoleId);
+            using IDisposable toolSubscription = CoreAi.SubscribeToolCalls(toolObserver.Record);
             ListSink sink = new();
             AiOrchestrator orch = new(
                 new SoloAuthorityHost(),
@@ -1624,21 +1692,50 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             using CancellationTokenSource cts = new();
             // Streaming, not RunTaskAsync: production callers always stream (see DrainStreamingAsync doc),
             // so the benchmark must exercise that same path rather than the non-streaming convenience.
-            Task task = DrainStreamingAsync(orch, new AiTaskRequest
+            Task StartTurn(string hint) => DrainStreamingAsync(orch, new AiTaskRequest
             {
                 RoleId = scenario.RoleId,
                 SystemPrompt = scenario.SystemPrompt,
-                Hint = scenario.Goal,
+                Hint = hint,
                 // Per-call override always wins over agent/global settings — this is the reliable channel
                 // for the visual free-build to run with NO roundtrip cap (0 = unlimited), independent of
                 // however the HTTP client's settings were built.
-                MaxToolCallRoundtrips = scenario.MaxToolCallRoundtripsOverride
+                MaxToolCallRoundtrips = scenario.MaxToolCallRoundtripsOverride,
+                // WHY: a call-level cap wins over the agent's explicit unlimited output setting.
+                MaxOutputTokens = ResolveBenchmarkMaxOutputTokens()
             }, cts.Token);
+
+            Task task = StartTurn(scenario.Goal);
 
             // Non-throwing wait: poll, cancel on timeout, give cancellation a grace window — never Assert.
             while (!task.IsCompleted && sw.Elapsed.TotalSeconds < timeoutSeconds)
             {
                 yield return null;
+            }
+
+            // WHY: a model can end a free build after a few valid calls despite the ten-minute
+            // budget. Continue in the same world, without resetting its scene or its deadline.
+            int previousToolCalls = 0;
+            int continuations = 0;
+            while (scenario.FreeBuildLayout && !scenario.ExcludeFromScoring && task.IsCompleted &&
+                   !task.IsFaulted && !task.IsCanceled &&
+                   CanContinueFreeBuild(Math.Max(capture.ToolCalls, toolObserver.ToolCalls),
+                       previousToolCalls, continuations, sw.Elapsed.TotalSeconds, timeoutSeconds))
+            {
+                previousToolCalls = Math.Max(capture.ToolCalls, toolObserver.ToolCalls);
+                continuations++;
+                int secondsLeft = Math.Max(0, (int)(timeoutSeconds - sw.Elapsed.TotalSeconds));
+                string followUp =
+                    $"Continue improving the scene already in workspace. About {secondsLeft} seconds remain. " +
+                    "Inspect existing parts first, then add missing major structures and details rather than " +
+                    "rebuilding or duplicating them. Use more appropriate materials and all five PartType " +
+                    "shapes; keep every part within the build volume. Use execute_lua and spend the remaining " +
+                    "time on the scene. Finish at least 20 seconds before the deadline.";
+                task = StartTurn(followUp);
+                while (!task.IsCompleted && sw.Elapsed.TotalSeconds < timeoutSeconds)
+                {
+                    yield return null;
+                }
             }
 
             if (!task.IsCompleted)
@@ -1660,7 +1757,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             // built, do NOT set Environment attribution and do NOT trigger the scenario retry (which would wipe
             // the scene and rebuild from scratch). A cancellation/timeout BEFORE anything was built keeps the
             // Environment+retry behaviour. "scene built" is defined exactly as the empty-response clean-stop below.
-            bool sceneWasBuilt = env.World.Count("spawn") >= 1 || capture.ToolCalls >= 1;
+            bool sceneWasBuilt = env.World.Count("spawn") >= 1 || capture.ToolCalls >= 1 ||
+                                 env.World is VisualBenchmarkWorldExecutor { HasRenderableScene: true } ||
+                                 env.HasRbxWorld && env.RbxWorld.Measure().Parts >= 1;
 
             if (task.IsFaulted)
             {
@@ -1697,15 +1796,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             obs.GenerationMs = capture.GenerationMs;
             obs.Turns = capture.Turns.Count;
             obs.CapturedTurns = capture.Turns;
-            obs.ToolCalls = capture.ToolCalls;
-            // `capture.FailedToolCalls` is the sole source: it counts every LlmToolCallTrace with
-            // Success=false, and every real execute_lua invocation that ILuaExecutor.ExecuteAsync ever
-            // runs (env.Lua.FailedExecutions) originates from exactly one such trace - there is no
-            // scenario-setup Lua seeding that would fail outside a captured turn. Adding
-            // env.Lua.FailedExecutions on top used to compensate for MeaiLlmClient dropping
-            // ExecutedToolCalls on an empty final response (fixed - see MeaiLlmClient.CompleteAsync);
-            // keeping the addition now double-counts every Lua tool failure.
-            obs.FailedToolCalls = capture.FailedToolCalls;
+            // WHY: a time-limited streaming turn may execute tools without emitting its terminal
+            // chunk. The global lifecycle records preserve those calls and their failures.
+            obs.ToolCalls = Math.Max(capture.ToolCalls, toolObserver.ToolCalls);
+            // WHY: the lifecycle observer covers failed calls from an unfinished streamed turn.
+            // Max avoids double-counting calls that also reached the terminal client capture.
+            obs.FailedToolCalls = Math.Max(capture.FailedToolCalls, toolObserver.FailedToolCalls);
             obs.InvalidCommands = env.World.InvalidCommandCount;
 
             // A mid-build empty/blank response AFTER the model has already built something is the weak
@@ -1781,7 +1877,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             // local backends (e.g. LM Studio) frequently under-report completion usage on tool-call turns,
             // which made decode tok/s read as ~0.3; guard against that by never trusting a provider completion
             // count that falls below a tokenizer estimate of everything the model generated (incl. tool calls).
-            int estCompletion = tokenCounter.CountTokens(capture.CompletionTextForEstimate(), modelId);
+            int estCompletion = Math.Max(
+                tokenCounter.CountTokens(capture.CompletionTextForEstimate(), modelId),
+                tokenCounter.CountTokens(toolObserver.CompletionText, modelId));
             int promptTokens, completionTokens;
             bool fromProvider = capture.AnyProviderUsage;
             if (fromProvider)
@@ -1791,7 +1889,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
             else
             {
-                promptTokens = tokenCounter.CountTokens(capture.PromptTextForEstimate(), modelId);
+                string promptText = capture.Turns.Count > 0
+                    ? capture.PromptTextForEstimate()
+                    : scenario.SystemPrompt + "\n" + scenario.Goal;
+                promptTokens = tokenCounter.CountTokens(promptText, modelId);
                 completionTokens = estCompletion;
             }
 
@@ -1848,7 +1949,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 // Capture when anything was built, or when the scenario expected objects (so a total
                 // failure still produces a picture full of "missing" ghosts rather than no picture).
-                if (scenario.CaptureScene && (vis.ObjectCount > 0 || vis.ExpectedNames.Count > 0))
+                if (scenario.CaptureScene && (vis.HasRenderableScene || vis.ExpectedNames.Count > 0))
                 {
                     string verdict = score.Classification switch
                     {
@@ -1863,7 +1964,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     string heroStats = null;
                     if (scenario.FreeBuildLayout)
                     {
-                        int spawns = env.World.Count("spawn");
+                        int builtParts = env.HasRbxWorld
+                            ? env.RbxWorld.Measure().Parts
+                            : env.World.Count("spawn");
                         // Count camera/vision tool calls so the picture itself shows whether the model actually
                         // LOOKED at its build (image-feedback variant) or never used vision at all — "0 looks"
                         // makes an unused vision run obvious at a glance.
@@ -1882,9 +1985,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                         double genSec = obs.GenerationMs / 1000.0;
                         double tokPerSec = genSec > 0.001 ? completionTokens / genSec : 0.0;
-                        heroStats = $"{obs.ToolCalls} tool-calls · {spawns} spawns · {cameraCalls} camera looks · " +
-                                    $"{genSec:0.#}s gen · {completionTokens} gen tokens" +
-                                    $"{(fromProvider ? "" : "~")} · {tokPerSec:0.#} tok/s ({totalTokens:0} total)";
+                        heroStats = capture.Turns.Count == 0 && obs.ToolCalls > 0
+                            ? $"{obs.ToolCalls} observed tool-calls · {builtParts} parts · " +
+                              $"{obs.LatencyMs / 1000.0:0.#}s build · partial token estimate ~{totalTokens:0}"
+                            : $"{obs.ToolCalls} tool-calls · {builtParts} parts · {cameraCalls} camera looks · " +
+                              $"{genSec:0.#}s gen · {completionTokens} gen tokens" +
+                              $"{(fromProvider ? "" : "~")} · {tokPerSec:0.#} tok/s ({totalTokens:0} total)";
                     }
 
                     yield return CaptureSceneScreenshot(vis, modelId, header, scenario.WhatItChecks,
@@ -1894,7 +2000,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 #if UNITY_EDITOR
                 // Persist the built free-build scene (the castle) as a reusable, inspectable Unity prefab —
                 // not just a flat screenshot — labelled with the model that authored it. Free-build only.
-                if (scenario.FreeBuildLayout && vis.ObjectCount > 0)
+                if (scenario.FreeBuildLayout && vis.HasRenderableScene)
                 {
                     SaveCastlePrefab(vis, modelId, scenario.Id, score.Base);
                 }
@@ -1902,7 +2008,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 // Always tear down the spawned scene, even when no screenshot was taken, so a visual
                 // scenario never leaks its GameObjects into the next run.
+                env.DisposeRbxWorld();
                 vis.Cleanup();
+            }
+
+            if (env.World is not VisualBenchmarkWorldExecutor)
+            {
+                env.DisposeRbxWorld();
             }
 
             onResult?.Invoke(result);
@@ -2052,7 +2164,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// PNG bytes via <paramref name="onPng"/>. Fully defensive — any failure yields a null
         /// screenshot and never breaks the run.
         /// </summary>
-        private static IEnumerator CaptureSceneScreenshot(
+        internal static IEnumerator CaptureSceneScreenshot(
             VisualBenchmarkWorldExecutor vis, string model, string header, string subtitle, bool freeBuildLayout,
             string heroStats, Action<byte[]> onPng)
         {

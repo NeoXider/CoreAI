@@ -28,8 +28,9 @@ are resolved by `PlayModeOpenAiTestConfig` and consumed by
 4. Hard-coded LM Studio fallbacks, only with the explicit legacy opt-in.
 
 So **env overrides the asset, and the asset overrides the local file for base URL and model.** Each field
-is resolved independently — keep the key in the local file, select the model in the asset, and override
-just the model from the shell when needed.
+is resolved independently. Keep the key in the local file. To run a live sweep against a different
+provider in the open Editor, set both `COREAI_TEST_BASE_URL` and `COREAI_TEST_MODEL` in that process;
+the local file alone cannot replace an already configured HTTP asset.
 
 > **Security — never commit API keys to the Resources asset.** The `CoreAISettingsAsset` under a
 > `Resources/` folder is packed into every player build, and the key string is trivially recoverable
@@ -120,7 +121,7 @@ per student.
 
 `PromptCacheLivePlayModeTests.ThreeDifferentStudentTails_ReuseStableRolePrefix_ByThirdRequest` does not run
 in regular CI. It needs a fully configured HTTP endpoint and an explicit
-`COREAI_TEST_PROMPT_CACHE=true`. The test makes exactly three requests with output cap 32 and a 90-second timeout, keeps
+`COREAI_TEST_PROMPT_CACHE=true`. The test makes exactly three requests with output cap 256 and a 90-second timeout, keeps
 the long real role/tool `SystemPrompt` byte-identical, changes only the synthetic student tail, and waits a short
 bounded pause between requests. By the third request the provider must return `CacheReadTokens > 0`; if it
 exposes cache writes, they are printed too. A failure reports the endpoint host, configured/served model,
@@ -148,9 +149,9 @@ PlayModeProductionLikeLlmFactory.TryCreate(
     out string ignoreReason);
 ```
 
-The override is honored on the env/file HTTP path. When the project `CoreAISettingsAsset` is the one
-driving the backend, the override is ignored (a warning is logged) because retargeting it would mutate
-the shared asset — set `COREAI_TEST_BASE_URL`/`COREAI_TEST_MODEL` (or the local file) to use overrides.
+The override is honored by the resolved HTTP test configuration. When the project asset already
+specifies an HTTP endpoint, a local file cannot retarget that endpoint; use `COREAI_TEST_BASE_URL`
+and `COREAI_TEST_MODEL` for a different provider.
 
 ---
 
@@ -172,6 +173,17 @@ Live tests skip with a clear, actionable reason:
 
 - The factory builds a throwaway HTTP settings object per test and disposes it on handle `Dispose()`,
   so it never mutates the project's `CoreAISettingsAsset`.
+- `TestAgentSetup`, `MeaiLlmClientPlayModeTests`, and tool-name repair probes resolve the same
+  live-test endpoint, so an HTTP model selected with `COREAI_TEST_MODEL` is exercised even when
+  the project asset points to a different local backend.
+- `TwoHttpAgents_IndependentStores_RunConcurrently` starts two real HTTP agent turns before
+  awaiting either and gives each agent its own client, settings, and memory store. The mixed
+  LLMUnity/HTTP test is separate and skips when the local GGUF host is unavailable.
+- `Programmer_BuildsCastle_ViaOptInClassicLuaWorldApi` verifies a host that explicitly enables
+  the legacy `coreai_world_spawn` binding. It uses `prefab` and `name` as required by that API;
+  the separate Roblox castle showcase covers the default `Instance.new('Part')` path.
+- The orchestration role sweep is `Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto`.
+- The game-creation benchmark accepts `COREAI_BENCHMARK_MAX_OUTPUT_TOKENS` as a per-call cap. Use it when an OpenRouter route reserves a large default output budget and returns `402`; keep the cap equal across models for score comparisons. G6 has one 600-second build attempt and saves its model-authored scene even if the provider stops later.
 - `COREAI_TEST_NATIVE_TOOLS=false` wraps the client so the orchestrator uses the text/prompt tool
   contract instead of native function calling — handy for local models with flaky native tool support.
 - Backend selection (HTTP vs LLMUnity vs offline) is still controlled by `COREAI_PLAYMODE_LLM_BACKEND`

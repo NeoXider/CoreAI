@@ -328,6 +328,16 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [Test]
+        public void CraftingMemoryNameExtractor_ReadsEscapedWeaponNameAssignment()
+        {
+            // WHY: execute_lua arguments are JSON; model Lua can assign the item name to a variable.
+            const string payload =
+                "{\"code\":\"local weapon_name = \\\"Hardwood Steel War Axe\\\"\\nlocal item = { name = weapon_name }\"}";
+
+            Assert.AreEqual("Hardwood Steel War Axe", CraftingMemoryItemNameExtractor.ExtractName(payload));
+        }
+
+        [Test]
         public void CraftingMemoryNameExtractor_ReadsSingleQuotedLuaTableName()
         {
             const string payload =
@@ -721,8 +731,9 @@ namespace CoreAI.Tests.PlayMode
             string instructions =
                 "These ingredients were used before. CALL the execute_lua tool (a text reply with Lua code does " +
                 "not execute anything) using the recorded craft memory to recreate the consistent result " +
-                "that the game should produce for the same ingredients. Do not call memory(...) inside Lua; " +
-                "pass Lua code that contains the concrete item name, " +
+                "that the game should produce for the same ingredients. Copy the exact recorded weapon name " +
+                "from memory into a Lua string literal; do not use 'same' or another placeholder. " +
+                "Do not call memory(...) inside Lua; pass Lua code that contains the concrete item name, " +
                 "for example local weapon_name = \"Name\".";
 
             return header + ingredients + memorySection + instructions;
@@ -1018,7 +1029,7 @@ namespace CoreAI.Tests.PlayMode
             new(@"\bitem_name\s*=\s*""([^""]+)""", RegexOptions.IgnoreCase),
             new(@"\bitem_name\s*=\s*\\""([^""]+)\\""", RegexOptions.IgnoreCase),
             new(@"\b(?:weapon|craft)_?name\s*=\s*""([^""]+)""", RegexOptions.IgnoreCase),
-            new(@"\b(?:weapon|craft)_?name\s*=\s*\\""([^""]+)\\""", RegexOptions.IgnoreCase),
+            new("\\b(?:weapon|craft)_?name\\s*=\\s*\\\\\"([^\"\\\\]+)\\\\\"", RegexOptions.IgnoreCase),
             // Lua: return "Flameforged Steel Sword" (bare quoted name as the chunk result).
             // Case-sensitive first letter: only capitalized item names, not lowercase status strings.
             new(@"\breturn\s+\\?""([A-Z][A-Za-z0-9_' -]{2,}?)\\?"""),

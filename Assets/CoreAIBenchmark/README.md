@@ -52,7 +52,7 @@ Verdicts:
 | PARTIAL | Base score from 50 to 89. |
 | FAIL | Base score below 50. |
 
-When repetitions are enabled, each scenario is run multiple times and the suite score uses the per-scenario **mean (average)** base score over its repetitions. This makes rankings less sensitive to one noisy local-model run. A heavy one-off such as the G6 castle hero can set `RepsOverride = 1`, so it always runs exactly once even when the rest of the suite repeats.
+When repetitions are enabled, each scenario is run multiple times and the suite score uses the per-scenario **mean (average)** base score over its repetitions. This makes rankings less sensitive to one noisy local-model run. G6 runs one scene without resetting it for retries. If the model ends a build turn early after using tools, the runner can ask it to continue that same scene, up to eight times while at least 45 seconds remain. The complete build has a 600-second maximum: up to 570 seconds for model turns and 30 seconds reserved for capture/export. `COREAI_BENCHMARK_TIMEOUT` can shorten the model portion.
 
 ## Game-Fitness Roles
 
@@ -120,12 +120,18 @@ Environment shaping is also supported:
 | `COREAI_TEST_MODEL` | Model id to request. |
 | `COREAI_BENCHMARK_GROUPS` | CSV group filter, such as `G1,G2,G6`; empty means all groups. |
 | `COREAI_BENCHMARK_REPS` | Repetitions per scenario (averaged). Use 3-5 to smooth out a noisy local-model run. |
-| `COREAI_BENCHMARK_TIMEOUT` | Per-scenario wall-clock timeout override in seconds; `0`/unset uses the per-scenario default. |
+| `COREAI_BENCHMARK_TIMEOUT` | Per-scenario model timeout override in seconds; `0`/unset uses the per-scenario default. G6 model turns are capped at 570 seconds even when this value is higher, leaving time for capture/export inside the 600-second wall budget. |
 | `COREAI_BENCHMARK_ROUNDTRIPS` | Per-request tool-call roundtrip cap for the standard scenarios (G1-G5, G7-G8); `0`/unset means the default `40`. G6 has its own, much higher cap (below). |
+| `COREAI_BENCHMARK_MAX_OUTPUT_TOKENS` | Optional positive per-call output cap (64-128000). Set this for providers that reserve the full requested `max_tokens` against available credit; it overrides an agent's unlimited-output setting. Keep the same value across models when comparing scores. |
 | `COREAI_BENCHMARK_VISION_MODE` | G6 free-build vision mode: `off` (default, text-only build), `image` (the model gets a camera tool to SEE and refine its own scene — vision-capable models only), or `both` (run the text-only build AND an image-feedback build to compare). Also a **Vision feedback** dropdown in the benchmark window. |
 | `COREAI_BENCHMARK_FREEBUILD_PROMPT` | Replaces the G6 free-build prompt verbatim with your own (e.g. build something other than the default castle). |
 | `COREAI_BENCHMARK_FREEBUILD_SUBJECT` | Swaps only the G6 subject (e.g. `a futuristic city`) into the generic free-build prompt, keeping the standard build/grading scaffold. Also settable from the benchmark window UI field. |
-| `COREAI_BENCHMARK_FREEBUILD_ROUNDTRIPS` | G6 tool-call cap; `0`/unset means the default `1000` (effectively unbounded — the model builds until it stops or the time budget elapses, then the scene is graded and screenshotted). |
+| `COREAI_BENCHMARK_FREEBUILD_ROUNDTRIPS` | G6 tool-call cap per turn; `0`/unset means the default `1000` (effectively unbounded). Early-ending scored builds can continue in the same scene within the 600-second time budget. |
+
+G6 counts and frames rendered Roblox parts, including parts created through `execute_lua`; the hero banner shows the real part count. The saved model-authored prefab is under the ignored `Assets/Benchmark/<model>/g6_free_build.prefab`. To retake a hero image from that prefab without contacting the model, set `COREAI_BENCHMARK_RECAPTURE_PREFAB` to its Unity asset path and `COREAI_BENCHMARK_RECAPTURE_OUTPUT` to an absolute PNG path, then run the explicit PlayMode test `CaptureSavedCastlePrefab_ForReport` in the open Editor.
+
+A provider `402` or `429` can leave a partial castle. Such a result records the provider failure and is not a comparable model-quality score; retain the saved scene and rerun when the provider quota is available.
+When G6 reaches its time limit during a streaming turn, the benchmark counts completed tool calls from lifecycle events. The hero marks its token count as a partial estimate because the provider never delivered final usage.
 
 For an LM Studio multi-model sweep, load one model at a time, run the benchmark, unload it, and move to the next model. Example structure:
 
@@ -293,6 +299,12 @@ per-object colours baked into real material assets (a `Materials/` subfolder bes
 self-identifying `BuiltBy_<model>__<score>of100` child. So each model's castle is inspectable and reusable in
 the editor, labelled with who built it. Verified on `gpt-5.3-spark`: a 101-object castle prefab, all
 renderers materialised.
+
+G6 builds through `execute_lua`, so its parts live under the Roblox world host rather than the
+`world_command` object counter. The hero PNG and prefab are exported whenever that world contains
+rendered parts, including when the model reaches its time limit after building a partial scene.
+The default prompt asks for a castle; `COREAI_BENCHMARK_FREEBUILD_PROMPT` replaces the subject and
+instructions, while `COREAI_BENCHMARK_FREEBUILD_SUBJECT` changes only the subject.
 
 ## Castle Gallery - G6 Free-Build Visual
 

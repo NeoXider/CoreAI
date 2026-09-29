@@ -138,9 +138,8 @@ namespace CoreAI.Tests.PlayMode
                 orchestratorSettings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
                 orchestratorSettings.SetOrchestratorTimeoutSeconds(600);
 
-                // WHY: Keep the DEFAULT AgentMemoryPolicy so the Builder role retains its production
-                // configuration (built-in system prompt routing, MaxToolCallRoundtrips = 0 = unlimited).
-                // Only the world tool is attached, exactly like production hosts do per role.
+                // WHY: Keep the default Builder prompt and tool policy; the task below bounds this
+                // small integration fixture so an over-eager model cannot decorate it for 25 minutes.
                 AgentMemoryPolicy policy = new();
                 policy.SetToolsForRole(BuiltInAgentRoleIds.Builder, new List<ILlmTool>
                 {
@@ -173,10 +172,11 @@ namespace CoreAI.Tests.PlayMode
                 {
                     RoleId = BuiltInAgentRoleIds.Builder,
                     Hint = Prompt,
-                    MaxOutputTokens = 128000
+                    MaxOutputTokens = 4096,
+                    MaxToolCallRoundtrips = 24
                 }, cts.Token);
 
-                yield return PlayModeTestAwait.WaitTask(task, 1500f, "Builder castle build", cts);
+                yield return PlayModeTestAwait.WaitTask(task, 600f, "Builder castle build", cts);
 
                 // WHY: Tool execution hops to the main thread; give late spawns a short NON-FAILING grace
                 // window (PlayModeTestAwait.WaitUntil would Assert.Fail before the transcript is logged).

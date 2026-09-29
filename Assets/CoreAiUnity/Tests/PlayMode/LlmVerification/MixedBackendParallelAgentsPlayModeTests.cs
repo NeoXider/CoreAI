@@ -17,13 +17,14 @@ namespace CoreAI.Tests.PlayMode
     /// <summary>
     /// Drives two agents CONCURRENTLY against two DIFFERENT live backends in the same play session:
     /// one turn goes through the native LLMUnity host (local GGUF, llama.cpp), the other through the
-    /// OpenAI-compatible HTTP transport (LM Studio). Proves the native and HTTP paths run in parallel
+    /// OpenAI-compatible HTTP transport. Proves the native and HTTP paths run in parallel
     /// without interfering (independent clients, memory stores, orchestrators). Skips gracefully when
     /// either backend is unavailable, so it is safe in headless/offline CI.
     /// </summary>
     public sealed class MixedBackendParallelAgentsPlayModeTests
     {
         private CoreAISettingsAsset _httpSettings;
+        private CoreAISettingsAsset _secondHttpSettings;
 
         private sealed class NullSink : IAiGameCommandSink
         {
@@ -41,13 +42,23 @@ namespace CoreAI.Tests.PlayMode
                 _httpSettings = null;
             }
 
+            if (_secondHttpSettings != null)
+            {
+                Object.DestroyImmediate(_secondHttpSettings);
+                _secondHttpSettings = null;
+            }
+
+            LogAssert.ignoreFailingMessages = false;
+
             yield return null;
         }
 
         [UnityTest]
         [Timeout(300000)]
-        public IEnumerator TwoAgents_LlmUnityAndLmStudioHttp_RunConcurrently()
+        public IEnumerator TwoAgents_LlmUnityAndConfiguredHttp_RunConcurrently()
         {
+            // WHY: An unavailable local GGUF logs an error before this fixture can skip it.
+            LogAssert.ignoreFailingMessages = true;
             // --- Backend A: local GGUF via the native LLMUnity host ---
             yield return SharedLlmUnity.EnsureInitialized();
             if (!SharedLlmUnity.IsReady)
@@ -55,7 +66,7 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore($"LLMUnity host not ready: {SharedLlmUnity.Error}");
             }
 
-            // --- Backend B: OpenAI-compatible HTTP (LM Studio) ---
+            // WHY: Resolve the live-test HTTP endpoint independently of the local GGUF backend.
             PlayModeOpenAiTestConfig.ResolvedConfig http = PlayModeOpenAiTestConfig.Resolve(null);
             if (!http.IsComplete)
             {
@@ -63,7 +74,6 @@ namespace CoreAI.Tests.PlayMode
             }
 
             IGameLogger logger = GameLoggerUnscopedFallback.Instance;
-            LogAssert.ignoreFailingMessages = true;
 
             // LLMUnity client + its own orchestrator/store (uses the LlmUnity-configured Instance settings).
             InMemoryStore localStore = new();
@@ -113,6 +123,56 @@ namespace CoreAI.Tests.PlayMode
                 "HTTP backend must target a base URL (remote backend was live).");
 
             Debug.Log($"[MixedBackend] local='{localTask.Result?.Trim()}' http='{httpTask.Result?.Trim()}'");
+        }
+
+        [UnityTest]
+        [Timeout(180000)]
+        public IEnumerator TwoHttpAgents_IndependentStores_RunConcurrently()
+        {
+            PlayModeOpenAiTestConfig.ResolvedConfig config = PlayModeOpenAiTestConfig.Resolve(null);
+            if (!config.IsComplete)
+            {
+                Assert.Ignore(PlayModeOpenAiTestConfig.BuildIgnoreReason(config));
+            }
+
+            LogAssert.ignoreFailingMessages = true;
+            _httpSettings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            _secondHttpSettings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            _httpSettings.ConfigureClientOwnedApi(config.BaseUrl, config.ApiKey, config.Model, 120);
+            _secondHttpSettings.ConfigureClientOwnedApi(config.BaseUrl, config.ApiKey, config.Model, 120);
+
+            InMemoryStore firstStore = new();
+            InMemoryStore secondStore = new();
+            IGameLogger logger = GameLoggerUnscopedFallback.Instance;
+            ILlmClient firstClient = MeaiLlmClient.CreateHttp(_httpSettings, logger,
+                supportsNativeToolCalling: config.NativeTools, memoryStore: firstStore);
+            ILlmClient secondClient = MeaiLlmClient.CreateHttp(_secondHttpSettings, logger,
+                supportsNativeToolCalling: config.NativeTools, memoryStore: secondStore);
+            AiOrchestrator firstAgent = BuildOrchestrator(firstClient, firstStore, _httpSettings);
+            AiOrchestrator secondAgent = BuildOrchestrator(secondClient, secondStore, _secondHttpSettings);
+
+            // WHY: Start both turns before yielding so neither can complete before the other is submitted.
+            Task<string> first = firstAgent.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.SmartChat,
+                Hint = "Reply with the single word alpha.",
+                MaxOutputTokens = 256
+            });
+            Task<string> second = secondAgent.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.SmartChat,
+                Hint = "Reply with the single word beta.",
+                MaxOutputTokens = 256
+            });
+
+            yield return PlayModeTestAwait.WaitTask(Task.WhenAll(first, second), 150f,
+                "two HTTP agents running concurrently");
+            Assert.IsFalse(first.IsFaulted, first.Exception?.GetBaseException().Message);
+            Assert.IsFalse(second.IsFaulted, second.Exception?.GetBaseException().Message);
+            Assert.IsFalse(string.IsNullOrWhiteSpace(first.Result), "The first agent returned no text.");
+            Assert.IsFalse(string.IsNullOrWhiteSpace(second.Result), "The second agent returned no text.");
+            Assert.AreNotSame(firstStore, secondStore, "Agent memory stores must be isolated.");
+            Debug.Log($"[ParallelHttp] first='{first.Result.Trim()}' second='{second.Result.Trim()}'");
         }
 
         private static AiOrchestrator BuildOrchestrator(

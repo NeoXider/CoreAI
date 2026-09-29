@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Benchmarking;
 using CoreAI.Infrastructure.Llm;
+using CoreAI.Messaging;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEngine;
@@ -31,11 +32,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// </summary>
     public sealed class GameCreationBenchmarkPlayModeTests
     {
-        // WHY 1.8: 7.5.0 rebuilt G6 on the Roblox API (execute_lua, Enum.Material/Enum.PartType) with a
+        // WHY: Suite 1.11 reserves capture time inside the ten-minute G6 wall budget.
+        // Suite 1.8 rebuilt G6 on the Roblox API (execute_lua, Enum.Material/Enum.PartType) with a
         // new grader, and the free-build prompt now describes that runtime honestly (section size, the
         // writable Part surface, how Color really composes). The versioning policy says scores compare
         // only within a suite version; every published v1.7 G6 number is the old world_command build.
-        private const string SuiteVersion = "1.8";
+        private const string SuiteVersion = "1.11";
+        private const float FreeBuildTotalBudgetSeconds = 600f;
+        private const float FreeBuildCaptureReserveSeconds = 30f;
+        private const float FreeBuildTimeoutSeconds = FreeBuildTotalBudgetSeconds - FreeBuildCaptureReserveSeconds;
 
         /// <summary>
         /// NUnit hard-abort backstop (110 min). Attribute arguments must be compile-time constants, so the
@@ -174,17 +179,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return 1;
         }
 
-        /// <summary>Per-scenario timeout: the env override when set (1..1200s), else the scenario's own default.</summary>
+        /// <summary>Per-scenario timeout, capped at ten minutes for a free build.</summary>
         private static float ResolveTimeoutSeconds(GameBenchmarkScenario scenario)
         {
             string raw = Environment.GetEnvironmentVariable(EnvTimeout);
             if (float.TryParse(raw, System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out float s) && s >= 1f && s <= 1200f)
             {
-                return s;
+                return scenario.FreeBuildLayout ? Math.Min(s, FreeBuildTimeoutSeconds) : s;
             }
 
-            return scenario.TimeoutSeconds;
+            return scenario.FreeBuildLayout
+                ? Math.Min(scenario.TimeoutSeconds, FreeBuildTimeoutSeconds)
+                : scenario.TimeoutSeconds;
         }
 
         /// <summary>Total attempts per repetition on a transient failure (1 + retries, clamped 1..4).</summary>
@@ -194,6 +201,143 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             int retries = int.TryParse(raw, out int n) && n >= 0 && n <= 3 ? n : 1;
             return 1 + retries;
         }
+
+        private static int ResolveMaxAttempts(GameBenchmarkScenario scenario)
+        {
+            // WHY: A second full attempt would turn one ten-minute G6 build into a twenty-minute run.
+            return scenario.FreeBuildLayout ? 1 : ResolveMaxAttempts();
+        }
+
+        [Test]
+        public void FreeBuildBudget_NeverExceedsTenMinutesIncludingRetries()
+        {
+            GameBenchmarkScenario freeBuild = GameFreeBuildScenariosG6.All()[0];
+            string previousTimeout = Environment.GetEnvironmentVariable(EnvTimeout);
+            string previousRetries = Environment.GetEnvironmentVariable(EnvRetries);
+            try
+            {
+                Environment.SetEnvironmentVariable(EnvTimeout, "1200");
+                Environment.SetEnvironmentVariable(EnvRetries, "3");
+                Assert.AreEqual(FreeBuildTimeoutSeconds, ResolveTimeoutSeconds(freeBuild));
+                Assert.AreEqual(600f, FreeBuildTimeoutSeconds + FreeBuildCaptureReserveSeconds);
+                Assert.AreEqual(1, ResolveMaxAttempts(freeBuild));
+
+                Environment.SetEnvironmentVariable(EnvTimeout, "90");
+                Assert.AreEqual(90f, ResolveTimeoutSeconds(freeBuild));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(EnvTimeout, previousTimeout);
+                Environment.SetEnvironmentVariable(EnvRetries, previousRetries);
+            }
+        }
+
+        [Test]
+        public void FreeBuildContinuation_RequiresProgressAndRemainingTime()
+        {
+            Assert.IsTrue(GameCreationBenchmarkHarness.CanContinueFreeBuild(8, 0, 0, 68, 600));
+            Assert.IsTrue(GameCreationBenchmarkHarness.CanContinueFreeBuild(16, 8, 1, 540, 600));
+            Assert.IsFalse(GameCreationBenchmarkHarness.CanContinueFreeBuild(8, 8, 1, 100, 600));
+            Assert.IsFalse(GameCreationBenchmarkHarness.CanContinueFreeBuild(16, 8, 1, 560, 600));
+            Assert.IsFalse(GameCreationBenchmarkHarness.CanContinueFreeBuild(16, 8,
+                GameCreationBenchmarkHarness.MaxFreeBuildContinuations, 100, 600));
+        }
+
+        [Test]
+        public void BenchmarkOutputCap_ResolvesOptionalPerCallLimit()
+        {
+            string previous = Environment.GetEnvironmentVariable("COREAI_BENCHMARK_MAX_OUTPUT_TOKENS");
+            try
+            {
+                Environment.SetEnvironmentVariable("COREAI_BENCHMARK_MAX_OUTPUT_TOKENS", "2048");
+                Assert.AreEqual(2048, ResolveBenchmarkMaxOutputTokens());
+                Environment.SetEnvironmentVariable("COREAI_BENCHMARK_MAX_OUTPUT_TOKENS", "0");
+                Assert.IsNull(ResolveBenchmarkMaxOutputTokens());
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("COREAI_BENCHMARK_MAX_OUTPUT_TOKENS", previous);
+            }
+        }
+
+        [Test]
+        public void ScenarioToolCallObserver_RetainsCallsFromAnUnfinishedStream()
+        {
+            ScenarioToolCallObserver observer = new("GameMaster");
+            LlmToolCallInfo matching = new("trace", "GameMaster", "call-1", "execute_lua",
+                "{\"code\":\"build()\"}");
+            LlmToolCallInfo failed = new("trace", "GameMaster", "call-3", "execute_lua",
+                "{\"code\":\"bad()\"}");
+            LlmToolCallInfo otherRole = new("trace", "Builder", "call-2", "world_command",
+                "{\"action\":\"spawn\"}");
+            observer.Record(new LlmToolCallRecord { Info = matching, Status = "started" });
+            observer.Record(new LlmToolCallRecord { Info = otherRole, Status = "completed" });
+            observer.Record(new LlmToolCallRecord { Info = matching, Status = "completed" });
+            observer.Record(new LlmToolCallRecord { Info = failed, Status = "failed" });
+
+            Assert.AreEqual(2, observer.ToolCalls);
+            Assert.AreEqual(1, observer.FailedToolCalls);
+            StringAssert.Contains("execute_lua", observer.CompletionText);
+            StringAssert.Contains("build()", observer.CompletionText);
+        }
+
+        [Test]
+        public void VisualSceneDetection_IncludesPartsBuiltOutsideWorldCommand()
+        {
+            VisualBenchmarkWorldExecutor world = new();
+            try
+            {
+                Assert.IsFalse(world.HasRenderableScene);
+                GameObject part = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                part.transform.SetParent(world.Root, false);
+                part.transform.position = new Vector3(20f, 0f, 0f);
+                Assert.AreEqual(0, world.ObjectCount,
+                    "A Lua-built part must not rely on the world_command object counter.");
+                Assert.IsTrue(world.HasRenderableScene,
+                    "Lua-built geometry must trigger the G6 screenshot and prefab export.");
+                Assert.That(world.ComputeBounds().center.x, Is.EqualTo(20f).Within(0.01f),
+                    "The hero camera must frame Lua-built geometry rather than an empty origin.");
+            }
+            finally
+            {
+                world.Cleanup();
+            }
+        }
+
+#if UNITY_EDITOR
+        /// <summary>Retakes a G6 hero image from the saved model-authored prefab without calling the provider.</summary>
+        [UnityTest]
+        [Explicit("Set COREAI_BENCHMARK_RECAPTURE_PREFAB and COREAI_BENCHMARK_RECAPTURE_OUTPUT")]
+        public IEnumerator CaptureSavedCastlePrefab_ForReport()
+        {
+            string prefabPath = Environment.GetEnvironmentVariable("COREAI_BENCHMARK_RECAPTURE_PREFAB");
+            string outputPath = Environment.GetEnvironmentVariable("COREAI_BENCHMARK_RECAPTURE_OUTPUT");
+            if (string.IsNullOrWhiteSpace(prefabPath) || string.IsNullOrWhiteSpace(outputPath))
+            {
+                Assert.Ignore("No saved castle requested for screenshot recapture.");
+            }
+
+            GameObject prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            Assert.IsNotNull(prefab, "The requested saved castle prefab must exist.");
+            VisualBenchmarkWorldExecutor world = new();
+            try
+            {
+                UnityEngine.Object.Instantiate(prefab, world.Root);
+                byte[] png = null;
+                string model = Environment.GetEnvironmentVariable("COREAI_TEST_MODEL") ?? prefab.name;
+                int parts = world.Root.GetComponentsInChildren<Renderer>(true).Length;
+                yield return CaptureSceneScreenshot(world, model,
+                    "Free build (visual) — saved scene", "Model-authored G6 castle captured from its saved prefab.",
+                    true, $"{parts} rendered parts", image => png = image);
+                Assert.IsNotNull(png, "The saved scene must render a PNG.");
+                File.WriteAllBytes(outputPath, png);
+            }
+            finally
+            {
+                world.Cleanup();
+            }
+        }
+#endif
 
         [Test]
         public void StopAtRetryBoundary_ClearsUnretriedHardFailureBeforeScoring()
@@ -356,7 +500,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     SuiteVersion = SuiteVersion
                 };
 
-                int maxAttempts = ResolveMaxAttempts();
                 GameBenchmarkScenario[] scenarios = AllScenarios();
                 // Per-scenario RepsOverride (e.g. G6/G7 always run once) means the true total is not simply
                 // scenarios.Length * repetitions — sum each scenario's actual planned rep count instead, or
@@ -381,6 +524,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 foreach (GameBenchmarkScenario scenario in scenarios)
                 {
                     float timeout = ResolveTimeoutSeconds(scenario);
+                    int maxAttempts = ResolveMaxAttempts(scenario);
                     // Scenarios with a RepsOverride (e.g. the G6 castle hero, G7 comprehensive integration)
                     // always run their own fixed count, even when the suite repeats every other scenario
                     // for an averaged score.

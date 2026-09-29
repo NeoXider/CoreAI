@@ -192,7 +192,8 @@ namespace CoreAI.Tests.PlayMode
                         "lookup_curriculum_standard",
                         "Look up a curriculum standard by its stable catalog code.",
                         (System.Func<string>)(() => "not used by this probe")))
-                    .WithMaxOutputTokens(32)
+                    // WHY: Reasoning models can spend a 32-token allowance before emitting visible text.
+                    .WithMaxOutputTokens(256)
                     .WithMaxToolCallRoundtrips(1)
                     .Build()
                     .ApplyToPolicy(policy);
@@ -230,7 +231,7 @@ namespace CoreAI.Tests.PlayMode
                             "This synthetic value must remain after the shared prefix.",
                         Hint = $"Synthetic student turn {i + 1}: reply with the single word OK.",
                         ForcedToolMode = LlmToolChoiceMode.None,
-                        MaxOutputTokens = 32,
+                        MaxOutputTokens = 256,
                         MaxToolCallRoundtrips = 1
                     }, cts.Token);
 

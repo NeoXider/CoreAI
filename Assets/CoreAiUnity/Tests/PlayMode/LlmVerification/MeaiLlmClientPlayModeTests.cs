@@ -25,44 +25,43 @@ namespace CoreAI.Tests.PlayMode
         [Timeout(300000)]
         public IEnumerator MeaiLlmClient_CreateHttp_ShouldCreateAndConnect()
         {
-            //    CoreAISettingsAsset
-            CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
-            if (settings == null)
+            PlayModeOpenAiTestConfig.ResolvedConfig config = PlayModeOpenAiTestConfig.Resolve();
+            if (!config.IsComplete)
             {
-                Assert.Ignore("CoreAISettingsAsset not found in Resources");
+                Assert.Ignore(PlayModeOpenAiTestConfig.BuildIgnoreReason(config));
             }
 
-            //   HTTP   
-            if (settings.BackendType != LlmBackendType.OpenAiHttp && settings.BackendType != LlmBackendType.Auto)
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            settings.ConfigureHttpApi(config.BaseUrl, config.ApiKey, config.Model, 0.2f, 120);
+            try
             {
-                Assert.Ignore("Backend is not HTTP. Current: " + settings.BackendType);
+                IGameLogger logger = GameLoggerUnscopedFallback.Instance;
+                InMemoryStore store = new();
+                MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, logger,
+                    supportsNativeToolCalling: config.NativeTools, memoryStore: store);
+                Assert.IsNotNull(client, "MeaiLlmClient.CreateHttp should not return null");
+                LogAssert.ignoreFailingMessages = true;
+
+                LlmCompletionRequest request = new()
+                {
+                    AgentRoleId = "TestAgent",
+                    SystemPrompt = "You are a test agent. Answer briefly.",
+                    UserPayload = "Say OK"
+                };
+
+                Task<LlmCompletionResult> task = client.CompleteAsync(request);
+                yield return PlayModeTestAwait.WaitTask(task, 120f, "MeaiLlmClient HTTP request");
+
+                LlmCompletionResult result = task.Result;
+                Assert.IsTrue(result.Ok, $"HTTP request failed: {result.Error}");
+                Assert.IsFalse(string.IsNullOrWhiteSpace(result.Content),
+                    "HTTP response content should not be empty");
             }
-
-            Debug.Log("[MeaiLlmClient.HTTP] Creating HTTP client...");
-            IGameLogger logger = GameLoggerUnscopedFallback.Instance;
-            InMemoryStore store = new();
-
-            MeaiLlmClient client = MeaiLlmClient.CreateHttp(settings, logger, supportsNativeToolCalling: true, memoryStore: store);
-            Assert.IsNotNull(client, "MeaiLlmClient.CreateHttp should not return null");
-
-            Debug.Log("[MeaiLlmClient.HTTP] Client created, sending request...");
-            LogAssert.ignoreFailingMessages = true;
-
-            LlmCompletionRequest request = new()
+            finally
             {
-                AgentRoleId = "TestAgent",
-                SystemPrompt = "You are a test agent. Respond with 'OK'.",
-                UserPayload = "Say OK"
-            };
-
-            Task<LlmCompletionResult> task = client.CompleteAsync(request);
-            yield return PlayModeTestAwait.WaitTask(task, 120f, "MeaiLlmClient HTTP request");
-
-            LlmCompletionResult result = ((Task<LlmCompletionResult>)task).Result;
-            Assert.IsTrue(result.Ok, $"HTTP request failed: {result?.Error}");
-            Assert.IsFalse(string.IsNullOrWhiteSpace(result.Content), "HTTP response content should not be empty");
-            Debug.Log(
-                $"[MeaiLlmClient.HTTP] Success: {result.Content?.Substring(0, Mathf.Min(100, result.Content.Length))}");
+                LogAssert.ignoreFailingMessages = false;
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
         }
 
         /// <summary>
@@ -72,12 +71,19 @@ namespace CoreAI.Tests.PlayMode
         public void MeaiLlmClient_NullArguments_ShouldThrow()
         {
             IGameLogger logger = GameLoggerUnscopedFallback.Instance;
-
-            Assert.Throws<ArgumentNullException>(() =>
-                MeaiLlmClient.CreateHttp((IOpenAiHttpSettings)null,
-                    ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
-                    logger,
-                    supportsNativeToolCalling: true));
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                Assert.Throws<ArgumentNullException>(() =>
+                    MeaiLlmClient.CreateHttp((IOpenAiHttpSettings)null,
+                        settings,
+                        logger,
+                        supportsNativeToolCalling: true));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
         }
     }
 #endif
