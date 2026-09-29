@@ -70,6 +70,14 @@ at 0.28 and flips the world Z axis, so its backing GameObject is at
 are visibly different; this fixture verifies the listed Lua behavior and properties, not
 pixel-identical rendering or the complete Roblox API.
 
+**Castle quest slice (2026-09-30):** the
+[`CastleQuestParity.lua`](../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/CastleQuestParity.lua)
+fixture ran unchanged in Roblox Studio and the open Unity Editor. Both reported
+`parts=51>47;coins=3;key=true;health=2;gate=true;win=true;gateY=14`. It covers a
+four-tower castle and a deterministic coin, key, trap, gate, and victory route. The
+[comparison record](CASTLE_QUEST_PARITY.md) includes Studio and Unity images, the
+X-axis cylinder correction, reproduction steps, and the physical-contact limit.
+
 ---
 
 ## 1. Principles

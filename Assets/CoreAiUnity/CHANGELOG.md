@@ -4,6 +4,12 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.47.4] - 2026-09-30
+
+### Tests
+
+- The open Unity Editor ran the shared castle quest Lua fixture against the materialized Roblox-style world. The parity test verifies the collectible, trap, gate, and victory route and the upright Cylinder render geometry. A paired Roblox Studio image and result are documented in `Docs/CoreAIMods/CASTLE_QUEST_PARITY.md`.
+
 ## [7.47.3] - 2026-09-30
 
 ### Fixed

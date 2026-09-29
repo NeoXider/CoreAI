@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [7.47.4] - 2026-09-30
+
+### Added
+
+- A shared Roblox Studio/CoreAI Lua castle quest fixture builds 51 parts and follows the same coin, key, trap, locked-gate, and victory route in both engines. The fixture connects touch handlers and uses the Roblox Cylinder X-axis convention for upright towers.
+- A visual comparison and reproduction guide records both completed scenes, the matching game-state result, and the limits of the deterministic route.
+
+### Tests
+
+- The open Unity Editor passed both Roblox parity EditMode tests. Roblox Studio's `RunScript` task produced the same `parts=51>47;coins=3;key=true;health=2;gate=true;win=true;gateY=14` result from the identical Lua file. The new test checks the rendered tower orientation as well as the game state.
+
 ## [7.47.3] - 2026-09-30
 
 ### Fixed
