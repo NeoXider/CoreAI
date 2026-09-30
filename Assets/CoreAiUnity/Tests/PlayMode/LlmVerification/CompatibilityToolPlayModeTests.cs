@@ -24,11 +24,41 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public sealed class CompatibilityToolPlayModeTests
     {
+        // WHY: each test is an LLMUnity readiness wait (up to 120 s on a cold start) + one 240 s tool turn
+        // + the 20 s LiveTestRequestScope reserve + 20 s margin = 400 s; Cap keeps the turn's own cancelling
+        // wait ahead of the framework abort when the load is slow.
+        private const int TestTimeoutMs = 400000;
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
+        }
+
         /// <summary>
         /// : LLM  check_compatibility      .
         /// </summary>
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator CompatibilityTool_CompatibleIngredients_LlmReportsCompatible()
         {
             Debug.Log("[CompatibilityTest] === TEST 1: Compatible ingredients ===");
@@ -38,47 +68,44 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
-            {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
 
-                //  checker   Fire+Earth
-                CompatibilityChecker checker = new();
-                checker.AddRule("Fire", "Earth", 1.5f, "Fire and Earth create lava  bonus synergy");
-                CompatibilityLlmTool tool = new(checker);
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
 
-                AgentConfig agent = new AgentBuilder("TestCompatChecker")
-                    .WithSystemPrompt(
-                        "You are a crafting assistant. When the user asks to check ingredients, " +
-                        "use the available compatibility capability, then report whether they are compatible " +
-                        "and mention the score.")
-                    .WithTool(tool)
-                    .WithMode(AgentMode.ToolsAndChat)
-                    .Build();
+            //  checker   Fire+Earth
+            CompatibilityChecker checker = new();
+            checker.AddRule("Fire", "Earth", 1.5f, "Fire and Earth create lava  bonus synergy");
+            CompatibilityLlmTool tool = new(checker);
 
-                ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
-                Task<TestResult> task =
-                    RunAgentTestAsync(clientWithStore, agent, "Check if Fire and Earth are compatible");
-                yield return PlayModeTestAwait.WaitTask(task, 240f, "compatibility_compatible");
+            AgentConfig agent = new AgentBuilder("TestCompatChecker")
+                .WithSystemPrompt(
+                    "You are a crafting assistant. When the user asks to check ingredients, " +
+                    "use the available compatibility capability, then report whether they are compatible " +
+                    "and mention the score.")
+                .WithTool(tool)
+                .WithMode(AgentMode.ToolsAndChat)
+                .Build();
 
-                TestResult r = task.Result;
-                Debug.Log(
-                    $"[CompatibilityTest] Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(120, r.Response?.Length ?? 0))}");
-                Assert.Greater(r.ToolsCount, 0, "Agent should have the compatibility tool");
-                InconclusiveIfNoResponse(r, "compatible ingredients");
-                Debug.Log("[CompatibilityTest] TEST 1 PASSED");
-            }
-            finally
-            {
-                handle.Dispose();
-            }
+            ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task<TestResult> task = _requests.Track(
+                RunAgentTestAsync(clientWithStore, agent, "Check if Fire and Earth are compatible", cts.Token));
+            yield return PlayModeTestAwait.WaitTask(task, _requests.Cap(240f), "compatibility_compatible", cts);
+
+            TestResult r = task.Result;
+            Debug.Log(
+                $"[CompatibilityTest] Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(120, r.Response?.Length ?? 0))}");
+            Assert.Greater(r.ToolsCount, 0, "Agent should have the compatibility tool");
+            InconclusiveIfNoResponse(r, "compatible ingredients");
+            Debug.Log("[CompatibilityTest] TEST 1 PASSED");
         }
 
         /// <summary>
         /// : LLM  check_compatibility   .
         /// </summary>
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator CompatibilityTool_IncompatibleIngredients_LlmReportsIncompatible()
         {
             Debug.Log("[CompatibilityTest] === TEST 2: Incompatible ingredients ===");
@@ -88,46 +115,43 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
-            {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
 
-                CompatibilityChecker checker = new();
-                checker.AddRule("Fire", "Water", 0f, "Fire and Water cancel each other out");
-                CompatibilityLlmTool tool = new(checker);
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
 
-                AgentConfig agent = new AgentBuilder("TestIncompatChecker")
-                    .WithSystemPrompt(
-                        "You are a crafting assistant. When the user asks to check ingredients, " +
-                        "use the available compatibility capability and report whether they are compatible " +
-                        "or not, including warnings.")
-                    .WithTool(tool)
-                    .WithMode(AgentMode.ToolsAndChat)
-                    .Build();
+            CompatibilityChecker checker = new();
+            checker.AddRule("Fire", "Water", 0f, "Fire and Water cancel each other out");
+            CompatibilityLlmTool tool = new(checker);
 
-                ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
-                Task<TestResult> task =
-                    RunAgentTestAsync(clientWithStore, agent, "Check if Fire and Water are compatible");
-                yield return PlayModeTestAwait.WaitTask(task, 240f, "compatibility_incompatible");
+            AgentConfig agent = new AgentBuilder("TestIncompatChecker")
+                .WithSystemPrompt(
+                    "You are a crafting assistant. When the user asks to check ingredients, " +
+                    "use the available compatibility capability and report whether they are compatible " +
+                    "or not, including warnings.")
+                .WithTool(tool)
+                .WithMode(AgentMode.ToolsAndChat)
+                .Build();
 
-                TestResult r = task.Result;
-                Debug.Log(
-                    $"[CompatibilityTest] Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(120, r.Response?.Length ?? 0))}");
-                Assert.Greater(r.ToolsCount, 0, "Agent should have the compatibility tool");
-                InconclusiveIfNoResponse(r, "incompatible ingredients");
-                Debug.Log("[CompatibilityTest] TEST 2 PASSED");
-            }
-            finally
-            {
-                handle.Dispose();
-            }
+            ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task<TestResult> task = _requests.Track(
+                RunAgentTestAsync(clientWithStore, agent, "Check if Fire and Water are compatible", cts.Token));
+            yield return PlayModeTestAwait.WaitTask(task, _requests.Cap(240f), "compatibility_incompatible", cts);
+
+            TestResult r = task.Result;
+            Debug.Log(
+                $"[CompatibilityTest] Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(120, r.Response?.Length ?? 0))}");
+            Assert.Greater(r.ToolsCount, 0, "Agent should have the compatibility tool");
+            InconclusiveIfNoResponse(r, "incompatible ingredients");
+            Debug.Log("[CompatibilityTest] TEST 2 PASSED");
         }
 
         /// <summary>
         /// : LLM  3    .
         /// </summary>
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator CompatibilityTool_ThreeIngredients_GroupRule()
         {
             Debug.Log("[CompatibilityTest] === TEST 3: Three ingredients group rule ===");
@@ -137,39 +161,36 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
-            {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
 
-                CompatibilityChecker checker = new();
-                checker.AddGroupRule(1.8f, "Fire+Earth+Air create a volcanic eruption  amazing synergy!",
-                    "Fire", "Earth", "Air");
-                CompatibilityLlmTool tool = new(checker);
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
 
-                AgentConfig agent = new AgentBuilder("TestTripleChecker")
-                    .WithSystemPrompt(
-                        "You are a crafting assistant. Use the available compatibility capability " +
-                        "and report the compatibility result.")
-                    .WithTool(tool)
-                    .WithMode(AgentMode.ToolsAndChat)
-                    .Build();
+            CompatibilityChecker checker = new();
+            checker.AddGroupRule(1.8f, "Fire+Earth+Air create a volcanic eruption  amazing synergy!",
+                "Fire", "Earth", "Air");
+            CompatibilityLlmTool tool = new(checker);
 
-                ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
-                Task<TestResult> task =
-                    RunAgentTestAsync(clientWithStore, agent, "Check compatibility of Fire, Earth, Air");
-                yield return PlayModeTestAwait.WaitTask(task, 240f, "compatibility_triple");
+            AgentConfig agent = new AgentBuilder("TestTripleChecker")
+                .WithSystemPrompt(
+                    "You are a crafting assistant. Use the available compatibility capability " +
+                    "and report the compatibility result.")
+                .WithTool(tool)
+                .WithMode(AgentMode.ToolsAndChat)
+                .Build();
 
-                TestResult r = task.Result;
-                Debug.Log(
-                    $"[CompatibilityTest] Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(120, r.Response?.Length ?? 0))}");
-                Assert.Greater(r.ToolsCount, 0, "Agent should have the compatibility tool");
-                InconclusiveIfNoResponse(r, "three ingredients group rule");
-                Debug.Log("[CompatibilityTest] TEST 3 PASSED");
-            }
-            finally
-            {
-                handle.Dispose();
-            }
+            ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task<TestResult> task = _requests.Track(
+                RunAgentTestAsync(clientWithStore, agent, "Check compatibility of Fire, Earth, Air", cts.Token));
+            yield return PlayModeTestAwait.WaitTask(task, _requests.Cap(240f), "compatibility_triple", cts);
+
+            TestResult r = task.Result;
+            Debug.Log(
+                $"[CompatibilityTest] Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(120, r.Response?.Length ?? 0))}");
+            Assert.Greater(r.ToolsCount, 0, "Agent should have the compatibility tool");
+            InconclusiveIfNoResponse(r, "three ingredients group rule");
+            Debug.Log("[CompatibilityTest] TEST 3 PASSED");
         }
 
         // 
@@ -258,7 +279,8 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
-        private async Task<TestResult> RunAgentTestAsync(ILlmClient llm, AgentConfig cfg, string msg)
+        private async Task<TestResult> RunAgentTestAsync(ILlmClient llm, AgentConfig cfg, string msg,
+            CancellationToken cancellationToken)
         {
             InMemoryStore store = new();
             AgentMemoryPolicy policy = new();
@@ -275,7 +297,7 @@ namespace CoreAI.Tests.PlayMode
                 ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
                 new LocalActorIdentityProvider("compatibility-tool-test"));
 
-            await orch.RunTaskAsync(new AiTaskRequest { RoleId = cfg.RoleId, Hint = msg });
+            await orch.RunTaskAsync(new AiTaskRequest { RoleId = cfg.RoleId, Hint = msg }, cancellationToken);
             return new TestResult { Response = cap.LastContent, ToolsCount = cap.LastTools?.Count ?? 0 };
         }
 

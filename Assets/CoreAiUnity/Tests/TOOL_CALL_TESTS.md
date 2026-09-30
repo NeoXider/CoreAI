@@ -79,11 +79,13 @@ Complete test suite for all MEAI tool calls: Memory and Execute Lua.
 Unity Test Runner -> EditMode -> Run All
 ```
 
+The backend comes from the `CoreAISettingsAsset` **Backend Type** (see [Backend Switching](#backend-switching)),
+not from an environment variable, whenever the project's settings asset is loaded.
+
 ### PlayMode with LLMUnity (Local Model)
 
 ```bash
-# Set environment variables
-export COREAI_PLAYMODE_LLM_BACKEND=llmunity
+# CoreAISettingsAsset -> Backend Type = LLMUnity
 
 # Run in Unity
 Unity Test Runner -> PlayMode -> AllToolCallsPlayModeTests
@@ -92,19 +94,19 @@ Unity Test Runner -> PlayMode -> AllToolCallsPlayModeTests
 ### PlayMode with HTTP API (LM Studio)
 
 ```bash
-# Set environment variables
-export COREAI_PLAYMODE_LLM_BACKEND=http
-export COREAI_OPENAI_TEST_BASE=http://localhost:1234/v1
-export COREAI_OPENAI_TEST_MODEL=qwen3.5-2b
+# CoreAISettingsAsset -> Backend Type = OpenAI HTTP; the endpoint comes from these variables
+# (set them in the Unity Editor process before it starts)
+export COREAI_TEST_BASE_URL=http://localhost:1234/v1
+export COREAI_TEST_MODEL=qwen3.5-2b
 
 # Run in Unity
 Unity Test Runner -> PlayMode -> AllToolCallsPlayModeTests
 ```
 
-### Auto Mode (Default)
+### Auto Mode
 
 ```bash
-# Without variables, automatically chooses LLMUnity or HTTP
+# CoreAISettingsAsset -> Backend Type = Auto: its AutoPriority decides whether HTTP or LLMUnity is tried first
 Unity Test Runner -> PlayMode -> AllToolCallsPlayModeTests
 ```
 
@@ -155,16 +157,19 @@ All tool calls use **one format**:
 
 ## Backend Switching
 
-`PlayModeProductionLikeLlmFactory` automatically chooses the backend:
+`PlayModeProductionLikeLlmFactory` resolves the backend in this order:
 
-1. **Auto** (default): tries LLMUnity -> HTTP
-2. **LLMUnity**: local GGUF model only
-3. **HTTP**: OpenAI-compatible API only (LM Studio)
+1. An explicit preference passed by the test.
+2. The `CoreAISettingsAsset` backend type: **Auto** (its `AutoPriority` decides whether HTTP or LLMUnity
+   is tried first), **LLMUnity** (local GGUF model only), **HTTP** (OpenAI-compatible API only, e.g.
+   LM Studio), or **Offline**.
+3. Only when no settings asset is loaded, `COREAI_PLAYMODE_LLM_BACKEND`:
+   - `auto` or empty -> Auto
+   - `llmunity`, `local`, `gguf` -> LLMUnity
+   - `http`, `openai`, `openai_http` -> HTTP API
 
-Switch through `COREAI_PLAYMODE_LLM_BACKEND`:
-- `auto` or empty -> Auto
-- `llmunity`, `local`, `gguf` -> LLMUnity
-- `http`, `openai`, `openai_http` -> HTTP API
+`TestAgentSetup` never reads the environment variable; it switches on the settings asset's backend type
+alone.
 
 ## Expected Results
 

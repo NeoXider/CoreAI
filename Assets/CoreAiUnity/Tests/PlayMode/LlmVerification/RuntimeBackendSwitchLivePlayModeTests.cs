@@ -27,13 +27,19 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public sealed class RuntimeBackendSwitchLivePlayModeTests
     {
+        // WHY: a 180 s health probe + a 180 s orchestrated turn = 360 s after a one-frame scope boot; 420 s
+        // leaves the 20 s LiveTestRequestScope reserve plus margin (the former 300 s could not hold both waits).
+        private const int TestTimeoutMs = 420_000;
+
         private CoreAISettingsAsset _previousInstance;
         private CoreAISettingsAsset _settings;
         private GameObject _scopeGo;
+        private LiveTestRequestScope _requests;
 
         [UnitySetUp]
         public IEnumerator SetUp()
         {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
             _previousInstance = CoreAISettingsAsset.Instance;
             _settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             _settings.ConfigureOffline();
@@ -59,6 +65,14 @@ namespace CoreAI.Tests.PlayMode
         [UnityTearDown]
         public IEnumerator TearDown()
         {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
             if (_scopeGo != null)
             {
                 Object.Destroy(_scopeGo);
@@ -75,7 +89,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator OfflineScope_SwitchedToLiveHttp_AnswersThroughRealModel()
         {
             PlayModeOpenAiTestConfig.ResolvedConfig config = PlayModeOpenAiTestConfig.Resolve(null);
@@ -94,8 +108,9 @@ namespace CoreAI.Tests.PlayMode
             Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, CoreAiBackend.Status.Mode);
 
             // Health probe round-trips through the real model.
-            Task<CoreAiBackendHealth> verify = CoreAiBackend.VerifyAsync(120);
-            yield return WaitTask(verify, 180f);
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task<CoreAiBackendHealth> verify = _requests.Track(CoreAiBackend.VerifyAsync(120, cts.Token));
+            yield return PlayModeTestAwait.WaitTask(verify, _requests.Cap(180f), "live health probe", cts);
             Assert.IsTrue(verify.Result.Ok,
                 $"Health probe must pass against the live backend. Error: {verify.Result.Error}");
             Assert.Greater(verify.Result.LatencyMs, 0);
@@ -103,7 +118,7 @@ namespace CoreAI.Tests.PlayMode
                       $"({verify.Result.Model})");
 
             // A real orchestrated request through the swapped backend.
-            Task<string> ask = CoreAi.OrchestrateAsync(new AiTaskRequest
+            Task<string> ask = _requests.Track(CoreAi.OrchestrateAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.SmartChat,
                 Hint = "Reply with the single word: pong",
@@ -115,31 +130,12 @@ namespace CoreAI.Tests.PlayMode
                 // settled this with 128000 and the rule it states: an empty visible answer AFTER a
                 // generous budget is the real failure signal. This test now applies that same rule.
                 MaxOutputTokens = 128000
-            });
-            yield return WaitTask(ask, 180f);
+            }, cts.Token));
+            yield return PlayModeTestAwait.WaitTask(ask, _requests.Cap(180f), "live orchestrated turn", cts);
 
             Assert.IsFalse(string.IsNullOrWhiteSpace(ask.Result),
                 "The live model must produce a non-empty answer after the runtime switch.");
             Debug.Log($"[RuntimeBackendSwitch] Live answer: {ask.Result}");
-        }
-
-        private static IEnumerator WaitTask(Task task, float timeoutSeconds)
-        {
-            float deadline = Time.realtimeSinceStartup + timeoutSeconds;
-            while (!task.IsCompleted && Time.realtimeSinceStartup < deadline)
-            {
-                yield return null;
-            }
-
-            if (!task.IsCompleted)
-            {
-                Assert.Fail($"Task did not complete within {timeoutSeconds}s.");
-            }
-
-            if (task.IsFaulted)
-            {
-                Assert.Fail($"Task faulted: {task.Exception?.GetBaseException().Message}");
-            }
         }
     }
 
@@ -153,8 +149,43 @@ namespace CoreAI.Tests.PlayMode
         private const string RoleId = "PromptCacheTeacherLiveProbe";
         private const int AttemptCount = 3;
 
+        // WHY: three sequential 95 s turns + two 1.25 s cache-publish delays = ~288 s over an HTTP-only
+        // backend (no GGUF load); 360 s leaves the 20 s LiveTestRequestScope reserve plus margin.
+        private const int TestTimeoutMs = 360_000;
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+        private CoreAISettingsAsset _settings;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
+            if (_settings != null)
+            {
+                Object.Destroy(_settings);
+                _settings = null;
+            }
+        }
+
         [UnityTest]
-        [Timeout(360000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator ThreeDifferentStudentTails_ReuseStableRolePrefix_ByThirdRequest()
         {
             if (!PlayModeOpenAiTestConfig.IsPromptCacheProbeEnabled())
@@ -174,116 +205,111 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignoreReason);
             }
 
-            CoreAISettingsAsset settings = null;
-            try
+            // WHY: handle and settings are released in [UnityTearDown] after the request drain, never under a
+            // still-running turn.
+            _handle = handle;
+
+            CapturingLlmClient capturing = new(handle.Client);
+            InMemoryAgentTurnTraceSink traceSink = new(AttemptCount + 2);
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            _settings = settings;
+            settings.SetOrchestratorTimeoutSeconds(90);
+
+            AgentMemoryPolicy policy = new();
+            string stableRolePrompt = BuildLongStableRolePrompt();
+            new AgentBuilder(RoleId, settings)
+                .WithMode(AgentMode.ToolsOnly)
+                .WithoutChatHistory()
+                .WithSystemPrompt(stableRolePrompt)
+                .WithTool(new DelegateLlmTool(
+                    "lookup_curriculum_standard",
+                    "Look up a curriculum standard by its stable catalog code.",
+                    (System.Func<string>)(() => "not used by this probe")))
+                // WHY: Reasoning models can spend a 32-token allowance before emitting visible text.
+                .WithMaxOutputTokens(256)
+                .WithMaxToolCallRoundtrips(1)
+                .Build()
+                .ApplyToPolicy(policy);
+
+            AiPromptComposer composer = new(
+                new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(),
+                new NullLuaScriptVersionStore(),
+                memoryPolicy: policy,
+                settings: settings);
+            AiOrchestrator orchestrator = new(
+                new SoloAuthorityHost(),
+                capturing,
+                new NullCommandSink(),
+                new SessionTelemetryCollector(),
+                composer,
+                new NullAgentMemoryStore(),
+                policy,
+                new NoOpRoleStructuredResponsePolicy(),
+                new NullAiOrchestrationMetrics(),
+                settings,
+                actorIdentityProvider: new LocalActorIdentityProvider("backend-switch-live-test"),
+                traceSink: traceSink);
+
+            string[] tailMarkers = { "synthetic-learner-a", "synthetic-learner-b", "synthetic-learner-c" };
+            for (int i = 0; i < AttemptCount; i++)
             {
-                CapturingLlmClient capturing = new(handle.Client);
-                InMemoryAgentTurnTraceSink traceSink = new(AttemptCount + 2);
-                settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-                settings.SetOrchestratorTimeoutSeconds(90);
-
-                AgentMemoryPolicy policy = new();
-                string stableRolePrompt = BuildLongStableRolePrompt();
-                new AgentBuilder(RoleId, settings)
-                    .WithMode(AgentMode.ToolsOnly)
-                    .WithoutChatHistory()
-                    .WithSystemPrompt(stableRolePrompt)
-                    .WithTool(new DelegateLlmTool(
-                        "lookup_curriculum_standard",
-                        "Look up a curriculum standard by its stable catalog code.",
-                        (System.Func<string>)(() => "not used by this probe")))
-                    // WHY: Reasoning models can spend a 32-token allowance before emitting visible text.
-                    .WithMaxOutputTokens(256)
-                    .WithMaxToolCallRoundtrips(1)
-                    .Build()
-                    .ApplyToPolicy(policy);
-
-                AiPromptComposer composer = new(
-                    new BuiltInDefaultAgentSystemPromptProvider(),
-                    new NoAgentUserPromptTemplateProvider(),
-                    new NullLuaScriptVersionStore(),
-                    memoryPolicy: policy,
-                    settings: settings);
-                AiOrchestrator orchestrator = new(
-                    new SoloAuthorityHost(),
-                    capturing,
-                    new NullCommandSink(),
-                    new SessionTelemetryCollector(),
-                    composer,
-                    new NullAgentMemoryStore(),
-                    policy,
-                    new NoOpRoleStructuredResponsePolicy(),
-                    new NullAiOrchestrationMetrics(),
-                    settings,
-                    actorIdentityProvider: new LocalActorIdentityProvider("backend-switch-live-test"),
-                    traceSink: traceSink);
-
-                string[] tailMarkers = { "synthetic-learner-a", "synthetic-learner-b", "synthetic-learner-c" };
-                for (int i = 0; i < AttemptCount; i++)
+                CancellationTokenSource cts = _requests.CreateCancellation();
+                cts.CancelAfter(System.TimeSpan.FromSeconds(90));
+                Task<string> turn = _requests.Track(orchestrator.RunTaskAsync(new AiTaskRequest
                 {
-                    using CancellationTokenSource cts = new(System.TimeSpan.FromSeconds(90));
-                    Task<string> turn = orchestrator.RunTaskAsync(new AiTaskRequest
-                    {
-                        RoleId = RoleId,
-                        TraceId = $"prompt-cache-live-{i + 1}",
-                        RequestSystemInstructions =
-                            $"Runtime student context {tailMarkers[i]}; progress checkpoint {i + 1}. " +
-                            "This synthetic value must remain after the shared prefix.",
-                        Hint = $"Synthetic student turn {i + 1}: reply with the single word OK.",
-                        ForcedToolMode = LlmToolChoiceMode.None,
-                        MaxOutputTokens = 256,
-                        MaxToolCallRoundtrips = 1
-                    }, cts.Token);
+                    RoleId = RoleId,
+                    TraceId = $"prompt-cache-live-{i + 1}",
+                    RequestSystemInstructions =
+                        $"Runtime student context {tailMarkers[i]}; progress checkpoint {i + 1}. " +
+                        "This synthetic value must remain after the shared prefix.",
+                    Hint = $"Synthetic student turn {i + 1}: reply with the single word OK.",
+                    ForcedToolMode = LlmToolChoiceMode.None,
+                    MaxOutputTokens = 256,
+                    MaxToolCallRoundtrips = 1
+                }, cts.Token));
 
-                    yield return WaitTask(turn, 95f, cts);
-                    Assert.IsFalse(string.IsNullOrWhiteSpace(turn.Result),
-                        $"Live cache attempt {i + 1} returned no assistant text.");
+                yield return PlayModeTestAwait.WaitTask(turn, _requests.Cap(95f),
+                    $"prompt-cache live request {i + 1}", cts);
+                Assert.IsFalse(string.IsNullOrWhiteSpace(turn.Result),
+                    $"Live cache attempt {i + 1} returned no assistant text.");
 
-                    if (i + 1 < AttemptCount)
+                if (i + 1 < AttemptCount)
+                {
+                    // WHY: Some providers publish a new cache entry asynchronously. Keep the delay short and bounded.
+                    float delayUntil = Time.realtimeSinceStartup + 1.25f;
+                    while (Time.realtimeSinceStartup < delayUntil)
                     {
-                        // WHY: Some providers publish a new cache entry asynchronously. Keep the delay short and bounded.
-                        float delayUntil = Time.realtimeSinceStartup + 1.25f;
-                        while (Time.realtimeSinceStartup < delayUntil)
-                        {
-                            yield return null;
-                        }
+                        yield return null;
                     }
                 }
-
-                Assert.AreEqual(AttemptCount, capturing.Requests.Count,
-                    "Each synthetic student should produce exactly one top-level CoreAI completion request.");
-                string stableSystemPrompt = capturing.Requests[0].SystemPrompt;
-                Assert.Greater(stableSystemPrompt.Length, 16000,
-                    "The live probe needs a realistically long cache-eligible role/tool prefix.");
-                for (int i = 0; i < AttemptCount; i++)
-                {
-                    Assert.IsTrue(string.Equals(
-                            stableSystemPrompt,
-                            capturing.Requests[i].SystemPrompt,
-                            System.StringComparison.Ordinal),
-                        $"SystemPrompt changed for synthetic student {i + 1}; shared cache reuse is impossible.");
-                    Assert.IsTrue(capturing.Requests[i].ChatHistory != null &&
-                                  capturing.Requests[i].ChatHistory.Any(message =>
-                                      (message.Text ?? "").Contains(tailMarkers[i])),
-                        $"Synthetic student {i + 1} instructions did not reach the volatile history tail.");
-                }
-
-                AgentTurnTrace[] traces = traceSink.Snapshot();
-                Assert.AreEqual(AttemptCount, traces.Length);
-                string diagnostics = BuildCacheDiagnostics(handle, traces, stableSystemPrompt.Length);
-                Debug.Log("[PromptCacheLive] " + diagnostics);
-                Assert.IsTrue(traces.Skip(1).Take(AttemptCount - 1).Any(trace => trace.CacheReadTokens > 0),
-                    "No provider-reported cache hit by the third request. " + diagnostics +
-                    " Check model cache support, exact endpoint/provider pinning, and the configured cohort session_id.");
             }
-            finally
+
+            Assert.AreEqual(AttemptCount, capturing.Requests.Count,
+                "Each synthetic student should produce exactly one top-level CoreAI completion request.");
+            string stableSystemPrompt = capturing.Requests[0].SystemPrompt;
+            Assert.Greater(stableSystemPrompt.Length, 16000,
+                "The live probe needs a realistically long cache-eligible role/tool prefix.");
+            for (int i = 0; i < AttemptCount; i++)
             {
-                handle.Dispose();
-                if (settings != null)
-                {
-                    Object.Destroy(settings);
-                }
+                Assert.IsTrue(string.Equals(
+                        stableSystemPrompt,
+                        capturing.Requests[i].SystemPrompt,
+                        System.StringComparison.Ordinal),
+                    $"SystemPrompt changed for synthetic student {i + 1}; shared cache reuse is impossible.");
+                Assert.IsTrue(capturing.Requests[i].ChatHistory != null &&
+                              capturing.Requests[i].ChatHistory.Any(message =>
+                                  (message.Text ?? "").Contains(tailMarkers[i])),
+                    $"Synthetic student {i + 1} instructions did not reach the volatile history tail.");
             }
+
+            AgentTurnTrace[] traces = traceSink.Snapshot();
+            Assert.AreEqual(AttemptCount, traces.Length);
+            string diagnostics = BuildCacheDiagnostics(handle, traces, stableSystemPrompt.Length);
+            Debug.Log("[PromptCacheLive] " + diagnostics);
+            Assert.IsTrue(traces.Skip(1).Take(AttemptCount - 1).Any(trace => trace.CacheReadTokens > 0),
+                "No provider-reported cache hit by the third request. " + diagnostics +
+                " Check model cache support, exact endpoint/provider pinning, and the configured cohort session_id.");
         }
 
         private static string BuildLongStableRolePrompt()
@@ -326,31 +352,6 @@ namespace CoreAI.Tests.PlayMode
                 $"cacheRead={trace.CacheReadTokens},cacheWrite={trace.CacheWriteTokens}]"));
             return
                 $"provider={provider}; configuredModel={configuredModel}; stablePrefixChars={prefixChars}; {attempts}";
-        }
-
-        private static IEnumerator WaitTask(Task task, float timeoutSeconds, CancellationTokenSource cts)
-        {
-            float deadline = Time.realtimeSinceStartup + timeoutSeconds;
-            while (!task.IsCompleted && Time.realtimeSinceStartup < deadline)
-            {
-                yield return null;
-            }
-
-            if (!task.IsCompleted)
-            {
-                cts.Cancel();
-                Assert.Fail($"Prompt-cache live request did not complete within {timeoutSeconds}s.");
-            }
-
-            if (task.IsFaulted)
-            {
-                Assert.Fail($"Prompt-cache live request faulted: {task.Exception?.GetBaseException().Message}");
-            }
-
-            if (task.IsCanceled)
-            {
-                Assert.Fail("Prompt-cache live request was cancelled before completion.");
-            }
         }
 
         private sealed class CapturingLlmClient : ILlmClient

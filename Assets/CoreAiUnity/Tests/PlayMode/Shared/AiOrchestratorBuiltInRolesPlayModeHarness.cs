@@ -30,7 +30,12 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
-        public static IEnumerator RunEachBuiltInRoleScenario(ILlmClient llm)
+        /// <summary>
+        /// Runs every built-in role once through a fresh <see cref="AiOrchestrator"/> over <paramref name="llm"/>.
+        /// Live callers pass their <see cref="LiveTestRequestScope"/> so each role's source is cancelled by the
+        /// fixture teardown and each wait is capped to the test budget; stub callers omit it.
+        /// </summary>
+        public static IEnumerator RunEachBuiltInRoleScenario(ILlmClient llm, LiveTestRequestScope requests = null)
         {
             ListSink sink = new();
             SoloAuthorityHost host = new();
@@ -62,8 +67,10 @@ namespace CoreAI.Tests.PlayMode
                 // WHY: a slow model can blow the per-role budget, and without a token the abandoned
                 // request keeps holding the single live backend — the next roles then fail for lack of a
                 // free model rather than for anything of their own. Cancelling on timeout keeps one slow
-                // role from cascading into the rest of the sweep.
-                using CancellationTokenSource roleCts = new();
+                // role from cascading into the rest of the sweep. A caller's scope owns and disposes its
+                // sources; without one this method owns the per-role source.
+                using CancellationTokenSource ownedRoleCts = requests == null ? new CancellationTokenSource() : null;
+                CancellationTokenSource roleCts = ownedRoleCts ?? requests.CreateCancellation();
                 Task task = orch.RunTaskAsync(
                     new AiTaskRequest
                     {
@@ -74,6 +81,12 @@ namespace CoreAI.Tests.PlayMode
                     roleCts.Token);
 
                 float timeout = role == BuiltInAgentRoleIds.Programmer ? 300f : 180f;
+                if (requests != null)
+                {
+                    requests.Track(task);
+                    timeout = requests.Cap(timeout);
+                }
+
                 yield return PlayModeTestAwait.WaitTask(task, timeout, $"orchestrator role '{role}'", roleCts);
 
                 if (sink.Commands.Count == 0)

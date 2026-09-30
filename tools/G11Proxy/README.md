@@ -39,6 +39,7 @@ python tools/G11Proxy/g11_proxy.py
 | `--upstream` | `http://127.0.0.1:1234/v1` | upstream base URL; its path replaces the incoming `/v1` prefix |
 | `--log-file` | *(none)* | append the stdout request log to this file as well |
 | `--upstream-timeout` | `300` | upstream socket timeout in seconds (must exceed the player's own timeout) |
+| `--capture-dir` | *(none)* | also write every `/v1` request body, untruncated, to one file per request (`GET /control/requests` keeps only 8 bodies cut at 64 KiB — too small for image attachments) |
 
 Confirm it is alive and pointed at the right upstream:
 
@@ -254,7 +255,7 @@ From the repository root:
 python tools/G11Proxy/test_g11_proxy.py
 ```
 
-21 tests, no network and no LM Studio required: they spin up a fake upstream (delayed three-frame
+29 tests, no network and no LM Studio required: they spin up a fake upstream (delayed three-frame
 SSE stream plus non-streaming JSON) and a proxy on ephemeral ports, and cover passthrough,
 chunked request bodies, incremental streaming (asserting the client has frame 1 *before* upstream
 sends the last frame), `fail-next`, `block`, `hang`, upstream-error `502`, CORS on preflight and on

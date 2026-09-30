@@ -2,7 +2,7 @@
 
 > Updated 2026-09-30 (7.47.4): the shared castle quest Lua fixture ran in Roblox Studio and the open Unity Editor with identical `parts=51>47;coins=3;key=true;health=2;gate=true;win=true;gateY=14` output. The Unity parity class passed 2/2 and checks that four Roblox X-axis cylinders are rolled into upright towers. Studio and Unity images and reproduction steps are in `Docs/CoreAIMods/CASTLE_QUEST_PARITY.md`. The route invokes its connected `Touched` handlers' game functions directly; a future cross-engine run should drive physical overlaps and player input in both runtimes.
 
-> Updated 2026-09-30 (7.47.3): the later monolithic live PlayMode sweep was stopped at 233/271 after a serial CLI bridge accumulated cancelled turns and caused cascading HTTP header timeouts. Its castle showcase measured eight of twelve required materials, a retained model failure. The combined memory-tool fixture was also waiting for terminal assistant text after successful tool calls; it now checks completed write/append/clear actions and store state, then cancels the remaining turn. A targeted Unity rerun passed all three actions in 73.13 seconds. The three-layer prompt and two streaming fixtures passed targeted reruns (1/1 and 2/2) on a clean bridge. The skill-proxy timing report now withholds speedup when either model run is incomplete; a fresh 1/1 live rerun completed both branches in 195.6s and 206.7s, reporting a valid 1.1x ratio and 17 fewer tools, while the proxy system prompt was 334 characters longer. Remaining work: repeat the full live assembly on an isolated bridge that cancels disconnected CLI turns, then record a clean single-run result; expand Roblox parity beyond the current object/property slice and evaluate castle material fidelity visually.
+> Updated 2026-09-30 (7.47.3): the later monolithic live PlayMode sweep was stopped at 233/271 after a serial CLI bridge accumulated cancelled turns and caused cascading HTTP header timeouts. Its castle showcase measured eight of twelve required materials, a retained model failure. The combined memory-tool fixture was also waiting for terminal assistant text after successful tool calls; it now checks completed write/append/clear actions and store state, then cancels the remaining turn. A targeted Unity rerun passed all three actions in 73.13 seconds. The three-layer prompt and two streaming fixtures passed targeted reruns (1/1 and 2/2) on a clean bridge. The skill-proxy timing report now withholds speedup when either model run is incomplete; a fresh 1/1 live rerun completed both branches in 195.6s and 206.7s, reporting a single-sample 1.06x ratio of the last model call and 17 fewer tools, while the proxy system prompt was 334 characters longer. Remaining work: repeat the full live assembly on an isolated bridge that cancels disconnected CLI turns, then record a clean single-run result; expand Roblox parity beyond the current object/property slice and evaluate castle material fidelity visually.
 
 > Updated 2026-09-29 (suite v1.15 verification): the full 28-scenario benchmark ran in the open GUI Editor through Neoxider Agents: GPT-6 Sol 100.00 (28 pass), GPT-6 Luna 99.70 (28 pass), Space Bunny Free 95.89 (26 pass, one G6 partial, one G5 fail). The G6 model budget is 570 seconds plus 30 seconds for capture/export. The corrected camera path sends an image part with a text inspection prompt; the three castles and complete Lua replays are archived under `Docs/BenchmarkRuns/2026-09-29/`. The Bunny G5 failure is retained because its transcript contains nine attempted calls for an exactly-three constraint, although the runtime deduplicated six. Scores from suite v1.14 remain historical. Follow-ups: evaluate visual composition beyond numeric G6 geometry, measure multi-repetition variance, and test a local GGUF backend for mixed-host concurrency.
 
@@ -35,6 +35,63 @@
 > `FastNoLlm` with `COREAI_LLM`: 78 passed / 0 failed / 1 platform skip. Live Qwen3.5-0.8B LLMUnity smokes from the
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
+
+## 7.47.x audit wave (2026-09-30, uncommitted fixes on top of 7.47.4)
+
+Five independent audits of 7.47.2-7.47.4 (benchmark, live tests, castle fixture, camera images) and their fixes: see
+both CHANGELOGs, `[Unreleased]`. Verified in Unity 6000.3.14f1 on the settled tree (after the attachment API and material fixes): EditMode 6609 total /
+6593 passed / 0 failed / 16 skipped; portable core 2213 / 0; Lua tier 1846 / 0 / 2 not run. The PlayMode live fixtures and the new benchmark
+tests compile but have **not been run** (they need a model backend).
+
+- [ ] **Owner decision: suite version.** G4's `clean_tool` and the declared tool-error coverage change G4 scores against
+      suite 1.15 (`SuiteVersion` is still "1.15" in `GameCreationBenchmarkPlayModeTests.cs`). Recommended: 1.16.
+      Rows whose G4 had no failed tool call without a failed Lua execution are unaffected and can be carried over
+      (check per run JSON before doing so).
+- [ ] **Owner decision: Environment-attributed scenarios leave the score.** Since 7.47.2 a provider timeout after a
+      partial build counts as Environment, so a model that keeps timing out drops out of the suite score instead of
+      being penalised; the leaderboard handled it by re-running, the policy itself is not guarded.
+- [ ] **Delete or replace the committed G6 hero PNG and `_g6_replay.lua` of the HTTP-500 run**
+      (`BENCHMARK_20260929_154152_codex-GPT-6-Luna_g6_*`): they come from a run attributed to Environment. The hero
+      selection now skips such runs, the archive still has them.
+- [ ] **Run the changed live PlayMode fixtures** (`LiveTestRequestScope`, alpha/beta isolation, restored `Ok`
+      assertions, HTTP routing with its own settings) against a backend that cancels disconnected turns; repeat the
+      full live assembly there. 7.47.3's "isolation" is client-side only.
+- [ ] **Run the whole live suite once on a settled tree**: the `[Timeout]` constants of the 35 converted fixtures and the
+      new attachment / camera Unity paths (`AgentCameraCapturePlayModeTests`, `CameraLlmToolPlayModeTests`, a live vision
+      turn) compile but have never run.
+- [ ] Move the remaining live turns onto `LiveTestRequestScope`: `SkillSetBenchmarkPlayModeTests` (:293, :385),
+      `GameCreationBenchmarkHarness` (:2186); `CoreAiChatDemoRealModelWebGl` needs a token on the panel's submit API and
+      capped Stop-settle waits.
+- [ ] **Image feedback wording**: any tool's `LlmToolImageResult` reuses the camera feedback prompt ("Camera frame from
+      your latest capture...") and replaces the previous image message. Keep it for G6 (the prompt is part of the suite),
+      make it neutral for non-camera tools together with a suite-version bump.
+- [ ] The World `capture_camera` tool still returns a base64 `dataUri` (not auto-lifted; `AskWithImageFollowUpAsync`
+      depends on it): move it to `LlmToolImageResult` and deprecate the follow-up helper. Chat-panel external submit
+      still rejects an empty text even with attachments.
+- [ ] `SharedLlmUnity` stays `_initializing = true` after a framework abort during `EnsureInitialized` (the next live test
+      waits up to 300 s and fails); the loopback server task in `TestAgentSetupHttpRoutingPlayModeTests` is not
+      fault-observed when the test fails early (`ObserveFaults` is internal to Shared).
+- [ ] `LiveCapturingLlmClient` does not forward `SupportsNativeToolCalling*` (like the three copies it replaced), so the
+      Programmer and SmartChat live runs use the text tool contract; forwarding would change what they measure.
+- [ ] `CoreAi.SetResolver` alone gives the facade no chat service, so every attachment overload throws without a full
+      bootstrap (the facade tests set the private `_chatService` by reflection); decide whether `SetResolver` should build
+      one.
+- [ ] **Rbx materials, left open**: standing cylinders sample the texture rotated 180 degrees (the binder puts the mesh on a
+      child rotated Z+90, `InstanceGameObjectBinder.cs` ~1527; fix in the binder with a part-space cylinder mesh);
+      WoodPlanks is bound to a herringbone parquet set and Wood095 has almost no relief (ambientCG WoodFloor040 / 051 / 043
+      or Planks021 are CC0 candidates); tile repetition on Concrete034; Concrete, Plaster, Asphalt, Snow, Cardboard have
+      no cavity map (their bakes were blotchy); the owner's gitignored 2K override catalog (`Assets/CoreAIRbxTexturesLocal`)
+      has cavity 0 until "Rebuild override catalog from local sets" is run; Metal's roughness anchor if a brushed look is
+      wanted; Glacier (transparent shader) has no grain; the shader variants were never built for WebGL.
+- [ ] **WebGL findings (2026-09-30)**: Metal renders almost black in the WebGL player (face-on and grazing; the editor
+      probe gives ball luminance 0.38): check the demo scene's environment / reflection source before touching the
+      shader; the Full Access demo never registers the World Loads approval page (`FullAccessHubDemoController
+      .RegisterModsPage` should call `HubModsPages.RegisterWorldLoadConfirmation`), so a loaded world cannot be
+      verified there; with the `MIRROR` define the G11 build rejects `CoreAiHubDemo` and `MiniRpgModsDemo` (Neoxider
+      `PlayerController3DPhysics` scene ids), so the 17-scene gate needs a Mirror-free tree; the chat demo panel runs
+      past the 960 px canvas; the retry log says "(0 retries left)" next to "attempt 2/10".
+- [ ] `Docs/CoreAIMods/RobloxCoreAiParityVisual.lua` is a hand copy of the parity fixture: add a test that it equals the
+      fixture minus the store/cleanup trailer, and archive the Roblox Studio Output text next to the screenshot.
 
 ## The MVP ladder: numbering and open work by rung (2026-09-24)
 

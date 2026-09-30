@@ -36,6 +36,21 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return raw is "image" or "both" ? raw : "off";
         }
 
+        /// <summary>Clock note appended verbatim to every G6 goal, including a full custom prompt.</summary>
+        internal const string FreeBuildTimeBudgetNote = FreeBuildScene.TimeBudgetNote;
+
+        /// <summary>The clock half of <see cref="FreeBuildTimeBudgetNote"/> (before the pacing sentence).</summary>
+        internal const string FreeBuildTimeBudgetClockNote = FreeBuildScene.TimeBudgetClockNote;
+
+        /// <summary>The stop-rule half of <see cref="FreeBuildTimeBudgetNote"/> (after the pacing sentence).</summary>
+        internal const string FreeBuildTimeBudgetStopNote = FreeBuildScene.TimeBudgetStopNote;
+
+        /// <summary>Pacing appended only to the default castle goal.</summary>
+        internal const string FreeBuildCastlePacingNote = FreeBuildScene.CastlePacingNote;
+
+        /// <summary>Subject-neutral pacing appended to a COREAI_BENCHMARK_FREEBUILD_SUBJECT goal.</summary>
+        internal const string FreeBuildGenericPacingNote = FreeBuildScene.GenericPacingNote;
+
         public static GameBenchmarkScenario[] All()
         {
             string mode = VisionMode();
@@ -101,9 +116,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             public override double TimeBudgetMs => 45000;
 
-            // Per-scenario wall-clock for the visual build. This is also the deadline the model is told about
-            // and counted down to after each tool call. The runner reserves 30 seconds of the 600-second
-            // wall budget for screenshots and export, and never retries the build.
+            // WHY: wall budget for the visual build. The runner clamps the model's share to 570 seconds, which is
+            // the deadline the model is told about and counted down to after each tool call; it then waits up
+            // to 5 seconds for cancellation and plans (does not enforce) 30 seconds for screenshots and
+            // export, so the suite start-gate reserves 605 seconds. The build is never retried.
             public override float TimeoutSeconds => 600f;
 
             public override AgentConfig BuildAgent(BenchmarkEnvironment env)
@@ -127,9 +143,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     dimension: BenchmarkDimension.ToolCorrectness);
                 // WHY: require at least one tool call so a DO-NOTHING run cannot bank these points vacuously
                 // (zero calls trivially has zero failures/invalid commands). "Clean" must mean "acted cleanly".
-                g.Add("clean_tools", "no failed tool calls", 10,
+                g.AddToolErrorCheckpoint("clean_tools", "no failed tool calls", 10,
                     run.ToolCalls >= 1 && run.FailedToolCalls == 0,
-                    dimension: BenchmarkDimension.ToolCorrectness,
+                    scoresFailedToolCalls: true, scoresInvalidCommands: false,
                     detail: $"{run.ToolCalls} calls, {run.FailedToolCalls} failed");
             }
         }
@@ -152,7 +168,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "Free-form build: the model designs and places a whole scene from scratch — judged loosely on scale and variety, shown as the report hero image.";
 
             // The visual free-build is overridable with no code change:
-            //   COREAI_BENCHMARK_FREEBUILD_PROMPT      — a full custom prompt, used verbatim
+            //   COREAI_BENCHMARK_FREEBUILD_PROMPT      — a full custom prompt, used verbatim plus only the
+            //                                            subject-neutral TimeBudgetNote
             //   COREAI_BENCHMARK_FREEBUILD_SUBJECT     — just the subject (e.g. "a futuristic city"); a generic
             //                                            spatial-build scaffold is generated around it
             //   COREAI_BENCHMARK_FREEBUILD_ROUNDTRIPS  — tool-call cap (default 1000); the test ends and the
@@ -169,24 +186,52 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return Env("COREAI_BENCHMARK_FREEBUILD_SUBJECT");
             }
 
-            public override string Goal
-            {
-                get
-                {
-                    string full = Env("COREAI_BENCHMARK_FREEBUILD_PROMPT");
-                    string baseGoal = full
-                                      ?? (FreeBuildSubject() is string subject ? GenericGoal(subject) : CastleGoal);
+            public override string Goal =>
+                ComposeGoal(Env("COREAI_BENCHMARK_FREEBUILD_PROMPT"), FreeBuildSubject());
 
-                    // Tell the model it is on a clock and that every execute_lua result carries the time left
-                    // (RbxBenchmarkWorld stamps it in as TimeLeft), so it can pace itself and stop cleanly
-                    // before the deadline rather than being cut off.
-                    return baseGoal +
-                           "\n\nYou are on a time budget. Every execute_lua result carries a TimeLeft note with " +
-                           "the seconds remaining. Complete the castle's main silhouette — ground, curtain walls, " +
-                           "towers, gate and keep — during the first half of the budget. Spend the remaining time " +
-                           "on the courtyard, approach, landscape and surface details. Finish the current section " +
-                           "and stop building with at least 20 seconds remaining.";
+            /// <summary>
+            /// Clock note appended to every goal: the model is on a time budget and every execute_lua result
+            /// carries the seconds left (RbxBenchmarkWorld stamps it in as TimeLeft), so it can pace itself
+            /// and stop cleanly before the deadline rather than being cut off. Subject-neutral on purpose.
+            /// </summary>
+            internal const string TimeBudgetNote = TimeBudgetClockNote + TimeBudgetStopNote;
+
+            // WHY: the default castle goal keeps the suite 1.15 order (clock, castle pacing, stop rule) so its
+            // scored prompt stays byte-identical and existing rows stay comparable; the note is therefore
+            // composed from two parts around the pacing sentence.
+            internal const string TimeBudgetClockNote =
+                "\n\nYou are on a time budget. Every execute_lua result carries a TimeLeft note with the " +
+                "seconds remaining.";
+
+            internal const string TimeBudgetStopNote =
+                " Finish the current section and stop building with at least 20 seconds remaining.";
+
+            /// <summary>Castle-only pacing: the default goal names the structures that make the silhouette.</summary>
+            internal const string CastlePacingNote =
+                " Complete the castle's main silhouette — ground, curtain walls, towers, gate and keep — " +
+                "during the first half of the budget. Spend the remaining time on the courtyard, approach, " +
+                "landscape and surface details.";
+
+            /// <summary>Subject-neutral pacing for a COREAI_BENCHMARK_FREEBUILD_SUBJECT build.</summary>
+            internal const string GenericPacingNote =
+                " Complete the main structure during the first half of the budget, then spend the remaining " +
+                "time on secondary structures, surroundings and surface details.";
+
+            /// <summary>
+            /// Builds the G6 goal. A full custom prompt stays verbatim plus only <see cref="TimeBudgetNote"/>;
+            /// a subject override gets the generic scaffold with subject-neutral pacing; the default is the
+            /// castle goal with castle pacing.
+            /// </summary>
+            private static string ComposeGoal(string fullPrompt, string subject)
+            {
+                if (fullPrompt != null)
+                {
+                    return fullPrompt + TimeBudgetNote;
                 }
+
+                return subject != null
+                    ? GenericGoal(subject) + TimeBudgetClockNote + GenericPacingNote + TimeBudgetStopNote
+                    : CastleGoal + TimeBudgetClockNote + CastlePacingNote + TimeBudgetStopNote;
             }
 
             private static string GenericGoal(string subject)

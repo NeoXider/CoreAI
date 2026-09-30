@@ -197,6 +197,7 @@ namespace CoreAI.Ai
                     MaxContextTokens = contextWindowTokens,
                     SystemPrompt = systemForBudget,
                     UserPayload = user,
+                    InlinedAttachmentTokens = AiUserMessageBuilder.EstimateInlinedTextTokens(task?.Attachments),
                     Tools = tools,
                     MaxOutputTokens = resolvedMaxOutput,
                     ContextRetryLevel = contextRetryPass
@@ -2049,7 +2050,7 @@ namespace CoreAI.Ai
             // WHY: history keeps only a descriptor of an attachment (name, type, size), so two different
             // screenshots can produce byte-identical text. A turn with attachments is never collapsed; the
             // price is a possible duplicate when the very same files are re-sent.
-            return task?.Attachments == null || task.Attachments.Count == 0;
+            return !AiUserMessageBuilder.HasAttachments(task?.Attachments);
         }
 
         /// <summary>

@@ -45,9 +45,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 g.Add("ran_tool", "issued at least one tool call", 5, run.ToolCalls >= 1,
                     dimension: BenchmarkDimension.ToolCorrectness);
-                g.Add("clean_tool", "no failed tool calls or invalid commands", 5,
+                g.AddToolErrorCheckpoint("clean_tool", "no failed tool calls or invalid commands", 5,
                     run.FailedToolCalls == 0 && env.World.InvalidCommandCount == 0,
-                    dimension: BenchmarkDimension.ToolCorrectness);
+                    scoresFailedToolCalls: true, scoresInvalidCommands: true);
             }
 
             protected static bool SpawnedExactly(BenchmarkEnvironment env, string exactName)

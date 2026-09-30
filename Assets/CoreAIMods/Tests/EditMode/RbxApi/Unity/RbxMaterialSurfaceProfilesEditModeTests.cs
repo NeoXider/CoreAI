@@ -118,9 +118,49 @@ namespace CoreAI.Tests.EditMode.RbxApi
             RbxMaterialSurfaceProfiles.Apply(entry);
 
             Assert.AreEqual(14f, entry.TileWidthStuds, 0.001f);
-            Assert.AreEqual(1.5f, entry.NormalStrength, 0.001f);
+            Assert.AreEqual(1.1f, entry.NormalStrength, 0.001f);
             Assert.AreEqual(0.72f, entry.RoughnessScale, 0.001f);
             Assert.AreEqual(0.7f, entry.PartColorInfluence, 0.001f);
+        }
+
+        [Test]
+        public void EveryNormalStrength_StaysAtOrUnderOnePointTwo()
+        {
+            // WHY: 1.3-1.5 were tuned while the tangent frame was dead; with a unit frame they read
+            // as glittering noise up close. Distance relief comes from the cavity map instead.
+            foreach (string name in RbxMaterialCatalogEditorUtility.MaterialNames)
+            {
+                if (RbxMaterialSurfaceProfiles.Has(name))
+                {
+                    Assert.LessOrEqual(RbxMaterialSurfaceProfiles.For(name).NormalStrength, 1.2f + 1e-4f,
+                        name + " normal strength");
+                }
+            }
+        }
+
+        [Test]
+        public void PackagedRelief_NeedsItsMapsAndOnlyLiftsTheThreePhotographedMetals()
+        {
+            RbxTextureCatalogEntryData withMaps = new()
+            {
+                MaterialName = "Brick",
+                AmbientOcclusionAssetPath = "Assets/x_Cavity.jpg"
+            };
+            RbxTextureCatalogEntryData withoutMaps = new() { MaterialName = "Brick" };
+
+            RbxMaterialSurfaceProfiles.ApplyPackagedRelief(withMaps);
+            RbxMaterialSurfaceProfiles.ApplyPackagedRelief(withoutMaps);
+
+            Assert.Greater(withMaps.CavityStrength, 0.5f);
+            Assert.AreEqual(0f, withoutMaps.CavityStrength, "no occlusion map, no cavity");
+            foreach (string name in RbxMaterialCatalogEditorUtility.MaterialNames)
+            {
+                RbxMaterialSurfaceProfiles.PackagedRelief relief = RbxMaterialSurfaceProfiles.ReliefFor(name);
+                Assert.That(relief.CavityStrength, Is.InRange(0f, 1f), name);
+                bool photographedMetal = name == "Metal" || name == "DiamondPlate" ||
+                                         name == "CorrodedMetal";
+                Assert.AreEqual(photographedMetal, relief.MetalAlbedoLift > 0f, name + " metal lift");
+            }
         }
     }
 }

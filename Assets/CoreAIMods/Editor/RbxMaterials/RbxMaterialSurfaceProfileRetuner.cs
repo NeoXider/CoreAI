@@ -30,7 +30,9 @@ namespace CoreAI.Editor.RbxMaterials
                          RbxMaterialCatalogEditorUtility.OverrideCatalogAssetPath
                      })
             {
-                int changed = RetuneCatalog(path);
+                // WHY: only the packaged catalog is known to hold CC0 sets with baked occlusion; the
+                // override may hold Bridge or Fab imports, whose AO and metal colour are calibrated.
+                int changed = RetuneCatalog(path, path == PackagedCatalogAssetPath);
                 if (changed < 0)
                 {
                     continue;
@@ -54,7 +56,7 @@ namespace CoreAI.Editor.RbxMaterials
         }
 
         /// <summary>Rewrites tiling and relief on one catalog; returns -1 when the asset is missing.</summary>
-        private static int RetuneCatalog(string assetPath)
+        private static int RetuneCatalog(string assetPath, bool applyPackagedRelief)
         {
             Object catalog = AssetDatabase.LoadMainAssetAtPath(assetPath);
             if (catalog == null)
@@ -85,6 +87,20 @@ namespace CoreAI.Editor.RbxMaterials
                 entry.FindPropertyRelative("_roughnessScale").floatValue = profile.RoughnessScale;
                 entry.FindPropertyRelative("_partColorInfluence").floatValue =
                     profile.PartColorInfluence;
+                if (applyPackagedRelief)
+                {
+                    RbxMaterialSurfaceProfiles.PackagedRelief relief =
+                        RbxMaterialSurfaceProfiles.ReliefFor(name);
+                    bool hasOcclusion =
+                        entry.FindPropertyRelative("_ambientOcclusion").objectReferenceValue != null;
+                    bool hasMetalness =
+                        entry.FindPropertyRelative("_metalness").objectReferenceValue != null;
+                    entry.FindPropertyRelative("_cavityStrength").floatValue =
+                        hasOcclusion ? relief.CavityStrength : 0f;
+                    entry.FindPropertyRelative("_metalAlbedoLift").floatValue =
+                        hasMetalness ? relief.MetalAlbedoLift : 0f;
+                }
+
                 changed++;
             }
 

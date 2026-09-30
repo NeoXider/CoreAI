@@ -16,6 +16,15 @@
         public string SimulatedAssistantReply { get; set; }
 
         /// <summary>
+        /// Files sent with the message: images for a vision-capable model, text-like files inlined into the
+        /// prompt (see <see cref="CoreAI.Ai.AiTaskRequest.Attachments"/>). Null, empty or all-null sends the text
+        /// alone. With at least one attachment the message text may be blank (image-only / file-only): the user bubble
+        /// then shows one <c>[attachment: name type size]</c> line per file, otherwise it shows the text only. The list
+        /// and the bytes are not copied; keep them unchanged until the submit's task completes.
+        /// </summary>
+        public System.Collections.Generic.IReadOnlyList<CoreAI.Ai.AiAttachment> Attachments { get; set; }
+
+        /// <summary>
         /// The host's own deadline for this turn, kept apart from the caller's cancellation token. When it
         /// fires while the caller's token is still alive, the turn is stopped and reported as a
         /// <see cref="CoreAI.Ai.LlmErrorCode.Timeout"/> (the panel shows <c>ResolveTimeoutMessage</c>) and the

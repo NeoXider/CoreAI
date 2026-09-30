@@ -287,6 +287,7 @@ namespace CoreAI.Editor.RbxMaterials
                 AmbientOcclusionAssetPath = occlusion
             };
             RbxMaterialSurfaceProfiles.Apply(entry);
+            RbxMaterialSurfaceProfiles.ApplyPackagedRelief(entry);
             _completedEntries.Add(entry);
             _completedMappings.Add(mapping);
         }

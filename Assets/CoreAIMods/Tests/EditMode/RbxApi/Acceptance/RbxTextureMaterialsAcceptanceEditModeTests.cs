@@ -520,21 +520,28 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
-        public void TexturedShader_UsesNarrowGeometricNormalAxisBlendWithoutParallax()
+        public void TexturedShader_UsesFlatFaceFramesAndCurvedAxisBlendWithoutParallax()
         {
             string path = Path.Combine(Application.dataPath, "CoreAIMods", "Runtime", "RbxApi",
                 "Unity", "Resources", "CoreAIRbxMaterials", "RbxTexturedSurface.shader");
             string source = File.ReadAllText(path);
 
-            StringAssert.Contains("static const float RBX_AXIS_BLEND_WIDTH = 0.10;", source);
-            StringAssert.Contains(
-                "float3 projectionWeights = RbxNarrowAxisWeights(geometricNormalAligned);", source);
+            // WHY: the numeric contract (frame strength, weights, face frames) is guarded by the CPU
+            // ports in RbxTexturedShaderMathEditModeTests; this only pins the structure.
+            StringAssert.IsMatch(@"bool\s+flatFace\s*=\s*RbxIsFlatFace\(geometricNormalAligned",
+                source);
+            StringAssert.Contains(": RbxCurvedAxisWeights(geometricNormalAligned);", source);
+            StringAssert.Contains("UNITY_BRANCH if (faceWeight > 0.0)", source);
             StringAssert.Contains("UNITY_BRANCH if (projectionWeights.x > 0.0)", source);
             StringAssert.Contains("UNITY_BRANCH if (projectionWeights.y > 0.0)", source);
             StringAssert.Contains("UNITY_BRANCH if (projectionWeights.z > 0.0)", source);
             StringAssert.IsMatch(
                 "output\\.positionAligned\\s*=\\s*input\\.positionOS\\.xyz\\s*\\*\\s*" +
-                "RbxTextureObjectAxisScale\\(\\)", source);
+                "objectAxisScale", source);
+            StringAssert.Contains(
+                "output.normalAligned = normalize(input.normalOS / max(objectAxisScale, 0.00001));",
+                source);
+            StringAssert.Contains("RbxLiftMetalReflectance(", source);
             StringAssert.IsMatch(
                 "float2\\s+uvScale\\s*=\\s*float2\\(\\s*_TextureScale\\s*/\\s*" +
                 "max\\(_TextureAspect,\\s*0\\.0001\\),\\s*_TextureScale\\s*\\)", source);

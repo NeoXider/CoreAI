@@ -83,7 +83,10 @@ namespace CoreAI.Ai
             AIFunctionFactoryOptions options = new()
             {
                 Name = name,
-                Description = description
+                Description = description,
+                // WHY: a delegate may return LlmToolImageResult to show the model a picture; the default
+                // marshaller would serialize it to JSON and lose the images. Every other value is unchanged.
+                MarshalResult = LlmToolImageResult.PreserveResult
             };
             AIFunction function = AIFunctionFactory.Create(action, options);
             return new DelegateExceptionBoundaryAIFunction(function);

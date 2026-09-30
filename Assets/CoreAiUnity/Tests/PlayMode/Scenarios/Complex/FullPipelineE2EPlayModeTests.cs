@@ -39,6 +39,36 @@ namespace CoreAI.Tests.PlayMode
         private const int PhaseTimeoutSeconds = 180;
         private const int LiveModelMaxOutputTokens = 128000;
 
+        // WHY: 120 s GGUF load (EnsureLlmUnityModelReady) + three sequential 180 s phases = 660 s,
+        // + the 20 s scope reserve and ~100 s margin = 780 s.
+        private const int TestTimeoutMs = 780000;
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
+            LogAssert.ignoreFailingMessages = false;
+        }
+
         // Tool call tracking.
 
         private static readonly List<string> _calledTools = new();
@@ -228,7 +258,7 @@ namespace CoreAI.Tests.PlayMode
         // E2E test.
 
         [UnityTest]
-        [Timeout(600000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator FullPipeline_Skills_Tools_Memory_MultiTurn()
         {
             Debug.Log("[E2E] FULL PIPELINE E2E: Skills + Tools + Memory + Chat");
@@ -242,247 +272,242 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
+
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            Debug.Log($"[E2E] Backend: {handle.ResolvedBackend}");
+
+            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.Offline)
             {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                Debug.Log($"[E2E] Backend: {handle.ResolvedBackend}");
-
-                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.Offline)
-                {
-                    Assert.Inconclusive("E2E test requires a live LLM backend (HTTP or LLMUnity).");
-                }
-
-
-                // Define skills.
-
-
-                SkillSet craftingSkill = new("Crafting",
-                    "Forge weapons and armor from raw materials",
-                    "You are a master blacksmith. Steps:\n" +
-                    "1. Call get_recipes to see available recipes.\n" +
-                    "2. Call check_inventory to verify materials.\n" +
-                    "3. Call craft_item with recipe_id and quality 1.0.\n" +
-                    "4. Record what you crafted for later recall.\n" +
-                    "5. Tell the player the result.\n" +
-                    "Always follow this order.",
-                    new DelegateLlmTool("get_recipes", "Get available crafting recipes",
-                        new Func<string, object>(GetRecipes)),
-                    new DelegateLlmTool("check_inventory", "Check player materials",
-                        new Func<string, object>(CheckInventory)),
-                    new DelegateLlmTool("craft_item", "Craft an item from recipe",
-                        new Func<string, double, object>(CraftItem)));
-
-                SkillSet combatSkill = new("Combat",
-                    "Fight enemies in tactical encounters",
-                    "Steps:\n1. Call get_enemy_info first.\n2. Call attack_enemy.\n3. Report results.",
-                    new DelegateLlmTool("get_enemy_info", "Get enemy stats and weaknesses",
-                        new Func<string, object>(GetEnemyInfo)),
-                    new DelegateLlmTool("attack_enemy", "Attack an enemy with a weapon",
-                        new Func<string, string, object>(AttackEnemy)));
-
-                SkillSet loreSkill = new("Lore",
-                    "World knowledge and bestiary",
-                    "Call search_lore to find information.",
-                    new DelegateLlmTool("search_lore", "Search the game lore database",
-                        new Func<string, object>(SearchLore)));
-
-                // Memory tools outside skills are always available.
-                DelegateLlmTool memoryWriteTool = new("memory_write", "Save information to persistent memory",
-                    new Func<string, object>(WriteMemory));
-                DelegateLlmTool memoryReadTool = new("memory_read", "Read previously saved memory",
-                    new Func<object>(ReadMemory));
-
-
-                // Build agent.
-
-
-                const string roleId = "E2E_GameMaster";
-                AgentConfig config = new AgentBuilder(roleId) { SuppressBuildWarnings = true }
-                    .WithSystemPrompt(
-                        "You are a Game Master for a fantasy RPG. " +
-                        "Rely on configured capabilities to handle the player's request. " +
-                        "Save important events, recall past events when asked, and respond briefly.")
-                    .WithSkill(craftingSkill)
-                    .WithSkill(combatSkill)
-                    .WithSkill(loreSkill)
-                    .WithTool(memoryWriteTool)
-                    .WithTool(memoryReadTool)
-                    .WithMode(AgentMode.ToolsAndChat)
-                    .Build();
-
-                InMemoryStore store = new();
-                AgentMemoryPolicy policy = new();
-                config.ApplyToPolicy(policy);
-
-                CaptureLlm cap = new(handle.WrapWithMemoryStore(store));
-                CoreAISettingsAsset settings = CoreAISettingsAsset.Instance
-                                               ?? ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-                Sink sink = new();
-
-                AiOrchestrator orch = new(
-                    new SoloAuthorityHost(), cap, sink, new SessionTelemetryCollector(),
-                    new AiPromptComposer(
-                        new BuiltInDefaultAgentSystemPromptProvider(),
-                        new NoAgentUserPromptTemplateProvider(),
-                        new NullLuaScriptVersionStore(), null, policy, settings),
-                    store, policy,
-                    new NoOpRoleStructuredResponsePolicy(),
-                    new NullAiOrchestrationMetrics(),
-                    settings,
-                    new LocalActorIdentityProvider("full-pipeline-e2e-test"), null, null);
-
-
-                // Phase 1: Crafting with SkillSet.
-
-
-                Debug.Log("[E2E] PHASE 1: Craft a Flame Sword (SkillSet -> tools -> memory)");
-
-                using CancellationTokenSource phase1Cts = new();
-                Task t1 = orch.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = roleId,
-                    Hint = "I want to craft a Flame Sword. Save what you crafted to memory.",
-                    MaxOutputTokens = LiveModelMaxOutputTokens
-                }, phase1Cts.Token);
-                yield return PlayModeTestAwait.WaitTask(t1, PhaseTimeoutSeconds, "Phase 1: Crafting", phase1Cts);
-
-                Debug.Log($"[E2E] Phase 1 tools: [{string.Join(", ", _calledTools)}]");
-                Debug.Log($"[E2E] Phase 1 response: {cap.LastContent}");
-                Debug.Log($"[E2E] Phase 1 LLM calls: {cap.CallCount}");
-
-                if (!cap.LastOk)
-                {
-                    Assert.Inconclusive($"Phase 1 LLM failed: {cap.LastContent}");
-                }
-
-                // Assert: at least one crafting tool was called
-                bool anyCraftTool = _calledTools.Contains("get_recipes") ||
-                                    _calledTools.Contains("check_inventory") ||
-                                    _calledTools.Contains("craft_item");
-
-                if (!anyCraftTool && handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
-                {
-                    Assert.Fail(
-                        $"Phase 1: local model ({handle.ResolvedBackend}) did not call crafting tools - " +
-                        $"multi-step SkillSet pipeline (read_skill->get_recipes->check_inventory->craft_item->memory_write) " +
-                        $"exceeds small model capacity. Called: [{string.Join(", ", _calledTools)}]. " +
-                        $"Pipeline correctness verified by SelfService_* tests.");
-                }
-
-                Assert.IsTrue(anyCraftTool,
-                    $"Phase 1: at least one crafting tool must be called. Got: [{string.Join(", ", _calledTools)}]");
-
-                Debug.Log("[E2E] Phase 1 passed - crafting tools invoked");
-
-
-                // Phase 2: Memory recall.
-
-
-                Debug.Log("[E2E] PHASE 2: Recall what was crafted (memory_read)");
-
-                int toolsBefore = _calledTools.Count;
-                using CancellationTokenSource phase2Cts = new();
-                Task t2 = orch.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = roleId,
-                    Hint = "What did I craft earlier?",
-                    MaxOutputTokens = LiveModelMaxOutputTokens
-                }, phase2Cts.Token);
-                yield return PlayModeTestAwait.WaitTask(t2, PhaseTimeoutSeconds, "Phase 2: Memory recall", phase2Cts);
-
-                Debug.Log($"[E2E] Phase 2 tools: [{string.Join(", ", _calledTools.Skip(toolsBefore))}]");
-                Debug.Log($"[E2E] Phase 2 response: {cap.LastContent}");
-
-                if (!cap.LastOk)
-                {
-                    Assert.Inconclusive($"Phase 2 LLM failed: {cap.LastContent}");
-                }
-
-                // Phase 2: model should have called memory_read OR mentioned crafted item from context
-                bool hasMemoryRead = _calledTools.Skip(toolsBefore).Contains("memory_read");
-                bool mentionsSword = cap.LastContent != null &&
-                                     (cap.LastContent.IndexOf("sword", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                      cap.LastContent.IndexOf("flame", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                      cap.LastContent.IndexOf("craft", StringComparison.OrdinalIgnoreCase) >= 0);
-
-                Assert.IsTrue(hasMemoryRead || mentionsSword,
-                    $"Phase 2: model should recall via memory_read or mention the crafted item. " +
-                    $"memory_read called: {hasMemoryRead}, mentions sword/flame/craft: {mentionsSword}");
-
-                Debug.Log("[E2E] Phase 2 passed - memory recall works");
-
-
-                // Phase 3: Cross-skill switch to Combat.
-
-
-                Debug.Log("[E2E] PHASE 3: Fight a Fire Drake (Combat skill)");
-
-                int toolsBefore3 = _calledTools.Count;
-                using CancellationTokenSource phase3Cts = new();
-                Task t3 = orch.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = roleId,
-                    Hint = "A Fire Drake appeared! Use the Combat skill: call get_enemy_info for the " +
-                           "Fire Drake, then attack_enemy with the sword you crafted. Report the result.",
-                    MaxOutputTokens = LiveModelMaxOutputTokens
-                }, phase3Cts.Token);
-                yield return PlayModeTestAwait.WaitTask(t3, PhaseTimeoutSeconds, "Phase 3: Combat", phase3Cts);
-
-                Debug.Log($"[E2E] Phase 3 tools: [{string.Join(", ", _calledTools.Skip(toolsBefore3))}]");
-                Debug.Log($"[E2E] Phase 3 response: {cap.LastContent}");
-
-                if (!cap.LastOk)
-                {
-                    Assert.Inconclusive($"Phase 3 LLM failed: {cap.LastContent}");
-                }
-
-                bool anyCombatTool = _calledTools.Skip(toolsBefore3)
-                    .Any(t => t == "get_enemy_info" || t == "attack_enemy");
-
-                if (!anyCombatTool && handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
-                {
-                    Assert.Fail(
-                        $"Phase 3: local model ({handle.ResolvedBackend}) did not call combat tools - " +
-                        $"multi-step skill pipeline exceeds small model capacity. " +
-                        $"Called: [{string.Join(", ", _calledTools.Skip(toolsBefore3))}]. " +
-                        $"Pipeline correctness verified by SelfService_* tests.");
-                }
-
-                Assert.IsTrue(anyCombatTool,
-                    $"Phase 3: at least one combat tool must be called. Got: [{string.Join(", ", _calledTools.Skip(toolsBefore3))}]");
-
-                Debug.Log("[E2E] Phase 3 passed - combat tools invoked");
-
-
-                // Summary.
-
-
-                Debug.Log("[E2E] E2E RESULTS");
-                Debug.Log($"[E2E] Total LLM calls:    {cap.CallCount}");
-                Debug.Log($"[E2E] Total time:         {cap.TotalMs} ms");
-                Debug.Log($"[E2E] All tools called:   [{string.Join(", ", _calledTools)}]");
-                Debug.Log($"[E2E] Unique tools:       [{string.Join(", ", _calledTools.Distinct())}]");
-                Debug.Log($"[E2E] Memory content:     {_memoryContent}");
-                Debug.Log($"[E2E] Phases passed:      3/3");
-
-                // Final: must have used tools from at least 2 different skills
-                List<string> uniqueTools = _calledTools.Distinct().ToList();
-                bool hasCraftingTools =
-                    uniqueTools.Any(t => t == "get_recipes" || t == "check_inventory" || t == "craft_item");
-                bool hasCombatTools = uniqueTools.Any(t => t == "get_enemy_info" || t == "attack_enemy");
-
-                Assert.IsTrue(hasCraftingTools && hasCombatTools,
-                    $"Must use tools from both Crafting and Combat skills. " +
-                    $"Crafting: {hasCraftingTools}, Combat: {hasCombatTools}. " +
-                    $"All: [{string.Join(", ", uniqueTools)}]");
-
-                Debug.Log("[E2E] ALL PHASES PASSED - Full pipeline E2E verified!");
+                Assert.Inconclusive("E2E test requires a live LLM backend (HTTP or LLMUnity).");
             }
-            finally
+
+
+            // Define skills.
+
+
+            SkillSet craftingSkill = new("Crafting",
+                "Forge weapons and armor from raw materials",
+                "You are a master blacksmith. Steps:\n" +
+                "1. Call get_recipes to see available recipes.\n" +
+                "2. Call check_inventory to verify materials.\n" +
+                "3. Call craft_item with recipe_id and quality 1.0.\n" +
+                "4. Record what you crafted for later recall.\n" +
+                "5. Tell the player the result.\n" +
+                "Always follow this order.",
+                new DelegateLlmTool("get_recipes", "Get available crafting recipes",
+                    new Func<string, object>(GetRecipes)),
+                new DelegateLlmTool("check_inventory", "Check player materials",
+                    new Func<string, object>(CheckInventory)),
+                new DelegateLlmTool("craft_item", "Craft an item from recipe",
+                    new Func<string, double, object>(CraftItem)));
+
+            SkillSet combatSkill = new("Combat",
+                "Fight enemies in tactical encounters",
+                "Steps:\n1. Call get_enemy_info first.\n2. Call attack_enemy.\n3. Report results.",
+                new DelegateLlmTool("get_enemy_info", "Get enemy stats and weaknesses",
+                    new Func<string, object>(GetEnemyInfo)),
+                new DelegateLlmTool("attack_enemy", "Attack an enemy with a weapon",
+                    new Func<string, string, object>(AttackEnemy)));
+
+            SkillSet loreSkill = new("Lore",
+                "World knowledge and bestiary",
+                "Call search_lore to find information.",
+                new DelegateLlmTool("search_lore", "Search the game lore database",
+                    new Func<string, object>(SearchLore)));
+
+            // Memory tools outside skills are always available.
+            DelegateLlmTool memoryWriteTool = new("memory_write", "Save information to persistent memory",
+                new Func<string, object>(WriteMemory));
+            DelegateLlmTool memoryReadTool = new("memory_read", "Read previously saved memory",
+                new Func<object>(ReadMemory));
+
+
+            // Build agent.
+
+
+            const string roleId = "E2E_GameMaster";
+            AgentConfig config = new AgentBuilder(roleId) { SuppressBuildWarnings = true }
+                .WithSystemPrompt(
+                    "You are a Game Master for a fantasy RPG. " +
+                    "Rely on configured capabilities to handle the player's request. " +
+                    "Save important events, recall past events when asked, and respond briefly.")
+                .WithSkill(craftingSkill)
+                .WithSkill(combatSkill)
+                .WithSkill(loreSkill)
+                .WithTool(memoryWriteTool)
+                .WithTool(memoryReadTool)
+                .WithMode(AgentMode.ToolsAndChat)
+                .Build();
+
+            InMemoryStore store = new();
+            AgentMemoryPolicy policy = new();
+            config.ApplyToPolicy(policy);
+
+            CaptureLlm cap = new(handle.WrapWithMemoryStore(store));
+            CoreAISettingsAsset settings = CoreAISettingsAsset.Instance
+                                           ?? ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            Sink sink = new();
+
+            AiOrchestrator orch = new(
+                new SoloAuthorityHost(), cap, sink, new SessionTelemetryCollector(),
+                new AiPromptComposer(
+                    new BuiltInDefaultAgentSystemPromptProvider(),
+                    new NoAgentUserPromptTemplateProvider(),
+                    new NullLuaScriptVersionStore(), null, policy, settings),
+                store, policy,
+                new NoOpRoleStructuredResponsePolicy(),
+                new NullAiOrchestrationMetrics(),
+                settings,
+                new LocalActorIdentityProvider("full-pipeline-e2e-test"), null, null);
+
+
+            // Phase 1: Crafting with SkillSet.
+
+
+            Debug.Log("[E2E] PHASE 1: Craft a Flame Sword (SkillSet -> tools -> memory)");
+
+            CancellationTokenSource phase1Cts = _requests.CreateCancellation();
+            Task t1 = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
             {
-                handle.Dispose();
-                LogAssert.ignoreFailingMessages = false;
+                RoleId = roleId,
+                Hint = "I want to craft a Flame Sword. Save what you crafted to memory.",
+                MaxOutputTokens = LiveModelMaxOutputTokens
+            }, phase1Cts.Token));
+            yield return PlayModeTestAwait.WaitTask(t1, _requests.Cap(PhaseTimeoutSeconds), "Phase 1: Crafting", phase1Cts);
+
+            Debug.Log($"[E2E] Phase 1 tools: [{string.Join(", ", _calledTools)}]");
+            Debug.Log($"[E2E] Phase 1 response: {cap.LastContent}");
+            Debug.Log($"[E2E] Phase 1 LLM calls: {cap.CallCount}");
+
+            if (!cap.LastOk)
+            {
+                Assert.Inconclusive($"Phase 1 LLM failed: {cap.LastContent}");
             }
+
+            // Assert: at least one crafting tool was called
+            bool anyCraftTool = _calledTools.Contains("get_recipes") ||
+                                _calledTools.Contains("check_inventory") ||
+                                _calledTools.Contains("craft_item");
+
+            if (!anyCraftTool && handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+            {
+                Assert.Fail(
+                    $"Phase 1: local model ({handle.ResolvedBackend}) did not call crafting tools - " +
+                    $"multi-step SkillSet pipeline (read_skill->get_recipes->check_inventory->craft_item->memory_write) " +
+                    $"exceeds small model capacity. Called: [{string.Join(", ", _calledTools)}]. " +
+                    $"Pipeline correctness verified by SelfService_* tests.");
+            }
+
+            Assert.IsTrue(anyCraftTool,
+                $"Phase 1: at least one crafting tool must be called. Got: [{string.Join(", ", _calledTools)}]");
+
+            Debug.Log("[E2E] Phase 1 passed - crafting tools invoked");
+
+
+            // Phase 2: Memory recall.
+
+
+            Debug.Log("[E2E] PHASE 2: Recall what was crafted (memory_read)");
+
+            int toolsBefore = _calledTools.Count;
+            CancellationTokenSource phase2Cts = _requests.CreateCancellation();
+            Task t2 = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = roleId,
+                Hint = "What did I craft earlier?",
+                MaxOutputTokens = LiveModelMaxOutputTokens
+            }, phase2Cts.Token));
+            yield return PlayModeTestAwait.WaitTask(t2, _requests.Cap(PhaseTimeoutSeconds), "Phase 2: Memory recall", phase2Cts);
+
+            Debug.Log($"[E2E] Phase 2 tools: [{string.Join(", ", _calledTools.Skip(toolsBefore))}]");
+            Debug.Log($"[E2E] Phase 2 response: {cap.LastContent}");
+
+            if (!cap.LastOk)
+            {
+                Assert.Inconclusive($"Phase 2 LLM failed: {cap.LastContent}");
+            }
+
+            // Phase 2: model should have called memory_read OR mentioned crafted item from context
+            bool hasMemoryRead = _calledTools.Skip(toolsBefore).Contains("memory_read");
+            bool mentionsSword = cap.LastContent != null &&
+                                 (cap.LastContent.IndexOf("sword", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                  cap.LastContent.IndexOf("flame", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                  cap.LastContent.IndexOf("craft", StringComparison.OrdinalIgnoreCase) >= 0);
+
+            Assert.IsTrue(hasMemoryRead || mentionsSword,
+                $"Phase 2: model should recall via memory_read or mention the crafted item. " +
+                $"memory_read called: {hasMemoryRead}, mentions sword/flame/craft: {mentionsSword}");
+
+            Debug.Log("[E2E] Phase 2 passed - memory recall works");
+
+
+            // Phase 3: Cross-skill switch to Combat.
+
+
+            Debug.Log("[E2E] PHASE 3: Fight a Fire Drake (Combat skill)");
+
+            int toolsBefore3 = _calledTools.Count;
+            CancellationTokenSource phase3Cts = _requests.CreateCancellation();
+            Task t3 = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = roleId,
+                Hint = "A Fire Drake appeared! Use the Combat skill: call get_enemy_info for the " +
+                       "Fire Drake, then attack_enemy with the sword you crafted. Report the result.",
+                MaxOutputTokens = LiveModelMaxOutputTokens
+            }, phase3Cts.Token));
+            yield return PlayModeTestAwait.WaitTask(t3, _requests.Cap(PhaseTimeoutSeconds), "Phase 3: Combat", phase3Cts);
+
+            Debug.Log($"[E2E] Phase 3 tools: [{string.Join(", ", _calledTools.Skip(toolsBefore3))}]");
+            Debug.Log($"[E2E] Phase 3 response: {cap.LastContent}");
+
+            if (!cap.LastOk)
+            {
+                Assert.Inconclusive($"Phase 3 LLM failed: {cap.LastContent}");
+            }
+
+            bool anyCombatTool = _calledTools.Skip(toolsBefore3)
+                .Any(t => t == "get_enemy_info" || t == "attack_enemy");
+
+            if (!anyCombatTool && handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+            {
+                Assert.Fail(
+                    $"Phase 3: local model ({handle.ResolvedBackend}) did not call combat tools - " +
+                    $"multi-step skill pipeline exceeds small model capacity. " +
+                    $"Called: [{string.Join(", ", _calledTools.Skip(toolsBefore3))}]. " +
+                    $"Pipeline correctness verified by SelfService_* tests.");
+            }
+
+            Assert.IsTrue(anyCombatTool,
+                $"Phase 3: at least one combat tool must be called. Got: [{string.Join(", ", _calledTools.Skip(toolsBefore3))}]");
+
+            Debug.Log("[E2E] Phase 3 passed - combat tools invoked");
+
+
+            // Summary.
+
+
+            Debug.Log("[E2E] E2E RESULTS");
+            Debug.Log($"[E2E] Total LLM calls:    {cap.CallCount}");
+            Debug.Log($"[E2E] Total time:         {cap.TotalMs} ms");
+            Debug.Log($"[E2E] All tools called:   [{string.Join(", ", _calledTools)}]");
+            Debug.Log($"[E2E] Unique tools:       [{string.Join(", ", _calledTools.Distinct())}]");
+            Debug.Log($"[E2E] Memory content:     {_memoryContent}");
+            Debug.Log($"[E2E] Phases passed:      3/3");
+
+            // Final: must have used tools from at least 2 different skills
+            List<string> uniqueTools = _calledTools.Distinct().ToList();
+            bool hasCraftingTools =
+                uniqueTools.Any(t => t == "get_recipes" || t == "check_inventory" || t == "craft_item");
+            bool hasCombatTools = uniqueTools.Any(t => t == "get_enemy_info" || t == "attack_enemy");
+
+            Assert.IsTrue(hasCraftingTools && hasCombatTools,
+                $"Must use tools from both Crafting and Combat skills. " +
+                $"Crafting: {hasCraftingTools}, Combat: {hasCombatTools}. " +
+                $"All: [{string.Join(", ", uniqueTools)}]");
+
+            Debug.Log("[E2E] ALL PHASES PASSED - Full pipeline E2E verified!");
         }
     }
 }

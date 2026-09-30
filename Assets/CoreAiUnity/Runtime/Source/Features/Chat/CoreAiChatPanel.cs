@@ -2582,6 +2582,15 @@ namespace CoreAI.Chat
 
         /// <summary>
         /// Submits a message from gameplay/test code through the same turn pipeline used by the UI.
+        /// <para>
+        /// With <see cref="CoreAiChatExternalSubmitOptions.Attachments"/> holding at least one non-null attachment the
+        /// text may be blank (an image-only or file-only message): the user bubble then shows the attachment
+        /// placeholders (<c>[attachment: shot.png image/png 48 KB]</c>, the same line the history stores) and
+        /// <see cref="OnMessageSending"/> is not called, because there is no text to filter. Non-blank text always
+        /// goes through <see cref="OnMessageSending"/>; a hook that empties it cancels the submit
+        /// (<see cref="CoreAiChatExternalSubmitRejection.Filtered"/>) even when files are attached. Blank text with no
+        /// attachment is <see cref="CoreAiChatExternalSubmitRejection.EmptyInput"/>.
+        /// </para>
         /// </summary>
         /// <returns>
         /// Final assistant text, simulated text, or <c>null</c> when the panel is busy, canceled, or given empty input.
@@ -2705,7 +2714,8 @@ namespace CoreAI.Chat
                 return null;
             }
 
-            if (string.IsNullOrWhiteSpace(messageText))
+            bool hasAttachments = AiUserMessageBuilder.HasAttachments(options.Attachments);
+            if (string.IsNullOrWhiteSpace(messageText) && !hasAttachments)
             {
                 if (outcome != null) outcome.Rejection = CoreAiChatExternalSubmitRejection.EmptyInput;
                 return null;
@@ -2714,13 +2724,16 @@ namespace CoreAI.Chat
             // WHY no MaxMessageLength here: that limit bounds what a person types. Host-submitted text (a
             // briefing, a task statement, a hint request) is composed by code that owns its size; cutting it
             // with the typing limit silently removed the end of service instructions the model never saw.
-            string text = messageText.Trim();
+            string text = messageText?.Trim() ?? "";
 
-            text = OnMessageSending(text);
-            if (string.IsNullOrEmpty(text))
+            if (text.Length > 0)
             {
-                if (outcome != null) outcome.Rejection = CoreAiChatExternalSubmitRejection.Filtered;
-                return null;
+                text = OnMessageSending(text);
+                if (string.IsNullOrEmpty(text))
+                {
+                    if (outcome != null) outcome.Rejection = CoreAiChatExternalSubmitRejection.Filtered;
+                    return null;
+                }
             }
 
             if (outcome != null)
@@ -2739,15 +2752,41 @@ namespace CoreAI.Chat
 
             if (options.AppendUserMessageToChat)
             {
-                AddMessage(text, true);
-                OnUserMessageSent?.Invoke(text);
+                string bubble = text.Length > 0 ? text : DescribeAttachmentsForBubble(options.Attachments);
+                AddMessage(bubble, true);
+                OnUserMessageSent?.Invoke(bubble);
             }
 
             using CancellationTokenSource linked =
                 CancellationTokenSource.CreateLinkedTokenSource(GetOrCreateCancellationTokenSource().Token,
                     cancellationToken);
             return await RunAgentTurnAsync(text, options.SimulatedAssistantReply, linked.Token, outcome,
-                options.DeadlineCancellationToken);
+                options.DeadlineCancellationToken, options.Attachments);
+        }
+
+        /// <summary>
+        /// The user bubble of an attachments-only external message: one history placeholder per attachment
+        /// (<see cref="AiAttachment.DescribeForHistory"/>), so the bubble matches what the conversation history stores.
+        /// </summary>
+        private static string DescribeAttachmentsForBubble(IReadOnlyList<AiAttachment> attachments)
+        {
+            StringBuilder bubble = new();
+            for (int i = 0; i < attachments.Count; i++)
+            {
+                if (attachments[i] == null)
+                {
+                    continue;
+                }
+
+                if (bubble.Length > 0)
+                {
+                    bubble.Append('\n');
+                }
+
+                bubble.Append(attachments[i].DescribeForHistory());
+            }
+
+            return bubble.ToString();
         }
 
         /// <summary>
@@ -2870,7 +2909,8 @@ namespace CoreAI.Chat
             string simulatedAssistantReply,
             CancellationToken cancellationToken,
             CoreAiChatExternalSubmitResult outcome = null,
-            CancellationToken deadlineToken = default)
+            CancellationToken deadlineToken = default,
+            IReadOnlyList<AiAttachment> attachments = null)
         {
             if (!CanStartAgentTurn())
             {
@@ -2985,6 +3025,11 @@ namespace CoreAI.Chat
                 _nonStreamAssistantOutputStarted = false;
                 _streamingStartedVisible = false;
                 AiTaskRequest request = BuildAiTaskRequest(userTextForModel, roleId);
+                if (AiUserMessageBuilder.HasAttachments(attachments))
+                {
+                    request.Attachments = attachments;
+                }
+
                 bool uiStreaming = Options.EnableStreaming;
                 bool useStreaming = ShouldUseStreamingForRole(roleId, uiStreaming) &&
                                     _chatService.IsStreamingEnabled(roleId, uiStreaming);

@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
@@ -27,12 +25,15 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     internal static class ProgrammerLiveHarness
     {
-        /// <summary>Everything one live Programmer scenario needs; dispose in <c>finally</c>.</summary>
+        /// <summary>
+        /// Everything one live Programmer scenario needs; dispose it in <c>[UnityTearDown]</c> after the request
+        /// drain, because a framework timeout abort never runs the test body's <c>finally</c>.
+        /// </summary>
         internal sealed class Setup
         {
             public LuaCsModStack Stack;
             public AiOrchestrator Orchestrator;
-            public CapturingLlmClient Capturing;
+            public LiveCapturingLlmClient Capturing;
             public CoreAISettingsAsset Settings;
             public ActorContext ActorContext;
 
@@ -56,31 +57,6 @@ namespace CoreAI.Tests.PlayMode
                     UnityEngine.Object.DestroyImmediate(Settings);
                     Settings = null;
                 }
-            }
-        }
-
-        internal sealed class CapturingLlmClient : ILlmClient
-        {
-            public LlmCompletionResult LastResult;
-
-            private readonly ILlmClient _inner;
-
-            public CapturingLlmClient(ILlmClient inner)
-            {
-                _inner = inner;
-            }
-
-            public async Task<LlmCompletionResult> CompleteAsync(
-                LlmCompletionRequest request,
-                CancellationToken cancellationToken = default)
-            {
-                LastResult = await _inner.CompleteAsync(request, cancellationToken);
-                return LastResult;
-            }
-
-            public void SetTools(IReadOnlyList<ILlmTool> tools)
-            {
-                _inner.SetTools(tools);
             }
         }
 
@@ -167,7 +143,7 @@ namespace CoreAI.Tests.PlayMode
                 BuiltInFullLuaSkillText.Instructions));
 
             InMemoryStore memoryStore = new();
-            setup.Capturing = new CapturingLlmClient(handle.WrapWithMemoryStore(memoryStore));
+            setup.Capturing = new LiveCapturingLlmClient(handle.WrapWithMemoryStore(memoryStore));
 
             AiPromptComposer composer = new(
                 new BuiltInDefaultAgentSystemPromptProvider(),

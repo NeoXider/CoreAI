@@ -505,6 +505,23 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void ExcludeScenes_BlankSpecKeepsTheFrozenSetAndNamesRemoveOnlyThoseScenes()
+        {
+            string[] frozen = CoreAIG11WebGlBuild.GetFrozenScenePaths();
+
+            CollectionAssert.AreEqual(frozen, CoreAIG11WebGlBuild.ExcludeScenes(frozen, null));
+            CollectionAssert.AreEqual(frozen, CoreAIG11WebGlBuild.ExcludeScenes(frozen, "  "));
+
+            string[] kept = CoreAIG11WebGlBuild.ExcludeScenes(
+                frozen, "coreaihubdemo; Assets/CoreAI.Demos/Skills/SkillsDemo.unity");
+
+            Assert.AreEqual(frozen.Length - 2, kept.Length);
+            CollectionAssert.DoesNotContain(kept, "Assets/CoreAI.Demos/Hub/CoreAiHubDemo.unity");
+            CollectionAssert.DoesNotContain(kept, "Assets/CoreAI.Demos/Skills/SkillsDemo.unity");
+            Assert.Throws<BuildFailedException>(() => CoreAIG11WebGlBuild.ExcludeScenes(frozen, "NoSuchScene"));
+        }
+
+        [Test]
         public void PrepareOutputDirectory_RemovesStaleFilesAndRejectsOtherPaths()
         {
             string outputPath = CoreAIG11WebGlBuild.GetOutputPath(_projectRoot);

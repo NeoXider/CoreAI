@@ -1787,6 +1787,36 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void BuildMessagesPayload_ImageOnlyUserMessage_SendsOnlyTheImagePart()
+        {
+            // An image-only message has no TextContent; the wire must not carry the stringified
+            // "Microsoft.Extensions.AI.DataContent" type name as a text part next to the image
+            // (observed in the WebGL player on 2026-09-30).
+            byte[] png = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+            List<MEAI.ChatMessage> msgs = new()
+            {
+                AiUserMessageBuilder.BuildUserMessage(
+                    "", new List<AiAttachment> { AiAttachment.Image(png, "image/png", "a.png") }),
+                AiUserMessageBuilder.BuildUserMessage(
+                    "describe", new List<AiAttachment> { AiAttachment.Image(png, "image/png", "b.png") })
+            };
+
+            List<Dictionary<string, object>> payload =
+                MeaiOpenAiChatClient.BuildMessagesPayloadForTests(msgs);
+
+            string imageOnly = JToken.FromObject(payload[0]["content"]).ToString();
+            StringAssert.DoesNotContain("DataContent", imageOnly);
+            JArray imageOnlyParts = JArray.Parse(imageOnly);
+            Assert.AreEqual(1, imageOnlyParts.Count, imageOnly);
+            Assert.AreEqual("image_url", (string)imageOnlyParts[0]["type"]);
+
+            JArray withText = JArray.FromObject(payload[1]["content"]);
+            Assert.AreEqual(2, withText.Count, withText.ToString());
+            Assert.AreEqual("describe", (string)withText[0]["text"]);
+            Assert.AreEqual("image_url", (string)withText[1]["type"]);
+        }
+
+        [Test]
         public void BuildMessagesPayload_ToolMessageWithMultipleResults_EmitsOneWireMessagePerResult()
         {
             // A Tool-role MEAI message carrying the whole turn's results must expand to one

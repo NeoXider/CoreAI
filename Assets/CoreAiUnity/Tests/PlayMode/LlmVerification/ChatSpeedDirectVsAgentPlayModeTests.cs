@@ -26,11 +26,20 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public class ChatSpeedDirectVsAgentPlayModeTests
     {
+        // WHY: without [Timeout] the framework aborts at 180 s, but the probe runs six sequential 120 s streams
+        // (warm + measure for three shapes) = 720 s, + the 20 s LiveTestRequestScope reserve = 740 s; 960 s leaves
+        // ~220 s for setup. TestAgentSetup.Initialize is not capped (SharedLlmUnity allows up to 600 s for a cold
+        // GGUF load and 300 s when another test is already loading); the Cap on every wait protects the request, so
+        // a slower load shortens the turn or ends in the test's own cancelling wait, never a stranded request.
+        private const int TestTimeoutMs = 960_000;
+
         private TestAgentSetup _setup;
+        private LiveTestRequestScope _requests;
 
         [UnitySetUp]
         public IEnumerator Setup()
         {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
             _setup = new TestAgentSetup();
             yield return _setup.Initialize();
             Assert.IsTrue(_setup.IsReady, $"LLM backend not ready ({_setup.BackendName}). Configure a live model.");
@@ -39,11 +48,20 @@ namespace CoreAI.Tests.PlayMode
         [UnityTearDown]
         public IEnumerator TearDown()
         {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
             _setup?.Dispose();
             yield return null;
         }
 
         [UnityTest]
+        [Timeout(TestTimeoutMs)]
         [Explicit("Live speed probe: direct model call vs CoreAI agent pipeline. Run manually against a live model.")]
         public IEnumerator DirectVsAgent_Speed()
         {
@@ -60,21 +78,19 @@ namespace CoreAI.Tests.PlayMode
             // A) DIRECT — raw provider client, minimal system prompt, no tools (like native LLMUnity chat).
             ThroughputProbe direct = new();
             yield return WarmThenMeasure(
-                () => _setup.Client.CompleteStreamingAsync(Direct(userText), CancellationToken.None),
+                ct => _setup.Client.CompleteStreamingAsync(Direct(userText), ct),
                 timeout, "direct", direct);
 
             // B) AGENT (PlainChat) — full orchestrator pipeline with a light, tool-free role.
             ThroughputProbe agentLight = new();
             yield return WarmThenMeasure(
-                () => _setup.Orchestrator.RunStreamingAsync(Turn(BuiltInAgentRoleIds.PlainChat, userText),
-                    CancellationToken.None),
+                ct => _setup.Orchestrator.RunStreamingAsync(Turn(BuiltInAgentRoleIds.PlainChat, userText), ct),
                 timeout, "agent-plainchat", agentLight);
 
             // C) AGENT (Creator) — full orchestrator pipeline with the tool-configured game-master role.
             ThroughputProbe agentHeavy = new();
             yield return WarmThenMeasure(
-                () => _setup.Orchestrator.RunStreamingAsync(Turn(BuiltInAgentRoleIds.Creator, userText),
-                    CancellationToken.None),
+                ct => _setup.Orchestrator.RunStreamingAsync(Turn(BuiltInAgentRoleIds.Creator, userText), ct),
                 timeout, "agent-creator", agentHeavy);
 
             Debug.Log(
@@ -112,12 +128,15 @@ namespace CoreAI.Tests.PlayMode
         /// whichever path runs last looks fastest regardless of prompt size.
         /// </summary>
         private IEnumerator WarmThenMeasure(
-            Func<IAsyncEnumerable<LlmStreamChunk>> streamFactory,
+            Func<CancellationToken, IAsyncEnumerable<LlmStreamChunk>> streamFactory,
             float timeout, string label, ThroughputProbe probe)
         {
+            CancellationTokenSource cts = _requests.CreateCancellation();
             ThroughputProbe warm = new();
-            yield return _setup.RunAndWait(MeasureAsync(streamFactory(), warm), timeout, label + "-warm");
-            yield return _setup.RunAndWait(MeasureAsync(streamFactory(), probe), timeout, label);
+            Task warmTask = _requests.Track(MeasureAsync(streamFactory(cts.Token), warm));
+            yield return _setup.RunAndWait(warmTask, _requests.Cap(timeout), label + "-warm", cts);
+            Task measureTask = _requests.Track(MeasureAsync(streamFactory(cts.Token), probe));
+            yield return _setup.RunAndWait(measureTask, _requests.Cap(timeout), label, cts);
         }
 
         private static LlmCompletionRequest Direct(string userText)

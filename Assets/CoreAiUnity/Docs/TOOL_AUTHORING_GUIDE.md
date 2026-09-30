@@ -284,6 +284,46 @@ Rules of thumb:
 - Honoured in **all three** agentic paths: `SmartToolCallingChatClient` (non-streaming) and both streaming
   paths in `MeaiLlmClient` (native tool calls and text-extracted ones).
 
+## Returning images from a tool
+
+Tool messages cannot carry images on OpenAI-compatible APIs, so a tool that produces a picture (a camera, a
+render, a chart, a minimap) returns an `LlmToolImageResult`: `Text` is the tool message (keep it a short JSON
+summary), `Images` are delivered to the model as image parts of a follow-up user message before the next
+request — *"Image returned by tool 'render_preview'. Inspect it and continue with the task."* Earlier images of
+other calls stay in the turn (a before/after comparison works; the newest 8 are kept). Only the camera tools
+(`camera_capture`, `screenshot`, `capture_camera`) replace their previous frame and use the camera prompt. No base64
+anywhere — the encoder's bytes reach the provider serializer untouched, and each image is encoded once per turn.
+
+```csharp
+// DelegateLlmTool keeps the result typed automatically:
+var minimap = new DelegateLlmTool("minimap", "See the level from above.", (Func<LlmToolImageResult>)(() =>
+    new LlmToolImageResult("{\"ok\":true,\"imageAttached\":true}", minimapCamera.CaptureAiAttachment(512))));
+
+// A hand-made AIFunction must opt in, or MEAI serializes the result to JSON and the image is lost:
+AIFunctionFactory.Create((Func<CancellationToken, Task<object>>)RenderAsync, new AIFunctionFactoryOptions
+{
+    Name = "render_preview",
+    MarshalResult = LlmToolImageResult.PreserveResult
+});
+```
+
+Rules (enforced by `ToolExecutionPolicy`, fail-closed): only supported image types (`png`, `jpeg`, `webp`, `gif`)
+with 1 byte to 4 MB of data (`LlmToolImageResult.MaxImageBytes`) or a URI are delivered; anything else is dropped
+and the tool text gets an `[image not attached: ...]` note. The images are ignored by JSON serializers, so they can
+never leak into a tool message as text. Only a vision-capable model can read them.
+
+Threading: capturing (`CaptureAiAttachment`, `ToAiAttachment`) must run on the Unity main thread. Tool bodies already
+start there in players and in Play Mode — `UnityMainThreadLlmAsyncMarshaler` invokes them on the main thread — so the
+synchronous minimap example above may capture inline. An **async** body must capture before it leaves the main
+thread: do not `await` a thread-pool hop (`Task.Run`, `UniTask.SwitchToThreadPool`, `ConfigureAwait(false)`) before
+the capture. A tool that can also be invoked off the main thread (a custom host, a background agent) hops explicitly
+with `await UniTask.SwitchToMainThread(ct)` first, as `CameraLlmTool` does.
+
+The built-in `camera_capture` / `screenshot` and `capture_camera` tools use this path; an older tool that still
+returns a base64 `dataUrl` in its JSON is decoded once by the policy and delivered the same way. Hosts that observe
+tool calls (`CoreAi.OnToolExecuted`) receive the `LlmToolImageResult` itself as the result — read `.Images`;
+`ToString()` is only the summary.
+
 ## Common pitfalls
 
 **1. The description-less native schema (the rotation/scale bug — worked example).**

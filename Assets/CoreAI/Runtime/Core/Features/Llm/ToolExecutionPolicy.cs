@@ -873,36 +873,33 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 sw.Stop();
-                string resultText = NormalizeToolResultText(result);
+                LlmToolImageResult imageResult = result as LlmToolImageResult;
+                string resultText = NormalizeToolResultText(imageResult != null ? imageResult.Text : result);
                 bool succeeded = IsToolResultSuccess(resultText);
-                string diagnosticResultText = resultText;
-                bool cameraImageResult = false;
-                if (succeeded && fc.Name is ("camera_capture" or "screenshot"))
+                // WHY: images never travel inside the tool message text. A typed result already carries them
+                // out-of-band; a legacy camera result with a base64 dataUrl is parsed and decoded ONCE here and
+                // converted to the same typed form, so SmartToolCallingChatClient lifts it without parsing it
+                // again. Only images a vision model can receive are kept (the same rule as the lifter); anything
+                // else stays ordinary text and takes the ordinary size cut below.
+                if (imageResult != null)
                 {
-                    try
-                    {
-                        JObject cameraResult = JObject.Parse(resultText);
-                        string dataUrl = cameraResult.Value<string>("dataUrl");
-                        if (!string.IsNullOrEmpty(dataUrl) &&
-                            dataUrl.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase) &&
-                            dataUrl.Length <= 4 * 1024 * 1024 * 4 / 3 + 128)
-                        {
-                            // WHY: the image must survive until SmartToolCallingChatClient lifts it into
-                            // WHY: a provider image part; diagnostics only need the JSON summary.
-                            cameraResult.Remove("dataUrl");
-                            cameraResult["imageAttached"] = true;
-                            diagnosticResultText = cameraResult.ToString(Formatting.None);
-                            cameraImageResult = true;
-                        }
-                    }
-                    catch (JsonException)
-                    {
-                        // WHY: malformed camera feedback follows the ordinary bounded text path.
-                    }
+                    imageResult = imageResult.KeepDeliverable();
+                    resultText = NormalizeToolResultText(imageResult.Text);
+                }
+                else if (succeeded && SmartToolCallingChatClient.IsCameraToolName(fc.Name) &&
+                         SmartToolCallingChatClient.TryReadLiftableCameraImage(
+                             resultText, out JObject cameraResult, out AiAttachment cameraImage))
+                {
+                    cameraResult.Remove("dataUrl");
+                    cameraResult["imageAttached"] = true;
+                    imageResult = LlmToolImageResult.FromLegacyCameraResult(
+                        resultText, cameraResult.ToString(Formatting.None), cameraImage);
+                    resultText = imageResult.Text;
                 }
 
+                string diagnosticResultText = resultText;
                 int maxResultChars = _settings.MaxToolResultChars;
-                if (!cameraImageResult && maxResultChars > 0 && resultText.Length > maxResultChars)
+                if (maxResultChars > 0 && resultText.Length > maxResultChars)
                 {
                     int originalLen = resultText.Length;
                     // Truncation is made visible to the model with an explicit marker rather than silently:
@@ -915,6 +912,11 @@ namespace CoreAI.Infrastructure.Llm
                     _logger.Info(
                         $"[ToolPolicy] Tool '{fc.Name}' result truncated: {originalLen} -> {shown} chars",
                         LogTag.Llm);
+                }
+
+                if (imageResult != null && !ReferenceEquals(resultText, imageResult.Text))
+                {
+                    imageResult = imageResult.WithText(resultText);
                 }
 
                 if (_settings.LogMeaiToolCallingSteps)
@@ -959,7 +961,8 @@ namespace CoreAI.Infrastructure.Llm
 
                 return new ToolCallResult
                 {
-                    Result = new MEAI.FunctionResultContent(fc.CallId, resultText),
+                    Result = new MEAI.FunctionResultContent(fc.CallId,
+                        imageResult != null ? (object)imageResult : resultText),
                     Succeeded = succeeded
                 };
             }

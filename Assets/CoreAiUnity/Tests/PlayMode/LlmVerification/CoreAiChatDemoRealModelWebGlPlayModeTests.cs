@@ -36,13 +36,28 @@ namespace CoreAI.Tests.PlayMode
         [UnityTearDown]
         public IEnumerator ScrubTestScopedHistoryAndUnloadLoadedScenes()
         {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed. Only the pacing probe's service request runs on a scope source:
+            // panel turns take no token, the panel owns their cancellation, and the scrub below stops and
+            // settles them before the unload.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
             // WHY the scrub precedes the unload: the panel and the scope's stores are reachable only while
             // the scene is loaded, and a turn the test left in flight must settle first — the cancellation
             // an unload triggers still appends the turn's user line to history, after any earlier erase.
             yield return ScrubTestScopedChatHistory();
-            // Single-mode scene loads otherwise persist past this test and leak their scope into the
+            // WHY: single-mode scene loads otherwise persist past this test and leak their scope into the
             // rest of the PlayMode run.
             yield return PlayModeSceneSandbox.UnloadToEmptyScene();
+
+            // WHY: a framework timeout during the scene load skips the body's release, which would leave the
+            // test memory scope queued for every LifetimeScope built later in the run.
+            _extraInstallers?.Dispose();
+            _extraInstallers = null;
         }
 
         private const string LogPrefix = "[CoreAI.Tests.ChatSceneRealModel]";
@@ -56,7 +71,13 @@ namespace CoreAI.Tests.PlayMode
 
         // WHY 120 s: the budget phase two already grants a stopped turn (WaitTask after StopAgent), so the
         // timeout path holds the cancel path to the contract this test asserts anyway, not a stricter one.
+        // Like every other wait it is capped by LiveTestRequestScope, see SettleBudget.
         private const float StopSettleTimeoutSeconds = 120f;
+
+        // WHY 5 s: once the scope budget is spent the capped settle wait would be zero, which would judge a
+        // turn as hung without giving its cancellation a single frame; 5 s matches the WaitTask cancellation
+        // grace and fits inside the scope reserve.
+        private const float MinSettleSeconds = 5f;
 
         // WHY 120 s and 3 frames: the pacing probe repeats an unsampled prompt through the panel's own
         // service so the skip message can say how this endpoint paced it. Three polled frames with content
@@ -68,6 +89,20 @@ namespace CoreAI.Tests.PlayMode
         // WHY 10 s: the teardown only needs a turn the test left in flight to settle after Stop before the
         // test-scoped history is erased; a turn that ignores Stop for longer has already failed the test.
         private const float TearDownSettleTimeoutSeconds = 10f;
+
+        // WHY: the stream test's worst path is scene load (~20 s) + 90 s first visible wait + 120 s first answer
+        // + 240 s cancellable-stream wait + 120 s Stop settle + 120 s pacing probe + 120 s probe settle = ~830 s;
+        // 900 s leaves the 20 s LiveTestRequestScope reserve plus margin. Every one of those waits is capped by
+        // the scope, so a slower load shortens the last wait instead of reaching the framework abort; only the
+        // 5 s settle floor may run into the reserve. The former 600 s could abort mid-probe.
+        private const int StreamTestTimeoutMs = 900_000;
+
+        // WHY: scene load (~20 s) + 120 s stopped-turn settle + 10 s unlock + 120 s follow-up answer = ~270 s;
+        // 600 s leaves the 20 s reserve plus a wide margin for a cold endpoint.
+        private const int StopTestTimeoutMs = 600_000;
+
+        private LiveTestRequestScope _requests;
+        private IDisposable _extraInstallers;
 
         /// <summary>
         /// The memory scope every persisted SmartChat turn of the demo scene is keyed under while a test of
@@ -96,9 +131,10 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         [Category("RealLlm")]
         [Category("WebGL")]
-        [Timeout(600000)]
+        [Timeout(StreamTestTimeoutMs)]
         public IEnumerator CoreAiChatDemo_RealModel_StreamsStopAndRecovers()
         {
+            _requests = new LiveTestRequestScope(StreamTestTimeoutMs);
             DemoChat demo = new();
             yield return OpenDemoChat(demo);
             CoreAiChatPanel panel = demo.Panel;
@@ -126,17 +162,17 @@ namespace CoreAI.Tests.PlayMode
             Task<string> firstTask = Submit(panel, firstPrompt, options);
             StreamingTextProbe firstProbe = new();
             yield return WaitForVisibleStreamingText(
-                firstTask, panel, chatService, firstPrompt, firstProbe, 90f, "first real-model stream",
+                firstTask, panel, chatService, firstPrompt, firstProbe, _requests.Cap(90f), "first real-model stream",
                 priorTurnCompleted: false);
             Debug.Log($"{LogPrefix} First visible stream: '{TrimForLog(firstProbe.Text)}'");
-            yield return WaitTask(firstTask, 120f, "first real-model response");
+            yield return WaitTask(firstTask, _requests.Cap(120f), "first real-model response");
             Assert.IsFalse(string.IsNullOrWhiteSpace(firstTask.Result), $"{LogPrefix} First response is empty.");
             Debug.Log($"{LogPrefix} First final response: '{TrimForLog(firstTask.Result)}'");
 
             Task<string> stopTask = Submit(panel, LongListPrompt, options);
             StreamingTextProbe stopProbe = new();
             yield return WaitForVisibleStreamingText(
-                stopTask, panel, chatService, LongListPrompt, stopProbe, 240f, "cancellable real-model stream",
+                stopTask, panel, chatService, LongListPrompt, stopProbe, _requests.Cap(240f), "cancellable real-model stream",
                 priorTurnCompleted: true);
             if (stopTask.IsCompleted)
             {
@@ -151,7 +187,7 @@ namespace CoreAI.Tests.PlayMode
             string textAtStop = stoppedLabel?.text ?? string.Empty;
             Debug.Log($"{LogPrefix} Stop before text: '{TrimForLog(textAtStop)}'");
             panel.StopAgent();
-            yield return WaitTask(stopTask, 120f, "stopped real-model response");
+            yield return WaitTask(stopTask, _requests.Cap(120f), "stopped real-model response");
             Assert.IsNull(stopTask.Result, $"{LogPrefix} Stop should cancel the active turn and return null.");
             yield return WaitUntil(() => !panel.IsBusy, 10f, "chat panel unlock after Stop");
             yield return null;
@@ -163,7 +199,7 @@ namespace CoreAI.Tests.PlayMode
             Task<string> thirdTask = Submit(panel,
                 "Give a short response showing chat still works.",
                 options);
-            yield return WaitTask(thirdTask, 120f, "third real-model response");
+            yield return WaitTask(thirdTask, _requests.Cap(120f), "third real-model response");
             Assert.IsFalse(string.IsNullOrWhiteSpace(thirdTask.Result), $"{LogPrefix} Third response is empty.");
             Assert.IsFalse(panel.IsBusy, $"{LogPrefix} Chat panel stayed busy after third response.");
             Debug.Log($"{LogPrefix} Third final response after Stop: '{TrimForLog(thirdTask.Result)}'");
@@ -177,9 +213,10 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         [Category("RealLlm")]
         [Category("WebGL")]
-        [Timeout(600000)]
+        [Timeout(StopTestTimeoutMs)]
         public IEnumerator CoreAiChatDemo_RealModel_StopCancelsTheTurnAndChatRecovers()
         {
+            _requests = new LiveTestRequestScope(StopTestTimeoutMs);
             // WHY a second test rather than a flag in the first: the streaming test skips whenever the
             // endpoint hands over its whole answer before a frame can sample it, and that skip used to take
             // Stop, the null result, the unlock and the follow-up turn down with it. None of those need a
@@ -209,7 +246,7 @@ namespace CoreAI.Tests.PlayMode
 
             panel.StopAgent();
             string bubblesAtStop = DescribeAssistantBubbles(panel);
-            yield return WaitTask(stopTask, 120f, "stopped real-model response");
+            yield return WaitTask(stopTask, _requests.Cap(120f), "stopped real-model response");
             Assert.IsNull(stopTask.Result, $"{LogPrefix} Stop should cancel the active turn and return null.");
             yield return WaitUntil(() => !panel.IsBusy, 10f, "chat panel unlock after Stop");
             yield return null;
@@ -221,7 +258,7 @@ namespace CoreAI.Tests.PlayMode
             Task<string> nextTask = Submit(panel,
                 "Give a short response showing chat still works.",
                 options);
-            yield return WaitTask(nextTask, 120f, "real-model response after Stop");
+            yield return WaitTask(nextTask, _requests.Cap(120f), "real-model response after Stop");
             Assert.IsFalse(string.IsNullOrWhiteSpace(nextTask.Result), $"{LogPrefix} Response after Stop is empty.");
             Assert.IsFalse(panel.IsBusy, $"{LogPrefix} Chat panel stayed busy after the response that followed Stop.");
             Debug.Log($"{LogPrefix} Final response after Stop: '{TrimForLog(nextTask.Result)}'");
@@ -243,12 +280,14 @@ namespace CoreAI.Tests.PlayMode
             // builds its container in Awake while the load completes, so no frame exists in which the test
             // holds the scope unbuilt. VContainer runs the installer queued here after Configure, and a later
             // registration of the same interface is the one the container resolves, so the decorators that
-            // key memory, history, transcript and summary all take the test scope. Disposed as soon as the
-            // load returns, so no scope built later in the run inherits it.
-            using (LifetimeScope.Enqueue(builder => builder.RegisterInstance<IAgentMemoryScopeProvider>(TestMemoryScope)))
-            {
-                yield return SceneManager.LoadSceneAsync(SceneName, LoadSceneMode.Single);
-            }
+            // key memory, history, transcript and summary all take the test scope. Released as soon as the
+            // load returns, so no scope built later in the run inherits it; the teardown releases it when a
+            // framework timeout abandons the load, since a body using-block would not run then.
+            _extraInstallers =
+                LifetimeScope.Enqueue(builder => builder.RegisterInstance<IAgentMemoryScopeProvider>(TestMemoryScope));
+            yield return SceneManager.LoadSceneAsync(SceneName, LoadSceneMode.Single);
+            _extraInstallers.Dispose();
+            _extraInstallers = null;
 
             yield return null;
             yield return null;
@@ -414,6 +453,15 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
+        /// <summary>
+        /// <see cref="StopSettleTimeoutSeconds"/> capped to what the scope has left, but never below
+        /// <see cref="MinSettleSeconds"/>.
+        /// </summary>
+        private float SettleBudget()
+        {
+            return Mathf.Max(MinSettleSeconds, _requests.Cap(StopSettleTimeoutSeconds));
+        }
+
         private static IEnumerator WaitForChatService(CoreAiChatPanel panel, float timeoutSeconds)
         {
             float started = Time.realtimeSinceStartup;
@@ -423,7 +471,7 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
-        private static IEnumerator WaitForVisibleStreamingText(
+        private IEnumerator WaitForVisibleStreamingText(
             Task<string> task,
             CoreAiChatPanel panel,
             CoreAiChatService chatService,
@@ -435,6 +483,7 @@ namespace CoreAI.Tests.PlayMode
         {
             float started = Time.realtimeSinceStartup;
             bool timedOut = false;
+            float settleSeconds = 0f;
             while (!task.IsCompleted)
             {
                 Label label = GetStreamingLabel(panel);
@@ -463,8 +512,9 @@ namespace CoreAI.Tests.PlayMode
                 // then repeats the prompt through the same service so the skip message says how this endpoint
                 // paced it; it can neither clear nor blame the panel, see JudgeUnsampledTurn.
                 StopActiveTurn(panel, task, operationName);
+                settleSeconds = SettleBudget();
                 float stopIssued = Time.realtimeSinceStartup;
-                while (!task.IsCompleted && Time.realtimeSinceStartup - stopIssued <= StopSettleTimeoutSeconds)
+                while (!task.IsCompleted && Time.realtimeSinceStartup - stopIssued <= settleSeconds)
                 {
                     yield return null;
                 }
@@ -476,7 +526,7 @@ namespace CoreAI.Tests.PlayMode
             string diagnostics =
                 $"TaskStatus={task.Status}; visibleLabels='{DescribeVisibleLabels(panel)}'; " +
                 $"FinalResult='{DescribeCompletedTaskResult(task)}'.";
-            FailTurnThatBroke(task, timedOut, prelude, diagnostics);
+            FailTurnThatBroke(task, timedOut, settleSeconds, prelude, diagnostics);
 
             if (timedOut && !priorTurnCompleted)
             {
@@ -497,12 +547,13 @@ namespace CoreAI.Tests.PlayMode
         /// Fails a turn that never showed partial text for the reasons that are the product's whatever the
         /// endpoint did: it did not settle after Stop, it ended in an error, or it completed with nothing.
         /// </summary>
-        private static void FailTurnThatBroke(Task<string> task, bool stoppedAfterTimeout, string prelude, string diagnostics)
+        private static void FailTurnThatBroke(
+            Task<string> task, bool stoppedAfterTimeout, float settleSeconds, string prelude, string diagnostics)
         {
             if (!task.IsCompleted)
             {
                 Assert.Fail(
-                    $"{prelude}; the turn did not settle within {StopSettleTimeoutSeconds:0.#}s after Stop. {diagnostics} " +
+                    $"{prelude}; the turn did not settle within {settleSeconds:0.#}s after Stop. {diagnostics} " +
                     "A turn that neither renders text nor honours Stop is a product hang, not a slow endpoint.");
             }
 
@@ -529,23 +580,26 @@ namespace CoreAI.Tests.PlayMode
         /// arrived only in the completion frame is counted and dated. The record feeds the skip message;
         /// only a probe that ignores cancellation afterwards turns into a verdict.
         /// </summary>
-        private static IEnumerator ProbeServicePacing(
+        private IEnumerator ProbeServicePacing(
             CoreAiChatService chatService,
             bool panelUiStreaming,
             string prompt,
             PacingProbe pacing)
         {
-            CancellationTokenSource cancellation = new();
+            // WHY a scope source: the teardown cancels and drains the probe even when a framework timeout
+            // abandons this coroutine mid-probe; the scope disposes it, so this method never does.
+            CancellationTokenSource cancellation = _requests.CreateCancellation();
+            float probeTimeoutSeconds = _requests.Cap(PacingProbeTimeoutSeconds);
             // WHY a stopwatch and not Time.realtimeSinceStartup: the chunk callback may run off the main
             // thread, where Unity's clock throws; this one is readable anywhere and every timestamp in the
             // probe shares it.
             System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
-            Task<string> task = chatService.SendMessageSmartAsync(
+            Task<string> task = _requests.Track(chatService.SendMessageSmartAsync(
                 prompt,
                 RoleId,
                 chunk => pacing.RecordChunk(chunk, clock.Elapsed.TotalSeconds),
                 panelUiStreaming,
-                cancellation.Token);
+                cancellation.Token));
 
             while (!task.IsCompleted)
             {
@@ -568,7 +622,7 @@ namespace CoreAI.Tests.PlayMode
                         pacing.OpenFramesWithReasoning++;
                     }
 
-                    if (clock.Elapsed.TotalSeconds > PacingProbeTimeoutSeconds)
+                    if (clock.Elapsed.TotalSeconds > probeTimeoutSeconds)
                     {
                         pacing.TimedOut = true;
                         break;
@@ -581,18 +635,15 @@ namespace CoreAI.Tests.PlayMode
             pacing.Seconds = (float)clock.Elapsed.TotalSeconds;
             pacing.OpenAtExit = !task.IsCompleted;
             cancellation.Cancel();
+            pacing.SettleSeconds = SettleBudget();
             float cancelled = Time.realtimeSinceStartup;
-            while (!task.IsCompleted && Time.realtimeSinceStartup - cancelled <= StopSettleTimeoutSeconds)
+            while (!task.IsCompleted && Time.realtimeSinceStartup - cancelled <= pacing.SettleSeconds)
             {
                 yield return null;
             }
 
             pacing.Settled = task.IsCompleted;
             pacing.Error = task.IsFaulted ? task.Exception?.GetBaseException().Message : null;
-            if (task.IsCompleted)
-            {
-                cancellation.Dispose();
-            }
         }
 
         /// <summary>
@@ -607,7 +658,7 @@ namespace CoreAI.Tests.PlayMode
             if (!pacing.Settled)
             {
                 Assert.Fail(
-                    $"{prelude}; the pacing probe then ignored cancellation for {StopSettleTimeoutSeconds:0.#}s ({pacingReport}), " +
+                    $"{prelude}; the pacing probe then ignored cancellation for {pacing.SettleSeconds:0.#}s ({pacingReport}), " +
                     $"a hang the product owns. {diagnostics}");
             }
 
@@ -890,6 +941,9 @@ namespace CoreAI.Tests.PlayMode
             public bool OpenAtExit;
             public bool TimedOut;
             public bool Settled;
+
+            /// <summary>How long the probe waited for its cancelled request to settle.</summary>
+            public float SettleSeconds;
             public string Error;
 
             /// <summary>Content deltas that reached the callback so far, including any that arrived in the completion frame.</summary>

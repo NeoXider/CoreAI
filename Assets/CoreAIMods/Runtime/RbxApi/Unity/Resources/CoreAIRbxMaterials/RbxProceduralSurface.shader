@@ -9,6 +9,7 @@ Shader "CoreAI/Rbx/Procedural Surface"
         [HideInInspector] _MaterialMode("Material Mode", Float) = 0
         [HideInInspector] _PatternScale("Pattern Scale", Float) = 1
         [HideInInspector] _BumpStrength("Bump Strength", Float) = 0.3
+        [HideInInspector] _GrainStrength("Grain Strength", Float) = 0
         [HideInInspector] _BaseMap("Base Map", 2D) = "white" {}
         [HideInInspector] _Cutoff("Alpha Cutoff", Range(0,1)) = 0.5
     }
@@ -61,6 +62,7 @@ Shader "CoreAI/Rbx/Procedural Surface"
                 float _MaterialMode;
                 float _PatternScale;
                 float _BumpStrength;
+                float _GrainStrength;
             CBUFFER_END
 
             struct Attributes
@@ -113,7 +115,7 @@ Shader "CoreAI/Rbx/Procedural Surface"
                 half3 baseColor = RbxComposeMaterialColor(_Color.rgb, _MaterialColor.rgb,
                     _PartColorInfluence);
                 RbxSurfaceSample procedural = RbxEvaluateSurface(patternPosition,
-                    geometricPatternNormal, materialMode, _PatternScale, baseColor);
+                    geometricPatternNormal, materialMode, _PatternScale, baseColor, _GrainStrength);
                 float3 normalWS = RbxPerturbNormal(input.positionWS, geometricNormalWS,
                     procedural.heightGradient, objectAlignedProjection, _PatternScale,
                     _BumpStrength, procedural.height);

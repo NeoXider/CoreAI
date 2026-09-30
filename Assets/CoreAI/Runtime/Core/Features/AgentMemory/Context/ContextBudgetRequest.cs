@@ -14,6 +14,13 @@ namespace CoreAI.Ai
         /// <summary>User payload text.</summary>
         public string UserPayload { get; set; }
 
+        /// <summary>
+        /// Estimated tokens of the text files inlined into the user turn next to <see cref="UserPayload"/> (see
+        /// <see cref="AiUserMessageBuilder.EstimateInlinedTextTokens"/>); 0 when the turn has none. Images are not
+        /// counted: they travel as separate image parts.
+        /// </summary>
+        public int InlinedAttachmentTokens { get; set; }
+
         /// <summary>Tools exposed on this request (for schema/description estimate).</summary>
         public IReadOnlyList<ILlmTool> Tools { get; set; }
 

@@ -58,10 +58,45 @@ namespace CoreAI.Tests.PlayMode
         private const int RequestTimeoutSeconds = 180;
         private const float WaitSeconds = 180f;
 
+        // WHY: one WaitSeconds turn plus an optional GGUF load; LiveTestRequestScope caps the turn to what is
+        // left so a slow load ends in the test's own cancelling wait instead of a framework abort.
+        private const int TestTimeoutMs = 300000;
+
+        // WHY: reasoning models spend the output budget on hidden reasoning before any visible text; the
+        // 256-token cap starved them into empty answers the same way the 32-token cap did in
+        // RuntimeBackendSwitchLivePlayModeTests. 4096 matches the other bounded live fixtures while still
+        // stopping a runaway turn from occupying a serial provider bridge.
+        private const int AnswerMaxOutputTokens = 4096;
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup, so cancel the abandoned request here and
+            // let it unwind before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
+        }
+
         // ===================== 1. Text attachment, STREAMING (primary) =====================
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator TextAttachment_Streaming_ModelReadsInlinedFile()
         {
             if (!TryCreateHandle(null, out PlayModeProductionLikeLlmHandle handle, out string ignore))
@@ -69,34 +104,35 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            using (handle)
-            {
-                yield return EnsureBackendReady(handle);
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
 
-                byte[] md = Encoding.UTF8.GetBytes(
-                    "# Secret Note\n\nThe secret code word is " + TextSentinel + ". Keep it safe.\n");
-                AiTaskRequest task = BuildTask(
-                    "AttachTest_TextStream",
-                    "What is the secret code word in the attached file? Reply with just the code word.",
-                    new List<AiAttachment> { AiAttachment.FromFile("secret.md", md) });
+            yield return EnsureBackendReady(handle);
 
-                StreamOutcome outcome = new();
-                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, true, out _);
-                Task run = RunStreamingCollectAsync(orch, task, outcome, CancellationToken.None);
-                yield return PlayModeTestAwait.WaitTask(run, WaitSeconds, "TextAttachment_Streaming");
+            byte[] md = Encoding.UTF8.GetBytes(
+                "# Secret Note\n\nThe secret code word is " + TextSentinel + ". Keep it safe.\n");
+            AiTaskRequest task = BuildTask(
+                "AttachTest_TextStream",
+                "What is the secret code word in the attached file? Reply with just the code word.",
+                new List<AiAttachment> { AiAttachment.FromFile("secret.md", md) });
 
-                string answer = outcome.Text.ToString();
-                Debug.Log($"[AttachmentLive] TextAttachment_Streaming answer: {answer} (error={outcome.Error})");
-                Assert.IsNull(outcome.Error, $"Streaming attachment turn failed: {outcome.Error}");
-                StringAssert.Contains(TextSentinel, answer,
-                    "The streamed answer must contain the sentinel inlined from the attached .md file.");
-            }
+            StreamOutcome outcome = new();
+            AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, true, out _);
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task run = _requests.Track(RunStreamingCollectAsync(orch, task, outcome, cts.Token));
+            yield return PlayModeTestAwait.WaitTask(run, _requests.Cap(WaitSeconds), "TextAttachment_Streaming", cts);
+
+            string answer = outcome.Text.ToString();
+            Debug.Log($"[AttachmentLive] TextAttachment_Streaming answer: {answer} (error={outcome.Error})");
+            Assert.IsNull(outcome.Error, $"Streaming attachment turn failed: {outcome.Error}");
+            StringAssert.Contains(TextSentinel, answer,
+                "The streamed answer must contain the sentinel inlined from the attached .md file.");
         }
 
         // ===================== 2. Lua attachment, STREAMING (primary) =====================
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator LuaAttachment_Streaming_ModelAnswersAboutCode()
         {
             if (!TryCreateHandle(null, out PlayModeProductionLikeLlmHandle handle, out string ignore))
@@ -104,34 +140,35 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            using (handle)
-            {
-                yield return EnsureBackendReady(handle);
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
 
-                byte[] lua = Encoding.UTF8.GetBytes(
-                    "-- spawn configuration\nlocal SPAWN_LIMIT = " + LuaSpawnLimit + "\nreturn SPAWN_LIMIT\n");
-                AiTaskRequest task = BuildTask(
-                    "AttachTest_LuaStream",
-                    "What number is SPAWN_LIMIT set to in the attached script? Reply with just the number.",
-                    new List<AiAttachment> { AiAttachment.FromFile("spawn.lua", lua) });
+            yield return EnsureBackendReady(handle);
 
-                StreamOutcome outcome = new();
-                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, true, out _);
-                Task run = RunStreamingCollectAsync(orch, task, outcome, CancellationToken.None);
-                yield return PlayModeTestAwait.WaitTask(run, WaitSeconds, "LuaAttachment_Streaming");
+            byte[] lua = Encoding.UTF8.GetBytes(
+                "-- spawn configuration\nlocal SPAWN_LIMIT = " + LuaSpawnLimit + "\nreturn SPAWN_LIMIT\n");
+            AiTaskRequest task = BuildTask(
+                "AttachTest_LuaStream",
+                "What number is SPAWN_LIMIT set to in the attached script? Reply with just the number.",
+                new List<AiAttachment> { AiAttachment.FromFile("spawn.lua", lua) });
 
-                string answer = outcome.Text.ToString();
-                Debug.Log($"[AttachmentLive] LuaAttachment_Streaming answer: {answer} (error={outcome.Error})");
-                Assert.IsNull(outcome.Error, $"Streaming lua-attachment turn failed: {outcome.Error}");
-                StringAssert.Contains(LuaSpawnLimit, answer,
-                    "The streamed answer must report the SPAWN_LIMIT value read from the attached .lua file.");
-            }
+            StreamOutcome outcome = new();
+            AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, true, out _);
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task run = _requests.Track(RunStreamingCollectAsync(orch, task, outcome, cts.Token));
+            yield return PlayModeTestAwait.WaitTask(run, _requests.Cap(WaitSeconds), "LuaAttachment_Streaming", cts);
+
+            string answer = outcome.Text.ToString();
+            Debug.Log($"[AttachmentLive] LuaAttachment_Streaming answer: {answer} (error={outcome.Error})");
+            Assert.IsNull(outcome.Error, $"Streaming lua-attachment turn failed: {outcome.Error}");
+            StringAssert.Contains(LuaSpawnLimit, answer,
+                "The streamed answer must report the SPAWN_LIMIT value read from the attached .lua file.");
         }
 
         // ===================== 3. Text attachment, NON-STREAMING (secondary) =====================
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator TextAttachment_NonStreaming_SameBehavior()
         {
             if (!TryCreateHandle(null, out PlayModeProductionLikeLlmHandle handle, out string ignore))
@@ -139,35 +176,36 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            using (handle)
-            {
-                yield return EnsureBackendReady(handle);
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
 
-                // Distinct sentinel from test 1 so a cached streaming answer cannot satisfy this turn.
-                const string sentinel = "NARWHAL-8820";
-                byte[] md = Encoding.UTF8.GetBytes(
-                    "# Secret Note\n\nThe secret code word is " + sentinel + ". Keep it safe.\n");
-                AiTaskRequest task = BuildTask(
-                    "AttachTest_TextNonStream",
-                    "What is the secret code word in the attached file? Reply with just the code word.",
-                    new List<AiAttachment> { AiAttachment.FromFile("secret.md", md) });
+            yield return EnsureBackendReady(handle);
 
-                // streaming:false forces CompleteForTaskAsync down the non-streaming ILlmClient.CompleteAsync path.
-                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, false, out _);
-                TaskResultBox box = new();
-                Task run = RunTaskCollectAsync(orch, task, box, CancellationToken.None);
-                yield return PlayModeTestAwait.WaitTask(run, WaitSeconds, "TextAttachment_NonStreaming");
+            // Distinct sentinel from test 1 so a cached streaming answer cannot satisfy this turn.
+            const string sentinel = "NARWHAL-8820";
+            byte[] md = Encoding.UTF8.GetBytes(
+                "# Secret Note\n\nThe secret code word is " + sentinel + ". Keep it safe.\n");
+            AiTaskRequest task = BuildTask(
+                "AttachTest_TextNonStream",
+                "What is the secret code word in the attached file? Reply with just the code word.",
+                new List<AiAttachment> { AiAttachment.FromFile("secret.md", md) });
 
-                Debug.Log($"[AttachmentLive] TextAttachment_NonStreaming answer: {box.Content}");
-                StringAssert.Contains(sentinel, box.Content ?? "",
-                    "The non-streaming answer must contain the sentinel inlined from the attached .md file.");
-            }
+            // streaming:false forces CompleteForTaskAsync down the non-streaming ILlmClient.CompleteAsync path.
+            AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, false, out _);
+            TaskResultBox box = new();
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task run = _requests.Track(RunTaskCollectAsync(orch, task, box, cts.Token));
+            yield return PlayModeTestAwait.WaitTask(run, _requests.Cap(WaitSeconds), "TextAttachment_NonStreaming", cts);
+
+            Debug.Log($"[AttachmentLive] TextAttachment_NonStreaming answer: {box.Content}");
+            StringAssert.Contains(sentinel, box.Content ?? "",
+                "The non-streaming answer must contain the sentinel inlined from the attached .md file.");
         }
 
         // ===================== 4. Image attachment, STREAMING (vision-gated) =====================
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator ImageAttachment_Streaming_VisionModelSeesColor()
         {
             string modelOverride = GetEnv(EnvVisionModel);
@@ -176,59 +214,60 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            using (handle)
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
+
+            // Vision capability gate: reuse the production VisionCapability heuristic on the resolved model,
+            // overridable with COREAI_TEST_VISION=on|off. Text-only models are skipped, never failed.
+            string model = ResolveModelName(handle);
+            VisionSupportMode mode = ParseVisionMode(GetEnv(EnvVisionMode));
+            if (!VisionCapability.IsEnabled(mode, model))
             {
-                // Vision capability gate: reuse the production VisionCapability heuristic on the resolved model,
-                // overridable with COREAI_TEST_VISION=on|off. Text-only models are skipped, never failed.
-                string model = ResolveModelName(handle);
-                VisionSupportMode mode = ParseVisionMode(GetEnv(EnvVisionMode));
-                if (!VisionCapability.IsEnabled(mode, model))
-                {
-                    Assert.Ignore(
-                        $"Configured model '{model}' is not vision-capable (mode={mode}). " +
-                        $"Set {EnvVisionModel} to a vision model id and/or {EnvVisionMode}=on to run this test.");
-                }
-
-                yield return EnsureBackendReady(handle);
-
-                byte[] png = MakeSolidColorPng(64, 64, new Color32(255, 0, 0, 255));
-                AiTaskRequest task = BuildTask(
-                    "AttachTest_ImageStream",
-                    "What single dominant color is this image? Answer with one word.",
-                    new List<AiAttachment> { AiAttachment.Image(png, "image/png", "red64.png") });
-
-                StreamOutcome outcome = new();
-                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, true, out _);
-                Task run = RunStreamingCollectAsync(orch, task, outcome, CancellationToken.None);
-                yield return PlayModeTestAwait.WaitTask(run, WaitSeconds, "ImageAttachment_Streaming");
-
-                string answer = outcome.Text.ToString();
-                Debug.Log($"[AttachmentLive] ImageAttachment_Streaming answer: {answer} (error={outcome.Error})");
-
-                // A provider that lacks real vision typically rejects the image_url part with an error; skip
-                // (do not fail) so a mis-tagged model or keyless local server cannot red the suite.
-                if (!string.IsNullOrEmpty(outcome.Error))
-                {
-                    Assert.Ignore(
-                        $"Model '{model}' errored on image content (likely no vision support): {outcome.Error}");
-                }
-
-                if (string.IsNullOrWhiteSpace(answer))
-                {
-                    Assert.Ignore(
-                        $"Vision model '{model}' returned an empty streamed answer for the red image; " +
-                        "retry or pick another model — not a CoreAI attachment-routing failure.");
-                }
-
-                StringAssert.Contains("red", answer.ToLowerInvariant(),
-                    "A vision model must identify the pure-red PNG as red.");
+                Assert.Ignore(
+                    $"Configured model '{model}' is not vision-capable (mode={mode}). " +
+                    $"Set {EnvVisionModel} to a vision model id and/or {EnvVisionMode}=on to run this test.");
             }
+
+            yield return EnsureBackendReady(handle);
+
+            byte[] png = MakeSolidColorPng(64, 64, new Color32(255, 0, 0, 255));
+            AiTaskRequest task = BuildTask(
+                "AttachTest_ImageStream",
+                "What single dominant color is this image? Answer with one word.",
+                new List<AiAttachment> { AiAttachment.Image(png, "image/png", "red64.png") });
+
+            StreamOutcome outcome = new();
+            AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, true, out _);
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task run = _requests.Track(RunStreamingCollectAsync(orch, task, outcome, cts.Token));
+            yield return PlayModeTestAwait.WaitTask(run, _requests.Cap(WaitSeconds), "ImageAttachment_Streaming", cts);
+
+            string answer = outcome.Text.ToString();
+            Debug.Log($"[AttachmentLive] ImageAttachment_Streaming answer: {answer} (error={outcome.Error})");
+
+            // A provider that lacks real vision typically rejects the image_url part with an error; skip
+            // (do not fail) so a mis-tagged model or keyless local server cannot red the suite.
+            if (!string.IsNullOrEmpty(outcome.Error))
+            {
+                Assert.Ignore(
+                    $"Model '{model}' errored on image content (likely no vision support): {outcome.Error}");
+            }
+
+            if (string.IsNullOrWhiteSpace(answer))
+            {
+                Assert.Ignore(
+                    $"Vision model '{model}' returned an empty streamed answer for the red image; " +
+                    "retry or pick another model — not a CoreAI attachment-routing failure.");
+            }
+
+            StringAssert.Contains("red", answer.ToLowerInvariant(),
+                "A vision model must identify the pure-red PNG as red.");
         }
 
         // ===================== 5. History placeholder sanity (cheap, live) =====================
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator AttachmentTurn_PersistsPlaceholder_NotRawBytes()
         {
             if (!TryCreateHandle(null, out PlayModeProductionLikeLlmHandle handle, out string ignore))
@@ -236,47 +275,48 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            using (handle)
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
+
+            yield return EnsureBackendReady(handle);
+
+            byte[] md = Encoding.UTF8.GetBytes("# Note\n\nThe secret code word is " + HistorySentinel + ".\n");
+            AiTaskRequest task = BuildTask(
+                "AttachTest_History",
+                "What is the secret code word in the attached file? Reply with just the code word.",
+                new List<AiAttachment> { AiAttachment.FromFile("note.md", md) });
+
+            // A recording store so the persisted user turn is readable after the orchestrator completes.
+            AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, true,
+                out InMemoryStore store);
+            StreamOutcome outcome = new();
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task run = _requests.Track(RunStreamingCollectAsync(orch, task, outcome, cts.Token));
+            yield return PlayModeTestAwait.WaitTask(run, _requests.Cap(WaitSeconds), "AttachmentTurn_History", cts);
+
+            Assert.IsNull(outcome.Error, $"Attachment turn failed before history was persisted: {outcome.Error}");
+
+            ChatMessage[] history = store.GetChatHistory(task.RoleId);
+            string userTurn = null;
+            foreach (ChatMessage m in history)
             {
-                yield return EnsureBackendReady(handle);
-
-                byte[] md = Encoding.UTF8.GetBytes("# Note\n\nThe secret code word is " + HistorySentinel + ".\n");
-                AiTaskRequest task = BuildTask(
-                    "AttachTest_History",
-                    "What is the secret code word in the attached file? Reply with just the code word.",
-                    new List<AiAttachment> { AiAttachment.FromFile("note.md", md) });
-
-                // A recording store so the persisted user turn is readable after the orchestrator completes.
-                AiOrchestrator orch = CreateOrchestrator(handle.Client, task.RoleId, true,
-                    out InMemoryStore store);
-                StreamOutcome outcome = new();
-                Task run = RunStreamingCollectAsync(orch, task, outcome, CancellationToken.None);
-                yield return PlayModeTestAwait.WaitTask(run, WaitSeconds, "AttachmentTurn_History");
-
-                Assert.IsNull(outcome.Error, $"Attachment turn failed before history was persisted: {outcome.Error}");
-
-                ChatMessage[] history = store.GetChatHistory(task.RoleId);
-                string userTurn = null;
-                foreach (ChatMessage m in history)
+                if (string.Equals(m.Role, "user", StringComparison.Ordinal))
                 {
-                    if (string.Equals(m.Role, "user", StringComparison.Ordinal))
-                    {
-                        userTurn = m.Content;
-                        break;
-                    }
+                    userTurn = m.Content;
+                    break;
                 }
-
-                Debug.Log($"[AttachmentLive] Persisted user turn: {userTurn}");
-                Assert.IsNotNull(userTurn, "The completed attachment turn must persist a 'user' history entry.");
-                StringAssert.Contains("[attachment:", userTurn,
-                    "The persisted user turn must carry a compact [attachment: …] placeholder.");
-                StringAssert.Contains("note.md", userTurn, "The placeholder must name the attached file.");
-                StringAssert.DoesNotContain("base64", userTurn.ToLowerInvariant(),
-                    "History must never persist base64 attachment data — only the placeholder.");
-                // Stronger guarantee: the raw file body is inlined only into the wire prompt, never history.
-                StringAssert.DoesNotContain(HistorySentinel, userTurn,
-                    "The raw attachment content must not be persisted into chat history, only the placeholder.");
             }
+
+            Debug.Log($"[AttachmentLive] Persisted user turn: {userTurn}");
+            Assert.IsNotNull(userTurn, "The completed attachment turn must persist a 'user' history entry.");
+            StringAssert.Contains("[attachment:", userTurn,
+                "The persisted user turn must carry a compact [attachment: …] placeholder.");
+            StringAssert.Contains("note.md", userTurn, "The placeholder must name the attached file.");
+            StringAssert.DoesNotContain("base64", userTurn.ToLowerInvariant(),
+                "History must never persist base64 attachment data — only the placeholder.");
+            // Stronger guarantee: the raw file body is inlined only into the wire prompt, never history.
+            StringAssert.DoesNotContain(HistorySentinel, userTurn,
+                "The raw attachment content must not be persisted into chat history, only the placeholder.");
         }
 
         // ===================== Helpers =====================
@@ -313,7 +353,7 @@ namespace CoreAI.Tests.PlayMode
                     "briefly. Do not explain your reasoning.",
                 Hint = question,
                 Attachments = attachments,
-                MaxOutputTokens = 256
+                MaxOutputTokens = AnswerMaxOutputTokens
             };
         }
 

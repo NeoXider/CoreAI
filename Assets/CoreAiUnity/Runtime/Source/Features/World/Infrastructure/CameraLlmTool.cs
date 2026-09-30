@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Vision;
 using Cysharp.Threading.Tasks;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
@@ -12,7 +13,11 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.World
 {
     /// <summary>
-    /// LLM tool that exposes camera control operations.
+    /// Scene-camera tool registered by <c>CoreAi.RegisterCameraVisionTool</c>: one native function,
+    /// <c>capture_camera</c>, that screenshots a named camera (or the main one). The frame is returned as an
+    /// <see cref="LlmToolImageResult"/> — a small JSON summary for the tool message plus the JPEG as an image
+    /// part — and the tool loop lifts it into the model's image channel automatically, like the agent-vision
+    /// <c>camera_capture</c> tool (<see cref="CoreAI.Vision.CameraLlmTool"/>).
     /// </summary>
     public sealed class CameraLlmTool : IAIFunctionsLlmTool
     {
@@ -28,17 +33,26 @@ namespace CoreAI.Infrastructure.World
         public IEnumerable<AIFunction> CreateAIFunctions()
         {
             yield return AIFunctionFactory.Create(
-                (Func<string, int, int, CancellationToken, Task<string>>)CaptureCameraAsync,
+                (Func<string, int, int, CancellationToken, Task<object>>)CaptureCameraAsync,
                 new AIFunctionFactoryOptions
                 {
                     Name = "capture_camera",
                     Description =
-                        "Take a screenshot from a specific camera (or 'main') and return it as a JPEG Base64 string."
+                        "Take a screenshot from a specific camera (or 'main') to SEE the scene. Returns a compact " +
+                        "JSON summary; the image itself is attached for you to look at.",
+                    MarshalResult = LlmToolImageResult.PreserveResult
                 }
             );
         }
 
-        private async Task<string> CaptureCameraAsync(
+        /// <summary>
+        /// Captures the camera and returns an <see cref="LlmToolImageResult"/>: the tool message is only the JSON
+        /// summary (<c>success</c>, <c>resolution</c>, <c>camera</c>, <c>format</c>, <c>sizeBytes</c>,
+        /// <c>imageAttached</c>), the JPEG travels out-of-band. WHY: the former base64 <c>dataUri</c> inside the JSON
+        /// was never lifted, so the default result-size cut sent the model thousands of base64 characters and never
+        /// the picture. Failures stay plain JSON strings.
+        /// </summary>
+        private async Task<object> CaptureCameraAsync(
             [Description("Camera GameObject name, or 'main' for the main camera. Default 'main'.")]
             string cameraName = "main",
             [Description("Screenshot width in pixels (clamped 64..1024). Default 512.")]
@@ -62,16 +76,16 @@ namespace CoreAI.Infrastructure.World
                 height = Mathf.Clamp(height, 64, 1024);
 
                 byte[] jpgBytes = CaptureCameraJpeg(targetCam, width, height);
-                string base64 = Convert.ToBase64String(jpgBytes);
-
-                // WHY: Return as Data URI so that if the user wants to append it as an ImageContent, they can parse it easily
-                return JsonConvert.SerializeObject(new
+                string summaryJson = JsonConvert.SerializeObject(new
                 {
                     success = true,
                     resolution = $"{width}x{height}",
                     camera = targetCam.name,
-                    dataUri = $"data:image/jpeg;base64,{base64}"
+                    format = "jpeg",
+                    sizeBytes = jpgBytes.Length,
+                    imageAttached = true
                 });
+                return new LlmToolImageResult(summaryJson, AiAttachment.Image(jpgBytes, "image/jpeg"));
             }
             catch (Exception ex)
             {
@@ -102,50 +116,9 @@ namespace CoreAI.Infrastructure.World
             width = Mathf.Clamp(width, 64, 1024);
             height = Mathf.Clamp(height, 64, 1024);
 
-            RenderTexture rt = new(width, height, 24);
-            RenderTexture previousTarget = targetCam.targetTexture;
-            RenderTexture previousActive = RenderTexture.active;
-            Texture2D tex = null;
-            try
-            {
-                targetCam.targetTexture = rt;
-                targetCam.Render();
-
-                RenderTexture.active = rt;
-                tex = new Texture2D(width, height, TextureFormat.RGB24, false);
-                tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
-                tex.Apply();
-
-                return tex.EncodeToJPG(Mathf.Clamp(quality, 1, 100));
-            }
-            finally
-            {
-                targetCam.targetTexture = previousTarget;
-                RenderTexture.active = previousActive;
-                DestroyCaptureObject(tex);
-                DestroyCaptureObject(rt);
-            }
-        }
-
-        /// <summary>
-        /// Releases a transient capture texture. <see cref="UnityEngine.Object.Destroy(UnityEngine.Object)"/>
-        /// is deferred and play-mode-only, so edit-mode callers would leak every capture.
-        /// </summary>
-        private static void DestroyCaptureObject(UnityEngine.Object target)
-        {
-            if (target == null)
-            {
-                return;
-            }
-
-            if (Application.isPlaying)
-            {
-                UnityEngine.Object.Destroy(target);
-            }
-            else
-            {
-                UnityEngine.Object.DestroyImmediate(target);
-            }
+            // WHY: pooled render target + one cached readback texture instead of a new pair per capture.
+            return AiAttachmentUnityExtensions.CaptureCamera(targetCam, width, height, CaptureImageFormat.Jpeg,
+                quality);
         }
 
         /// <summary>
@@ -201,14 +174,13 @@ namespace CoreAI.Infrastructure.World
         }
 
         /// <summary>
-        /// Autonomous-tool follow-up lift: parses a <c>capture_camera</c> tool result (the JSON produced by
-        /// this tool, carrying a <c>data:image/...;base64,</c> <c>dataUri</c>) into a MEAI
-        /// <see cref="DataContent"/>. OpenAI tool-result messages cannot carry images, so after the model
-        /// invokes <c>capture_camera</c> the host lifts the returned image into a follow-up <b>user</b>
-        /// message (subscribe to <c>CoreAi.OnToolCallCompleted</c>, match
-        /// <c>LlmToolCallInfo.ToolName</c> == <c>"capture_camera"</c>, call this on
-        /// <c>ResultJson</c>) so the next model call receives the screenshot as an <c>image_url</c> part.
-        /// Returns <c>false</c> for non-image / failed / unparseable results.
+        /// Legacy helper: parses a camera result JSON that still carries a <c>data:image/...;base64,</c>
+        /// <c>dataUri</c> (the shape <c>capture_camera</c> returned before it switched to
+        /// <see cref="LlmToolImageResult"/>, or a host tool of the same shape) into a MEAI <see cref="DataContent"/>.
+        /// Today's <c>capture_camera</c> result has no <c>dataUri</c> — the tool loop delivers its image to the model
+        /// automatically, and <c>CoreAi.OnToolExecuted</c> hands hosts the <see cref="LlmToolImageResult"/> whose
+        /// <c>Images</c> hold the frame — so this returns <c>false</c> for it, as it does for non-image, failed or
+        /// unparseable results.
         /// </summary>
         public static bool TryExtractImageContentFromResult(string toolResultJson, out DataContent imageContent)
         {

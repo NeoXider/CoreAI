@@ -27,6 +27,10 @@ namespace CoreAI.Tests.PlayMode
         private const int MinDistinctMaterials = 12;
         private const int RequiredShapes = 5;
 
+        // WHY: the 3000 s run budget plus harness build, the 60 s Lua measurement and the screenshot;
+        // LiveTestRequestScope caps the run wait so the test's own cancelling wait fires first.
+        private const int TestTimeoutMs = 3_600_000;
+
         // WHY: one giant execute_lua call asks a small local model for ~10k tokens in a single
         // generation, which is where ling-3.0-tiny wedged for the whole 1800s transport budget. Section
         // by section is also how the G6 benchmark phrases it, so both graders exercise the same shape.
@@ -67,9 +71,15 @@ namespace CoreAI.Tests.PlayMode
             "table.sort(m); table.sort(s)\n" +
             "return parts .. '|' .. table.concat(m, ',') .. '|' .. table.concat(s, ',')";
 
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+        private ProgrammerLiveHarness.Setup _setup;
+        private GameObject _rig;
+
         [UnitySetUp]
         public IEnumerator SetUp()
         {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
             LogAssert.ignoreFailingMessages = true;
             yield return null;
         }
@@ -77,12 +87,32 @@ namespace CoreAI.Tests.PlayMode
         [UnityTearDown]
         public IEnumerator TearDown()
         {
+            // WHY: a framework timeout skips the test body's cleanup, and Dispose alone does not cancel, so
+            // the abandoned castle turn is cancelled here and allowed to unwind before the setup and client
+            // are disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            if (_rig != null)
+            {
+                UnityEngine.Object.Destroy(_rig);
+                _rig = null;
+            }
+
+            _setup?.Dispose();
+            _setup = null;
+            _handle?.Dispose();
+            _handle = null;
+
             LogAssert.ignoreFailingMessages = false;
             yield return null;
         }
 
         [UnityTest]
-        [Timeout(3600000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator Programmer_BuildsCastle_WithTwelveMaterialsAndAllFiveShapes()
         {
             // WHY: [UnitySetUp] runs in a different LogAssert scope than the [UnityTest] body in PlayMode.
@@ -97,79 +127,72 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            ProgrammerLiveHarness.Setup setup = null;
-            GameObject rig = null;
-            using CancellationTokenSource cts = new();
-            try
+            // WHY: handle, setup and camera rig are released in [UnityTearDown] after the request drain, never
+            // under a still-running turn.
+            _handle = handle;
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            TestContext.WriteLine($"[CastleShowcase] Backend: {handle.ResolvedBackend}");
+            ProgrammerLiveHarness.Setup setup = ProgrammerLiveHarness.Build(handle, 3000);
+            _setup = setup;
+
+            TestContext.WriteLine($"[CastleShowcase] Prompt: {Prompt}");
+            Task task = _requests.Track(setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
-                TestContext.WriteLine($"[CastleShowcase] Backend: {handle.ResolvedBackend}");
-                setup = ProgrammerLiveHarness.Build(handle, 3000);
+                RoleId = BuiltInAgentRoleIds.Programmer,
+                Hint = Prompt
+            }, cts.Token));
+            yield return PlayModeTestAwait.WaitTask(task, _requests.Cap(3000f), "Programmer castle showcase", cts);
 
-                TestContext.WriteLine($"[CastleShowcase] Prompt: {Prompt}");
-                Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = BuiltInAgentRoleIds.Programmer,
-                    Hint = Prompt
-                }, cts.Token);
-                yield return PlayModeTestAwait.WaitTask(task, 3000f, "Programmer castle showcase", cts);
+            ProgrammerLiveHarness.LogToolCallTranscript("CastleShowcase");
+            ProgrammerLiveHarness.AssertModelActuallyCalledTools("CastleShowcase");
+            // WHY: A tool-only build can finish with no assistant text (EmptyResponse), so only that
+            // outcome is tolerated; HTTP 5xx, a timeout, or a client exception the orchestrator swallowed
+            // (no completion captured) still fails. The scene readback below determines whether the
+            // requested castle actually materialized.
+            Assert.IsTrue(setup.Capturing.LastIsOkOrEmptyFinalText,
+                $"Programmer run failed: {setup.Capturing.DescribeLastOutcome()}");
 
-                ProgrammerLiveHarness.LogToolCallTranscript("CastleShowcase");
-                ProgrammerLiveHarness.AssertModelActuallyCalledTools("CastleShowcase");
-                // WHY: A tool-only build can finish with no assistant text. The scene readback below
-                // determines whether the requested castle actually materialized.
+            // Let the binder materialize every part and the texture provider bind its materials.
+            yield return null;
+            yield return null;
 
-                // Let the binder materialize every part and the texture provider bind its materials.
-                yield return null;
-                yield return null;
+            Task<LuaTool.LuaResult> measure = _requests.Track(
+                setup.Stack.ToolExecutor.ExecuteAsync(MeasureLua, setup.ActorContext, cts.Token));
+            yield return PlayModeTestAwait.WaitTask(measure, _requests.Cap(60f), "Castle measurement", cts);
+            Assert.IsTrue(measure.Result.Success, $"Measurement Lua failed: {measure.Result.Error}");
 
-                Task<LuaTool.LuaResult> measure =
-                    setup.Stack.ToolExecutor.ExecuteAsync(MeasureLua, setup.ActorContext, CancellationToken.None);
-                yield return PlayModeTestAwait.WaitTask(measure, 60f, "Castle measurement", cts);
-                Assert.IsTrue(measure.Result.Success, $"Measurement Lua failed: {measure.Result.Error}");
+            string[] fields = (measure.Result.Output ?? "").Split('|');
+            Assert.AreEqual(3, fields.Length, $"Unexpected measurement output: {measure.Result.Output}");
+            int parts = int.Parse(fields[0]);
+            string[] materials = fields[1].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            string[] shapes = fields[2].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            TestContext.WriteLine($"[CastleShowcase] parts={parts} materials({materials.Length})=" +
+                                  $"{string.Join(",", materials)} shapes({shapes.Length})={string.Join(",", shapes)}");
 
-                string[] fields = (measure.Result.Output ?? "").Split('|');
-                Assert.AreEqual(3, fields.Length, $"Unexpected measurement output: {measure.Result.Output}");
-                int parts = int.Parse(fields[0]);
-                string[] materials = fields[1].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                string[] shapes = fields[2].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                TestContext.WriteLine($"[CastleShowcase] parts={parts} materials({materials.Length})=" +
-                                      $"{string.Join(",", materials)} shapes({shapes.Length})={string.Join(",", shapes)}");
+            // WHY: the model picks its own footprint and height, so a hard-coded camera either cuts
+            // the castle off or photographs empty sky. Framing the built geometry keeps the hero shot
+            // usable whatever the model builds.
+            Bounds built = MeasureBuiltBounds(setup);
+            GameObject rig = BuildCameraRig(built);
+            _rig = rig;
+            Camera camera = rig.GetComponentInChildren<Camera>();
+            string modelName = SafeModelName(handle);
+            PlayModeCameraShot.Capture(camera,
+                PlayModeCameraShot.ArtifactPath("castle-showcase-" + modelName + ".png"));
 
-                // WHY: the model picks its own footprint and height, so a hard-coded camera either cuts
-                // the castle off or photographs empty sky. Framing the built geometry keeps the hero shot
-                // usable whatever the model builds.
-                Bounds built = MeasureBuiltBounds(setup);
-                rig = BuildCameraRig(built);
-                Camera camera = rig.GetComponentInChildren<Camera>();
-                string modelName = SafeModelName(handle);
-                PlayModeCameraShot.Capture(camera,
-                    PlayModeCameraShot.ArtifactPath("castle-showcase-" + modelName + ".png"));
+            // WHY: the establishing shot fits the whole castle, and at that distance one texture tile
+            // is a few pixels wide - it cannot show whether the materials carry real relief. The
+            // second frame walks the camera up to the wall, which is where normals and tiling read.
+            MoveToDetailView(camera, built);
+            PlayModeCameraShot.Capture(camera,
+                PlayModeCameraShot.ArtifactPath("castle-showcase-" + modelName + "-detail.png"));
 
-                // WHY: the establishing shot fits the whole castle, and at that distance one texture tile
-                // is a few pixels wide - it cannot show whether the materials carry real relief. The
-                // second frame walks the camera up to the wall, which is where normals and tiling read.
-                MoveToDetailView(camera, built);
-                PlayModeCameraShot.Capture(camera,
-                    PlayModeCameraShot.ArtifactPath("castle-showcase-" + modelName + "-detail.png"));
-
-                Assert.GreaterOrEqual(parts, MinParts, "the castle must be built from at least " + MinParts + " Castle* parts");
-                Assert.GreaterOrEqual(materials.Length, MinDistinctMaterials,
-                    $"expected at least {MinDistinctMaterials} distinct Enum.Material values, got: {string.Join(",", materials)}");
-                Assert.AreEqual(RequiredShapes, shapes.Length,
-                    $"expected all five Enum.PartType shapes, got: {string.Join(",", shapes)}");
-                TestContext.WriteLine("[CastleShowcase] TEST PASSED");
-            }
-            finally
-            {
-                cts.Cancel();
-                if (rig != null)
-                {
-                    UnityEngine.Object.Destroy(rig);
-                }
-
-                setup?.Dispose();
-                handle.Dispose();
-            }
+            Assert.GreaterOrEqual(parts, MinParts, "the castle must be built from at least " + MinParts + " Castle* parts");
+            Assert.GreaterOrEqual(materials.Length, MinDistinctMaterials,
+                $"expected at least {MinDistinctMaterials} distinct Enum.Material values, got: {string.Join(",", materials)}");
+            Assert.AreEqual(RequiredShapes, shapes.Length,
+                $"expected all five Enum.PartType shapes, got: {string.Join(",", shapes)}");
+            TestContext.WriteLine("[CastleShowcase] TEST PASSED");
         }
 
         /// <summary>Model id reduced to a file-name-safe token for the screenshot name.</summary>

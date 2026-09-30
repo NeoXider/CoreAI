@@ -747,6 +747,23 @@ void RbxBlendFabricPattern(float3 position, float3 weights, out float weave,
     }
 }
 
+// WHY: the only relief Plastic, SmoothPlastic and Salt had was a 120-220 per metre stipple, finer
+// than a pixel beyond about three metres, so its footprint filter flattened it and the surfaces
+// rendered with no normal detail at all (their normals-off frames were byte-identical). This 4.5 cm
+// grain survives to about thirty metres. Material modes are shared (Rubber uses SmoothPlastic's
+// mode, Snow uses Salt's), so the grain is scaled by the material's own _GrainStrength, which only
+// Plastic, SmoothPlastic and Salt set.
+static const float RBX_PLASTIC_GRAIN_FREQUENCY = 22.0;
+static const float RBX_PLASTIC_GRAIN_HEIGHT = 0.03;
+
+float RbxPlasticGrainHeight(float3 physicalPosition)
+{
+    float grainVisibility;
+    float grain = RbxFilteredValueNoise(physicalPosition * RBX_PLASTIC_GRAIN_FREQUENCY
+        + float3(7.0, 29.0, 13.0), grainVisibility);
+    return (grain - 0.5) * RBX_PLASTIC_GRAIN_HEIGHT;
+}
+
 half3 RbxComposeMaterialColor(half3 partColor, half3 materialColor, half partColorInfluence)
 {
     half3 partModulation = lerp(half3(1.0h, 1.0h, 1.0h),
@@ -755,7 +772,7 @@ half3 RbxComposeMaterialColor(half3 partColor, half3 materialColor, half partCol
 }
 
 RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal, int materialMode,
-    float patternScale, half3 baseColor)
+    float patternScale, half3 baseColor, float grainStrength)
 {
     RbxSurfaceSample sample;
     float3 physicalPosition = patternPosition;
@@ -781,7 +798,11 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
         sample.smoothness = RbxCompensateUnresolvedRoughness(sample.smoothness,
             stippleVisibility, 0.04h);
         sample.occlusion = 0.97h;
-        sample.height = (stipple - 0.5) * 0.025;
+        // WHY: 0.0125 m keeps the resolved stipple near the tilt it had at two metres while the
+        // old determinant floor still halved it; without the floor the former 0.025 reached about
+        // 25 degrees of tilt at arm's length and read as sandpaper.
+        sample.height = (stipple - 0.5) * 0.0125
+            + RbxPlasticGrainHeight(physicalPosition) * grainStrength;
     }
     else if (materialMode == 1)
     {
@@ -796,7 +817,8 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
             - (half)(microRoughness - 0.5) * 0.12h;
         sample.smoothness = RbxCompensateUnresolvedRoughness(sample.smoothness,
             microVisibility, 0.055h);
-        sample.height = (microRoughness - 0.5) * 0.018;
+        sample.height = (microRoughness - 0.5) * 0.009
+            + RbxPlasticGrainHeight(physicalPosition) * grainStrength;
     }
     else if (materialMode == 2)
     {
@@ -1094,7 +1116,8 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
         sample.smoothness = RbxCompensateUnresolvedRoughness(sample.smoothness,
             crystalVisibility, 0.08h);
         sample.occlusion = 0.9h + drifts * 0.1h;
-        sample.height = (drifts - 0.5) * 0.01 + (crystals - 0.5) * 0.001;
+        sample.height = (drifts - 0.5) * 0.01 + (crystals - 0.5) * 0.001
+            + RbxPlasticGrainHeight(physicalPosition) * grainStrength;
     }
     else if (materialMode == 17)
     {
@@ -1147,7 +1170,11 @@ float3 RbxPerturbNormal(float3 positionWS, float3 normalWS, float3 heightGradien
     float3 reciprocalX = cross(positionDerivativeY, normalWS);
     float3 reciprocalY = cross(normalWS, positionDerivativeX);
     float determinant = dot(positionDerivativeX, reciprocalX);
-    float inverseDeterminant = sign(determinant) / max(abs(determinant), 0.00001);
+    // WHY: the determinant is the squared pixel footprint in metres (about 1e-4 at ten metres and
+    // 1e-5 at three), so a 1e-5 floor weakened every procedural bump as the camera came closer. The
+    // floor now only guards a degenerate edge-on pixel; the pixel-scale stipples of the materials that
+    // still render procedurally (Plastic, SmoothPlastic) were halved to stay sane up close.
+    float inverseDeterminant = sign(determinant) / max(abs(determinant), 1e-20);
     float3 screenGradient = (heightDerivativeX * reciprocalX + heightDerivativeY * reciprocalY)
         * inverseDeterminant;
 

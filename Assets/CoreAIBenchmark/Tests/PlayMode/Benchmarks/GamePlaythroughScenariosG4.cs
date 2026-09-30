@@ -53,8 +53,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 g.Add("ran_tool", "issued at least one tool call", 5, run.ToolCalls >= 1,
                     dimension: BenchmarkDimension.ToolCorrectness);
-                g.Add("clean_tool", "no failed Lua executions", 5, env.Lua.FailedExecutions == 0,
-                    dimension: BenchmarkDimension.ToolCorrectness);
+                // WHY: a failed call that never ran Lua (unknown tool, unparsable arguments, policy
+                // rejection, tool timeout) must fail this checkpoint too, or G4 would charge it nothing.
+                g.AddToolErrorCheckpoint("clean_tool", "no failed tool calls or Lua executions", 5,
+                    run.FailedToolCalls == 0 && env.Lua.FailedExecutions == 0,
+                    scoresFailedToolCalls: true, scoresInvalidCommands: false,
+                    detail: $"{run.FailedToolCalls} failed calls, {env.Lua.FailedExecutions} failed Lua runs");
             }
 
             protected static bool Num(BenchmarkEnvironment env, string slot, double expected, params object[] a)

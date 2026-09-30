@@ -27,11 +27,42 @@ namespace CoreAI.Tests.PlayMode
         private const string PreClearPayload = "this will be deleted";
         private const float MemoryTurnTimeoutSeconds = 240f;
 
+        // WHY: one memory turn (MemoryTurnTimeoutSeconds + 5 s cancellation grace) + the 20 s LiveTestRequestScope
+        // reserve = 265 s per test; 300 s (write) and 360 s (append/clear) leave 35 s and 95 s for setup.
+        // TestAgentSetup.Initialize is not capped (SharedLlmUnity allows up to 600 s for a cold GGUF load and 300 s
+        // when another test is already loading); the Cap on every wait protects the request, so a slower load
+        // shortens the turn or ends in the test's own cancelling wait, never a stranded request.
+        private const int WriteTestTimeoutMs = 300000;
+        private const int MutateTestTimeoutMs = 360000;
+
+        private LiveTestRequestScope _requests;
+        private TestAgentSetup _setup;
+        private LlmFailureMonitor _llmFailures;
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned request
+            // unwind before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _llmFailures?.Dispose();
+            _llmFailures = null;
+            _setup?.Dispose();
+            _setup = null;
+            yield return null;
+        }
+
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(WriteTestTimeoutMs)]
         public IEnumerator MemoryTool_WritesMemory()
         {
-            using TestAgentSetup setup = new();
+            _requests = new LiveTestRequestScope(WriteTestTimeoutMs);
+            TestAgentSetup setup = _setup = new TestAgentSetup();
             yield return setup.Initialize();
             if (!setup.IsReady)
             {
@@ -39,7 +70,9 @@ namespace CoreAI.Tests.PlayMode
             }
 
             ApplyVerboseLlmLoggingForTrace();
-            using LlmFailureMonitor llmFailures = LlmFailureMonitor.Start();
+            // WHY: the diagnostics subscription is released in [UnityTearDown], which also runs on a framework
+            // timeout abort; a body using-declaration would leak it into later tests.
+            LlmFailureMonitor llmFailures = _llmFailures = LlmFailureMonitor.Start();
 
             Debug.Log($"[AgentMemoryOpenAiApiPlayMode] Backend: {setup.BackendName}, role={Role}");
 
@@ -50,9 +83,9 @@ namespace CoreAI.Tests.PlayMode
             };
             LogHintToConsole(request);
 
-            using CancellationTokenSource cts = new();
-            Task<string> run = setup.Orchestrator.RunTaskAsync(request, cts.Token);
-            yield return WaitForMemoryOrTask(setup, run, cts,
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task<string> run = _requests.Track(setup.Orchestrator.RunTaskAsync(request, cts.Token));
+            yield return WaitForMemoryOrTask(setup, run, cts, _requests.Cap(MemoryTurnTimeoutSeconds),
                 (string memory) => memory.Contains(WriteExpectedSubstring, StringComparison.OrdinalIgnoreCase),
                 "memory write");
             LogOrchestratorReply(run);
@@ -74,10 +107,11 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
-        [Timeout(360000)]
+        [Timeout(MutateTestTimeoutMs)]
         public IEnumerator MemoryTool_AppendsMemory()
         {
-            using TestAgentSetup setup = new();
+            _requests = new LiveTestRequestScope(MutateTestTimeoutMs);
+            TestAgentSetup setup = _setup = new TestAgentSetup();
             yield return setup.Initialize();
             if (!setup.IsReady)
             {
@@ -85,7 +119,9 @@ namespace CoreAI.Tests.PlayMode
             }
 
             ApplyVerboseLlmLoggingForTrace();
-            using LlmFailureMonitor llmFailures = LlmFailureMonitor.Start();
+            // WHY: the diagnostics subscription is released in [UnityTearDown], which also runs on a framework
+            // timeout abort; a body using-declaration would leak it into later tests.
+            LlmFailureMonitor llmFailures = _llmFailures = LlmFailureMonitor.Start();
 
             setup.MemoryStore.Save(Role, new AgentMemoryState { Memory = InitialBaseline });
             AssertAgentMemoryEquals(setup, InitialBaseline, "baseline before append");
@@ -99,9 +135,9 @@ namespace CoreAI.Tests.PlayMode
             };
             LogHintToConsole(appendRequest);
 
-            using CancellationTokenSource cts = new();
-            Task<string> run = setup.Orchestrator.RunTaskAsync(appendRequest, cts.Token);
-            yield return WaitForMemoryOrTask(setup, run, cts,
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task<string> run = _requests.Track(setup.Orchestrator.RunTaskAsync(appendRequest, cts.Token));
+            yield return WaitForMemoryOrTask(setup, run, cts, _requests.Cap(MemoryTurnTimeoutSeconds),
                 (string memory) => memory.Contains(InitialBaseline, StringComparison.Ordinal) &&
                     memory.Contains(AppendMarker, StringComparison.OrdinalIgnoreCase),
                 "memory append");
@@ -131,10 +167,11 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
-        [Timeout(360000)]
+        [Timeout(MutateTestTimeoutMs)]
         public IEnumerator MemoryTool_ClearsMemory()
         {
-            using TestAgentSetup setup = new();
+            _requests = new LiveTestRequestScope(MutateTestTimeoutMs);
+            TestAgentSetup setup = _setup = new TestAgentSetup();
             yield return setup.Initialize();
             if (!setup.IsReady)
             {
@@ -142,7 +179,9 @@ namespace CoreAI.Tests.PlayMode
             }
 
             ApplyVerboseLlmLoggingForTrace();
-            using LlmFailureMonitor llmFailures = LlmFailureMonitor.Start();
+            // WHY: the diagnostics subscription is released in [UnityTearDown], which also runs on a framework
+            // timeout abort; a body using-declaration would leak it into later tests.
+            LlmFailureMonitor llmFailures = _llmFailures = LlmFailureMonitor.Start();
 
             setup.MemoryStore.Save(Role, new AgentMemoryState { Memory = PreClearPayload });
             AssertAgentMemoryEquals(setup, PreClearPayload, "baseline before clear");
@@ -156,9 +195,9 @@ namespace CoreAI.Tests.PlayMode
             };
             LogHintToConsole(clearRequest);
 
-            using CancellationTokenSource cts = new();
-            Task<string> run = setup.Orchestrator.RunTaskAsync(clearRequest, cts.Token);
-            yield return WaitForMemoryOrTask(setup, run, cts,
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task<string> run = _requests.Track(setup.Orchestrator.RunTaskAsync(clearRequest, cts.Token));
+            yield return WaitForMemoryOrTask(setup, run, cts, _requests.Cap(MemoryTurnTimeoutSeconds),
                 (string memory) => string.IsNullOrWhiteSpace(memory),
                 "memory clear");
             LogOrchestratorReply(run);
@@ -264,12 +303,13 @@ namespace CoreAI.Tests.PlayMode
             TestAgentSetup setup,
             Task<string> run,
             CancellationTokenSource cts,
+            float timeoutSeconds,
             Func<string, bool> memoryMatches,
             string operationName)
         {
             float started = Time.realtimeSinceStartup;
             while (!memoryMatches(ReadMemoryOrEmpty(setup)) && !run.IsCompleted &&
-                   Time.realtimeSinceStartup - started < MemoryTurnTimeoutSeconds)
+                   Time.realtimeSinceStartup - started < timeoutSeconds)
             {
                 yield return null;
             }
@@ -278,6 +318,8 @@ namespace CoreAI.Tests.PlayMode
             {
                 if (!run.IsCompleted)
                 {
+                    // WHY: client-side cancellation only; a serial provider bridge may still finish this
+                    // abandoned turn before it serves the next request.
                     cts.Cancel();
                     float cancellationStarted = Time.realtimeSinceStartup;
                     while (!run.IsCompleted && Time.realtimeSinceStartup - cancellationStarted < 5f)
@@ -297,7 +339,7 @@ namespace CoreAI.Tests.PlayMode
             }
 
             float remaining = Mathf.Max(0f,
-                MemoryTurnTimeoutSeconds - (Time.realtimeSinceStartup - started));
+                timeoutSeconds - (Time.realtimeSinceStartup - started));
             yield return setup.RunAndWait(run, remaining, operationName, cts);
         }
 

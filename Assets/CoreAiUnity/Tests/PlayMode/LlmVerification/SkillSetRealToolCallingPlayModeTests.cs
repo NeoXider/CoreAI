@@ -28,6 +28,42 @@ namespace CoreAI.Tests.PlayMode
         private const int ComplexTurnTimeoutSeconds = 240;
         private const int LiveModelMaxOutputTokens = 128000;
 
+        // WHY: 120 s optional GGUF load + one 240 s skill turn = 360 s; 600 s leaves the 20 s
+        // LiveTestRequestScope reserve plus a wide margin for slow multi-roundtrip providers.
+        private const int TestTimeoutMs = 600_000;
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+        private CoreAISettingsAsset _settings;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
+
+            if (_settings != null)
+            {
+                UnityEngine.Object.DestroyImmediate(_settings);
+                _settings = null;
+            }
+        }
+
         // ── Tool call trackers ────────────────────────────────────────────────
 
         private static readonly List<string> _calledTools = new();
@@ -178,7 +214,7 @@ namespace CoreAI.Tests.PlayMode
         // ── Test: Self-Service Pattern ────────────────────────────────────────
 
         [UnityTest]
-        [Timeout(600000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator SelfService_ModelCallsReadSkill_ThenUsesCraftingTools()
         {
             Debug.Log("[SkillRealTest] ═══════════════════════════════════════════");
@@ -193,163 +229,158 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
+
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            Debug.Log($"[SkillRealTest] Backend: {handle.ResolvedBackend}");
+
+            // ── Define skills ──────────────────────────────────────────
+
+            SkillSet craftingSkill = new("Crafting",
+                "Forge weapons, armor, and items from raw materials",
+                "You are a master blacksmith. When the player asks to craft:\n" +
+                "1. Call get_recipes to see what can be crafted.\n" +
+                "2. Call check_inventory to verify materials.\n" +
+                "3. If sufficient, call craft_item with recipe_id and quality 1.0.\n" +
+                "4. Tell the player the result.\n" +
+                "Always call get_recipes first.",
+                new DelegateLlmTool("get_recipes", "Get available crafting recipes for an item type",
+                    new Func<string, object>(GetRecipes)),
+                new DelegateLlmTool("check_inventory", "Check if player has required materials",
+                    new Func<string, object>(CheckInventory)),
+                new DelegateLlmTool("craft_item", "Craft an item from a recipe",
+                    new Func<string, float, object>(CraftItem)));
+
+            SkillSet combatSkill = new("Combat",
+                "Fight enemies and manage combat encounters",
+                "Call get_enemy_stats before attacking.",
+                new DelegateLlmTool("get_enemy_stats", "Get enemy statistics",
+                    new Func<string, object>(GetEnemyStats)));
+
+            SkillSet loreSkill = new("Lore",
+                "World knowledge, history, and codex entries",
+                "Call search_codex for knowledge.",
+                new DelegateLlmTool("search_codex", "Search the lore codex",
+                    new Func<string, object>(SearchCodex)));
+
+            // ── Build agent — model sees catalog + read_skill ──────────
+
+            const string roleId = "SkillCraftmaster";
+            AgentConfig config = new AgentBuilder(roleId)
+                {
+                    SuppressBuildWarnings = true
+                }
+                .WithSystemPrompt(
+                    "You are a Game Master for a fantasy RPG. " +
+                    "Use the configured skill capabilities when the player asks for specialized work. " +
+                    "Respond briefly after using tools.")
+                .WithSkill(craftingSkill)
+                .WithSkill(combatSkill)
+                .WithSkill(loreSkill)
+                .WithMode(AgentMode.ToolsAndChat)
+                .Build();
+
+            InMemoryStore store = new();
+            AgentMemoryPolicy policy = new();
+            config.ApplyToPolicy(policy);
+
+            CaptureLlm cap = new(handle.WrapWithMemoryStore(store));
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            _settings = settings;
+            Sink sink = new();
+
+            AiOrchestrator orch = new(
+                new SoloAuthorityHost(), cap, sink, new SessionTelemetryCollector(),
+                new AiPromptComposer(
+                    new BuiltInDefaultAgentSystemPromptProvider(),
+                    new NoAgentUserPromptTemplateProvider(),
+                    new NullLuaScriptVersionStore(), null, policy, settings),
+                store, policy,
+                new NoOpRoleStructuredResponsePolicy(),
+                new NullAiOrchestrationMetrics(),
+                settings,
+                new LocalActorIdentityProvider("skill-real-tool-calling-test"), null, null);
+
+            // ── Run: model should read_skill("Crafting") → use crafting tools ──
+
+            Debug.Log("[SkillRealTest] ── Sending: 'I want to craft an iron sword' ──");
+            Debug.Log($"[SkillRealTest] Model sees: catalog + read_skill + all {config.Tools.Count} tools");
+
+            CoreAi.ClearToolCallHistory();
+
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task t = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
             {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                Debug.Log($"[SkillRealTest] Backend: {handle.ResolvedBackend}");
+                RoleId = roleId,
+                Hint = "I want to craft an iron sword.",
+                MaxOutputTokens = LiveModelMaxOutputTokens
+            }, cts.Token));
+            yield return PlayModeTestAwait.WaitTask(t, _requests.Cap(ComplexTurnTimeoutSeconds), "self-service crafting", cts);
 
-                // ── Define skills ──────────────────────────────────────────
+            // ── Results ────────────────────────────────────────────────
 
-                SkillSet craftingSkill = new("Crafting",
-                    "Forge weapons, armor, and items from raw materials",
-                    "You are a master blacksmith. When the player asks to craft:\n" +
-                    "1. Call get_recipes to see what can be crafted.\n" +
-                    "2. Call check_inventory to verify materials.\n" +
-                    "3. If sufficient, call craft_item with recipe_id and quality 1.0.\n" +
-                    "4. Tell the player the result.\n" +
-                    "Always call get_recipes first.",
-                    new DelegateLlmTool("get_recipes", "Get available crafting recipes for an item type",
-                        new Func<string, object>(GetRecipes)),
-                    new DelegateLlmTool("check_inventory", "Check if player has required materials",
-                        new Func<string, object>(CheckInventory)),
-                    new DelegateLlmTool("craft_item", "Craft an item from a recipe",
-                        new Func<string, float, object>(CraftItem)));
+            Debug.Log("[SkillRealTest] ═══════════════════════════════════════════");
+            Debug.Log("[SkillRealTest]              RESULTS");
+            Debug.Log("[SkillRealTest] ═══════════════════════════════════════════");
+            Debug.Log($"[SkillRealTest] LLM calls:       {cap.CallCount}");
+            Debug.Log($"[SkillRealTest] Total time:      {cap.ElapsedMs} ms");
+            Debug.Log($"[SkillRealTest] Tools available: {cap.LastTools?.Count ?? 0}");
+            Debug.Log($"[SkillRealTest] Tools called:    [{string.Join(", ", _calledTools)}]");
+            Debug.Log($"[SkillRealTest] Response OK:     {cap.LastOk}");
+            Debug.Log($"[SkillRealTest] Response:        {cap.LastContent}");
 
-                SkillSet combatSkill = new("Combat",
-                    "Fight enemies and manage combat encounters",
-                    "Call get_enemy_stats before attacking.",
-                    new DelegateLlmTool("get_enemy_stats", "Get enemy statistics",
-                        new Func<string, object>(GetEnemyStats)));
+            // System prompt check
+            Debug.Log($"[SkillRealTest] ── System prompt ({cap.LastSystemPrompt?.Length ?? 0} chars) ──");
+            bool hasCatalog = cap.LastSystemPrompt?.Contains("Available Skills") == true;
+            bool hasFullInstructions = cap.LastSystemPrompt?.Contains("master blacksmith") == true;
 
-                SkillSet loreSkill = new("Lore",
-                    "World knowledge, history, and codex entries",
-                    "Call search_codex for knowledge.",
-                    new DelegateLlmTool("search_codex", "Search the lore codex",
-                        new Func<string, object>(SearchCodex)));
+            Debug.Log($"[SkillRealTest] Contains catalog:          {hasCatalog}");
+            Debug.Log($"[SkillRealTest] Contains full instructions: {hasFullInstructions} (should be false)");
 
-                // ── Build agent — model sees catalog + read_skill ──────────
+            bool readSkillCalled = _calledTools.Contains("read_skill");
+            Debug.Log($"[SkillRealTest] read_skill called:         {readSkillCalled}");
 
-                const string roleId = "SkillCraftmaster";
-                AgentConfig config = new AgentBuilder(roleId)
-                    {
-                        SuppressBuildWarnings = true
-                    }
-                    .WithSystemPrompt(
-                        "You are a Game Master for a fantasy RPG. " +
-                        "Use the configured skill capabilities when the player asks for specialized work. " +
-                        "Respond briefly after using tools.")
-                    .WithSkill(craftingSkill)
-                    .WithSkill(combatSkill)
-                    .WithSkill(loreSkill)
-                    .WithMode(AgentMode.ToolsAndChat)
-                    .Build();
-
-                InMemoryStore store = new();
-                AgentMemoryPolicy policy = new();
-                config.ApplyToPolicy(policy);
-
-                CaptureLlm cap = new(handle.WrapWithMemoryStore(store));
-                CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-                Sink sink = new();
-
-                AiOrchestrator orch = new(
-                    new SoloAuthorityHost(), cap, sink, new SessionTelemetryCollector(),
-                    new AiPromptComposer(
-                        new BuiltInDefaultAgentSystemPromptProvider(),
-                        new NoAgentUserPromptTemplateProvider(),
-                        new NullLuaScriptVersionStore(), null, policy, settings),
-                    store, policy,
-                    new NoOpRoleStructuredResponsePolicy(),
-                    new NullAiOrchestrationMetrics(),
-                    settings,
-                    new LocalActorIdentityProvider("skill-real-tool-calling-test"), null, null);
-
-                // ── Run: model should read_skill("Crafting") → use crafting tools ──
-
-                Debug.Log("[SkillRealTest] ── Sending: 'I want to craft an iron sword' ──");
-                Debug.Log($"[SkillRealTest] Model sees: catalog + read_skill + all {config.Tools.Count} tools");
-
-                CoreAi.ClearToolCallHistory();
-
-                using CancellationTokenSource cts = new();
-                Task t = orch.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = roleId,
-                    Hint = "I want to craft an iron sword.",
-                    MaxOutputTokens = LiveModelMaxOutputTokens
-                }, cts.Token);
-                yield return PlayModeTestAwait.WaitTask(t, ComplexTurnTimeoutSeconds, "self-service crafting", cts);
-
-                // ── Results ────────────────────────────────────────────────
-
-                Debug.Log("[SkillRealTest] ═══════════════════════════════════════════");
-                Debug.Log("[SkillRealTest]              RESULTS");
-                Debug.Log("[SkillRealTest] ═══════════════════════════════════════════");
-                Debug.Log($"[SkillRealTest] LLM calls:       {cap.CallCount}");
-                Debug.Log($"[SkillRealTest] Total time:      {cap.ElapsedMs} ms");
-                Debug.Log($"[SkillRealTest] Tools available: {cap.LastTools?.Count ?? 0}");
-                Debug.Log($"[SkillRealTest] Tools called:    [{string.Join(", ", _calledTools)}]");
-                Debug.Log($"[SkillRealTest] Response OK:     {cap.LastOk}");
-                Debug.Log($"[SkillRealTest] Response:        {cap.LastContent}");
-
-                // System prompt check
-                Debug.Log($"[SkillRealTest] ── System prompt ({cap.LastSystemPrompt?.Length ?? 0} chars) ──");
-                bool hasCatalog = cap.LastSystemPrompt?.Contains("Available Skills") == true;
-                bool hasFullInstructions = cap.LastSystemPrompt?.Contains("master blacksmith") == true;
-
-                Debug.Log($"[SkillRealTest] Contains catalog:          {hasCatalog}");
-                Debug.Log($"[SkillRealTest] Contains full instructions: {hasFullInstructions} (should be false)");
-
-                bool readSkillCalled = _calledTools.Contains("read_skill");
-                Debug.Log($"[SkillRealTest] read_skill called:         {readSkillCalled}");
-
-                foreach (KeyValuePair<string, string> kvp in _toolResults)
-                {
-                    Debug.Log($"[SkillRealTest] Tool result [{kvp.Key}]: {kvp.Value}");
-                }
-
-                Debug.Log("[SkillRealTest] ═══════════════════════════════════════════");
-
-                // ── Assertions ─────────────────────────────────────────────
-
-                if (!cap.LastOk)
-                {
-                    Assert.Inconclusive("LLM did not return a valid response — check connectivity.");
-                }
-
-                // Catalog in prompt, NOT full instructions
-                Assert.IsTrue(hasCatalog, "System prompt should contain skill catalog.");
-                Assert.IsFalse(hasFullInstructions,
-                    "Full instructions should NOT be in system prompt — model reads them via read_skill.");
-                IReadOnlyList<LlmToolCallRecord> toolCalls = CoreAi.GetToolCallHistorySnapshot();
-                Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
-                                                 r.Info.RoleId == roleId &&
-                                                 r.Info.ToolName == "read_skill"),
-                    "Self-service skill flow must complete a real read_skill tool call.");
-                Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
-                                                 r.Info.RoleId == roleId &&
-                                                 r.Info.ToolName == "call_skill_tool"),
-                    "Self-service skill flow must complete a real call_skill_tool proxy call.");
-
-                // At least one crafting tool was called
-                bool anyCraftTool = _calledTools.Contains("get_recipes") ||
-                                    _calledTools.Contains("check_inventory") ||
-                                    _calledTools.Contains("craft_item");
-
-                if (!anyCraftTool)
-                {
-                    Assert.Fail(
-                        $"At least one crafting tool should have been called. Called: [{string.Join(", ", _calledTools)}]");
-                }
-
-                Debug.Log("[SkillRealTest] ✅ All assertions passed — self-service pattern works!");
-
-                ScriptableObject.DestroyImmediate(settings);
-            }
-            finally
+            foreach (KeyValuePair<string, string> kvp in _toolResults)
             {
-                handle.Dispose();
+                Debug.Log($"[SkillRealTest] Tool result [{kvp.Key}]: {kvp.Value}");
             }
+
+            Debug.Log("[SkillRealTest] ═══════════════════════════════════════════");
+
+            // ── Assertions ─────────────────────────────────────────────
+
+            if (!cap.LastOk)
+            {
+                Assert.Inconclusive("LLM did not return a valid response — check connectivity.");
+            }
+
+            // Catalog in prompt, NOT full instructions
+            Assert.IsTrue(hasCatalog, "System prompt should contain skill catalog.");
+            Assert.IsFalse(hasFullInstructions,
+                "Full instructions should NOT be in system prompt — model reads them via read_skill.");
+            IReadOnlyList<LlmToolCallRecord> toolCalls = CoreAi.GetToolCallHistorySnapshot();
+            Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
+                                             r.Info.RoleId == roleId &&
+                                             r.Info.ToolName == "read_skill"),
+                "Self-service skill flow must complete a real read_skill tool call.");
+            Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
+                                             r.Info.RoleId == roleId &&
+                                             r.Info.ToolName == "call_skill_tool"),
+                "Self-service skill flow must complete a real call_skill_tool proxy call.");
+
+            // At least one crafting tool was called
+            bool anyCraftTool = _calledTools.Contains("get_recipes") ||
+                                _calledTools.Contains("check_inventory") ||
+                                _calledTools.Contains("craft_item");
+
+            if (!anyCraftTool)
+            {
+                Assert.Fail(
+                    $"At least one crafting tool should have been called. Called: [{string.Join(", ", _calledTools)}]");
+            }
+
+            Debug.Log("[SkillRealTest] ✅ All assertions passed — self-service pattern works!");
         }
     }
 #endif

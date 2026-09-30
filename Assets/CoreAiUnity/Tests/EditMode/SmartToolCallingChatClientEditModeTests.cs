@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Infrastructure.Llm;
@@ -47,6 +48,39 @@ namespace CoreAI.Tests.EditMode
             string toolResult = ResultForCall(followUp, "camera_1").Result.ToString();
             StringAssert.Contains("imageAttached", toolResult);
             StringAssert.DoesNotContain("dataUrl", toolResult);
+        }
+
+        /// <summary>
+        /// A camera result the lifter does not accept (here a <c>data:image/bmp</c>) must not be exempt from the
+        /// result-size cut: it is never lifted, so exempting it left the whole base64 in every later request.
+        /// </summary>
+        [Test]
+        public async Task CameraCapture_UnliftableImage_IsTruncatedWithMarker_NotExemptFromTheCap()
+        {
+            string dataUrl = "data:image/bmp;base64," + Convert.ToBase64String(new byte[1024]);
+            ScriptedChatClient inner = new(iteration => iteration == 1
+                ? MakeToolCallResponse("camera_capture", "camera_1")
+                : MakeTextResponse("scene inspected"));
+            MEAI.AIFunction camera = MakeAIFunction("camera_capture", _ =>
+                Task.FromResult<object>("{\"ok\":true,\"summary\":\"captured\",\"dataUrl\":\"" +
+                                        dataUrl + "\"}"));
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance,
+                new CoreAISettingsOptions { MaxToolResultChars = 100 }, true,
+                new List<Ai.ILlmTool>(), "GameMaster", 3);
+
+            await client.GetResponseAsync(
+                new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "Improve this castle") },
+                new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { camera } });
+
+            Assert.AreEqual(2, inner.ObservedMessages.Count);
+            List<MEAI.ChatMessage> followUp = inner.ObservedMessages[1];
+            string toolResult = ResultForCall(followUp, "camera_1").Result.ToString();
+            StringAssert.Contains("chars total -> 100 shown", toolResult,
+                "A result that will not be lifted must be cut at the cap with the visible marker.");
+            Assert.Less(toolResult.Length, dataUrl.Length,
+                "The whole base64 must not stay in the history.");
+            Assert.IsFalse(followUp.Any(message => message.Contents.OfType<MEAI.DataContent>().Any()),
+                "A bmp is not a liftable image type, so no image part is sent.");
         }
 
         [Test]
@@ -1658,6 +1692,336 @@ namespace CoreAI.Tests.EditMode
         /// <summary>
         /// Creates a chat response containing a tool call.
         /// </summary>
+        /// <summary>
+        /// Any tool can show the model a picture by returning <see cref="Ai.LlmToolImageResult"/>: the bytes reach
+        /// the image part untouched (same array, no base64 in between) and the tool message is only the summary.
+        /// </summary>
+        [Test]
+        public async Task TypedImageResult_AnyTool_ReachesTheModelAsAnImageWithoutACopy()
+        {
+            byte[] png = { 0x89, 0x50, 0x4E, 0x47, 1, 2, 3 };
+            const string summary = "{\"ok\":true,\"imageAttached\":true}";
+            ScriptedChatClient inner = new(iteration => iteration == 1
+                ? MakeToolCallResponse("render_preview", "render_1")
+                : MakeTextResponse("looks good"));
+            MEAI.AIFunction render = MEAI.AIFunctionFactory.Create(
+                (Func<object>)(() => new Ai.LlmToolImageResult(summary, Ai.AiAttachment.Image(png, "image/png"))),
+                new MEAI.AIFunctionFactoryOptions
+                {
+                    Name = "render_preview",
+                    MarshalResult = Ai.LlmToolImageResult.PreserveResult
+                });
+            SmartToolCallingChatClient client = new(inner, NullLog.Instance, new CoreAISettingsOptions(), true,
+                new List<Ai.ILlmTool>(), "GameMaster", 3);
+
+            await client.GetResponseAsync(
+                new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "Render it") },
+                new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { render } });
+
+            List<MEAI.ChatMessage> followUp = inner.ObservedMessages[1];
+            MEAI.DataContent image = followUp.SelectMany(message => message.Contents)
+                .OfType<MEAI.DataContent>().Single();
+            Assert.IsTrue(MemoryMarshal.TryGetArray(image.Data, out ArraySegment<byte> segment));
+            Assert.AreSame(png, segment.Array, "The encoder's bytes must reach the image part without a copy.");
+            Assert.AreEqual("image/png", image.MediaType);
+            Assert.AreEqual(summary, ResultForCall(followUp, "render_1").Result);
+        }
+
+        /// <summary>
+        /// A legacy camera result (base64 dataUrl inside JSON) is parsed and decoded ONCE, by the policy, and handed
+        /// on typed; the lifter then moves the decoded image without parsing the JSON again. The raw result string
+        /// stays what it was for code that read it before the lift.
+        /// </summary>
+        [Test]
+        public async Task LegacyCameraResult_IsDecodedOnceByThePolicy_AndLiftedWithoutReparsing()
+        {
+            string payload = "{\"ok\":true,\"camera\":\"Main\",\"dataUrl\":\"data:image/jpeg;base64," +
+                             Convert.ToBase64String(new byte[300]) + "\"}";
+            MEAI.AIFunction camera = MakeAIFunction("camera_capture", _ => Task.FromResult<object>(payload));
+            ToolExecutionPolicy policy = new(NullLog.Instance, new CoreAISettingsOptions { MaxToolResultChars = 100 },
+                new List<Ai.ILlmTool>(), true, "Tester");
+
+            ToolExecutionPolicy.ToolCallResult result = await policy.ExecuteSingleAsync(
+                new MEAI.FunctionCallContent("c1", "camera_capture", new Dictionary<string, object>()),
+                new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { camera } }, CancellationToken.None);
+
+            Ai.LlmToolImageResult typed = result.Result.Result as Ai.LlmToolImageResult;
+            Assert.IsNotNull(typed, "A liftable legacy camera result travels typed after the policy.");
+            Assert.AreEqual(payload, typed.ToString());
+            StringAssert.DoesNotContain("dataUrl", typed.Text);
+            StringAssert.Contains("imageAttached", typed.Text);
+            Assert.AreEqual(300, typed.Images.Single().Memory.Length);
+
+            List<MEAI.ChatMessage> messages = new()
+            {
+                MakeAssistantToolCall("c1", "camera_capture"),
+                new MEAI.ChatMessage(MEAI.ChatRole.Tool, new List<MEAI.AIContent> { result.Result })
+            };
+            HashSet<string> lifted = null;
+            SmartToolCallingChatClient.LiftCameraImages(messages, ref lifted);
+
+            MEAI.DataContent image = messages.SelectMany(message => message.Contents).OfType<MEAI.DataContent>().Single();
+            Assert.IsTrue(MemoryMarshal.TryGetArray(image.Data, out ArraySegment<byte> segment));
+            Assert.AreSame(typed.Images[0].Data, segment.Array, "The lifter must reuse the policy's decoded bytes.");
+            Assert.AreEqual(typed.Text, ResultForCall(messages, "c1").Result);
+        }
+
+        /// <summary>
+        /// Fail-closed: an image a vision model cannot receive is not attached, the tool text names why, and no
+        /// serializer can turn the bytes into tool-message text.
+        /// </summary>
+        [Test]
+        public void TypedImageResult_UndeliverableImages_AreDroppedAndNamed_AndNeverSerialized()
+        {
+            Ai.LlmToolImageResult typed = new("{\"ok\":true}", new[]
+            {
+                Ai.AiAttachment.FromFile("frame.bmp", new byte[] { 1, 2 }, "image/bmp"),
+                Ai.AiAttachment.Image(new byte[Ai.LlmToolImageResult.MaxImageBytes + 1], "image/png")
+            });
+            List<MEAI.ChatMessage> messages = new()
+            {
+                new MEAI.ChatMessage(MEAI.ChatRole.Tool,
+                    new List<MEAI.AIContent> { new MEAI.FunctionResultContent("r1", typed) })
+            };
+
+            HashSet<string> lifted = null;
+            SmartToolCallingChatClient.LiftCameraImages(messages, ref lifted);
+
+            Assert.AreEqual(1, messages.Count, "Nothing deliverable, so no image message is added.");
+            string text = ResultForCall(messages, "r1").Result.ToString();
+            StringAssert.Contains("[image not attached:", text);
+            StringAssert.Contains("image/bmp", text);
+            StringAssert.DoesNotContain("Images", Newtonsoft.Json.JsonConvert.SerializeObject(typed));
+            StringAssert.DoesNotContain("Images", System.Text.Json.JsonSerializer.Serialize(typed));
+        }
+
+        [Test]
+        public async Task DelegateTool_CanReturnAnImageResult_WhileOtherReturnsStayJson()
+        {
+            Ai.LlmToolImageResult shot = new("{\"ok\":true}", Ai.AiAttachment.Image(new byte[] { 1 }, "image/png"));
+            Ai.DelegateLlmTool images = new("shot", "Returns a picture.", (Func<Ai.LlmToolImageResult>)(() => shot));
+            Ai.DelegateLlmTool text = new("text", "Returns text.", (Func<string>)(() => "hello"));
+
+            object imageResult = await images.CreateAIFunction().InvokeAsync(new MEAI.AIFunctionArguments());
+            object textResult = await text.CreateAIFunction().InvokeAsync(new MEAI.AIFunctionArguments());
+
+            Assert.AreSame(shot, imageResult);
+            Assert.IsInstanceOf<System.Text.Json.JsonElement>(textResult, "Non-image returns keep MEAI's JSON marshalling.");
+            Assert.AreEqual("hello", textResult.ToString());
+        }
+
+        [Test]
+        public void Allocation_LiftingATypedImage_NeverCopiesOrEncodesIt()
+        {
+            long probe = GC.GetAllocatedBytesForCurrentThread();
+            GC.KeepAlive(new byte[1024]);
+            if (GC.GetAllocatedBytesForCurrentThread() - probe < 1024)
+            {
+                Assert.Ignore("This runtime does not report per-thread allocations.");
+            }
+
+            Ai.LlmToolImageResult typed = new("{\"ok\":true}",
+                Ai.AiAttachment.Image(new byte[1024 * 1024], "image/jpeg"));
+            Func<List<MEAI.ChatMessage>> lift = () =>
+            {
+                List<MEAI.ChatMessage> messages = new()
+                {
+                    new MEAI.ChatMessage(MEAI.ChatRole.Tool,
+                        new List<MEAI.AIContent> { new MEAI.FunctionResultContent("r1", typed) })
+                };
+                HashSet<string> lifted = null;
+                SmartToolCallingChatClient.LiftCameraImages(messages, ref lifted);
+                return messages;
+            };
+            for (int i = 0; i < 3; i++)
+            {
+                GC.KeepAlive(lift());
+            }
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 16; i++)
+            {
+                GC.KeepAlive(lift());
+            }
+
+            long perCall = (GC.GetAllocatedBytesForCurrentThread() - before) / 16;
+            TestContext.WriteLine($"lift of a typed 1 MB image: {perCall} B per call");
+            Assert.Less(perCall, 8192, "Lifting moves the image; it never copies, encodes or parses it.");
+        }
+
+        /// <summary>
+        /// The benchmark camera contract: a camera frame keeps the exact camera wording, and each new frame replaces
+        /// the previous camera message.
+        /// </summary>
+        [TestCase("camera_capture")]
+        [TestCase("screenshot")]
+        [TestCase("capture_camera")]
+        public void CameraToolImage_KeepsTheCameraWording_AndReplacesThePreviousFrame(string toolName)
+        {
+            Assert.AreEqual(
+                "Camera frame from your latest capture. Inspect the image and continue the requested scene work " +
+                "using what you see.", ToolCallHistoryTrimmer.CameraFeedbackPrompt,
+                "The camera prompt is part of the benchmark suite version; it must not change.");
+            List<MEAI.ChatMessage> messages = new();
+            HashSet<string> lifted = null;
+
+            AppendTypedImageCall(messages, "c1", toolName, 1);
+            SmartToolCallingChatClient.LiftCameraImages(messages, ref lifted);
+            AppendTypedImageCall(messages, "c2", toolName, 2);
+            SmartToolCallingChatClient.LiftCameraImages(messages, ref lifted);
+
+            List<MEAI.ChatMessage> imageMessages = messages
+                .Where(message => message.Contents.OfType<MEAI.DataContent>().Any()).ToList();
+            Assert.AreEqual(1, imageMessages.Count, "Only the newest camera frame stays.");
+            Assert.AreEqual(ToolCallHistoryTrimmer.CameraFeedbackPrompt,
+                imageMessages[0].Contents.OfType<MEAI.TextContent>().Single().Text);
+            Assert.AreEqual((byte)2, imageMessages[0].Contents.OfType<MEAI.DataContent>().Single().Data.Span[0]);
+            Assert.IsTrue(ToolCallHistoryTrimmer.IsCameraFeedback(imageMessages[0]));
+        }
+
+        /// <summary>
+        /// A non-camera tool's image is shown with a prompt naming the tool, and an earlier render is NOT evicted:
+        /// comparing a before and an after render must work.
+        /// </summary>
+        [Test]
+        public void NonCameraToolImages_NameTheTool_AndTwoRendersStayComparable()
+        {
+            List<MEAI.ChatMessage> messages = new();
+            HashSet<string> lifted = null;
+
+            AppendTypedImageCall(messages, "r1", "render_before", 1);
+            SmartToolCallingChatClient.LiftCameraImages(messages, ref lifted);
+            AppendTypedImageCall(messages, "r2", "render_after", 2);
+            SmartToolCallingChatClient.LiftCameraImages(messages, ref lifted);
+
+            List<MEAI.ChatMessage> imageMessages = messages
+                .Where(message => message.Contents.OfType<MEAI.DataContent>().Any()).ToList();
+            Assert.AreEqual(2, imageMessages.Count, "Both renders stay in the turn.");
+            Assert.AreEqual("Image returned by tool 'render_before'. Inspect it and continue with the task.",
+                imageMessages[0].Contents.OfType<MEAI.TextContent>().Single().Text);
+            Assert.AreEqual("Image returned by tool 'render_after'. Inspect it and continue with the task.",
+                imageMessages[1].Contents.OfType<MEAI.TextContent>().Single().Text);
+            Assert.IsTrue(imageMessages.All(ToolCallHistoryTrimmer.IsToolImageFeedback));
+            Assert.IsFalse(imageMessages.Any(ToolCallHistoryTrimmer.IsCameraFeedback));
+            StringAssert.DoesNotContain("Camera frame", string.Join("|", messages.Select(message => message.Text)));
+        }
+
+        [Test]
+        public void CameraAndNonCameraImages_DoNotEvictEachOther()
+        {
+            List<MEAI.ChatMessage> messages = new();
+            HashSet<string> lifted = null;
+
+            AppendTypedImageCall(messages, "r1", "render_preview", 1);
+            SmartToolCallingChatClient.LiftCameraImages(messages, ref lifted);
+            AppendTypedImageCall(messages, "c1", "camera_capture", 2);
+            SmartToolCallingChatClient.LiftCameraImages(messages, ref lifted);
+            AppendTypedImageCall(messages, "c2", "camera_capture", 3);
+            SmartToolCallingChatClient.LiftCameraImages(messages, ref lifted);
+
+            Assert.AreEqual(1, messages.Count(ToolCallHistoryTrimmer.IsToolImageFeedback));
+            Assert.AreEqual(1, messages.Count(ToolCallHistoryTrimmer.IsCameraFeedback));
+        }
+
+        [Test]
+        public void NonCameraToolImages_KeepOnlyTheLatestEight()
+        {
+            List<MEAI.ChatMessage> messages = new();
+            HashSet<string> lifted = null;
+            for (int i = 0; i < 10; i++)
+            {
+                AppendTypedImageCall(messages, "r" + i, "render_" + i, (byte)i);
+                SmartToolCallingChatClient.LiftCameraImages(messages, ref lifted);
+            }
+
+            List<MEAI.ChatMessage> kept = messages.Where(ToolCallHistoryTrimmer.IsToolImageFeedback).ToList();
+            Assert.AreEqual(ToolCallHistoryTrimmer.MaxToolImageFeedbackMessages, kept.Count);
+            StringAssert.Contains("'render_2'", kept[0].Contents.OfType<MEAI.TextContent>().Single().Text);
+            StringAssert.Contains("'render_9'", kept[7].Contents.OfType<MEAI.TextContent>().Single().Text);
+        }
+
+        [Test]
+        public void NonCameraToolImages_OneCallWithSeveralImages_AndAPrunedCall()
+        {
+            List<MEAI.ChatMessage> messages = new()
+            {
+                MakeAssistantToolCall("r1", "render_pair"),
+                new MEAI.ChatMessage(MEAI.ChatRole.Tool, new List<MEAI.AIContent>
+                {
+                    new MEAI.FunctionResultContent("r1", new Ai.LlmToolImageResult("{\"ok\":true}", new[]
+                    {
+                        Ai.AiAttachment.Image(new byte[] { 1 }, "image/png"),
+                        Ai.AiAttachment.Image(new byte[] { 2 }, "image/png")
+                    }))
+                }),
+                new MEAI.ChatMessage(MEAI.ChatRole.Tool, new List<MEAI.AIContent>
+                {
+                    new MEAI.FunctionResultContent("orphan", new Ai.LlmToolImageResult("{\"ok\":true}",
+                        Ai.AiAttachment.Image(new byte[] { 3 }, "image/png")))
+                })
+            };
+            HashSet<string> lifted = null;
+
+            SmartToolCallingChatClient.LiftCameraImages(messages, ref lifted);
+
+            List<string> prompts = messages.Where(ToolCallHistoryTrimmer.IsToolImageFeedback)
+                .Select(message => message.Contents.OfType<MEAI.TextContent>().Single().Text).ToList();
+            CollectionAssert.AreEqual(new[]
+            {
+                "2 images returned by tool 'render_pair'. Inspect them and continue with the task.",
+                "Image returned by a tool. Inspect it and continue with the task."
+            }, prompts);
+        }
+
+        [Test]
+        public void HistoryTrim_RetiresANonCameraImageWithItsExchange()
+        {
+            List<MEAI.ChatMessage> messages = new();
+            HashSet<string> lifted = null;
+            AppendTypedImageCall(messages, "r1", "render_before", 1);
+            SmartToolCallingChatClient.LiftCameraImages(messages, ref lifted);
+            AppendTypedImageCall(messages, "r2", "render_after", 2);
+            SmartToolCallingChatClient.LiftCameraImages(messages, ref lifted);
+
+            ToolCallHistoryTrimmer.Trim(messages, 2);
+
+            List<MEAI.ChatMessage> kept = messages.Where(ToolCallHistoryTrimmer.IsToolImageFeedback).ToList();
+            Assert.AreEqual(1, kept.Count, "The old render leaves together with its tool exchange.");
+            StringAssert.Contains("'render_after'", kept[0].Contents.OfType<MEAI.TextContent>().Single().Text);
+        }
+
+        [TestCase("\"yes\"")]
+        [TestCase("\"true\"")]
+        [TestCase("1")]
+        [TestCase("null")]
+        [TestCase("{\"v\":true}")]
+        public void LegacyCameraResult_NonBooleanOk_IsOrdinaryText_AndNeverThrows(string okValue)
+        {
+            string payload = "{\"ok\":" + okValue + ",\"camera\":\"Main\",\"dataUrl\":\"data:image/jpeg;base64," +
+                             Convert.ToBase64String(new byte[8]) + "\"}";
+
+            bool liftable = true;
+            Assert.DoesNotThrow(() => liftable = SmartToolCallingChatClient.TryReadLiftableCameraImage(
+                payload, out _, out _));
+            Assert.IsFalse(liftable);
+            Assert.IsTrue(SmartToolCallingChatClient.TryReadLiftableCameraImage(
+                payload.Replace("\"ok\":" + okValue, "\"ok\":true"), out _, out Ai.AiAttachment image));
+            Assert.AreEqual(8, image.Memory.Length);
+            Assert.IsFalse(SmartToolCallingChatClient.TryReadLiftableCameraImage(
+                "{\"ok\":true,\"dataUrl\":{\"nested\":1}}", out _, out _));
+        }
+
+        private static void AppendTypedImageCall(List<MEAI.ChatMessage> messages, string callId, string toolName,
+            byte marker)
+        {
+            messages.Add(MakeAssistantToolCall(callId, toolName));
+            messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, new List<MEAI.AIContent>
+            {
+                new MEAI.FunctionResultContent(callId, new Ai.LlmToolImageResult("{\"ok\":true}",
+                    Ai.AiAttachment.Image(new[] { marker }, "image/jpeg")))
+            }));
+        }
+
         private static MEAI.ChatResponse MakeToolCallResponse(string toolName, string callId)
         {
             MEAI.FunctionCallContent fc = new(callId, toolName, new Dictionary<string, object>());

@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import threading
 import time
@@ -122,9 +123,12 @@ class Logger:
 class ProxyState:
     """Injection settings plus the counters served by ``GET /control/state``."""
 
-    def __init__(self, upstream):
+    def __init__(self, upstream, capture_dir=None):
         self._lock = threading.Lock()
         self.upstream = upstream
+        # Optional untruncated copy of every captured body, one file per request (see --capture-dir).
+        self.capture_dir = capture_dir
+        self.capture_files = 0
         parts = urlsplit(upstream)
         self.scheme = parts.scheme or "http"
         self.host = parts.hostname or "127.0.0.1"
@@ -218,11 +222,26 @@ class ProxyState:
             text = body.decode("utf-8") if body else ""
         except UnicodeDecodeError:
             text = body.decode("latin-1", "replace") if body else ""
+        if self.capture_dir:
+            self._write_capture_file(method, route, text)
         if len(text) > CAPTURED_BODY_MAX_CHARS:
             text = text[:CAPTURED_BODY_MAX_CHARS] + "...<truncated>"
         with self._lock:
             self.captured.append({"at": _utc_now(), "method": method, "path": route, "body": text})
             del self.captured[:-CAPTURED_REQUESTS_MAX]
+
+    def _write_capture_file(self, method, route, text):
+        # WHY: image/attachment payloads exceed CAPTURED_BODY_MAX_CHARS, and the part that has to be
+        # asserted (where an image landed) can sit past the truncation point.
+        with self._lock:
+            self.capture_files += 1
+            index = self.capture_files
+        safe_route = "".join(c if c.isalnum() else "_" for c in route).strip("_") or "root"
+        stamp = _utc_now().replace(":", "").replace("-", "")
+        name = "%04d-%s-%s-%s.json" % (index, stamp, method, safe_route)
+        os.makedirs(self.capture_dir, exist_ok=True)
+        with open(os.path.join(self.capture_dir, name), "w", encoding="utf-8") as handle:
+            handle.write(text)
 
     def captured_requests(self):
         with self._lock:
@@ -781,9 +800,12 @@ def create_server(
     host=DEFAULT_HOST,
     log_file=None,
     upstream_timeout=DEFAULT_UPSTREAM_TIMEOUT,
+    capture_dir=None,
 ):
     """Build a bound (not yet serving) proxy. Pass port 0 for an ephemeral port."""
-    return G11ProxyServer((host, port), ProxyState(upstream), Logger(log_file), upstream_timeout)
+    return G11ProxyServer(
+        (host, port), ProxyState(upstream, capture_dir), Logger(log_file), upstream_timeout
+    )
 
 
 def main(argv=None):
@@ -806,6 +828,11 @@ def main(argv=None):
         default=DEFAULT_UPSTREAM_TIMEOUT,
         help="upstream socket timeout in seconds (default %(default)s)",
     )
+    parser.add_argument(
+        "--capture-dir",
+        default=None,
+        help="also write every /v1 request body, untruncated, to one file per request in this directory",
+    )
     args = parser.parse_args(argv)
 
     server = create_server(
@@ -814,6 +841,7 @@ def main(argv=None):
         host=args.host,
         log_file=args.log_file,
         upstream_timeout=args.upstream_timeout,
+        capture_dir=args.capture_dir,
     )
     server.logger.line(
         "%s START g11_proxy listening=http://%s:%d upstream=%s timeout_s=%.0f"

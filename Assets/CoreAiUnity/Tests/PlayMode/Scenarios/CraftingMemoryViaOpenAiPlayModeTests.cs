@@ -23,7 +23,38 @@ namespace CoreAI.Tests.PlayMode
     public sealed class CraftingMemoryViaOpenAiPlayModeTests
     {
         private const int LlmTurnTimeoutSeconds = 240;
-        private const int LongScenarioTimeoutMs = 600000;
+
+        // WHY: the longest body (ThreeCrafts) runs three sequential 240 s turns = 720 s, + the 20 s scope reserve
+        // and ~100 s margin for backend setup and the memory flush frames = 840 s; the two-craft tests fit inside.
+        private const int TestTimeoutMs = 840000;
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+        private ToolCallCapture _toolCalls;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
+            _toolCalls?.Dispose();
+            _toolCalls = null;
+        }
 
         private sealed class InMemoryStore : IAgentMemoryStore
         {
@@ -75,7 +106,7 @@ namespace CoreAI.Tests.PlayMode
         ///     .    PlayModeOpenAiTestConfig.
         /// </summary>
         [UnityTest]
-        [Timeout(LongScenarioTimeoutMs)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator CraftingMemoryOpenAi_ThreeCrafts_AllUnique()
         {
             Debug.Log("[CraftingMemory.OpenAI]  TEST START ");
@@ -91,175 +122,174 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
+
+            Debug.Log("[CraftingMemory.OpenAI]  HTTP client created");
+            Debug.Log($"[CraftingMemory.OpenAI] Base URL: {PlayModeOpenAiTestConfig.ResolveBaseUrl()}");
+            Debug.Log($"[CraftingMemory.OpenAI] Model: {PlayModeOpenAiTestConfig.ResolveModelId()}");
+
+            InMemoryStore store = new();
+            AgentMemoryPolicy policy = new();
+            TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
+            // Local models often re-emit identical tool payloads across iterations; duplicate guard
+            // otherwise hits max consecutive errors. Harness sink is idempotent for these crafts.
+            policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(
+                new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(),
+                new NullLuaScriptVersionStore());
+
+            //     MemoryStore (   )
+            ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+
+            CoreAi.ClearToolCallHistory();
+            // WHY: the global tool-call subscription is released in [UnityTearDown], which also runs on a
+            // framework timeout abort; a body `using` would leak it into later tests.
+            ToolCallCapture toolCalls = new();
+            _toolCalls = toolCalls;
+            List<string> craftedNames = new();
+            // Canonical memory string used by later craft prompts.
+            // Keep this separate from store memory because the model can write memory directly.
+            string memoryAccum = "";
+
+            // Craft 1.
             {
-                Debug.Log("[CraftingMemory.OpenAI]  HTTP client created");
-                Debug.Log($"[CraftingMemory.OpenAI] Base URL: {PlayModeOpenAiTestConfig.ResolveBaseUrl()}");
-                Debug.Log($"[CraftingMemory.OpenAI] Model: {PlayModeOpenAiTestConfig.ResolveModelId()}");
+                const string ing1 = "Iron";
+                const string ing2 = "Oak";
+                string prompt = BuildCraftPrompt(1,
+                    "Iron (metal, hardness:60, magic:5, rarity:1)",
+                    "Oak Wood (wood, hardness:40, magic:10, rarity:1)",
+                    memoryAccum);
 
-                InMemoryStore store = new();
-                AgentMemoryPolicy policy = new();
-                TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
-                // Local models often re-emit identical tool payloads across iterations; duplicate guard
-                // otherwise hits max consecutive errors. Harness sink is idempotent for these crafts.
-                policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
-                SessionTelemetryCollector telemetry = new();
-                AiPromptComposer composer = new(
-                    new BuiltInDefaultAgentSystemPromptProvider(),
-                    new NoAgentUserPromptTemplateProvider(),
-                    new NullLuaScriptVersionStore());
+                LogBeforeModelCall("CRAFT 1: Iron + Oak", prompt, store);
 
-                //     MemoryStore (   )
-                ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+                ListSink sink = new();
+                AiOrchestrator orch =
+                    CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
 
-                CoreAi.ClearToolCallHistory();
-                using ToolCallCapture toolCalls = new();
-                List<string> craftedNames = new();
-                // Canonical memory string used by later craft prompts.
-                // Keep this separate from store memory because the model can write memory directly.
-                string memoryAccum = "";
-
-                // Craft 1.
+                int toolMark = toolCalls.Count;
+                CancellationTokenSource cts = _requests.CreateCancellation();
+                Task t = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
                 {
-                    const string ing1 = "Iron";
-                    const string ing2 = "Oak";
-                    string prompt = BuildCraftPrompt(1,
-                        "Iron (metal, hardness:60, magic:5, rarity:1)",
-                        "Oak Wood (wood, hardness:40, magic:10, rarity:1)",
-                        memoryAccum);
+                    RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                    Hint = prompt,
+                    // Live models occasionally reply with the Lua as text instead of invoking the
+                    // tool; the craft chain needs the real execute_lua record, so force the call.
+                    ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                    RequiredToolName = "execute_lua"
+                }, cts.Token));
 
-                    LogBeforeModelCall("CRAFT 1: Iron + Oak", prompt, store);
+                yield return PlayModeTestAwait.WaitTask(t, _requests.Cap(LlmTurnTimeoutSeconds), "craft 1", cts);
+                yield return FlushMemoryStorePersistenceFrames();
 
-                    ListSink sink = new();
-                    AiOrchestrator orch =
-                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+                LogAfterModelCall("craft 1", sink, store);
+                LlmToolCallRecord executeLua = toolCalls.RequireExtractableExecuteLuaSince(
+                    toolMark, BuiltInAgentRoleIds.CoreMechanic, "craft 1");
+                string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
 
-                    int toolMark = toolCalls.Count;
-                    using CancellationTokenSource cts = CreateTurnCancellation();
-                    Task t = orch.RunTaskAsync(new AiTaskRequest
-                    {
-                        RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt,
-                        // Live models occasionally reply with the Lua as text instead of invoking the
-                        // tool; the craft chain needs the real execute_lua record, so force the call.
-                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
-                        RequiredToolName = "execute_lua"
-                    }, cts.Token);
-
-                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "craft 1");
-                    yield return FlushMemoryStorePersistenceFrames();
-
-                    LogAfterModelCall("craft 1", sink, store);
-                    LlmToolCallRecord executeLua = toolCalls.RequireExtractableExecuteLuaSince(
-                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "craft 1");
-                    string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
-
-                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 1", 1, ing1, ing2))
-                    {
-                        yield break;
-                    }
-                }
-
-                // Craft 2 with the same ingredients plus memory.
+                if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 1", 1, ing1, ing2))
                 {
-                    const string ing1 = "Steel";
-                    const string ing2 = "Hardwood";
-                    string prompt = BuildCraftPrompt(2,
-                        "Steel (metal, hardness:75, magic:8, rarity:2)",
-                        "Hardwood (wood, hardness:50, magic:12, rarity:2)",
-                        memoryAccum);
-
-                    LogBeforeModelCall("CRAFT 2: Steel + Hardwood", prompt, store);
-
-                    ListSink sink = new();
-                    AiOrchestrator orch =
-                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
-
-                    int toolMark = toolCalls.Count;
-                    using CancellationTokenSource cts = CreateTurnCancellation();
-                    Task t = orch.RunTaskAsync(new AiTaskRequest
-                    {
-                        RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt,
-                        // Live models occasionally reply with the Lua as text instead of invoking the
-                        // tool; the craft chain needs the real execute_lua record, so force the call.
-                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
-                        RequiredToolName = "execute_lua"
-                    }, cts.Token);
-
-                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "craft 2");
-                    yield return FlushMemoryStorePersistenceFrames();
-
-                    LogAfterModelCall("craft 2", sink, store);
-                    LlmToolCallRecord executeLua = toolCalls.RequireExtractableExecuteLuaSince(
-                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "craft 2");
-                    string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
-
-                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 2", 2, ing1, ing2))
-                    {
-                        yield break;
-                    }
+                    yield break;
                 }
-
-                // Craft 3: Mithril + Enchanted Wood.
-                {
-                    const string ing1 = "Mithril";
-                    const string ing2 = "Enchanted";
-                    string prompt = BuildCraftPrompt(3,
-                        "Mithril (metal, hardness:70, magic:60, rarity:4)",
-                        "Enchanted Wood (wood, hardness:45, magic:70, rarity:3)",
-                        memoryAccum);
-
-                    LogBeforeModelCall("CRAFT 3: Mithril + Enchanted Wood", prompt, store);
-
-                    ListSink sink = new();
-                    AiOrchestrator orch =
-                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
-
-                    int toolMark = toolCalls.Count;
-                    using CancellationTokenSource cts = CreateTurnCancellation();
-                    Task t = orch.RunTaskAsync(new AiTaskRequest
-                    {
-                        RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt,
-                        // Live models occasionally reply with the Lua as text instead of invoking the
-                        // tool; the craft chain needs the real execute_lua record, so force the call.
-                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
-                        RequiredToolName = "execute_lua"
-                    }, cts.Token);
-
-                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "craft 3");
-                    yield return FlushMemoryStorePersistenceFrames();
-
-                    LogAfterModelCall("craft 3", sink, store);
-                    LlmToolCallRecord executeLua = toolCalls.RequireExtractableExecuteLuaSince(
-                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "craft 3");
-                    string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
-
-                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 3", 3, ing1, ing2))
-                    {
-                        yield break;
-                    }
-                }
-
-                // Final validation.
-                Debug.Log("[CraftingMemory.OpenAI]  FINAL VALIDATION ");
-
-                Assert.AreEqual(3, craftedNames.Count, "Must have 3 crafted items");
-
-                HashSet<string> uniqueFirst3 = new(craftedNames.Select(n => n.ToLowerInvariant()));
-                Assert.AreEqual(3, uniqueFirst3.Count,
-                    $"Crafts 1-3 must be unique! Got: {string.Join(", ", craftedNames)}");
-
-                Debug.Log("[CraftingMemory.OpenAI]  First 3 crafts are unique");
-                Debug.Log($"[CraftingMemory.OpenAI] Crafted items: {string.Join(" | ", craftedNames)}");
-                Debug.Log($"[CraftingMemory.OpenAI] Canonical memory for prompts:\n{memoryAccum}");
-                Debug.Log("[CraftingMemory.OpenAI]  TEST PASSED ");
             }
-            finally
+
+            // Craft 2 with the same ingredients plus memory.
             {
-                handle.Dispose();
+                const string ing1 = "Steel";
+                const string ing2 = "Hardwood";
+                string prompt = BuildCraftPrompt(2,
+                    "Steel (metal, hardness:75, magic:8, rarity:2)",
+                    "Hardwood (wood, hardness:50, magic:12, rarity:2)",
+                    memoryAccum);
+
+                LogBeforeModelCall("CRAFT 2: Steel + Hardwood", prompt, store);
+
+                ListSink sink = new();
+                AiOrchestrator orch =
+                    CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+
+                int toolMark = toolCalls.Count;
+                CancellationTokenSource cts = _requests.CreateCancellation();
+                Task t = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                    Hint = prompt,
+                    // Live models occasionally reply with the Lua as text instead of invoking the
+                    // tool; the craft chain needs the real execute_lua record, so force the call.
+                    ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                    RequiredToolName = "execute_lua"
+                }, cts.Token));
+
+                yield return PlayModeTestAwait.WaitTask(t, _requests.Cap(LlmTurnTimeoutSeconds), "craft 2", cts);
+                yield return FlushMemoryStorePersistenceFrames();
+
+                LogAfterModelCall("craft 2", sink, store);
+                LlmToolCallRecord executeLua = toolCalls.RequireExtractableExecuteLuaSince(
+                    toolMark, BuiltInAgentRoleIds.CoreMechanic, "craft 2");
+                string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
+
+                if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 2", 2, ing1, ing2))
+                {
+                    yield break;
+                }
             }
+
+            // Craft 3: Mithril + Enchanted Wood.
+            {
+                const string ing1 = "Mithril";
+                const string ing2 = "Enchanted";
+                string prompt = BuildCraftPrompt(3,
+                    "Mithril (metal, hardness:70, magic:60, rarity:4)",
+                    "Enchanted Wood (wood, hardness:45, magic:70, rarity:3)",
+                    memoryAccum);
+
+                LogBeforeModelCall("CRAFT 3: Mithril + Enchanted Wood", prompt, store);
+
+                ListSink sink = new();
+                AiOrchestrator orch =
+                    CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+
+                int toolMark = toolCalls.Count;
+                CancellationTokenSource cts = _requests.CreateCancellation();
+                Task t = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                    Hint = prompt,
+                    // Live models occasionally reply with the Lua as text instead of invoking the
+                    // tool; the craft chain needs the real execute_lua record, so force the call.
+                    ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                    RequiredToolName = "execute_lua"
+                }, cts.Token));
+
+                yield return PlayModeTestAwait.WaitTask(t, _requests.Cap(LlmTurnTimeoutSeconds), "craft 3", cts);
+                yield return FlushMemoryStorePersistenceFrames();
+
+                LogAfterModelCall("craft 3", sink, store);
+                LlmToolCallRecord executeLua = toolCalls.RequireExtractableExecuteLuaSince(
+                    toolMark, BuiltInAgentRoleIds.CoreMechanic, "craft 3");
+                string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
+
+                if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 3", 3, ing1, ing2))
+                {
+                    yield break;
+                }
+            }
+
+            // Final validation.
+            Debug.Log("[CraftingMemory.OpenAI]  FINAL VALIDATION ");
+
+            Assert.AreEqual(3, craftedNames.Count, "Must have 3 crafted items");
+
+            HashSet<string> uniqueFirst3 = new(craftedNames.Select(n => n.ToLowerInvariant()));
+            Assert.AreEqual(3, uniqueFirst3.Count,
+                $"Crafts 1-3 must be unique! Got: {string.Join(", ", craftedNames)}");
+
+            Debug.Log("[CraftingMemory.OpenAI]  First 3 crafts are unique");
+            Debug.Log($"[CraftingMemory.OpenAI] Crafted items: {string.Join(" | ", craftedNames)}");
+            Debug.Log($"[CraftingMemory.OpenAI] Canonical memory for prompts:\n{memoryAccum}");
+            Debug.Log("[CraftingMemory.OpenAI]  TEST PASSED ");
         }
 
         [Test]
@@ -426,7 +456,7 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         [Explicit(
             "Targeted duplicate of ThreeCrafts_AllUnique for same-ingredient drift; too expensive for mandatory full live-model suite.")]
-        [Timeout(LongScenarioTimeoutMs)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator CraftingMemoryOpenAi_TwoCrafts_SecondIsDifferent()
         {
             Debug.Log("[CraftingMemory.OpenAI]  2-CRAFT TEST START ");
@@ -442,125 +472,124 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
+
+            InMemoryStore store = new();
+            AgentMemoryPolicy policy = new();
+            TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
+            policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(
+                new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(),
+                new NullLuaScriptVersionStore());
+
+            ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+            CoreAi.ClearToolCallHistory();
+            // WHY: the global tool-call subscription is released in [UnityTearDown], which also runs on a
+            // framework timeout abort; a body `using` would leak it into later tests.
+            ToolCallCapture toolCalls = new();
+            _toolCalls = toolCalls;
+
+            // Craft 1.
+            string prompt1 = BuildCraftPrompt(1,
+                "Steel Ingot (metal, hardness:80, magic:10, rarity:2)",
+                "Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)",
+                "");
+
+            LogBeforeModelCall("CRAFT 1: Steel + Fire Crystal", prompt1, store);
+
+            ListSink sink1 = new();
+            AiOrchestrator orch1 = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink1);
+
+            int toolMark1 = toolCalls.Count;
+            CancellationTokenSource cts1 = _requests.CreateCancellation();
+            Task t1 = _requests.Track(orch1.RunTaskAsync(new AiTaskRequest
             {
-                InMemoryStore store = new();
-                AgentMemoryPolicy policy = new();
-                TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
-                policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
-                SessionTelemetryCollector telemetry = new();
-                AiPromptComposer composer = new(
-                    new BuiltInDefaultAgentSystemPromptProvider(),
-                    new NoAgentUserPromptTemplateProvider(),
-                    new NullLuaScriptVersionStore());
+                RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                Hint = prompt1
+            }, cts1.Token));
 
-                ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
-                CoreAi.ClearToolCallHistory();
-                using ToolCallCapture toolCalls = new();
+            yield return PlayModeTestAwait.WaitTask(t1, _requests.Cap(LlmTurnTimeoutSeconds), "craft 1", cts1);
+            yield return FlushMemoryStorePersistenceFrames();
 
-                // Craft 1.
-                string prompt1 = BuildCraftPrompt(1,
-                    "Steel Ingot (metal, hardness:80, magic:10, rarity:2)",
-                    "Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)",
-                    "");
+            LogAfterModelCall("craft 1", sink1, store);
 
-                LogBeforeModelCall("CRAFT 1: Steel + Fire Crystal", prompt1, store);
+            LlmToolCallRecord firstExecuteLua = toolCalls.RequireExtractableExecuteLuaSince(
+                toolMark1, BuiltInAgentRoleIds.CoreMechanic, "craft 1");
 
-                ListSink sink1 = new();
-                AiOrchestrator orch1 = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink1);
+            string firstPayload = ToolCallCapture.BuildExtractionPayload(firstExecuteLua);
+            AssertExecuteLuaUsesNumericQualityIfPresent(firstPayload, "craft 1");
+            string firstName = CraftingMemoryItemNameExtractor.ExtractName(firstPayload);
+            Debug.Log($"[CraftingMemory.OpenAI] Extracted Craft 1 name: '{firstName ?? "unknown"}'");
 
-                int toolMark1 = toolCalls.Count;
-                using CancellationTokenSource cts1 = CreateTurnCancellation();
-                Task t1 = orch1.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                    Hint = prompt1
-                }, cts1.Token);
-
-                yield return PlayModeTestAwait.WaitTask(t1, LlmTurnTimeoutSeconds, "craft 1");
-                yield return FlushMemoryStorePersistenceFrames();
-
-                LogAfterModelCall("craft 1", sink1, store);
-
-                LlmToolCallRecord firstExecuteLua = toolCalls.RequireExtractableExecuteLuaSince(
-                    toolMark1, BuiltInAgentRoleIds.CoreMechanic, "craft 1");
-
-                string firstPayload = ToolCallCapture.BuildExtractionPayload(firstExecuteLua);
-                AssertExecuteLuaUsesNumericQualityIfPresent(firstPayload, "craft 1");
-                string firstName = CraftingMemoryItemNameExtractor.ExtractName(firstPayload);
-                Debug.Log($"[CraftingMemory.OpenAI] Extracted Craft 1 name: '{firstName ?? "unknown"}'");
-
-                // Craft 2 with the same ingredients plus memory.
-                // This harness only registers execute_lua (no memory ILlmTool), so the model's "memory" JSON
-                // never hits IAgentMemoryStore. Feed craft #2 the canonical previous-crafts line from craft #1
-                // so the prompt can require a different weapon name (same as ThreeCrafts memoryAccum pattern).
-                string memoryHint = "";
-                if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState st1) &&
-                    !string.IsNullOrWhiteSpace(st1.Memory))
-                {
-                    memoryHint = st1.Memory.Trim();
-                }
-
-                if (string.IsNullOrWhiteSpace(memoryHint) && !string.IsNullOrWhiteSpace(firstName))
-                {
-                    memoryHint = $"Previous crafts: Craft #1 - {firstName} made from Steel + Fire";
-                    store.Save(BuiltInAgentRoleIds.CoreMechanic, new AgentMemoryState { Memory = memoryHint });
-                    Debug.Log($"[CraftingMemory.OpenAI] Injected harness memory for craft 2 prompt:\n{memoryHint}");
-                }
-
-                string prompt2 = BuildCraftPrompt(2,
-                    "Steel Ingot (metal, hardness:80, magic:10, rarity:2)",
-                    "Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)",
-                    memoryHint);
-
-                LogBeforeModelCall("CRAFT 2: Same ingredients, check memory", prompt2, store);
-
-                ListSink sink2 = new();
-                AiOrchestrator orch2 = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink2);
-
-                int toolMark2 = toolCalls.Count;
-                using CancellationTokenSource cts2 = CreateTurnCancellation();
-                Task t2 = orch2.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                    Hint = prompt2
-                }, cts2.Token);
-
-                yield return PlayModeTestAwait.WaitTask(t2, LlmTurnTimeoutSeconds, "craft 2");
-                yield return FlushMemoryStorePersistenceFrames();
-
-                LogAfterModelCall("craft 2", sink2, store);
-
-                LlmToolCallRecord secondExecuteLua = toolCalls.RequireExtractableExecuteLuaSince(
-                    toolMark2, BuiltInAgentRoleIds.CoreMechanic, "craft 2");
-
-                string secondPayload = ToolCallCapture.BuildExtractionPayload(secondExecuteLua);
-                AssertExecuteLuaUsesNumericQualityIfPresent(secondPayload, "craft 2");
-                string secondName = CraftingMemoryItemNameExtractor.ExtractName(secondPayload);
-                Debug.Log($"[CraftingMemory.OpenAI] Extracted Craft 2 name: '{secondName ?? "unknown"}'");
-
-                // Final validation.
-                Debug.Log("[CraftingMemory.OpenAI]  VALIDATION ");
-
-                Assert.AreNotEqual(firstName.ToLowerInvariant(), secondName.ToLowerInvariant(),
-                    $"Craft 2 repeated Craft 1 name. Both are '{firstName}'.");
-
-                Debug.Log($"[CraftingMemory.OpenAI]  Craft names are different:");
-                Debug.Log($"[CraftingMemory.OpenAI]   Craft 1: '{firstName}'");
-                Debug.Log($"[CraftingMemory.OpenAI]   Craft 2: '{secondName}'");
-
-                Debug.Log("[CraftingMemory.OpenAI]  TEST PASSED ");
-            }
-            finally
+            // Craft 2 with the same ingredients plus memory.
+            // This harness only registers execute_lua (no memory ILlmTool), so the model's "memory" JSON
+            // never hits IAgentMemoryStore. Feed craft #2 the canonical previous-crafts line from craft #1
+            // so the prompt can require a different weapon name (same as ThreeCrafts memoryAccum pattern).
+            string memoryHint = "";
+            if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState st1) &&
+                !string.IsNullOrWhiteSpace(st1.Memory))
             {
-                handle.Dispose();
+                memoryHint = st1.Memory.Trim();
             }
+
+            if (string.IsNullOrWhiteSpace(memoryHint) && !string.IsNullOrWhiteSpace(firstName))
+            {
+                memoryHint = $"Previous crafts: Craft #1 - {firstName} made from Steel + Fire";
+                store.Save(BuiltInAgentRoleIds.CoreMechanic, new AgentMemoryState { Memory = memoryHint });
+                Debug.Log($"[CraftingMemory.OpenAI] Injected harness memory for craft 2 prompt:\n{memoryHint}");
+            }
+
+            string prompt2 = BuildCraftPrompt(2,
+                "Steel Ingot (metal, hardness:80, magic:10, rarity:2)",
+                "Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)",
+                memoryHint);
+
+            LogBeforeModelCall("CRAFT 2: Same ingredients, check memory", prompt2, store);
+
+            ListSink sink2 = new();
+            AiOrchestrator orch2 = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink2);
+
+            int toolMark2 = toolCalls.Count;
+            CancellationTokenSource cts2 = _requests.CreateCancellation();
+            Task t2 = _requests.Track(orch2.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                Hint = prompt2
+            }, cts2.Token));
+
+            yield return PlayModeTestAwait.WaitTask(t2, _requests.Cap(LlmTurnTimeoutSeconds), "craft 2", cts2);
+            yield return FlushMemoryStorePersistenceFrames();
+
+            LogAfterModelCall("craft 2", sink2, store);
+
+            LlmToolCallRecord secondExecuteLua = toolCalls.RequireExtractableExecuteLuaSince(
+                toolMark2, BuiltInAgentRoleIds.CoreMechanic, "craft 2");
+
+            string secondPayload = ToolCallCapture.BuildExtractionPayload(secondExecuteLua);
+            AssertExecuteLuaUsesNumericQualityIfPresent(secondPayload, "craft 2");
+            string secondName = CraftingMemoryItemNameExtractor.ExtractName(secondPayload);
+            Debug.Log($"[CraftingMemory.OpenAI] Extracted Craft 2 name: '{secondName ?? "unknown"}'");
+
+            // Final validation.
+            Debug.Log("[CraftingMemory.OpenAI]  VALIDATION ");
+
+            Assert.AreNotEqual(firstName.ToLowerInvariant(), secondName.ToLowerInvariant(),
+                $"Craft 2 repeated Craft 1 name. Both are '{firstName}'.");
+
+            Debug.Log($"[CraftingMemory.OpenAI]  Craft names are different:");
+            Debug.Log($"[CraftingMemory.OpenAI]   Craft 1: '{firstName}'");
+            Debug.Log($"[CraftingMemory.OpenAI]   Craft 2: '{secondName}'");
+
+            Debug.Log("[CraftingMemory.OpenAI]  TEST PASSED ");
         }
 
         [UnityTest]
         [Explicit(
             "Targeted live-model determinism check for repeated ingredients; run separately from mandatory full PlayMode.")]
-        [Timeout(LongScenarioTimeoutMs)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator CraftingMemoryOpenAi_RepeatIngredients_SecondMatchesFirst()
         {
             Debug.Log("[CraftingMemory.OpenAI]  REPEAT-INGREDIENT DETERMINISM TEST START ");
@@ -575,90 +604,89 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
+
+            InMemoryStore store = new();
+            AgentMemoryPolicy policy = new();
+            TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
+            policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(
+                new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(),
+                new NullLuaScriptVersionStore());
+
+            ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+            CoreAi.ClearToolCallHistory();
+            // WHY: the global tool-call subscription is released in [UnityTearDown], which also runs on a
+            // framework timeout abort; a body `using` would leak it into later tests.
+            ToolCallCapture toolCalls = new();
+            _toolCalls = toolCalls;
+
+            string prompt1 = BuildCraftPrompt(1,
+                "Steel Ingot (metal, hardness:80, magic:10, rarity:2)",
+                "Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)",
+                "");
+
+            LogBeforeModelCall("DETERMINISM CRAFT 1: Steel + Fire Crystal", prompt1, store);
+
+            ListSink sink1 = new();
+            AiOrchestrator orch1 = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink1);
+
+            int toolMark1 = toolCalls.Count;
+            CancellationTokenSource cts1 = _requests.CreateCancellation();
+            Task t1 = _requests.Track(orch1.RunTaskAsync(new AiTaskRequest
             {
-                InMemoryStore store = new();
-                AgentMemoryPolicy policy = new();
-                TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
-                policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
-                SessionTelemetryCollector telemetry = new();
-                AiPromptComposer composer = new(
-                    new BuiltInDefaultAgentSystemPromptProvider(),
-                    new NoAgentUserPromptTemplateProvider(),
-                    new NullLuaScriptVersionStore());
+                RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                Hint = prompt1
+            }, cts1.Token));
 
-                ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
-                CoreAi.ClearToolCallHistory();
-                using ToolCallCapture toolCalls = new();
+            yield return PlayModeTestAwait.WaitTask(t1, _requests.Cap(LlmTurnTimeoutSeconds), "determinism craft 1", cts1);
+            yield return FlushMemoryStorePersistenceFrames();
 
-                string prompt1 = BuildCraftPrompt(1,
-                    "Steel Ingot (metal, hardness:80, magic:10, rarity:2)",
-                    "Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)",
-                    "");
+            LogAfterModelCall("determinism craft 1", sink1, store);
 
-                LogBeforeModelCall("DETERMINISM CRAFT 1: Steel + Fire Crystal", prompt1, store);
+            LlmToolCallRecord firstExecuteLua = toolCalls.RequireExtractableExecuteLuaSince(
+                toolMark1, BuiltInAgentRoleIds.CoreMechanic, "determinism craft 1");
+            string firstPayload = ToolCallCapture.BuildExtractionPayload(firstExecuteLua);
+            AssertExecuteLuaUsesNumericQualityIfPresent(firstPayload, "determinism craft 1");
+            string firstName = CraftingMemoryItemNameExtractor.ExtractName(firstPayload);
 
-                ListSink sink1 = new();
-                AiOrchestrator orch1 = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink1);
+            string memoryHint = BuildCanonicalMemory("", 1, firstName, "Steel", "Fire");
+            store.Save(BuiltInAgentRoleIds.CoreMechanic, new AgentMemoryState { Memory = memoryHint });
 
-                int toolMark1 = toolCalls.Count;
-                using CancellationTokenSource cts1 = CreateTurnCancellation();
-                Task t1 = orch1.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                    Hint = prompt1
-                }, cts1.Token);
+            string prompt2 = BuildDeterministicCraftPrompt(2,
+                "Steel Ingot (metal, hardness:80, magic:10, rarity:2)",
+                "Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)",
+                memoryHint);
 
-                yield return PlayModeTestAwait.WaitTask(t1, LlmTurnTimeoutSeconds, "determinism craft 1");
-                yield return FlushMemoryStorePersistenceFrames();
+            LogBeforeModelCall("DETERMINISM CRAFT 2: Same ingredients", prompt2, store);
 
-                LogAfterModelCall("determinism craft 1", sink1, store);
+            ListSink sink2 = new();
+            AiOrchestrator orch2 = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink2);
 
-                LlmToolCallRecord firstExecuteLua = toolCalls.RequireExtractableExecuteLuaSince(
-                    toolMark1, BuiltInAgentRoleIds.CoreMechanic, "determinism craft 1");
-                string firstPayload = ToolCallCapture.BuildExtractionPayload(firstExecuteLua);
-                AssertExecuteLuaUsesNumericQualityIfPresent(firstPayload, "determinism craft 1");
-                string firstName = CraftingMemoryItemNameExtractor.ExtractName(firstPayload);
-
-                string memoryHint = BuildCanonicalMemory("", 1, firstName, "Steel", "Fire");
-                store.Save(BuiltInAgentRoleIds.CoreMechanic, new AgentMemoryState { Memory = memoryHint });
-
-                string prompt2 = BuildDeterministicCraftPrompt(2,
-                    "Steel Ingot (metal, hardness:80, magic:10, rarity:2)",
-                    "Fire Crystal (crystal, hardness:30, magic:85, rarity:4, fire_damage:25)",
-                    memoryHint);
-
-                LogBeforeModelCall("DETERMINISM CRAFT 2: Same ingredients", prompt2, store);
-
-                ListSink sink2 = new();
-                AiOrchestrator orch2 = CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink2);
-
-                int toolMark2 = toolCalls.Count;
-                using CancellationTokenSource cts2 = CreateTurnCancellation();
-                Task t2 = orch2.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                    Hint = prompt2
-                }, cts2.Token);
-
-                yield return PlayModeTestAwait.WaitTask(t2, LlmTurnTimeoutSeconds, "determinism craft 2");
-                yield return FlushMemoryStorePersistenceFrames();
-
-                LogAfterModelCall("determinism craft 2", sink2, store);
-
-                LlmToolCallRecord secondExecuteLua = toolCalls.RequireExtractableExecuteLuaSince(
-                    toolMark2, BuiltInAgentRoleIds.CoreMechanic, "determinism craft 2");
-                string secondPayload = ToolCallCapture.BuildExtractionPayload(secondExecuteLua);
-                AssertExecuteLuaUsesNumericQualityIfPresent(secondPayload, "determinism craft 2");
-                string secondName = CraftingMemoryItemNameExtractor.ExtractName(secondPayload);
-
-                Assert.IsTrue(CraftingMemoryItemNameExtractor.NamesMatchForDeterminism(firstName, secondName),
-                    $"Repeated ingredients should reproduce the recorded craft. First='{firstName}', second='{secondName}'.");
-            }
-            finally
+            int toolMark2 = toolCalls.Count;
+            CancellationTokenSource cts2 = _requests.CreateCancellation();
+            Task t2 = _requests.Track(orch2.RunTaskAsync(new AiTaskRequest
             {
-                handle.Dispose();
-            }
+                RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                Hint = prompt2
+            }, cts2.Token));
+
+            yield return PlayModeTestAwait.WaitTask(t2, _requests.Cap(LlmTurnTimeoutSeconds), "determinism craft 2", cts2);
+            yield return FlushMemoryStorePersistenceFrames();
+
+            LogAfterModelCall("determinism craft 2", sink2, store);
+
+            LlmToolCallRecord secondExecuteLua = toolCalls.RequireExtractableExecuteLuaSince(
+                toolMark2, BuiltInAgentRoleIds.CoreMechanic, "determinism craft 2");
+            string secondPayload = ToolCallCapture.BuildExtractionPayload(secondExecuteLua);
+            AssertExecuteLuaUsesNumericQualityIfPresent(secondPayload, "determinism craft 2");
+            string secondName = CraftingMemoryItemNameExtractor.ExtractName(secondPayload);
+
+            Assert.IsTrue(CraftingMemoryItemNameExtractor.NamesMatchForDeterminism(firstName, secondName),
+                $"Repeated ingredients should reproduce the recorded craft. First='{firstName}', second='{secondName}'.");
         }
 
         private static AiOrchestrator CreateOrchestrator(
@@ -690,13 +718,6 @@ namespace CoreAI.Tests.PlayMode
                 new NoOpRoleStructuredResponsePolicy(),
                 new NullAiOrchestrationMetrics(), ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
                 new LocalActorIdentityProvider("crafting-memory-test"));
-        }
-
-        private static CancellationTokenSource CreateTurnCancellation()
-        {
-            CancellationTokenSource cts = new();
-            cts.CancelAfter(TimeSpan.FromSeconds(LlmTurnTimeoutSeconds));
-            return cts;
         }
 
         private static string BuildCraftPrompt(int craftNumber, string ingredient1, string ingredient2,

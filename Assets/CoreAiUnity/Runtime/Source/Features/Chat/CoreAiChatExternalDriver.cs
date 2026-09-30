@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
+using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -212,11 +214,190 @@ namespace CoreAI.Chat
             SubmitAndReportAsync(panel, prompt).Forget();
         }
 
-        private static async Task SubmitAndReportAsync(CoreAiChatPanel panel, string prompt)
+        /// <summary>
+        /// Submits a message with attachments to the first active <see cref="CoreAiChatPanel"/> through the
+        /// same turn pipeline as <see cref="SubmitPrompt"/>. SendMessage-compatible: one JSON string
+        /// <c>{"text":"...","images":["data:image/png;base64,..."],"files":[{"name":"notes.txt","text":"..."}]}</c>.
+        /// <c>images</c> entries are data URLs (or <c>{"name":"a.png","dataUrl":"data:..."}</c>); <c>files</c>
+        /// entries are text files (<c>mediaType</c> optional). The text may be blank when at least one attachment
+        /// is present. A malformed request logs <c>attachments-rejected</c>; the turn result is logged with the
+        /// same <c>turn-complete</c> / <c>turn-failed</c> markers as <see cref="SubmitPrompt"/>.
+        /// </summary>
+        public void SubmitPromptWithAttachments(string json)
+        {
+            if (!TryParseAttachmentRequest(json, out ExternalAttachmentRequest request, out string error))
+            {
+                Logging.Log.Instance.Warn($"{LogPrefix} attachments-rejected: {error}");
+                return;
+            }
+
+            CoreAiChatPanel panel = FindFirstObjectByType<CoreAiChatPanel>();
+            if (panel == null)
+            {
+                Logging.Log.Instance.Warn(
+                    $"{LogPrefix} SubmitPromptWithAttachments ignored: no CoreAiChatPanel in the scene.");
+                return;
+            }
+
+            Logging.Log.Instance.Info(
+                $"{LogPrefix} submitting prompt ({request.Text.Length} chars) with " +
+                $"images={request.ImageCount} files={request.FileCount} to '{panel.name}'.");
+            CoreAiChatExternalSubmitOptions options = new() { Attachments = request.Attachments };
+            SubmitAndReportAsync(panel, request.Text, options).Forget();
+        }
+
+        /// <summary>Parsed <see cref="SubmitPromptWithAttachments"/> payload.</summary>
+        internal sealed class ExternalAttachmentRequest
+        {
+            /// <summary>Message text; empty for an attachment-only message.</summary>
+            public string Text { get; set; } = string.Empty;
+
+            /// <summary>Images first (in request order), then text files (in request order).</summary>
+            public IReadOnlyList<AiAttachment> Attachments { get; set; } = Array.Empty<AiAttachment>();
+
+            /// <summary>Number of image attachments.</summary>
+            public int ImageCount { get; set; }
+
+            /// <summary>Number of text-file attachments.</summary>
+            public int FileCount { get; set; }
+        }
+
+        /// <summary>
+        /// Parses the <see cref="SubmitPromptWithAttachments"/> JSON. Pure (no scene access) so it is testable in
+        /// EditMode. Returns false with a short reason for malformed JSON, a non-image data URL in
+        /// <c>images</c>, a file without text, or a request that carries neither text nor attachments.
+        /// </summary>
+        internal static bool TryParseAttachmentRequest(
+            string json, out ExternalAttachmentRequest request, out string error)
+        {
+            request = null;
+            error = null;
+            Newtonsoft.Json.Linq.JObject root;
+            try
+            {
+                root = Newtonsoft.Json.Linq.JObject.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
+            }
+            catch (Exception ex)
+            {
+                error = $"invalid JSON ({ex.GetType().Name})";
+                return false;
+            }
+
+            List<AiAttachment> attachments = new();
+            int images = 0;
+            if (root["images"] is Newtonsoft.Json.Linq.JArray imageArray)
+            {
+                foreach (Newtonsoft.Json.Linq.JToken token in imageArray)
+                {
+                    string dataUrl;
+                    string name;
+                    if (token.Type == Newtonsoft.Json.Linq.JTokenType.String)
+                    {
+                        dataUrl = (string)token;
+                        name = string.Empty;
+                    }
+                    else if (token is Newtonsoft.Json.Linq.JObject imageObject)
+                    {
+                        dataUrl = (string)imageObject["dataUrl"];
+                        name = (string)imageObject["name"] ?? string.Empty;
+                    }
+                    else
+                    {
+                        error = $"images[{images}] must be a data URL string or an object with dataUrl";
+                        return false;
+                    }
+
+                    if (!AiAttachment.TryFromDataUrl(dataUrl, out AiAttachment image, name) ||
+                        image.Category != AiAttachmentCategory.Image)
+                    {
+                        error = $"images[{images}] is not a base64 image data URL";
+                        return false;
+                    }
+
+                    if (string.IsNullOrEmpty(name))
+                    {
+                        // WHY: the user bubble and history describe attachments by file name; a stable
+                        // generated name keeps the transcript readable for an unnamed canvas image.
+                        image = AiAttachment.FromDataUrl(
+                            dataUrl, $"image-{images + 1}{ExtensionFor(image.ResolvedMediaType)}");
+                    }
+
+                    attachments.Add(image);
+                    images++;
+                }
+            }
+
+            int files = 0;
+            if (root["files"] is Newtonsoft.Json.Linq.JArray fileArray)
+            {
+                foreach (Newtonsoft.Json.Linq.JToken token in fileArray)
+                {
+                    if (token is not Newtonsoft.Json.Linq.JObject fileObject ||
+                        fileObject["text"]?.Type != Newtonsoft.Json.Linq.JTokenType.String)
+                    {
+                        error = $"files[{files}] must be an object with a string text";
+                        return false;
+                    }
+
+                    string name = (string)fileObject["name"];
+                    if (string.IsNullOrWhiteSpace(name))
+                    {
+                        name = $"file-{files + 1}.txt";
+                    }
+
+                    try
+                    {
+                        attachments.Add(AiAttachment.FromText(
+                            name, (string)fileObject["text"], (string)fileObject["mediaType"] ?? string.Empty));
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        error = $"files[{files}]: {ex.Message}";
+                        return false;
+                    }
+
+                    files++;
+                }
+            }
+
+            string text = (string)root["text"] ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(text) && attachments.Count == 0)
+            {
+                error = "neither text nor attachments";
+                return false;
+            }
+
+            request = new ExternalAttachmentRequest
+            {
+                Text = text,
+                Attachments = attachments,
+                ImageCount = images,
+                FileCount = files
+            };
+            return true;
+
+            static string ExtensionFor(string mediaType)
+            {
+                switch (mediaType)
+                {
+                    case "image/jpeg":
+                        return ".jpg";
+                    case "image/webp":
+                        return ".webp";
+                    case "image/gif":
+                        return ".gif";
+                    default:
+                        return ".png";
+                }
+            }
+        }
+
+        private static async Task SubmitAndReportAsync(
+            CoreAiChatPanel panel, string prompt, CoreAiChatExternalSubmitOptions options = null)
         {
             try
             {
-                string response = await panel.SubmitMessageFromExternalAsync(prompt);
+                string response = await panel.SubmitMessageFromExternalAsync(prompt, options);
                 if (response == null)
                 {
                     Logging.Log.Instance.Warn($"{LogPrefix} turn-failed: panel busy, canceled, or empty input.");

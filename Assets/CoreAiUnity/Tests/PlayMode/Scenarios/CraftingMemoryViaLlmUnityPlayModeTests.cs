@@ -26,6 +26,38 @@ namespace CoreAI.Tests.PlayMode
         private const int LlmTurnTimeoutSeconds = 240;
         private const int CraftTurnMaxOutputTokens = 128000;
 
+        // WHY: 120 s GGUF load (EnsureLlmUnityModelReady) + three sequential 240 s craft turns = 840 s,
+        // + the 20 s scope reserve and ~100 s margin for the memory flush frames and assertions = 960 s.
+        private const int TestTimeoutMs = 960000;
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+        private ToolCallCapture _toolCalls;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
+            _toolCalls?.Dispose();
+            _toolCalls = null;
+        }
+
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
@@ -78,7 +110,7 @@ namespace CoreAI.Tests.PlayMode
         [UnityTest]
         [Explicit(
             "Targeted backend-parity crafting probe. Mandatory full PlayMode keeps CraftingMemoryOpenAi_ThreeCrafts_AllUnique as the representative Lua-backed ThreeCrafts gate.")]
-        [Timeout(600000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator CraftingMemoryLlmUnity_ThreeCrafts_AllUnique()
         {
             Debug.Log("[CraftingMemory.LLMUnity] TEST START");
@@ -94,176 +126,175 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
+
+            if (handle.ResolvedBackend != PlayModeProductionLikeLlmBackend.LlmUnity)
             {
-                if (handle.ResolvedBackend != PlayModeProductionLikeLlmBackend.LlmUnity)
-                {
-                    Assert.Ignore(
-                        $"LLMUnity crafting scenario requires LLMUnity backend. Current backend: {handle.ResolvedBackend}");
-                }
-
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-
-                Debug.Log($"[CraftingMemory] Using backend: {handle.ResolvedBackend}, Model ready");
-
-                InMemoryStore store = new();
-
-                AgentMemoryPolicy policy = new();
-                TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
-                // Small models often repeat identical tool payloads; allow duplicates so tool loop is not
-                // aborted before assertions (same rationale as CraftingMemoryViaOpenAiPlayModeTests).
-                policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
-                // The crafting tool (execute_lua) is registered per turn inside CreateOrchestrator so it
-                // publishes the raw Lua code to the per-turn sink, exactly like CraftingMemoryViaOpenAi.
-
-                SessionTelemetryCollector telemetry = new();
-                AiPromptComposer composer = new(
-                    new BuiltInDefaultAgentSystemPromptProvider(),
-                    new NoAgentUserPromptTemplateProvider(),
-                    new NullLuaScriptVersionStore());
-
-                ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
-
-                CoreAi.ClearToolCallHistory();
-                using ToolCallCapture toolCalls = new();
-                List<string> craftedNames = new();
-                string memoryAccum = "";
-
-                // Craft 1: Iron + Oak.
-                {
-                    string prompt = BuildCraftPrompt(1,
-                        "Iron (metal, hardness:60, magic:5, rarity:1)",
-                        "Oak Wood (wood, hardness:40, magic:10, rarity:1)",
-                        store);
-
-                    LogBeforeModelCall("CRAFT 1: Iron + Oak", prompt, store);
-
-                    ListSink sink = new();
-                    AiOrchestrator orch =
-                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
-
-                    int toolMark = toolCalls.Count;
-                    using CancellationTokenSource cts = CreateTurnCancellation();
-                    Task t = orch.RunTaskAsync(new AiTaskRequest
-                    {
-                        RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt,
-                        MaxOutputTokens = CraftTurnMaxOutputTokens
-                    }, cts.Token);
-
-                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "craft 1", cts);
-                    yield return FlushMemoryStorePersistenceFrames();
-
-                    LogAfterModelCall("craft 1", sink, store);
-
-                    LlmToolCallRecord executeLua = toolCalls.RequireCompletedToolSince(
-                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 1");
-                    string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
-                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 1", 1, "Iron",
-                            "Oak Wood"))
-                    {
-                        yield break;
-                    }
-                }
-
-                // Craft 2: Steel + Hardwood.
-                {
-                    string prompt = BuildCraftPrompt(2,
-                        "Steel (metal, hardness:75, magic:8, rarity:2)",
-                        "Hardwood (wood, hardness:50, magic:12, rarity:2)",
-                        store);
-
-                    LogBeforeModelCall("CRAFT 2: Steel + Hardwood", prompt, store);
-
-                    ListSink sink = new();
-                    AiOrchestrator orch =
-                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
-
-                    int toolMark = toolCalls.Count;
-                    using CancellationTokenSource cts = CreateTurnCancellation();
-                    Task t = orch.RunTaskAsync(new AiTaskRequest
-                    {
-                        RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt,
-                        MaxOutputTokens = CraftTurnMaxOutputTokens
-                    }, cts.Token);
-
-                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "craft 2", cts);
-                    yield return FlushMemoryStorePersistenceFrames();
-
-                    LogAfterModelCall("craft 2", sink, store);
-
-                    LlmToolCallRecord executeLua = toolCalls.RequireCompletedToolSince(
-                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 2");
-                    string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
-                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 2", 2, "Steel",
-                            "Hardwood"))
-                    {
-                        yield break;
-                    }
-                }
-
-                // Craft 3: Mithril + Enchanted Wood.
-                {
-                    string prompt = BuildCraftPrompt(3,
-                        "Mithril (metal, hardness:70, magic:60, rarity:4)",
-                        "Enchanted Wood (wood, hardness:45, magic:70, rarity:3)",
-                        store);
-
-                    LogBeforeModelCall("CRAFT 3: Mithril + Enchanted Wood", prompt, store);
-
-                    ListSink sink = new();
-                    AiOrchestrator orch =
-                        CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
-
-                    int toolMark = toolCalls.Count;
-                    using CancellationTokenSource cts = CreateTurnCancellation();
-                    Task t = orch.RunTaskAsync(new AiTaskRequest
-                    {
-                        RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt,
-                        MaxOutputTokens = CraftTurnMaxOutputTokens
-                    }, cts.Token);
-
-                    yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "craft 3", cts);
-                    yield return FlushMemoryStorePersistenceFrames();
-
-                    LogAfterModelCall("craft 3", sink, store);
-
-                    LlmToolCallRecord executeLua = toolCalls.RequireCompletedToolSince(
-                        toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 3");
-                    string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
-                    if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 3", 3, "Mithril",
-                            "Enchanted Wood"))
-                    {
-                        yield break;
-                    }
-                }
-
-                // Final validation.
-                Debug.Log("[CraftingMemory.LLMUnity]  FINAL VALIDATION ");
-
-                Assert.AreEqual(3, craftedNames.Count, "Must have 3 crafted items");
-
-                HashSet<string> uniqueFirst3 = new(craftedNames.Select(n => n.ToLowerInvariant()));
-                Assert.AreEqual(3, uniqueFirst3.Count,
-                    $"Crafts 1-3 must be unique! Got: {string.Join(", ", craftedNames)}");
-
-                Debug.Log("[CraftingMemory.LLMUnity]  First 3 crafts are unique");
-
-                Debug.Log($"[CraftingMemory.LLMUnity] Crafted items: {string.Join(" | ", craftedNames)}");
-
-                if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState finalMem))
-                {
-                    Debug.Log($"[CraftingMemory.LLMUnity] Final memory state:\n{finalMem.Memory}");
-                }
-
-                Debug.Log("[CraftingMemory.LLMUnity]  TEST PASSED ");
+                Assert.Ignore(
+                    $"LLMUnity crafting scenario requires LLMUnity backend. Current backend: {handle.ResolvedBackend}");
             }
-            finally
+
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+
+            Debug.Log($"[CraftingMemory] Using backend: {handle.ResolvedBackend}, Model ready");
+
+            InMemoryStore store = new();
+
+            AgentMemoryPolicy policy = new();
+            TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
+            // Small models often repeat identical tool payloads; allow duplicates so tool loop is not
+            // aborted before assertions (same rationale as CraftingMemoryViaOpenAiPlayModeTests).
+            policy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic, allowDuplicateToolCalls: true);
+            // The crafting tool (execute_lua) is registered per turn inside CreateOrchestrator so it
+            // publishes the raw Lua code to the per-turn sink, exactly like CraftingMemoryViaOpenAi.
+
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(
+                new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(),
+                new NullLuaScriptVersionStore());
+
+            ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+
+            CoreAi.ClearToolCallHistory();
+            // WHY: the global tool-call subscription is released in [UnityTearDown], which also runs on a
+            // framework timeout abort; a body `using` would leak it into later tests.
+            ToolCallCapture toolCalls = new();
+            _toolCalls = toolCalls;
+            List<string> craftedNames = new();
+            string memoryAccum = "";
+
+            // Craft 1: Iron + Oak.
             {
-                handle.Dispose();
+                string prompt = BuildCraftPrompt(1,
+                    "Iron (metal, hardness:60, magic:5, rarity:1)",
+                    "Oak Wood (wood, hardness:40, magic:10, rarity:1)",
+                    store);
+
+                LogBeforeModelCall("CRAFT 1: Iron + Oak", prompt, store);
+
+                ListSink sink = new();
+                AiOrchestrator orch =
+                    CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+
+                int toolMark = toolCalls.Count;
+                CancellationTokenSource cts = _requests.CreateCancellation();
+                Task t = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                    Hint = prompt,
+                    MaxOutputTokens = CraftTurnMaxOutputTokens
+                }, cts.Token));
+
+                yield return PlayModeTestAwait.WaitTask(t, _requests.Cap(LlmTurnTimeoutSeconds), "craft 1", cts);
+                yield return FlushMemoryStorePersistenceFrames();
+
+                LogAfterModelCall("craft 1", sink, store);
+
+                LlmToolCallRecord executeLua = toolCalls.RequireCompletedToolSince(
+                    toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 1");
+                string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
+                if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 1", 1, "Iron",
+                        "Oak Wood"))
+                {
+                    yield break;
+                }
             }
+
+            // Craft 2: Steel + Hardwood.
+            {
+                string prompt = BuildCraftPrompt(2,
+                    "Steel (metal, hardness:75, magic:8, rarity:2)",
+                    "Hardwood (wood, hardness:50, magic:12, rarity:2)",
+                    store);
+
+                LogBeforeModelCall("CRAFT 2: Steel + Hardwood", prompt, store);
+
+                ListSink sink = new();
+                AiOrchestrator orch =
+                    CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+
+                int toolMark = toolCalls.Count;
+                CancellationTokenSource cts = _requests.CreateCancellation();
+                Task t = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                    Hint = prompt,
+                    MaxOutputTokens = CraftTurnMaxOutputTokens
+                }, cts.Token));
+
+                yield return PlayModeTestAwait.WaitTask(t, _requests.Cap(LlmTurnTimeoutSeconds), "craft 2", cts);
+                yield return FlushMemoryStorePersistenceFrames();
+
+                LogAfterModelCall("craft 2", sink, store);
+
+                LlmToolCallRecord executeLua = toolCalls.RequireCompletedToolSince(
+                    toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 2");
+                string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
+                if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 2", 2, "Steel",
+                        "Hardwood"))
+                {
+                    yield break;
+                }
+            }
+
+            // Craft 3: Mithril + Enchanted Wood.
+            {
+                string prompt = BuildCraftPrompt(3,
+                    "Mithril (metal, hardness:70, magic:60, rarity:4)",
+                    "Enchanted Wood (wood, hardness:45, magic:70, rarity:3)",
+                    store);
+
+                LogBeforeModelCall("CRAFT 3: Mithril + Enchanted Wood", prompt, store);
+
+                ListSink sink = new();
+                AiOrchestrator orch =
+                    CreateOrchestrator(clientWithMemory, store, policy, telemetry, composer, sink);
+
+                int toolMark = toolCalls.Count;
+                CancellationTokenSource cts = _requests.CreateCancellation();
+                Task t = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                    Hint = prompt,
+                    MaxOutputTokens = CraftTurnMaxOutputTokens
+                }, cts.Token));
+
+                yield return PlayModeTestAwait.WaitTask(t, _requests.Cap(LlmTurnTimeoutSeconds), "craft 3", cts);
+                yield return FlushMemoryStorePersistenceFrames();
+
+                LogAfterModelCall("craft 3", sink, store);
+
+                LlmToolCallRecord executeLua = toolCalls.RequireCompletedToolSince(
+                    toolMark, BuiltInAgentRoleIds.CoreMechanic, "execute_lua", "craft 3");
+                string executedLua = ToolCallCapture.BuildExtractionPayload(executeLua);
+                if (!ExtractCraftInfo(executedLua, store, craftedNames, ref memoryAccum, "craft 3", 3, "Mithril",
+                        "Enchanted Wood"))
+                {
+                    yield break;
+                }
+            }
+
+            // Final validation.
+            Debug.Log("[CraftingMemory.LLMUnity]  FINAL VALIDATION ");
+
+            Assert.AreEqual(3, craftedNames.Count, "Must have 3 crafted items");
+
+            HashSet<string> uniqueFirst3 = new(craftedNames.Select(n => n.ToLowerInvariant()));
+            Assert.AreEqual(3, uniqueFirst3.Count,
+                $"Crafts 1-3 must be unique! Got: {string.Join(", ", craftedNames)}");
+
+            Debug.Log("[CraftingMemory.LLMUnity]  First 3 crafts are unique");
+
+            Debug.Log($"[CraftingMemory.LLMUnity] Crafted items: {string.Join(" | ", craftedNames)}");
+
+            if (store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState finalMem))
+            {
+                Debug.Log($"[CraftingMemory.LLMUnity] Final memory state:\n{finalMem.Memory}");
+            }
+
+            Debug.Log("[CraftingMemory.LLMUnity]  TEST PASSED ");
         }
 
         private static AiOrchestrator CreateOrchestrator(
@@ -325,13 +356,6 @@ namespace CoreAI.Tests.PlayMode
                 "Return a Lua table or string that includes the concrete item name.";
 
             return header + ingredients + memorySection + instructions;
-        }
-
-        private static CancellationTokenSource CreateTurnCancellation()
-        {
-            CancellationTokenSource cts = new();
-            cts.CancelAfter(TimeSpan.FromSeconds(LlmTurnTimeoutSeconds));
-            return cts;
         }
 
         private static string BuildDeterministicCraftPrompt(int craftNumber, string ingredient1, string ingredient2,

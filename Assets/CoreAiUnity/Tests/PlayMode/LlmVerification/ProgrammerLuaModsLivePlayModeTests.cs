@@ -33,14 +33,21 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     [Explicit("Live LLM required: configure COREAI_TEST_BASE_URL / COREAI_TEST_MODEL (or CoreAISettingsAsset).")]
     [Category("LiveLlm")]
-    [Timeout(1_800_000)]
+    [Timeout(ProgrammerLuaModsLivePlayModeTests.TestTimeoutMs)]
     public sealed class ProgrammerLuaModsLivePlayModeTests
     {
+        private const int TestTimeoutMs = 1_800_000;
+
         private static readonly IObjectResolver ProductionCoreContainer = BuildProductionCoreContainer();
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+        private ProgrammerSetup _setup;
 
         [UnitySetUp]
         public IEnumerator SetUp()
         {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
             LogAssert.ignoreFailingMessages = true;
             yield break;
         }
@@ -48,6 +55,18 @@ namespace CoreAI.Tests.PlayMode
         [UnityTearDown]
         public IEnumerator TearDown()
         {
+            // WHY: a framework timeout skips the test body's cleanup, so cancel the abandoned request here and
+            // let it unwind before the setup and client are disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _setup?.Dispose();
+            _setup = null;
+            _handle?.Dispose();
+            _handle = null;
             LogAssert.ignoreFailingMessages = false;
             yield break;
         }
@@ -124,31 +143,6 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
-        private sealed class CapturingLlmClient : ILlmClient
-        {
-            public LlmCompletionResult LastResult;
-
-            private readonly ILlmClient _inner;
-
-            public CapturingLlmClient(ILlmClient inner)
-            {
-                _inner = inner;
-            }
-
-            public async Task<LlmCompletionResult> CompleteAsync(
-                LlmCompletionRequest request,
-                CancellationToken cancellationToken = default)
-            {
-                LastResult = await _inner.CompleteAsync(request, cancellationToken);
-                return LastResult;
-            }
-
-            public void SetTools(IReadOnlyList<ILlmTool> tools)
-            {
-                _inner.SetTools(tools);
-            }
-        }
-
         private sealed class NullSink : IAiGameCommandSink
         {
             public void Publish(ApplyAiGameCommand command)
@@ -156,13 +150,13 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
-        /// <summary>Everything one live Programmer scenario needs, built per test and disposed in finally.</summary>
+        /// <summary>Everything one live Programmer scenario needs, built per test and disposed in [UnityTearDown].</summary>
         private sealed class ProgrammerSetup
         {
             public LuaCsModStack Stack;
             public CountingCommandSink CommandSink;
             public AiOrchestrator Orchestrator;
-            public CapturingLlmClient Capturing;
+            public LiveCapturingLlmClient Capturing;
             public CoreAISettingsAsset Settings;
             public ActorContext ActorContext;
 
@@ -233,7 +227,7 @@ namespace CoreAI.Tests.PlayMode
                 BuiltInRbxApiSkillText.Instructions));
 
             InMemoryStore memoryStore = new();
-            setup.Capturing = new CapturingLlmClient(handle.WrapWithMemoryStore(memoryStore));
+            setup.Capturing = new LiveCapturingLlmClient(handle.WrapWithMemoryStore(memoryStore));
 
             AiPromptComposer composer = new(
                 new BuiltInDefaultAgentSystemPromptProvider(),
@@ -298,7 +292,7 @@ namespace CoreAI.Tests.PlayMode
         // ------------------------------------------------------------------------------------------
 
         [UnityTest]
-        [Timeout(1_800_000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator Programmer_BuildsTetrisMod_FromBuiltInExamplePrompt()
         {
             // WHY: [UnitySetUp] runs in a different LogAssert scope than the [UnityTest] body in
@@ -314,88 +308,85 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            ProgrammerSetup setup = null;
-            try
+            // WHY: handle and setup are released in [UnityTearDown] after the request drain, never under a
+            // still-running turn.
+            _handle = handle;
+            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
             {
-                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
-                {
-                    yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                }
-
-                TestContext.WriteLine($"[TetrisMod] Backend: {handle.ResolvedBackend}");
-                GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics();
-
-                setup = BuildProgrammerSetup(handle);
-
-                // WHY: The exact prompt the in-game chat Examples menu inserts for its Tetris button.
-                string prompt = ResolveExampleMessage("tetris");
-                TestContext.WriteLine($"[TetrisMod] Prompt length: {prompt.Length} chars (built-in 'tetris' example)");
-
-                List<string> loadedModIds = new();
-                setup.Stack.Runtime.AddModSourceLoadedListener(
-                    setup.ActorContext,
-                    (id, _, _) => loadedModIds.Add(id));
-
-                CoreAi.ClearToolCallHistory();
-                using CancellationTokenSource cts = new();
-                Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = BuiltInAgentRoleIds.Programmer,
-                    Hint = prompt,
-                    MaxOutputTokens = 128000
-                }, cts.Token);
-
-                yield return PlayModeTestAwait.WaitTask(task, 1500f, "Programmer tetris mod", cts);
-
-                IReadOnlyList<LuaModInfo> mods = setup.Stack.Runtime.ListMods(setup.ActorContext);
-
-                TestContext.WriteLine("[TetrisMod] ---------- TRANSCRIPT ----------");
-                LogToolCallTranscript("TetrisMod");
-                TestContext.WriteLine($"[TetrisMod] ModSourceLoaded events: {loadedModIds.Count} " +
-                                      $"({string.Join(", ", loadedModIds)})");
-                TestContext.WriteLine($"[TetrisMod] World commands published during load: {setup.CommandSink.Count}");
-                foreach (LuaModInfo mod in mods)
-                {
-                    TestContext.WriteLine(
-                        $"[TetrisMod] Mod '{mod.Id}': handlers={mod.HandlerCount} timers={mod.TimerCount} " +
-                        $"errors={mod.ErrorCount} quarantined={mod.Quarantined}");
-                    if (setup.Stack.Runtime.TryGetModSource(setup.ActorContext, mod.Id, out string source))
-                    {
-                        TestContext.WriteLine($"[TetrisMod] --- source of '{mod.Id}' ---\n{source}");
-                    }
-                }
-
-                string finalAnswer = setup.Capturing.LastResult?.Content ?? "";
-                TestContext.WriteLine($"[TetrisMod] Final answer: {finalAnswer}");
-                TestContext.WriteLine("[TetrisMod] --------------------------------");
-
-                // WHY: Some providers end a successful tool-only turn with no final text. The loaded
-                // mod and its live hooks are the result this test verifies.
-                Assert.GreaterOrEqual(loadedModIds.Count, 1,
-                    "The agent must load at least one mod through the real manage_mods tool " +
-                    "(ModSourceLoaded never fired).");
-                Assert.GreaterOrEqual(mods.Count, 1, "Runtime must contain at least one loaded mod.");
-
-                LuaModInfo newest = mods[mods.Count - 1];
-                Assert.IsFalse(newest.Quarantined, $"Mod '{newest.Id}' is quarantined after load.");
-                Assert.AreEqual(0, newest.ErrorCount,
-                    $"Mod '{newest.Id}' reported {newest.ErrorCount} handler errors right after load.");
-                Assert.Greater(newest.HandlerCount + newest.TimerCount, 0,
-                    $"Mod '{newest.Id}' registered no hooks/timers — a Tetris mod must hook the tick loop.");
-
-                bool completedModsToolCall = CoreAi.GetToolCallHistorySnapshot().Any(r =>
-                    r != null && r.Status == "completed" &&
-                    (r.Info.ToolName == "manage_mods" || r.Info.ToolName == "execute_lua"));
-                Assert.IsTrue(completedModsToolCall,
-                    "Tool-call history must contain a completed manage_mods/execute_lua call.");
-
-                TestContext.WriteLine("[TetrisMod] TEST PASSED");
+                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
             }
-            finally
+
+            TestContext.WriteLine($"[TetrisMod] Backend: {handle.ResolvedBackend}");
+            GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics();
+
+            ProgrammerSetup setup = BuildProgrammerSetup(handle);
+            _setup = setup;
+
+            // WHY: The exact prompt the in-game chat Examples menu inserts for its Tetris button.
+            string prompt = ResolveExampleMessage("tetris");
+            TestContext.WriteLine($"[TetrisMod] Prompt length: {prompt.Length} chars (built-in 'tetris' example)");
+
+            List<string> loadedModIds = new();
+            setup.Stack.Runtime.AddModSourceLoadedListener(
+                setup.ActorContext,
+                (id, _, _) => loadedModIds.Add(id));
+
+            CoreAi.ClearToolCallHistory();
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
-                setup?.Dispose();
-                handle.Dispose();
+                RoleId = BuiltInAgentRoleIds.Programmer,
+                Hint = prompt,
+                MaxOutputTokens = 128000
+            }, cts.Token));
+
+            yield return PlayModeTestAwait.WaitTask(task, _requests.Cap(1500f), "Programmer tetris mod", cts);
+
+            IReadOnlyList<LuaModInfo> mods = setup.Stack.Runtime.ListMods(setup.ActorContext);
+
+            TestContext.WriteLine("[TetrisMod] ---------- TRANSCRIPT ----------");
+            LogToolCallTranscript("TetrisMod");
+            TestContext.WriteLine($"[TetrisMod] ModSourceLoaded events: {loadedModIds.Count} " +
+                                  $"({string.Join(", ", loadedModIds)})");
+            TestContext.WriteLine($"[TetrisMod] World commands published during load: {setup.CommandSink.Count}");
+            foreach (LuaModInfo mod in mods)
+            {
+                TestContext.WriteLine(
+                    $"[TetrisMod] Mod '{mod.Id}': handlers={mod.HandlerCount} timers={mod.TimerCount} " +
+                    $"errors={mod.ErrorCount} quarantined={mod.Quarantined}");
+                if (setup.Stack.Runtime.TryGetModSource(setup.ActorContext, mod.Id, out string source))
+                {
+                    TestContext.WriteLine($"[TetrisMod] --- source of '{mod.Id}' ---\n{source}");
+                }
             }
+
+            string finalAnswer = setup.Capturing.LastResult?.Content ?? "";
+            TestContext.WriteLine($"[TetrisMod] Final answer: {finalAnswer}");
+            TestContext.WriteLine("[TetrisMod] --------------------------------");
+
+            // WHY: Some providers end a successful tool-only turn with no final text, so only that
+            // outcome is tolerated; HTTP 5xx or a timeout after the mod loaded still fails the run.
+            Assert.IsTrue(setup.Capturing.LastIsOkOrEmptyFinalText,
+                $"Programmer run failed: {setup.Capturing.DescribeLastOutcome()}");
+            Assert.GreaterOrEqual(loadedModIds.Count, 1,
+                "The agent must load at least one mod through the real manage_mods tool " +
+                "(ModSourceLoaded never fired).");
+            Assert.GreaterOrEqual(mods.Count, 1, "Runtime must contain at least one loaded mod.");
+
+            LuaModInfo newest = mods[mods.Count - 1];
+            Assert.IsFalse(newest.Quarantined, $"Mod '{newest.Id}' is quarantined after load.");
+            Assert.AreEqual(0, newest.ErrorCount,
+                $"Mod '{newest.Id}' reported {newest.ErrorCount} handler errors right after load.");
+            Assert.Greater(newest.HandlerCount + newest.TimerCount, 0,
+                $"Mod '{newest.Id}' registered no hooks/timers — a Tetris mod must hook the tick loop.");
+
+            bool completedModsToolCall = CoreAi.GetToolCallHistorySnapshot().Any(r =>
+                r != null && r.Status == "completed" &&
+                (r.Info.ToolName == "manage_mods" || r.Info.ToolName == "execute_lua"));
+            Assert.IsTrue(completedModsToolCall,
+                "Tool-call history must contain a completed manage_mods/execute_lua call.");
+
+            TestContext.WriteLine("[TetrisMod] TEST PASSED");
         }
 
         // ------------------------------------------------------------------------------------------
@@ -435,7 +426,7 @@ end)
             "is a real number.";
 
         [UnityTest]
-        [Timeout(1_800_000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator Programmer_FixesBrokenMod_FromSingleNaturalLanguagePrompt()
         {
             // WHY: [UnitySetUp] runs in a different LogAssert scope than the [UnityTest] body in
@@ -451,118 +442,115 @@ end)
                 Assert.Ignore(ignore);
             }
 
-            ProgrammerSetup setup = null;
-            try
+            // WHY: handle and setup are released in [UnityTearDown] after the request drain, never under a
+            // still-running turn.
+            _handle = handle;
+            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
             {
-                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            }
+
+            TestContext.WriteLine($"[FixMod] Backend: {handle.ResolvedBackend}");
+            GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics();
+
+            ProgrammerSetup setup = BuildProgrammerSetup(handle);
+            _setup = setup;
+
+            int handlerErrors = 0;
+            string lastHandlerError = null;
+            List<string> waveDonePayloads = new();
+            setup.Stack.Runtime.AddModHandlerErroredListener(
+                setup.ActorContext,
+                (_, error, _) =>
                 {
-                    yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                }
-
-                TestContext.WriteLine($"[FixMod] Backend: {handle.ResolvedBackend}");
-                GlobalMessagePipeMinimalBootstrap.EnsureInitializedForLlmDiagnostics();
-
-                setup = BuildProgrammerSetup(handle);
-
-                int handlerErrors = 0;
-                string lastHandlerError = null;
-                List<string> waveDonePayloads = new();
-                setup.Stack.Runtime.AddModHandlerErroredListener(
-                    setup.ActorContext,
-                    (_, error, _) =>
-                    {
-                        handlerErrors++;
-                        lastHandlerError = error;
-                    });
-                setup.Stack.Runtime.AddModEventEmittedListener(
-                    setup.ActorContext,
-                    (_, eventName, payload) =>
-                    {
-                        if (eventName == "wave_done")
-                        {
-                            waveDonePayloads.Add(payload ?? "");
-                        }
-                    });
-
-                // ---- Arrange: load the broken mod through the REAL runtime and prove it is broken.
-                setup.Stack.Runtime.LoadMod(setup.ActorContext, BrokenModId, BrokenArenaLua, LuaCapabilities.All,
-                    false);
-                Assert.IsTrue(setup.Stack.Runtime.IsLoaded(setup.ActorContext, BrokenModId),
-                    "Arrange failed: the broken mod did not load.");
-
-                yield return TriggerWave(setup.Stack.Runtime, setup.ActorContext);
-
-                TestContext.WriteLine($"[FixMod] BEFORE: handlerErrors={handlerErrors} " +
-                                      $"waveDone={waveDonePayloads.Count} lastError={lastHandlerError}");
-                Assert.GreaterOrEqual(handlerErrors, 1,
-                    "Arrange failed: the broken handler did not error on 'wave_start'.");
-                Assert.AreEqual(0, waveDonePayloads.Count,
-                    "Arrange failed: the broken mod unexpectedly emitted 'wave_done'.");
-
-                // ---- Act: one natural-language prompt through the production Programmer pipeline.
-                int errorsBeforeAgent = handlerErrors;
-                CoreAi.ClearToolCallHistory();
-                using CancellationTokenSource cts = new();
-                Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
+                    handlerErrors++;
+                    lastHandlerError = error;
+                });
+            setup.Stack.Runtime.AddModEventEmittedListener(
+                setup.ActorContext,
+                (_, eventName, payload) =>
                 {
-                    RoleId = BuiltInAgentRoleIds.Programmer,
-                    Hint = FixPrompt,
-                    MaxOutputTokens = 128000
-                }, cts.Token);
-
-                yield return PlayModeTestAwait.WaitTask(task, 1500f, "Programmer fix broken mod", cts);
-
-                // ---- Assert: the previously failing dispatch now succeeds.
-                int errorsAfterAgent = handlerErrors;
-                waveDonePayloads.Clear();
-
-                yield return TriggerWave(setup.Stack.Runtime, setup.ActorContext);
-
-                IReadOnlyList<LuaModInfo> mods = setup.Stack.Runtime.ListMods(setup.ActorContext);
-
-                TestContext.WriteLine("[FixMod] ---------- TRANSCRIPT ----------");
-                LogToolCallTranscript("FixMod");
-                foreach (LuaModInfo mod in mods)
-                {
-                    TestContext.WriteLine(
-                        $"[FixMod] Mod '{mod.Id}': handlers={mod.HandlerCount} timers={mod.TimerCount} " +
-                        $"errors={mod.ErrorCount} quarantined={mod.Quarantined}");
-                    if (setup.Stack.Runtime.TryGetModSource(setup.ActorContext, mod.Id, out string source))
+                    if (eventName == "wave_done")
                     {
-                        TestContext.WriteLine($"[FixMod] --- source of '{mod.Id}' (after) ---\n{source}");
+                        waveDonePayloads.Add(payload ?? "");
                     }
-                }
+                });
 
-                TestContext.WriteLine($"[FixMod] AFTER: newHandlerErrors={handlerErrors - errorsAfterAgent} " +
-                                      $"waveDone={waveDonePayloads.Count} " +
-                                      $"payloads=[{string.Join(", ", waveDonePayloads)}]");
-                TestContext.WriteLine($"[FixMod] Final answer: {setup.Capturing.LastResult?.Content}");
-                TestContext.WriteLine("[FixMod] --------------------------------");
+            // ---- Arrange: load the broken mod through the REAL runtime and prove it is broken.
+            setup.Stack.Runtime.LoadMod(setup.ActorContext, BrokenModId, BrokenArenaLua, LuaCapabilities.All,
+                false);
+            Assert.IsTrue(setup.Stack.Runtime.IsLoaded(setup.ActorContext, BrokenModId),
+                "Arrange failed: the broken mod did not load.");
 
-                // WHY: The post-repair event dispatch proves the outcome even if the provider emits
-                // no closing assistant text after its last manage_mods call.
-                Assert.GreaterOrEqual(mods.Count, 1, "No mod is loaded after the repair.");
-                Assert.IsTrue(mods.Any(m => !m.Quarantined),
-                    "All loaded mods are quarantined after the repair.");
-                Assert.AreEqual(errorsAfterAgent, handlerErrors,
-                    $"The repaired handler still errors on 'wave_start': {lastHandlerError}");
-                Assert.GreaterOrEqual(waveDonePayloads.Count, 1,
-                    "The repaired mod did not emit 'wave_done' when 'wave_start' fired.");
-                Assert.IsTrue(waveDonePayloads.Any(p => !string.IsNullOrWhiteSpace(p)),
-                    "The 'wave_done' payload must carry a real value.");
+            yield return TriggerWave(setup.Stack.Runtime, setup.ActorContext);
 
-                bool completedModsToolCall = CoreAi.GetToolCallHistorySnapshot().Any(r =>
-                    r != null && r.Status == "completed" && r.Info.ToolName == "manage_mods");
-                Assert.IsTrue(completedModsToolCall,
-                    "Tool-call history must contain a completed manage_mods call (the repair path).");
+            TestContext.WriteLine($"[FixMod] BEFORE: handlerErrors={handlerErrors} " +
+                                  $"waveDone={waveDonePayloads.Count} lastError={lastHandlerError}");
+            Assert.GreaterOrEqual(handlerErrors, 1,
+                "Arrange failed: the broken handler did not error on 'wave_start'.");
+            Assert.AreEqual(0, waveDonePayloads.Count,
+                "Arrange failed: the broken mod unexpectedly emitted 'wave_done'.");
 
-                TestContext.WriteLine("[FixMod] TEST PASSED");
-            }
-            finally
+            // ---- Act: one natural-language prompt through the production Programmer pipeline.
+            int errorsBeforeAgent = handlerErrors;
+            CoreAi.ClearToolCallHistory();
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
-                setup?.Dispose();
-                handle.Dispose();
+                RoleId = BuiltInAgentRoleIds.Programmer,
+                Hint = FixPrompt,
+                MaxOutputTokens = 128000
+            }, cts.Token));
+
+            yield return PlayModeTestAwait.WaitTask(task, _requests.Cap(1500f), "Programmer fix broken mod", cts);
+
+            // ---- Assert: the previously failing dispatch now succeeds.
+            int errorsAfterAgent = handlerErrors;
+            waveDonePayloads.Clear();
+
+            yield return TriggerWave(setup.Stack.Runtime, setup.ActorContext);
+
+            IReadOnlyList<LuaModInfo> mods = setup.Stack.Runtime.ListMods(setup.ActorContext);
+
+            TestContext.WriteLine("[FixMod] ---------- TRANSCRIPT ----------");
+            LogToolCallTranscript("FixMod");
+            foreach (LuaModInfo mod in mods)
+            {
+                TestContext.WriteLine(
+                    $"[FixMod] Mod '{mod.Id}': handlers={mod.HandlerCount} timers={mod.TimerCount} " +
+                    $"errors={mod.ErrorCount} quarantined={mod.Quarantined}");
+                if (setup.Stack.Runtime.TryGetModSource(setup.ActorContext, mod.Id, out string source))
+                {
+                    TestContext.WriteLine($"[FixMod] --- source of '{mod.Id}' (after) ---\n{source}");
+                }
             }
+
+            TestContext.WriteLine($"[FixMod] AFTER: newHandlerErrors={handlerErrors - errorsAfterAgent} " +
+                                  $"waveDone={waveDonePayloads.Count} " +
+                                  $"payloads=[{string.Join(", ", waveDonePayloads)}]");
+            TestContext.WriteLine($"[FixMod] Final answer: {setup.Capturing.LastResult?.Content}");
+            TestContext.WriteLine("[FixMod] --------------------------------");
+
+            // WHY: The post-repair event dispatch proves the outcome even if the provider emits
+            // no closing assistant text after its last manage_mods call; any other failure still fails.
+            Assert.IsTrue(setup.Capturing.LastIsOkOrEmptyFinalText,
+                $"Programmer run failed: {setup.Capturing.DescribeLastOutcome()}");
+            Assert.GreaterOrEqual(mods.Count, 1, "No mod is loaded after the repair.");
+            Assert.IsTrue(mods.Any(m => !m.Quarantined),
+                "All loaded mods are quarantined after the repair.");
+            Assert.AreEqual(errorsAfterAgent, handlerErrors,
+                $"The repaired handler still errors on 'wave_start': {lastHandlerError}");
+            Assert.GreaterOrEqual(waveDonePayloads.Count, 1,
+                "The repaired mod did not emit 'wave_done' when 'wave_start' fired.");
+            Assert.IsTrue(waveDonePayloads.Any(p => !string.IsNullOrWhiteSpace(p)),
+                "The 'wave_done' payload must carry a real value.");
+
+            bool completedModsToolCall = CoreAi.GetToolCallHistorySnapshot().Any(r =>
+                r != null && r.Status == "completed" && r.Info.ToolName == "manage_mods");
+            Assert.IsTrue(completedModsToolCall,
+                "Tool-call history must contain a completed manage_mods call (the repair path).");
+
+            TestContext.WriteLine("[FixMod] TEST PASSED");
         }
 
         /// <summary>

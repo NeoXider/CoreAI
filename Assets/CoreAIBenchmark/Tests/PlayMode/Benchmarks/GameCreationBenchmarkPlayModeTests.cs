@@ -4,6 +4,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -32,13 +33,21 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// </summary>
     public sealed class GameCreationBenchmarkPlayModeTests
     {
+        // WHY: Suite 1.16 makes each tool-error checkpoint declare what it covers (G4 clean_tool now also fails on
+        // a failed call that never ran Lua) and accounts for a turn cut by the deadline. Rows whose G4 had no such
+        // failed call are unchanged and were carried over from 1.15.
         // WHY: Suite 1.15 removes duplicate tool-error deductions and supplies advertised Lua world queries.
         // Suite 1.8 rebuilt G6 on the Roblox API (execute_lua, Enum.Material/Enum.PartType) with a
         // new grader, and the free-build prompt now describes that runtime honestly (section size, the
         // writable Part surface, how Color really composes). The versioning policy says scores compare
         // only within a suite version; every published v1.7 G6 number is the old world_command build.
-        private const string SuiteVersion = "1.15";
+        private const string SuiteVersion = "1.16";
         private const float FreeBuildTotalBudgetSeconds = 600f;
+
+        /// <summary>
+        /// Planning allowance for the G6 screenshot and prefab export after the build. The capture is not
+        /// time-limited; the start-gate reserves this on top of the build and the cancel grace.
+        /// </summary>
         private const float FreeBuildCaptureReserveSeconds = 30f;
         private const float FreeBuildTimeoutSeconds = FreeBuildTotalBudgetSeconds - FreeBuildCaptureReserveSeconds;
 
@@ -179,7 +188,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return 1;
         }
 
-        /// <summary>Per-scenario timeout, capped at ten minutes for a free build.</summary>
+        /// <summary>Per-scenario model timeout; a free build is capped at the 600 s budget minus the capture reserve.</summary>
         private static float ResolveTimeoutSeconds(GameBenchmarkScenario scenario)
         {
             string raw = Environment.GetEnvironmentVariable(EnvTimeout);
@@ -208,8 +217,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return scenario.FreeBuildLayout ? 1 : ResolveMaxAttempts();
         }
 
+        /// <summary>
+        /// Wall-clock one scenario rep may occupy, as the suite start-gate plans it: every attempt's timeout
+        /// plus the cancel grace the runner waits after it, and for a free build the capture/export reserve.
+        /// </summary>
+        internal static double ScenarioWorstCaseSeconds(GameBenchmarkScenario scenario, float timeout,
+            int maxAttempts)
+        {
+            return maxAttempts * (timeout + CancelGraceSeconds) +
+                   (scenario.FreeBuildLayout ? FreeBuildCaptureReserveSeconds : 0.0);
+        }
+
         [Test]
-        public void FreeBuildBudget_NeverExceedsTenMinutesIncludingRetries()
+        public void FreeBuildBudget_ResolverClampsTheModelTimeUnderTheReserve()
         {
             GameBenchmarkScenario freeBuild = GameFreeBuildScenariosG6.All()[0];
             string previousTimeout = Environment.GetEnvironmentVariable(EnvTimeout);
@@ -218,9 +238,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 Environment.SetEnvironmentVariable(EnvTimeout, "1200");
                 Environment.SetEnvironmentVariable(EnvRetries, "3");
-                Assert.AreEqual(FreeBuildTimeoutSeconds, ResolveTimeoutSeconds(freeBuild));
-                Assert.AreEqual(600f, FreeBuildTimeoutSeconds + FreeBuildCaptureReserveSeconds);
+                float timeout = ResolveTimeoutSeconds(freeBuild);
+                Assert.AreEqual(FreeBuildTotalBudgetSeconds - FreeBuildCaptureReserveSeconds, timeout);
                 Assert.AreEqual(1, ResolveMaxAttempts(freeBuild));
+                Assert.AreEqual(timeout + CancelGraceSeconds + FreeBuildCaptureReserveSeconds,
+                    ScenarioWorstCaseSeconds(freeBuild, timeout, ResolveMaxAttempts(freeBuild)), 1e-6,
+                    "The start-gate must plan the cancel grace and the capture reserve, not only the model time.");
 
                 Environment.SetEnvironmentVariable(EnvTimeout, "90");
                 Assert.AreEqual(90f, ResolveTimeoutSeconds(freeBuild));
@@ -313,25 +336,199 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         [Test]
-        public void ToolErrorPenalties_DoNotChargeFailuresAlreadyCoveredByCleanCheckpoint()
+        public void ToolErrorPenalties_FollowTheCoverageEachRealCheckpointDeclares()
         {
-            RunObservation errors = new() { FailedToolCalls = 2, InvalidCommands = 1 };
-            ScenarioGrading bothCovered = new();
-            bothCovered.Add("clean_tools", "no failed tool calls or invalid commands", 10, false,
-                dimension: BenchmarkDimension.ToolCorrectness);
-            ApplyUnscoredToolErrorPenalties(bothCovered, errors);
-            Assert.AreEqual(0, bothCovered.Penalties.Count);
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                // WHY: G4 clean_tool scores failed calls but not invalid world commands, so the invalid
+                // command must surface as a separate penalty.
+                foreach (GameBenchmarkScenario scenario in GamePlaythroughScenariosG4.All())
+                {
+                    BenchmarkEnvironment env = new(settings);
+                    scenario.Prepare(env);
+                    AddInvalidWorldCommand(env);
+                    RunObservation failedCallWithoutLua = new()
+                    {
+                        ToolCalls = 2, FailedToolCalls = 1, InvalidCommands = env.World.InvalidCommandCount
+                    };
+                    ScenarioGrading grade = scenario.Grade(env, failedCallWithoutLua);
+                    ApplyUnscoredToolErrorPenalties(grade, failedCallWithoutLua);
 
-            ScenarioGrading failedOnlyCovered = new();
-            failedOnlyCovered.Add("clean_tools", "no failed tool calls", 10, false,
-                dimension: BenchmarkDimension.ToolCorrectness);
-            ApplyUnscoredToolErrorPenalties(failedOnlyCovered, errors);
-            Assert.AreEqual(1, failedOnlyCovered.Penalties.Count);
-            StringAssert.Contains("invalid world command", failedOnlyCovered.Penalties[0].Reason);
+                    Assert.AreEqual(0, env.Lua.FailedExecutions, scenario.Id);
+                    BenchmarkCheckpoint clean = grade.Checkpoints.Find(c => c.Id == "clean_tool");
+                    Assert.IsNotNull(clean, scenario.Id);
+                    Assert.IsFalse(clean.Passed,
+                        $"{scenario.Id}: a failed call that never ran Lua must still be charged.");
+                    Assert.AreEqual(1, grade.Penalties.Count, scenario.Id);
+                    StringAssert.Contains("invalid world command", grade.Penalties[0].Reason);
+                }
 
-            ScenarioGrading uncovered = new();
-            ApplyUnscoredToolErrorPenalties(uncovered, errors);
-            Assert.AreEqual(2, uncovered.Penalties.Count);
+                // WHY: G3 clean_tool scores both, so no separate penalty may be added - nothing is charged twice.
+                GameBenchmarkScenario g3 = Array.Find(GameReasoningScenariosG3.All(),
+                    candidate => candidate.Id == "g3_balanced_enemies");
+                Assert.IsNotNull(g3);
+                BenchmarkEnvironment g3Env = new(settings);
+                g3.Prepare(g3Env);
+                AddInvalidWorldCommand(g3Env);
+                RunObservation errors = new()
+                {
+                    ToolCalls = 3, FailedToolCalls = 2, InvalidCommands = g3Env.World.InvalidCommandCount
+                };
+                Assert.AreEqual(1, errors.InvalidCommands);
+                ScenarioGrading g3Grade = g3.Grade(g3Env, errors);
+                ApplyUnscoredToolErrorPenalties(g3Grade, errors);
+                Assert.IsFalse(g3Grade.Checkpoints.Find(c => c.Id == "clean_tool").Passed);
+                Assert.AreEqual(0, g3Grade.Penalties.Count);
+
+                ScenarioGrading uncovered = new();
+                ApplyUnscoredToolErrorPenalties(uncovered, errors);
+                Assert.AreEqual(2, uncovered.Penalties.Count);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
+        }
+
+        private static void AddInvalidWorldCommand(BenchmarkEnvironment env)
+        {
+            env.World.TryExecute(new ApplyAiGameCommand
+            {
+                CommandTypeId = AiGameCommandTypeIds.WorldCommand,
+                JsonPayload = "{\"action\":\"\"}"
+            });
+        }
+
+        [Test]
+        public void FreeBuildGoal_AddsCastlePacingOnlyToTheDefaultCastleGoal()
+        {
+            const string subjectVar = "COREAI_BENCHMARK_FREEBUILD_SUBJECT";
+            const string promptVar = "COREAI_BENCHMARK_FREEBUILD_PROMPT";
+            string previousSubject = Environment.GetEnvironmentVariable(subjectVar);
+            string previousPrompt = Environment.GetEnvironmentVariable(promptVar);
+            const string timeNote = GameFreeBuildScenariosG6.FreeBuildTimeBudgetNote;
+            try
+            {
+                Environment.SetEnvironmentVariable(subjectVar, null);
+                Environment.SetEnvironmentVariable(promptVar, null);
+                // WHY: the default castle goal is byte-identical to suite 1.15 (clock, castle pacing, stop rule).
+                StringAssert.EndsWith(GameFreeBuildScenariosG6.FreeBuildTimeBudgetClockNote +
+                                      GameFreeBuildScenariosG6.FreeBuildCastlePacingNote +
+                                      GameFreeBuildScenariosG6.FreeBuildTimeBudgetStopNote,
+                    GameFreeBuildScenariosG6.All()[0].Goal);
+
+                Environment.SetEnvironmentVariable(subjectVar, "a futuristic city");
+                string generic = GameFreeBuildScenariosG6.All()[0].Goal;
+                string genericSuffix = GameFreeBuildScenariosG6.FreeBuildTimeBudgetClockNote +
+                                       GameFreeBuildScenariosG6.FreeBuildGenericPacingNote +
+                                       GameFreeBuildScenariosG6.FreeBuildTimeBudgetStopNote;
+                StringAssert.EndsWith(genericSuffix, generic);
+                StringAssert.DoesNotContain(GameFreeBuildScenariosG6.FreeBuildCastlePacingNote, generic);
+                string[] castleWords = { "castle", "curtain wall", "keep", "tower", "gate", "silhouette" };
+                foreach (string castleWord in castleWords)
+                {
+                    StringAssert.DoesNotContain(castleWord, genericSuffix.ToLowerInvariant());
+                }
+
+                const string customPrompt = "Build a lighthouse on a sea cliff.";
+                Environment.SetEnvironmentVariable(promptVar, customPrompt);
+                Assert.AreEqual(customPrompt + timeNote, GameFreeBuildScenariosG6.All()[0].Goal);
+                StringAssert.DoesNotContain("castle", timeNote.ToLowerInvariant());
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(subjectVar, previousSubject);
+                Environment.SetEnvironmentVariable(promptVar, previousPrompt);
+            }
+        }
+
+        /// <summary>Streams two chunks; each MoveNext spends <see cref="BurnMs"/> so turn time is measurable.</summary>
+        private sealed class TimedStreamingLlm : ILlmClient
+        {
+            internal const int BurnMs = 40;
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "done" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                await Task.CompletedTask;
+                Burn(BurnMs);
+                yield return new LlmStreamChunk { Text = "part " };
+                Burn(BurnMs);
+                yield return new LlmStreamChunk { IsDone = true, PromptTokens = 100, CompletionTokens = 10 };
+            }
+
+            private static void Burn(int ms)
+            {
+                System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+                while (sw.ElapsedMilliseconds < ms)
+                {
+                    Thread.Sleep(1);
+                }
+            }
+        }
+
+        [Test]
+        public void TokenAccounting_CutTurnIsTimedAndMarksTheTotalsPartial()
+        {
+            SessionCapturingLlmClient capture = new(new TimedStreamingLlm());
+            LlmCompletionRequest request = new() { UserPayload = "build" };
+
+            IAsyncEnumerator<LlmStreamChunk> completed = capture.CompleteStreamingAsync(request).GetAsyncEnumerator();
+            while (completed.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+            {
+            }
+
+            completed.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            double completedMs = capture.GenerationMs;
+
+            // WHY: disposing after the first chunk is what the deadline does to a streaming turn.
+            IAsyncEnumerator<LlmStreamChunk> cut = capture.CompleteStreamingAsync(request).GetAsyncEnumerator();
+            Assert.IsTrue(cut.MoveNextAsync().AsTask().GetAwaiter().GetResult());
+            cut.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            capture.Seal();
+
+            Assert.AreEqual(2, capture.Turns.Count);
+            Assert.AreEqual(1, capture.CutTurnCount);
+            Assert.IsFalse(capture.Turns[0].Cut);
+            Assert.IsTrue(capture.Turns[1].Cut);
+            Assert.AreEqual("part ", capture.Turns[1].Assistant);
+            Assert.GreaterOrEqual(capture.GenerationMs, completedMs + TimedStreamingLlm.BurnMs - 1,
+                "The cut turn's generation time must be counted.");
+            StringAssert.Contains("CUT:", capture.BuildTranscript("goal"));
+
+            // WHY: the lifecycle observer's arguments for the cut turn lift the estimate above provider usage.
+            const int estimatedCompletion = 40;
+            TokenAccounting tokens = ResolveTokenAccounting(capture, estimatedCompletion, 0);
+            Assert.IsTrue(tokens.Partial);
+            Assert.IsFalse(tokens.FromProvider);
+            Assert.AreEqual(100, tokens.PromptTokens);
+            Assert.AreEqual(estimatedCompletion, tokens.CompletionTokens);
+            Assert.AreEqual(capture.GenerationMs / 1000.0, tokens.GenerationSeconds, 1e-9);
+            Assert.Less(tokens.TokensPerSecond, estimatedCompletion / (completedMs / 1000.0),
+                "Tokens that include the cut turn must not be divided by the completed turns' time alone.");
+
+            string banner = FormatFreeBuildHeroStats(5, 12, 0, 1000, tokens);
+            StringAssert.Contains("partial token estimate", banner);
+            StringAssert.Contains("~" + tokens.TokensPerSecond.ToString("0.#"), banner);
+
+            SessionCapturingLlmClient complete = new(new TimedStreamingLlm());
+            IAsyncEnumerator<LlmStreamChunk> only = complete.CompleteStreamingAsync(request).GetAsyncEnumerator();
+            while (only.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+            {
+            }
+
+            only.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            TokenAccounting exact = ResolveTokenAccounting(complete, 5, 0);
+            Assert.IsFalse(exact.Partial);
+            Assert.IsTrue(exact.FromProvider);
+            Assert.AreEqual(10, exact.CompletionTokens);
         }
 
         [Test]
@@ -384,6 +581,33 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         [Test]
+        public void ScenarioToolCallObserver_IgnoresCallsFromAnotherRunsTrace()
+        {
+            ScenarioToolCallObserver observer = new("GameMaster", "g6_free_build", "bench-g6_free_build-run2");
+            observer.Record(new LlmToolCallRecord
+            {
+                Info = new LlmToolCallInfo("bench-g6_free_build-run2-t1", "GameMaster", "c1", "execute_lua",
+                    "{\"code\":\"mine()\"}"),
+                Status = "completed"
+            });
+            observer.Record(new LlmToolCallRecord
+            {
+                Info = new LlmToolCallInfo("bench-g6_free_build-run1-t3", "GameMaster", "c2", "execute_lua",
+                    "{\"code\":\"orphan()\"}"),
+                Status = "failed"
+            });
+            observer.Record(new LlmToolCallRecord
+            {
+                Info = new LlmToolCallInfo("", "GameMaster", "c3", "execute_lua", "{\"code\":\"untraced()\"}"),
+                Status = "completed"
+            });
+
+            Assert.AreEqual(2, observer.ToolCalls);
+            Assert.AreEqual(0, observer.FailedToolCalls);
+            StringAssert.DoesNotContain("orphan()", observer.CompletionText);
+        }
+
+        [Test]
         public void VisionFreeBuild_IsSelectedAsHeroAndExportsLua()
         {
             BenchmarkReport report = new();
@@ -404,6 +628,38 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             };
             report.Add(expected);
             Assert.AreSame(expected, FindFreeBuildHeroResult(report));
+        }
+
+        [Test]
+        public void FreeBuildHero_SkipsAFailedBuild()
+        {
+            BenchmarkReport report = new();
+            ScenarioResult plain = new()
+            {
+                Group = "G6",
+                ScenarioId = "g6_free_build",
+                SceneScreenshotPng = new byte[] { 2 }
+            };
+            report.Add(plain);
+            report.Add(new ScenarioResult
+            {
+                Group = "G6",
+                ScenarioId = "g6_free_build_vision",
+                SceneScreenshotPng = new byte[] { 1 },
+                Attribution = FailureAttribution.Environment,
+                Failure = "provider error: HTTP 500"
+            });
+            Assert.AreSame(plain, FindFreeBuildHeroResult(report));
+
+            BenchmarkReport failedOnly = new();
+            failedOnly.Add(new ScenarioResult
+            {
+                Group = "G6",
+                ScenarioId = "g6_free_build",
+                SceneScreenshotPng = new byte[] { 3 },
+                Failure = "grading failed: boom"
+            });
+            Assert.IsNull(FindFreeBuildHeroResult(failedOnly));
         }
 
         [TestCase("A task was canceled.", true)]
@@ -705,12 +961,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         // COREAI_BENCHMARK_TIMEOUT env can raise well past the suite defaults). Reserve
                         // the whole worst case, or a provider that hangs on every attempt blows straight
                         // through the NUnit hard abort with no artifacts written.
-                        if (suiteClock.Elapsed.TotalSeconds + maxAttempts * (double)timeout > suiteBudgetSeconds)
+                        double worstCaseSeconds = ScenarioWorstCaseSeconds(scenario, timeout, maxAttempts);
+                        if (suiteClock.Elapsed.TotalSeconds + worstCaseSeconds > suiteBudgetSeconds)
                         {
                             budgetHit = true;
                             Debug.LogWarning(
                                 $"[Benchmark] Suite time budget ({suiteBudgetSeconds:0}s) would be exceeded by " +
-                                $"{scenario.Name} ({maxAttempts} attempt(s) x {timeout:0}s timeout) after " +
+                                $"{scenario.Name} ({maxAttempts} attempt(s) x {timeout:0}s timeout, " +
+                                $"{worstCaseSeconds:0}s planned) after " +
                                 $"{report.Results.Count} scenario result(s); stopping early and writing the " +
                                 "report for everything finished so far.");
                             break;
@@ -974,6 +1232,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 if (r.SceneScreenshotPng == null || r.SceneScreenshotPng.Length == 0 ||
                     !string.Equals(r.Group, "G6", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                // WHY: a failed build (provider 5xx, crash, harness fault) is not the model's showcase;
+                // WHY: its screenshot still lands in the regular scene-screenshot section.
+                if (!string.IsNullOrEmpty(r.Failure) || r.Attribution == FailureAttribution.Environment ||
+                    r.Attribution == FailureAttribution.Framework)
                 {
                     continue;
                 }

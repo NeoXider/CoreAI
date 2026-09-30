@@ -51,23 +51,26 @@ namespace CoreAI.Mods.Rbx.Rendering
                 throw new ArgumentNullException(nameof(textureLoader));
             }
 
+            // WHY: these mirror the packaged catalog asset for the six original sets so a missing
+            // asset degrades to the same look, including the occlusion map baked from each normal
+            // map and the reflectance lift of the photographed metal.
             return new[]
             {
-                CreatePackagedEntry(textureLoader, "Wood", 512, "Wood095", 10f, 0.65f,
-                    0.75f, false),
-                CreatePackagedEntry(textureLoader, "WoodPlanks", 528, "Wood095", 8f, 0.65f,
-                    0.78f, false),
-                CreatePackagedEntry(textureLoader, "Brick", 848, "Bricks104", 10f, 0.6f,
-                    0.82f, false),
+                CreatePackagedEntry(textureLoader, "Wood", 512, "Wood095", 10f, 1f,
+                    0.75f, false, 0.25f, 0f),
+                CreatePackagedEntry(textureLoader, "WoodPlanks", 528, "Wood095", 8f, 1.1f,
+                    0.78f, false, 0.25f, 0f),
+                CreatePackagedEntry(textureLoader, "Brick", 848, "Bricks104", 10f, 1.1f,
+                    0.82f, false, 0.75f, 0f),
                 CreatePackagedEntry(textureLoader, "Cobblestone", 880, "PavingStones151", 14f,
-                    0.7f, 0.72f, false),
-                CreatePackagedEntry(textureLoader, "Metal", 1088, "Metal063", 3.5f, 0.45f,
-                    0.68f, true),
+                    1.1f, 0.72f, false, 0.6f, 0f),
+                CreatePackagedEntry(textureLoader, "Metal", 1088, "Metal063", 3.5f, 0.85f,
+                    0.68f, true, 0f, 0.4f),
                 // WHY: Grass005 was a featureless mat — albedo variation 8.5 with a normal too weak
                 // to carve blades, so it read as flat green felt. Grass004 shows real blades; the
                 // tile drops to 4.5 studs because at 7 the blades fell below one screen pixel.
-                CreatePackagedEntry(textureLoader, "Grass", 1280, "Grass004", 4.5f, 1.4f,
-                    0.7f, false)
+                CreatePackagedEntry(textureLoader, "Grass", 1280, "Grass004", 4.5f, 1.2f,
+                    0.7f, false, 0.45f, 0f)
             };
         }
 
@@ -90,7 +93,8 @@ namespace CoreAI.Mods.Rbx.Rendering
 
         private static Entry CreatePackagedEntry(Func<string, Texture2D> textureLoader,
             string materialName, int materialValue, string textureStem, float tileWidthStuds,
-            float normalStrength, float partColorInfluence, bool hasMetalness)
+            float normalStrength, float partColorInfluence, bool hasMetalness, float cavityStrength,
+            float metalAlbedoLift)
         {
             string prefix = "CoreAIRbxTextures/" + textureStem + "_1K-JPG_";
             Entry entry = new()
@@ -103,12 +107,14 @@ namespace CoreAI.Mods.Rbx.Rendering
                 RoughnessOrSmoothness = textureLoader(prefix + "Roughness"),
                 IsSmoothnessMap = false,
                 Metalness = hasMetalness ? textureLoader(prefix + "Metalness") : null,
-                AmbientOcclusion = null,
+                AmbientOcclusion = cavityStrength > 0f ? textureLoader(prefix + "Cavity") : null,
                 TileWidthStuds = tileWidthStuds,
                 IntrinsicColor = Color.white,
                 PartColorInfluence = partColorInfluence,
                 RoughnessScale = 1f,
-                NormalStrength = normalStrength
+                NormalStrength = normalStrength,
+                CavityStrength = cavityStrength,
+                MetalAlbedoLift = metalAlbedoLift
             };
             return entry;
         }
@@ -131,6 +137,8 @@ namespace CoreAI.Mods.Rbx.Rendering
             [SerializeField, Range(0f, 1f)] private float _partColorInfluence = 0.75f;
             [SerializeField, Min(0f)] private float _roughnessScale = 1f;
             [SerializeField, Min(0f)] private float _normalStrength = 1f;
+            [SerializeField, Range(0f, 1f)] private float _cavityStrength;
+            [SerializeField, Range(0f, 1f)] private float _metalAlbedoLift;
 
             /// <summary>Canonical Enum.Material name.</summary>
             public string MaterialName
@@ -228,6 +236,29 @@ namespace CoreAI.Mods.Rbx.Rendering
             {
                 get => _normalStrength;
                 set => _normalStrength = value;
+            }
+
+            /// <summary>
+            /// How strongly the ambient-occlusion map also darkens the albedo, 0..1. Packaged sets
+            /// set it for the occlusion map baked from their normal map, which keeps grooves visible
+            /// once the mip chain has averaged the normal map flat; 0 (imported sets) leaves the
+            /// occlusion map on ambient light only.
+            /// </summary>
+            public float CavityStrength
+            {
+                get => _cavityStrength;
+                set => _cavityStrength = Mathf.Clamp01(value);
+            }
+
+            /// <summary>
+            /// Share of the way metallic texels move toward the brightest shade of their own hue,
+            /// 0..1. Only packaged photographed metals, whose colour maps are far darker than real
+            /// metal reflectance, set it; 0 leaves a calibrated metalness workflow untouched.
+            /// </summary>
+            public float MetalAlbedoLift
+            {
+                get => _metalAlbedoLift;
+                set => _metalAlbedoLift = Mathf.Clamp01(value);
             }
 
             /// <summary>Whether any texture reference is assigned.</summary>

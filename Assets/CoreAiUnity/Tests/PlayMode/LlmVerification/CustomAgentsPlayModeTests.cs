@@ -22,6 +22,36 @@ namespace CoreAI.Tests.PlayMode
 #if COREAI_LLM && !UNITY_WEBGL
     public sealed class CustomAgentsPlayModeTests
     {
+        // WHY: each test is an LLMUnity readiness wait (up to 120 s on a cold start) + one 240 s agent turn
+        // (tool retry loop) + the 20 s LiveTestRequestScope reserve + 20 s margin = 400 s; Cap keeps the
+        // turn's own cancelling wait ahead of the framework abort when the load is slow.
+        private const int TestTimeoutMs = 400000;
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
+        }
+
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
@@ -117,7 +147,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator CustomAgent_Merchant_ToolsAndChat()
         {
             Debug.Log("[CustomAgents] === TEST 1: MERCHANT (ToolsAndChat) ===");
@@ -127,47 +157,45 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
+
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            TestInventoryProvider inv = new();
+            inv.Items.Add(new InventoryTool.InventoryItem
+                { Name = "Iron Sword", Type = "weapon", Quantity = 3, Price = 50 });
+            inv.Items.Add(new InventoryTool.InventoryItem
+                { Name = "Health Potion", Type = "consumable", Quantity = 10, Price = 25 });
+
+            AgentConfig merchant = new AgentBuilder("TestMerchant")
+                .WithSystemPrompt("You are a shopkeeper. When asked about items, use your inventory information.")
+                .WithTool(new InventoryLlmTool(inv))
+                .WithMemory()
+                .WithMode(AgentMode.ToolsAndChat)
+                .Build();
+
+            //      MemoryTool
+            ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task<TestResult> task = _requests.Track(
+                RunAgentTestAsync(clientWithStore, merchant, "What items do you have?", cts.Token));
+            yield return PlayModeTestAwait.WaitTask(task, _requests.Cap(240f), "merchant", cts); // 240s  retry loop
+            TestResult r = task.Result;
+            Debug.Log(
+                $"[CustomAgents] MERCHANT Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(80, r.Response?.Length ?? 0))}");
+            Assert.Greater(r.ToolsCount, 0, "Merchant should have tools");
+            if (!r.LlmOk || string.IsNullOrEmpty(r.Response))
             {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                TestInventoryProvider inv = new();
-                inv.Items.Add(new InventoryTool.InventoryItem
-                    { Name = "Iron Sword", Type = "weapon", Quantity = 3, Price = 50 });
-                inv.Items.Add(new InventoryTool.InventoryItem
-                    { Name = "Health Potion", Type = "consumable", Quantity = 10, Price = 25 });
-
-                AgentConfig merchant = new AgentBuilder("TestMerchant")
-                    .WithSystemPrompt("You are a shopkeeper. When asked about items, use your inventory information.")
-                    .WithTool(new InventoryLlmTool(inv))
-                    .WithMemory()
-                    .WithMode(AgentMode.ToolsAndChat)
-                    .Build();
-
-                //      MemoryTool
-                ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
-                Task<TestResult> task = RunAgentTestAsync(clientWithStore, merchant, "What items do you have?");
-                yield return PlayModeTestAwait.WaitTask(task, 240f, "merchant"); // 240s  retry loop
-                TestResult r = task.Result;
-                Debug.Log(
-                    $"[CustomAgents] MERCHANT Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(80, r.Response?.Length ?? 0))}");
-                Assert.Greater(r.ToolsCount, 0, "Merchant should have tools");
-                if (!r.LlmOk || string.IsNullOrEmpty(r.Response))
-                {
-                    Assert.Inconclusive(
-                        "Production-like LLM did not return usable output (see MeaiOpenAiChatClient / HTTP logs; fix endpoint). " +
-                        $"Last error: {r.LlmError ?? "null"}");
-                }
-
-                Debug.Log("[CustomAgents] TEST 1 PASSED");
+                Assert.Inconclusive(
+                    "Production-like LLM did not return usable output (see MeaiOpenAiChatClient / HTTP logs; fix endpoint). " +
+                    $"Last error: {r.LlmError ?? "null"}");
             }
-            finally
-            {
-                handle.Dispose();
-            }
+
+            Debug.Log("[CustomAgents] TEST 1 PASSED");
         }
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator CustomAgent_Analyzer_ToolsOnly()
         {
             Debug.Log("[CustomAgents] === TEST 2: ANALYZER (ToolsOnly) ===");
@@ -177,32 +205,30 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
-            {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                AgentConfig analyzer = new AgentBuilder("TestAnalyzer")
-                    .WithSystemPrompt("You analyze sessions using the available session statistics.")
-                    .WithTool(new SessionStatsLlmTool())
-                    .WithMode(AgentMode.ToolsOnly)
-                    .Build();
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
 
-                ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
-                Task<TestResult> task = RunAgentTestAsync(clientWithStore, analyzer, "Analyze session");
-                yield return PlayModeTestAwait.WaitTask(task, 240f, "analyzer"); // 240s  retry loop
-                TestResult r = task.Result;
-                Debug.Log($"[CustomAgents] ANALYZER Tools: {r.ToolsCount}, Mode: {analyzer.Mode}");
-                Assert.AreEqual(AgentMode.ToolsOnly, analyzer.Mode);
-                Assert.Greater(r.ToolsCount, 0);
-                Debug.Log("[CustomAgents] TEST 2 PASSED");
-            }
-            finally
-            {
-                handle.Dispose();
-            }
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            AgentConfig analyzer = new AgentBuilder("TestAnalyzer")
+                .WithSystemPrompt("You analyze sessions using the available session statistics.")
+                .WithTool(new SessionStatsLlmTool())
+                .WithMode(AgentMode.ToolsOnly)
+                .Build();
+
+            ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task<TestResult> task = _requests.Track(
+                RunAgentTestAsync(clientWithStore, analyzer, "Analyze session", cts.Token));
+            yield return PlayModeTestAwait.WaitTask(task, _requests.Cap(240f), "analyzer", cts); // 240s  retry loop
+            TestResult r = task.Result;
+            Debug.Log($"[CustomAgents] ANALYZER Tools: {r.ToolsCount}, Mode: {analyzer.Mode}");
+            Assert.AreEqual(AgentMode.ToolsOnly, analyzer.Mode);
+            Assert.Greater(r.ToolsCount, 0);
+            Debug.Log("[CustomAgents] TEST 2 PASSED");
         }
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator CustomAgent_Storyteller_ChatOnly()
         {
             Debug.Log("[CustomAgents] === TEST 3: STORYTELLER (ChatOnly) ===");
@@ -212,39 +238,37 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
-            {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                AgentConfig storyteller = new AgentBuilder("TestStoryteller")
-                    .WithSystemPrompt("You are a campfire storyteller. Share tales.")
-                    .WithMemory(MemoryToolAction.Append)
-                    .WithMode(AgentMode.ChatOnly)
-                    .Build();
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
 
-                ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
-                Task<TestResult> task = RunAgentTestAsync(clientWithStore, storyteller, "Tell me a story");
-                yield return PlayModeTestAwait.WaitTask(task, 240f, "storyteller"); // 240s  retry loop
-                TestResult r = task.Result;
-                Debug.Log(
-                    $"[CustomAgents] STORYTELLER Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(80, r.Response?.Length ?? 0))}");
-                Assert.AreEqual(AgentMode.ChatOnly, storyteller.Mode);
-                if (!r.LlmOk || string.IsNullOrEmpty(r.Response))
-                {
-                    Assert.Inconclusive(
-                        "Production-like LLM did not return usable output (HTTP 500 / offline). " +
-                        $"Last error: {r.LlmError ?? "null"}");
-                }
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            AgentConfig storyteller = new AgentBuilder("TestStoryteller")
+                .WithSystemPrompt("You are a campfire storyteller. Share tales.")
+                .WithMemory(MemoryToolAction.Append)
+                .WithMode(AgentMode.ChatOnly)
+                .Build();
 
-                Debug.Log("[CustomAgents] TEST 3 PASSED");
-            }
-            finally
+            ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task<TestResult> task = _requests.Track(
+                RunAgentTestAsync(clientWithStore, storyteller, "Tell me a story", cts.Token));
+            yield return PlayModeTestAwait.WaitTask(task, _requests.Cap(240f), "storyteller", cts); // 240s  retry loop
+            TestResult r = task.Result;
+            Debug.Log(
+                $"[CustomAgents] STORYTELLER Tools: {r.ToolsCount}, Response: {r.Response?.Substring(0, Math.Min(80, r.Response?.Length ?? 0))}");
+            Assert.AreEqual(AgentMode.ChatOnly, storyteller.Mode);
+            if (!r.LlmOk || string.IsNullOrEmpty(r.Response))
             {
-                handle.Dispose();
+                Assert.Inconclusive(
+                    "Production-like LLM did not return usable output (HTTP 500 / offline). " +
+                    $"Last error: {r.LlmError ?? "null"}");
             }
+
+            Debug.Log("[CustomAgents] TEST 3 PASSED");
         }
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator CustomAgent_Helper_WithAction()
         {
             Debug.Log("[CustomAgents] === TEST 4: HELPER (WithAction) ===");
@@ -254,41 +278,40 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
-            {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                bool triggerFired = false;
-                string receivedMessage = string.Empty;
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
 
-                AgentConfig helper = new AgentBuilder("TestHelper")
-                    .WithSystemPrompt(
-                        "When asked to send a ping, send the provided message through the available action.")
-                    .WithMode(AgentMode.ToolsOnly)
-                    .WithAction("send_ping", "Send a ping message", new Action<string>((string message) =>
-                    {
-                        triggerFired = true;
-                        receivedMessage = message;
-                    }))
-                    .Build();
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            bool triggerFired = false;
+            string receivedMessage = string.Empty;
 
-                ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
-                Task<TestResult> task = RunAgentTestAsync(clientWithStore, helper, "Send ping");
-                yield return PlayModeTestAwait.WaitTask(task, 240f, "helper");
-                TestResult r = task.Result;
+            AgentConfig helper = new AgentBuilder("TestHelper")
+                .WithSystemPrompt(
+                    "When asked to send a ping, send the provided message through the available action.")
+                .WithMode(AgentMode.ToolsOnly)
+                .WithAction("send_ping", "Send a ping message", new Action<string>((string message) =>
+                {
+                    triggerFired = true;
+                    receivedMessage = message;
+                }))
+                .Build();
 
-                Debug.Log(
-                    $"[CustomAgents] HELPER Tools: {r.ToolsCount}, Fired: {triggerFired}, Msg: {receivedMessage}");
-                Assert.Greater(r.ToolsCount, 0);
-                Assert.IsTrue(triggerFired, "Delegate should have been triggered.");
-                Debug.Log("[CustomAgents] TEST 4 PASSED");
-            }
-            finally
-            {
-                handle.Dispose();
-            }
+            ILlmClient clientWithStore = handle.WrapWithMemoryStore(new InMemoryStore());
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task<TestResult> task = _requests.Track(
+                RunAgentTestAsync(clientWithStore, helper, "Send ping", cts.Token));
+            yield return PlayModeTestAwait.WaitTask(task, _requests.Cap(240f), "helper", cts);
+            TestResult r = task.Result;
+
+            Debug.Log(
+                $"[CustomAgents] HELPER Tools: {r.ToolsCount}, Fired: {triggerFired}, Msg: {receivedMessage}");
+            Assert.Greater(r.ToolsCount, 0);
+            Assert.IsTrue(triggerFired, "Delegate should have been triggered.");
+            Debug.Log("[CustomAgents] TEST 4 PASSED");
         }
 
-        private async Task<TestResult> RunAgentTestAsync(ILlmClient llm, AgentConfig cfg, string msg)
+        private async Task<TestResult> RunAgentTestAsync(ILlmClient llm, AgentConfig cfg, string msg,
+            CancellationToken cancellationToken)
         {
             InMemoryStore store = new();
             AgentMemoryPolicy policy = new();
@@ -308,7 +331,7 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log($"[CustomAgents] Hint: {msg}");
             Debug.Log("[CustomAgents] ----------------------------------------");
 
-            await orch.RunTaskAsync(new AiTaskRequest { RoleId = cfg.RoleId, Hint = msg });
+            await orch.RunTaskAsync(new AiTaskRequest { RoleId = cfg.RoleId, Hint = msg }, cancellationToken);
 
             Debug.Log("[CustomAgents] MODEL RESPONSE:");
             Debug.Log($"[CustomAgents] Available Tools: {cap.LastTools?.Count ?? 0}");

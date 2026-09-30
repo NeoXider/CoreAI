@@ -25,11 +25,38 @@ namespace CoreAI.Tests.PlayMode
     /// <summary>
     /// PlayMode verification for real tool calls such as memory and execute_lua.
     /// Runs against LLMUnity, an OpenAI-compatible HTTP API, or automatic backend selection.
-    /// Select the backend with COREAI_PLAYMODE_LLM_BACKEND and related test settings.
+    /// The backend comes from <see cref="PlayModeProductionLikeLlmFactory"/>: the CoreAISettingsAsset backend type,
+    /// with COREAI_PLAYMODE_LLM_BACKEND read only when no settings asset is loaded.
     /// </summary>
 #if COREAI_LLM && !UNITY_WEBGL
     public sealed class AllToolCallsPlayModeTests
     {
+        private const float MemoryStepTimeoutSeconds = 240f;
+
+        // WHY: three sequential memory steps of up to MemoryStepTimeoutSeconds plus the 5 s cancellation
+        // grace each (3 x 245 s = 735 s), plus model load and teardown. The former 600 s aborted mid-step and
+        // left that step's request running into the next test.
+        private const int TestTimeoutMs = 900000;
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup, so cancel the abandoned request here and
+            // let it unwind before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
+            yield return null;
+        }
+
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
@@ -79,9 +106,10 @@ namespace CoreAI.Tests.PlayMode
         ///  : LLMUnity  HTTP API.
         /// </summary>
         [UnityTest]
-        [Timeout(600000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator AllToolCalls_MemoryTool_WriteAppendClear()
         {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
             Debug.Log("[AllToolCalls]  MEMORY TOOL TEST START ");
 
             //  LLM    (auto-select backend)
@@ -95,253 +123,249 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running step.
+            _handle = handle;
+
+            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
             {
-                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
-                {
-                    yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                }
+                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            }
 
-                Debug.Log($"[AllToolCalls] Backend: {handle.ResolvedBackend}");
+            Debug.Log($"[AllToolCalls] Backend: {handle.ResolvedBackend}");
 
-                InMemoryStore store = new();
-                CoreAi.ClearToolCallHistory();
-                AgentMemoryPolicy policy = new();
-                TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
+            InMemoryStore store = new();
+            CoreAi.ClearToolCallHistory();
+            AgentMemoryPolicy policy = new();
+            TestAgentPolicyDefaults.ApplyToolsAndChatWithMemory(policy, BuiltInAgentRoleIds.CoreMechanic);
 
-                //     MemoryStore (   store')
-                ILlmClient sharedClient = handle.WrapWithMemoryStore(store);
+            //     MemoryStore (   store')
+            ILlmClient sharedClient = handle.WrapWithMemoryStore(store);
 
-                //  LLMAgent  LLM  keepModelLoaded (  LLMUnity)
+            //  LLMAgent  LLM  keepModelLoaded (  LLMUnity)
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
-                LLMAgent agent = handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity
-                    ? UnityEngine.Object.FindFirstObjectByType<LLMAgent>()
-                    : null;
-                LLM llm = agent?.llm ?? agent?.GetComponent<LLM>();
+            LLMAgent agent = handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity
+                ? UnityEngine.Object.FindFirstObjectByType<LLMAgent>()
+                : null;
+            LLM llm = agent?.llm ?? agent?.GetComponent<LLM>();
 #else
-                object llm = null;
+            object llm = null;
 #endif
-                if (llm != null)
-                {
-                    try
-                    {
-                        PropertyInfo keepProp = llm.GetType().GetProperty("keepModelLoaded");
-                        if (keepProp != null)
-                        {
-                            keepProp.SetValue(llm, true);
-                            Debug.Log("[AllToolCalls] keepModelLoaded = true (server stays running)");
-                        }
-                    }
-                    catch
-                    {
-                        Debug.Log("[AllToolCalls] keepModelLoaded property not found");
-                    }
-                }
-
-                SessionTelemetryCollector telemetry = new();
-                AiPromptComposer composer = new(
-                    new BuiltInDefaultAgentSystemPromptProvider(),
-                    new NoAgentUserPromptTemplateProvider(),
-                    new NullLuaScriptVersionStore());
-
-                Debug.Log($"[AllToolCalls] Using client: {sharedClient.GetType().Name}");
-
-                // ===== TEST 1: WRITE MEMORY =====
-                {
-                    ListSink sink = new();
-                    CapturingLlmClient capturingLlm = new(sharedClient);
-                    AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
-
-                    //    native tool calling
-                    string prompt =
-                        "Use the memory tool exactly once with action=\"write\" and content=\"Test craft #1 is an Iron Sword.\".";
-
-                    Debug.Log($"[AllToolCalls] ");
-                    Debug.Log($"[AllToolCalls] TEST 1: WRITE MEMORY");
-                    Debug.Log($"[AllToolCalls] ");
-                    Debug.Log($"[AllToolCalls]  PROMPT TO MODEL:");
-                    Debug.Log($"[AllToolCalls] {prompt}");
-                    Debug.Log($"[AllToolCalls] ");
-
-                    using CancellationTokenSource cts = new();
-                    Task t = orch.RunTaskAsync(new AiTaskRequest
-                    {
-                        RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt,
-                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
-                        RequiredToolName = "memory",
-                        MaxOutputTokens = 128000
-                    }, cts.Token);
-
-                    yield return WaitForMemoryMutationOrTask(store, t, cts,
-                        memory => memory.Contains("Iron Sword") && HasCompletedMemoryAction("write"),
-                        "memory write");
-
-                    Debug.Log($"[AllToolCalls]  MODEL RESPONSE:");
-                    Debug.Log($"[AllToolCalls] Content (FULL):");
-                    if (string.IsNullOrEmpty(capturingLlm.LastContent))
-                    {
-                        Debug.LogWarning("[AllToolCalls]  Content is EMPTY!");
-                    }
-                    else
-                    {
-                        Debug.Log(capturingLlm.LastContent);
-                    }
-
-                    Debug.Log($"[AllToolCalls] ");
-
-                    //  :      tool call'
-                    bool memorySaved = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state1) &&
-                                       !string.IsNullOrWhiteSpace(state1.Memory);
-
-                    if (!memorySaved)
-                    {
-                        Debug.LogWarning($"[AllToolCalls]  WRITE FAILED: Memory NOT saved by tool call. " +
-                                         $"Model responded with text instead of calling the memory tool.");
-                    }
-                    else
-                    {
-                        Debug.Log($"[AllToolCalls]  Memory written by tool call: {state1.Memory}");
-                    }
-
-                    WriteLlmDebug("MemoryTool_Write", capturingLlm, handle, sink.Items.Count);
-
-                    Assert.IsTrue(memorySaved,
-                        "Memory must be saved by the required memory tool call, not by text response.");
-                }
-
-                // ===== TEST 2: APPEND MEMORY =====
-                {
-                    ListSink sink = new();
-                    CapturingLlmClient capturingLlm = new(sharedClient);
-                    AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
-
-                    //    native tool calling
-                    string prompt =
-                        "Use the memory tool exactly once with action=\"append\" and content=\"Test craft #2 is a Steel Shield.\". Keep the existing memory.";
-
-                    Debug.Log($"[AllToolCalls] ");
-                    Debug.Log($"[AllToolCalls] TEST 2: APPEND MEMORY");
-                    Debug.Log($"[AllToolCalls] ");
-                    Debug.Log($"[AllToolCalls]  PROMPT TO MODEL:");
-                    Debug.Log($"[AllToolCalls] {prompt}");
-                    Debug.Log($"[AllToolCalls] ");
-
-                    using CancellationTokenSource cts = new();
-                    Task t = orch.RunTaskAsync(new AiTaskRequest
-                    {
-                        RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt,
-                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
-                        RequiredToolName = "memory",
-                        MaxOutputTokens = 128000
-                    }, cts.Token);
-
-                    yield return WaitForMemoryMutationOrTask(store, t, cts,
-                        memory => memory.Contains("Iron Sword") && memory.Contains("Steel Shield") &&
-                                  HasCompletedMemoryAction("append"),
-                        "memory append");
-
-                    Debug.Log($"[AllToolCalls]  MODEL RESPONSE:");
-                    Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
-
-                    //  :     
-                    bool memoryAppended =
-                        store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state2) &&
-                        state2.Memory.Contains("Iron Sword") &&
-                        state2.Memory.Contains("Steel Shield");
-
-                    if (!memoryAppended)
-                    {
-                        string currentMemory = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState s)
-                            ? s.Memory
-                            : "(none)";
-                        Debug.LogWarning($"[AllToolCalls]  APPEND FAILED: Memory not appended by tool call. " +
-                                         $"Current memory: '{currentMemory}'. Model responded with text instead.");
-                    }
-                    else
-                    {
-                        Debug.Log($"[AllToolCalls]  Memory appended by tool call: {state2.Memory}");
-                    }
-
-                    WriteLlmDebug("MemoryTool_Append", capturingLlm, handle, sink.Items.Count);
-
-                    Assert.IsTrue(memoryAppended,
-                        "Memory must be appended by actual tool call. Expected both 'Iron Sword' and 'Steel Shield' in memory.");
-                }
-
-                // ===== TEST 3: CLEAR MEMORY =====
-                {
-                    ListSink sink = new();
-                    CapturingLlmClient capturingLlm = new(sharedClient);
-                    AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
-
-                    //    native tool calling
-                    string prompt =
-                        "Use the memory tool exactly once with action=\"clear\". Do not use read, write, append, delete, str_replace, insert, or rename.";
-
-                    Debug.Log($"[AllToolCalls] ");
-                    Debug.Log($"[AllToolCalls] TEST 3: CLEAR MEMORY");
-                    Debug.Log($"[AllToolCalls] ");
-                    Debug.Log($"[AllToolCalls]  PROMPT TO MODEL:");
-                    Debug.Log($"[AllToolCalls] {prompt}");
-                    Debug.Log($"[AllToolCalls] ");
-
-                    using CancellationTokenSource cts = new();
-                    Task t = orch.RunTaskAsync(new AiTaskRequest
-                    {
-                        RoleId = BuiltInAgentRoleIds.CoreMechanic,
-                        Hint = prompt,
-                        ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
-                        RequiredToolName = "memory",
-                        MaxOutputTokens = 128000
-                    }, cts.Token);
-
-                    yield return WaitForMemoryMutationOrTask(store, t, cts,
-                        memory => string.IsNullOrWhiteSpace(memory) && HasCompletedMemoryAction("clear"),
-                        "memory clear");
-
-                    Debug.Log($"[AllToolCalls]  MODEL RESPONSE:");
-                    Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
-
-                    WriteLlmDebug("MemoryTool_Clear", capturingLlm, handle, sink.Items.Count);
-
-                    if (!HasCompletedMemoryAction("clear"))
-                    {
-                        Assert.Inconclusive(
-                            "The live backend did not emit memory(action=clear) even with RequireSpecific(memory). " +
-                            "Runtime clear/tool-result behavior is covered by deterministic tests; this is model/backend compliance.");
-                    }
-
-                    // WHY: the memory tool's `clear` action EMPTIES the document (MemoryMutationPlan.Change(""))
-                    // — it deliberately keeps the store record with Memory == "", it does not delete the entry.
-                    // So "cleared" means "no entry OR empty content", not "entry absent" (the old check wrongly
-                    // failed the run even though HasCompletedMemoryAction("clear") above already proved the model
-                    // emitted and completed the real tool call).
-                    bool memoryCleared =
-                        !store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState clearedState)
-                        || string.IsNullOrEmpty(clearedState?.Memory);
-
-                    if (!memoryCleared)
-                    {
-                        Debug.LogWarning($"[AllToolCalls]  CLEAR FAILED: memory(action=clear) completed but the " +
-                                         $"document is not empty. Current memory: '{clearedState?.Memory}'.");
-                    }
-                    else
-                    {
-                        Debug.Log($"[AllToolCalls]  Memory cleared by tool call");
-                    }
-
-                    Assert.IsTrue(memoryCleared,
-                        "Memory must be emptied by the clear tool call (empty document, entry may remain).");
-                }
-
-                Debug.Log("[AllToolCalls]  MEMORY TOOL TEST PASSED ");
-            }
-            finally
+            if (llm != null)
             {
-                handle.Dispose();
+                try
+                {
+                    PropertyInfo keepProp = llm.GetType().GetProperty("keepModelLoaded");
+                    if (keepProp != null)
+                    {
+                        keepProp.SetValue(llm, true);
+                        Debug.Log("[AllToolCalls] keepModelLoaded = true (server stays running)");
+                    }
+                }
+                catch
+                {
+                    Debug.Log("[AllToolCalls] keepModelLoaded property not found");
+                }
             }
+
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(
+                new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(),
+                new NullLuaScriptVersionStore());
+
+            Debug.Log($"[AllToolCalls] Using client: {sharedClient.GetType().Name}");
+
+            // ===== TEST 1: WRITE MEMORY =====
+            {
+                ListSink sink = new();
+                CapturingLlmClient capturingLlm = new(sharedClient);
+                AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
+
+                //    native tool calling
+                string prompt =
+                    "Use the memory tool exactly once with action=\"write\" and content=\"Test craft #1 is an Iron Sword.\".";
+
+                Debug.Log($"[AllToolCalls] ");
+                Debug.Log($"[AllToolCalls] TEST 1: WRITE MEMORY");
+                Debug.Log($"[AllToolCalls] ");
+                Debug.Log($"[AllToolCalls]  PROMPT TO MODEL:");
+                Debug.Log($"[AllToolCalls] {prompt}");
+                Debug.Log($"[AllToolCalls] ");
+
+                CancellationTokenSource cts = _requests.CreateCancellation();
+                Task t = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                    Hint = prompt,
+                    ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                    RequiredToolName = "memory",
+                    MaxOutputTokens = 128000
+                }, cts.Token));
+
+                yield return WaitForMemoryMutationOrTask(store, t, cts, _requests.Cap(MemoryStepTimeoutSeconds),
+                    memory => memory.Contains("Iron Sword") && HasCompletedMemoryAction("write"),
+                    "memory write");
+
+                Debug.Log($"[AllToolCalls]  MODEL RESPONSE:");
+                Debug.Log($"[AllToolCalls] Content (FULL):");
+                if (string.IsNullOrEmpty(capturingLlm.LastContent))
+                {
+                    Debug.LogWarning("[AllToolCalls]  Content is EMPTY!");
+                }
+                else
+                {
+                    Debug.Log(capturingLlm.LastContent);
+                }
+
+                Debug.Log($"[AllToolCalls] ");
+
+                //  :      tool call'
+                bool memorySaved = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state1) &&
+                                   !string.IsNullOrWhiteSpace(state1.Memory);
+
+                if (!memorySaved)
+                {
+                    Debug.LogWarning($"[AllToolCalls]  WRITE FAILED: Memory NOT saved by tool call. " +
+                                     $"Model responded with text instead of calling the memory tool.");
+                }
+                else
+                {
+                    Debug.Log($"[AllToolCalls]  Memory written by tool call: {state1.Memory}");
+                }
+
+                WriteLlmDebug("MemoryTool_Write", capturingLlm, handle, sink.Items.Count);
+
+                Assert.IsTrue(memorySaved,
+                    "Memory must be saved by the required memory tool call, not by text response.");
+            }
+
+            // ===== TEST 2: APPEND MEMORY =====
+            {
+                ListSink sink = new();
+                CapturingLlmClient capturingLlm = new(sharedClient);
+                AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
+
+                //    native tool calling
+                string prompt =
+                    "Use the memory tool exactly once with action=\"append\" and content=\"Test craft #2 is a Steel Shield.\". Keep the existing memory.";
+
+                Debug.Log($"[AllToolCalls] ");
+                Debug.Log($"[AllToolCalls] TEST 2: APPEND MEMORY");
+                Debug.Log($"[AllToolCalls] ");
+                Debug.Log($"[AllToolCalls]  PROMPT TO MODEL:");
+                Debug.Log($"[AllToolCalls] {prompt}");
+                Debug.Log($"[AllToolCalls] ");
+
+                CancellationTokenSource cts = _requests.CreateCancellation();
+                Task t = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                    Hint = prompt,
+                    ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                    RequiredToolName = "memory",
+                    MaxOutputTokens = 128000
+                }, cts.Token));
+
+                yield return WaitForMemoryMutationOrTask(store, t, cts, _requests.Cap(MemoryStepTimeoutSeconds),
+                    memory => memory.Contains("Iron Sword") && memory.Contains("Steel Shield") &&
+                              HasCompletedMemoryAction("append"),
+                    "memory append");
+
+                Debug.Log($"[AllToolCalls]  MODEL RESPONSE:");
+                Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
+
+                //  :     
+                bool memoryAppended =
+                    store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state2) &&
+                    state2.Memory.Contains("Iron Sword") &&
+                    state2.Memory.Contains("Steel Shield");
+
+                if (!memoryAppended)
+                {
+                    string currentMemory = store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState s)
+                        ? s.Memory
+                        : "(none)";
+                    Debug.LogWarning($"[AllToolCalls]  APPEND FAILED: Memory not appended by tool call. " +
+                                     $"Current memory: '{currentMemory}'. Model responded with text instead.");
+                }
+                else
+                {
+                    Debug.Log($"[AllToolCalls]  Memory appended by tool call: {state2.Memory}");
+                }
+
+                WriteLlmDebug("MemoryTool_Append", capturingLlm, handle, sink.Items.Count);
+
+                Assert.IsTrue(memoryAppended,
+                    "Memory must be appended by actual tool call. Expected both 'Iron Sword' and 'Steel Shield' in memory.");
+            }
+
+            // ===== TEST 3: CLEAR MEMORY =====
+            {
+                ListSink sink = new();
+                CapturingLlmClient capturingLlm = new(sharedClient);
+                AiOrchestrator orch = CreateOrchestrator(capturingLlm, store, policy, telemetry, composer, sink);
+
+                //    native tool calling
+                string prompt =
+                    "Use the memory tool exactly once with action=\"clear\". Do not use read, write, append, delete, str_replace, insert, or rename.";
+
+                Debug.Log($"[AllToolCalls] ");
+                Debug.Log($"[AllToolCalls] TEST 3: CLEAR MEMORY");
+                Debug.Log($"[AllToolCalls] ");
+                Debug.Log($"[AllToolCalls]  PROMPT TO MODEL:");
+                Debug.Log($"[AllToolCalls] {prompt}");
+                Debug.Log($"[AllToolCalls] ");
+
+                CancellationTokenSource cts = _requests.CreateCancellation();
+                Task t = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
+                {
+                    RoleId = BuiltInAgentRoleIds.CoreMechanic,
+                    Hint = prompt,
+                    ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                    RequiredToolName = "memory",
+                    MaxOutputTokens = 128000
+                }, cts.Token));
+
+                yield return WaitForMemoryMutationOrTask(store, t, cts, _requests.Cap(MemoryStepTimeoutSeconds),
+                    memory => string.IsNullOrWhiteSpace(memory) && HasCompletedMemoryAction("clear"),
+                    "memory clear");
+
+                Debug.Log($"[AllToolCalls]  MODEL RESPONSE:");
+                Debug.Log($"[AllToolCalls] Content: {capturingLlm.LastContent}");
+
+                WriteLlmDebug("MemoryTool_Clear", capturingLlm, handle, sink.Items.Count);
+
+                if (!HasCompletedMemoryAction("clear"))
+                {
+                    Assert.Inconclusive(
+                        "The live backend did not emit memory(action=clear) even with RequireSpecific(memory). " +
+                        "Runtime clear/tool-result behavior is covered by deterministic tests; this is model/backend compliance.");
+                }
+
+                // WHY: the memory tool's `clear` action EMPTIES the document (MemoryMutationPlan.Change(""))
+                // — it deliberately keeps the store record with Memory == "", it does not delete the entry.
+                // So "cleared" means "no entry OR empty content", not "entry absent" (the old check wrongly
+                // failed the run even though HasCompletedMemoryAction("clear") above already proved the model
+                // emitted and completed the real tool call).
+                bool memoryCleared =
+                    !store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState clearedState)
+                    || string.IsNullOrEmpty(clearedState?.Memory);
+
+                if (!memoryCleared)
+                {
+                    Debug.LogWarning($"[AllToolCalls]  CLEAR FAILED: memory(action=clear) completed but the " +
+                                     $"document is not empty. Current memory: '{clearedState?.Memory}'.");
+                }
+                else
+                {
+                    Debug.Log($"[AllToolCalls]  Memory cleared by tool call");
+                }
+
+                Assert.IsTrue(memoryCleared,
+                    "Memory must be emptied by the clear tool call (empty document, entry may remain).");
+            }
+
+            Debug.Log("[AllToolCalls]  MEMORY TOOL TEST PASSED ");
         }
 
         // The execute_lua LLM verification test was removed with the legacy Lua runtime. The Lua-CSharp
@@ -477,10 +501,10 @@ namespace CoreAI.Tests.PlayMode
             IAgentMemoryStore store,
             Task task,
             CancellationTokenSource cts,
+            float timeoutSeconds,
             Func<string, bool> matches,
             string operationName)
         {
-            const float timeoutSeconds = 240f;
             float started = Time.realtimeSinceStartup;
             string CurrentMemory() => store.TryLoad(BuiltInAgentRoleIds.CoreMechanic, out AgentMemoryState state)
                 ? state?.Memory ?? ""
@@ -496,6 +520,8 @@ namespace CoreAI.Tests.PlayMode
             {
                 if (!task.IsCompleted)
                 {
+                    // WHY: client-side cancellation only; a serial provider bridge may still finish this
+                    // abandoned turn before it serves the next step.
                     cts.Cancel();
                     float cancellationStarted = Time.realtimeSinceStartup;
                     while (!task.IsCompleted && Time.realtimeSinceStartup - cancellationStarted < 5f)

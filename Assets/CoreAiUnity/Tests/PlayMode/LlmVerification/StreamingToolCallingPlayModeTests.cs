@@ -19,11 +19,22 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public class StreamingToolCallingPlayModeTests
     {
+        // WHY: without [Timeout] the framework aborts at 180 s, which one Max(120, RequestTimeoutSeconds + 30) wait
+        // can already reach, and Streaming_ThenNonStreaming runs two of them: 2 x 150 s at the default request
+        // timeout + 20 s reserve = 320 s. 600 s matches StreamingPlayModeTests; LiveTestRequestScope caps longer
+        // configured waits so the cancel fires first. TestAgentSetup.Initialize is not capped (SharedLlmUnity
+        // allows up to 600 s for a cold GGUF load and 300 s when another test is already loading); the Cap on every
+        // wait protects the request, so a slower load shortens the turn or ends in the test's own cancelling wait,
+        // never a stranded request.
+        private const int TestTimeoutMs = 600000;
+
         private TestAgentSetup _setup;
+        private LiveTestRequestScope _requests;
 
         [UnitySetUp]
         public IEnumerator Setup()
         {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
             _setup = new TestAgentSetup();
             yield return _setup.Initialize();
             Assert.IsTrue(_setup.IsReady, $"LLM backend not available ({_setup.BackendName}). Skipping.");
@@ -32,6 +43,14 @@ namespace CoreAI.Tests.PlayMode
         [UnityTearDown]
         public IEnumerator TearDown()
         {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
             _setup?.Dispose();
             yield return null;
         }
@@ -43,6 +62,7 @@ namespace CoreAI.Tests.PlayMode
         /// and completes without errors (smoke test for the full pipeline).
         /// </summary>
         [UnityTest]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator Streaming_WithToolCapablePrompt_CompletesSuccessfully()
         {
             LlmCompletionRequest request = new()
@@ -56,10 +76,12 @@ namespace CoreAI.Tests.PlayMode
             List<LlmStreamChunk> chunks = new();
             bool gotDone = false;
 
-            Task streamTask = CollectStreamAsync(_setup.Client, request, CancellationToken.None,
-                chunks, done => gotDone = done);
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task streamTask = _requests.Track(CollectStreamAsync(_setup.Client, request, cts.Token,
+                chunks, done => gotDone = done));
 
-            yield return _setup.RunAndWait(streamTask, ResolveLlmWaitSeconds(), "Streaming_ToolCapable");
+            yield return _setup.RunAndWait(streamTask, _requests.Cap(ResolveLlmWaitSeconds()), "Streaming_ToolCapable",
+                cts);
 
             Assert.IsTrue(gotDone, "Should receive a chunk with IsDone=true");
             Assert.GreaterOrEqual(chunks.Count, 1, "Should receive at least 1 chunk");
@@ -86,6 +108,7 @@ namespace CoreAI.Tests.PlayMode
         /// and properly stops the stream. Tests the StopActiveGeneration path.
         /// </summary>
         [UnityTest]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator Streaming_EarlyCancellation_StopsCleanly()
         {
             LlmCompletionRequest request = new()
@@ -95,16 +118,18 @@ namespace CoreAI.Tests.PlayMode
                 UserPayload = "Write a very detailed essay about the history of computing from the 1940s to today."
             };
 
-            CancellationTokenSource cts = new();
+            CancellationTokenSource cts = _requests.CreateCancellation();
             cts.CancelAfter(TimeSpan.FromSeconds(5));
             StreamCancelCounter counter = new();
 
-            Task streamTask = ConsumeStreamingUntilCanceledAsync(_setup.Client, request, cts.Token, counter);
+            Task streamTask = _requests.Track(
+                ConsumeStreamingUntilCanceledAsync(_setup.Client, request, cts.Token, counter));
 
             yield return new WaitForSecondsRealtime(0.25f);
             cts.Cancel();
 
-            yield return _setup.RunAndWait(streamTask, ResolveLlmWaitSeconds(), "Streaming_EarlyCancel");
+            yield return _setup.RunAndWait(streamTask, _requests.Cap(ResolveLlmWaitSeconds()), "Streaming_EarlyCancel",
+                cts);
 
             Debug.Log(
                 $"[StreamingToolTest] EarlyCancel: wasCancelled={counter.WasCancelled}, chunks={counter.ChunkCount}");
@@ -117,6 +142,7 @@ namespace CoreAI.Tests.PlayMode
         /// right after a streaming request without state contamination.
         /// </summary>
         [UnityTest]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator Streaming_ThenNonStreaming_NoStateContamination()
         {
             // First: streaming request
@@ -130,10 +156,11 @@ namespace CoreAI.Tests.PlayMode
             List<LlmStreamChunk> chunks = new();
             bool gotDone = false;
 
-            Task streamTask = CollectStreamAsync(_setup.Client, streamRequest, CancellationToken.None,
-                chunks, done => gotDone = done);
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task streamTask = _requests.Track(CollectStreamAsync(_setup.Client, streamRequest, cts.Token,
+                chunks, done => gotDone = done));
 
-            yield return _setup.RunAndWait(streamTask, ResolveLlmWaitSeconds(), "Streaming_First");
+            yield return _setup.RunAndWait(streamTask, _requests.Cap(ResolveLlmWaitSeconds()), "Streaming_First", cts);
 
             Assert.IsTrue(gotDone, "Streaming should complete");
 
@@ -146,9 +173,11 @@ namespace CoreAI.Tests.PlayMode
             };
 
             LlmResultBox resultBox = new();
-            Task nonStreamTask = CompleteOnMainThreadAsync(_setup.Client, nonStreamRequest, resultBox);
+            Task nonStreamTask = _requests.Track(
+                CompleteOnMainThreadAsync(_setup.Client, nonStreamRequest, resultBox, cts.Token));
 
-            yield return _setup.RunAndWait(nonStreamTask, ResolveLlmWaitSeconds(), "NonStreaming_Second");
+            yield return _setup.RunAndWait(nonStreamTask, _requests.Cap(ResolveLlmWaitSeconds()), "NonStreaming_Second",
+                cts);
 
             Assert.IsNotNull(resultBox.Value, "Non-streaming result should not be null");
             Assert.IsTrue(resultBox.Value.Ok, $"Non-streaming request failed: {resultBox.Value?.Error}");
@@ -214,9 +243,10 @@ namespace CoreAI.Tests.PlayMode
         private static async Task CompleteOnMainThreadAsync(
             ILlmClient client,
             LlmCompletionRequest request,
-            LlmResultBox box)
+            LlmResultBox box,
+            CancellationToken ct)
         {
-            box.Value = await client.CompleteAsync(request, CancellationToken.None);
+            box.Value = await client.CompleteAsync(request, ct);
         }
 
         private sealed class StreamCancelCounter

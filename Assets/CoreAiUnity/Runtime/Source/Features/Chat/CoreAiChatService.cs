@@ -169,6 +169,22 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// Sends a chat message with attachments (images for vision models, text-like files inlined into the
+        /// prompt; see <see cref="AiTaskRequest.Attachments"/>) and returns the final response text. Neither the list
+        /// nor the bytes are copied and both are read on every provider request of the turn, so keep them unchanged
+        /// until the returned task completes (for the streaming overloads: until the stream is fully enumerated or
+        /// disposed). A null or all-null list is the text-only turn.
+        /// </summary>
+        public System.Threading.Tasks.Task<string> SendMessageAsync(
+            string userText,
+            IReadOnlyList<AiAttachment> attachments,
+            string roleId,
+            CancellationToken ct = default)
+        {
+            return SendMessageAsync(CreateTaskRequest(userText, roleId, attachments), ct);
+        }
+
+        /// <summary>
         /// Sends a chat message through the AI orchestrator and returns the final response text.
         /// </summary>
         /// <remarks>
@@ -381,7 +397,23 @@ namespace CoreAI.Chat
             return SendMessageStreamingAsync(request, ct);
         }
 
-        internal AiTaskRequest CreateTaskRequest(string userText, string roleId)
+        /// <summary>
+        /// Streams a chat message with attachments; see
+        /// <see cref="SendMessageAsync(string, IReadOnlyList{AiAttachment}, string, CancellationToken)"/>.
+        /// </summary>
+        public IAsyncEnumerable<LlmStreamChunk> SendMessageStreamingAsync(
+            string userText,
+            IReadOnlyList<AiAttachment> attachments,
+            string roleId,
+            CancellationToken ct = default)
+        {
+            return SendMessageStreamingAsync(CreateTaskRequest(userText, roleId, attachments), ct);
+        }
+
+        internal AiTaskRequest CreateTaskRequest(
+            string userText,
+            string roleId,
+            IReadOnlyList<AiAttachment> attachments = null)
         {
             ActorContext actorContext = _actorIdentityProvider.GetActorContext(roleId);
             return new AiTaskRequest
@@ -390,7 +422,8 @@ namespace CoreAI.Chat
                 Hint = userText,
                 SourceTag = "Chat",
                 ActorContext = actorContext,
-                CancellationScope = actorContext.SessionId
+                CancellationScope = actorContext.SessionId,
+                Attachments = attachments
             };
         }
 
@@ -719,6 +752,22 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// <see cref="SendMessageSmartAsync(string, string, Action{LlmStreamChunk}, bool?, CancellationToken)"/>
+        /// with attachments (images and text-like files; see <see cref="AiTaskRequest.Attachments"/>).
+        /// </summary>
+        public System.Threading.Tasks.Task<string> SendMessageSmartAsync(
+            string userText,
+            IReadOnlyList<AiAttachment> attachments,
+            string roleId,
+            Action<LlmStreamChunk> onChunk = null,
+            bool? uiStreamingOverride = null,
+            CancellationToken ct = default)
+        {
+            return SendMessageSmartAsync(CreateTaskRequest(userText, roleId, attachments), onChunk,
+                uiStreamingOverride, ct);
+        }
+
+        /// <summary>
         /// Sends a prepared AI task using streaming when enabled, otherwise falls back to buffered completion.
         /// </summary>
         public async System.Threading.Tasks.Task<string> SendMessageSmartAsync(
@@ -864,13 +913,12 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Autonomous-tool follow-up lift. OpenAI tool-result messages cannot carry images, so after the
-        /// model calls <c>capture_camera</c> the host lifts the returned image into a follow-up USER
-        /// <c>image_url</c> message before the next model call. Pass the raw <c>capture_camera</c> tool
-        /// result JSON (e.g. <c>LlmToolCallCompleted.ResultJson</c> from <c>CoreAi.OnToolCallCompleted</c>);
-        /// the image is extracted via <see cref="CameraLlmTool.TryExtractImageContentFromResult"/> and sent
-        /// with <paramref name="followUpPrompt"/>. Returns <c>null</c> when the result carries no usable
-        /// image (so the caller can keep the plain text turn). Gated by <see cref="IsVisionEnabled"/>.
+        /// Legacy path: sends a separate one-shot USER message with the image carried by a camera result JSON that
+        /// still has a base64 <c>dataUri</c> (extracted via <see cref="CameraLlmTool.TryExtractImageContentFromResult"/>)
+        /// plus <paramref name="followUpPrompt"/>. Returns <c>null</c> when the JSON carries no usable image (today's
+        /// <c>capture_camera</c> summary has none: its frame reaches the model automatically inside the turn) or
+        /// vision is disabled. For an image you already hold, use
+        /// <see cref="AskWithImageFollowUpAsync(string, AiAttachment, string, CancellationToken)"/>.
         /// </summary>
         public async System.Threading.Tasks.Task<string> AskWithImageFollowUpAsync(
             string followUpPrompt,
@@ -892,6 +940,41 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// Sends <paramref name="image"/> (e.g. an <see cref="LlmToolImageResult.Images"/> entry from
+        /// <c>CoreAi.OnToolExecuted</c>) with <paramref name="followUpPrompt"/> as a separate one-shot USER message
+        /// and returns the reply; <c>null</c> when vision is disabled. The bytes are wrapped, not copied: keep them
+        /// unchanged until the returned task completes.
+        /// </summary>
+        /// <exception cref="ArgumentNullException"><paramref name="image"/> is null.</exception>
+        /// <exception cref="ArgumentException"><paramref name="image"/> is not a supported image.</exception>
+        public async System.Threading.Tasks.Task<string> AskWithImageFollowUpAsync(
+            string followUpPrompt,
+            AiAttachment image,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            CancellationToken ct = default)
+        {
+            if (image == null)
+            {
+                throw new ArgumentNullException(nameof(image));
+            }
+
+            if (image.Category != AiAttachmentCategory.Image)
+            {
+                throw new ArgumentException(
+                    $"AskWithImageFollowUpAsync needs an image attachment; '{image.ResolvedMediaType}' is not a " +
+                    "supported image type.", nameof(image));
+            }
+
+            if (!IsVisionEnabled())
+            {
+                return null;
+            }
+
+            return await SendUserImageMessageAsync(followUpPrompt, AiUserMessageBuilder.BuildImageContent(image),
+                roleId, ct);
+        }
+
+        /// <summary>
         /// Sends a single USER message carrying <paramref name="prompt"/> plus <paramref name="image"/> to
         /// the LLM client. The image rides through <see cref="LlmCompletionRequest.ChatHistory"/> as a user
         /// <see cref="Microsoft.Extensions.AI.ChatMessage"/> with a <see cref="DataContent"/>, which the provider
@@ -899,7 +982,7 @@ namespace CoreAI.Chat
         /// </summary>
         private async System.Threading.Tasks.Task<string> SendUserImageMessageAsync(
             string prompt,
-            DataContent image,
+            AIContent image,
             string roleId,
             CancellationToken ct)
         {

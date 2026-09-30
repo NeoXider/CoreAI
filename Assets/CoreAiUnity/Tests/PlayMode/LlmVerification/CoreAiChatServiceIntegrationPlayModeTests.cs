@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.AgentMemory;
 using CoreAI.Ai;
@@ -23,6 +24,35 @@ namespace CoreAI.Tests.PlayMode
 #if COREAI_LLM && !UNITY_WEBGL
     public sealed class CoreAiChatServiceIntegrationPlayModeTests
     {
+        // WHY: 120 s GGUF load (EnsureLlmUnityModelReady) + four sequential 240 s turns (Chat Only, Tools Only,
+        // Hybrid, Agent Swapping) = 1080 s, + the 20 s scope reserve and ~100 s margin = 1200 s.
+        private const int TestTimeoutMs = 1200000;
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
+        }
+
         private sealed class DummyGameCommandSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
@@ -56,7 +86,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
-        [Timeout(600000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator ChatService_Integration_AllModesAndAgentSwapping()
         {
             Debug.Log("[ChatServiceIntegration] ===== TEST START =====");
@@ -67,155 +97,152 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
+
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            Debug.Log($"[ChatServiceIntegration] Backend: {handle.ResolvedBackend}");
+
+            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.Offline)
             {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                Debug.Log($"[ChatServiceIntegration] Backend: {handle.ResolvedBackend}");
-
-                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.Offline)
-                {
-                    Assert.Ignore(
-                        "Tools-Only / Hybrid tool-calling verification requires a live LLM backend (HTTP or LLMUnity).");
-                }
-
-                // Setup infrastructure
-                InMemoryStore store = new();
-                AgentMemoryPolicy policy = new();
-                SessionTelemetryCollector telemetry = new();
-                AiPromptComposer composer = new(
-                    new BuiltInDefaultAgentSystemPromptProvider(),
-                    new NoAgentUserPromptTemplateProvider(),
-                    new NullLuaScriptVersionStore());
-                DummyGameCommandSink sink = new();
-
-                // Setup tools for roles
-                TestInventoryProvider toolOnlyProvider = new();
-                TestInventoryProvider hybridProvider = new();
-                policy.SetToolsForRole("MerchantToolOnly",
-                    new List<ILlmTool> { new InventoryLlmTool(toolOnlyProvider) });
-                policy.SetToolsForRole("MerchantHybrid",
-                    new List<ILlmTool> { new InventoryLlmTool(hybridProvider) });
-                policy.SetToolsForRole("SimpleChatOnly", new List<ILlmTool>());
-                policy.SetStreamingEnabled("SimpleChatOnly", false);
-
-                AiOrchestrator orchestrator = new(
-                    new SoloAuthorityHost(),
-                    handle.Client,
-                    sink,
-                    telemetry,
-                    composer,
-                    store,
-                    policy,
-                    new NoOpRoleStructuredResponsePolicy(),
-                    new NullAiOrchestrationMetrics(),
-                    ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
-                    new LocalActorIdentityProvider("chat-service-integration-test"));
-
-                TestSettings settingsAsset = new() { EnableStreaming = true };
-                CoreAiChatService chatService = new(orchestrator, policy, settingsAsset, store, null);
-
-                // --- 1. Chat Only ---
-                Debug.Log("[ChatServiceIntegration] Mode: Chat Only");
-                string chatOnlyResponse = null;
-                Task<string> t1 = chatService.SendMessageSmartAsync("Hello, who are you?", "SimpleChatOnly",
-                    c =>
-                    {
-                        if (c.IsDone)
-                        {
-                            chatOnlyResponse += "";
-                        }
-                        else
-                        {
-                            chatOnlyResponse += c.Text;
-                        }
-                    });
-                yield return PlayModeTestAwait.WaitTask(t1, 240f, "Chat Only");
-                if (string.IsNullOrEmpty(chatOnlyResponse))
-                {
-                    chatOnlyResponse = t1.Result;
-                }
-
-                Assert.IsNotEmpty(chatOnlyResponse, "Chat only response should not be empty");
-                //       -   chat-only.
-                //  chat-only     ,    sink.
-                sink.Items.Clear();
-
-                // --- 2. Tools Only (Implicitly, the prompt drives it to use tool) ---
-                Debug.Log("[ChatServiceIntegration] Mode: Tools Only");
-                toolOnlyProvider.ResetInvocation();
-                string toolOnlyResponse = null;
-                Task<string> t2 = chatService.SendMessageSmartAsync(
-                    "What is in your inventory? Just use the tool, don't say anything else.", "MerchantToolOnly",
-                    c =>
-                    {
-                        if (!c.IsDone)
-                        {
-                            toolOnlyResponse += c.Text;
-                        }
-                    });
-                yield return PlayModeTestAwait.WaitTask(t2, 240f, "Tools Only");
-
-                // WHY: assert on evidence the tool actually ran (provider invoked) or that its concrete
-                // result surfaced in the reply, not on envelope/reply publication which is true for any answer.
-                bool calledTool = toolOnlyProvider.WasInvoked ||
-                                  (toolOnlyResponse != null &&
-                                   toolOnlyResponse.Contains("Staff", StringComparison.OrdinalIgnoreCase));
-
-                Assert.IsTrue(calledTool,
-                    "Tools-Only mode must actually invoke the inventory tool (provider GetInventoryAsync) or " +
-                    "surface the concrete tool result (inventory item 'Staff') in the reply.");
-
-                // --- 3. Hybrid (Chat + Tools) ---
-                Debug.Log("[ChatServiceIntegration] Mode: Hybrid");
-                hybridProvider.ResetInvocation();
-                string hybridResponse = null;
-                sink.Items.Clear();
-                Task<string> t3 = chatService.SendMessageSmartAsync(
-                    "Tell me a short joke and then check your inventory.", "MerchantHybrid",
-                    c =>
-                    {
-                        if (!c.IsDone)
-                        {
-                            hybridResponse += c.Text;
-                        }
-                    });
-                yield return PlayModeTestAwait.WaitTask(t3, 240f, "Hybrid");
-                // WHY: same as Tools-Only - require real tool invocation (or its concrete result), not reply publication.
-                bool hybridCalledTool = hybridProvider.WasInvoked ||
-                                        (hybridResponse != null &&
-                                         hybridResponse.Contains("Staff", StringComparison.OrdinalIgnoreCase));
-                if (string.IsNullOrEmpty(hybridResponse))
-                {
-                    hybridResponse = t3.Result;
-                }
-
-                Assert.IsNotEmpty(hybridResponse, "Hybrid response should not be empty");
-                Assert.IsTrue(hybridCalledTool,
-                    "Hybrid mode must actually invoke the inventory tool (provider GetInventoryAsync) or surface " +
-                    "the concrete tool result (inventory item 'Staff') alongside the chat reply.");
-
-                // --- 4. Agent Swapping ---
-                Debug.Log("[ChatServiceIntegration] Mode: Agent Swapping");
-                string swappedResponse = "";
-                yield return SendAndCapture(
-                    chatService,
-                    "Return one short non-empty sentence.",
-                    "SimpleChatOnly",
-                    240f,
-                    "Agent Swapping",
-                    value => swappedResponse = value);
-
-                Assert.IsNotEmpty(swappedResponse, "Swapped response should not be empty");
-
-                Debug.Log("[ChatServiceIntegration] ===== TEST PASSED =====");
+                Assert.Ignore(
+                    "Tools-Only / Hybrid tool-calling verification requires a live LLM backend (HTTP or LLMUnity).");
             }
-            finally
+
+            // Setup infrastructure
+            InMemoryStore store = new();
+            AgentMemoryPolicy policy = new();
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(
+                new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(),
+                new NullLuaScriptVersionStore());
+            DummyGameCommandSink sink = new();
+
+            // Setup tools for roles
+            TestInventoryProvider toolOnlyProvider = new();
+            TestInventoryProvider hybridProvider = new();
+            policy.SetToolsForRole("MerchantToolOnly",
+                new List<ILlmTool> { new InventoryLlmTool(toolOnlyProvider) });
+            policy.SetToolsForRole("MerchantHybrid",
+                new List<ILlmTool> { new InventoryLlmTool(hybridProvider) });
+            policy.SetToolsForRole("SimpleChatOnly", new List<ILlmTool>());
+            policy.SetStreamingEnabled("SimpleChatOnly", false);
+
+            AiOrchestrator orchestrator = new(
+                new SoloAuthorityHost(),
+                handle.Client,
+                sink,
+                telemetry,
+                composer,
+                store,
+                policy,
+                new NoOpRoleStructuredResponsePolicy(),
+                new NullAiOrchestrationMetrics(),
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                new LocalActorIdentityProvider("chat-service-integration-test"));
+
+            TestSettings settingsAsset = new() { EnableStreaming = true };
+            CoreAiChatService chatService = new(orchestrator, policy, settingsAsset, store, null);
+
+            // --- 1. Chat Only ---
+            Debug.Log("[ChatServiceIntegration] Mode: Chat Only");
+            string chatOnlyResponse = null;
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task<string> t1 = _requests.Track(chatService.SendMessageSmartAsync("Hello, who are you?", "SimpleChatOnly",
+                c =>
+                {
+                    if (c.IsDone)
+                    {
+                        chatOnlyResponse += "";
+                    }
+                    else
+                    {
+                        chatOnlyResponse += c.Text;
+                    }
+                }, ct: cts.Token));
+            yield return PlayModeTestAwait.WaitTask(t1, _requests.Cap(240f), "Chat Only", cts);
+            if (string.IsNullOrEmpty(chatOnlyResponse))
             {
-                handle.Dispose();
+                chatOnlyResponse = t1.Result;
             }
+
+            Assert.IsNotEmpty(chatOnlyResponse, "Chat only response should not be empty");
+            //       -   chat-only.
+            //  chat-only     ,    sink.
+            sink.Items.Clear();
+
+            // --- 2. Tools Only (Implicitly, the prompt drives it to use tool) ---
+            Debug.Log("[ChatServiceIntegration] Mode: Tools Only");
+            toolOnlyProvider.ResetInvocation();
+            string toolOnlyResponse = null;
+            Task<string> t2 = _requests.Track(chatService.SendMessageSmartAsync(
+                "What is in your inventory? Just use the tool, don't say anything else.", "MerchantToolOnly",
+                c =>
+                {
+                    if (!c.IsDone)
+                    {
+                        toolOnlyResponse += c.Text;
+                    }
+                }, ct: cts.Token));
+            yield return PlayModeTestAwait.WaitTask(t2, _requests.Cap(240f), "Tools Only", cts);
+
+            // WHY: assert on evidence the tool actually ran (provider invoked) or that its concrete
+            // result surfaced in the reply, not on envelope/reply publication which is true for any answer.
+            bool calledTool = toolOnlyProvider.WasInvoked ||
+                              (toolOnlyResponse != null &&
+                               toolOnlyResponse.Contains("Staff", StringComparison.OrdinalIgnoreCase));
+
+            Assert.IsTrue(calledTool,
+                "Tools-Only mode must actually invoke the inventory tool (provider GetInventoryAsync) or " +
+                "surface the concrete tool result (inventory item 'Staff') in the reply.");
+
+            // --- 3. Hybrid (Chat + Tools) ---
+            Debug.Log("[ChatServiceIntegration] Mode: Hybrid");
+            hybridProvider.ResetInvocation();
+            string hybridResponse = null;
+            sink.Items.Clear();
+            Task<string> t3 = _requests.Track(chatService.SendMessageSmartAsync(
+                "Tell me a short joke and then check your inventory.", "MerchantHybrid",
+                c =>
+                {
+                    if (!c.IsDone)
+                    {
+                        hybridResponse += c.Text;
+                    }
+                }, ct: cts.Token));
+            yield return PlayModeTestAwait.WaitTask(t3, _requests.Cap(240f), "Hybrid", cts);
+            // WHY: same as Tools-Only - require real tool invocation (or its concrete result), not reply publication.
+            bool hybridCalledTool = hybridProvider.WasInvoked ||
+                                    (hybridResponse != null &&
+                                     hybridResponse.Contains("Staff", StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrEmpty(hybridResponse))
+            {
+                hybridResponse = t3.Result;
+            }
+
+            Assert.IsNotEmpty(hybridResponse, "Hybrid response should not be empty");
+            Assert.IsTrue(hybridCalledTool,
+                "Hybrid mode must actually invoke the inventory tool (provider GetInventoryAsync) or surface " +
+                "the concrete tool result (inventory item 'Staff') alongside the chat reply.");
+
+            // --- 4. Agent Swapping ---
+            Debug.Log("[ChatServiceIntegration] Mode: Agent Swapping");
+            string swappedResponse = "";
+            yield return SendAndCapture(
+                chatService,
+                "Return one short non-empty sentence.",
+                "SimpleChatOnly",
+                240f,
+                "Agent Swapping",
+                value => swappedResponse = value);
+
+            Assert.IsNotEmpty(swappedResponse, "Swapped response should not be empty");
+
+            Debug.Log("[ChatServiceIntegration] ===== TEST PASSED =====");
         }
 
-        private static IEnumerator SendAndCapture(
+        private IEnumerator SendAndCapture(
             CoreAiChatService chatService,
             string text,
             string roleId,
@@ -224,14 +251,15 @@ namespace CoreAI.Tests.PlayMode
             Action<string> capture)
         {
             string response = "";
-            Task<string> task = chatService.SendMessageSmartAsync(text, roleId, c =>
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task<string> task = _requests.Track(chatService.SendMessageSmartAsync(text, roleId, c =>
             {
                 if (!c.IsDone && !string.IsNullOrEmpty(c.Text))
                 {
                     response += c.Text;
                 }
-            });
-            yield return PlayModeTestAwait.WaitTask(task, timeoutSeconds, label);
+            }, ct: cts.Token));
+            yield return PlayModeTestAwait.WaitTask(task, _requests.Cap(timeoutSeconds), label, cts);
             if (string.IsNullOrWhiteSpace(response))
             {
                 response = task.Result ?? "";

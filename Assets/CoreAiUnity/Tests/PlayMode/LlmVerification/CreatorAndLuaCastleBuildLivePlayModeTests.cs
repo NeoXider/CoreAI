@@ -35,9 +35,17 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     [Explicit("Live LLM required: configure COREAI_TEST_BASE_URL / COREAI_TEST_MODEL (or CoreAISettingsAsset).")]
     [Category("LiveLlm")]
-    [Timeout(1_800_000)]
+    [Timeout(CreatorAndLuaCastleBuildLivePlayModeTests.CreatorTimeoutMs)]
     public sealed class CreatorAndLuaCastleBuildLivePlayModeTests
     {
+        // WHY: 120 s optional GGUF load + one 1500 s Creator turn + 10 s spawn grace = 1630 s; 1800 s leaves
+        // the 20 s LiveTestRequestScope reserve plus margin so the test's own cancelling wait fires first.
+        private const int CreatorTimeoutMs = 1_800_000;
+
+        // WHY: 120 s optional GGUF load + one 600 s Programmer turn + main-thread replay = ~720 s; 900 s leaves
+        // the 20 s LiveTestRequestScope reserve plus margin.
+        private const int LuaTimeoutMs = 900_000;
+
         private const string CastlePrefix = "Castle";
         private const int MinCastleObjects = 8;
 
@@ -53,6 +61,11 @@ namespace CoreAI.Tests.PlayMode
             "and four connecting walls (at least 9 distinct parts). Start every name with 'Castle'; " +
             "provide explicit x/y/z and scaleX/scaleY/scaleZ. Execute immediately; do not build a mod.";
 
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+        private CoreAISettingsAsset _settings;
+        private HashSet<int> _preExistingCastleIds;
+
         [UnitySetUp]
         public IEnumerator SetUp()
         {
@@ -66,8 +79,29 @@ namespace CoreAI.Tests.PlayMode
         [UnityTearDown]
         public IEnumerator TearDown()
         {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            if (_preExistingCastleIds != null)
+            {
+                DestroyNewCastleObjects(_preExistingCastleIds);
+                _preExistingCastleIds = null;
+            }
+
+            if (_settings != null)
+            {
+                UnityEngine.Object.DestroyImmediate(_settings);
+                _settings = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
             LogAssert.ignoreFailingMessages = false;
-            yield break;
         }
 
         private sealed class NullSink : IAiGameCommandSink
@@ -153,9 +187,10 @@ namespace CoreAI.Tests.PlayMode
         // ------------------------------------------------------------------------------------------
 
         [UnityTest]
-        [Timeout(1_800_000)]
+        [Timeout(CreatorTimeoutMs)]
         public IEnumerator Creator_BuildsSmallCastle_ViaWorldCommand()
         {
+            _requests = new LiveTestRequestScope(CreatorTimeoutMs);
             LogAssert.ignoreFailingMessages = true;
             TestContext.WriteLine("[CreatorCastle] === TEST START ===");
 
@@ -165,76 +200,68 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            CoreAISettingsAsset settings = null;
-            HashSet<int> preExisting = CollectCastleInstanceIds();
-            try
+            // WHY: handle, settings and spawned castle parts are released in [UnityTearDown] after the
+            // request drain, so a timed-out turn never runs against a disposed client or destroyed settings.
+            _handle = handle;
+            _preExistingCastleIds = CollectCastleInstanceIds();
+            HashSet<int> preExisting = _preExistingCastleIds;
+
+            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
             {
-                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
-                {
-                    yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                }
-
-                TestContext.WriteLine($"[CreatorCastle] Backend: {handle.ResolvedBackend}");
-
-                InMemoryStore store = new();
-                ILlmClient client = handle.WrapWithMemoryStore(store);
-
-                CoreAiWorldCommandExecutor worldExecutor =
-                    new(GameLoggerUnscopedFallback.Instance, null, allowPrimitives: true);
-
-                settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-                settings.SetOrchestratorTimeoutSeconds(600);
-
-                // WHY: DEFAULT policy keeps Creator's production config (built-in system prompt, unlimited
-                // tool roundtrips); only the world tool is attached, exactly like production hosts do.
-                AgentMemoryPolicy policy = new();
-                policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, new List<ILlmTool>
-                {
-                    new WorldLlmTool(worldExecutor, settings, GameLoggerUnscopedFallback.Instance)
-                });
-
-                AiOrchestrator orchestrator = BuildOrchestrator(client, store, policy, settings);
-
-                TestContext.WriteLine($"[CreatorCastle] Prompt: {CreatorPrompt}");
-                using CancellationTokenSource cts = new();
-                Task task = orchestrator.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = BuiltInAgentRoleIds.Creator,
-                    Hint = CreatorPrompt,
-                    MaxOutputTokens = 128000
-                }, cts.Token);
-
-                yield return PlayModeTestAwait.WaitTask(task, 1500f, "Creator castle build", cts);
-
-                float graceStarted = Time.realtimeSinceStartup;
-                while (CountNewCastleObjects(preExisting, out _) < MinCastleObjects &&
-                       Time.realtimeSinceStartup - graceStarted < 10f)
-                {
-                    yield return null;
-                }
-
-                int newCastle = CountNewCastleObjects(preExisting, out List<string> names);
-                TestContext.WriteLine("[CreatorCastle] ---------- TRANSCRIPT ----------");
-                TestContext.WriteLine(
-                    $"[CreatorCastle] Castle objects found ({newCastle}): {string.Join(", ", names)}");
-                TestContext.WriteLine("[CreatorCastle] --------------------------------");
-
-                Assert.GreaterOrEqual(newCastle, MinCastleObjects,
-                    $"Expected at least {MinCastleObjects} new scene objects named '{CastlePrefix}*' after the " +
-                    $"Creator build. Found {newCastle}: [{string.Join(", ", names)}].");
-
-                TestContext.WriteLine("[CreatorCastle] TEST PASSED");
+                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
             }
-            finally
+
+            TestContext.WriteLine($"[CreatorCastle] Backend: {handle.ResolvedBackend}");
+
+            InMemoryStore store = new();
+            ILlmClient client = handle.WrapWithMemoryStore(store);
+
+            CoreAiWorldCommandExecutor worldExecutor =
+                new(GameLoggerUnscopedFallback.Instance, null, allowPrimitives: true);
+
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            _settings = settings;
+            settings.SetOrchestratorTimeoutSeconds(600);
+
+            // WHY: DEFAULT policy keeps Creator's production config (built-in system prompt, unlimited
+            // tool roundtrips); only the world tool is attached, exactly like production hosts do.
+            AgentMemoryPolicy policy = new();
+            policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, new List<ILlmTool>
             {
-                DestroyNewCastleObjects(preExisting);
-                if (settings != null)
-                {
-                    UnityEngine.Object.DestroyImmediate(settings);
-                }
+                new WorldLlmTool(worldExecutor, settings, GameLoggerUnscopedFallback.Instance)
+            });
 
-                handle.Dispose();
+            AiOrchestrator orchestrator = BuildOrchestrator(client, store, policy, settings);
+
+            TestContext.WriteLine($"[CreatorCastle] Prompt: {CreatorPrompt}");
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.Creator,
+                Hint = CreatorPrompt,
+                MaxOutputTokens = 128000
+            }, cts.Token));
+
+            yield return PlayModeTestAwait.WaitTask(task, _requests.Cap(1500f), "Creator castle build", cts);
+
+            float graceStarted = Time.realtimeSinceStartup;
+            while (CountNewCastleObjects(preExisting, out _) < MinCastleObjects &&
+                   Time.realtimeSinceStartup - graceStarted < 10f)
+            {
+                yield return null;
             }
+
+            int newCastle = CountNewCastleObjects(preExisting, out List<string> names);
+            TestContext.WriteLine("[CreatorCastle] ---------- TRANSCRIPT ----------");
+            TestContext.WriteLine(
+                $"[CreatorCastle] Castle objects found ({newCastle}): {string.Join(", ", names)}");
+            TestContext.WriteLine("[CreatorCastle] --------------------------------");
+
+            Assert.GreaterOrEqual(newCastle, MinCastleObjects,
+                $"Expected at least {MinCastleObjects} new scene objects named '{CastlePrefix}*' after the " +
+                $"Creator build. Found {newCastle}: [{string.Join(", ", names)}].");
+
+            TestContext.WriteLine("[CreatorCastle] TEST PASSED");
         }
 
         // ------------------------------------------------------------------------------------------
@@ -242,9 +269,10 @@ namespace CoreAI.Tests.PlayMode
         // ------------------------------------------------------------------------------------------
 
         [UnityTest]
-        [Timeout(1_800_000)]
+        [Timeout(LuaTimeoutMs)]
         public IEnumerator Programmer_BuildsCastle_ViaOptInClassicLuaWorldApi()
         {
+            _requests = new LiveTestRequestScope(LuaTimeoutMs);
             LogAssert.ignoreFailingMessages = true;
             TestContext.WriteLine("[LuaCastle] === TEST START ===");
 
@@ -254,152 +282,143 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            CoreAISettingsAsset settings = null;
-            LuaCsModStack stack = null;
-            HashSet<int> preExisting = CollectCastleInstanceIds();
-            try
+            // WHY: handle, settings and spawned castle parts are released in [UnityTearDown] after the
+            // request drain, so a timed-out turn never runs against a disposed client or destroyed settings.
+            _handle = handle;
+            _preExistingCastleIds = CollectCastleInstanceIds();
+            HashSet<int> preExisting = _preExistingCastleIds;
+
+            if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
             {
-                if (handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity)
+                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            }
+
+            TestContext.WriteLine($"[LuaCastle] Backend: {handle.ResolvedBackend}");
+
+            RecordingWorldSink recordingSink = new();
+
+            // WHY: This host opts into classic WorldEdit bindings. Mods get LuaCapabilities.All;
+            // one-off execute_lua gets All minus Full. The emitted commands are replayed below.
+            LuaCapabilities scriptCapabilities = LuaCapabilities.All;
+            LuaCapabilities oneOffCapabilities = scriptCapabilities & ~LuaCapabilities.Full;
+
+            LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+            {
+                Logger = GameLoggerUnscopedFallback.Instance,
+                CommandSink = recordingSink,
+                ModStore = new InMemoryModStore(),
+                Log = Log.Instance,
+                Capabilities = scriptCapabilities,
+                OneOffCapabilities = oneOffCapabilities,
+                RegisterWorldEditBuildBindings = true,
+                RbxApi = new LuaCsRbxApiBindings()
+            });
+
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            _settings = settings;
+            settings.SetOrchestratorTimeoutSeconds(600);
+
+            AgentMemoryPolicy policy = new();
+            policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
+                new LuaLlmTool(stack.ToolExecutor, settings, Log.Instance, new LuaGenerationRateLimiter()));
+            // WHY: this fixture targets the opt-in classic API; production Rbx skill text
+            // describes the default host and would contradict the explicitly enabled binding.
+
+            InMemoryStore store = new();
+            ILlmClient client = handle.WrapWithMemoryStore(store);
+            AiOrchestrator orchestrator = BuildOrchestrator(client, store, policy, settings);
+
+            TestContext.WriteLine($"[LuaCastle] Prompt: {LuaPrompt}");
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = BuiltInAgentRoleIds.Programmer,
+                Hint = LuaPrompt,
+                MaxOutputTokens = 4096,
+                MaxToolCallRoundtrips = 24
+            }, cts.Token));
+
+            yield return PlayModeTestAwait.WaitTask(task, _requests.Cap(600f), "Programmer lua castle build", cts);
+
+            // WHY: The model's Lua ran on the worker thread and published its world commands to the sink;
+            // parse them to prove the Lua produced a castle's worth of DISTINCT 'Castle*' spawns. This is
+            // the authoritative proof of "castle via Lua" — it does not depend on prefab resolution.
+            List<ApplyAiGameCommand> commands = recordingSink.Snapshot();
+            HashSet<string> castleSpawns = new(StringComparer.OrdinalIgnoreCase);
+            List<ApplyAiGameCommand> replay = new();
+            foreach (ApplyAiGameCommand command in commands)
+            {
+                if (!string.Equals(command.CommandTypeId, AiGameCommandTypeIds.WorldCommand,
+                        StringComparison.Ordinal))
                 {
-                    yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+                    continue;
                 }
 
-                TestContext.WriteLine($"[LuaCastle] Backend: {handle.ResolvedBackend}");
-
-                RecordingWorldSink recordingSink = new();
-
-                // WHY: This host opts into classic WorldEdit bindings. Mods get LuaCapabilities.All;
-                // one-off execute_lua gets All minus Full. The emitted commands are replayed below.
-                LuaCapabilities scriptCapabilities = LuaCapabilities.All;
-                LuaCapabilities oneOffCapabilities = scriptCapabilities & ~LuaCapabilities.Full;
-
-                stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
+                CoreAiWorldCommandEnvelope env;
+                try
                 {
-                    Logger = GameLoggerUnscopedFallback.Instance,
-                    CommandSink = recordingSink,
-                    ModStore = new InMemoryModStore(),
-                    Log = Log.Instance,
-                    Capabilities = scriptCapabilities,
-                    OneOffCapabilities = oneOffCapabilities,
-                    RegisterWorldEditBuildBindings = true,
-                    RbxApi = new LuaCsRbxApiBindings()
+                    env = JsonUtility.FromJson<CoreAiWorldCommandEnvelope>(command.JsonPayload ?? "");
+                }
+                catch (Exception)
+                {
+                    env = null;
+                }
+
+                if (env == null ||
+                    !string.Equals(env.action?.Trim(), "spawn", StringComparison.OrdinalIgnoreCase) ||
+                    string.IsNullOrEmpty(env.targetName) ||
+                    !env.targetName.StartsWith(CastlePrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                castleSpawns.Add(env.targetName.Trim());
+
+                // WHY: This minimal gate has no prefab registry, so map each part onto a built-in primitive
+                // (geometry unchanged) so the spawns MATERIALIZE into real GameObjects on replay below.
+                env.prefabKeyOrName = "cube";
+                replay.Add(new ApplyAiGameCommand
+                {
+                    CommandTypeId = AiGameCommandTypeIds.WorldCommand,
+                    JsonPayload = JsonUtility.ToJson(env, false),
+                    SourceRoleId = command.SourceRoleId,
+                    SourceTaskHint = command.SourceTaskHint,
+                    SourceTag = command.SourceTag
                 });
-
-                settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-                settings.SetOrchestratorTimeoutSeconds(600);
-
-                AgentMemoryPolicy policy = new();
-                policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                    new LuaLlmTool(stack.ToolExecutor, settings, Log.Instance, new LuaGenerationRateLimiter()));
-                // WHY: this fixture targets the opt-in classic API; production Rbx skill text
-                // describes the default host and would contradict the explicitly enabled binding.
-
-                InMemoryStore store = new();
-                ILlmClient client = handle.WrapWithMemoryStore(store);
-                AiOrchestrator orchestrator = BuildOrchestrator(client, store, policy, settings);
-
-                TestContext.WriteLine($"[LuaCastle] Prompt: {LuaPrompt}");
-                using CancellationTokenSource cts = new();
-                Task task = orchestrator.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = BuiltInAgentRoleIds.Programmer,
-                    Hint = LuaPrompt,
-                    MaxOutputTokens = 4096,
-                    MaxToolCallRoundtrips = 24
-                }, cts.Token);
-
-                yield return PlayModeTestAwait.WaitTask(task, 600f, "Programmer lua castle build", cts);
-
-                // WHY: The model's Lua ran on the worker thread and published its world commands to the sink;
-                // parse them to prove the Lua produced a castle's worth of DISTINCT 'Castle*' spawns. This is
-                // the authoritative proof of "castle via Lua" — it does not depend on prefab resolution.
-                List<ApplyAiGameCommand> commands = recordingSink.Snapshot();
-                HashSet<string> castleSpawns = new(StringComparer.OrdinalIgnoreCase);
-                List<ApplyAiGameCommand> replay = new();
-                foreach (ApplyAiGameCommand command in commands)
-                {
-                    if (!string.Equals(command.CommandTypeId, AiGameCommandTypeIds.WorldCommand,
-                            StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-
-                    CoreAiWorldCommandEnvelope env;
-                    try
-                    {
-                        env = JsonUtility.FromJson<CoreAiWorldCommandEnvelope>(command.JsonPayload ?? "");
-                    }
-                    catch (Exception)
-                    {
-                        env = null;
-                    }
-
-                    if (env == null ||
-                        !string.Equals(env.action?.Trim(), "spawn", StringComparison.OrdinalIgnoreCase) ||
-                        string.IsNullOrEmpty(env.targetName) ||
-                        !env.targetName.StartsWith(CastlePrefix, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    castleSpawns.Add(env.targetName.Trim());
-
-                    // WHY: This minimal gate has no prefab registry, so map each part onto a built-in primitive
-                    // (geometry unchanged) so the spawns MATERIALIZE into real GameObjects on replay below.
-                    env.prefabKeyOrName = "cube";
-                    replay.Add(new ApplyAiGameCommand
-                    {
-                        CommandTypeId = AiGameCommandTypeIds.WorldCommand,
-                        JsonPayload = JsonUtility.ToJson(env, false),
-                        SourceRoleId = command.SourceRoleId,
-                        SourceTaskHint = command.SourceTaskHint,
-                        SourceTag = command.SourceTag
-                    });
-                }
-
-                // WHY: Replay on the MAIN thread — CoreAiWorldCommandExecutor creates GameObjects and must not
-                // be driven from the Lua worker thread. Corroborates that the emitted spawns are applicable.
-                CoreAiWorldCommandExecutor worldExecutor =
-                    new(GameLoggerUnscopedFallback.Instance, null, allowPrimitives: true);
-                int accepted = 0;
-                foreach (ApplyAiGameCommand command in replay)
-                {
-                    if (worldExecutor.TryExecute(command))
-                    {
-                        accepted++;
-                    }
-                }
-
-                int newCastle = CountNewCastleObjects(preExisting, out List<string> names);
-
-                TestContext.WriteLine("[LuaCastle] ---------- TRANSCRIPT ----------");
-                TestContext.WriteLine($"[LuaCastle] World commands emitted by Lua: {commands.Count}");
-                TestContext.WriteLine($"[LuaCastle] Distinct Castle* spawns from Lua ({castleSpawns.Count}): " +
-                                      string.Join(", ", castleSpawns));
-                TestContext.WriteLine($"[LuaCastle] Materialized on replay ({newCastle}, accepted {accepted}): " +
-                                      string.Join(", ", names));
-                TestContext.WriteLine("[LuaCastle] --------------------------------");
-
-                Assert.GreaterOrEqual(castleSpawns.Count, MinCastleObjects,
-                    $"Programmer's Lua must call coreai_world_spawn for at least {MinCastleObjects} distinct " +
-                    $"'{CastlePrefix}*' parts. Distinct Castle spawns: {castleSpawns.Count} " +
-                    $"([{string.Join(", ", castleSpawns)}]); total world commands emitted: {commands.Count}.");
-                Assert.GreaterOrEqual(newCastle, MinCastleObjects,
-                    $"Expected at least {MinCastleObjects} '{CastlePrefix}*' objects after replaying the Lua " +
-                    $"spawns. Found {newCastle}: [{string.Join(", ", names)}]. Accepted: {accepted}.");
-
-                TestContext.WriteLine("[LuaCastle] TEST PASSED");
             }
-            finally
+
+            // WHY: Replay on the MAIN thread — CoreAiWorldCommandExecutor creates GameObjects and must not
+            // be driven from the Lua worker thread. Corroborates that the emitted spawns are applicable.
+            CoreAiWorldCommandExecutor worldExecutor =
+                new(GameLoggerUnscopedFallback.Instance, null, allowPrimitives: true);
+            int accepted = 0;
+            foreach (ApplyAiGameCommand command in replay)
             {
-                DestroyNewCastleObjects(preExisting);
-                if (settings != null)
+                if (worldExecutor.TryExecute(command))
                 {
-                    UnityEngine.Object.DestroyImmediate(settings);
+                    accepted++;
                 }
-
-                handle.Dispose();
             }
+
+            int newCastle = CountNewCastleObjects(preExisting, out List<string> names);
+
+            TestContext.WriteLine("[LuaCastle] ---------- TRANSCRIPT ----------");
+            TestContext.WriteLine($"[LuaCastle] World commands emitted by Lua: {commands.Count}");
+            TestContext.WriteLine($"[LuaCastle] Distinct Castle* spawns from Lua ({castleSpawns.Count}): " +
+                                  string.Join(", ", castleSpawns));
+            TestContext.WriteLine($"[LuaCastle] Materialized on replay ({newCastle}, accepted {accepted}): " +
+                                  string.Join(", ", names));
+            TestContext.WriteLine("[LuaCastle] --------------------------------");
+
+            Assert.GreaterOrEqual(castleSpawns.Count, MinCastleObjects,
+                $"Programmer's Lua must call coreai_world_spawn for at least {MinCastleObjects} distinct " +
+                $"'{CastlePrefix}*' parts. Distinct Castle spawns: {castleSpawns.Count} " +
+                $"([{string.Join(", ", castleSpawns)}]); total world commands emitted: {commands.Count}.");
+            Assert.GreaterOrEqual(newCastle, MinCastleObjects,
+                $"Expected at least {MinCastleObjects} '{CastlePrefix}*' objects after replaying the Lua " +
+                $"spawns. Found {newCastle}: [{string.Join(", ", names)}]. Accepted: {accepted}.");
+
+            TestContext.WriteLine("[LuaCastle] TEST PASSED");
         }
 
         // ------------------------------------------------------------------------------------------

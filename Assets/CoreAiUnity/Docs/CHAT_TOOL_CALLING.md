@@ -82,8 +82,11 @@ Model: "I have an Iron Sword for 50 coins..."
 
 ## Testing
 
+`MerchantWithToolCallingPlayModeTests` picks its backend through `PlayModeProductionLikeLlmFactory`: the
+`CoreAISettingsAsset` backend type decides (set it to LLMUnity for a local GGUF model, or HTTP for an
+OpenAI-compatible endpoint). `COREAI_PLAYMODE_LLM_BACKEND` is read only when no settings asset is loaded.
+
 ```bash
-COREAI_PLAYMODE_LLM_BACKEND=llmunity
 Unity Test Runner → PlayMode → MerchantWithToolCallingPlayModeTests
 ```
 

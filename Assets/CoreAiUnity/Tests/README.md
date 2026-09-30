@@ -253,12 +253,60 @@ require a player test run.
 
 - **120s** for medium single-turn live-model prompts; **240s** for complex
   tool/SkillSet/crafting/Lua/multi-agent turns.
-- Do not exceed **600s** without documenting the failure mode. A timeout means inspect prompt,
-  tool schema, routing, cancellation, reasoning mode, and mechanics **before** raising limits.
+- Do not exceed **600s** for a single wait without documenting the failure mode. A timeout means
+  inspect prompt, tool schema, routing, cancellation, reasoning mode, and mechanics **before** raising
+  limits. A test's `[Timeout]` is the sum of its sequential waits plus setup, so multi-turn tests go
+  above 600s; each such constant carries a `// WHY:` with the arithmetic.
+- A `[UnityTest]` without `[Timeout]` is aborted by the Unity Test Framework at **180s**, and the
+  framework clock includes `[UnitySetUp]`. An abort does not cancel a `using` source inside the
+  coroutine, so the request would otherwise run into the next test. Live fixtures therefore use
+  `LiveTestRequestScope` (`Shared/PlayModeTestAwait.cs`): a `const` `[Timeout]` covering every wait,
+  the scope created first in `[UnitySetUp]` (or the test body) from that constant, cancellation sources
+  from `CreateCancellation()`, every wait through `Cap(...)` with its source, request tasks registered
+  with `Track(...)`, and `yield return CancelAllAndDrain()` first in `[UnityTearDown]` so the cancelled
+  turn unwinds (bounded, 5s) before the client or handle is disposed. Cancellation is client-side; a
+  serial provider bridge may still finish the abandoned turn.
+- On a `[Timeout]` abort the framework stops driving the test coroutine and never disposes it, so no
+  `finally` or `using` in a test body runs. Everything a request uses or the test changes process-wide
+  — the production-like handle, `TestAgentSetup`, settings assets, harness setups, camera rigs, tool-call
+  or diagnostics subscriptions, a `LifetimeScope.Enqueue` installer, `CoreAISettingsAsset.SetInstance`
+  and `COREAI_TEST_*` variables — goes into a field right after it is created or changed and is
+  released or restored in `[UnityTearDown]`, after the drain. Never dispose it in the body.
+- A model load is not capped: `EnsureLlmUnityModelReady` waits up to 120s, while `TestAgentSetup.Initialize`
+  and `SharedLlmUnity.EnsureInitialized` allow up to 600s for a cold GGUF load (300s when another test is
+  already loading). A `[Timeout]` WHY states the request budget and what is left for setup; `Cap(...)`
+  protects the request when a load takes longer.
+- `FastNoLlm/LiveTestRequestScopePlayModeTests` pins this machinery without a backend: `Cap` never
+  exceeds the budget and never goes negative, the drain cancels and waits for tracked requests (and stops
+  with a warning at its bound for one that ignores cancellation), sources are disposed, `CancelAll` is
+  idempotent, and the shared `InFlightMeter` counts concurrent and sequential completions and streams.
+- Fixtures on this pattern: every live fixture in `LlmVerification` and `Scenarios` —
+  `AgentMemoryOpenAiApi`, `AgentMemoryWithRealModel`, `AiAttachmentLive`,
+  `AiOrchestratorBuiltInRolesProductionLlm` (through the shared role harness), `AllToolCalls`,
+  `BuilderAgentCastleBuildLive`, `ChatSpeedDirectVsAgent`, `MerchantWithToolCalling`
+  (`ChatWithToolCallingPlayModeTests.cs`), `CompatibilityTool`, `CoreAiChatDemoRealModelWebGl`,
+  `CoreAiChatServiceIntegration`, `CreatorAndLuaCastleBuildLive`, `CustomAgents`, `FullPipelineResilience`,
+  `MeaiLlmClient`, `MixedBackendParallelAgents`, `ParallelHttpAgents`, `MultiToolChain`, `ProgrammerLuaModsLive`,
+  `RbxCastleMaterialsShowcaseLive`, `RuntimeBackendSwitchLive` and `PromptCacheLive` (both in
+  `RuntimeBackendSwitchLivePlayModeTests.cs`), `SkillSetReadSkillVerification`,
+  `SkillSetRealToolCalling`, `SkillSetToolDiscovery`, `SmartChatAndAINpc`, `Streaming`,
+  `StreamingToolCalling`, `TokensPerSecond`, `ToolNameRepair`, `WorldCommand`, `CraftingMemoryViaLlmUnity`,
+  `CraftingMemoryViaOpenAi`, `MultiAgentCraftingWorkflow`, `FullPipelineE2E`, and
+  `MerchantBehaviorChatWithTools` (all `…PlayModeTests`). The scripted-client test
+  `UnknownTool_RemainsVisible_AndDoesNotExecute` in `ToolNameRepair` sends no live request but uses the
+  scope like its neighbours. Not on it because they send no live request: `TestAgentSetupHttpRouting`
+  (loopback fake server; it still restores the settings instance and `COREAI_TEST_*` variables in
+  `[UnityTearDown]`), `ChatHistory` (stub client), and the Rbx material sheet / variant /
+  castle-screenshot renders (local Lua only). In `CoreAiChatDemoRealModelWebGl` the chat panel owns its
+  turns (its submit API takes no token), so those waits — including both Stop-settle waits, which keep a
+  5s floor — are capped but the turns are stopped through the panel's own Stop path in teardown, not by
+  the scope. The `CoreAIBenchmark` fixtures are not converted.
 
 ## C4. Backends and running
 
-`PlayModeProductionLikeLlmFactory` selects the backend via `COREAI_PLAYMODE_LLM_BACKEND`:
+`PlayModeProductionLikeLlmFactory` uses an explicit test preference first, then the
+`CoreAISettingsAsset` backend type; only when no settings asset is loaded does it read
+`COREAI_PLAYMODE_LLM_BACKEND`:
 
 - `auto` or empty → tries LLMUnity, then HTTP.
 - `llmunity` / `local` / `gguf` → local GGUF model only.
@@ -266,8 +314,9 @@ require a player test run.
   configure `COREAI_TEST_BASE_URL` (usually ending in `/v1`) and `COREAI_TEST_MODEL`.
 
 For the HTTP backend, set `COREAI_TEST_BASE_URL`, `COREAI_TEST_MODEL`, and
-`COREAI_TEST_API_KEY` when required. `COREAI_PLAYMODE_LLM_BACKEND=http` selects HTTP instead of
-LLMUnity. See [Running the LIVE PlayMode test suite](../Docs/RUNNING_LIVE_TESTS.md) for the
+`COREAI_TEST_API_KEY` when required. `TestAgentSetup` ignores `COREAI_PLAYMODE_LLM_BACKEND` and switches
+on the settings asset's backend type alone, so select HTTP there (or install a settings instance with
+`CoreAISettingsAsset.SetInstance`, as `TestAgentSetupHttpRoutingPlayModeTests` does). See [Running the LIVE PlayMode test suite](../Docs/RUNNING_LIVE_TESTS.md) for the
 configuration precedence and gitignored local config file. Environment variables must be set
 in the Unity Editor process; changing them in a shell after the Editor starts does not update
 that process. Run via Unity Test Runner → PlayMode, filtered by assembly when narrowing a run.

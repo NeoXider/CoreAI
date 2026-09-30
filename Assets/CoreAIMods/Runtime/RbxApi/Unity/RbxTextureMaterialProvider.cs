@@ -286,6 +286,7 @@ namespace CoreAI.Mods.Rbx.Rendering
             material.SetTexture(PropertyIds.BaseMap, albedo);
             material.SetTexture(PropertyIds.BumpMap, normal);
             material.SetTexture(PropertyIds.RoughnessMap, roughness);
+            ApplyVariantDerivedTuning(material, baseEntry, in data);
             float textureAspect = material.GetFloat(PropertyIds.TextureAspect);
             if (albedo != null && albedo.height > 0)
             {
@@ -307,6 +308,32 @@ namespace CoreAI.Mods.Rbx.Rendering
                 material.SetTexture(PropertyIds.MetallicMap, null);
                 material.DisableKeyword(MetallicMapKeyword);
             }
+        }
+
+        /// <summary>
+        /// Keeps the base entry's occlusion map and tuning, except where the variant brings its own
+        /// maps: the cavity darkening belongs to an occlusion map baked from the base normal map, and
+        /// the metal lift to the base colour map, so neither is applied to a user's replacement.
+        /// </summary>
+        private static void ApplyVariantDerivedTuning(Material material,
+            RbxMaterialTextureCatalog.Entry baseEntry, in RbxMaterialVariantData data)
+        {
+            if (baseEntry.AmbientOcclusion != null)
+            {
+                material.SetTexture(PropertyIds.OcclusionMap, baseEntry.AmbientOcclusion);
+                material.EnableKeyword(OcclusionMapKeyword);
+            }
+            else
+            {
+                material.SetTexture(PropertyIds.OcclusionMap, null);
+                material.DisableKeyword(OcclusionMapKeyword);
+            }
+
+            bool ownNormal = !string.IsNullOrEmpty(data.NormalMap);
+            bool ownColor = !string.IsNullOrEmpty(data.ColorMap) ||
+                            !string.IsNullOrEmpty(data.MetalnessMap);
+            material.SetFloat(PropertyIds.CavityStrength, ownNormal ? 0f : baseEntry.CavityStrength);
+            material.SetFloat(PropertyIds.MetalAlbedoLift, ownColor ? 0f : baseEntry.MetalAlbedoLift);
         }
 
         private Texture2D ResolveVariantMap(string variantName, string slotName,
@@ -585,6 +612,8 @@ namespace CoreAI.Mods.Rbx.Rendering
             material.SetFloat(PropertyIds.BumpScale, Mathf.Max(0f, entry.NormalStrength));
             material.SetFloat(PropertyIds.RoughnessScale, Mathf.Max(0f, entry.RoughnessScale));
             material.SetFloat(PropertyIds.InvertRoughness, entry.IsSmoothnessMap ? 1f : 0f);
+            material.SetFloat(PropertyIds.CavityStrength, entry.CavityStrength);
+            material.SetFloat(PropertyIds.MetalAlbedoLift, entry.MetalAlbedoLift);
             material.SetTexture(PropertyIds.BaseMap, entry.Albedo);
             material.SetTexture(PropertyIds.BumpMap, entry.Normal);
             material.SetTexture(PropertyIds.RoughnessMap, entry.RoughnessOrSmoothness);
@@ -645,6 +674,8 @@ namespace CoreAI.Mods.Rbx.Rendering
             public static readonly int RoughnessMap = Shader.PropertyToID("_RoughnessMap");
             public static readonly int MetallicMap = Shader.PropertyToID("_MetallicMap");
             public static readonly int OcclusionMap = Shader.PropertyToID("_OcclusionMap");
+            public static readonly int CavityStrength = Shader.PropertyToID("_CavityStrength");
+            public static readonly int MetalAlbedoLift = Shader.PropertyToID("_MetalAlbedoLift");
         }
     }
 }

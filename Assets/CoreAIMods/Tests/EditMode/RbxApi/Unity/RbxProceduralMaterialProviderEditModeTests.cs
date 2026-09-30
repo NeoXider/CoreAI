@@ -62,6 +62,23 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
             Assert.AreEqual("CoreAiRbxMaterial_Wood", woodMaterial.name);
         }
 
+        [TestCase("Plastic", 256, 1f)]
+        [TestCase("SmoothPlastic", 272, 1f)]
+        [TestCase("Salt", 1392, 0.5f)]
+        [TestCase("Rubber", 2311, 0f)]
+        [TestCase("Snow", 1328, 0f)]
+        public void PlasticGrain_IsSetPerMaterialNotPerSharedShaderMode(string name, int value,
+            float expectedGrain)
+        {
+            // WHY: Rubber shares SmoothPlastic's shader mode and Snow shares Salt's; gating the
+            // grain on the mode gave both a plastic grain they never had.
+            RbxMaterialId id = new(name, value);
+
+            Assert.IsTrue(_provider.TryGetMaterial(in id, out Material material));
+            Assert.IsTrue(material.HasProperty("_GrainStrength"), name);
+            Assert.AreEqual(expectedGrain, material.GetFloat("_GrainStrength"), name);
+        }
+
         [Test]
         public void UnmappedValue_ResolvesDocumentedVisibleFallback()
         {
@@ -306,13 +323,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
                 "RbxProceduralTransparent.shader"));
 
             int texturedProjection = texturedSource.IndexOf(
-                "float3 projectionWeights = RbxNarrowAxisWeights(geometricNormalAligned);",
+                ": RbxCurvedAxisWeights(geometricNormalAligned);",
                 StringComparison.Ordinal);
             int texturedPerturbation = texturedSource.IndexOf(
                 "float3 normalWS = normalize(mappedNormalWS);", StringComparison.Ordinal);
             Assert.That(texturedProjection, Is.GreaterThanOrEqualTo(0));
             Assert.That(texturedPerturbation, Is.GreaterThan(texturedProjection));
-            StringAssert.DoesNotContain("RbxNarrowAxisWeights(normalWS)", texturedSource);
+            StringAssert.DoesNotContain("RbxCurvedAxisWeights(normalWS)", texturedSource);
 
             int proceduralProjection = surfaceSource.IndexOf(
                 "geometricPatternNormal, materialMode", StringComparison.Ordinal);

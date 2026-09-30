@@ -110,6 +110,7 @@ namespace CoreAI.Editor.RbxMaterials
                     AmbientOcclusionAssetPath = ImportOptional(surface.AmbientOcclusionPath)
                 };
                 RbxMaterialSurfaceProfiles.Apply(entry);
+                RbxMaterialSurfaceProfiles.ApplyPackagedRelief(entry);
                 entries.Add(entry);
                 imported++;
             }

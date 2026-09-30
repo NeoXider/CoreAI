@@ -57,9 +57,16 @@ namespace CoreAI.Editor.RbxMaterials
                     RoughnessAssetPath = Stamp(roughness, false, false),
                     IsSmoothnessMap = false,
                     MetalnessAssetPath = OptionalMap(stem, "Metalness"),
-                    AmbientOcclusionAssetPath = null
+                    // WHY: ambientCG's 1K JPG sets ship no usable occlusion, so the packaged folder
+                    // carries one baked from each normal map (RbxCavityMapBake). It is only wired
+                    // up for materials whose relief profile asks for it.
+                    AmbientOcclusionAssetPath =
+                        RbxMaterialSurfaceProfiles.ReliefFor(set.MaterialName).CavityStrength > 0f
+                            ? OptionalMap(stem, RbxCavityMapBake.MapSuffix)
+                            : null
                 };
                 RbxMaterialSurfaceProfiles.Apply(entry);
+                RbxMaterialSurfaceProfiles.ApplyPackagedRelief(entry);
                 entries.Add(entry);
             }
 

@@ -2650,11 +2650,46 @@ namespace CoreAI.Tests.EditMode
 
             public List<int> RetryLevels { get; } = new();
 
+            public List<int> InlinedAttachmentTokens { get; } = new();
+
             public ContextBudget Compute(ContextBudgetRequest request, ITokenEstimator estimator)
             {
                 RetryLevels.Add(request.ContextRetryLevel);
+                InlinedAttachmentTokens.Add(request.InlinedAttachmentTokens);
                 return _inner.Compute(request, estimator);
             }
+        }
+
+        /// <summary>
+        /// Text files inlined into the turn take room in the context window, so the history budget must count them;
+        /// the caller's attachment list reaches every retry as-is (it is re-read, never copied).
+        /// </summary>
+        [Test]
+        public async Task RunTaskAsync_BudgetCountsInlinedTextAttachments_OnEveryRetry()
+        {
+            FailsThenOkLlm llm = new(1, LlmErrorCode.ContextLengthExceeded);
+            TestMemoryStore memory = new();
+            AgentMemoryPolicy policy = new();
+            RecordingBudgetPolicy budgetPolicy = new();
+            policy.ConfigureChatHistory("role_ctx", true, 32768, false, 50);
+            TestSettings settings = new() { MaxContextOverflowRetries = 2 };
+            AiOrchestrator orchestrator = new(
+                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                memory, policy, null, null, settings, TestActorIdentityProvider,
+                new DeterministicConversationContextManager(new NullConversationSummaryStore()),
+                contextBudgetPolicy: budgetPolicy);
+            AiAttachment[] attachments = { AiAttachment.FromText("level.lua", new string('x', 4000)) };
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest
+            {
+                RoleId = "role_ctx", Hint = "Review", Attachments = attachments
+            });
+
+            Assert.AreEqual(2, llm.Calls);
+            CollectionAssert.AreEqual(new[] { 1000, 1000 }, budgetPolicy.InlinedAttachmentTokens);
+            Assert.AreSame(attachments, llm.Requests[0].Attachments);
+            Assert.AreSame(attachments, llm.Requests[1].Attachments);
         }
 
         [Test]

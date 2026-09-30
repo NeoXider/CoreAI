@@ -41,7 +41,8 @@ namespace CoreAI.Ai
             int reservedCompletion = ResolveCompletionReserve(maxCtx, request.MaxOutputTokens);
 
             int systemEst = estimator.EstimateText(request.SystemPrompt ?? "");
-            int userEst = estimator.EstimateText(request.UserPayload ?? "");
+            int userEst = estimator.EstimateText(request.UserPayload ?? "") +
+                          Math.Max(0, request.InlinedAttachmentTokens);
             int toolsEst = EstimateToolsTokens(request.Tools, estimator);
             int slack = SlackDefault;
             int fixedTotal = systemEst + userEst + toolsEst + slack;

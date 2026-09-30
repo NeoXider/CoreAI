@@ -395,7 +395,9 @@ namespace CoreAI.Infrastructure.Llm
                     chatMessages.Add(NormalizeChatHistoryMessageForProvider(message));
                 }
 
-                if (!string.IsNullOrWhiteSpace(request.UserPayload))
+                // WHY: an image-only turn has a blank payload, so skipping it would silently drop the images, while a list of only nulls must not add an empty user message.
+                if (!string.IsNullOrWhiteSpace(request.UserPayload) ||
+                    AiUserMessageBuilder.HasAttachments(request.Attachments))
                 {
                     chatMessages.Add(AiUserMessageBuilder.BuildUserMessage(request.UserPayload, request.Attachments));
                 }
@@ -641,6 +643,8 @@ namespace CoreAI.Infrastructure.Llm
                 MEAI.UsageDetails summaryUsage = usageSoFar;
                 bool summaryFailed = false;
 
+                HashSet<string>? liftedForSummary = null;
+                SmartToolCallingChatClient.LiftCameraImages(summaryMessages, ref liftedForSummary);
                 IAsyncEnumerable<MEAI.ChatResponseUpdate> summaryStream =
                     _innerClient.GetStreamingResponseAsync(summaryMessages, summaryOptions, cancellationToken);
                 await using IAsyncEnumerator<MEAI.ChatResponseUpdate> summaryEnumerator =
@@ -935,6 +939,8 @@ namespace CoreAI.Infrastructure.Llm
                 // surfaced to callers as a clean, blind-retryable transport failure. The
                 // chunk-yielding body stays OUTSIDE the catch; the `await using` declaration
                 // disposes the enumerator on every exit path (try/finally is yield-safe).
+                // WHY: lifting right before every streaming request is what lets typed tool images reach the image channel from every append site (a repaired malformed-JSON call loops back here without a lift of its own), since an unlifted typed result would send its text only; lifting is idempotent.
+                SmartToolCallingChatClient.LiftCameraImages(chatMessages, ref liftedCameraCallIds);
                 IAsyncEnumerable<MEAI.ChatResponseUpdate> updateStream =
                     _innerClient.GetStreamingResponseAsync(chatMessages, iterationOptions, cancellationToken);
                 await using IAsyncEnumerator<MEAI.ChatResponseUpdate> updateEnumerator =

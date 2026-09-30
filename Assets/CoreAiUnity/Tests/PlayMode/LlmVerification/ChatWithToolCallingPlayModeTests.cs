@@ -26,6 +26,35 @@ namespace CoreAI.Tests.PlayMode
         private const int LlmTurnTimeoutSeconds = 240;
         private const int LiveModelMaxOutputTokens = 128000;
 
+        // WHY: 120 s optional GGUF load + one 240 s tool turn = 360 s; 420 s leaves the 20 s
+        // LiveTestRequestScope reserve plus margin (the former 300 s could abort mid-turn after a slow load).
+        private const int TestTimeoutMs = 420_000;
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
+        }
+
         private sealed class InMemoryStore : IAgentMemoryStore
         {
             public readonly Dictionary<string, AgentMemoryState> States = new();
@@ -124,7 +153,7 @@ namespace CoreAI.Tests.PlayMode
         /// :   " ", Chat Agent  get_inventory     .
         /// </summary>
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator ChatAgent_CallsInventoryTool_ThenRespondsWithItems()
         {
             Debug.Log("[ChatWithToolCalling]  TEST START ");
@@ -139,79 +168,75 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
+
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            Debug.Log($"[ChatWithToolCalling] Backend: {handle.ResolvedBackend}");
+
+            //
+            TestInventoryProvider testInventory = new();
+            testInventory.Inventory.Add(new InventoryTool.InventoryItem
+                { Name = "Iron Sword", Type = "weapon", Quantity = 3, Price = 50 });
+            testInventory.Inventory.Add(new InventoryTool.InventoryItem
+                { Name = "Health Potion", Type = "consumable", Quantity = 10, Price = 25 });
+            testInventory.Inventory.Add(new InventoryTool.InventoryItem
+                { Name = "Leather Armor", Type = "armor", Quantity = 2, Price = 100 });
+
+            InMemoryStore store = new();
+            AgentMemoryPolicy policy = new();
+            SessionTelemetryCollector telemetry = new();
+            AiPromptComposer composer = new(
+                new BuiltInDefaultAgentSystemPromptProvider(),
+                new NoAgentUserPromptTemplateProvider(),
+                new NullLuaScriptVersionStore());
+
+            ListSink sink = new();
+
+            //     MemoryStore   capturing
+            ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+            CapturingLlmClient capturingLlm = new(clientWithMemory);
+
+            //    InventoryTool
+            AiOrchestrator orch = CreateOrchestratorWithInventory(
+                capturingLlm, store, policy, telemetry, composer, sink, testInventory);
+
+            //
+            string playerMessage = "I want to buy something. What do you have?";
+
+            Debug.Log($"[ChatWithToolCalling] ");
+            Debug.Log($"[ChatWithToolCalling]  PLAYER MESSAGE:");
+            Debug.Log($"[ChatWithToolCalling] {playerMessage}");
+            Debug.Log($"[ChatWithToolCalling] ");
+
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task t = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
             {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                Debug.Log($"[ChatWithToolCalling] Backend: {handle.ResolvedBackend}");
+                RoleId = BuiltInAgentRoleIds.Merchant,
+                Hint = playerMessage,
+                MaxOutputTokens = LiveModelMaxOutputTokens
+            }, cts.Token));
 
-                //   
-                TestInventoryProvider testInventory = new();
-                testInventory.Inventory.Add(new InventoryTool.InventoryItem
-                    { Name = "Iron Sword", Type = "weapon", Quantity = 3, Price = 50 });
-                testInventory.Inventory.Add(new InventoryTool.InventoryItem
-                    { Name = "Health Potion", Type = "consumable", Quantity = 10, Price = 25 });
-                testInventory.Inventory.Add(new InventoryTool.InventoryItem
-                    { Name = "Leather Armor", Type = "armor", Quantity = 2, Price = 100 });
+            yield return PlayModeTestAwait.WaitTask(t, _requests.Cap(LlmTurnTimeoutSeconds), "chat with tool calling", cts);
 
-                InMemoryStore store = new();
-                AgentMemoryPolicy policy = new();
-                SessionTelemetryCollector telemetry = new();
-                AiPromptComposer composer = new(
-                    new BuiltInDefaultAgentSystemPromptProvider(),
-                    new NoAgentUserPromptTemplateProvider(),
-                    new NullLuaScriptVersionStore());
+            Debug.Log($"[ChatWithToolCalling]  AGENT RESPONSE:");
+            Debug.Log($"[ChatWithToolCalling] Content: {capturingLlm.LastContent}");
+            Debug.Log($"[ChatWithToolCalling] Commands produced: {sink.Items.Count}");
 
-                ListSink sink = new();
+            //     -
+            bool responseMentionsItems =
+                capturingLlm.LastContent?.Contains("Sword", StringComparison.OrdinalIgnoreCase) == true ||
+                capturingLlm.LastContent?.Contains("Potion", StringComparison.OrdinalIgnoreCase) == true ||
+                capturingLlm.LastContent?.Contains("Armor", StringComparison.OrdinalIgnoreCase) == true ||
+                capturingLlm.LastContent?.Contains("inventory", StringComparison.OrdinalIgnoreCase) == true ||
+                capturingLlm.LastContent?.Contains("items", StringComparison.OrdinalIgnoreCase) == true;
 
-                //     MemoryStore   capturing
-                ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
-                CapturingLlmClient capturingLlm = new(clientWithMemory);
+            Assert.Greater(testInventory.CallCount, 0,
+                "Merchant must call the inventory tool before answering available items.");
+            Assert.IsTrue(responseMentionsItems,
+                $"Merchant should answer with available inventory items after tool use. Response: {capturingLlm.LastContent}");
 
-                //    InventoryTool
-                AiOrchestrator orch = CreateOrchestratorWithInventory(
-                    capturingLlm, store, policy, telemetry, composer, sink, testInventory);
-
-                //   
-                string playerMessage = "I want to buy something. What do you have?";
-
-                Debug.Log($"[ChatWithToolCalling] ");
-                Debug.Log($"[ChatWithToolCalling]  PLAYER MESSAGE:");
-                Debug.Log($"[ChatWithToolCalling] {playerMessage}");
-                Debug.Log($"[ChatWithToolCalling] ");
-
-                using CancellationTokenSource cts = new();
-                Task t = orch.RunTaskAsync(new AiTaskRequest
-                {
-                    RoleId = BuiltInAgentRoleIds.Merchant,
-                    Hint = playerMessage,
-                    MaxOutputTokens = LiveModelMaxOutputTokens
-                }, cts.Token);
-
-                yield return PlayModeTestAwait.WaitTask(t, LlmTurnTimeoutSeconds, "chat with tool calling", cts);
-
-                Debug.Log($"[ChatWithToolCalling]  AGENT RESPONSE:");
-                Debug.Log($"[ChatWithToolCalling] Content: {capturingLlm.LastContent}");
-                Debug.Log($"[ChatWithToolCalling] Commands produced: {sink.Items.Count}");
-
-                //     -   
-                bool responseMentionsItems =
-                    capturingLlm.LastContent?.Contains("Sword", StringComparison.OrdinalIgnoreCase) == true ||
-                    capturingLlm.LastContent?.Contains("Potion", StringComparison.OrdinalIgnoreCase) == true ||
-                    capturingLlm.LastContent?.Contains("Armor", StringComparison.OrdinalIgnoreCase) == true ||
-                    capturingLlm.LastContent?.Contains("inventory", StringComparison.OrdinalIgnoreCase) == true ||
-                    capturingLlm.LastContent?.Contains("items", StringComparison.OrdinalIgnoreCase) == true;
-
-                Assert.Greater(testInventory.CallCount, 0,
-                    "Merchant must call the inventory tool before answering available items.");
-                Assert.IsTrue(responseMentionsItems,
-                    $"Merchant should answer with available inventory items after tool use. Response: {capturingLlm.LastContent}");
-
-                Debug.Log("[ChatWithToolCalling]  TEST PASSED ");
-            }
-            finally
-            {
-                handle.Dispose();
-            }
+            Debug.Log("[ChatWithToolCalling]  TEST PASSED ");
         }
 
         private static AiOrchestrator CreateOrchestratorWithInventory(

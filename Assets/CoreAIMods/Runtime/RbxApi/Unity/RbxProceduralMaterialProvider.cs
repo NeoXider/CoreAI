@@ -25,10 +25,14 @@ namespace CoreAI.Mods.Rbx.Rendering
 
         private static readonly CatalogDefinition[] Definitions =
         {
+            // WHY: the grain is the only relief Plastic, SmoothPlastic and Salt keep beyond a few
+            // metres. It is set per material, not per shader mode, because Rubber shares
+            // SmoothPlastic's mode and Snow shares Salt's, and both must keep their own look. Salt's
+            // larger bump strength turned the full grain into stucco at two metres, so it takes half.
             new("Plastic", 256, ShaderKind.Surface, 0, 1f, 0.08f,
-                new Color(0.72f, 0.71f, 0.7f), 0.82f),
+                new Color(0.72f, 0.71f, 0.7f), 0.82f, grainStrength: 1f),
             new("SmoothPlastic", 272, ShaderKind.Surface, 1, 1f, 0.015f,
-                new Color(0.76f, 0.75f, 0.74f), 0.82f),
+                new Color(0.76f, 0.75f, 0.74f), 0.82f, grainStrength: 1f),
             // WHY: Roblox Neon has no intrinsic palette; the emission is Part.Color itself.
             new("Neon", 288, ShaderKind.Neon, 0, 1f, 0f, Color.white, 1f),
             new("Wood", 512, ShaderKind.Surface, 2, 12f, 0.22f,
@@ -86,7 +90,7 @@ namespace CoreAI.Mods.Rbx.Rendering
             new("Asphalt", 1376, ShaderKind.Surface, 9, 5f, 0.36f,
                 new Color(0.12f, 0.125f, 0.13f), 0.18f),
             new("Salt", 1392, ShaderKind.Surface, 16, 2.4f, 0.2f,
-                new Color(0.92f, 0.91f, 0.86f), 0.16f),
+                new Color(0.92f, 0.91f, 0.86f), 0.16f, grainStrength: 0.5f),
             new("Ice", 1536, ShaderKind.Transparent, 2, 2f, 0.3f,
                 new Color(0.4f, 0.74f, 1f, 0.86f), 0.2f),
             new("Glacier", 1552, ShaderKind.Transparent, 2, 1.2f, 0.42f,
@@ -255,6 +259,7 @@ namespace CoreAI.Mods.Rbx.Rendering
             material.SetFloat(PropertyIds.MaterialMode, definition.Mode);
             material.SetFloat(PropertyIds.PatternScale, definition.PatternScale);
             material.SetFloat(PropertyIds.BumpStrength, definition.BumpStrength);
+            material.SetFloat(PropertyIds.GrainStrength, definition.GrainStrength);
 
             if (definition.Kind == ShaderKind.Transparent)
             {
@@ -352,6 +357,7 @@ namespace CoreAI.Mods.Rbx.Rendering
             public static readonly int MaterialMode = Shader.PropertyToID("_MaterialMode");
             public static readonly int PatternScale = Shader.PropertyToID("_PatternScale");
             public static readonly int BumpStrength = Shader.PropertyToID("_BumpStrength");
+            public static readonly int GrainStrength = Shader.PropertyToID("_GrainStrength");
             public static readonly int SrcBlend = Shader.PropertyToID("_SrcBlend");
             public static readonly int DstBlend = Shader.PropertyToID("_DstBlend");
         }
@@ -366,9 +372,11 @@ namespace CoreAI.Mods.Rbx.Rendering
             public readonly float BumpStrength;
             public readonly Color MaterialColor;
             public readonly float PartColorInfluence;
+            public readonly float GrainStrength;
 
             public CatalogDefinition(string name, int value, ShaderKind kind, int mode,
-                float patternScale, float bumpStrength, Color materialColor, float partColorInfluence)
+                float patternScale, float bumpStrength, Color materialColor, float partColorInfluence,
+                float grainStrength = 0f)
             {
                 Name = name;
                 Value = value;
@@ -378,6 +386,7 @@ namespace CoreAI.Mods.Rbx.Rendering
                 BumpStrength = bumpStrength;
                 MaterialColor = materialColor;
                 PartColorInfluence = partColorInfluence;
+                GrainStrength = grainStrength;
             }
         }
     }

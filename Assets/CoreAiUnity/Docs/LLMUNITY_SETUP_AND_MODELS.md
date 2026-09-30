@@ -196,7 +196,7 @@ Roles: **Creator, Builder, Analyzer, Programmer, AINpc, CoreMechanicAI, PlainCha
 
 ## 7. Play Mode tests (runtime in the editor)
 
-**How to test end-to-end behavior:** (1) **Play:** Play Mode, console filter `[Llm]` — what went to the model and what came back; `[MessagePipe]` — what was published to the game. (2) **No GPU/model:** EditMode orchestrator/parser tests (`AgentMemoryConcurrencyEditModeTests`, `AgentRolesAndPromptsTests`, …) with **Stub**. (3) **Real model in Play Mode:** shared helper **`PlayModeProductionLikeLlmFactory.TryCreate`** — same order as **`CoreAILifetimeScope`**: when OpenAI-compatible **HTTP** is configured (env, see below), **`OpenAiChatLlmClient`** is used; otherwise **LLMUnity** (runtime **LLM + LLMAgent**, GGUF from Model Manager: prefer **qwen** + **0.8** in the filename, else `LlmUnityModelBootstrap`). Optionally **`COREAI_PLAYMODE_LLM_BACKEND`** = `auto` | `http` | `llmunity` overrides choice for all tests that pass `preference: null` to the factory. (4) **Prompt regression:** after changing system/user templates, run the matching EditMode tests.
+**How to test end-to-end behavior:** (1) **Play:** Play Mode, console filter `[Llm]` — what went to the model and what came back; `[MessagePipe]` — what was published to the game. (2) **No GPU/model:** EditMode orchestrator/parser tests (`AgentMemoryConcurrencyEditModeTests`, `AgentRolesAndPromptsTests`, …) with **Stub**. (3) **Real model in Play Mode:** shared helper **`PlayModeProductionLikeLlmFactory.TryCreate`** — the backend is an explicit test preference if the test passes one, otherwise the **`CoreAISettingsAsset`** backend type (`Auto` follows the asset's `AutoPriority`: HTTP first or LLMUnity first). **HTTP** uses **`OpenAiChatLlmClient`** against the endpoint resolved from env (see below); **LLMUnity** uses the runtime **LLM + LLMAgent** (GGUF from Model Manager: prefer **qwen** + **0.8** in the filename, else `LlmUnityModelBootstrap`). **`COREAI_PLAYMODE_LLM_BACKEND`** = `auto` | `http` | `llmunity` | `offline` is read only when **no** settings asset is loaded, so with the project asset present it does not change the backend. (4) **Prompt regression:** after changing system/user templates, run the matching EditMode tests.
 
 PlayMode assemblies are **`CoreAI.Tests.PlayMode.FastNoLlm`** (stubs, no model) and **`CoreAI.Tests.PlayMode.LlmVerification`** (live model; helpers in **`CoreAI.Tests.PlayMode.LlmInfra`**):
 
@@ -217,10 +217,10 @@ $env:COREAI_TEST_MODEL = "<id from GET http://<LM_STUDIO_HOST>:1234/v1/models>"
 
 `PlayModeOpenAiTestConfig` resolves each field from environment variables (the canonical `COREAI_TEST_*` names; the older `COREAI_OPENAI_TEST_*` names are still read), then the project's `CoreAISettingsAsset`, then the gitignored `coreai-live-tests.local.json`. The legacy opt-in `COREAI_OPENAI_TEST_USE_PROJECT_DEFAULTS=1` falls back to the hard-coded `FallbackLmStudioBaseUrl` / `FallbackLmStudioModelId` constants (do not enable it in CI). Full guide: [RUNNING_LIVE_TESTS.md](RUNNING_LIVE_TESTS.md).
 
-Force backend for tests using `TryCreate(preference: null)`:
+Choose the backend for tests using `TryCreate(preference: null)` with the `CoreAISettingsAsset` **Backend Type** (HTTP / LLMUnity / Auto). The environment variable below is a fallback that applies only when no settings asset is loaded; `TestAgentSetup` never reads it and switches on the asset's backend type alone:
 
 ```powershell
-$env:COREAI_PLAYMODE_LLM_BACKEND = "http"    # or llmunity, auto
+$env:COREAI_PLAYMODE_LLM_BACKEND = "http"    # or llmunity, auto - only without a CoreAISettingsAsset
 ```
 
 Then **Window → General → Test Runner → PlayMode** → run **CoreAI.Tests.PlayMode.LlmVerification**.

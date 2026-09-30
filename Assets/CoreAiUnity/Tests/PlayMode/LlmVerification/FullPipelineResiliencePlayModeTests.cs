@@ -32,7 +32,17 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public sealed class FullPipelineResiliencePlayModeTests
     {
+        // WHY: [UnitySetUp] counts toward [Timeout]: for the first test of a run the reachability probe (4 x 60 s +
+        // 3 x 5 s backoff = 255 s), then the longest body wait (240 s) and the 20 s scope reserve = 515 s; 720 s
+        // leaves ~200 s for setup. Every wait is capped by LiveTestRequestScope, so the test's own cancelling wait
+        // fires before the framework abort. TestAgentSetup.Initialize is not capped (SharedLlmUnity allows up to
+        // 600 s for a cold GGUF load and 300 s when another test is already loading); the Cap on every wait
+        // protects the request, so a slower load shortens the turn or ends in the test's own cancelling wait, never
+        // a stranded request.
+        private const int TestTimeoutMs = 720000;
+
         private TestAgentSetup _setup;
+        private LiveTestRequestScope _requests;
 
         /// <summary>Identity of the last settings used for <see cref="s_liveLlmProbeState"/>; must reset when user switches API URL/backend so a stale 429 does not skip runs against LM Studio.</summary>
         private static string s_llmProbeSettingsKey;
@@ -45,6 +55,7 @@ namespace CoreAI.Tests.PlayMode
         [UnitySetUp]
         public IEnumerator Setup()
         {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
             LogAssert.ignoreFailingMessages = true;
             _setup = new TestAgentSetup();
             yield return _setup.Initialize();
@@ -66,6 +77,14 @@ namespace CoreAI.Tests.PlayMode
         [UnityTearDown]
         public IEnumerator TearDown()
         {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
             _setup?.Dispose();
             LogAssert.ignoreFailingMessages = false;
             yield return null;
@@ -108,10 +127,10 @@ namespace CoreAI.Tests.PlayMode
             for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
                 LlmCompletionResult probeResult = null;
-                using CancellationTokenSource cts = new();
-                Task probeTask = CompleteNonStreamAsync(_setup.Client, probeRequest, r => probeResult = r,
-                    cts.Token);
-                yield return WaitTask(probeTask, 60f, "FullPipeline LLM reachability", cts);
+                CancellationTokenSource cts = _requests.CreateCancellation();
+                Task probeTask = _requests.Track(CompleteNonStreamAsync(_setup.Client, probeRequest,
+                    r => probeResult = r, cts.Token));
+                yield return WaitTask(probeTask, _requests.Cap(60f), "FullPipeline LLM reachability", cts);
 
                 if (probeResult != null && probeResult.Ok && !string.IsNullOrWhiteSpace(probeResult.Content))
                 {
@@ -222,7 +241,7 @@ namespace CoreAI.Tests.PlayMode
         /// → TryRepairToolName → AIFunction → memory persisted → JSON stripped.
         /// </summary>
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator StreamingMemoryWrite_ToolExecutes_NoJsonLeak()
         {
             Debug.Log($"[FullPipeline1] Backend: {_setup.BackendName}");
@@ -241,9 +260,9 @@ namespace CoreAI.Tests.PlayMode
             };
 
             StreamResultBox box = new();
-            using CancellationTokenSource cts = new();
-            Task task = CollectStreamAsync(_setup.Client, request, box, cts.Token);
-            yield return WaitTask(task, 120f, "StreamingMemoryWrite", cts);
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(CollectStreamAsync(_setup.Client, request, box, cts.Token));
+            yield return WaitTask(task, _requests.Cap(120f), "StreamingMemoryWrite", cts);
 
             Debug.Log($"[FullPipeline1] Output ({box.ChunkCount} chunks): '{box.FullText}'");
 
@@ -285,7 +304,7 @@ namespace CoreAI.Tests.PlayMode
         /// SmartToolCallingChatClient (non-streaming loop) → ToolExecutionPolicy → JSON strip.
         /// </summary>
         [UnityTest]
-        [Timeout(180000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator NonStreamingMemoryWrite_ToolExecutes_NoJsonLeak()
         {
             Debug.Log($"[FullPipeline2] Backend: {_setup.BackendName}");
@@ -303,9 +322,9 @@ namespace CoreAI.Tests.PlayMode
             };
 
             LlmCompletionResult result = null;
-            using CancellationTokenSource cts = new();
-            Task task = CompleteNonStreamAsync(_setup.Client, request, r => result = r, cts.Token);
-            yield return WaitTask(task, 120f, "NonStreamingMemoryWrite", cts);
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(CompleteNonStreamAsync(_setup.Client, request, r => result = r, cts.Token));
+            yield return WaitTask(task, _requests.Cap(120f), "NonStreamingMemoryWrite", cts);
 
             Assert.IsNotNull(result, "Result should not be null");
             Assert.IsTrue(result.Ok, $"Request should succeed: {result?.Error}");
@@ -353,7 +372,7 @@ namespace CoreAI.Tests.PlayMode
         /// No JSON leak at ANY level.
         /// </summary>
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator OrchestratorMerchantInventory_FullStack_NoJsonLeak()
         {
             Debug.Log($"[FullPipeline3] Backend: {_setup.BackendName}");
@@ -393,15 +412,15 @@ namespace CoreAI.Tests.PlayMode
                 ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
                 new LocalActorIdentityProvider("full-pipeline-resilience-test"));
 
-            using CancellationTokenSource orchCts = new();
-            Task orchTask = orch.RunTaskAsync(new AiTaskRequest
+            CancellationTokenSource orchCts = _requests.CreateCancellation();
+            Task orchTask = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Merchant,
                 Hint = "What items do you have for sale?",
                 MaxOutputTokens = 128000
-            }, orchCts.Token);
+            }, orchCts.Token));
 
-            yield return WaitTask(orchTask, 240f, "OrchestratorMerchant", orchCts);
+            yield return WaitTask(orchTask, _requests.Cap(240f), "OrchestratorMerchant", orchCts);
 
             // Check commands
             Debug.Log($"[FullPipeline3] Commands: {sink.Items.Count}");
@@ -456,7 +475,7 @@ namespace CoreAI.Tests.PlayMode
         /// orchestrator/context tests that inject persisted memory into prompts.
         /// </summary>
         [UnityTest]
-        [Timeout(600000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator StreamingMemoryWrite_PersistsAndNoJsonLeak()
         {
             Debug.Log($"[FullPipeline4] Backend: {_setup.BackendName}");
@@ -475,9 +494,9 @@ namespace CoreAI.Tests.PlayMode
             };
 
             StreamResultBox writeBox = new();
-            using CancellationTokenSource writeCts = new();
-            Task writeTask = CollectStreamAsync(_setup.Client, writeRequest, writeBox, writeCts.Token);
-            yield return WaitTask(writeTask, 240f, "Write_Phase", writeCts);
+            CancellationTokenSource writeCts = _requests.CreateCancellation();
+            Task writeTask = _requests.Track(CollectStreamAsync(_setup.Client, writeRequest, writeBox, writeCts.Token));
+            yield return WaitTask(writeTask, _requests.Cap(240f), "Write_Phase", writeCts);
 
             Debug.Log($"[FullPipeline4] Write output: '{writeBox.FullText}'");
             Assert.IsTrue(_setup.MemoryStore.TryLoad("Teacher", out AgentMemoryState writeState),
@@ -504,7 +523,7 @@ namespace CoreAI.Tests.PlayMode
         /// on the final IsDone chunk when tools were called during streaming.
         /// </summary>
         [UnityTest]
-        [Timeout(180000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator StreamingToolCall_TracesDiagnosticsPopulated()
         {
             Debug.Log($"[FullPipeline5] Backend: {_setup.BackendName}");
@@ -528,9 +547,9 @@ namespace CoreAI.Tests.PlayMode
             };
 
             TraceResultBox traceBox = new();
-            using CancellationTokenSource cts = new();
-            Task task = CollectStreamWithTracesAsync(_setup.Client, request, traceBox, cts.Token);
-            yield return WaitTask(task, 240f, "StreamingTraces", cts);
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(CollectStreamWithTracesAsync(_setup.Client, request, traceBox, cts.Token));
+            yield return WaitTask(task, _requests.Cap(240f), "StreamingTraces", cts);
 
             Debug.Log($"[FullPipeline5] Output: '{traceBox.FullText}' | Traces: {traceBox.Traces.Count}");
 
@@ -614,11 +633,6 @@ namespace CoreAI.Tests.PlayMode
             }
 
             box.FullText = sb.ToString();
-        }
-
-        private static IEnumerator WaitTask(Task task, float timeoutSec, string label)
-        {
-            return PlayModeTestAwait.WaitTask(task, timeoutSec, label);
         }
 
         private static IEnumerator WaitTask(

@@ -40,6 +40,11 @@ namespace CoreAI.Tests.PlayMode
             public int LastToolCount;
             public string LastContent;
             public bool LastOk;
+
+            /// <summary>
+            /// Duration of the most recent <see cref="CompleteAsync"/> call only. An earlier call of the same
+            /// run (a retry, a second model turn) is overwritten, not summed, so this is not the run's total.
+            /// </summary>
             public long ElapsedMs;
 
             public BenchmarkCaptureLlm(ILlmClient inner)
@@ -445,8 +450,10 @@ Some merchants only trade specific item types.",
                 if (rA.Ok && rB.Ok && !rA.TimedOut && !rB.TimedOut &&
                     rB.ElapsedMs > 0 && rA.ElapsedMs > 0)
                 {
-                    float speedup = (float)rB.ElapsedMs / rA.ElapsedMs;
-                    Debug.Log($"[SkillBenchmark] Speedup:        {speedup:0.0}x");
+                    double speedup = (double)rB.ElapsedMs / rA.ElapsedMs;
+                    Debug.Log($"[SkillBenchmark] Speedup:        {speedup:0.00}x ({rB.ElapsedMs} ms direct / " +
+                              $"{rA.ElapsedMs} ms skills; single-sample observation of the last model call " +
+                              "per run, not an averaged speedup)");
                 }
                 else
                 {

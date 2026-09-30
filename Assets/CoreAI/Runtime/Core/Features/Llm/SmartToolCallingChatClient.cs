@@ -19,7 +19,91 @@ namespace CoreAI.Infrastructure.Llm
     /// </summary>
     public sealed class SmartToolCallingChatClient : MEAI.IChatClient
     {
-        /// <summary>Move successful camera tool JSON into a provider image message before the next request.</summary>
+        /// <summary>The largest decoded camera image that is lifted into an image part (4 MB).</summary>
+        internal const int MaxCameraImageBytes = LlmToolImageResult.MaxImageBytes;
+
+        /// <summary>
+        /// True for the camera tool names whose results are lifted. Case-insensitive on purpose: a call the model
+        /// wrote as <c>Camera_Capture</c> is repaired to the real tool and runs, so the history holds the model's
+        /// spelling while <see cref="ToolExecutionPolicy"/> sees the canonical one; both must land on one rule.
+        /// </summary>
+        internal static bool IsCameraToolName(string name)
+        {
+            return string.Equals(name, "camera_capture", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "screenshot", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// True for the tools whose typed images are delivered as a camera frame: the camera prompt, and each new
+        /// frame replacing the previous one. <see cref="IsCameraToolName"/> plus the scene tool <c>capture_camera</c>
+        /// (<c>CoreAi.RegisterCameraVisionTool</c>). Every other tool's images keep their own feedback message.
+        /// </summary>
+        internal static bool IsCameraFrameToolName(string name)
+        {
+            return IsCameraToolName(name) ||
+                   string.Equals(name, "capture_camera", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// The one rule for what counts as a liftable legacy camera result: a JSON object with <c>ok</c> exactly
+        /// <c>true</c> and a <c>dataUrl</c> of the form <c>data:image/(jpeg|png|webp|gif);base64,...</c> whose
+        /// decoded size is 1 byte to <see cref="MaxCameraImageBytes"/>. Everything else is ordinary tool text.
+        /// The payload is decoded straight from the parsed string (no substring copy); an oversized one is refused
+        /// before it is decoded.
+        /// </summary>
+        /// <remarks>
+        /// WHY shared: <see cref="ToolExecutionPolicy"/> converts exactly the results this accepts into an
+        /// <see cref="LlmToolImageResult"/> (decoded once, there), and the lifter applies the same rule to a
+        /// history that never went through the policy, so both paths agree on which results carry an image.
+        /// <c>ok</c> must be the JSON boolean <c>true</c>: <c>"true"</c>, <c>1</c> or <c>"yes"</c> are ordinary text.
+        /// </remarks>
+        internal static bool TryReadLiftableCameraImage(string resultText, out JObject payload, out AiAttachment image)
+        {
+            payload = null;
+            image = null;
+            if (string.IsNullOrEmpty(resultText))
+            {
+                return false;
+            }
+
+            try
+            {
+                JObject parsed = JObject.Parse(resultText);
+                if (parsed["ok"] is not JValue { Type: JTokenType.Boolean } ok || !(bool)ok ||
+                    parsed["dataUrl"] is not JValue { Type: JTokenType.String } dataUrl ||
+                    !AiAttachment.TryDecodeDataUrl((string)dataUrl, MaxCameraImageBytes, true,
+                        out ReadOnlyMemory<byte> bytes, out string mediaType))
+                {
+                    return false;
+                }
+
+                payload = parsed;
+                image = AiAttachment.Image(bytes, mediaType);
+                return true;
+            }
+            catch (Exception ex) when (ex is JsonException or InvalidCastException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Moves tool images into user image messages before the next request (tool messages cannot carry images
+        /// on OpenAI-compatible APIs). Two sources, lifted once each (idempotent through
+        /// <paramref name="liftedCallIds"/>):
+        /// <list type="bullet">
+        /// <item><description>an <see cref="LlmToolImageResult"/> result (any tool, and every camera result that
+        /// went through <see cref="ToolExecutionPolicy"/>): its images are moved as-is — no parse, no decode — and
+        /// the tool message keeps only its <see cref="LlmToolImageResult.Text"/>;</description></item>
+        /// <item><description>a legacy camera JSON string with a base64 <c>dataUrl</c> in a history that never went
+        /// through the policy: parsed and decoded here.</description></item>
+        /// </list>
+        /// Camera frames (<see cref="IsCameraFrameToolName"/>) go into ONE message with
+        /// <see cref="ToolCallHistoryTrimmer.CameraFeedbackPrompt"/> that replaces the previous camera frame. Images
+        /// of any other tool get one message per tool call, prompted with the tool's name
+        /// (<see cref="ToolCallHistoryTrimmer.ToolImageFeedbackPrompt"/>); earlier ones stay, so a model can compare
+        /// two renders, up to the latest <see cref="ToolCallHistoryTrimmer.MaxToolImageFeedbackMessages"/>.
+        /// </summary>
         public static void LiftCameraImages(List<MEAI.ChatMessage> messages, ref HashSet<string> liftedCallIds)
         {
             HashSet<string> cameraCallIds = null;
@@ -29,7 +113,7 @@ namespace CoreAI.Infrastructure.Llm
                 for (int i = 0; i < message.Contents.Count; i++)
                 {
                     if (message.Contents[i] is MEAI.FunctionCallContent call &&
-                        call.Name is ("camera_capture" or "screenshot") &&
+                        IsCameraToolName(call.Name) &&
                         !string.IsNullOrEmpty(call.CallId) &&
                         (liftedCallIds == null || !liftedCallIds.Contains(call.CallId)))
                     {
@@ -40,6 +124,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             List<MEAI.AIContent> images = null;
+            List<MEAI.ChatMessage> toolImageFeedback = null;
             for (int m = 0; m < messages.Count; m++)
             {
                 MEAI.ChatMessage message = messages[m];
@@ -48,6 +133,42 @@ namespace CoreAI.Infrastructure.Llm
                     if (message.Contents[i] is not MEAI.FunctionResultContent result ||
                         (liftedCallIds != null && liftedCallIds.Contains(result.CallId ?? "")))
                     {
+                        continue;
+                    }
+
+                    if (result.Result is LlmToolImageResult typed)
+                    {
+                        typed = typed.KeepDeliverable();
+                        string toolName = FindCallName(messages, result.CallId);
+                        // WHY: a result whose call message was pruned is still recognised as a camera frame by the camera field of its summary, exactly as the legacy lift below recognises it.
+                        if (IsCameraFrameToolName(toolName) || typed.IsLegacyCameraResult ||
+                            (toolName == null && typed.Text.Contains("\"camera\"")))
+                        {
+                            for (int k = 0; k < typed.Images.Count; k++)
+                            {
+                                (images ??= new List<MEAI.AIContent>()).Add(
+                                    AiUserMessageBuilder.BuildImageContent(typed.Images[k]));
+                            }
+                        }
+                        else if (typed.Images.Count > 0)
+                        {
+                            List<MEAI.AIContent> contents = new(typed.Images.Count + 1)
+                            {
+                                new MEAI.TextContent(
+                                    ToolCallHistoryTrimmer.ToolImageFeedbackPrompt(toolName, typed.Images.Count))
+                            };
+                            for (int k = 0; k < typed.Images.Count; k++)
+                            {
+                                contents.Add(AiUserMessageBuilder.BuildImageContent(typed.Images[k]));
+                            }
+
+                            MEAI.ChatMessage toolFeedback = new(MEAI.ChatRole.User, contents);
+                            ToolCallHistoryTrimmer.MarkToolImageFeedback(toolFeedback);
+                            (toolImageFeedback ??= new List<MEAI.ChatMessage>()).Add(toolFeedback);
+                        }
+
+                        message.Contents[i] = new MEAI.FunctionResultContent(result.CallId, typed.Text);
+                        (liftedCallIds ??= new HashSet<string>(StringComparer.Ordinal)).Add(result.CallId);
                         continue;
                     }
 
@@ -60,54 +181,18 @@ namespace CoreAI.Infrastructure.Llm
                         continue;
                     }
 
-                    try
+                    // WHY: A malformed camera response remains ordinary tool feedback.
+                    if (!TryReadLiftableCameraImage(resultText, out JObject payload, out AiAttachment image))
                     {
-                        JObject payload = JObject.Parse(resultText);
-                        if (payload.Value<bool?>("ok") != true)
-                        {
-                            continue;
-                        }
-
-                        string dataUrl = payload.Value<string>("dataUrl");
-                        if (string.IsNullOrEmpty(dataUrl) ||
-                            !dataUrl.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
-                        {
-                            continue;
-                        }
-
-                        int separator = dataUrl.IndexOf(';');
-                        int comma = dataUrl.IndexOf(',');
-                        if (separator <= 5 || comma <= separator ||
-                            !string.Equals(dataUrl.Substring(separator, comma - separator),
-                                ";base64", StringComparison.OrdinalIgnoreCase))
-                        {
-                            continue;
-                        }
-
-                        string mediaType = dataUrl.Substring(5, separator - 5).ToLowerInvariant();
-                        if (mediaType is not ("image/jpeg" or "image/png" or "image/webp" or "image/gif"))
-                        {
-                            continue;
-                        }
-
-                        byte[] bytes = Convert.FromBase64String(dataUrl.Substring(comma + 1));
-                        if (bytes.Length == 0 || bytes.Length > 4 * 1024 * 1024)
-                        {
-                            continue;
-                        }
-
-                        images ??= new List<MEAI.AIContent>();
-                        images.Add(new MEAI.DataContent(bytes, mediaType));
-                        payload.Remove("dataUrl");
-                        payload["imageAttached"] = true;
-                        message.Contents[i] = new MEAI.FunctionResultContent(result.CallId,
-                            payload.ToString(Formatting.None));
-                        (liftedCallIds ??= new HashSet<string>(StringComparer.Ordinal)).Add(result.CallId);
+                        continue;
                     }
-                    catch (Exception ex) when (ex is JsonException or FormatException)
-                    {
-                        // WHY: A malformed camera response remains ordinary tool feedback.
-                    }
+
+                    (images ??= new List<MEAI.AIContent>()).Add(AiUserMessageBuilder.BuildImageContent(image));
+                    payload.Remove("dataUrl");
+                    payload["imageAttached"] = true;
+                    message.Contents[i] = new MEAI.FunctionResultContent(result.CallId,
+                        payload.ToString(Formatting.None));
+                    (liftedCallIds ??= new HashSet<string>(StringComparer.Ordinal)).Add(result.CallId);
                 }
             }
 
@@ -123,6 +208,37 @@ namespace CoreAI.Infrastructure.Llm
                 ToolCallHistoryTrimmer.MarkCameraFeedback(feedback);
                 messages.Add(feedback);
             }
+
+            if (toolImageFeedback != null)
+            {
+                messages.AddRange(toolImageFeedback);
+                ToolCallHistoryTrimmer.RemoveExcessToolImageFeedback(messages,
+                    ToolCallHistoryTrimmer.MaxToolImageFeedbackMessages);
+            }
+        }
+
+        /// <summary>The name of the function call with <paramref name="callId"/>, or null when its call message is gone.</summary>
+        private static string FindCallName(List<MEAI.ChatMessage> messages, string callId)
+        {
+            if (string.IsNullOrEmpty(callId))
+            {
+                return null;
+            }
+
+            for (int m = messages.Count - 1; m >= 0; m--)
+            {
+                IList<MEAI.AIContent> contents = messages[m].Contents;
+                for (int i = 0; i < contents.Count; i++)
+                {
+                    if (contents[i] is MEAI.FunctionCallContent call &&
+                        string.Equals(call.CallId, callId, StringComparison.Ordinal))
+                    {
+                        return call.Name;
+                    }
+                }
+            }
+
+            return null;
         }
 
         private readonly MEAI.IChatClient _innerClient;
@@ -569,6 +685,8 @@ namespace CoreAI.Infrastructure.Llm
                 while (true)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    // WHY: lifting right before every request to the inner client is what lets typed tool images reach the image channel from every append site (a corrected tool name `continue`s here without the lift above), since an unlifted typed result would send its text only; lifting is idempotent.
+                    LiftCameraImages(messages, ref _liftedCameraCallIds);
                     _requests++;
                     int limit = _owner._maxRoundtripsOverride ?? _owner._settings.MaxToolCallRoundtrips;
                     bool finalSummary = limit > 0 && _requests > limit;
@@ -1411,12 +1529,13 @@ namespace CoreAI.Infrastructure.Llm
         {
             try
             {
-                List<MEAI.ChatMessage> summaryMessages = new(messages)
-                {
-                    new MEAI.ChatMessage(MEAI.ChatRole.User,
-                        "Tool budget exhausted. Do not call any more tools. Summarize in plain text " +
-                        "what you accomplished and what remains to be done.")
-                };
+                List<MEAI.ChatMessage> summaryMessages = new(messages);
+                // WHY: this summary request is built by branches that return before the regular lift, and an unlifted typed tool image would reach the model as its text only, so it is lifted here too; lifting is idempotent.
+                HashSet<string> liftedForSummary = null;
+                LiftCameraImages(summaryMessages, ref liftedForSummary);
+                summaryMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
+                    "Tool budget exhausted. Do not call any more tools. Summarize in plain text " +
+                    "what you accomplished and what remains to be done."));
 
                 // Tools deliberately omitted (not just ToolMode=None): the model physically cannot
                 // emit another native tool call, so this extra turn can never loop.

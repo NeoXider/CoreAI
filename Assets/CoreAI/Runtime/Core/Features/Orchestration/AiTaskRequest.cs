@@ -44,13 +44,20 @@ namespace CoreAI.Ai
         /// <c>image/gif</c>) are sent as native image parts — only <b>vision-capable</b> models receive them;
         /// text-only models typically error or ignore the image per provider.</description></item>
         /// <item><description><b>Text-like files</b> (<c>text/*</c>, <c>application/json</c>, Lua, Markdown,
-        /// source code, …) are decoded as UTF-8 and inlined into the prompt as delimited blocks, so they reach
-        /// <b>every</b> model, including text-only local ones.</description></item>
+        /// source code, …) are decoded (byte-order mark, else the media type's <c>charset</c>, else UTF-8) and
+        /// inlined into the prompt as delimited blocks, so they reach <b>every</b> model, including text-only local
+        /// ones. A payload that is not text in that encoding throws naming the file.</description></item>
         /// <item><description>Any other media type (audio, video, meshes, arbitrary binary) throws at compose
         /// time — attachments are never silently dropped.</description></item>
         /// </list>
-        /// <c>null</c> or empty leaves the turn as a plain-text prompt (unchanged behavior). Composition and
-        /// validation live in <see cref="AiUserMessageBuilder"/>.
+        /// <c>null</c>, empty or all-null leaves the turn as a plain-text prompt (unchanged behavior). Composition
+        /// and validation live in <see cref="AiUserMessageBuilder"/>.
+        /// <para>
+        /// Lifetime: neither this list nor the attachment bytes are copied, and they are read again for every
+        /// provider request of the turn — each tool-call roundtrip, the final summary request and every orchestrator
+        /// retry — so keep them unchanged until the task's <see cref="System.Threading.Tasks.Task"/> completes or its
+        /// stream is fully enumerated or disposed.
+        /// </para>
         /// </summary>
         public IReadOnlyList<AiAttachment> Attachments { get; set; }
 

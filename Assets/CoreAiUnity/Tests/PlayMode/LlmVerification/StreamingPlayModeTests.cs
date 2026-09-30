@@ -19,11 +19,21 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public class StreamingPlayModeTests
     {
+        // WHY: without [Timeout] the Unity Test Framework aborts at 180 s, which Streaming_ThinkBlocks' own
+        // Max(180, RequestTimeoutSeconds + 30) wait can never beat. 600 s covers RequestTimeoutSeconds up to
+        // ~550 s; LiveTestRequestScope caps longer waits so the cancelling wait always fires first.
+        // TestAgentSetup.Initialize is not capped (SharedLlmUnity allows up to 600 s for a cold GGUF load and 300 s
+        // when another test is already loading); the Cap on every wait protects the request, so a slower load
+        // shortens the turn or ends in the test's own cancelling wait, never a stranded request.
+        private const int TestTimeoutMs = 600000;
+
         private TestAgentSetup _setup;
+        private LiveTestRequestScope _requests;
 
         [UnitySetUp]
         public IEnumerator Setup()
         {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
             _setup = new TestAgentSetup();
             yield return _setup.Initialize();
             Assert.IsTrue(_setup.IsReady, $"LLM   ({_setup.BackendName}).  .");
@@ -32,6 +42,14 @@ namespace CoreAI.Tests.PlayMode
         [UnityTearDown]
         public IEnumerator TearDown()
         {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned request
+            // unwind before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
             _setup?.Dispose();
             yield return null;
         }
@@ -39,6 +57,7 @@ namespace CoreAI.Tests.PlayMode
         // ===================== Streaming =====================
 
         [UnityTest]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator Streaming_ReturnsChunks_WithDoneFlag()
         {
             LlmCompletionRequest request = new()
@@ -54,9 +73,9 @@ namespace CoreAI.Tests.PlayMode
             // :     main thread  UnityWebRequest    ThreadPool.
             //  async-  ( Task.Run),  continuations
             //   UnitySynchronizationContext.
-            using CancellationTokenSource cts = new();
-            Task streamTask = CollectStreamAsync(_setup.Client, request, cts.Token,
-                chunks, done => gotDone = done);
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task streamTask = _requests.Track(CollectStreamAsync(_setup.Client, request, cts.Token,
+                chunks, done => gotDone = done));
 
             // LLMUnity cold start / first token can exceed 30s; align with RequestTimeoutSeconds + margin
             // (same idea as Streaming_ThinkBlocks_StrippedFromResponse).
@@ -67,7 +86,7 @@ namespace CoreAI.Tests.PlayMode
                 waitSec = Mathf.Max(120f, settingsAsset.RequestTimeoutSeconds + 30f);
             }
 
-            yield return _setup.RunAndWait(streamTask, waitSec, "Streaming", cts);
+            yield return _setup.RunAndWait(streamTask, _requests.Cap(waitSec), "Streaming", cts);
 
             Assert.IsTrue(gotDone, "Should receive a chunk with IsDone=true");
             Assert.GreaterOrEqual(chunks.Count, 1, "Should receive at least 1 chunk");
@@ -91,6 +110,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator Streaming_CancellationToken_StopsStream()
         {
             LlmCompletionRequest request = new()
@@ -100,12 +120,13 @@ namespace CoreAI.Tests.PlayMode
                 UserPayload = "Write a very long essay about the history of computing in detail."
             };
 
-            CancellationTokenSource cts = new();
+            CancellationTokenSource cts = _requests.CreateCancellation();
             // Safety net if the stream or transport ignores cooperative cancel.
             cts.CancelAfter(TimeSpan.FromSeconds(8));
             StreamCancelCounter counter = new();
 
-            Task streamTask = ConsumeStreamingUntilCanceledAsync(_setup.Client, request, cts.Token, counter);
+            Task streamTask = _requests.Track(
+                ConsumeStreamingUntilCanceledAsync(_setup.Client, request, cts.Token, counter));
 
             // Cancel from the test coroutine: local servers often return the whole reply in one SSE frame, so
             // in-loop "cancel after N chunks" never runs a second MoveNext. MeaiLlmClient checks the token
@@ -113,7 +134,7 @@ namespace CoreAI.Tests.PlayMode
             yield return new WaitForSecondsRealtime(0.25f);
             cts.Cancel();
 
-            yield return _setup.RunAndWait(streamTask, 30f, "Streaming_Cancel");
+            yield return _setup.RunAndWait(streamTask, _requests.Cap(30f), "Streaming_Cancel", cts);
 
             Debug.Log(
                 $"[StreamingTest] Cancellation: wasCancelled={counter.WasCancelled}, chunks={counter.ChunkCount}");
@@ -180,6 +201,7 @@ namespace CoreAI.Tests.PlayMode
         // ===================== 3-Layer Prompt =====================
 
         [UnityTest]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator ThreeLayerPrompt_AllLayersApplied()
         {
             // Setup 3 layers
@@ -213,8 +235,8 @@ namespace CoreAI.Tests.PlayMode
             };
 
             LlmResultBox resultBox = new();
-            using CancellationTokenSource cts = new();
-            Task task = CompleteOnMainThreadAsync(_setup.Client, request, resultBox, cts.Token);
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(CompleteOnMainThreadAsync(_setup.Client, request, resultBox, cts.Token));
 
             float waitSec = 120f;
             CoreAISettingsAsset settingsAsset = CoreAISettingsAsset.Instance;
@@ -223,7 +245,7 @@ namespace CoreAI.Tests.PlayMode
                 waitSec = Mathf.Max(120f, settingsAsset.RequestTimeoutSeconds + 30f);
             }
 
-            yield return _setup.RunAndWait(task, waitSec, "ThreeLayerPrompt", cts);
+            yield return _setup.RunAndWait(task, _requests.Cap(waitSec), "ThreeLayerPrompt", cts);
 
             LlmCompletionResult result = resultBox.Value;
 
@@ -239,6 +261,7 @@ namespace CoreAI.Tests.PlayMode
         // ===================== Streaming + Think Block =====================
 
         [UnityTest]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator Streaming_ThinkBlocks_StrippedFromResponse()
         {
             // Models may write their thinking inside <think> (content) or separately as delta.reasoning_content;
@@ -253,9 +276,9 @@ namespace CoreAI.Tests.PlayMode
             List<LlmStreamChunk> chunks = new();
             StringBuilder response = new();
 
-            using CancellationTokenSource cts = new();
-            Task streamTask = CollectStreamAsync(_setup.Client, request, cts.Token, chunks,
-                _ => { });
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task streamTask = _requests.Track(CollectStreamAsync(_setup.Client, request, cts.Token, chunks,
+                _ => { }));
 
             // Wait at least as long as UnityWebRequest (RequestTimeoutSeconds) plus slack: a long reasoning_content
             // eats the same wall-time as generation, and the test must not give up before HTTP does.
@@ -266,7 +289,7 @@ namespace CoreAI.Tests.PlayMode
                 waitSec = Mathf.Max(180f, asset.RequestTimeoutSeconds + 30f);
             }
 
-            yield return _setup.RunAndWait(streamTask, waitSec, "Streaming_ThinkBlock", cts);
+            yield return _setup.RunAndWait(streamTask, _requests.Cap(waitSec), "Streaming_ThinkBlock", cts);
 
             foreach (LlmStreamChunk c in chunks)
             {

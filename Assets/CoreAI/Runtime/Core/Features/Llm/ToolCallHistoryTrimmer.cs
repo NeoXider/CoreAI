@@ -21,25 +21,83 @@ namespace CoreAI.Infrastructure.Llm
     /// </summary>
     public static class ToolCallHistoryTrimmer
     {
-        private static readonly ConditionalWeakTable<MEAI.ChatMessage, object> CameraFeedbackMessages = new();
+        // WHY: one table, one marker object per kind, so a message is tagged without a wrapper type and the tag dies with the message.
+        private static readonly ConditionalWeakTable<MEAI.ChatMessage, object> ImageFeedbackMessages = new();
         private static readonly object CameraFeedbackMarker = new();
+        private static readonly object ToolImageFeedbackMarker = new();
 
         internal const string CameraFeedbackPrompt =
             "Camera frame from your latest capture. Inspect the image and " +
             "continue the requested scene work using what you see.";
 
+        /// <summary>The non-camera prompt when the producing call is no longer in the history.</summary>
+        internal const string UnnamedToolImageFeedbackPrompt =
+            "Image returned by a tool. Inspect it and continue with the task.";
+
+        /// <summary>How many non-camera tool image messages one history keeps (the newest win).</summary>
+        internal const int MaxToolImageFeedbackMessages = 8;
+
+        /// <summary>
+        /// The text of the user message that carries a non-camera tool's images, e.g.
+        /// <c>Image returned by tool 'render_after'. Inspect it and continue with the task.</c>
+        /// </summary>
+        internal static string ToolImageFeedbackPrompt(string toolName, int imageCount)
+        {
+            if (string.IsNullOrWhiteSpace(toolName) && imageCount <= 1)
+            {
+                return UnnamedToolImageFeedbackPrompt;
+            }
+
+            string source = string.IsNullOrWhiteSpace(toolName) ? "a tool" : "tool '" + toolName + "'";
+            return imageCount > 1
+                ? imageCount + " images returned by " + source + ". Inspect them and continue with the task."
+                : "Image returned by " + source + ". Inspect it and continue with the task.";
+        }
+
         internal static void MarkCameraFeedback(MEAI.ChatMessage message)
         {
-            CameraFeedbackMessages.Add(message, CameraFeedbackMarker);
+            ImageFeedbackMessages.Add(message, CameraFeedbackMarker);
+        }
+
+        internal static void MarkToolImageFeedback(MEAI.ChatMessage message)
+        {
+            ImageFeedbackMessages.Add(message, ToolImageFeedbackMarker);
+        }
+
+        internal static bool IsCameraFeedback(MEAI.ChatMessage message)
+        {
+            return ImageFeedbackMessages.TryGetValue(message, out object marker) &&
+                   ReferenceEquals(marker, CameraFeedbackMarker);
+        }
+
+        internal static bool IsToolImageFeedback(MEAI.ChatMessage message)
+        {
+            return ImageFeedbackMessages.TryGetValue(message, out object marker) &&
+                   ReferenceEquals(marker, ToolImageFeedbackMarker);
         }
 
         internal static void RemovePriorCameraFeedback(List<MEAI.ChatMessage> messages)
         {
-            // WHY: a benchmark can disable tool-history trimming to retain every build command. Camera
-            // WHY: bytes still need a separate bound; the newest frame supersedes older rendered frames.
+            // WHY: a benchmark can disable tool-history trimming to retain every build command, and camera bytes still need a separate bound, so the newest frame supersedes older rendered frames.
             for (int i = messages.Count - 1; i >= 0; i--)
             {
-                if (CameraFeedbackMessages.TryGetValue(messages[i], out _))
+                if (IsCameraFeedback(messages[i]))
+                {
+                    messages.RemoveAt(i);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Drops the oldest non-camera tool image messages beyond <paramref name="keep"/>. Unlike camera frames
+        /// they are not superseded by the next image (a model may compare two renders), so this is their bound.
+        /// </summary>
+        internal static void RemoveExcessToolImageFeedback(List<MEAI.ChatMessage> messages, int keep)
+        {
+            int seen = 0;
+            for (int i = messages.Count - 1; i >= 0; i--)
+            {
+                if (IsToolImageFeedback(messages[i]) && ++seen > keep)
                 {
                     messages.RemoveAt(i);
                 }
@@ -121,9 +179,8 @@ namespace CoreAI.Infrastructure.Llm
                         unitToolMessages++;
                     }
 
-                    // WHY: camera images are inserted as User messages because OpenAI tool results
-                    // WHY: cannot carry image parts. Retire an old image with its source tool exchange.
-                    if (index < messages.Count && CameraFeedbackMessages.TryGetValue(messages[index], out _))
+                    // WHY: tool images are inserted as User messages right after their exchange because OpenAI tool results cannot carry image parts, so an old image is retired together with its source tool exchange.
+                    while (index < messages.Count && ImageFeedbackMessages.TryGetValue(messages[index], out _))
                     {
                         messages.RemoveAt(index);
                     }

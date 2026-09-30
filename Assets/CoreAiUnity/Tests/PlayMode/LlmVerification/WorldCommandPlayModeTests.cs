@@ -1,6 +1,7 @@
 ﻿#if COREAI_LLM && !UNITY_WEBGL
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
@@ -19,11 +20,45 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public sealed class WorldCommandPlayModeTests
     {
+        // WHY: each test is one 240 s world tool turn + a 5 s flag-sync wait + the 20 s LiveTestRequestScope
+        // reserve = 265 s; 360 s leaves ~95 s for setup. TestAgentSetup.Initialize is not capped (SharedLlmUnity
+        // allows up to 600 s for a cold GGUF load and 300 s when another test is already loading); the Cap on every
+        // wait protects the request, so a slower load shortens the turn or ends in the test's own cancelling wait,
+        // never a stranded request.
+        private const int TestTimeoutMs = 360000;
+
+        private LiveTestRequestScope _requests;
+        private TestAgentSetup _setup;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _setup?.Dispose();
+            _setup = null;
+        }
+
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator WorldTool_SpawnObject()
         {
-            using TestAgentSetup setup = new();
+            // WHY: [UnityTearDown] disposes the setup only after the in-flight request is drained.
+            TestAgentSetup setup = new();
+            _setup = setup;
             yield return setup.Initialize();
             if (!setup.IsReady)
             {
@@ -40,14 +75,15 @@ namespace CoreAI.Tests.PlayMode
             };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
-            Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
                     "Spawn TestPrefab as an object named test_obj at coordinates x=0, y=0, z=0."
-            });
+            }, cts.Token));
 
-            yield return setup.RunAndWait(task, 240f, "world spawn");
+            yield return setup.RunAndWait(task, _requests.Cap(240f), "world spawn", cts);
 
             //      (      Orchestrator   )
             //      tool execution.
@@ -63,10 +99,12 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator WorldTool_MoveObject()
         {
-            using TestAgentSetup setup = new();
+            // WHY: [UnityTearDown] disposes the setup only after the in-flight request is drained.
+            TestAgentSetup setup = new();
+            _setup = setup;
             yield return setup.Initialize();
             if (!setup.IsReady)
             {
@@ -83,14 +121,15 @@ namespace CoreAI.Tests.PlayMode
             };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
-            Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
                     "Move the target named 'Player' to coordinates x=10, y=20, z=30."
-            });
+            }, cts.Token));
 
-            yield return setup.RunAndWait(task, 240f, "world move");
+            yield return setup.RunAndWait(task, _requests.Cap(240f), "world move", cts);
 
             if (!setup.WorldExecutor.LastCommandWasCalled)
             {
@@ -107,10 +146,12 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator WorldTool_ListObjects()
         {
-            using TestAgentSetup setup = new();
+            // WHY: [UnityTearDown] disposes the setup only after the in-flight request is drained.
+            TestAgentSetup setup = new();
+            _setup = setup;
             yield return setup.Initialize();
             if (!setup.IsReady)
             {
@@ -127,14 +168,15 @@ namespace CoreAI.Tests.PlayMode
             };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
-            Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
                     "List all objects currently in the scene."
-            });
+            }, cts.Token));
 
-            yield return setup.RunAndWait(task, 240f, "world list_objects");
+            yield return setup.RunAndWait(task, _requests.Cap(240f), "world list_objects", cts);
 
             if (!setup.WorldExecutor.LastCommandWasCalled)
             {
@@ -148,10 +190,12 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator WorldTool_PlayAnimation()
         {
-            using TestAgentSetup setup = new();
+            // WHY: [UnityTearDown] disposes the setup only after the in-flight request is drained.
+            TestAgentSetup setup = new();
+            _setup = setup;
             yield return setup.Initialize();
             if (!setup.IsReady)
             {
@@ -168,14 +212,15 @@ namespace CoreAI.Tests.PlayMode
             };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
-            Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
                     "Play the 'attack' animation on the target named 'Enemy'."
-            });
+            }, cts.Token));
 
-            yield return setup.RunAndWait(task, 240f, "world play_animation");
+            yield return setup.RunAndWait(task, _requests.Cap(240f), "world play_animation", cts);
 
             if (!setup.WorldExecutor.LastCommandWasCalled)
             {
@@ -189,10 +234,12 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator WorldTool_ListAnimations()
         {
-            using TestAgentSetup setup = new();
+            // WHY: [UnityTearDown] disposes the setup only after the in-flight request is drained.
+            TestAgentSetup setup = new();
+            _setup = setup;
             yield return setup.Initialize();
             if (!setup.IsReady)
             {
@@ -209,14 +256,15 @@ namespace CoreAI.Tests.PlayMode
             };
             setup.Policy.SetToolsForRole(BuiltInAgentRoleIds.Creator, tools);
 
-            Task task = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint =
                     "List the available animations for the target named 'Enemy'."
-            });
+            }, cts.Token));
 
-            yield return setup.RunAndWait(task, 240f, "world list_animations");
+            yield return setup.RunAndWait(task, _requests.Cap(240f), "world list_animations", cts);
 
             if (!setup.WorldExecutor.LastCommandWasCalled)
             {

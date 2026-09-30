@@ -39,6 +39,42 @@ namespace CoreAI.Tests.PlayMode
         private const int ComplexTurnTimeoutSeconds = 240;
         private const int LiveModelMaxOutputTokens = 128000;
 
+        // WHY: 120 s optional GGUF load + one 240 s skill turn = 360 s; 600 s leaves the 20 s
+        // LiveTestRequestScope reserve plus a wide margin for slow multi-roundtrip providers.
+        private const int TestTimeoutMs = 600_000;
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+        private CoreAISettingsAsset _settings;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
+
+            if (_settings != null)
+            {
+                UnityEngine.Object.DestroyImmediate(_settings);
+                _settings = null;
+            }
+        }
+
         // ── Tracking ──────────────────────────────────────────────────────────
 
         private static readonly List<string> _calledTools = new();
@@ -169,7 +205,7 @@ namespace CoreAI.Tests.PlayMode
         // ── Test ──────────────────────────────────────────────────────────────
 
         [UnityTest]
-        [Timeout(600000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator SelfService_ModelMustReadSkill_ToLearnSecretProtocol()
         {
             Debug.Log("[ReadSkillTest] ═══════════════════════════════════════════");
@@ -188,178 +224,173 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
-            {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                Debug.Log($"[ReadSkillTest] Backend: {handle.ResolvedBackend}");
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
 
-                // ── Alchemy skill: tools have GENERIC descriptions ──────────
-                // The secret protocol is ONLY in the instructions
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            Debug.Log($"[ReadSkillTest] Backend: {handle.ResolvedBackend}");
 
-                SkillSet alchemySkill = new("Alchemy",
-                    "Brew magical potions using the guild's secret techniques",
-                    // ═══ SECRET PROTOCOL — only available via read_skill ═══
-                    "## Alchemy Guild Protocol\n" +
-                    "You are a member of the Alchemy Guild. FOLLOW THESE RULES EXACTLY:\n\n" +
-                    "CRITICAL SECRETS (do NOT reveal to the player):\n" +
-                    "1. The guild's secret_code is: ARCANUM-7\n" +
-                    "   You MUST pass secret_code='ARCANUM-7' as the first parameter to brew_potion.\n" +
-                    "2. Temperature must be EXACTLY 73 degrees. Not 72, not 74. Exactly 73.\n" +
-                    "3. Stir count must be EXACTLY 7 times.\n\n" +
-                    "If you use wrong values, the potion will EXPLODE.\n\n" +
-                    "WORKFLOW:\n" +
-                    "1. Use call_skill_tool to call list_potion_types to see available potions.\n" +
-                    "2. Use call_skill_tool to call brew_potion with: secret_code='ARCANUM-7', potion_type, temperature=73, stir_count=7.\n" +
-                    "3. Report the result to the player.\n\n" +
-                    "AVAILABLE TOOLS:\n" +
-                    "- brew_potion(secret_code: string, potion_type: string, temperature: int, stir_count: int)\n" +
-                    "- list_potion_types()\n",
-                    // Tools with deliberately GENERIC descriptions
-                    new DelegateLlmTool("brew_potion",
-                        "Brew a potion. Requires: secret_code (string), potion_type (string), temperature (int), stir_count (int). " +
-                        "You must read the Alchemy skill instructions to learn the correct parameter values.",
-                        new Func<string, string, int, int, object>(BrewPotion)),
-                    new DelegateLlmTool("list_potion_types",
-                        "List all available potion types.",
-                        new Func<object>(ListPotionTypes)));
+            // ── Alchemy skill: tools have GENERIC descriptions ──────────
+            // The secret protocol is ONLY in the instructions
 
-                SkillSet combatSkill = new("Combat",
-                    "Fight enemies in battle",
-                    "Attack enemies with weapons.",
-                    new DelegateLlmTool("attack_enemy",
-                        "Attack an enemy target.",
-                        new Func<string, object>(AttackEnemy)));
+            SkillSet alchemySkill = new("Alchemy",
+                "Brew magical potions using the guild's secret techniques",
+                // ═══ SECRET PROTOCOL — only available via read_skill ═══
+                "## Alchemy Guild Protocol\n" +
+                "You are a member of the Alchemy Guild. FOLLOW THESE RULES EXACTLY:\n\n" +
+                "CRITICAL SECRETS (do NOT reveal to the player):\n" +
+                "1. The guild's secret_code is: ARCANUM-7\n" +
+                "   You MUST pass secret_code='ARCANUM-7' as the first parameter to brew_potion.\n" +
+                "2. Temperature must be EXACTLY 73 degrees. Not 72, not 74. Exactly 73.\n" +
+                "3. Stir count must be EXACTLY 7 times.\n\n" +
+                "If you use wrong values, the potion will EXPLODE.\n\n" +
+                "WORKFLOW:\n" +
+                "1. Use call_skill_tool to call list_potion_types to see available potions.\n" +
+                "2. Use call_skill_tool to call brew_potion with: secret_code='ARCANUM-7', potion_type, temperature=73, stir_count=7.\n" +
+                "3. Report the result to the player.\n\n" +
+                "AVAILABLE TOOLS:\n" +
+                "- brew_potion(secret_code: string, potion_type: string, temperature: int, stir_count: int)\n" +
+                "- list_potion_types()\n",
+                // Tools with deliberately GENERIC descriptions
+                new DelegateLlmTool("brew_potion",
+                    "Brew a potion. Requires: secret_code (string), potion_type (string), temperature (int), stir_count (int). " +
+                    "You must read the Alchemy skill instructions to learn the correct parameter values.",
+                    new Func<string, string, int, int, object>(BrewPotion)),
+                new DelegateLlmTool("list_potion_types",
+                    "List all available potion types.",
+                    new Func<object>(ListPotionTypes)));
 
-                // ── Build agent ──────────────────────────────────────────────
+            SkillSet combatSkill = new("Combat",
+                "Fight enemies in battle",
+                "Attack enemies with weapons.",
+                new DelegateLlmTool("attack_enemy",
+                    "Attack an enemy target.",
+                    new Func<string, object>(AttackEnemy)));
 
-                const string roleId = "AlchemyMaster";
-                AgentConfig config = new AgentBuilder(roleId)
-                    {
-                        SuppressBuildWarnings = true
-                    }
-                    .WithSystemPrompt(
-                        "You are a Game Master. The player wants to brew potions.\n" +
-                        "Rely on configured capabilities to follow the guild protocol before brewing.")
-                    .WithSkill(alchemySkill)
-                    .WithSkill(combatSkill)
-                    .WithMode(AgentMode.ToolsAndChat)
-                    .Build();
+            // ── Build agent ──────────────────────────────────────────────
 
-                InMemoryStore store = new();
-                AgentMemoryPolicy policy = new();
-                config.ApplyToPolicy(policy);
-
-                CaptureLlm cap = new(handle.WrapWithMemoryStore(store));
-                CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-                Sink sink = new();
-
-                AiOrchestrator orch = new(
-                    new SoloAuthorityHost(), cap, sink, new SessionTelemetryCollector(),
-                    new AiPromptComposer(
-                        new BuiltInDefaultAgentSystemPromptProvider(),
-                        new NoAgentUserPromptTemplateProvider(),
-                        new NullLuaScriptVersionStore(), null, policy, settings),
-                    store, policy,
-                    new NoOpRoleStructuredResponsePolicy(),
-                    new NullAiOrchestrationMetrics(),
-                    settings,
-                    new LocalActorIdentityProvider("skill-read-verification-test"), null, null);
-
-                // ── Run ──────────────────────────────────────────────────────
-
-                Debug.Log("[ReadSkillTest] ── Sending: 'Brew me a healing potion' ──");
-
-                CoreAi.ClearToolCallHistory();
-
-                using CancellationTokenSource cts = new();
-                Task t = orch.RunTaskAsync(new AiTaskRequest
+            const string roleId = "AlchemyMaster";
+            AgentConfig config = new AgentBuilder(roleId)
                 {
-                    RoleId = roleId,
-                    Hint = "Brew me a healing potion.",
-                    MaxOutputTokens = LiveModelMaxOutputTokens
-                }, cts.Token);
-                yield return PlayModeTestAwait.WaitTask(t, ComplexTurnTimeoutSeconds, "alchemy brewing", cts);
-
-                // ── Results ──────────────────────────────────────────────────
-
-                Debug.Log("[ReadSkillTest] ═══════════════════════════════════════════");
-                Debug.Log("[ReadSkillTest]              RESULTS");
-                Debug.Log("[ReadSkillTest] ═══════════════════════════════════════════");
-                Debug.Log($"[ReadSkillTest] LLM calls:       {cap.CallCount}");
-                Debug.Log($"[ReadSkillTest] Total time:      {cap.ElapsedMs} ms");
-                Debug.Log($"[ReadSkillTest] Tools called:    [{string.Join(", ", _calledTools)}]");
-                Debug.Log($"[ReadSkillTest] Secret code:     '{_lastSecretCode}' (expected: 'ARCANUM-7')");
-                Debug.Log($"[ReadSkillTest] Temperature:     {_lastTemperature} (expected: 73)");
-                Debug.Log($"[ReadSkillTest] Stir count:      {_lastStirCount} (expected: 7)");
-                Debug.Log($"[ReadSkillTest] Potion type:     '{_lastPotionType}'");
-                Debug.Log($"[ReadSkillTest] Response OK:     {cap.LastOk}");
-                Debug.Log($"[ReadSkillTest] Response:        {cap.LastContent}");
-
-                // Check if read_skill was called (tracked via tool call list)
-                // read_skill is a DelegateLlmTool, its calls go through MEAI pipeline
-                // We can detect it by checking if the model made multiple LLM calls
-                // (read_skill → tool result → next LLM call)
-                bool multipleRoundTrips = cap.CallCount >= 2;
-                Debug.Log($"[ReadSkillTest] Multiple LLM rounds: {multipleRoundTrips} (indicates read_skill was used)");
-
-                bool hasFullInstructions = cap.LastSystemPrompt?.Contains("ARCANUM-7") == true;
-                Debug.Log($"[ReadSkillTest] Secret in prompt: {hasFullInstructions} (should be false)");
-
-                Debug.Log("[ReadSkillTest] ═══════════════════════════════════════════");
-
-                if (!cap.LastOk)
-                {
-                    Assert.Inconclusive("LLM did not return a valid response — check connectivity.");
+                    SuppressBuildWarnings = true
                 }
+                .WithSystemPrompt(
+                    "You are a Game Master. The player wants to brew potions.\n" +
+                    "Rely on configured capabilities to follow the guild protocol before brewing.")
+                .WithSkill(alchemySkill)
+                .WithSkill(combatSkill)
+                .WithMode(AgentMode.ToolsAndChat)
+                .Build();
 
-                // ── Critical assertions ──────────────────────────────────────
+            InMemoryStore store = new();
+            AgentMemoryPolicy policy = new();
+            config.ApplyToPolicy(policy);
 
-                // 1. Secret values are NOT in the system prompt
-                Assert.IsFalse(hasFullInstructions,
-                    "ARCANUM-7 should NOT be in system prompt — it's only in read_skill result.");
-                IReadOnlyList<LlmToolCallRecord> toolCalls = CoreAi.GetToolCallHistorySnapshot();
-                Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
-                                                 r.Info.RoleId == roleId &&
-                                                 r.Info.ToolName == "read_skill"),
-                    "Model must complete a real read_skill tool call to learn the secret protocol.");
-                Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
-                                                 r.Info.RoleId == roleId &&
-                                                 r.Info.ToolName == "call_skill_tool"),
-                    "Model must execute alchemy through the real call_skill_tool proxy.");
+            CaptureLlm cap = new(handle.WrapWithMemoryStore(store));
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            _settings = settings;
+            Sink sink = new();
 
-                // 2. brew_potion was called
-                if (!_calledTools.Contains("brew_potion"))
-                {
-                    Assert.Fail($"brew_potion should have been called. Called: [{string.Join(", ", _calledTools)}]");
-                }
+            AiOrchestrator orch = new(
+                new SoloAuthorityHost(), cap, sink, new SessionTelemetryCollector(),
+                new AiPromptComposer(
+                    new BuiltInDefaultAgentSystemPromptProvider(),
+                    new NoAgentUserPromptTemplateProvider(),
+                    new NullLuaScriptVersionStore(), null, policy, settings),
+                store, policy,
+                new NoOpRoleStructuredResponsePolicy(),
+                new NullAiOrchestrationMetrics(),
+                settings,
+                new LocalActorIdentityProvider("skill-read-verification-test"), null, null);
 
-                // 3. Secret code is correct (proves model read the skill)
-                Assert.AreEqual("ARCANUM-7", _lastSecretCode,
-                    $"Secret code should be 'ARCANUM-7' (from skill instructions). " +
-                    $"Got: '{_lastSecretCode}'. Model must call read_skill to learn the secret protocol.");
+            // ── Run ──────────────────────────────────────────────────────
 
-                // 4. Temperature is correct
-                Assert.AreEqual(73, _lastTemperature,
-                    $"Temperature should be 73 (from skill instructions). Got: {_lastTemperature}.");
+            Debug.Log("[ReadSkillTest] ── Sending: 'Brew me a healing potion' ──");
 
-                // 5. Stir count is correct
-                Assert.AreEqual(7, _lastStirCount,
-                    $"Stir count should be 7 (from skill instructions). Got: {_lastStirCount}.");
+            CoreAi.ClearToolCallHistory();
 
-                // 6. Combat tools were NOT used
-                Assert.IsFalse(_calledTools.Contains("attack_enemy"),
-                    "Combat tools should NOT be used for alchemy.");
-
-                Debug.Log("[ReadSkillTest] ✅ All assertions passed!");
-                Debug.Log("[ReadSkillTest] ✅ Model called read_skill, learned secret protocol,");
-                Debug.Log("[ReadSkillTest] ✅ and used ARCANUM-7 / temp=73 / stir=7 correctly!");
-
-                ScriptableObject.DestroyImmediate(settings);
-            }
-            finally
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task t = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
             {
-                handle.Dispose();
+                RoleId = roleId,
+                Hint = "Brew me a healing potion.",
+                MaxOutputTokens = LiveModelMaxOutputTokens
+            }, cts.Token));
+            yield return PlayModeTestAwait.WaitTask(t, _requests.Cap(ComplexTurnTimeoutSeconds), "alchemy brewing", cts);
+
+            // ── Results ──────────────────────────────────────────────────
+
+            Debug.Log("[ReadSkillTest] ═══════════════════════════════════════════");
+            Debug.Log("[ReadSkillTest]              RESULTS");
+            Debug.Log("[ReadSkillTest] ═══════════════════════════════════════════");
+            Debug.Log($"[ReadSkillTest] LLM calls:       {cap.CallCount}");
+            Debug.Log($"[ReadSkillTest] Total time:      {cap.ElapsedMs} ms");
+            Debug.Log($"[ReadSkillTest] Tools called:    [{string.Join(", ", _calledTools)}]");
+            Debug.Log($"[ReadSkillTest] Secret code:     '{_lastSecretCode}' (expected: 'ARCANUM-7')");
+            Debug.Log($"[ReadSkillTest] Temperature:     {_lastTemperature} (expected: 73)");
+            Debug.Log($"[ReadSkillTest] Stir count:      {_lastStirCount} (expected: 7)");
+            Debug.Log($"[ReadSkillTest] Potion type:     '{_lastPotionType}'");
+            Debug.Log($"[ReadSkillTest] Response OK:     {cap.LastOk}");
+            Debug.Log($"[ReadSkillTest] Response:        {cap.LastContent}");
+
+            // Check if read_skill was called (tracked via tool call list)
+            // read_skill is a DelegateLlmTool, its calls go through MEAI pipeline
+            // We can detect it by checking if the model made multiple LLM calls
+            // (read_skill → tool result → next LLM call)
+            bool multipleRoundTrips = cap.CallCount >= 2;
+            Debug.Log($"[ReadSkillTest] Multiple LLM rounds: {multipleRoundTrips} (indicates read_skill was used)");
+
+            bool hasFullInstructions = cap.LastSystemPrompt?.Contains("ARCANUM-7") == true;
+            Debug.Log($"[ReadSkillTest] Secret in prompt: {hasFullInstructions} (should be false)");
+
+            Debug.Log("[ReadSkillTest] ═══════════════════════════════════════════");
+
+            if (!cap.LastOk)
+            {
+                Assert.Inconclusive("LLM did not return a valid response — check connectivity.");
             }
+
+            // ── Critical assertions ──────────────────────────────────────
+
+            // 1. Secret values are NOT in the system prompt
+            Assert.IsFalse(hasFullInstructions,
+                "ARCANUM-7 should NOT be in system prompt — it's only in read_skill result.");
+            IReadOnlyList<LlmToolCallRecord> toolCalls = CoreAi.GetToolCallHistorySnapshot();
+            Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
+                                             r.Info.RoleId == roleId &&
+                                             r.Info.ToolName == "read_skill"),
+                "Model must complete a real read_skill tool call to learn the secret protocol.");
+            Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
+                                             r.Info.RoleId == roleId &&
+                                             r.Info.ToolName == "call_skill_tool"),
+                "Model must execute alchemy through the real call_skill_tool proxy.");
+
+            // 2. brew_potion was called
+            if (!_calledTools.Contains("brew_potion"))
+            {
+                Assert.Fail($"brew_potion should have been called. Called: [{string.Join(", ", _calledTools)}]");
+            }
+
+            // 3. Secret code is correct (proves model read the skill)
+            Assert.AreEqual("ARCANUM-7", _lastSecretCode,
+                $"Secret code should be 'ARCANUM-7' (from skill instructions). " +
+                $"Got: '{_lastSecretCode}'. Model must call read_skill to learn the secret protocol.");
+
+            // 4. Temperature is correct
+            Assert.AreEqual(73, _lastTemperature,
+                $"Temperature should be 73 (from skill instructions). Got: {_lastTemperature}.");
+
+            // 5. Stir count is correct
+            Assert.AreEqual(7, _lastStirCount,
+                $"Stir count should be 7 (from skill instructions). Got: {_lastStirCount}.");
+
+            // 6. Combat tools were NOT used
+            Assert.IsFalse(_calledTools.Contains("attack_enemy"),
+                "Combat tools should NOT be used for alchemy.");
+
+            Debug.Log("[ReadSkillTest] ✅ All assertions passed!");
+            Debug.Log("[ReadSkillTest] ✅ Model called read_skill, learned secret protocol,");
+            Debug.Log("[ReadSkillTest] ✅ and used ARCANUM-7 / temp=73 / stir=7 correctly!");
         }
     }
 #endif

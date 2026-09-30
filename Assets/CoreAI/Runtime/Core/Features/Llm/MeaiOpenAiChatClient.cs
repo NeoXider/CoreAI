@@ -3185,6 +3185,9 @@ namespace CoreAI.Infrastructure.Llm
                             string resultStr = functionResult.Result switch
                             {
                                 string s => s,
+                                // WHY: fail-closed. An image result that somehow reached the wire unlifted
+                                // sends its summary text only - never the image bytes as text.
+                                LlmToolImageResult imageResult => imageResult.Text,
                                 // WHY: Newtonsoft serializes System.Text.Json's JsonElement struct by
                                 // reflection into a useless {"ValueKind":N}, which would blind the
                                 // model to its own tool results - emit the element's real JSON.
@@ -3251,7 +3254,11 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 else
                 {
-                    msgDict["content"] = BuildOpenAiMessageContent(content, msg.Contents);
+                    // WHY: an image-only user message has no TextContent, so `content` is the stringified
+                    // fallback ("Microsoft.Extensions.AI.DataContent"); that type name must not reach the
+                    // model as a text part next to the image. Image parts are built from the real text.
+                    object wireContent = BuildOpenAiMessageContent(msg.Text, msg.Contents);
+                    msgDict["content"] = wireContent is string ? content : wireContent;
                 }
 
                 messages.Add(msgDict);
@@ -3336,13 +3343,35 @@ namespace CoreAI.Infrastructure.Llm
             switch (content)
             {
                 case MEAI.DataContent data when IsImageMediaType(data.MediaType):
-                    return $"data:{NormalizeImageMediaType(data.MediaType)};base64," +
-                           Convert.ToBase64String(data.Data.ToArray());
+                    return AiUserMessageBuilder.GetOrBuildWireUrl(data, NormalizeImageMediaType(data.MediaType),
+                        DataUrlBuilder);
                 case MEAI.UriContent uri when IsImageMediaType(uri.MediaType):
                     return uri.Uri?.ToString();
                 default:
                     return null;
             }
+        }
+
+        private static readonly Func<string, ReadOnlyMemory<byte>, string> DataUrlBuilder = BuildBase64DataUrl;
+
+        /// <summary>
+        /// <c>data:&lt;type&gt;;base64,&lt;payload&gt;</c> written once into a string of the exact length, encoded
+        /// straight from the image memory. WHY: the image is re-sent on every request of a multi-roundtrip turn;
+        /// the former <c>ToArray</c> + <c>ToBase64String</c> + concatenation made two extra full-size copies each
+        /// time. An image part CoreAI built for the turn caches this string (see
+        /// <see cref="AiUserMessageBuilder.GetOrBuildWireUrl"/>), so each image is encoded once per turn.
+        /// </summary>
+        internal static string BuildBase64DataUrl(string mediaType, ReadOnlyMemory<byte> data)
+        {
+            int prefixLength = 5 + mediaType.Length + 8;
+            int base64Length = checked((data.Length + 2) / 3 * 4);
+            return string.Create(prefixLength + base64Length, (mediaType, data), static (span, state) =>
+            {
+                "data:".AsSpan().CopyTo(span);
+                state.mediaType.AsSpan().CopyTo(span.Slice(5));
+                ";base64,".AsSpan().CopyTo(span.Slice(5 + state.mediaType.Length));
+                Convert.TryToBase64Chars(state.data.Span, span.Slice(13 + state.mediaType.Length), out _);
+            });
         }
 
         private static bool IsImageMediaType(string mediaType)

@@ -1,5 +1,6 @@
 ﻿#if COREAI_LLM && !UNITY_WEBGL
 using System.Collections;
+using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
@@ -17,6 +18,38 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public sealed class AgentMemoryWithRealModelPlayModeTests
     {
+        // WHY: 240 s memory write + 2 x (1 s pause + 120 s recall) + the 20 s LiveTestRequestScope reserve = 502 s;
+        // 600 s leaves ~100 s for setup. TestAgentSetup.Initialize is not capped (SharedLlmUnity allows up to 600 s
+        // for a cold GGUF load and 300 s when another test is already loading); the Cap on every wait protects the
+        // request, so a slower load shortens the turn or ends in the test's own cancelling wait, never a stranded
+        // request.
+        private const int TestTimeoutMs = 600000;
+
+        private LiveTestRequestScope _requests;
+        private TestAgentSetup _setup;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _setup?.Dispose();
+            _setup = null;
+        }
+
         /// <summary>
         /// Writes a single fact into agent memory via the memory tool, then performs a recall turn
         /// and asserts that the published <c>ApplyAiGameCommand</c> sink contains the recalled fact.
@@ -24,10 +57,12 @@ namespace CoreAI.Tests.PlayMode
         /// (Auto picks the first reachable backend).
         /// </summary>
         [UnityTest]
-        [Timeout(600000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator Creator_WritesMemory_ThenRecalls_ViaAuto()
         {
-            using TestAgentSetup setup = new();
+            // WHY: [UnityTearDown] disposes the setup only after the in-flight request is drained.
+            TestAgentSetup setup = new();
+            _setup = setup;
             yield return setup.Initialize();
 
             if (!setup.IsReady)
@@ -38,12 +73,13 @@ namespace CoreAI.Tests.PlayMode
             Debug.Log($"[Test] Backend: {setup.BackendName}");
 
             // Task 1: Write memory
-            Task t1 = setup.Orchestrator.RunTaskAsync(new AiTaskRequest
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task t1 = _requests.Track(setup.Orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Creator,
                 Hint = "Please remember for later that the player likes apples."
-            });
-            yield return setup.RunAndWait(t1, 240f, "creator memory write");
+            }, cts.Token));
+            yield return setup.RunAndWait(t1, _requests.Cap(240f), "creator memory write", cts);
 
             if (!setup.MemoryStore.TryLoad(BuiltInAgentRoleIds.Creator, out AgentMemoryState st) ||
                 string.IsNullOrWhiteSpace(st.Memory))
@@ -83,13 +119,13 @@ namespace CoreAI.Tests.PlayMode
                     yield return new WaitForSecondsRealtime(1f);
                 }
 
-                Task<string> tRecall = orch2.RunTaskAsync(new AiTaskRequest
+                Task<string> tRecall = _requests.Track(orch2.RunTaskAsync(new AiTaskRequest
                 {
                     RoleId = BuiltInAgentRoleIds.Creator,
                     Hint = "What is your available memory about apples?"
-                });
-                yield return setup.RunAndWait(tRecall, 120f,
-                    $"creator memory recall ({attempt}/{recallMaxAttempts})");
+                }, cts.Token));
+                yield return setup.RunAndWait(tRecall, _requests.Cap(120f),
+                    $"creator memory recall ({attempt}/{recallMaxAttempts})", cts);
 
                 recallResult = tRecall.Result;
                 if (!string.IsNullOrEmpty(recallResult))

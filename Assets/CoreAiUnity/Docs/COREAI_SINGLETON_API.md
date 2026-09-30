@@ -63,6 +63,7 @@ Both paths use **one** `CoreAILifetimeScope` registered on the scene and **one**
 | `OrchestrateAsync` | `Task<string?>` | Full **game pipeline**: session snapshot, authority, queue, validation, **publishing a command** to the bus. |
 | `OrchestrateStreamAsync` | `IAsyncEnumerable<LlmStreamChunk>` | Same, but **tokens as they generate** + final publish after the stream. |
 | `OrchestrateStreamCollectAsync` | `Task<string>` | Stream + **assemble full text** + `onChunk` for UI. |
+| `AskAsync` / `StreamAsync` / `StreamChunksAsync` / `SmartAskAsync` **+ attachments** | same as above | Send **images and files** with the prompt (one `AiAttachment` or a list) — see [3.7](#37-send-prompts-images-and-files). |
 | `StopAgent` | `void` | **Cancel generation** and running agent tasks. |
 | `ClearContext` | `void` | **Clear memory** (chat + long-term). |
 | `IsReady` | `bool` | Whether the API can be called (scope + services). |
@@ -185,6 +186,83 @@ var task = new AiTaskRequest { RoleId = "Creator", Hint = "Explain the step" };
 string full = await CoreAi.OrchestrateStreamCollectAsync(task,
     onChunk: c => statusLine.text += c);
 ```
+
+### 3.7. Send prompts, images and files
+
+Every text entry point takes one `AiAttachment` or a list of them (`IReadOnlyList<AiAttachment>`, e.g. an array)
+right after the prompt; everything else (role, callbacks, cancellation) stays where it was. Namespaces:
+`using CoreAI;` (facade + Unity helpers) and `using CoreAI.Ai;` (`AiAttachment`).
+
+| You send | One line |
+|----------|----------|
+| Prompt only | `await CoreAi.AskAsync("Hello!");` |
+| Prompt + one image | `await CoreAi.AskAsync("What is on screen?", Camera.main.CaptureAiAttachment());` |
+| Prompt + several images | `await CoreAi.AskAsync("What changed?", new[] { before.ToAiAttachment(), after.ToAiAttachment() });` |
+| Image only | `await CoreAi.AskAsync("", icon.ToAiAttachment());` |
+| Text file + prompt | `await CoreAi.AskAsync("Find the bug", AiAttachment.FromText("enemy.lua", luaSource));` |
+| Images + files | `await CoreAi.AskAsync("Does the code match the picture?", new[] { shot, AiAttachment.FromFile(path) });` |
+| Streaming | `await foreach (string c in CoreAi.StreamAsync("Describe it", shot)) label.text += c;` |
+| Smart (stream if enabled) | `await CoreAi.SmartAskAsync("Describe it", shots, "SmartChat", onChunk: c => label.text += c);` |
+| A specific agent / role | `await CoreAi.AskAsync("Review", files, roleId: "Programmer");` |
+| Full pipeline (commands, authority) | `await CoreAi.OrchestrateAsync(new AiTaskRequest { RoleId = "Creator", Hint = "Build this", Attachments = new[] { sketch } });` |
+| The chat panel | `await panel.SubmitMessageFromExternalAsync("Look", new CoreAiChatExternalSubmitOptions { Attachments = new[] { shot } });` (blank text is allowed when there is an attachment: the bubble shows `[attachment: ...]`) |
+| Without Unity (own harness, server) | `await orchestrator.RunTaskAsync("What is on it?", AiAttachment.FromFile("shot.png"));` (also `RunStreamingAsync`) |
+| Ask about a picture a tool returned | `await CoreAi.AskWithImageFollowUpAsync("Is it finished?", shot.Images[0]);` (one-shot, no history) |
+
+> **`null` in the attachment position is ambiguous.** `CoreAi.AskAsync("hi", null)` and
+> `orchestrator.RunTaskAsync("hi", null)` do not compile (CS0121: the `string roleId`, `AiAttachment` and
+> `IReadOnlyList<AiAttachment>` overloads all accept `null`). Omit the argument, or cast it:
+> `CoreAi.AskAsync("hi", (AiAttachment)null)`. A null attachment or list is the prompt-only turn.
+
+**Where attachments come from**
+
+| Source | Call | Notes |
+|--------|------|-------|
+| `Camera` | `cam.CaptureAiAttachment(maxSide: 512)` | Offscreen render of what the camera sees (no screen-space overlay UI). |
+| Whole screen incl. UI | `ScreenCapture.CaptureScreenshotAsTexture().ToAiAttachment()` | Call at end of frame (coroutine `WaitForEndOfFrame`), then `Destroy` the texture. |
+| `Texture2D` | `tex.ToAiAttachment()` | Long edge 1024 by default (`maxSide: 0` = native size — a 4096² texture then costs a 64 MB readback). JPEG by default (`CaptureImageFormat.Png` for crisp UI/pixel art); works for GPU-only and compressed textures. |
+| `Sprite` | `sprite.ToAiAttachment()` | Only the sprite's region, PNG by default (keeps transparency); long edge 1024 by default. |
+| `RenderTexture` | `rt.ToAiAttachment()` | Current content; long edge 1024 by default (`maxSide: 0` = native). |
+| `TextAsset` | `asset.ToAiAttachment("level.lua")` | Inlined as text; pass a file name with an extension for the right type. |
+| File on disk | `AiAttachment.FromFile(path)` / `await AiAttachment.FromFileAsync(path)` | Type from the extension. Not for WebGL `StreamingAssets` — download the bytes and use `FromFile(name, bytes)`. |
+| Bytes | `AiAttachment.Image(bytes)`, `AiAttachment.FromFile("a.json", bytes)` | The array is referenced, not copied. `Image` detects PNG/JPEG/GIF/WEBP from the bytes when no type is given and rejects a non-image type (use `FromFile`/`FromText` for text). |
+| Pooled buffer / stream | `AiAttachment.Image(memory, "image/jpeg")`, `AiAttachment.FromStream(memoryStream, "image/png")` | No copy (a `MemoryStream` only when its buffer is publicly visible). See the lifetime rule below. |
+| Base64 / data URL | `AiAttachment.FromBase64(b64, "image/png")`, `AiAttachment.FromDataUrl("data:image/png;base64,...")` | Decoded once; RFC 2397 parameters are fine (`data:text/plain;charset=utf-16;base64,...`). `TryFromDataUrl` does not throw. |
+| String | `AiAttachment.FromText("notes.md", text)` | Inlined as-is (no encode/decode). |
+| URL | `AiAttachment.ImageUri(new Uri("https://..."))` | The provider fetches it. |
+
+**How each kind reaches the model**
+
+- **Images** (`image/png`, `image/jpeg`, `image/webp`, `image/gif`) become native image parts — only a
+  **vision-capable model** can read them (check `CoreAi.IsVisionEnabled()`; a text-only model or provider errors
+  or ignores them). Any number per turn, no CoreAI cap; the provider's own limits apply. Scale big pictures down
+  (`maxSide`) to save tokens.
+- **Text-like files** (`text/*`, JSON, Lua, XML, YAML, TOML, SQL, JS, C#, Python, Markdown, CSV, shaders, ...) are
+  inlined into the prompt as delimited blocks, so **every model** reads them. Decoding: the byte-order mark
+  (UTF-8, UTF-16 LE/BE, UTF-32 LE/BE), else the `charset` of the media type (`"text/plain; charset=utf-16"`,
+  `"text/plain; charset=iso-8859-1"`), else UTF-8. A file that is not text in that encoding — NUL characters (binary,
+  or UTF-16 without a BOM or charset) or more than 1 in 64 undecodable characters — throws `ArgumentException`
+  naming the file instead of sending mojibake. Caps: 256 KB per file, 1 MB per turn
+  (`AiAttachment.MaxInlineTextBytes` / `MaxTotalInlineTextBytes`); inlined files count against the context budget
+  (about 4 bytes per token) so history is trimmed to make room.
+- **Anything else** (audio, video, meshes, arbitrary binary) throws `ArgumentException` when the turn is
+  composed — nothing is dropped silently or pasted as base64.
+- Chat history stores only a placeholder such as `[attachment: shot.jpg image/jpeg 84 KB]`, never the bytes.
+- **Tools can show pictures too**: return `LlmToolImageResult` (text + images) from a tool — see
+  [TOOL_AUTHORING_GUIDE](TOOL_AUTHORING_GUIDE.md#returning-images-from-a-tool). The camera tools (`camera_capture`,
+  `screenshot`, `capture_camera`) do this already; `CoreAi.OnToolExecuted` then receives the `LlmToolImageResult`
+  itself as `result` (cast it and read `.Images`), not a JSON string with a `dataUrl`.
+
+**Lifetime (no copies).** CoreAI keeps your list and your buffers as they are and reads them again for every provider
+request of the turn — each tool-call roundtrip, the final summary request and every orchestrator retry. Keep the
+buffers and the list unchanged until the returned `Task` completes, or until the returned stream is fully enumerated
+or disposed. Reuse a pooled buffer only after that.
+
+**Cost.** A prompt-only call allocates exactly what it did before. Attachments are wrapped, never copied: several
+1 MB images add a few hundred bytes per call; inlined text files are written once into the final prompt string;
+each image is encoded into one data-URL string on the first provider request of the turn and that string is reused by
+every later request (tool roundtrips, the summary). The single-attachment overloads wrap the attachment in a
+one-element array (32 bytes); pass your own list to reuse it.
 
 ---
 

@@ -35,7 +35,7 @@ lives in `Assets/CoreAiUnity/Runtime/Source/Features/Vision/`:
 ## 2. Capture pipeline (decision)
 
 `Camera.Render()` into an offscreen `RenderTexture` → `Texture2D.ReadPixels` → encode (JPEG default,
-PNG optional) → `byte[]` → base64 `data:` URL.
+PNG optional) → `byte[]` → returned as an `LlmToolImageResult` image (no base64 in the tool message; §5).
 
 Decisions & tradeoffs:
 - **Render to an offscreen RT, not `ScreenCapture`.** Rendering a specific `Camera` to our own RT lets us
@@ -117,7 +117,8 @@ each call under the wrapper's `ToolTimeoutMsOverride` / `EndsTurn` / `IsMutating
 lists the function names under "Available tools" in the prompt and in refusals.
 
 **`camera_capture` result.** Because OpenAI tool-result messages cannot carry images (see §5), the function
-returns a compact JSON **string**:
+returns an `LlmToolImageResult`: the tool message is this compact JSON summary, and the JPEG travels next to it as
+an image:
 
 ```json
 {
@@ -130,14 +131,14 @@ returns a compact JSON **string**:
   "format": "jpg",
   "sizeBytes": 21430,
   "pose": { "position": {"x":3,"y":5,"z":-8}, "rotation": {"x":15,"y":90,"z":0}, "fieldOfView": 60 },
-  "dataUrl": "data:image/jpeg;base64,/9j/4AAQ..."
+  "imageAttached": true
 }
 ```
 
 - **`summary`** is always present so a **text-only** model still gets value (which camera, where it is,
   what it is looking at) even though it can't see the pixels.
-- **`dataUrl`** is the image the host lifts into a vision message (§5). Errors return
-  `{ "ok": false, "error": "<code>", "message": "<human text>" }`.
+- **`imageAttached`** tells the model the picture follows in the next user message (§5). Errors are plain JSON
+  strings: `{ "ok": false, "error": "<code>", "message": "<human text>" }`.
 
 Failures are structured: `no_camera`, `rate_limited` (`retryAfterMs`), `scene_loading`,
 `camera_not_movable` (with the marker instructions), `target_not_found`, `no_change`.
@@ -154,17 +155,47 @@ Grepping `FunctionResultContent` usage (`ToolExecutionPolicy`, `MeaiOpenAiChatCl
   message. The OpenAI Chat Completions schema has **no image content part for `role: "tool"` messages** —
   so an image returned *as a tool result* is not delivered to the model as an image.
 
-Consequence (and it matches the existing capture-only tool): the tool returns the image as a `dataUrl`
-inside its JSON result, and the **host lifts it** into a follow-up **user** message so the next model call
-receives it as an `image_url` part. Wiring (documented, host-side, not owned by this tool):
+Consequence: the image is **lifted** into a follow-up **user** message so the next model call receives it as
+an `image_url` part. This is automatic — `SmartToolCallingChatClient.LiftCameraImages` runs before every
+provider request on both the streaming and non-streaming paths; the host wires nothing.
 
-1. Subscribe to the tool-call-completed event.
-2. Match `ToolName == "camera_capture"`.
-3. Parse the result's `dataUrl` (a `data:image/...;base64,` URI) into a MEAI `DataContent` — the tool
-   exposes `CameraLlmTool.TryGetImageDataUrl(resultJson, out string dataUrl)` and
-   `CameraLlmTool.TryParseImageDataUrl(dataUrl, out DataContent image)` for exactly this.
-4. Send a follow-up user message `[text prompt, image]`; `MeaiOpenAiChatClient` turns the `DataContent`
-   into `image_url`.
+Current shape (lean path): `camera_capture` / `screenshot` return an `LlmToolImageResult` — the JSON summary
+(`imageAttached: true`) is the tool message, the JPEG/PNG bytes travel out-of-band and are moved into the image
+message as-is. No base64, no data URL, no JSON parse or decode per capture (the former base64-in-JSON path cost
+about 7 MB of garbage for a 100 KB frame; the typed path about 12 KB). Any tool can return images this way —
+see `TOOL_AUTHORING_GUIDE.md` → "Returning images from a tool". An older tool that still returns a base64
+`dataUrl` inside its JSON is decoded once by `ToolExecutionPolicy` and delivered the same way (`"ok"` must be the
+JSON boolean `true`; `"true"`, `1` or `"yes"` leave it ordinary text).
+
+How the lifted message reads:
+
+- **Camera tools** (`camera_capture`, `screenshot`, and the scene tool `capture_camera`): one user message with the
+  fixed prompt *"Camera frame from your latest capture. Inspect the image and continue the requested scene work
+  using what you see."* and the frame. A new frame **replaces** the previous camera message, so a long build
+  session carries one frame, not all of them. This wording is part of the benchmark contract (G6) and does not
+  change.
+- **Any other tool** returning images: one user message per call, *"Image returned by tool 'render_after'.
+  Inspect it and continue with the task."* (or *"2 images returned by tool '...'"*). Earlier ones are **kept**, so a
+  model can compare a before and an after render; the newest 8 such messages stay per history. Both kinds leave
+  together with their tool exchange when the tool history is trimmed.
+
+**Hosts observing tool calls.** `CoreAi.OnToolExecuted` (and any `IToolExecutionNotifier`) receives the tool's own
+return value as `result`. For the camera tools that is now the `LlmToolImageResult`, **not** the JSON string with a
+`dataUrl` it used to be:
+
+```csharp
+CoreAi.OnToolExecuted += (role, tool, args, result) =>
+{
+    if (result is LlmToolImageResult shot && shot.Images.Count > 0)
+        preview.texture = LoadPreview(shot.Images[0].Memory);   // the JPEG/PNG bytes, no base64
+};
+```
+
+`result.ToString()` is only the summary text, and `LlmToolCallCompleted.ResultJson` is that summary too. The static
+`CameraLlmTool.TryGetImageDataUrl` / `TryParseImageDataUrl` (and the scene tool's
+`TryExtractImageContentFromResult`) only understand legacy JSON strings that still carry a data URL; they return
+`false` for today's camera results. To ask a one-off question about a frame, pass the image itself:
+`CoreAi.AskWithImageFollowUpAsync("Is the roof done?", shot.Images[0])`.
 
 For a chat use case that does not need the model to *decide* to look, the simpler existing path
 (`CoreAi.AskWithCameraAsync`) captures and sends the image in one user message directly — no tool round-trip.
@@ -211,7 +242,11 @@ The tool is constructed with the role id it is registered for, which is how it k
 ## 8. Relationship to the existing `capture_camera` tool
 
 `CoreAI.Infrastructure.World.CameraLlmTool` (`camera_tool` → `capture_camera`) predates this feature. It is
-capture-only, has no ownership model, and is registered on demand for SmartChat. The new
+capture-only, has no ownership model, and is registered on demand for SmartChat
+(`CoreAi.RegisterCameraVisionTool`). It returns an `LlmToolImageResult` as well (summary: `success`, `resolution`,
+`camera`, `format`, `sizeBytes`, `imageAttached`), so its frame reaches the model automatically with the camera
+prompt; it used to put a base64 `dataUri` into the tool text, which was never lifted and was cut to
+`MaxToolResultChars` characters of base64. The new
 `CoreAI.Vision.CameraLlmTool` (`camera` → `camera_capture`/`camera_look`/`camera_list`) is a superset for
 autonomous agents: it adds the ownership/marker model, camera movement, and listing. They can coexist
 (different tool/function names, different default roles). The vision tool is self-contained and does not

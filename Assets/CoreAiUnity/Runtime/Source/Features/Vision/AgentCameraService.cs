@@ -408,50 +408,8 @@ namespace CoreAI.Vision
             int longEdge = Mathf.Clamp(maxSize <= 0 ? DefaultMaxSize : maxSize, MinSize, MaxSize);
             ComputeSize(camera, longEdge, out width, out height);
 
-            RenderTexture rt = new(width, height, 24);
-            RenderTexture previousTarget = camera.targetTexture;
-            RenderTexture previousActive = RenderTexture.active;
-            Texture2D tex = null;
-            try
-            {
-                camera.targetTexture = rt;
-                camera.Render();
-
-                RenderTexture.active = rt;
-                tex = new Texture2D(width, height, TextureFormat.RGB24, false);
-                tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
-                tex.Apply();
-
-                return format == CaptureImageFormat.Png ? tex.EncodeToPNG() : tex.EncodeToJPG(JpegQuality);
-            }
-            finally
-            {
-                camera.targetTexture = previousTarget;
-                RenderTexture.active = previousActive;
-                DestroyCaptureObject(tex);
-                DestroyCaptureObject(rt);
-            }
-        }
-
-        /// <summary>
-        /// Releases a transient capture texture. <see cref="UnityEngine.Object.Destroy(UnityEngine.Object)"/>
-        /// is deferred and play-mode-only, so edit-mode callers would leak every capture.
-        /// </summary>
-        private static void DestroyCaptureObject(UnityEngine.Object target)
-        {
-            if (target == null)
-            {
-                return;
-            }
-
-            if (Application.isPlaying)
-            {
-                UnityEngine.Object.Destroy(target);
-            }
-            else
-            {
-                UnityEngine.Object.DestroyImmediate(target);
-            }
+            // WHY: pooled render target + one cached readback texture instead of a new pair per capture.
+            return AiAttachmentUnityExtensions.CaptureCamera(camera, width, height, format, JpegQuality);
         }
 
         private static void ComputeSize(Camera camera, int longEdge, out int width, out int height)

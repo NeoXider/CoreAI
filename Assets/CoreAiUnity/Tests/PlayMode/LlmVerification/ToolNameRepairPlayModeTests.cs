@@ -25,9 +25,17 @@ namespace CoreAI.Tests.PlayMode
     /// </summary>
     public sealed class ToolNameRepairPlayModeTests
     {
+        // WHY: the live tests run a scripted first turn plus one real follow-up turn inside a single 120 s
+        // stream wait; + the 20 s LiveTestRequestScope reserve + 40 s margin = 180 s. The old 120 s [Timeout]
+        // equalled the wait, so its own cancelling timeout could never fire.
+        private const int TestTimeoutMs = 180000;
+
+        private LiveTestRequestScope _requests;
+
         [UnitySetUp]
         public IEnumerator Setup()
         {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
             LogAssert.ignoreFailingMessages = true;
             yield return null;
         }
@@ -35,6 +43,14 @@ namespace CoreAI.Tests.PlayMode
         [UnityTearDown]
         public IEnumerator TearDown()
         {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
             LogAssert.ignoreFailingMessages = false;
             yield return null;
         }
@@ -82,7 +98,7 @@ namespace CoreAI.Tests.PlayMode
         // =========================================================================
 
         [UnityTest]
-        [Timeout(120000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator WrongCasing_Repair_ToolExecuted_RealLlmContinues()
         {
             if (!TryCreateRealMeaiClient(out MEAI.IChatClient realMeai))
@@ -112,8 +128,9 @@ namespace CoreAI.Tests.PlayMode
             };
 
             ResultBox box = new();
-            Task task = CollectStreamAsync(client, request, box, CancellationToken.None);
-            yield return WaitTask(task, 120f, "WrongCasing_Repair");
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(CollectStreamAsync(client, request, box, cts.Token));
+            yield return WaitTask(task, _requests.Cap(120f), "WrongCasing_Repair", cts);
 
             Debug.Log($"[RepairTest1] Output: '{box.FullText}' | Calls: {hybrid.StreamCalls}");
 
@@ -134,7 +151,7 @@ namespace CoreAI.Tests.PlayMode
         // =========================================================================
 
         [UnityTest]
-        [Timeout(120000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator UnknownTool_RemainsVisible_AndDoesNotExecute()
         {
             SingleShotScriptedMeaiClient hybrid = new(null,
@@ -156,9 +173,9 @@ namespace CoreAI.Tests.PlayMode
             };
 
             ResultBox box = new();
-            using CancellationTokenSource cts = new();
-            Task task = CollectStreamAsync(client, request, box, cts.Token);
-            yield return PlayModeTestAwait.WaitTask(task, 120f, "UnknownTool_Isolation", cts);
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(CollectStreamAsync(client, request, box, cts.Token));
+            yield return WaitTask(task, _requests.Cap(120f), "UnknownTool_Isolation", cts);
 
             Debug.Log($"[RepairTest2] Output: '{box.FullText}' | Calls: {hybrid.StreamCalls}");
 
@@ -175,7 +192,7 @@ namespace CoreAI.Tests.PlayMode
         // =========================================================================
 
         [UnityTest]
-        [Timeout(120000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator MixedCaseWithTextPrefix_ToolRepaired_TextPreserved()
         {
             if (!TryCreateRealMeaiClient(out MEAI.IChatClient realMeai))
@@ -203,8 +220,9 @@ namespace CoreAI.Tests.PlayMode
             };
 
             ResultBox box = new();
-            Task task = CollectStreamAsync(client, request, box, CancellationToken.None);
-            yield return WaitTask(task, 120f, "MixedCase_Repair");
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(CollectStreamAsync(client, request, box, cts.Token));
+            yield return WaitTask(task, _requests.Cap(120f), "MixedCase_Repair", cts);
 
             Debug.Log($"[RepairTest3] Output: '{box.FullText}' | Calls: {hybrid.StreamCalls}");
 
@@ -242,9 +260,9 @@ namespace CoreAI.Tests.PlayMode
             box.FullText = sb.ToString();
         }
 
-        private static IEnumerator WaitTask(Task task, float timeoutSec, string label)
+        private static IEnumerator WaitTask(Task task, float timeoutSec, string label, CancellationTokenSource cts)
         {
-            return PlayModeTestAwait.WaitTask(task, timeoutSec, label);
+            return PlayModeTestAwait.WaitTask(task, timeoutSec, label, cts);
         }
 
         private sealed class ResultBox

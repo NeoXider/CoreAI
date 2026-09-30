@@ -41,11 +41,21 @@ namespace CoreAI.Tests.PlayMode
         /// <summary>Upper bound guarding against a divide-by-near-zero TTFT artifact (very fast local MoE can be high).</summary>
         private const double MaxPlausibleDecodeTokPerSec = 5000.0;
 
+        // WHY: without [Timeout] the Unity Test Framework aborts at 180 s, which the Max(120, RequestTimeoutSeconds
+        // + 30) stream wait can never beat. The stream wait + the 20 s LiveTestRequestScope reserve fits 600 s for
+        // RequestTimeoutSeconds up to ~550 s; Cap clamps longer waits so the cancelling wait always fires first.
+        // TestAgentSetup.Initialize is not capped (SharedLlmUnity allows up to 600 s for a cold GGUF load and 300 s
+        // when another test is already loading); the Cap on every wait protects the request, so a slower load
+        // shortens the turn or ends in the test's own cancelling wait, never a stranded request.
+        private const int TestTimeoutMs = 600000;
+
         private TestAgentSetup _setup;
+        private LiveTestRequestScope _requests;
 
         [UnitySetUp]
         public IEnumerator Setup()
         {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
             _setup = new TestAgentSetup();
             yield return _setup.Initialize();
             Assert.IsTrue(_setup.IsReady, $"LLM backend not ready ({_setup.BackendName}). Configure a live model.");
@@ -54,11 +64,20 @@ namespace CoreAI.Tests.PlayMode
         [UnityTearDown]
         public IEnumerator TearDown()
         {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
             _setup?.Dispose();
             yield return null;
         }
 
         [UnityTest]
+        [Timeout(TestTimeoutMs)]
         [Explicit("Live throughput probe; run manually against a configured streaming model (e.g. LM Studio).")]
         public IEnumerator DecodeTokensPerSecond_IsConsistent_AndLmStudioComparable()
         {
@@ -74,7 +93,8 @@ namespace CoreAI.Tests.PlayMode
             };
 
             ThroughputProbe probe = new();
-            Task streamTask = MeasureStreamAsync(_setup.Client, request, probe);
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task streamTask = _requests.Track(MeasureStreamAsync(_setup.Client, request, probe, cts.Token));
 
             float waitSec = 120f;
             CoreAISettingsAsset settingsAsset = CoreAISettingsAsset.Instance;
@@ -83,7 +103,7 @@ namespace CoreAI.Tests.PlayMode
                 waitSec = Mathf.Max(120f, settingsAsset.RequestTimeoutSeconds + 30f);
             }
 
-            yield return _setup.RunAndWait(streamTask, waitSec, "TokensPerSecond");
+            yield return _setup.RunAndWait(streamTask, _requests.Cap(waitSec), "TokensPerSecond", cts);
 
             if (!string.IsNullOrEmpty(probe.Error))
             {
@@ -146,12 +166,13 @@ namespace CoreAI.Tests.PlayMode
         /// caller can split the total call into prefill (≈TTFT) and decode (the rest).
         /// </summary>
         private static async Task MeasureStreamAsync(
-            ILlmClient client, LlmCompletionRequest request, ThroughputProbe probe)
+            ILlmClient client, LlmCompletionRequest request, ThroughputProbe probe,
+            CancellationToken cancellationToken)
         {
             Stopwatch sw = Stopwatch.StartNew();
             try
             {
-                await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, CancellationToken.None))
+                await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request, cancellationToken))
                 {
                     if (!string.IsNullOrEmpty(chunk.Error))
                     {

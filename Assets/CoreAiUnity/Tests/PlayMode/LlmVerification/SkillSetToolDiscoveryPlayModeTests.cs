@@ -25,6 +25,42 @@ namespace CoreAI.Tests.PlayMode
 #if COREAI_LLM && !UNITY_WEBGL
     public sealed class SkillSetToolDiscoveryPlayModeTests
     {
+        // WHY: an LLMUnity readiness wait (up to 120 s on a cold start) + one 120 s skill turn + the 20 s
+        // LiveTestRequestScope reserve + 40 s margin = 300 s.
+        private const int TestTimeoutMs = 300000;
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+        private CoreAISettingsAsset _settings;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
+
+            if (_settings != null)
+            {
+                UnityEngine.Object.DestroyImmediate(_settings);
+                _settings = null;
+            }
+        }
+
         private static bool _enchantWeaponCalled;
         private static string _enchantTarget;
         private static string _enchantType;
@@ -117,7 +153,7 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
-        [Timeout(300000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator Model_ReadsSkill_ThenCallsSkillToolViaProxy()
         {
             Debug.Log("[ToolDiscovery] ═══════════════════════════════════════════");
@@ -134,109 +170,105 @@ namespace CoreAI.Tests.PlayMode
                 Assert.Ignore(ignore);
             }
 
-            try
-            {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
 
-                SkillSet enchantingSkill = new("Enchanting",
-                    "Apply magical enchantments to weapons and armor",
-                    "You are an enchantment master.\n" +
-                    "When the player asks to enchant an item, call enchant_weapon with:\n" +
-                    "- weapon_name: the name of the weapon\n" +
-                    "- enchantment_type: the type of enchantment (fire, ice, lightning)\n" +
-                    "Report the result to the player.",
-                    new DelegateLlmTool("enchant_weapon",
-                        "Apply enchantment to a weapon. Parameters: weapon_name (string), enchantment_type (string)",
-                        new Func<string, string, object>(EnchantWeapon)));
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
 
-                SkillSet explorationSkill = new("Exploration",
-                    "Explore the map and find locations",
-                    "Search for locations on the map.",
-                    new DelegateLlmTool("search_map",
-                        "Search the map",
-                        new Func<string, object>(SearchMap)));
+            SkillSet enchantingSkill = new("Enchanting",
+                "Apply magical enchantments to weapons and armor",
+                "You are an enchantment master.\n" +
+                "When the player asks to enchant an item, call enchant_weapon with:\n" +
+                "- weapon_name: the name of the weapon\n" +
+                "- enchantment_type: the type of enchantment (fire, ice, lightning)\n" +
+                "Report the result to the player.",
+                new DelegateLlmTool("enchant_weapon",
+                    "Apply enchantment to a weapon. Parameters: weapon_name (string), enchantment_type (string)",
+                    new Func<string, string, object>(EnchantWeapon)));
 
-                const string roleId = "EnchantMaster";
-                AgentConfig config = new AgentBuilder(roleId)
-                    {
-                        SuppressBuildWarnings = true
-                    }
-                    .WithSystemPrompt(
-                        "You are a Game Master in a fantasy RPG.\n" +
-                        "When the player asks you to do something, use the relevant available skill " +
-                        "and its tools to complete the request.")
-                    .WithSkill(enchantingSkill)
-                    .WithSkill(explorationSkill)
-                    .WithMode(AgentMode.ToolsAndChat)
-                    .Build();
+            SkillSet explorationSkill = new("Exploration",
+                "Explore the map and find locations",
+                "Search for locations on the map.",
+                new DelegateLlmTool("search_map",
+                    "Search the map",
+                    new Func<string, object>(SearchMap)));
 
-                InMemoryStore store = new();
-                AgentMemoryPolicy policy = new();
-                config.ApplyToPolicy(policy);
-
-                CaptureLlm cap = new(handle.WrapWithMemoryStore(store));
-                CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-
-                AiOrchestrator orch = new(
-                    new SoloAuthorityHost(), cap, new Sink(), new SessionTelemetryCollector(),
-                    new AiPromptComposer(
-                        new BuiltInDefaultAgentSystemPromptProvider(),
-                        new NoAgentUserPromptTemplateProvider(),
-                        new NullLuaScriptVersionStore(), null, policy, settings),
-                    store, policy,
-                    new NoOpRoleStructuredResponsePolicy(),
-                    new NullAiOrchestrationMetrics(),
-                    settings,
-                    new LocalActorIdentityProvider("skill-tool-discovery-test"), null, null);
-
-                Debug.Log("[ToolDiscovery] ── Request: 'Enchant my iron sword with fire' ──");
-
-                CoreAi.ClearToolCallHistory();
-                Task t = orch.RunTaskAsync(new AiTaskRequest
+            const string roleId = "EnchantMaster";
+            AgentConfig config = new AgentBuilder(roleId)
                 {
-                    RoleId = roleId,
-                    Hint = "Enchant my iron sword with fire"
-                });
-                yield return PlayModeTestAwait.WaitTask(t, 120f, "enchant request");
-
-                // Results
-                Debug.Log("[ToolDiscovery] ═══════════════════════════════════════════");
-                Debug.Log($"[ToolDiscovery] enchant_weapon called: {_enchantWeaponCalled}");
-                Debug.Log($"[ToolDiscovery] Weapon:               '{_enchantTarget}'");
-                Debug.Log($"[ToolDiscovery] Enchantment:          '{_enchantType}'");
-                Debug.Log($"[ToolDiscovery] Model response:       {cap.LastContent}");
-                Debug.Log("[ToolDiscovery] ═══════════════════════════════════════════");
-
-                // Verify model only saw 2 tools (not enchant_weapon directly)
-                Assert.That(cap.FirstSystemPrompt, Does.Not.Contain("enchant_weapon"),
-                    "enchant_weapon should NOT be in system prompt — only discoverable via read_skill.");
-
-                if (!cap.LastOk)
-                {
-                    Assert.Inconclusive("LLM did not return a valid response.");
+                    SuppressBuildWarnings = true
                 }
+                .WithSystemPrompt(
+                    "You are a Game Master in a fantasy RPG.\n" +
+                    "When the player asks you to do something, use the relevant available skill " +
+                    "and its tools to complete the request.")
+                .WithSkill(enchantingSkill)
+                .WithSkill(explorationSkill)
+                .WithMode(AgentMode.ToolsAndChat)
+                .Build();
 
-                IReadOnlyList<LlmToolCallRecord> toolCalls = CoreAi.GetToolCallHistorySnapshot();
-                Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
-                                                 r.Info.RoleId == roleId &&
-                                                 r.Info.ToolName == "read_skill"),
-                    "Skill discovery must complete a real read_skill tool call.");
-                Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
-                                                 r.Info.RoleId == roleId &&
-                                                 r.Info.ToolName == "call_skill_tool"),
-                    "Skill discovery must complete a real call_skill_tool proxy call.");
-                Assert.IsTrue(_enchantWeaponCalled,
-                    "enchant_weapon should have been executed through call_skill_tool, not only mentioned in model text.");
+            InMemoryStore store = new();
+            AgentMemoryPolicy policy = new();
+            config.ApplyToPolicy(policy);
 
-                Debug.Log("[ToolDiscovery] ✅ Model discovered enchant_weapon via read_skill");
-                Debug.Log("[ToolDiscovery] ✅ and executed it via call_skill_tool proxy!");
+            CaptureLlm cap = new(handle.WrapWithMemoryStore(store));
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            _settings = settings;
 
-                ScriptableObject.DestroyImmediate(settings);
-            }
-            finally
+            AiOrchestrator orch = new(
+                new SoloAuthorityHost(), cap, new Sink(), new SessionTelemetryCollector(),
+                new AiPromptComposer(
+                    new BuiltInDefaultAgentSystemPromptProvider(),
+                    new NoAgentUserPromptTemplateProvider(),
+                    new NullLuaScriptVersionStore(), null, policy, settings),
+                store, policy,
+                new NoOpRoleStructuredResponsePolicy(),
+                new NullAiOrchestrationMetrics(),
+                settings,
+                new LocalActorIdentityProvider("skill-tool-discovery-test"), null, null);
+
+            Debug.Log("[ToolDiscovery] ── Request: 'Enchant my iron sword with fire' ──");
+
+            CoreAi.ClearToolCallHistory();
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task t = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
             {
-                handle.Dispose();
+                RoleId = roleId,
+                Hint = "Enchant my iron sword with fire"
+            }, cts.Token));
+            yield return PlayModeTestAwait.WaitTask(t, _requests.Cap(120f), "enchant request", cts);
+
+            // Results
+            Debug.Log("[ToolDiscovery] ═══════════════════════════════════════════");
+            Debug.Log($"[ToolDiscovery] enchant_weapon called: {_enchantWeaponCalled}");
+            Debug.Log($"[ToolDiscovery] Weapon:               '{_enchantTarget}'");
+            Debug.Log($"[ToolDiscovery] Enchantment:          '{_enchantType}'");
+            Debug.Log($"[ToolDiscovery] Model response:       {cap.LastContent}");
+            Debug.Log("[ToolDiscovery] ═══════════════════════════════════════════");
+
+            // Verify model only saw 2 tools (not enchant_weapon directly)
+            Assert.That(cap.FirstSystemPrompt, Does.Not.Contain("enchant_weapon"),
+                "enchant_weapon should NOT be in system prompt — only discoverable via read_skill.");
+
+            if (!cap.LastOk)
+            {
+                Assert.Inconclusive("LLM did not return a valid response.");
             }
+
+            IReadOnlyList<LlmToolCallRecord> toolCalls = CoreAi.GetToolCallHistorySnapshot();
+            Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
+                                             r.Info.RoleId == roleId &&
+                                             r.Info.ToolName == "read_skill"),
+                "Skill discovery must complete a real read_skill tool call.");
+            Assert.IsTrue(toolCalls.Any(r => r.Status == "completed" &&
+                                             r.Info.RoleId == roleId &&
+                                             r.Info.ToolName == "call_skill_tool"),
+                "Skill discovery must complete a real call_skill_tool proxy call.");
+            Assert.IsTrue(_enchantWeaponCalled,
+                "enchant_weapon should have been executed through call_skill_tool, not only mentioned in model text.");
+
+            Debug.Log("[ToolDiscovery] ✅ Model discovered enchant_weapon via read_skill");
+            Debug.Log("[ToolDiscovery] ✅ and executed it via call_skill_tool proxy!");
         }
     }
 #endif

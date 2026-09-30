@@ -2,6 +2,136 @@
 
 ## [Unreleased]
 
+### Breaking
+
+- **`NotifyToolExecuted` result for camera tools.** `IToolExecutionNotifier.NotifyToolExecuted` `result` is the tool's
+  `LlmToolImageResult` for `camera_capture`, `screenshot` and `capture_camera`, not a JSON string with a base64
+  `dataUrl`. Cast it and read `.Images`; `ToString()` is the summary only.
+- **Source break.** `RunTaskAsync("x", null)` / `RunStreamingAsync("x", null)` is CS0121-ambiguous between the `roleId`,
+  `AiAttachment` and `IReadOnlyList<AiAttachment>` overloads: omit the argument or cast the null.
+- **Stricter attachment input.** `AiAttachment.Image(...)` rejects a non-image media type, and bytes that are neither
+  PNG/JPEG/GIF/WEBP nor named like an image, at construction instead of at compose time. A text attachment that is not
+  text in its encoding (NUL characters, or more than 1 in 64 undecodable) throws naming the file instead of being sent
+  as mojibake. `NormalizeMediaType` drops parameters (`text/plain; charset=utf-16` is `text/plain`), so
+  `application/json; charset=utf-8` is Text instead of Unsupported.
+
+### Fixed
+
+- **An image-only message no longer sends the type name as text.** `MeaiOpenAiChatClient` added the stringified content
+  type (`Microsoft.Extensions.AI.DataContent`) as a text part next to the image when the message had no text; it now
+  builds the parts from the real text only. Found in the WebGL player against a real model.
+- **A camera image can no longer skip the tool-result size cut without being lifted.** `ToolExecutionPolicy` exempts
+  `camera_capture` / `screenshot` results from `MaxToolResultChars` on the promise that `LiftCameraImages` moves the
+  base64 into an image part before the next request. The exemption was looser than the lifter: a `data:image/bmp`,
+  a non-base64 payload, an over-4 MB decode or a result without `"ok":true` stayed whole in the history of every later
+  request. One shared rule (`SmartToolCallingChatClient.TryReadLiftableCameraImage`) now decides both, and the final
+  no-tools summary turn lifts before it sends. (Correction: that validator still threw `FormatException` for `"ok":"yes"` and accepted `"true"` and `1`; only a
+  JSON boolean `true` counts now, see below.)
+- **Benchmark G6 no longer gives castle instructions to other subjects.** The time-budget suffix carried castle
+  wording (curtain walls, gate, keep) into `COREAI_BENCHMARK_FREEBUILD_SUBJECT` goals and into a verbatim
+  `COREAI_BENCHMARK_FREEBUILD_PROMPT`. Castle pacing is now appended only to the default castle goal, a subject goal
+  gets subject-neutral pacing, and a full custom prompt gets the prompt plus the time-budget note only.
+- **A G6 turn cut by the deadline is accounted for.** Its generation time and turn were missing while its tool
+  arguments were counted, so tokens per second was inflated and the hero banner showed provider-exact numbers. A cut
+  streaming turn is now recorded with its elapsed time and marked `CUT` in the transcript, and the run's tokens are
+  reported as a partial estimate (`~`).
+- **Tool-error coverage is declared, not inferred.** A checkpoint's id or the word "invalid" in its description decided
+  whether it covered failed tool calls or invalid commands. Each checkpoint now declares what it scores, and G4's
+  `clean_tool` also fails on a failed tool call that never ran Lua (it charged nothing for those under suite 1.15).
+  **G4 scores can drop by the 5-point checkpoint against 1.15; compare scores only within one suite version** (the
+  suite version is decided with the leaderboard).
+- **The lifecycle tool-call observer ignores another run's calls.** Benchmark turns carry a per-run trace id, so an
+  orphaned task that outlives the cancel grace no longer changes `used_tools` / `clean_tools` of the next scenario.
+- **The suite start-gate plans the 5-second cancel grace and the G6 30-second capture reserve**, and the G6 budget
+  test is renamed to what it proves. A failed or Environment/Framework-attributed G6 run is never chosen as the report
+  hero.
+- **Rbx textured materials: packaged normal maps ran at about a tenth of their strength.** The tangent-frame epsilon in
+  `RbxTexturedSurface` (1e-6) was larger than the frame itself (1e-9..1e-8), so it shrank every tangent; switching
+  normals off changed a Brick frame by under 0.1 grey levels. The floor now only guards zero, and the procedural height gradient got the same fix. On its own this was not enough
+  to see relief at play distance (see the cavity entry below).
+- **Rbx textured block faces were mirrored or upside down, and a 45-degree wedge showed two ghosted projections.** Flat
+  faces now read one map in an upright frame, unrolled round the part so brick courses and planks continue round
+  corners (the single wrap seam is the +X/-Z edge); slopes get their own frame; the normal is divided by the part
+  scale. Curved parts use a wider blend (`RbxCurvedAxisWeights`) so balls and drums no longer show a cross or a seam.
+- **Textured metals rendered near-black.** The packaged metal colour maps have a linear reflectance of about 0.16, used
+  as-is as F0 (a dark mirror of the sky's ground half). Metallic texels are lifted toward the brightest shade of their
+  own hue by `_MetalAlbedoLift` (0.4, packaged Metal, DiamondPlate and CorrodedMetal only, faded out on near-black
+  texels); Bridge/Fab imports and dielectrics are untouched.
+- **Procedural Plastic, SmoothPlastic and Salt now have a fine surface grain** (their only relief was a stipple the
+  footprint filter flattened), and procedural bumps no longer weaken close to the camera.
+- **`AiAttachment.FromFileAsync` does not use `ConfigureAwait(false)`** (a WebGL-unsafe primitive the async-primitives
+  guard rejects).
+- **Non-camera tool images.** They were lifted with the camera prompt and evicted every earlier image. Each call now gets
+  `Image returned by tool '<name>'. Inspect it and continue with the task.`, earlier renders stay (a before/after
+  comparison works) and the latest 8 are kept. Camera frames keep the exact G6 prompt and replacement.
+- **A camera result is no longer described as exempt from the size cut**: no tool result is exempt any more; images are
+  lifted before every request because an unlifted typed result would send its text only.
+- **Only a JSON boolean `true` counts as `ok`** in the legacy camera validator; a non-string `dataUrl` is ordinary text.
+- **Text attachments decode correctly.** UTF-16/UTF-32 files (by byte-order mark or `charset`) and legacy charsets used to
+  become U+FFFD/NUL garbage. RFC 2397 data URLs with parameters (`data:text/plain;charset=utf-8;base64,...`) were
+  rejected. `FromStream` with a position past the end threw. Line-wrapped base64 that fits the cap was refused.
+- **A list of only null attachments** no longer appends an empty user message and no longer disables the resend dedupe.
+- **The context budget counts inlined text files** (about 4 bytes per token, `ContextBudgetRequest.InlinedAttachmentTokens`),
+  so the history is trimmed to make room.
+- **Relief is visible at play distance.** Brick joints, cobble gaps and rock cracks read as recessed at 2, 8 and 20 m. The
+  photographed normal maps carry their relief in 1-2 texel bevels that mipmapping flattens, so the packaged sets now ship
+  an occlusion map baked from their normal map (`*_Cavity.jpg`, 26 sets; Concrete, Plaster, Asphalt, Snow, Cardboard and the
+  nearly flat sets get none), and a new `_CavityStrength` (default 0, set only for packaged CC0 entries) lets it darken
+  the albedo so grooves stay dark under direct sun. Textured sets are about 10 grey levels darker on average. Far-range
+  relief is modest by nature (joints grey instead of chalk-white).
+- Texture normal strengths are capped at 1.2 (earlier values were tuned against a dead tangent frame) and procedural
+  Plastic / SmoothPlastic micro-relief is halved. The plastic grain is set per material (`_GrainStrength`: Plastic,
+  SmoothPlastic 1, Salt 0.5); Rubber and Snow keep their look.
+- Top and bottom texture grids no longer depend on part size, so adjacent floor plates of different sizes line up again;
+  curved surfaces drop projection weights under 2.5% (a third projection on about 5% of a ball, down from 28%); the
+  flat-face test is resolution-independent and the edge offsets are folded to one tile.
+
+### Changed
+
+- The skill-proxy A/B log prints the time ratio with two decimals and both raw times, labelled a single sample of
+  the last model call. Correction to 7.47.3: its "valid 1.1x ratio" is a single-sample 1.06x (195.6 s with two
+  meta-tools versus 206.7 s with 19 direct tools); retries are not included.
+- **Attachment and camera-image paths are allocation-lean** (portable benchmark, bytes per call): prompt + one 256 KB
+  image 768 to 304, empty prompt + image 568 to 248, two 32 KB text files 411 KB to 132 KB (one exact-size string), the
+  wire data URL of a 256 KB image 1.66 MB to 0.70 MB, a 100 KB camera frame end to end 7.4 MB to 12 KB. An image-only
+  turn no longer sends an empty text part.
+- **Each image is encoded to its wire data URL once per turn** and reused by every roundtrip, the summary and retries:
+  4 x 1 MB images went from about 11 MB of strings per request to 2.3 KB per request after the first.
+- `SupportedImageMediaTypes` / `SupportedTextMediaTypes` are read-only wrappers.
+
+### Tests
+
+- `CameraCapture_UnliftableImage_IsTruncatedWithMarker_NotExemptFromTheCap` (fails without the fix), G6 goal
+  composition, cut-turn accounting, tool-error coverage per real scenario, per-run trace filter and hero selection.
+- 34 attachment tests (factories, data URL / base64, stream / file, image-only, no-copy slice, wire data URL, the
+  orchestrator extensions, four allocation guards), typed tool images for any tool, fail-closed drop, decode-once legacy
+  lift; `RbxMaterialNormalCoverageEditModeTests` (every material has a real normal source) and the
+  `RbxMaterialSeamSheetPlayModeTests` inspection sheet with relief, metal and block-orientation guards. Three shader
+  source pins moved to the new projection contract.
+- CPU ports of the textured shader math (`RbxTexturedShaderMathEditModeTests`), cavity-bake tests and a close / mid / far
+  relief proof measured over object pixels only (`RbxMaterialSeamSheetPlayModeTests`, category `MaterialInspection`).
+
+### Added
+
+- **Multimodal one-liners in the engine-free core.** `IAiOrchestrationService.RunTaskAsync` / `RunStreamingAsync`
+  take `(prompt[, attachment | attachments][, roleId])`: prompt only, prompt + one image, several images, image only,
+  images + text files. `AiAttachment` gained `FromFile` / `FromFileAsync` / `FromStream` / `FromText` / `FromBase64` /
+  `FromDataUrl` / `TryFromDataUrl`, `Image(ReadOnlyMemory<byte>)` and `Memory`; the caller's buffer is wrapped, never
+  copied.
+- **`LlmToolImageResult`: any tool can show the model images.** Return it from a tool created with
+  `MarshalResult = LlmToolImageResult.PreserveResult` (`DelegateLlmTool` already does); the images travel out-of-band,
+  and only images a vision model can receive are delivered (fail-closed, the tool text says what was dropped).
+  `camera_capture` / `screenshot` use it; a legacy base64 `dataUrl` result is decoded once in `ToolExecutionPolicy` and
+  lifted without re-parsing.
+- `AiUserMessageBuilder.HasAttachments` / `EstimateInlinedTextTokens`, `ContextBudgetRequest.InlinedAttachmentTokens`, and
+  `AiAttachment.Image()` detects the type from the file signature.
+
+### Docs
+
+- Attachment lifetime contract: the buffers and the list are re-read on every provider request of the turn, the summary and
+  retries; keep them unchanged until the Task completes or the stream is fully enumerated or disposed.
+
+
 ## [7.47.4] - 2026-09-30
 
 ### Added
@@ -24,7 +154,7 @@
 ### Verification
 
 - A long free-model PlayMode sweep exposed the test isolation issue and was stopped after 233 of 271 cases when queued provider requests caused cascading HTTP header timeouts. The material-showcase castle independently failed its 12-material requirement with eight measured materials; the grading threshold was kept. A focused retry confirmed the memory write itself succeeded before the old fixture timed out waiting for more model text.
-- In the open Editor, the corrected combined memory-tool fixture passed write/append/clear in 73.13 seconds; the three-layer prompt passed 1/1 and the two streaming fixtures passed 2/2. The skill-proxy A/B test passed 1/1 in 402.45 seconds: both live responses completed, so its measured 1.1x ratio is valid for that run (195.6s with two meta-tools versus 206.7s with 19 direct tools). The proxy system prompt was 334 characters longer, which is reported rather than hidden.
+- In the open Editor, the corrected combined memory-tool fixture passed write/append/clear in 73.13 seconds; the three-layer prompt passed 1/1 and the two streaming fixtures passed 2/2. The skill-proxy A/B test passed 1/1 in 402.45 seconds: both live responses completed, so its time ratio is a single-sample 1.06x for the last model call of each run (195.6s with two meta-tools versus 206.7s with 19 direct tools; retries are not included). The proxy system prompt was 334 characters longer, which is reported rather than hidden.
 
 ## [7.47.2] - 2026-09-29
 

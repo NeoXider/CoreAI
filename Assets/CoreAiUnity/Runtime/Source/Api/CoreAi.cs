@@ -25,6 +25,9 @@ namespace CoreAI
     ///     label.text += chunk;
     /// // Smart path (streaming if enabled in settings / agent / UI):
     /// await CoreAi.SmartAskAsync("Question", "SmartChat", onChunk: c => label.text += c);
+    /// // Images (vision models) and text files (any model), one or many:
+    /// string seen = await CoreAi.AskAsync("What is on screen?", Camera.main.CaptureAiAttachment());
+    /// string diff = await CoreAi.AskAsync("Compare", new[] { before.ToAiAttachment(), AiAttachment.FromFile(path) });
     /// // Full orchestrator (memory, authority, metrics, publish):
     /// var task = new AiTaskRequest { RoleId = "Creator", Hint = "Emit a JSON command" };
     /// string result = await CoreAi.OrchestrateAsync(task);
@@ -121,6 +124,46 @@ namespace CoreAI
         }
 
         /// <summary>
+        /// <see cref="AskAsync(string, string, CancellationToken)"/> with one attachment — an image (sent to a
+        /// vision-capable model) or a text-like file (inlined into the prompt for any model):
+        /// <code>
+        /// string answer = await CoreAi.AskAsync("What is wrong with this level?", Camera.main.CaptureAiAttachment());
+        /// string review = await CoreAi.AskAsync("Review this script", AiAttachment.FromText("enemy.lua", luaSource));
+        /// </code>
+        /// </summary>
+        public static Task<string?> AskAsync(
+            string userMessage,
+            AiAttachment attachment,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            CancellationToken cancellationToken = default)
+        {
+            return AskAsync(userMessage, AiAttachmentList.Of(attachment), roleId, cancellationToken);
+        }
+
+        /// <summary>
+        /// <see cref="AskAsync(string, string, CancellationToken)"/> with any number of attachments (several
+        /// images, images and text files, in order). An empty <paramref name="userMessage"/> sends the attachments
+        /// alone; a null list (or one of only nulls) is the prompt-only turn. Images reach only vision-capable models
+        /// (see <see cref="IsVisionEnabled"/>); text files reach every model.
+        /// <para>
+        /// Neither the list nor the image bytes are copied, and they are read again on every provider request of the
+        /// turn (tool-call roundtrips, the final summary, retries): keep them unchanged until the returned
+        /// <see cref="Task"/> completes. A bare <c>null</c> second argument is ambiguous between the overloads
+        /// (CS0121); pass <c>roleId:</c> by name or cast the null.
+        /// </para>
+        /// </summary>
+        public static async Task<string?> AskAsync(
+            string userMessage,
+            IReadOnlyList<AiAttachment>? attachments,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            CancellationToken cancellationToken = default)
+        {
+            CoreAiChatService svc = RequireChatService();
+            AiTaskRequest task = svc.CreateTaskRequest(userMessage, roleId, attachments);
+            return await svc.SendMessageAsync(task, cancellationToken);
+        }
+
+        /// <summary>
         /// Whether the configured model can receive images (vision / multimodal). Gates the camera send
         /// path and any vision-tool registration: when <c>false</c>, callers should fall back to
         /// <see cref="AskAsync"/> and omit images/tools. Resolved from <c>CoreAISettingsAsset.VisionSupport</c>
@@ -169,15 +212,18 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Registers <c>CameraLlmTool</c> (the <c>capture_camera</c> tool) on <paramref name="roleId"/> so a
-        /// vision-capable model can autonomously request a screenshot — but only when
-        /// <see cref="IsVisionEnabled"/> is <c>true</c>. For text-only models this is a no-op (the tool is
+        /// Registers the scene-camera tool <c>capture_camera</c> (<see cref="Infrastructure.World.CameraLlmTool"/>)
+        /// on <paramref name="roleId"/> so a vision-capable model can autonomously request a screenshot — but only
+        /// when <see cref="IsVisionEnabled"/> is <c>true</c>. For text-only models this is a no-op (the tool is
         /// omitted), satisfying the capability gate on the tool-registration side. Returns whether the tool
         /// was registered.
         /// <para>
-        /// Because OpenAI tool results cannot carry images, after the tool runs lift the screenshot into a
-        /// follow-up user message with <see cref="AskWithImageFollowUpAsync"/> (subscribe to
-        /// <see cref="OnToolCallCompleted"/>, match <c>capture_camera</c>, pass its <c>ResultJson</c>).
+        /// Nothing else is needed to show the model the picture: the tool returns an <see cref="LlmToolImageResult"/>
+        /// and the tool loop lifts the frame into a user image message before the next request, automatically.
+        /// Naming: <c>capture_camera</c> is this scene tool; <c>camera_capture</c> (alias <c>screenshot</c>) is the
+        /// agent-vision tool of <see cref="Vision.CameraLlmTool"/>, added per role by
+        /// <see cref="CoreAiChatService.TryEnsureCameraToolForRole"/> (the chat panel calls it). Both deliver their
+        /// frames the same way.
         /// </para>
         /// </summary>
         public static bool RegisterCameraVisionTool(string roleId = BuiltInAgentRoleIds.SmartChat)
@@ -301,11 +347,16 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Autonomous-tool follow-up lift: after the model calls <c>capture_camera</c>, OpenAI tool results
-        /// cannot carry images, so the host lifts the returned image into a follow-up USER <c>image_url</c>
-        /// message before the next model call. Pass the raw <c>capture_camera</c> result JSON (e.g.
-        /// <see cref="LlmToolCallCompleted.ResultJson"/> from <see cref="OnToolCallCompleted"/>). Returns
-        /// <c>null</c> when the result carries no usable image or vision is disabled.
+        /// Legacy path: sends a separate one-shot USER message with the image carried by a camera result JSON that
+        /// still has a base64 <c>dataUri</c> (the pre-typed <c>capture_camera</c> shape, or a host tool of that
+        /// shape). Returns <c>null</c> when the JSON carries no usable image or vision is disabled.
+        /// <para>
+        /// Today's camera tools need no follow-up: their frame reaches the model inside the same turn,
+        /// automatically, and their <see cref="LlmToolCallCompleted.ResultJson"/> is only the summary (no image), so
+        /// passing it here returns <c>null</c>. To ask about a frame a tool produced, take it from
+        /// <see cref="OnToolExecuted"/> (<c>((LlmToolImageResult)result).Images[0]</c>) and use
+        /// <see cref="AskWithImageFollowUpAsync(string, AiAttachment, string, CancellationToken)"/>.
+        /// </para>
         /// </summary>
         public static Task<string> AskWithImageFollowUpAsync(
             string followUpPrompt,
@@ -318,17 +369,72 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Streams model text as stripped string chunks (<c>&lt;think&gt;</c> filtered). Terminal empty chunks are not yielded.
+        /// Sends <paramref name="image"/> with <paramref name="followUpPrompt"/> as a separate one-shot USER message
+        /// (no history, no tools) to the vision model and returns its reply, e.g. an image a tool returned:
+        /// <code>
+        /// CoreAi.OnToolExecuted += (role, tool, args, result) =>
+        /// {
+        ///     if (result is LlmToolImageResult shot &amp;&amp; shot.Images.Count > 0)
+        ///         _ = CoreAi.AskWithImageFollowUpAsync("Is the castle finished?", shot.Images[0]);
+        /// };
+        /// </code>
+        /// Returns <c>null</c> when vision is disabled. The image bytes are not copied: keep them unchanged until
+        /// the returned <see cref="Task"/> completes.
         /// </summary>
-        public static async IAsyncEnumerable<string> StreamAsync(
-            string userMessage,
+        /// <exception cref="ArgumentException"><paramref name="image"/> is not a supported image.</exception>
+        public static Task<string> AskWithImageFollowUpAsync(
+            string followUpPrompt,
+            AiAttachment image,
             string roleId = BuiltInAgentRoleIds.SmartChat,
-            [EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
+            return RequireChatService().AskWithImageFollowUpAsync(followUpPrompt, image, roleId, cancellationToken);
+        }
+
+        /// <summary>
+        /// Streams model text as stripped string chunks (<c>&lt;think&gt;</c> filtered). Terminal empty chunks are not yielded.
+        /// </summary>
+        public static IAsyncEnumerable<string> StreamAsync(
+            string userMessage,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            CancellationToken cancellationToken = default)
+        {
+            return StreamTextAsync(userMessage, null, roleId, cancellationToken);
+        }
+
+        /// <summary><see cref="StreamAsync(string, string, CancellationToken)"/> with one attachment (image or text file).</summary>
+        public static IAsyncEnumerable<string> StreamAsync(
+            string userMessage,
+            AiAttachment attachment,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            CancellationToken cancellationToken = default)
+        {
+            return StreamTextAsync(userMessage, AiAttachmentList.Of(attachment), roleId, cancellationToken);
+        }
+
+        /// <summary><see cref="StreamAsync(string, string, CancellationToken)"/> with any number of attachments.</summary>
+        public static IAsyncEnumerable<string> StreamAsync(
+            string userMessage,
+            IReadOnlyList<AiAttachment>? attachments,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            CancellationToken cancellationToken = default)
+        {
+            return StreamTextAsync(userMessage, attachments, roleId, cancellationToken);
+        }
+
+        // WHY: one iterator behind the public overloads - the service is still resolved on the first MoveNextAsync,
+        // exactly as before, and a token given to WithCancellation still merges through [EnumeratorCancellation].
+        private static async IAsyncEnumerable<string> StreamTextAsync(
+            string userMessage,
+            IReadOnlyList<AiAttachment>? attachments,
+            string roleId,
+            [EnumeratorCancellation]
+            CancellationToken cancellationToken)
+        {
             CoreAiChatService svc = RequireChatService();
-            await foreach (LlmStreamChunk chunk in
-                           svc.SendMessageStreamingAsync(userMessage, roleId, cancellationToken))
+            await foreach (LlmStreamChunk chunk in attachments == null
+                               ? svc.SendMessageStreamingAsync(userMessage, roleId, cancellationToken)
+                               : svc.SendMessageStreamingAsync(userMessage, attachments, roleId, cancellationToken))
             {
                 if (!string.IsNullOrEmpty(chunk.Error))
                 {
@@ -359,6 +465,27 @@ namespace CoreAI
             return svc.SendMessageStreamingAsync(userMessage, roleId, cancellationToken);
         }
 
+        /// <summary><see cref="StreamChunksAsync(string, string, CancellationToken)"/> with one attachment.</summary>
+        public static IAsyncEnumerable<LlmStreamChunk> StreamChunksAsync(
+            string userMessage,
+            AiAttachment attachment,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            CancellationToken cancellationToken = default)
+        {
+            return StreamChunksAsync(userMessage, AiAttachmentList.Of(attachment), roleId, cancellationToken);
+        }
+
+        /// <summary><see cref="StreamChunksAsync(string, string, CancellationToken)"/> with any number of attachments.</summary>
+        public static IAsyncEnumerable<LlmStreamChunk> StreamChunksAsync(
+            string userMessage,
+            IReadOnlyList<AiAttachment>? attachments,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            CancellationToken cancellationToken = default)
+        {
+            CoreAiChatService svc = RequireChatService();
+            return svc.SendMessageStreamingAsync(userMessage, attachments, roleId, cancellationToken);
+        }
+
         /// <summary>
         /// Streaming turn with a full <see cref="AiTaskRequest"/> (same path as
         /// <see cref="SendMessageStreamingAsync"/> for UI). Use this when the host must pass
@@ -387,7 +514,40 @@ namespace CoreAI
             CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
-            Action<LlmStreamChunk>? adapter = onChunk == null
+            return svc.SendMessageSmartAsync(userMessage, roleId, AdaptTextChunks(onChunk), uiStreamingOverride,
+                cancellationToken)!;
+        }
+
+        /// <summary><see cref="SmartAskAsync(string, string, Action{string}, bool?, CancellationToken)"/> with one attachment.</summary>
+        public static Task<string?> SmartAskAsync(
+            string userMessage,
+            AiAttachment attachment,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            Action<string>? onChunk = null,
+            bool? uiStreamingOverride = null,
+            CancellationToken cancellationToken = default)
+        {
+            return SmartAskAsync(userMessage, AiAttachmentList.Of(attachment), roleId, onChunk, uiStreamingOverride,
+                cancellationToken);
+        }
+
+        /// <summary><see cref="SmartAskAsync(string, string, Action{string}, bool?, CancellationToken)"/> with any number of attachments.</summary>
+        public static Task<string?> SmartAskAsync(
+            string userMessage,
+            IReadOnlyList<AiAttachment>? attachments,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            Action<string>? onChunk = null,
+            bool? uiStreamingOverride = null,
+            CancellationToken cancellationToken = default)
+        {
+            CoreAiChatService svc = RequireChatService();
+            return svc.SendMessageSmartAsync(userMessage, attachments, roleId, AdaptTextChunks(onChunk),
+                uiStreamingOverride, cancellationToken)!;
+        }
+
+        private static Action<LlmStreamChunk>? AdaptTextChunks(Action<string>? onChunk)
+        {
+            return onChunk == null
                 ? null
                 : new Action<LlmStreamChunk>(chunk =>
                 {
@@ -396,7 +556,6 @@ namespace CoreAI
                         onChunk(chunk.Text);
                     }
                 });
-            return svc.SendMessageSmartAsync(userMessage, roleId, adapter, uiStreamingOverride, cancellationToken)!;
         }
 
         /// <summary>
@@ -519,7 +678,14 @@ namespace CoreAI
         /// <param name="roleId">Agent role id.</param>
         /// <param name="toolName">Tool name.</param>
         /// <param name="arguments">Model-provided arguments (optional).</param>
-        /// <param name="result">Tool return payload (optional).</param>
+        /// <param name="result">
+        /// The tool's own return value (optional). For a tool that shows the model images — the camera tools
+        /// <c>camera_capture</c>, <c>screenshot</c> and <c>capture_camera</c>, and any tool returning
+        /// <see cref="LlmToolImageResult"/> — this is that <see cref="LlmToolImageResult"/>, not a JSON string: cast
+        /// it and read <see cref="LlmToolImageResult.Images"/>; its <c>ToString()</c> is only the summary text
+        /// (no <c>dataUrl</c>). The data-URL helpers (<c>CameraLlmTool.TryExtractImageContentFromResult</c>) apply to
+        /// legacy JSON strings only.
+        /// </param>
         public delegate void ToolExecutedHandler(string roleId, string toolName,
             IDictionary<string, object?>? arguments, object? result);
 
@@ -527,7 +693,16 @@ namespace CoreAI
         /// Raised after the MEAI stack executes a tool (VFX, audio, analytics, etc.).
         /// <code>
         /// CoreAi.OnToolExecuted += (role, tool, args, result) => Debug.Log($"{role} used {tool}");
+        /// // Images a tool showed the model (camera frames, renders): the result is the typed object.
+        /// CoreAi.OnToolExecuted += (role, tool, args, result) =>
+        /// {
+        ///     if (result is LlmToolImageResult shot) preview.Show(shot.Images);
+        /// };
         /// </code>
+        /// <para>
+        /// For camera tools <c>result</c> is an <see cref="LlmToolImageResult"/>, not the JSON string with a
+        /// <c>dataUrl</c> it was before; see <see cref="ToolExecutedHandler"/>.
+        /// </para>
         /// </summary>
         public static event ToolExecutedHandler? OnToolExecuted;
 

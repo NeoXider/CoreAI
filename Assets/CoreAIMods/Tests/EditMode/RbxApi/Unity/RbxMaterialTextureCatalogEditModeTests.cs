@@ -154,6 +154,50 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
         }
 
         [Test]
+        public void CavityAndMetalLift_DefaultToZeroAndReachTheMaterialOnlyWhenSet()
+        {
+            Type catalogType = RequiredRuntimeType(CatalogTypeName);
+            Type entryType = RequiredNestedType(catalogType, "Entry");
+            Shader shader = Shader.Find("CoreAI/Rbx/Textured Surface");
+            Assert.NotNull(shader);
+            Texture2D albedo = new(2, 2);
+            Texture2D normal = new(2, 2);
+            Texture2D roughness = new(2, 2);
+            ScriptableObject catalog = null;
+            try
+            {
+                // WHY: an imported Bridge or Fab set never sets these, so it must render exactly as
+                // before; only the packaged CC0 entries carry non-zero values.
+                object imported = CreateCompleteEntry(entryType, "Concrete", 816, albedo, normal,
+                    roughness, true);
+                object packaged = CreateCompleteEntry(entryType, "Metal", 1088, albedo, normal,
+                    roughness, true);
+                SetProperty(packaged, "CavityStrength", 0.6f);
+                SetProperty(packaged, "MetalAlbedoLift", 0.4f);
+                catalog = CreateCatalog(catalogType, entryType, imported, packaged);
+                RbxTextureMaterialProvider provider = CreateProvider(catalogType, catalog, shader);
+                RbxMaterialId concrete = new("Concrete", 816);
+                RbxMaterialId metal = new("Metal", 1088);
+
+                Assert.AreEqual(0f, (float)GetProperty(imported, "CavityStrength"));
+                Assert.AreEqual(0f, (float)GetProperty(imported, "MetalAlbedoLift"));
+                Assert.IsTrue(provider.TryGetMaterial(in concrete, out Material importedMaterial));
+                Assert.AreEqual(0f, importedMaterial.GetFloat("_CavityStrength"));
+                Assert.AreEqual(0f, importedMaterial.GetFloat("_MetalAlbedoLift"));
+                Assert.IsTrue(provider.TryGetMaterial(in metal, out Material packagedMaterial));
+                Assert.AreEqual(0.6f, packagedMaterial.GetFloat("_CavityStrength"), 1e-6f);
+                Assert.AreEqual(0.4f, packagedMaterial.GetFloat("_MetalAlbedoLift"), 1e-6f);
+            }
+            finally
+            {
+                Destroy(albedo);
+                Destroy(normal);
+                Destroy(roughness);
+                Destroy(catalog);
+            }
+        }
+
+        [Test]
         public void MissingRequiredTextureFallsBackToProceduralAndLogsOnce()
         {
             Type catalogType = RequiredRuntimeType(CatalogTypeName);
@@ -206,7 +250,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
             StringAssert.Contains("_OcclusionMap", shader);
             StringAssert.Contains("_RBX_OCCLUSION_MAP", shader);
             StringAssert.Contains("_RBX_NORMAL_DIRECTX", shader);
-            StringAssert.Contains("RBX_AXIS_BLEND_WIDTH = 0.10", shader);
+            StringAssert.Contains("_CavityStrength(\"Cavity Strength\", Range(0,1)) = 0", shader);
+            StringAssert.Contains("_MetalAlbedoLift(\"Metal Albedo Lift\", Range(0,1)) = 0", shader);
         }
 
         [Test]

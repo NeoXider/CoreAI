@@ -12,6 +12,9 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Called after a tool is successfully invoked by the pipeline.
         /// Implementations must be exception-safe (callers wrap in try/catch as defense-in-depth).
+        /// <paramref name="result"/> is the tool's own return value: for a tool that shows the model images
+        /// (the camera tools, any tool returning <see cref="CoreAI.Ai.LlmToolImageResult"/>) it is that object, whose
+        /// <c>Images</c> hold the pictures and whose <c>ToString()</c> is only the summary text.
         /// </summary>
         void NotifyToolExecuted(
             string roleId,

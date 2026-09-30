@@ -60,9 +60,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             protected static void AddToolHygiene(ScenarioGrading g, BenchmarkEnvironment env, RunObservation run)
             {
-                g.Add("clean_tools", "no failed tool calls or invalid world commands", 5,
+                g.AddToolErrorCheckpoint("clean_tools", "no failed tool calls or invalid world commands", 5,
                     run.FailedToolCalls == 0 && env.World.InvalidCommandCount == 0 && env.Lua.FailedExecutions == 0,
-                    dimension: BenchmarkDimension.ToolCorrectness);
+                    scoresFailedToolCalls: true, scoresInvalidCommands: true);
             }
 
             protected static List<RecordedWorldCommand> SpawnCommands(BenchmarkEnvironment env)

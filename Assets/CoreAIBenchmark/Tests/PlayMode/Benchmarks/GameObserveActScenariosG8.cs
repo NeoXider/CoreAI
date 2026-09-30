@@ -103,9 +103,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 g.Add("used_tools", "issued at least one tool call", 5, run.ToolCalls >= 1,
                     dimension: BenchmarkDimension.ToolCorrectness);
-                g.Add("clean_tools", "no failed tool calls or invalid world commands", 10,
+                g.AddToolErrorCheckpoint("clean_tools", "no failed tool calls or invalid world commands", 10,
                     run.FailedToolCalls == 0 && env.World.InvalidCommandCount == 0,
-                    dimension: BenchmarkDimension.ToolCorrectness,
+                    scoresFailedToolCalls: true, scoresInvalidCommands: true,
                     detail: $"{run.FailedToolCalls} failed, {env.World.InvalidCommandCount} invalid");
             }
         }

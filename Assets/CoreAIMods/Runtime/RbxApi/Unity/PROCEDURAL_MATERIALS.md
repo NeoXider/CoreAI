@@ -36,6 +36,17 @@ The catalog maps all 45 public `Enum.Material` items, grouped by shader family:
 - Transparent (mode 0 additive, 1 smooth, 2 fractured): ForceField; Glass, Air; Ice, Glacier, Water.
 
 Opaque materials use procedural albedo, metallic, smoothness, occlusion, and height-derived normals.
+Plastic, SmoothPlastic and Salt add a shared 4.5 cm value-noise grain (`RbxPlasticGrainHeight`,
+22 cycles per metre) on top of their pixel-scale stipple, which the footprint filter removes beyond a
+few metres; each material's bump strength keeps the grain visible on Plastic and Salt and down to a
+highlight-only sheen on SmoothPlastic. The grain is scaled by the per-material `_GrainStrength`
+(1 for Plastic and SmoothPlastic, 0.5 for Salt, whose larger bump strength made the full grain read
+as stucco, 0 for every other entry): shader modes are shared, and Rubber (SmoothPlastic's
+mode) and Snow (Salt's mode) keep their own look. The screen-space height gradient divides by the squared pixel
+footprint with a guard that only protects degenerate pixels, so bumps no longer weaken as the camera
+comes closer. With that guard gone, the pixel-scale stipples of Plastic and SmoothPlastic, which render procedurally
+even with the packaged textures present, were halved,
+so they stay a fine texture at arm's length instead of reading as sandpaper.
 Organic low-frequency relief uses NoiseShader's analytical 3D simplex derivatives; authored masks such
 as planks, mortar, blades, cracks, and pebbles use one center-height fragment derivative. The normal path
 does not resample the complete material. Neon is HDR emissive and independent of scene lighting.

@@ -46,28 +46,30 @@ namespace CoreAI.Vision
         public IEnumerable<AIFunction> CreateAIFunctions()
         {
             yield return AIFunctionFactory.Create(
-                (Func<string, int, CancellationToken, Task<string>>)CaptureCameraAsync,
+                (Func<string, int, CancellationToken, Task<object>>)CaptureCameraAsync,
                 new AIFunctionFactoryOptions
                 {
                     Name = "camera_capture",
                     Description =
                         "Take a screenshot of the game camera to SEE the current scene and verify your work. " +
-                        "Returns a compact JSON result with a text summary and a base64 image data URL. " +
-                        "Defaults to your own camera, else the main camera. Does NOT move the camera."
+                        "Returns a compact JSON summary; the image itself is attached for you to look at. " +
+                        "Defaults to your own camera, else the main camera. Does NOT move the camera.",
+                    MarshalResult = LlmToolImageResult.PreserveResult
                 });
 
             // WHY: models that search tools by the literal word "screenshot" miss camera_capture, so this
             // alias exposes the identical capture behavior under a name that matches that search intent.
             yield return AIFunctionFactory.Create(
-                (Func<string, int, CancellationToken, Task<string>>)CaptureCameraAsync,
+                (Func<string, int, CancellationToken, Task<object>>)CaptureCameraAsync,
                 new AIFunctionFactoryOptions
                 {
                     Name = "screenshot",
                     Description =
                         "Take a screenshot of the game camera to SEE the current scene and verify your work. " +
-                        "Alias for camera_capture: returns a compact JSON result with a text summary and a " +
-                        "base64 image data URL. Defaults to your own camera, else the main camera. Does NOT " +
-                        "move the camera."
+                        "Alias for camera_capture: returns a compact JSON summary; the image itself is attached " +
+                        "for you to look at. Defaults to your own camera, else the main camera. Does NOT " +
+                        "move the camera.",
+                    MarshalResult = LlmToolImageResult.PreserveResult
                 });
 
             yield return AIFunctionFactory.Create(
@@ -92,7 +94,13 @@ namespace CoreAI.Vision
                 });
         }
 
-        private async Task<string> CaptureCameraAsync(
+        /// <summary>
+        /// Captures a frame and returns it as an <see cref="LlmToolImageResult"/>: the JPEG/PNG bytes travel
+        /// out-of-band to the model's image channel, the tool message is only the JSON summary. WHY: the former
+        /// base64 data URL inside the JSON cost several full-size string copies plus a parse and a decode per
+        /// capture before the image reached the model. Failures are plain JSON strings.
+        /// </summary>
+        private async Task<object> CaptureCameraAsync(
             [Description("Camera GameObject name, or 'main' for the main camera. Leave empty to use your own " +
                          "camera if you have one, otherwise the main camera.")]
             string cameraName = "",
@@ -137,11 +145,10 @@ namespace CoreAI.Vision
                 }
 
                 string mime = result.Format == "png" ? "image/png" : "image/jpeg";
-                string dataUrl = $"data:{mime};base64,{Convert.ToBase64String(result.Bytes)}";
                 Vector3 p = result.Pose.Position;
                 Vector3 r = result.Pose.EulerRotation;
 
-                return JsonConvert.SerializeObject(new
+                string summaryJson = JsonConvert.SerializeObject(new
                 {
                     ok = true,
                     summary =
@@ -155,8 +162,9 @@ namespace CoreAI.Vision
                     format = result.Format,
                     sizeBytes = result.SizeBytes,
                     pose = PoseJson(result.Pose),
-                    dataUrl
+                    imageAttached = true
                 });
+                return new LlmToolImageResult(summaryJson, AiAttachment.Image(result.Bytes, mime));
             }
             catch (Exception ex)
             {

@@ -559,6 +559,12 @@ namespace CoreAI.Editor
     {
         internal const string RelativeOutputPath = "artifacts/G11-WebGL";
 
+        /// <summary>
+        /// Optional environment variable naming frozen scenes (file name without extension or full asset path,
+        /// separated by <c>;</c> or <c>,</c>) to leave out of a local diagnostic build. Unset keeps the full set.
+        /// </summary>
+        internal const string ExcludeScenesVariable = "COREAI_G11_EXCLUDE_SCENES";
+
         private static readonly string[] FrozenScenePaths =
         {
             "Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity",
@@ -599,8 +605,18 @@ namespace CoreAI.Editor
             PrepareOutputDirectory(projectRoot, outputPath);
 
             BuildPlayerOptions options = CreateBuildPlayerOptions(outputPath);
+            // WHY: a project with an optional package that breaks one demo scene at build time (e.g. Mirror's
+            // scene-id check) can still build the rest for a targeted browser check; the full gate stays the default.
+            options.scenes = ExcludeScenes(options.scenes, Environment.GetEnvironmentVariable(ExcludeScenesVariable));
+            if (options.scenes.Length != FrozenScenePaths.Length)
+            {
+                CoreAIEditorLog.Log(
+                    $"G11 WebGL build: {ExcludeScenesVariable} left out {FrozenScenePaths.Length - options.scenes.Length} " +
+                    "scene(s); this player is NOT a full G11 gate build.");
+            }
+
             CoreAIEditorLog.Log(
-                $"G11 WebGL build started: {FrozenScenePaths.Length} scenes -> {outputPath}");
+                $"G11 WebGL build started: {options.scenes.Length} scenes -> {outputPath}");
             BuildReport report = BuildPipeline.BuildPlayer(options);
             if (report.summary.result != BuildResult.Succeeded)
             {
@@ -630,6 +646,40 @@ namespace CoreAI.Editor
                 targetGroup = BuildTargetGroup.WebGL,
                 options = BuildOptions.CleanBuildCache | BuildOptions.StrictMode
             };
+        }
+
+        /// <summary>
+        /// Returns <paramref name="scenes"/> without the entries named in <paramref name="exclusionSpec"/>
+        /// (see <see cref="ExcludeScenesVariable"/>). A blank spec returns the input unchanged; a name that matches
+        /// no scene throws, so a typo can never be mistaken for a full build.
+        /// </summary>
+        internal static string[] ExcludeScenes(string[] scenes, string exclusionSpec)
+        {
+            if (string.IsNullOrWhiteSpace(exclusionSpec))
+            {
+                return scenes;
+            }
+
+            System.Collections.Generic.List<string> kept = new(scenes);
+            foreach (string rawName in exclusionSpec.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string name = rawName.Trim();
+                if (name.Length == 0)
+                {
+                    continue;
+                }
+
+                int removed = kept.RemoveAll(scene =>
+                    string.Equals(scene, name, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(Path.GetFileNameWithoutExtension(scene), name, StringComparison.OrdinalIgnoreCase));
+                if (removed == 0)
+                {
+                    throw new BuildFailedException(
+                        $"{ExcludeScenesVariable} names '{name}', which is not a frozen G11 scene.");
+                }
+            }
+
+            return kept.ToArray();
         }
 
         /// <summary>Returns the fixed G11 output directory for a project root.</summary>

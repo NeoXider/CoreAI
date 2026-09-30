@@ -44,13 +44,23 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             private readonly StringBuilder _toolTraceJsonl = new();
             private readonly List<string> _luaChunks = new();
             private readonly string _scenarioId;
+            private readonly string _traceIdPrefix;
             private int _toolCalls;
             private int _failedToolCalls;
+            private int _cameraCalls;
 
-            internal ScenarioToolCallObserver(string roleId, string scenarioId = "")
+            /// <param name="roleId">Only calls requested by this agent role are counted.</param>
+            /// <param name="scenarioId">Scenario id written into each JSONL trace line.</param>
+            /// <param name="traceIdPrefix">
+            /// Prefix of every trace id this run's requests carry. A call with a different non-empty trace id
+            /// belongs to another run (for example an orphaned task that outlived its cancel grace) and is
+            /// ignored. Null or empty disables the trace filter.
+            /// </param>
+            internal ScenarioToolCallObserver(string roleId, string scenarioId = "", string traceIdPrefix = null)
             {
                 _roleId = roleId;
                 _scenarioId = scenarioId;
+                _traceIdPrefix = traceIdPrefix;
             }
 
             internal int ToolCalls
@@ -61,6 +71,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             internal int FailedToolCalls
             {
                 get { lock (_gate) { return _failedToolCalls; } }
+            }
+
+            /// <summary>
+            /// Camera/vision calls the lifecycle hook saw. Unlike the captured turns' tool traces this includes
+            /// the calls of a streamed turn cut by the deadline, which never reaches its terminal chunk.
+            /// </summary>
+            internal int CameraCalls
+            {
+                get { lock (_gate) { return _cameraCalls; } }
             }
 
             internal string CompletionText
@@ -81,12 +100,27 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     return;
                 }
 
+                // WHY: the hook is process-wide, so the role alone cannot tell this run from an orphaned
+                // same-role task of an earlier scenario. An empty trace id (a client that does not propagate
+                // the request trace) falls back to the role filter.
+                if (!string.IsNullOrEmpty(_traceIdPrefix) && !string.IsNullOrEmpty(record.Info.TraceId)
+                    && !record.Info.TraceId.StartsWith(_traceIdPrefix, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
                 lock (_gate)
                 {
                     _toolCalls++;
                     if (record.Status == "failed")
                     {
                         _failedToolCalls++;
+                    }
+
+                    if (record.Info.ToolName != null &&
+                        record.Info.ToolName.StartsWith("camera", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _cameraCalls++;
                     }
 
                     _completionText.Append(record.Info.ToolName).Append(' ')
@@ -168,6 +202,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public int? CompletionTokens;
             public bool Ok = true;
             public string Error = "";
+
+            /// <summary>
+            /// True when the turn ended before the provider's terminal result (scenario deadline, cancellation
+            /// or a thrown call). Its generation time is counted; its usage and tool trace never arrived.
+            /// </summary>
+            public bool Cut;
         }
 
         /// <summary>
@@ -178,7 +218,17 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         public sealed class SessionCapturingLlmClient : ILlmClient
         {
             private readonly ILlmClient _inner;
+            private readonly object _gate = new();
+            private readonly List<InFlightTurn> _inFlight = new();
             private string _systemPrompt = "";
+            private bool _sealed;
+
+            private sealed class InFlightTurn
+            {
+                public LlmCompletionRequest Request;
+                public long StartTimestamp;
+                public readonly StringBuilder Text = new();
+            }
 
             public SessionCapturingLlmClient(ILlmClient inner)
             {
@@ -203,6 +253,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// <summary>Number of turns the provider returned as failed (Ok == false with an error).</summary>
             public int FailedTurnCount { get; private set; }
 
+            /// <summary>
+            /// Turns that ended before the provider's terminal result. Their time is in
+            /// <see cref="GenerationMs"/>, but provider usage for them is missing, so token totals are partial.
+            /// </summary>
+            public int CutTurnCount { get; private set; }
+
             /// <summary>The first provider error text seen, used to classify a transient failure.</summary>
             public string FirstProviderError { get; private set; } = "";
 
@@ -224,11 +280,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request, CancellationToken cancellationToken = default)
             {
-                long t0 = Stopwatch.GetTimestamp();
-                LlmCompletionResult result = await _inner.CompleteAsync(request, cancellationToken)
-                    .ConfigureAwait(false);
-                GenerationMs += (Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency;
-                Record(request, result);
+                InFlightTurn turn = BeginTurn(request);
+                LlmCompletionResult result;
+                try
+                {
+                    result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    EndCutTurn(turn);
+                    throw;
+                }
+
+                EndTurn(turn, result);
                 return result;
             }
 
@@ -237,36 +301,144 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 [EnumeratorCancellation]
                 CancellationToken cancellationToken = default)
             {
-                StringBuilder text = new();
+                InFlightTurn turn = BeginTurn(request);
                 LlmStreamChunk last = null;
-                long t0 = Stopwatch.GetTimestamp();
-                await foreach (LlmStreamChunk chunk in _inner.CompleteStreamingAsync(request, cancellationToken)
-                                   .ConfigureAwait(false))
+                bool finished = false;
+                try
                 {
-                    if (!string.IsNullOrEmpty(chunk.Text))
+                    await foreach (LlmStreamChunk chunk in _inner.CompleteStreamingAsync(request, cancellationToken)
+                                       .ConfigureAwait(false))
                     {
-                        text.Append(chunk.Text);
+                        if (!string.IsNullOrEmpty(chunk.Text))
+                        {
+                            lock (_gate)
+                            {
+                                turn.Text.Append(chunk.Text);
+                            }
+                        }
+
+                        last = chunk;
+                        yield return chunk;
                     }
 
-                    last = chunk;
-                    yield return chunk;
+                    finished = true;
                 }
-
-                GenerationMs += (Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency;
+                finally
+                {
+                    // WHY: a stream cut by the scenario deadline never reaches its terminal chunk; without
+                    // this its generation time and the turn itself vanish while its tool calls still count.
+                    if (!finished)
+                    {
+                        EndCutTurn(turn);
+                    }
+                }
 
                 // ExecutedToolCalls must be carried from the terminal chunk - without it, Record() never
                 // sees any tool trace for a streamed turn, so ToolCalls/FailedToolCalls silently stay 0 no
                 // matter what the model actually did. This path used to be effectively dead (benchmarks
                 // forced non-streaming), which is exactly how the gap went unnoticed.
-                Record(request, new LlmCompletionResult
+                string content;
+                lock (_gate)
+                {
+                    content = turn.Text.ToString();
+                }
+
+                EndTurn(turn, new LlmCompletionResult
                 {
                     Ok = last?.Error == null,
-                    Content = text.ToString(),
+                    Content = content,
                     Error = last?.Error ?? "",
                     PromptTokens = last?.PromptTokens,
                     CompletionTokens = last?.CompletionTokens,
                     ExecutedToolCalls = last?.ExecutedToolCalls
                 });
+            }
+
+            /// <summary>
+            /// Stops recording: a turn still in flight is recorded as cut with the time it ran so far, and
+            /// anything an orphaned call reports afterwards is ignored, so the harness can read
+            /// <see cref="Turns"/> without racing a late writer.
+            /// </summary>
+            public void Seal()
+            {
+                lock (_gate)
+                {
+                    if (_sealed)
+                    {
+                        return;
+                    }
+
+                    foreach (InFlightTurn turn in _inFlight)
+                    {
+                        RecordCutLocked(turn);
+                    }
+
+                    _inFlight.Clear();
+                    _sealed = true;
+                }
+            }
+
+            private InFlightTurn BeginTurn(LlmCompletionRequest request)
+            {
+                InFlightTurn turn = new() { Request = request, StartTimestamp = Stopwatch.GetTimestamp() };
+                lock (_gate)
+                {
+                    if (!_sealed)
+                    {
+                        _inFlight.Add(turn);
+                    }
+                }
+
+                return turn;
+            }
+
+            private void EndTurn(InFlightTurn turn, LlmCompletionResult result)
+            {
+                lock (_gate)
+                {
+                    if (!_inFlight.Remove(turn))
+                    {
+                        return;
+                    }
+
+                    GenerationMs += ElapsedMs(turn.StartTimestamp);
+                    Record(turn.Request, result);
+                }
+            }
+
+            private void EndCutTurn(InFlightTurn turn)
+            {
+                lock (_gate)
+                {
+                    if (_inFlight.Remove(turn))
+                    {
+                        RecordCutLocked(turn);
+                    }
+                }
+            }
+
+            private void RecordCutLocked(InFlightTurn turn)
+            {
+                GenerationMs += ElapsedMs(turn.StartTimestamp);
+                CutTurnCount++;
+                if (!string.IsNullOrEmpty(turn.Request?.SystemPrompt))
+                {
+                    _systemPrompt = turn.Request.SystemPrompt;
+                }
+
+                Turns.Add(new CapturedTurn
+                {
+                    Index = Turns.Count + 1,
+                    User = turn.Request?.UserPayload ?? "",
+                    Assistant = turn.Text.ToString(),
+                    Ok = false,
+                    Cut = true
+                });
+            }
+
+            private static double ElapsedMs(long startTimestamp)
+            {
+                return (Stopwatch.GetTimestamp() - startTimestamp) * 1000.0 / Stopwatch.Frequency;
             }
 
             private void Record(LlmCompletionRequest request, LlmCompletionResult result)
@@ -375,6 +547,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 {
                     sb.AppendLine();
                     sb.AppendLine($"--- turn {t.Index} ---");
+                    if (t.Cut)
+                    {
+                        sb.AppendLine("CUT: ended before the provider's final result; no usage reported, " +
+                                      "tool calls are in the lifecycle trace.");
+                    }
+
                     if (!t.Ok && !string.IsNullOrEmpty(t.Error))
                     {
                         sb.AppendLine($"ERROR: {Truncate(t.Error, MaxDetail)}");
@@ -1582,12 +1760,32 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public int? HardCap;
             public double Bonus;
 
+            /// <summary>True when a checkpoint's predicate includes RunObservation.FailedToolCalls.</summary>
+            public bool ScoresFailedToolCalls { get; private set; }
+
+            /// <summary>True when a checkpoint's predicate includes the world's invalid-command count.</summary>
+            public bool ScoresInvalidCommands { get; private set; }
+
             public void Add(string id, string description, double weight, bool passed,
                 bool mandatory = false, string detail = null,
                 BenchmarkDimension dimension = BenchmarkDimension.TaskCompletion)
             {
                 Checkpoints.Add(new BenchmarkCheckpoint(id, description, weight, passed, mandatory, detail,
                     dimension));
+            }
+
+            /// <summary>
+            /// Adds a tool-correctness checkpoint and declares which runtime errors its predicate measures,
+            /// so <see cref="GameCreationBenchmarkHarness.ApplyUnscoredToolErrorPenalties"/> charges only
+            /// the errors no checkpoint scored.
+            /// </summary>
+            public void AddToolErrorCheckpoint(string id, string description, double weight, bool passed,
+                bool scoresFailedToolCalls, bool scoresInvalidCommands, string detail = null)
+            {
+                Add(id, description, weight, passed, detail: detail,
+                    dimension: BenchmarkDimension.ToolCorrectness);
+                ScoresFailedToolCalls |= scoresFailedToolCalls;
+                ScoresInvalidCommands |= scoresInvalidCommands;
             }
 
             public void Penalty(string reason, double points)
@@ -1812,12 +2010,89 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
         internal const int MaxFreeBuildContinuations = 8;
 
+        /// <summary>
+        /// How long the runner waits for a cancelled scenario task to wind down after its timeout. This time
+        /// comes after the model's timeout, so the suite start-gate adds it to every attempt.
+        /// </summary>
+        internal const double CancelGraceSeconds = 5.0;
+
         /// <summary>Allows another build turn only when the previous one used tools and time remains.</summary>
         internal static bool CanContinueFreeBuild(int toolCalls, int previousToolCalls,
             int continuations, double elapsedSeconds, float timeoutSeconds)
         {
             return toolCalls > previousToolCalls && continuations < MaxFreeBuildContinuations &&
                    timeoutSeconds - elapsedSeconds > 45.0;
+        }
+
+        /// <summary>Token totals and generation throughput reported for one scenario run.</summary>
+        internal readonly struct TokenAccounting
+        {
+            internal TokenAccounting(int promptTokens, int completionTokens, bool fromProvider, bool partial,
+                double generationMs)
+            {
+                PromptTokens = promptTokens;
+                CompletionTokens = completionTokens;
+                FromProvider = fromProvider;
+                Partial = partial;
+                GenerationSeconds = generationMs / 1000.0;
+            }
+
+            /// <summary>Provider-reported when any usage arrived, else a BPE estimate; a lower bound when partial.</summary>
+            internal int PromptTokens { get; }
+
+            /// <summary>Max of provider usage and a BPE estimate of everything generated, cut turns included.</summary>
+            internal int CompletionTokens { get; }
+
+            /// <summary>True only when the provider reported usage and no turn was cut before reporting it.</summary>
+            internal bool FromProvider { get; }
+
+            /// <summary>True when at least one turn ended before its usage arrived.</summary>
+            internal bool Partial { get; }
+
+            /// <summary>Time inside LLM calls, cut turns included, so it covers the same turns as the tokens.</summary>
+            internal double GenerationSeconds { get; }
+
+            internal double TokensPerSecond => GenerationSeconds > 0.001 ? CompletionTokens / GenerationSeconds : 0.0;
+        }
+
+        /// <summary>
+        /// Resolves the token totals for a run. A turn cut by the deadline reaches the completion estimate
+        /// through its lifecycle tool calls and reaches <see cref="SessionCapturingLlmClient.GenerationMs"/>
+        /// through its elapsed time, but never reports provider usage, so such a run is flagged partial and
+        /// never presented as provider-exact.
+        /// </summary>
+        internal static TokenAccounting ResolveTokenAccounting(SessionCapturingLlmClient capture,
+            int estimatedCompletion, int estimatedPrompt)
+        {
+            bool partial = capture.CutTurnCount > 0;
+            return capture.AnyProviderUsage
+                ? new TokenAccounting(capture.ProviderPromptTokens,
+                    Math.Max(capture.ProviderCompletionTokens, estimatedCompletion), !partial, partial,
+                    capture.GenerationMs)
+                : new TokenAccounting(estimatedPrompt, estimatedCompletion, false, partial, capture.GenerationMs);
+        }
+
+        /// <summary>Second line of the G6 hero banner: build effort, tokens and generation throughput.</summary>
+        internal static string FormatFreeBuildHeroStats(int toolCalls, int builtParts, int cameraCalls,
+            double latencyMs, TokenAccounting tokens)
+        {
+            int totalTokens = tokens.PromptTokens + tokens.CompletionTokens;
+            if (tokens.GenerationSeconds <= 0.001 && toolCalls > 0)
+            {
+                return $"{toolCalls} observed tool-calls · {builtParts} parts · " +
+                       $"{latencyMs / 1000.0:0.#}s build · partial token estimate ~{totalTokens}";
+            }
+
+            if (tokens.Partial)
+            {
+                return $"{toolCalls} tool-calls · {builtParts} parts · {cameraCalls} camera looks · " +
+                       $"{tokens.GenerationSeconds:0.#}s gen · partial token estimate ~{tokens.CompletionTokens} " +
+                       $"gen tokens · ~{tokens.TokensPerSecond:0.#} tok/s (~{totalTokens} total)";
+            }
+
+            return $"{toolCalls} tool-calls · {builtParts} parts · {cameraCalls} camera looks · " +
+                   $"{tokens.GenerationSeconds:0.#}s gen · {tokens.CompletionTokens} gen tokens" +
+                   $"{(tokens.FromProvider ? "" : "~")} · {tokens.TokensPerSecond:0.#} tok/s ({totalTokens} total)";
         }
 
         /// <summary>
@@ -1884,7 +2159,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             config.ApplyToPolicy(policy);
 
             SessionCapturingLlmClient capture = new(client);
-            ScenarioToolCallObserver toolObserver = new(scenario.RoleId, scenario.Id);
+            string traceIdPrefix = $"bench-{scenario.Id}-{Guid.NewGuid():N}";
+            int turnNumber = 0;
+            ScenarioToolCallObserver toolObserver = new(scenario.RoleId, scenario.Id, traceIdPrefix);
             using IDisposable toolSubscription = CoreAi.SubscribeToolCalls(toolObserver.Record);
             ListSink sink = new();
             AiOrchestrator orch = new(
@@ -1920,7 +2197,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // however the HTTP client's settings were built.
                 MaxToolCallRoundtrips = scenario.MaxToolCallRoundtripsOverride,
                 // WHY: a call-level cap wins over the agent's explicit unlimited output setting.
-                MaxOutputTokens = ResolveBenchmarkMaxOutputTokens()
+                MaxOutputTokens = ResolveBenchmarkMaxOutputTokens(),
+                TraceId = $"{traceIdPrefix}-t{++turnNumber}"
             }, cts.Token, error => streamError ??= error);
 
             Task task = StartTurn(scenario.Goal);
@@ -1959,7 +2237,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             if (!task.IsCompleted)
             {
                 cts.Cancel();
-                double deadline = sw.Elapsed.TotalSeconds + 5.0;
+                double deadline = sw.Elapsed.TotalSeconds + CancelGraceSeconds;
                 while (!task.IsCompleted && sw.Elapsed.TotalSeconds < deadline)
                 {
                     yield return null;
@@ -1968,6 +2246,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             sw.Stop();
             obs.LatencyMs = sw.Elapsed.TotalMilliseconds;
+            // WHY: a task that outlived the grace window must not append turns while they are read below.
+            capture.Seal();
 
             // WHY: Only scenario-budget cancellation after a scene exists ends the build cleanly.
             // WHY: Earlier provider timeouts are environment failures, not model quality.
@@ -2080,21 +2360,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             int estCompletion = Math.Max(
                 tokenCounter.CountTokens(capture.CompletionTextForEstimate(), modelId),
                 tokenCounter.CountTokens(toolObserver.CompletionText, modelId));
-            int promptTokens, completionTokens;
-            bool fromProvider = capture.AnyProviderUsage;
-            if (fromProvider)
-            {
-                promptTokens = capture.ProviderPromptTokens;
-                completionTokens = Math.Max(capture.ProviderCompletionTokens, estCompletion);
-            }
-            else
-            {
-                string promptText = capture.Turns.Count > 0
+            int estPrompt = capture.AnyProviderUsage
+                ? 0
+                : tokenCounter.CountTokens(capture.Turns.Count > 0
                     ? capture.PromptTextForEstimate()
-                    : scenario.SystemPrompt + "\n" + scenario.Goal;
-                promptTokens = tokenCounter.CountTokens(promptText, modelId);
-                completionTokens = estCompletion;
-            }
+                    : scenario.SystemPrompt + "\n" + scenario.Goal, modelId);
+            TokenAccounting tokens = ResolveTokenAccounting(capture, estCompletion, estPrompt);
+            int promptTokens = tokens.PromptTokens;
+            int completionTokens = tokens.CompletionTokens;
+            bool fromProvider = tokens.FromProvider;
 
             double totalTokens = promptTokens + completionTokens;
             GoalScore score = GoalScore.Compute(
@@ -2125,8 +2399,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 InvalidCommands = obs.InvalidCommands,
                 PromptTokens = promptTokens,
                 CompletionTokens = completionTokens,
-                ProviderPromptTokens = fromProvider ? capture.ProviderPromptTokens : (int?)null,
-                ProviderCompletionTokens = fromProvider ? capture.ProviderCompletionTokens : (int?)null,
+                ProviderPromptTokens = capture.AnyProviderUsage ? capture.ProviderPromptTokens : (int?)null,
+                ProviderCompletionTokens = capture.AnyProviderUsage ? capture.ProviderCompletionTokens : (int?)null,
+                // WHY: false when a turn was cut before its usage arrived, so the report labels the total "~".
                 TokensFromProvider = fromProvider,
                 LatencyMs = obs.LatencyMs,
                 GenerationMs = obs.GenerationMs,
@@ -2188,14 +2463,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                             }
                         }
 
-                        double genSec = obs.GenerationMs / 1000.0;
-                        double tokPerSec = genSec > 0.001 ? completionTokens / genSec : 0.0;
-                        heroStats = capture.Turns.Count == 0 && obs.ToolCalls > 0
-                            ? $"{obs.ToolCalls} observed tool-calls · {builtParts} parts · " +
-                              $"{obs.LatencyMs / 1000.0:0.#}s build · partial token estimate ~{totalTokens:0}"
-                            : $"{obs.ToolCalls} tool-calls · {builtParts} parts · {cameraCalls} camera looks · " +
-                              $"{genSec:0.#}s gen · {completionTokens} gen tokens" +
-                              $"{(fromProvider ? "" : "~")} · {tokPerSec:0.#} tok/s ({totalTokens:0} total)";
+                        // WHY: the captured turns miss the calls of a turn cut by the deadline (its traces arrive
+                        // only on the terminal chunk), and a G6 image run is normally one long turn cut at the
+                        // budget, so the banner would claim "0 camera looks". The tool total already takes the
+                        // larger of the two sources; the camera count does the same.
+                        cameraCalls = Math.Max(cameraCalls, toolObserver.CameraCalls);
+                        heroStats = FormatFreeBuildHeroStats(obs.ToolCalls, builtParts, cameraCalls,
+                            obs.LatencyMs, tokens);
                     }
 
                     yield return CaptureSceneScreenshot(vis, modelId, header, scenario.WhatItChecks,
@@ -3445,31 +3719,22 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return scenarioCancellationRequested && sceneWasBuilt && cancellationResult;
         }
 
+        /// <summary>
+        /// Charges failed tool calls and invalid world commands that no checkpoint scored. Coverage is what
+        /// each checkpoint declared through <see cref="ScenarioGrading.AddToolErrorCheckpoint"/>, never
+        /// inferred from a checkpoint id or description.
+        /// </summary>
         internal static void ApplyUnscoredToolErrorPenalties(ScenarioGrading grading, RunObservation obs)
         {
-            bool failedCallsCovered = false;
-            bool invalidCommandsCovered = false;
-            foreach (BenchmarkCheckpoint checkpoint in grading.Checkpoints)
-            {
-                if (checkpoint.Id is not ("clean_tools" or "clean_tool"))
-                {
-                    continue;
-                }
-
-                failedCallsCovered = true;
-                invalidCommandsCovered |= checkpoint.Description.IndexOf("invalid",
-                    StringComparison.OrdinalIgnoreCase) >= 0;
-            }
-
             // WHY: a failed clean-tools checkpoint already deducts its configured weight. Apply the
-            // WHY: harness penalty only where a scenario has no matching reliability checkpoint.
-            if (obs.FailedToolCalls > 0 && !failedCallsCovered)
+            // WHY: harness penalty only where no checkpoint measures that error count.
+            if (obs.FailedToolCalls > 0 && !grading.ScoresFailedToolCalls)
             {
                 grading.Penalty($"{obs.FailedToolCalls} failed tool call(s)",
                     Math.Min(2 * obs.FailedToolCalls, 8));
             }
 
-            if (obs.InvalidCommands > 0 && !invalidCommandsCovered)
+            if (obs.InvalidCommands > 0 && !grading.ScoresInvalidCommands)
             {
                 grading.Penalty($"{obs.InvalidCommands} invalid world command(s)",
                     Math.Min(5 * obs.InvalidCommands, 15));

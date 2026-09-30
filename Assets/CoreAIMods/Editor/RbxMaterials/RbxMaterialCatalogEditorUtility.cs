@@ -23,6 +23,8 @@ namespace CoreAI.Editor.RbxMaterials
         public float PartColorInfluence { get; set; } = 0.75f;
         public float RoughnessScale { get; set; } = 1f;
         public float NormalStrength { get; set; } = 1f;
+        public float CavityStrength { get; set; }
+        public float MetalAlbedoLift { get; set; }
     }
 
     /// <summary>Shared import settings and serialized catalog writer.</summary>
@@ -226,6 +228,8 @@ namespace CoreAI.Editor.RbxMaterials
             SetFloat(entry, "_partColorInfluence", data.PartColorInfluence);
             SetFloat(entry, "_roughnessScale", data.RoughnessScale);
             SetFloat(entry, "_normalStrength", data.NormalStrength);
+            SetFloat(entry, "_cavityStrength", data.CavityStrength);
+            SetFloat(entry, "_metalAlbedoLift", data.MetalAlbedoLift);
         }
 
         private static void SetString(SerializedProperty parent, string name, string value)

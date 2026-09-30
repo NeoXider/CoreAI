@@ -10,8 +10,18 @@ exactly which environment variable or file to set, so unconfigured runs stay gre
 
 Long-running CLI bridges can serialize requests and delay HTTP response headers. If a live run is
 aborted, clear or restart that bridge before repeating a test; otherwise an earlier provider turn can
-occupy the next test's deadline. The streaming fixtures cancel their own requests on timeout. A
-transport timeout is a provider availability result, not evidence that the model answered incorrectly.
+occupy the next test's deadline. Live fixtures cancel their own requests when a wait times out, when a
+memory step has already reached its outcome, and in `[UnityTearDown]` when the Unity Test Framework
+aborts the test at its `[Timeout]` (`LiveTestRequestScope` in `Shared/PlayModeTestAwait.cs` owns those
+cancellation sources, caps every wait to the time left in the test's budget, and lets the cancelled turn
+unwind for up to 5 s before the client is disposed). An abort never runs a `finally` or `using` in the test
+body, so the fixtures keep their handles, settings and subscriptions in fields and release them in
+`[UnityTearDown]` after that drain. Every live fixture in `LlmVerification` and
+`Scenarios` uses it; the fixture list is in [Tests/README.md § C3](../Tests/README.md#c3-timeouts), and the
+`CoreAIBenchmark` fixtures are not converted. This is client-side
+cancellation only: it stops this process's request, but a serial bridge may still finish the abandoned
+turn before it serves the next one. A transport timeout is a provider availability result, not evidence
+that the model answered incorrectly.
 
 ---
 
@@ -178,12 +188,19 @@ Live tests skip with a clear, actionable reason:
 
 - The factory builds a throwaway HTTP settings object per test and disposes it on handle `Dispose()`,
   so it never mutates the project's `CoreAISettingsAsset`.
-- `TestAgentSetup`, `MeaiLlmClientPlayModeTests`, and tool-name repair probes resolve the same
-  live-test endpoint, so an HTTP model selected with `COREAI_TEST_MODEL` is exercised even when
-  the project asset points to a different local backend.
-- `TwoHttpAgents_IndependentStores_RunConcurrently` starts two real HTTP agent turns before
-  awaiting either and gives each agent its own client, settings, and memory store. The mixed
-  LLMUnity/HTTP test is separate and skips when the local GGUF host is unavailable.
+- `MeaiLlmClientPlayModeTests` and the tool-name repair probes build their HTTP client straight from
+  this surface, so an HTTP model selected with `COREAI_TEST_MODEL` is exercised even when the project
+  asset points to a local backend. `TestAgentSetup` resolves the same endpoint only when the asset's
+  backend type leads it to HTTP (`OpenAiHttp`, or `Auto` falling through to HTTP).
+- `TwoHttpAgents_IndependentStores_RunConcurrently` (`ParallelHttpAgentsPlayModeTests`, which needs no
+  LLMUnity) starts two real HTTP agent turns before awaiting either and gives each agent its own client,
+  settings, and memory store. It asserts that each agent answered its own word (`alpha` / `beta`) without
+  the other's, that each store holds only its own user turn and answer, and that both requests entered
+  the `ILlmClient` boundary concurrently (a shared in-flight counter wrapped around both clients must peak
+  at 2). The counter wraps `MeaiLlmClient` from outside, so it shows that nothing above the client
+  serialized the turns; it cannot see inside MEAI or on the wire, and a serial provider may still process
+  them one after the other. The mixed LLMUnity/HTTP test (`MixedBackendParallelAgentsPlayModeTests`) is
+  separate and skips when the local GGUF host is unavailable.
 - `Programmer_BuildsCastle_ViaOptInClassicLuaWorldApi` verifies a host that explicitly enables
   the legacy `coreai_world_spawn` binding. It uses `prefab` and `name` as required by that API;
   the separate Roblox castle showcase covers the default `Instance.new('Part')` path.
@@ -191,8 +208,10 @@ Live tests skip with a clear, actionable reason:
 - The game-creation benchmark accepts `COREAI_BENCHMARK_MAX_OUTPUT_TOKENS` as a per-call cap. Use it when an OpenRouter route reserves a large default output budget and returns `402`; keep the cap equal across models for score comparisons. G6 has one 600-second build attempt and saves its model-authored scene even if the provider stops later.
 - `COREAI_TEST_NATIVE_TOOLS=false` wraps the client so the orchestrator uses the text/prompt tool
   contract instead of native function calling — handy for local models with flaky native tool support.
-- Backend selection (HTTP vs LLMUnity vs offline) is still controlled by `COREAI_PLAYMODE_LLM_BACKEND`
-  and/or the `CoreAISettingsAsset` backend type; this surface configures the OpenAI-compatible HTTP path.
+- Backend selection (HTTP vs LLMUnity vs offline) is separate from this surface, which configures only
+  the OpenAI-compatible HTTP path. `PlayModeProductionLikeLlmFactory` uses an explicit test preference
+  first, then the `CoreAISettingsAsset` backend type, and reads `COREAI_PLAYMODE_LLM_BACKEND` only when no
+  settings asset is loaded. `TestAgentSetup` reads the settings asset's backend type alone.
 - `ProgrammerLiveHarness` builds a real `RbxWorldHost`, so what a live run creates through the Rbx API
   becomes actual GameObjects. Tests that photograph the result (`RbxCastleMaterialsShowcase…`) frame the
   built geometry's bounds, so the hero shot works whatever footprint the model chooses.

@@ -621,6 +621,19 @@ class ScriptedReplyTests(ProxyTestBase):
         self.assertEqual("/v1/chat/completions", captured[-1]["path"])
         self.assertIn("HTTP_PROBE", captured[-1]["body"])
 
+    def test_capture_dir_keeps_bodies_past_the_capture_limit(self):
+        with tempfile.TemporaryDirectory() as capture_dir:
+            self.proxy.state.capture_dir = capture_dir
+            tail = "TAIL_MARKER"
+            filler = "x" * (g11_proxy.CAPTURED_BODY_MAX_CHARS + 10)
+            self._post_json("/v1/chat/completions", {"stream": False, "pad": filler, "tail": tail})
+            files = sorted(os.listdir(capture_dir))
+            self.assertEqual(1, len(files), files)
+            with open(os.path.join(capture_dir, files[0]), encoding="utf-8") as handle:
+                self.assertIn(tail, handle.read())
+            _, _, data = self._request("GET", "/control/requests")
+            self.assertIn("...<truncated>", json.loads(data.decode("utf-8"))["requests"][-1]["body"])
+
     def test_reset_clears_the_script(self):
         self._script([{"text": "x"}])
         self._control("/control/reset", {})

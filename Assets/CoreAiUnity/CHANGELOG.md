@@ -4,6 +4,106 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Breaking
+
+- **`CoreAi.OnToolExecuted` result type.** `result` is an `LlmToolImageResult` for `camera_capture` / `screenshot` /
+  `capture_camera`, not the JSON string with a `dataUrl`; the data-URL helpers only understand legacy JSON strings.
+- **Scene camera JSON.** The `capture_camera` summary has no `dataUri` any more; it adds `format`, `sizeBytes` and
+  `imageAttached`.
+- **Default size.** `Texture2D` / `Sprite` / `RenderTexture` `.ToAiAttachment()` downscale to a long edge of 1024
+  (`maxSide: 0` keeps the native size).
+- **Source break.** `CoreAi.AskAsync(msg, null)` (also `StreamAsync`, `StreamChunksAsync`, `SmartAskAsync`) and
+  `AskWithImageFollowUpAsync(msg, null)` are CS0121-ambiguous: omit the argument or cast the null.
+
+### Fixed
+
+- **Image-only chat messages** no longer carry `Microsoft.Extensions.AI.DataContent` as a text part (see the CoreAI
+  entry); verified in the WebGL player with Space Bunny.
+- **Live PlayMode tests cancel an in-flight model request when the Unity Test Framework aborts at `[Timeout]`.**
+  The cancel-on-timeout path could not run: several fixtures had no `[Timeout]`, so the framework's 180 s default
+  fired before their own 180-245 s waits, and nothing cancelled the abandoned request, which then ran into the next
+  test. `LiveTestRequestScope` owns each test's cancellation sources, `[UnityTearDown]` cancels them and every wait is
+  capped to the time left in the test's budget. The Streaming fixtures get an explicit 600 s and the combined memory
+  write/append/clear test 900 s. The isolation is client-side: a serial CLI bridge may still finish an abandoned turn.
+- **`TwoHttpAgents_IndependentStores_RunConcurrently` proves isolation.** It compared two separate store instances,
+  which cannot fail. Each agent must now answer its own word without the other's, each store must hold only its own
+  turn, and a shared in-flight counter over both clients must peak at 2 (client-side concurrency; a serial provider
+  may still process the turns one after the other).
+- **Live tests assert the model result again.** The Programmer Tetris/FixMod, castle showcase and AINpc tools tests
+  had lost `LastResult.Ok`; only an empty final text (`LlmErrorCode.EmptyResponse`) is tolerated now, HTTP 5xx and
+  timeouts fail.
+- **`TestAgentSetupHttpRoutingPlayModeTests` pins its own HTTP settings** instead of passing only because the
+  committed settings asset selects HTTP; `COREAI_PLAYMODE_LLM_BACKEND` never selected the `TestAgentSetup` backend.
+- **An attachment was silently dropped from an image-only turn that had chat history** (`MeaiLlmClient`
+  `BuildMeaiChatMessages`).
+- **Live gates no longer pass on a missing completion.** The Programmer, castle-showcase and AINpc gates required only
+  that a captured result was not an error; a client that threw (the orchestrator swallows it) passed. They now require a
+  captured completion and report the exception.
+- **`capture_camera` never showed the model the picture**: it put base64 into the tool text, which was never lifted and was
+  cut to `MaxToolResultChars`. It returns an `LlmToolImageResult` and is lifted automatically with the camera prompt.
+- **Chat panel external submit accepts an image-only or file-only message** (blank text plus at least one attachment); the
+  bubble shows the `[attachment: ...]` line and `OnMessageSending` is skipped. It used to return `EmptyInput`.
+- A camera with Depth/Nothing clear flags no longer renders over stale pooled-texture content, and a native-size capture
+  above 4 megapixels no longer pins its readback texture.
+- Live PlayMode fixtures no longer dispose their LLM handle, `TestAgentSetup`, settings assets, harness setups, camera rigs,
+  subscriptions or the chat-demo `LifetimeScope.Enqueue` installer in a test-body `finally`/`using` (the Unity Test
+  Framework never runs those on a `[Timeout]` abort); everything is released in `[UnityTearDown]` after
+  `CancelAllAndDrain`. `TestAgentSetupHttpRoutingPlayModeTests` restores the settings instance and `COREAI_TEST_*`
+  variables there too. The real-model chat demo test caps both Stop-settle waits by the test budget (5 s floor).
+  `LiveTestRequestScope.Cap` is never negative.
+
+### Changed
+
+- Live attachment tests allow 4096 output tokens (was 256) so reasoning models do not run out of budget before they
+  answer.
+- `camera_capture` / `screenshot` return the frame as an `LlmToolImageResult` (no base64 in the tool JSON; the tool text
+  and the event `ResultJson` are the same as the old lifted form). `AgentCameraService` and the World `CameraLlmTool`
+  reuse pooled render targets instead of a new `RenderTexture` + `Texture2D` per capture.
+- Every live PlayMode fixture in LlmVerification and Scenarios (35 of them) takes its cancellation, request tracking and
+  budget from `LiveTestRequestScope` (now in `Shared/PlayModeTestAwait.cs`, `Track` + `CancelAllAndDrain`), with a
+  `[Timeout]` constant computed from its waits.
+
+### Docs
+
+- `RUNNING_LIVE_TESTS.md` and `Tests/README.md` describe the isolation as client-side cancellation and document the
+  backend precedence (explicit preference, settings asset, then `COREAI_PLAYMODE_LLM_BACKEND` only when no asset is
+  loaded).
+- `COREAI_SINGLETON_API.md` (attachment matrix), `TOOL_AUTHORING_GUIDE.md` ("Returning images from a tool"),
+  `Docs/CoreAI/agent-vision.md` (the automatic lean lift) and the engine-free section of the CoreAI README.
+- The backend-selection wording is corrected in `CHAT_TOOL_CALLING.md`, `LLMUNITY_SETUP_AND_MODELS.md`,
+  `TOOL_CALL_TESTS.md`, `TESTING_TOOL_CALLING.md` and the `AllToolCallsPlayModeTests` summary.
+- `COREAI_SINGLETON_API` 3.7 (lifetime, the CS0121 note, decoding, defaults, tool-image result), `TOOL_AUTHORING_GUIDE` (the
+  real threading rule, tool-image prompts), `agent-vision.md` (`OnToolExecuted`, `capture_camera` typed).
+
+### Added
+
+- **WebGL harness.** `CoreAiChatExternalDriver.SubmitPromptWithAttachments(json)` (opt-in with the same URL flag) submits
+  a prompt with images and text files from page JS; the G11 proxy has `--capture-dir` (untruncated request bodies);
+  `COREAI_G11_EXCLUDE_SCENES` leaves named scenes out of a local diagnostic G11 build (logged as not a full gate).
+- **WebGL verification against `opencode/space-bunny-free`, real Chrome** (evidence in `artifacts/webgl-r3`, not committed):
+  no unsupported shader, 46 material slots PASS, a text turn, images (one, two, image-only), text files, the camera
+  tool path (a tool message without base64, the JPEG in the next user message), the self-test (16 checks, 0 fails),
+  model-written Lua through `execute_lua`, outbound HTTP refused in 41 ms, persistence across a reload, and a retry
+  after one injected 503. The player was built without the Hub and MiniRpg demos (Mirror scene ids, see the TODO).
+- **Attachment overloads on the Unity facade.** `CoreAi.AskAsync` / `StreamAsync` / `StreamChunksAsync` /
+  `SmartAskAsync` and `CoreAiChatService.SendMessage*Async` accept one attachment or a list next to the text;
+  `CoreAiChatExternalSubmitOptions.Attachments` does the same for the chat panel. `Texture2D`, `Sprite` and
+  `RenderTexture` have `ToAiAttachment`, `Camera.CaptureAiAttachment` renders offscreen, `TextAsset.ToAiAttachment`
+  inlines a script, all through a pooled render target and one cached readback texture.
+- `AskWithImageFollowUpAsync(prompt, AiAttachment)` on `CoreAi` and `CoreAiChatService` (the JSON-string overload is
+  documented as legacy); `AiAttachmentUnityExtensions.DefaultMaxSide` / `MaxCachedReadbackPixels`.
+
+### Tests
+
+- New `LiveTestRequestScopePlayModeTests` (FastNoLlm, no backend): budget cap, cancel-and-drain (early return, bounded wait
+  with warning, source disposal, idempotent `CancelAll`) and the in-flight meter for concurrent and sequential completions
+  and streams. `TwoHttpAgents_IndependentStores_RunConcurrently` moved to `ParallelHttpAgentsPlayModeTests` (no LLMUnity
+  needed); its claim is that both requests entered the `ILlmClient` boundary concurrently. The three live capturing
+  clients are one `LiveCapturingLlmClient`.
+- `AiAttachmentUnityExtensionsEditModeTests` and `CoreAiAttachmentFacadeEditModeTests` cover the Unity half (graphics tests
+  are ignored under `-nographics`).
+
+
 ## [7.47.4] - 2026-09-30
 
 ### Tests

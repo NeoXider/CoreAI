@@ -21,12 +21,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 25000000000000000000000000000010, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 5a520acf1c246e246a36dcf2259fd2ba, type: 3}
     _tileWidthStuds: 10
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.65
     _roughnessScale: 0.75
-    _normalStrength: 1.2
+    _normalStrength: 1
+    _cavityStrength: 0.25
+    _metalAlbedoLift: 0
   - _materialName: WoodPlanks
     _materialValue: 528
     _albedo: {fileID: 2800000, guid: 8d02393c3f801aa46ab6d51ec7f9cf4f, type: 3}
@@ -35,12 +37,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 3847b7d5fbf4d214f8b2a1d9a17c2ff0, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 2672a97c24c931f409e7392aa0828244, type: 3}
     _tileWidthStuds: 9
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.65
     _roughnessScale: 0.78
-    _normalStrength: 1.4
+    _normalStrength: 1.1
+    _cavityStrength: 0.45
+    _metalAlbedoLift: 0
   - _materialName: Brick
     _materialValue: 848
     _albedo: {fileID: 2800000, guid: 25000000000000000000000000000001, type: 3}
@@ -49,12 +53,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 25000000000000000000000000000003, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 9ad285f7fdf50b040a9926c562ee54e4, type: 3}
     _tileWidthStuds: 10
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.6
     _roughnessScale: 0.82
-    _normalStrength: 1.3
+    _normalStrength: 1.1
+    _cavityStrength: 0.75
+    _metalAlbedoLift: 0
   - _materialName: Cobblestone
     _materialValue: 880
     _albedo: {fileID: 2800000, guid: 2500000000000000000000000000000b, type: 3}
@@ -63,12 +69,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 2500000000000000000000000000000d, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: f29d066747603a54388a8c2b1e3dfd81, type: 3}
     _tileWidthStuds: 14
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
     _roughnessScale: 0.72
-    _normalStrength: 1.5
+    _normalStrength: 1.1
+    _cavityStrength: 0.6
+    _metalAlbedoLift: 0
   - _materialName: Metal
     _materialValue: 1088
     _albedo: {fileID: 2800000, guid: 25000000000000000000000000000007, type: 3}
@@ -83,6 +91,8 @@ MonoBehaviour:
     _partColorInfluence: 0.45
     _roughnessScale: 0.68
     _normalStrength: 0.85
+    _cavityStrength: 0
+    _metalAlbedoLift: 0.4
   - _materialName: Grass
     _materialValue: 1280
     _albedo: {fileID: 2800000, guid: 7759f56c6ed211a4d8f1c93491a3e918, type: 3}
@@ -91,12 +101,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 4b9fae9ef69427d449ff6a36d9ff6c98, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: b9d4194f7b042d54c9647b8f7da49c0b, type: 3}
     _tileWidthStuds: 4.5
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
     _roughnessScale: 0.78
-    _normalStrength: 1.4
+    _normalStrength: 1.2
+    _cavityStrength: 0.45
+    _metalAlbedoLift: 0
   - _materialName: Slate
     _materialValue: 800
     _albedo: {fileID: 2800000, guid: a293f3b1b85ae8044a06ba7a9ba4d751, type: 3}
@@ -105,12 +117,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 294548388b4acb64ab0ab627916e9207, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 800c3026ace95e141a710b0dc082b270, type: 3}
     _tileWidthStuds: 10
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.65
     _roughnessScale: 0.8
-    _normalStrength: 1.25
+    _normalStrength: 1.1
+    _cavityStrength: 0.6
+    _metalAlbedoLift: 0
   - _materialName: Limestone
     _materialValue: 820
     _albedo: {fileID: 2800000, guid: 83d12a60d6a7d98498d313382d8227e6, type: 3}
@@ -119,12 +133,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 77427e06c8903d74183a6715df7fadc1, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 88244c93a903afd43b58b487333b0f49, type: 3}
     _tileWidthStuds: 12
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
     _roughnessScale: 0.82
-    _normalStrength: 1.15
+    _normalStrength: 1.05
+    _cavityStrength: 0.5
+    _metalAlbedoLift: 0
   - _materialName: Sandstone
     _materialValue: 912
     _albedo: {fileID: 2800000, guid: fe1aa7fec703d284e9e43b43dcfb667c, type: 3}
@@ -133,12 +149,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 57400ab12fc8cf348aec2c7c1ee6be18, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 055f2892c06ce954da21267380da9f2d, type: 3}
     _tileWidthStuds: 10
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
     _roughnessScale: 0.85
-    _normalStrength: 1.35
+    _normalStrength: 1.15
+    _cavityStrength: 0.5
+    _metalAlbedoLift: 0
   - _materialName: Granite
     _materialValue: 832
     _albedo: {fileID: 2800000, guid: ece18027f54fbbc4e9b42bd960de26b6, type: 3}
@@ -152,7 +170,9 @@ MonoBehaviour:
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.65
     _roughnessScale: 0.78
-    _normalStrength: 1.15
+    _normalStrength: 1
+    _cavityStrength: 0
+    _metalAlbedoLift: 0
   - _materialName: Basalt
     _materialValue: 788
     _albedo: {fileID: 2800000, guid: 6fba1114db9565049a6d3d724e68de54, type: 3}
@@ -161,12 +181,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 183909a5621dc80408159058eef42f35, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 6f91dfcfab3b8a3489e915a7298f7f72, type: 3}
     _tileWidthStuds: 13
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.55
     _roughnessScale: 0.8
-    _normalStrength: 1.3
+    _normalStrength: 1.15
+    _cavityStrength: 0.55
+    _metalAlbedoLift: 0
   - _materialName: Rock
     _materialValue: 896
     _albedo: {fileID: 2800000, guid: 1192c906279ab1d46b64632000c554a0, type: 3}
@@ -175,12 +197,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: a786878990d6c9c4a8ee49b46f1a4372, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 46f3264382d2c7542b55bf8070624069, type: 3}
     _tileWidthStuds: 18
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.65
     _roughnessScale: 0.85
-    _normalStrength: 1.4
+    _normalStrength: 1.2
+    _cavityStrength: 0.5
+    _metalAlbedoLift: 0
   - _materialName: Concrete
     _materialValue: 816
     _albedo: {fileID: 2800000, guid: b8c363d1c9b40a54bb5cb296b50a0981, type: 3}
@@ -195,6 +219,8 @@ MonoBehaviour:
     _partColorInfluence: 0.75
     _roughnessScale: 0.85
     _normalStrength: 1
+    _cavityStrength: 0
+    _metalAlbedoLift: 0
   - _materialName: Marble
     _materialValue: 784
     _albedo: {fileID: 2800000, guid: 9da5664453415d64fa48c14a39b4e9b6, type: 3}
@@ -209,6 +235,8 @@ MonoBehaviour:
     _partColorInfluence: 0.7
     _roughnessScale: 0.55
     _normalStrength: 0.55
+    _cavityStrength: 0
+    _metalAlbedoLift: 0
   - _materialName: Plaster
     _materialValue: 2310
     _albedo: {fileID: 2800000, guid: 8a6e4826163916144b1e183c29b60cb2, type: 3}
@@ -222,7 +250,9 @@ MonoBehaviour:
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.85
     _roughnessScale: 0.9
-    _normalStrength: 1.1
+    _normalStrength: 1
+    _cavityStrength: 0
+    _metalAlbedoLift: 0
   - _materialName: Pavement
     _materialValue: 836
     _albedo: {fileID: 2800000, guid: 434a5660ee287fb4aaa4d049f0dc3a2c, type: 3}
@@ -231,12 +261,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: ce28f45a6144faa4f9de7c80a07b9d52, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 99c8fe45ac725674d80e4ad5fb611f33, type: 3}
     _tileWidthStuds: 12
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
     _roughnessScale: 0.8
-    _normalStrength: 1.25
+    _normalStrength: 1.1
+    _cavityStrength: 0.55
+    _metalAlbedoLift: 0
   - _materialName: Pebble
     _materialValue: 864
     _albedo: {fileID: 2800000, guid: d7ba46629a4718549bed04bd210aafe3, type: 3}
@@ -245,12 +277,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 18dc1d1f462cbcd4eaa19c067fbd2e9b, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: b019dd67a1daae44898fd32a1e0da666, type: 3}
     _tileWidthStuds: 9
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
     _roughnessScale: 0.8
-    _normalStrength: 1.45
+    _normalStrength: 1.2
+    _cavityStrength: 0.5
+    _metalAlbedoLift: 0
   - _materialName: CeramicTiles
     _materialValue: 2306
     _albedo: {fileID: 2800000, guid: 7399132fb6cbe4f4ca5ae0e362aedc93, type: 3}
@@ -259,12 +293,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: deb674811c4565645b30c125518b848f, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: a298d159f08dcc049bfc765e33236760, type: 3}
     _tileWidthStuds: 6
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.8
     _roughnessScale: 0.7
     _normalStrength: 0.95
+    _cavityStrength: 0.5
+    _metalAlbedoLift: 0
   - _materialName: ClayRoofTiles
     _materialValue: 2307
     _albedo: {fileID: 2800000, guid: 166bcd395fc758d40bf477e1106b729f, type: 3}
@@ -273,12 +309,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: b83ea6a4d6fcc404bbd3d0c74f9c66c6, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 8737c67601ceede498034e74d9e732eb, type: 3}
     _tileWidthStuds: 7
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
     _roughnessScale: 0.8
-    _normalStrength: 1.45
+    _normalStrength: 1.2
+    _cavityStrength: 0.55
+    _metalAlbedoLift: 0
   - _materialName: RoofShingles
     _materialValue: 2308
     _albedo: {fileID: 2800000, guid: 899ed44a7b89fe84bb0fdaa2da2b2b7e, type: 3}
@@ -287,12 +325,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 555462a3102109944951202751f5d6ab, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 03616cf0d496e58478925f3b88b68e6e, type: 3}
     _tileWidthStuds: 7
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
     _roughnessScale: 0.85
-    _normalStrength: 1.5
+    _normalStrength: 1.2
+    _cavityStrength: 0.55
+    _metalAlbedoLift: 0
   - _materialName: CorrodedMetal
     _materialValue: 1040
     _albedo: {fileID: 2800000, guid: e59871d962eda1246a1cf9956d1263b8, type: 3}
@@ -301,12 +341,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: ad5d4f12b939df645b4913d500b0822f, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 2800000, guid: b72df922c1efd014ea18d39520ebeb91, type: 3}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 21cb7b0496e88a5438603c2d9f4fb060, type: 3}
     _tileWidthStuds: 6
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.5
     _roughnessScale: 0.85
-    _normalStrength: 1.3
+    _normalStrength: 1.1
+    _cavityStrength: 0.35
+    _metalAlbedoLift: 0.4
   - _materialName: DiamondPlate
     _materialValue: 1056
     _albedo: {fileID: 2800000, guid: b25fd3e5a1075fe45917d46469ac2a4a, type: 3}
@@ -315,12 +357,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 316d52771f005324b84fee0d6c6b83c1, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 2800000, guid: 6f86fcdc12fbbfa408925f1c871cce16, type: 3}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: bf7a34e40a7618a47b741f2eec4f9b71, type: 3}
     _tileWidthStuds: 6
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.5
     _roughnessScale: 0.72
-    _normalStrength: 1.5
+    _normalStrength: 1.2
+    _cavityStrength: 0.45
+    _metalAlbedoLift: 0.4
   - _materialName: Foil
     _materialValue: 1072
     _albedo: {fileID: 2800000, guid: a9648a12dd1dfca45948d90805346ed3, type: 3}
@@ -334,7 +378,9 @@ MonoBehaviour:
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.5
     _roughnessScale: 0.55
-    _normalStrength: 1.15
+    _normalStrength: 1
+    _cavityStrength: 0
+    _metalAlbedoLift: 0
   - _materialName: LeafyGrass
     _materialValue: 1284
     _albedo: {fileID: 2800000, guid: 7fc818363c9464d4eb9a340837fb9656, type: 3}
@@ -343,12 +389,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: e2312af09cb20024abae07fdfda205e4, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: e70277c7b1b3da34ea522b692d501233, type: 3}
     _tileWidthStuds: 5
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
     _roughnessScale: 0.8
-    _normalStrength: 1.4
+    _normalStrength: 1.2
+    _cavityStrength: 0.45
+    _metalAlbedoLift: 0
   - _materialName: Ground
     _materialValue: 1360
     _albedo: {fileID: 2800000, guid: c9a8e419552fb69418d780effd71cbc4, type: 3}
@@ -357,12 +405,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 7cd1c98f735fdb840b73494c0a6774fe, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 69b0586649384984b9404c16f95c61ee, type: 3}
     _tileWidthStuds: 16
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
     _roughnessScale: 0.88
-    _normalStrength: 1.35
+    _normalStrength: 1.15
+    _cavityStrength: 0.45
+    _metalAlbedoLift: 0
   - _materialName: Mud
     _materialValue: 1344
     _albedo: {fileID: 2800000, guid: d4307bb5247ecda47a1d44194a60eacd, type: 3}
@@ -371,12 +421,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: c684bfc21b9012445a97cf9005992ebb, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: fb9859d90c0d1684db9b7ec15928d4ac, type: 3}
     _tileWidthStuds: 15
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
     _roughnessScale: 0.85
-    _normalStrength: 1.3
+    _normalStrength: 1.15
+    _cavityStrength: 0.45
+    _metalAlbedoLift: 0
   - _materialName: Sand
     _materialValue: 1296
     _albedo: {fileID: 2800000, guid: c29f1af7a6f2fc446944e75fa5f6c7ed, type: 3}
@@ -385,12 +437,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 212bf6e756167d24594104f2ebf57e2b, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: dd0aaea9b2e7a14428ad22e618cdd088, type: 3}
     _tileWidthStuds: 7
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.75
     _roughnessScale: 0.9
-    _normalStrength: 1.2
+    _normalStrength: 1.05
+    _cavityStrength: 0.35
+    _metalAlbedoLift: 0
   - _materialName: Snow
     _materialValue: 1328
     _albedo: {fileID: 2800000, guid: 974422cb80ccb2e44b59e6762e910c9e, type: 3}
@@ -404,7 +458,9 @@ MonoBehaviour:
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.8
     _roughnessScale: 0.8
-    _normalStrength: 1.2
+    _normalStrength: 1
+    _cavityStrength: 0
+    _metalAlbedoLift: 0
   - _materialName: Ice
     _materialValue: 1536
     _albedo: {fileID: 2800000, guid: f1c3fad0aae1b0745b8b443b0949911f, type: 3}
@@ -419,6 +475,8 @@ MonoBehaviour:
     _partColorInfluence: 0.8
     _roughnessScale: 0.45
     _normalStrength: 0.85
+    _cavityStrength: 0
+    _metalAlbedoLift: 0
   - _materialName: CrackedLava
     _materialValue: 804
     _albedo: {fileID: 2800000, guid: 034243393fd643d4ca970daa467e7f8c, type: 3}
@@ -427,12 +485,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 53e107541a6f121469554d4f0dbcea50, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 66c40d9d423979c4bb619937ab2fc995, type: 3}
     _tileWidthStuds: 13
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.6
     _roughnessScale: 0.85
-    _normalStrength: 1.5
+    _normalStrength: 1.2
+    _cavityStrength: 0.5
+    _metalAlbedoLift: 0
   - _materialName: Asphalt
     _materialValue: 1376
     _albedo: {fileID: 2800000, guid: ec260ff28628a3041b5ba9a3d7064e61, type: 3}
@@ -446,7 +506,9 @@ MonoBehaviour:
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.6
     _roughnessScale: 0.85
-    _normalStrength: 1.3
+    _normalStrength: 1.1
+    _cavityStrength: 0
+    _metalAlbedoLift: 0
   - _materialName: Fabric
     _materialValue: 1312
     _albedo: {fileID: 2800000, guid: d66c060d54f28994ab7f93a851a0c610, type: 3}
@@ -455,12 +517,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 30fa48fad84a7ec4ca1d8caf150a5cb5, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 9175da9297095b641a7afee596778dd1, type: 3}
     _tileWidthStuds: 2.5
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.9
     _roughnessScale: 0.9
-    _normalStrength: 1.3
+    _normalStrength: 1.1
+    _cavityStrength: 0.35
+    _metalAlbedoLift: 0
   - _materialName: Carpet
     _materialValue: 2305
     _albedo: {fileID: 2800000, guid: 8e5b581526bf17c4aa81dc8e49dee4c2, type: 3}
@@ -469,12 +533,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: b1a73657270606f4296124c300473e8f, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: e148f399bf55c0646a4c9031580bf55d, type: 3}
     _tileWidthStuds: 3
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.9
     _roughnessScale: 0.95
-    _normalStrength: 1.35
+    _normalStrength: 1.15
+    _cavityStrength: 0.35
+    _metalAlbedoLift: 0
   - _materialName: Leather
     _materialValue: 2309
     _albedo: {fileID: 2800000, guid: 4516c8aaf790f5b44b4fd27534e4b770, type: 3}
@@ -483,12 +549,14 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: 20b0d46816c62384392cb17baa7e1225, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 53146ce685ea2504faf940c225ec0fcb, type: 3}
     _tileWidthStuds: 2.5
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.85
     _roughnessScale: 0.8
-    _normalStrength: 1.25
+    _normalStrength: 1.05
+    _cavityStrength: 0.3
+    _metalAlbedoLift: 0
   - _materialName: Cardboard
     _materialValue: 2304
     _albedo: {fileID: 2800000, guid: 9b9b81cd0555c9842981283cbfa6333e, type: 3}
@@ -502,7 +570,9 @@ MonoBehaviour:
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.8
     _roughnessScale: 0.9
-    _normalStrength: 1.2
+    _normalStrength: 1
+    _cavityStrength: 0
+    _metalAlbedoLift: 0
   - _materialName: Rubber
     _materialValue: 2311
     _albedo: {fileID: 2800000, guid: adc2039d2046867449a0e95e276bee47, type: 3}
@@ -511,9 +581,11 @@ MonoBehaviour:
     _roughnessOrSmoothness: {fileID: 2800000, guid: a3534f0a359fdaf4a9fc6055a9b86ec4, type: 3}
     _isSmoothnessMap: 0
     _metalness: {fileID: 0}
-    _ambientOcclusion: {fileID: 0}
+    _ambientOcclusion: {fileID: 2800000, guid: 5b2f6862c7ff353429794f06ab9a2a08, type: 3}
     _tileWidthStuds: 3
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.85
     _roughnessScale: 0.9
-    _normalStrength: 1.2
+    _normalStrength: 1
+    _cavityStrength: 0.3
+    _metalAlbedoLift: 0

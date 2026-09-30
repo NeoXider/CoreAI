@@ -398,7 +398,8 @@ namespace CoreAI.Ai
         /// Optional files attached to the current user turn. When non-empty, the client builds the current-turn
         /// user message via <see cref="AiUserMessageBuilder.BuildUserMessage"/> (image parts for vision models,
         /// inlined text blocks for every model) instead of wrapping <see cref="UserPayload"/> as plain text.
-        /// <c>null</c>/empty preserves the legacy plain-text path.
+        /// <c>null</c>/empty/all-null preserves the legacy plain-text path. The list and the bytes are read on every
+        /// request built from this object, never copied.
         /// </summary>
         public IReadOnlyList<AiAttachment> Attachments { get; set; }
 

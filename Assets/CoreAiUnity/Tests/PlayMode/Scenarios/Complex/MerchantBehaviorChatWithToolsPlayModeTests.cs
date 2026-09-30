@@ -28,6 +28,35 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
         private const int LlmStepTimeoutSeconds = 240;
         private const int ScenarioStepMaxOutputTokens = 128000;
 
+        // WHY: 120 s GGUF load (EnsureLlmUnityModelReady) + three sequential 240 s negotiation steps = 840 s,
+        // + the 20 s scope reserve and ~100 s margin = 960 s.
+        private const int TestTimeoutMs = 960000;
+
+        private LiveTestRequestScope _requests;
+        private PlayModeProductionLikeLlmHandle _handle;
+
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            _requests = new LiveTestRequestScope(TestTimeoutMs);
+            yield break;
+        }
+
+        [UnityTearDown]
+        public IEnumerator TearDown()
+        {
+            // WHY: a framework timeout skips the test body's cleanup; cancel and let the abandoned turn unwind
+            // before the client is disposed.
+            if (_requests != null)
+            {
+                yield return _requests.CancelAllAndDrain();
+                _requests = null;
+            }
+
+            _handle?.Dispose();
+            _handle = null;
+        }
+
         [Test]
         public async Task MerchantEconomy_BuyWithoutDiscount_DoesNotMutateOnInsufficientGold()
         {
@@ -69,7 +98,7 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
         [UnityTest]
         [Explicit(
             "Long live-model negotiation scenario; run targeted when validating merchant behavior, not in mandatory full PlayMode.")]
-        [Timeout(600000)]
+        [Timeout(TestTimeoutMs)]
         public IEnumerator MerchantChatWithTools_FullNegotiationFlow_CompletesPurchase()
         {
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
@@ -82,90 +111,86 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
                 Assert.Ignore(ignore);
             }
 
-            try
-            {
-                yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
-                Debug.Log($"[MerchantScenario] Backend: {handle.ResolvedBackend}");
+            // WHY: disposed in [UnityTearDown] after the request drain, never under a still-running turn.
+            _handle = handle;
 
-                InMemoryStore store = new();
-                MerchantInventoryProvider inventory = new();
-                MerchantEconomyState economy = new(inventory);
-                ListSink sink = new();
+            yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
+            Debug.Log($"[MerchantScenario] Backend: {handle.ResolvedBackend}");
 
-                AgentMemoryPolicy policy = new();
-                AgentBuilder builder = new AgentBuilder(BuiltInAgentRoleIds.Merchant)
-                    .WithMode(AgentMode.ToolsAndChat)
-                    .WithChatHistory()
-                    .WithMemory()
-                    .WithTool(new InventoryLlmTool(inventory))
-                    .WithTool(new DelegateLlmTool("get_player_gold",
-                        "Return current player gold amount.", new Func<Task<string>>(economy.GetPlayerGoldAsync)))
-                    .WithTool(new DelegateLlmTool("apply_discount",
-                        "Apply percent discount to an item. Args: itemName, percent.",
-                        new Func<string, int, Task<string>>(economy.ApplyDiscountAsync)))
-                    .WithTool(new DelegateLlmTool("buy_item",
-                        "Try buying an item for player. Args: itemName, quantity.",
-                        new Func<string, int, Task<string>>(economy.BuyItemAsync)));
-                builder.Build().ApplyToPolicy(policy);
+            InMemoryStore store = new();
+            MerchantInventoryProvider inventory = new();
+            MerchantEconomyState economy = new(inventory);
+            ListSink sink = new();
 
-                ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
-                AiOrchestrator orch = new(
-                    new SoloAuthorityHost(),
-                    clientWithMemory,
-                    sink,
-                    new SessionTelemetryCollector(),
-                    new AiPromptComposer(
-                        new BuiltInDefaultAgentSystemPromptProvider(),
-                        new NoAgentUserPromptTemplateProvider(),
-                        new NullLuaScriptVersionStore()),
-                    store,
-                    policy,
-                    new NoOpRoleStructuredResponsePolicy(),
-                    new NullAiOrchestrationMetrics(),
-                    ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
-                    new LocalActorIdentityProvider("merchant-behavior-test"));
+            AgentMemoryPolicy policy = new();
+            AgentBuilder builder = new AgentBuilder(BuiltInAgentRoleIds.Merchant)
+                .WithMode(AgentMode.ToolsAndChat)
+                .WithChatHistory()
+                .WithMemory()
+                .WithTool(new InventoryLlmTool(inventory))
+                .WithTool(new DelegateLlmTool("get_player_gold",
+                    "Return current player gold amount.", new Func<Task<string>>(economy.GetPlayerGoldAsync)))
+                .WithTool(new DelegateLlmTool("apply_discount",
+                    "Apply percent discount to an item. Args: itemName, percent.",
+                    new Func<string, int, Task<string>>(economy.ApplyDiscountAsync)))
+                .WithTool(new DelegateLlmTool("buy_item",
+                    "Try buying an item for player. Args: itemName, quantity.",
+                    new Func<string, int, Task<string>>(economy.BuyItemAsync)));
+            builder.Build().ApplyToPolicy(policy);
 
-                yield return RunStep(orch, sink, inventory, economy, store, "Step1_GreetAndList",
-                    "You are a merchant NPC in game. Player says: 'Hi! What do you sell?'. " +
-                    "Answer with available item names and prices.");
+            ILlmClient clientWithMemory = handle.WrapWithMemoryStore(store);
+            AiOrchestrator orch = new(
+                new SoloAuthorityHost(),
+                clientWithMemory,
+                sink,
+                new SessionTelemetryCollector(),
+                new AiPromptComposer(
+                    new BuiltInDefaultAgentSystemPromptProvider(),
+                    new NoAgentUserPromptTemplateProvider(),
+                    new NullLuaScriptVersionStore()),
+                store,
+                policy,
+                new NoOpRoleStructuredResponsePolicy(),
+                new NullAiOrchestrationMetrics(),
+                ScriptableObject.CreateInstance<CoreAISettingsAsset>(),
+                new LocalActorIdentityProvider("merchant-behavior-test"));
 
-                const string step2Base =
-                    "Player says: 'I want Leather Armor x1'. Player has low gold (40 gold). " +
-                    "This step validates the purchase-failure tool path: call buy_item for Leather Armor x1. " +
-                    "If purchase fails, explain briefly and suggest cheaper options.";
-                yield return RunStep(orch, sink, inventory, economy, store, "Step2_TooExpensive", step2Base,
-                    LlmToolChoiceMode.RequireSpecific, "buy_item");
+            yield return RunStep(orch, sink, inventory, economy, store, "Step1_GreetAndList",
+                "You are a merchant NPC in game. Player says: 'Hi! What do you sell?'. " +
+                "Answer with available item names and prices.");
 
-                yield return RunStep(orch, sink, inventory, economy, store, "Step3_NegotiateAndBuy",
-                    "Player says: 'I can spend at most 40 gold and I want one Iron Sword. " +
-                    "Can we make a deal and complete the purchase if the price fits?' " +
-                    "As the merchant: if the price is above the player's budget, call apply_discount so it fits, " +
-                    "then ALWAYS finish the deal in this same turn by calling buy_item for Iron Sword x1 — " +
-                    "announcing the discount without the buy_item call does not complete the purchase.");
+            const string step2Base =
+                "Player says: 'I want Leather Armor x1'. Player has low gold (40 gold). " +
+                "This step validates the purchase-failure tool path: call buy_item for Leather Armor x1. " +
+                "If purchase fails, explain briefly and suggest cheaper options.";
+            yield return RunStep(orch, sink, inventory, economy, store, "Step2_TooExpensive", step2Base,
+                LlmToolChoiceMode.RequireSpecific, "buy_item");
 
-                Assert.IsTrue(inventory.CallLog.Any(c => c.StartsWith("get_inventory", StringComparison.Ordinal)),
-                    "Merchant should inspect inventory.");
-                Assert.IsTrue(
-                    economy.CallLog.Any(c => c.StartsWith("buy_item:Leather Armor", StringComparison.Ordinal)),
-                    "Scenario should attempt expensive purchase first.");
-                Assert.IsTrue(
-                    economy.CallLog.Any(c => c.StartsWith("apply_discount:Iron Sword:", StringComparison.Ordinal)),
-                    "Scenario should negotiate discount.");
-                Assert.IsTrue(
-                    economy.CallLog.Any(c =>
-                        c.StartsWith("buy_item:Iron Sword:1:success", StringComparison.Ordinal)),
-                    "Scenario should finish with successful purchase.");
-                Assert.AreEqual(1, economy.PlayerInventory.Count(i => i == "Iron Sword"));
-                Assert.Less(economy.PlayerGold, 40, "Gold should decrease after successful purchase.");
-                Assert.IsTrue(sink.Items.Count > 0, "Orchestrator should publish chat payloads.");
-            }
-            finally
-            {
-                handle.Dispose();
-            }
+            yield return RunStep(orch, sink, inventory, economy, store, "Step3_NegotiateAndBuy",
+                "Player says: 'I can spend at most 40 gold and I want one Iron Sword. " +
+                "Can we make a deal and complete the purchase if the price fits?' " +
+                "As the merchant: if the price is above the player's budget, call apply_discount so it fits, " +
+                "then ALWAYS finish the deal in this same turn by calling buy_item for Iron Sword x1 — " +
+                "announcing the discount without the buy_item call does not complete the purchase.");
+
+            Assert.IsTrue(inventory.CallLog.Any(c => c.StartsWith("get_inventory", StringComparison.Ordinal)),
+                "Merchant should inspect inventory.");
+            Assert.IsTrue(
+                economy.CallLog.Any(c => c.StartsWith("buy_item:Leather Armor", StringComparison.Ordinal)),
+                "Scenario should attempt expensive purchase first.");
+            Assert.IsTrue(
+                economy.CallLog.Any(c => c.StartsWith("apply_discount:Iron Sword:", StringComparison.Ordinal)),
+                "Scenario should negotiate discount.");
+            Assert.IsTrue(
+                economy.CallLog.Any(c =>
+                    c.StartsWith("buy_item:Iron Sword:1:success", StringComparison.Ordinal)),
+                "Scenario should finish with successful purchase.");
+            Assert.AreEqual(1, economy.PlayerInventory.Count(i => i == "Iron Sword"));
+            Assert.Less(economy.PlayerGold, 40, "Gold should decrease after successful purchase.");
+            Assert.IsTrue(sink.Items.Count > 0, "Orchestrator should publish chat payloads.");
         }
 
-        private static IEnumerator RunStep(
+        private IEnumerator RunStep(
             AiOrchestrator orch,
             ListSink sink,
             MerchantInventoryProvider inventory,
@@ -179,8 +204,8 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
             Debug.Log($"[MerchantScenario] === {label} ===");
             Debug.Log($"[MerchantScenario] PLAYER: {hint}");
             int beforeCommands = sink.Items.Count;
-            using CancellationTokenSource cts = new();
-            Task task = orch.RunTaskAsync(new AiTaskRequest
+            CancellationTokenSource cts = _requests.CreateCancellation();
+            Task task = _requests.Track(orch.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = BuiltInAgentRoleIds.Merchant,
                 Hint = hint,
@@ -188,8 +213,8 @@ namespace CoreAI.Tests.PlayMode.Scenarios.Complex
                 ForcedToolMode = forcedToolMode,
                 RequiredToolName = requiredToolName ?? "",
                 MaxOutputTokens = ScenarioStepMaxOutputTokens
-            }, cts.Token);
-            yield return PlayModeTestAwait.WaitTask(task, LlmStepTimeoutSeconds, label, cts);
+            }, cts.Token));
+            yield return PlayModeTestAwait.WaitTask(task, _requests.Cap(LlmStepTimeoutSeconds), label, cts);
 
             if (sink.Items.Count > beforeCommands)
             {
