@@ -4,6 +4,8 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.48.0] - 2026-09-30
+
 ### Breaking
 
 - **`CoreAi.OnToolExecuted` result type.** `result` is an `LlmToolImageResult` for `camera_capture` / `screenshot` /

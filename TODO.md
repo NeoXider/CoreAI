@@ -23,7 +23,7 @@
 > on the Unity EditMode/PlayMode `FastNoLlm` gate; spikes S1/S2 and the IL2CPP/WebGL player checks are open
 > follow-ups that gate the next networked rung, not MVP3's product scope. MVP4 (script contexts) next, not started. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
 > non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`; the current status in `PLAN.md`.
-> Latest release: 7.47.4 (2026-09-30, all seven packages in lockstep — castle quest parity fixture and visual comparison). Earlier: 7.47.3 (2026-09-30, live-test isolation and benchmark timing report). Earlier: 7.47.0 (2026-09-25, MVP3 and the audit fix waves, merged with
+> Latest release: 7.48.0 (2026-09-30, all seven packages in lockstep — attachments and camera images end to end, visible Rbx material relief, WebGL verification, 7.47.x audit fixes). Earlier: 7.47.4 (2026-09-30, castle quest parity fixture and visual comparison). Earlier: 7.47.3 (2026-09-30, live-test isolation and benchmark timing report). Earlier: 7.47.0 (2026-09-25, MVP3 and the audit fix waves, merged with
 > 7.46.0). Earlier: 7.46.0 and 7.45.0 (2026-09-24, lockstep); 7.3.1 (2026-09-02, the six
 > packages of that time in lockstep — WebGL tool-turn fix); 7.3.0 (2026-09-02, lockstep — MVP2.5 persistence
 > release); 7.2.0 (2026-09-02, `com.neoxider.coreai` + `.coreaiunity` only); 7.1.1 (2026-08-31,
@@ -36,10 +36,10 @@
 > gate called Genie `grant_gold`; Spellcraft produced `storm|3`, `fire|2`, `poison|1`, and `frost|2` through
 > native `cast_spell` with no ToolsOnly error.
 
-## 7.47.x audit wave (2026-09-30, uncommitted fixes on top of 7.47.4)
+## 7.47.x audit wave (2026-09-30, released in 7.48.0)
 
 Five independent audits of 7.47.2-7.47.4 (benchmark, live tests, castle fixture, camera images) and their fixes: see
-both CHANGELOGs, `[Unreleased]`. Verified in Unity 6000.3.14f1 on the settled tree (after the attachment API and material fixes): EditMode 6609 total /
+both CHANGELOGs, `[7.48.0]`. Verified in Unity 6000.3.14f1 on the settled tree (after the attachment API and material fixes): EditMode 6609 total /
 6593 passed / 0 failed / 16 skipped; portable core 2213 / 0; Lua tier 1846 / 0 / 2 not run. The PlayMode live fixtures and the new benchmark
 tests compile but have **not been run** (they need a model backend).
 

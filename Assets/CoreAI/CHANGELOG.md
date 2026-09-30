@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [7.48.0] - 2026-09-30
+
 ### Breaking
 
 - **`NotifyToolExecuted` result for camera tools.** `IToolExecutionNotifier.NotifyToolExecuted` `result` is the tool's
