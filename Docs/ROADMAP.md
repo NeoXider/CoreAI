@@ -77,7 +77,7 @@ shareable.
 
 ## 2. Package map
 
-Seven UPM packages, released in lockstep (all currently 7.48.0):
+Seven UPM packages, released in lockstep (all currently 7.49.0):
 
 | Package | What it is |
 |---|---|

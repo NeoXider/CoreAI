@@ -1010,6 +1010,17 @@ namespace CoreAI.Infrastructure.Llm
                         streamModel = ResolveModelName(update.ModelId);
                     }
 
+                    if (IsGenerationProgressUpdate(update))
+                    {
+                        // WHY: backend liveness, not content: the model is still generating but said
+                        // nothing displayable yet. Surfaced as an additive marker only - no Text, no
+                        // ReasoningText, no visible-message boundary, no think-filter input - so empty
+                        // role frames stay non-semantic and the caller's own cancellation still ends
+                        // the request through the existing token checks.
+                        yield return new LlmStreamChunk { GenerationInProgress = true };
+                        continue;
+                    }
+
                     int nativeToolCountBeforeUpdate = nativeToolCalls.Count;
                     if (update.Contents != null)
                     {
@@ -2029,6 +2040,28 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return update.Text;
+        }
+
+        /// <summary>
+        /// True when the update is a backend generation-liveness signal
+        /// (<see cref="MeaiOpenAiChatClient.GenerationProgressMetadataKey"/>): whitelisted phase only,
+        /// read back from the MEAI update metadata the transport stamped it with.
+        /// </summary>
+        private static bool IsGenerationProgressUpdate(MEAI.ChatResponseUpdate update)
+        {
+            if (update?.AdditionalProperties == null)
+            {
+                return false;
+            }
+
+            if (!update.AdditionalProperties.TryGetValue<string>(
+                    MeaiOpenAiChatClient.GenerationProgressMetadataKey, out string marker))
+            {
+                return false;
+            }
+
+            return string.Equals(marker?.Trim(), MeaiOpenAiChatClient.GenerationProgressPhaseProcessing,
+                StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

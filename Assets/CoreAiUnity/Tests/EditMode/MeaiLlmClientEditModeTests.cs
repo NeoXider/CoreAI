@@ -1102,6 +1102,81 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("alpha beta", visible.ToString());
         }
 
+        [Test]
+        public async Task CompleteStreamingAsync_GenerationProgress_YieldsAdditiveMarkerWithoutVisibleText()
+        {
+            GenerationProgressStreamingChatClient provider = new();
+            MeaiLlmClient client = new(provider, new SilentProgressLogger(),
+                new StubCoreSettings(), supportsNativeToolCalling: true, memoryStore: null);
+            List<LlmStreamChunk> chunks = new();
+
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(
+                new LlmCompletionRequest { UserPayload = "hi" }))
+            {
+                chunks.Add(chunk);
+            }
+
+            List<LlmStreamChunk> progress = chunks.Where(c => c.GenerationInProgress).ToList();
+            Assert.AreEqual(1, progress.Count,
+                "One backend liveness signal must surface as exactly one marker chunk.");
+            Assert.AreEqual("", progress[0].Text ?? "");
+            Assert.AreEqual("", progress[0].ReasoningText ?? "");
+            Assert.IsFalse(progress[0].IsDone);
+            Assert.IsFalse(progress[0].StartsNewMessage, "Liveness is not a message boundary.");
+            Assert.AreEqual("hi", string.Concat(chunks.Select(c => c.Text ?? "")));
+            LlmStreamChunk firstVisible = chunks.First(c => !string.IsNullOrEmpty(c.Text));
+            Assert.IsFalse(firstVisible.StartsNewMessage,
+                "Progress before the first word must not open a new message.");
+            Assert.IsTrue(chunks.Last().IsDone);
+        }
+
+        [Test]
+        public void LlmStreamChunk_WithError_PreservesGenerationProgress()
+        {
+            LlmStreamChunk chunk = new() { GenerationInProgress = true, Text = "" };
+            LlmStreamChunk rewritten = chunk.WithError("cancelled", LlmErrorCode.Cancelled);
+
+            Assert.IsTrue(rewritten.GenerationInProgress);
+            Assert.AreEqual("cancelled", rewritten.Error);
+            Assert.AreEqual(LlmErrorCode.Cancelled, rewritten.ErrorCode);
+        }
+
+        private sealed class SilentProgressLogger : IGameLogger
+        {
+            public void LogDebug(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
+            public void LogInfo(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
+            public void LogWarning(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
+            public void LogError(GameLogFeature feature, string message, UnityEngine.Object context = null) { }
+        }
+
+        private sealed class GenerationProgressStreamingChatClient : MEAI.IChatClient
+        {
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> messages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default) =>
+                throw new NotSupportedException();
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> messages, MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                MEAI.ChatResponseUpdate progress = new(MEAI.ChatRole.Assistant, "");
+                if (progress.AdditionalProperties == null)
+                {
+                    progress.AdditionalProperties = new MEAI.AdditionalPropertiesDictionary();
+                }
+
+                progress.AdditionalProperties[MeaiOpenAiChatClient.GenerationProgressMetadataKey] =
+                    MeaiOpenAiChatClient.GenerationProgressPhaseProcessing;
+                yield return progress;
+                yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "hi");
+                await Task.Yield();
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null) => null;
+            public void Dispose() { }
+        }
+
         private sealed class MultiPartStreamingChatClient : MEAI.IChatClient
         {
             public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> messages,

@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [7.49.0] - 2026-10-02
+
+### Added
+
+- Generic `generation_progress:{phase:processing}` SSE support. Whitelisted processing frames signal generation without forwarding private reasoning or adding visible text to chat history.
+
+### Fixed
+
+- Server-managed streams use the configured request budget for first generation progress. Comments, empty role frames and arbitrary extensions do not count as generation.
+- SSE error frames and EOF without a terminal completion frame fail explicitly instead of silently completing an interrupted answer. Cancellation retains its cancellation outcome.
+
 ## [7.48.0] - 2026-09-30
 
 ### Breaking

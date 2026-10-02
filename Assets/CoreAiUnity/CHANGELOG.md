@@ -4,6 +4,16 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.49.0] - 2026-10-02
+
+### Added
+
+- `LlmStreamChunk.GenerationInProgress` carries a safe waiting-status signal from the backend. It contains no private reasoning and is separate from visible text, first-content notification and persisted chat history.
+
+### Fixed
+
+- The MEAI adapter preserves processing-only progress while SSE errors and missing terminal frames remain failures. Server-managed HTTP requests use the configured request timeout.
+
 ## [7.48.0] - 2026-09-30
 
 ### Breaking

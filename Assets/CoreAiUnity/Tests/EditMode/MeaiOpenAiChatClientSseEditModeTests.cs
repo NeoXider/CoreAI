@@ -280,6 +280,50 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void ParseSseDataLine_GenerationProgressProcessing_EmitsMetadataOnlyUpdate()
+        {
+            const string json = "{\"generation_progress\":{\"phase\":\"processing\"},\"choices\":[]}";
+
+            MEAI.ChatResponseUpdate u = MeaiOpenAiChatClient.ParseSseDataLineForTests(json);
+
+            Assert.IsNotNull(u, "Whitelisted progress must parse, not be dropped.");
+            Assert.AreEqual("", u.Text ?? "", "Progress must never fake visible text.");
+            Assert.IsEmpty(u.Contents.OfType<MEAI.TextReasoningContent>(),
+                "Progress must never carry reasoning.");
+            Assert.AreEqual(MeaiOpenAiChatClient.GenerationProgressPhaseProcessing,
+                u.AdditionalProperties[MeaiOpenAiChatClient.GenerationProgressMetadataKey]);
+        }
+
+        [Test]
+        public void ParseSseDataLine_GenerationProgressUnknownPhase_IsIgnored()
+        {
+            const string json = "{\"generation_progress\":{\"phase\":\"dreaming\"},\"choices\":[]}";
+            Assert.IsNull(MeaiOpenAiChatClient.ParseSseDataLineForTests(json),
+                "Only the whitelisted processing phase is safe progress.");
+        }
+
+        [Test]
+        public void ParseSseDataLine_GenerationProgressStripsEmbeddedReasoning()
+        {
+            const string json =
+                "{\"generation_progress\":{\"phase\":\"processing\",\"reasoning_content\":\"secret plan\",\"reasoning\":\"x\"},\"choices\":[]}";
+            MEAI.ChatResponseUpdate u = MeaiOpenAiChatClient.ParseSseDataLineForTests(json);
+
+            Assert.IsNotNull(u);
+            Assert.AreEqual("", u.Text ?? "", "Leaked reasoning must never become visible text.");
+            Assert.IsEmpty(u.Contents.OfType<MEAI.TextReasoningContent>(),
+                "Leaked reasoning must never become reasoning content either.");
+        }
+
+        [Test]
+        public void ParseSseDataLine_RoleOnlyDelta_IsNotSemanticContent()
+        {
+            MEAI.ChatResponseUpdate u = MeaiOpenAiChatClient.ParseSseDataLineForTests(
+                "{\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}");
+            Assert.IsNull(u);
+        }
+
+        [Test]
         public void ParseCompletion_EmptyContent_KeepsReasoningOutOfVisibleText()
         {
             // WHY: in RedoSchool reasoning_content was stored as a finished note for the learner; empty
@@ -463,6 +507,8 @@ namespace CoreAI.Tests.EditMode
             List<string> visibleParts = new();
             StringBuilder reasoningParts = new();
 
+            LlmClientException failure = Assert.ThrowsAsync<LlmClientException>(async () =>
+            {
             await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
                                new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
             {
@@ -481,10 +527,28 @@ namespace CoreAI.Tests.EditMode
                 }
             }
 
+            });
+            Assert.AreEqual(LlmErrorCode.EmptyResponse, failure.ErrorCode);
+
             Assert.AreEqual("I am thinking", reasoningParts.ToString(),
                 "Every reasoning delta must surface as TextReasoningContent.");
             Assert.AreEqual("", string.Concat(visibleParts),
                 "A reasoning-only turn must not emit visible assistant text.");
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_NativeToolOnly_IsUsableCompletion()
+        {
+            const string sse = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"test_tool\",\"arguments\":\"{}\"}}]}}]}\n\ndata: [DONE]\n\n";
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), new DoneSentinelTransport(sse));
+            List<MEAI.ChatResponseUpdate> updates = new();
+
+            await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+                updates.Add(update);
+
+            Assert.AreEqual(1, updates.SelectMany(u => u.Contents).OfType<MEAI.FunctionCallContent>().Count());
+            Assert.IsTrue(updates.All(u => string.IsNullOrEmpty(u.Text)));
         }
 
         [Test]
@@ -819,6 +883,141 @@ namespace CoreAI.Tests.EditMode
                     "Each starved attempt must be aborted early and retried only emptyStreamMaxAttempts (3) times.");
                 Assert.AreEqual(1, transport.NonStreamingCalls,
                     "After the starved-stream retries exactly one non-streaming completion runs.");
+            }
+            finally
+            {
+                MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = savedTimeout;
+            }
+        }
+
+        [TestCase("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n")]
+        [TestCase("data: {\"unexpected\":true}\n\n")]
+        public async Task GetStreamingResponseAsync_NonSemanticPrefix_DoesNotDisableStarvationGuard(string prefix)
+        {
+            int savedTimeout = MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds;
+            MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = 0;
+            try
+            {
+                EndlessKeepAliveTransport transport = new(prefix);
+                MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+                List<string> parts = new();
+                using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(3));
+
+                await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                                   new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }, cancellationToken: deadline.Token))
+                    parts.Add(update.Text);
+
+                Assert.AreEqual("fallback answer", string.Concat(parts));
+                Assert.AreEqual(3, transport.StreamOpens);
+                Assert.AreEqual(1, transport.NonStreamingCalls);
+            }
+            finally { MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = savedTimeout; }
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_PartialEof_PreservesPartialAndFailsWithoutFallback()
+        {
+            AsyncChunkedSseTransport transport = new(new[] { "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n" });
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+            List<string> parts = new();
+
+            LlmClientException failure = Assert.ThrowsAsync<LlmClientException>(async () =>
+            {
+                await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                                   new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+                    parts.Add(update.Text);
+            });
+
+            Assert.AreEqual("partial", string.Concat(parts));
+            Assert.AreEqual(LlmErrorCode.BackendUnavailable, failure.ErrorCode);
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_FinishReasonWithoutDone_IsTerminalCompletion()
+        {
+            AsyncChunkedSseTransport transport = new(new[] { "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":\"stop\"}]}\n\n" });
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+            List<string> parts = new();
+
+            await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+                parts.Add(update.Text);
+
+            Assert.AreEqual("answer", string.Concat(parts));
+        }
+
+        [Test]
+        public void GetStreamingResponseAsync_ErrorFrame_IsTypedAndRedacted()
+        {
+            ProgressOnlyTransport transport = new("data: {\"error\":{\"code\":502,\"message\":\"secret-provider-token\"}}\n\n");
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+
+            LlmClientException failure = Assert.ThrowsAsync<LlmClientException>(async () =>
+            {
+                await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                                   new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") })) { }
+            });
+
+            StringAssert.DoesNotContain("secret-provider-token", failure.ToString());
+            Assert.IsEmpty(failure.ProviderErrorBody);
+            Assert.AreEqual(502, failure.HttpStatus);
+            Assert.AreEqual(1, transport.StreamOpens);
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_ServerManagedKeepAlive_UsesConfiguredDeadline()
+        {
+            int savedTimeout = MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds;
+            MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = 0;
+            try
+            {
+                AsyncChunkedSseTransport transport = new(new[] { ": keep-alive\n\n", "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\ndata: [DONE]\n\n" });
+                DoneSentinelSettings settings = new() { ExecutionMode = LlmExecutionMode.ServerManagedApi };
+                MeaiOpenAiChatClient client = new(settings, transport);
+                List<string> parts = new();
+
+                await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                                   new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+                    parts.Add(update.Text);
+
+                Assert.AreEqual("answer", string.Concat(parts), "A managed endpoint may legitimately omit reasoning progress frames.");
+            }
+            finally { MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = savedTimeout; }
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_ProgressOnlyTerminal_FailsWithoutFallback()
+        {
+            // WHY: Progress proves generation, not a completed answer; it must not trigger a fresh fallback attempt.
+            int savedTimeout = MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds;
+            MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = 0;
+            try
+            {
+                const string sse =
+                    "data: {\"generation_progress\":{\"phase\":\"processing\"},\"choices\":[]}\n\n" +
+                    "data: {\"generation_progress\":{\"phase\":\"processing\"},\"choices\":[]}\n\n" +
+                    "data: [DONE]\n\n";
+                ProgressOnlyTransport transport = new(sse);
+                MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+                List<MEAI.ChatResponseUpdate> updates = new();
+
+                LlmClientException failure = Assert.ThrowsAsync<LlmClientException>(async () =>
+                {
+                    await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                                       new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+                        updates.Add(update);
+                });
+                Assert.AreEqual(LlmErrorCode.EmptyResponse, failure.ErrorCode);
+
+                Assert.GreaterOrEqual(updates.Count, 1,
+                    "Progress frames must surface as parsed deltas, not vanish.");
+                Assert.IsTrue(updates.All(u => string.IsNullOrEmpty(u.Text)),
+                    "Progress carries no visible text.");
+                Assert.IsTrue(updates.All(u =>
+                    !(u.Contents ?? new List<MEAI.AIContent>()).OfType<MEAI.TextReasoningContent>().Any()),
+                    "Progress carries no reasoning.");
+                Assert.AreEqual(1, transport.StreamOpens,
+                    "Progress cannot silently complete an empty answer or trigger a mixed fallback.");
             }
             finally
             {
@@ -1412,6 +1611,45 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
+        /// Streams a fixed SSE payload once, then closes. The plain completion endpoint throws:
+        /// any empty-stream retry or non-streaming fallback surfaces immediately as a failure.
+        /// </summary>
+        private sealed class ProgressOnlyTransport : IOpenAiHttpTransport
+        {
+            private readonly string _sse;
+
+            public ProgressOnlyTransport(string sse)
+            {
+                _sse = sse;
+            }
+
+            public int StreamOpens { get; private set; }
+            public string DebugLabel => "ProgressOnly";
+            public bool SupportsSseStreaming => true;
+
+            public Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                throw new NotSupportedException("ProgressOnlyTransport: fallback must never run.");
+            }
+
+            public Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                StreamOpens++;
+                OpenAiHttpSseOpenResult result = new()
+                {
+                    StatusCode = 200,
+                    ResponseHeaders = new Dictionary<string, IEnumerable<string>>
+                    {
+                        { "Content-Type", new[] { "text/event-stream" } }
+                    }
+                };
+                return Task.FromResult(result.WithRawStream(new ThrowsAfterPayloadStream(_sse)));
+            }
+        }
+
+        /// <summary>
         /// Streams NEVER close and never send a data line — an endless drip of ": keep-alive" SSE
         /// comments (a proxy holding a starved upstream connection open). Only the starved-stream
         /// watchdog can end an attempt. The plain completion endpoint answers normally.
@@ -1421,6 +1659,8 @@ namespace CoreAI.Tests.EditMode
             public int StreamOpens;
             public int NonStreamingCalls;
 
+            private readonly string _prefix;
+            public EndlessKeepAliveTransport(string prefix = "") { _prefix = prefix; }
             public string DebugLabel => "EndlessKeepAlive";
             public bool SupportsSseStreaming => true;
 
@@ -1450,13 +1690,16 @@ namespace CoreAI.Tests.EditMode
                     }
                 };
 
-                return Task.FromResult(result.WithRawStream(new EndlessKeepAliveStream()));
+                return Task.FromResult(result.WithRawStream(new EndlessKeepAliveStream(_prefix)));
             }
         }
 
         private sealed class EndlessKeepAliveStream : Stream
         {
             private static readonly byte[] KeepAlive = Encoding.UTF8.GetBytes(": keep-alive\n\n");
+            private readonly byte[] _prefix;
+            private int _prefixOffset;
+            public EndlessKeepAliveStream(string prefix) { _prefix = Encoding.UTF8.GetBytes(prefix); }
 
             public override bool CanRead => true;
             public override bool CanSeek => false;
@@ -1479,6 +1722,13 @@ namespace CoreAI.Tests.EditMode
 
             public override int Read(byte[] buffer, int offset, int count)
             {
+                if (_prefixOffset < _prefix.Length)
+                {
+                    int prefixCount = Math.Min(count, _prefix.Length - _prefixOffset);
+                    Array.Copy(_prefix, _prefixOffset, buffer, offset, prefixCount);
+                    _prefixOffset += prefixCount;
+                    return prefixCount;
+                }
                 int toCopy = Math.Min(count, KeepAlive.Length);
                 Array.Copy(KeepAlive, 0, buffer, offset, toCopy);
                 return toCopy;
@@ -1952,6 +2202,7 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class DoneSentinelSettings : IOpenAiHttpSettings
         {
+            public LlmExecutionMode ExecutionMode { get; set; }
             public string ExtraBodyJson { get; set; } = "";
             public string ApiBaseUrl => "https://example.invalid/v1";
             public string ApiKey => "";

@@ -1,6 +1,7 @@
 #if COREAI_LLM
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 #if UNITY_EDITOR
@@ -489,7 +490,9 @@ namespace CoreAI.Infrastructure.Llm
             const int transientLocalLlmReloadMaxAttempts = 10;
             const int emptyStreamMaxAttempts = 3;
             bool fallBackToNonStreaming = false;
-            int starvedStreamFirstDeltaTimeoutSec = StarvedStreamFirstDeltaTimeoutSeconds;
+            int starvedStreamFirstDeltaTimeoutSec = _settings.ExecutionMode == LlmExecutionMode.ServerManagedApi
+                ? (_settings.RequestTimeoutSeconds <= 0 ? 120 : _settings.RequestTimeoutSeconds)
+                : StarvedStreamFirstDeltaTimeoutSeconds;
             int rateLimitRetriesLeft = RateLimitMaxRetries;
 
             for (int attempt = 1; attempt <= transientLocalLlmReloadMaxAttempts; attempt++)
@@ -637,8 +640,10 @@ namespace CoreAI.Infrastructure.Llm
 
                     SseToolCallAccumulator toolAccumulator = new(_log);
                     DateTime lastProgressUtc = DateTime.UtcNow;
-                    DateTime attemptStartUtc = DateTime.UtcNow;
-                    bool sawNonCommentLine = false;
+                    Stopwatch firstDeltaClock = Stopwatch.StartNew();
+                    bool sawSemanticProgress = false;
+                    bool sawTerminalFrame = false;
+                    bool sawUsableOutput = false;
                     bool starvedAttemptAborted = false;
                     int parsedSseDeltas = 0;
 
@@ -661,36 +666,18 @@ namespace CoreAI.Infrastructure.Llm
 
                         if (IsSseDoneLine(line))
                         {
+                            sawTerminalFrame = true;
                             break;
-                        }
-
-                        // WHY: Starved-stream early abort: a proxy hiding an upstream failure behind
-                        // HTTP 200 sends only SSE comment lines (": keep-alive") and can hold the
-                        // connection open far longer than callers' turn budgets. If the stream has
-                        // produced nothing but comments/blank lines for the first-delta window,
-                        // abandon this attempt now; the empty-stream retry/fallback below handles it.
-                        if (parsedSseDeltas == 0 && !sawNonCommentLine)
-                        {
-                            bool isCommentOrBlank = string.IsNullOrWhiteSpace(line)
-                                                    || line.StartsWith(":", StringComparison.Ordinal);
-                            if (!isCommentOrBlank)
-                            {
-                                sawNonCommentLine = true;
-                            }
-                            else if ((DateTime.UtcNow - attemptStartUtc).TotalSeconds
-                                     > starvedStreamFirstDeltaTimeoutSec)
-                            {
-                                _log.Warn(
-                                    $"MeaiOpenAiChatClient: SSE stream sent only keep-alive comments for {starvedStreamFirstDeltaTimeoutSec}s with 0 parsed deltas - aborting this streaming attempt early.",
-                                    LogTag.Llm);
-                                starvedAttemptAborted = true;
-                                break;
-                            }
                         }
 
                         // WHY: one line in, at most one update out — no `line + "\n"` copy and no Split
                         // array to re-find a boundary the reader already framed (see ParseSseLine).
+                        int fragmentsBefore = toolAccumulator.FragmentVersion;
                         MEAI.ChatResponseUpdate update = ParseSseLine(line, toolAccumulator);
+                        sawSemanticProgress |= IsSemanticStreamingProgress(update) || toolAccumulator.FragmentVersion != fragmentsBefore;
+                        sawTerminalFrame |= update?.FinishReason != null;
+                        sawUsableOutput |= !string.IsNullOrEmpty(update?.Text) ||
+                            update?.Contents?.Any(c => c is MEAI.FunctionCallContent) == true;
                         if (update != null)
                         {
                             parsedSseDeltas++;
@@ -715,7 +702,18 @@ namespace CoreAI.Infrastructure.Llm
                         if (completedCalls != null)
                         {
                             parsedSseDeltas++;
+                            sawUsableOutput = true;
                             yield return completedCalls;
+                        }
+
+                        // WHY: Empty role frames, comments and arbitrary extensions do not prove
+                        // generation. Semantic deltas or safe backend progress defeat the first-delta
+                        // ceiling; network keep-alive still serves the independent transport clock.
+                        if (!sawSemanticProgress && !sawTerminalFrame && firstDeltaClock.Elapsed.TotalSeconds > starvedStreamFirstDeltaTimeoutSec)
+                        {
+                            _log.Warn($"MeaiOpenAiChatClient: SSE produced no generation progress for {starvedStreamFirstDeltaTimeoutSec}s; aborting this attempt.", LogTag.Llm);
+                            starvedAttemptAborted = true;
+                            break;
                         }
 
                         // WHY: Re-arm the stall clock only AFTER every update for this line has been
@@ -731,10 +729,15 @@ namespace CoreAI.Infrastructure.Llm
                         }
                     }
 
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!sawTerminalFrame && !starvedAttemptAborted)
+                        throw new LlmClientException("LLM SSE ended before a terminal completion frame.", LlmErrorCode.BackendUnavailable);
+
                     MEAI.ChatResponseUpdate flushed = toolAccumulator.Flush();
                     if (flushed != null)
                     {
                         parsedSseDeltas++;
+                        sawUsableOutput = true;
                         yield return flushed;
                     }
 
@@ -768,9 +771,10 @@ namespace CoreAI.Infrastructure.Llm
                         break;
                     }
 
-                    // WHY: In the RedoSchool incident reasoning_content got persisted as the learner's
-                    // finished note. Even a reasoning-only stream stays diagnostics and never becomes
-                    // TextContent.
+                    if (!sawUsableOutput)
+                        throw new LlmClientException("LLM stream completed without visible text or tool calls.", LlmErrorCode.EmptyResponse);
+
+                    // WHY: Provider reasoning is diagnostics and must never become visible TextContent.
                     yield break;
                 }
             }
@@ -1864,6 +1868,16 @@ namespace CoreAI.Infrastructure.Llm
 
         private const string SseDonePayload = "[DONE]";
 
+        /// <summary>
+        /// MEAI update metadata key carrying a backend generation-liveness signal. A backend that
+        /// strips private reasoning still emits <c>generation_progress:{phase:processing}</c> SSE frames
+        /// with empty <c>choices</c> while it thinks; only the whitelisted phase below is recognized.
+        /// </summary>
+        public const string GenerationProgressMetadataKey = "generation_progress";
+
+        /// <summary>Whitelisted <c>generation_progress.phase</c> value treated as safe liveness progress.</summary>
+        public const string GenerationProgressPhaseProcessing = "processing";
+
         /// <summary>True when the payload range found by <see cref="TryGetSseDataRange"/> is <c>[DONE]</c>.</summary>
         private static bool IsSseDoneRange(string line, int start, int end)
         {
@@ -1998,6 +2012,18 @@ namespace CoreAI.Infrastructure.Llm
                 return null;
             }
 
+            if (root["error"] != null || root["error_code"] != null)
+            {
+                string statusText = (root["error"] as JObject)?["code"]?.ToString() ?? root["status_code"]?.ToString();
+                int status = int.TryParse(statusText, out int reportedStatus) && reportedStatus >= 400 && reportedStatus <= 599
+                    ? reportedStatus : 502;
+                string category = root["error_code"]?.ToString() ?? "";
+                LlmErrorCode code = string.Equals(category, "timeout", StringComparison.OrdinalIgnoreCase)
+                    ? LlmErrorCode.Timeout : MapHttpStatus(status, "", "");
+                // WHY: Raw SSE error bodies may contain credentials or private diagnostics.
+                throw new LlmClientException("LLM streaming response reported an upstream error.", code, status);
+            }
+
             accumulator.LatchWireId(root["id"]?.ToString());
             string finishValue = (root["choices"] as JArray)?.First?["finish_reason"]?.ToString();
             MEAI.ChatResponseUpdate update = ExtractDeltaUpdateCore(root, accumulator);
@@ -2055,7 +2081,7 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (choice0 == null || choice0.Type != JTokenType.Object)
                 {
-                    return TryParseStreamingUsageChunk(obj);
+                    return TryParseStreamingUsageChunk(obj) ?? TryParseGenerationProgressChunk(obj);
                 }
 
                 JObject choice = (JObject)choice0;
@@ -2127,12 +2153,48 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
 
-                return TryParseStreamingUsageChunk(obj);
+                return TryParseStreamingUsageChunk(obj) ?? TryParseGenerationProgressChunk(obj);
             }
             catch
             {
                 return null;
             }
+        }
+
+        private static bool IsSemanticStreamingProgress(MEAI.ChatResponseUpdate update)
+        {
+            if (update == null) return false;
+            if (!string.IsNullOrEmpty(update.Text)) return true;
+            if (update.AdditionalProperties?.TryGetValue<string>(GenerationProgressMetadataKey, out string phase) == true &&
+                string.Equals(phase, GenerationProgressPhaseProcessing, StringComparison.OrdinalIgnoreCase)) return true;
+            return update.Contents?.Any(content => content is MEAI.TextReasoningContent || content is MEAI.FunctionCallContent) == true;
+        }
+
+        /// <summary>
+        /// Backend generation liveness: an SSE object shaped
+        /// <c>generation_progress:{phase:processing},choices:[]</c> becomes a metadata-only update that
+        /// counts as a parsed delta (starved-stream watchdog, empty-stream fallback) without carrying
+        /// any text or reasoning. WHY only the whitelisted phase: the backend strips private
+        /// reasoning before emitting progress, so every other field on the object is ignored and any
+        /// unknown phase (or none) falls back to null, keeping unknown extensions backward compatible.
+        /// </summary>
+        private static MEAI.ChatResponseUpdate TryParseGenerationProgressChunk(JObject obj)
+        {
+            if (obj["generation_progress"] is not JObject progress)
+            {
+                return null;
+            }
+
+            string phase = progress["phase"]?.ToString()?.Trim() ?? "";
+            if (!string.Equals(phase, GenerationProgressPhaseProcessing, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            MEAI.ChatResponseUpdate update = new(MEAI.ChatRole.Assistant, "");
+            update.AdditionalProperties ??= new MEAI.AdditionalPropertiesDictionary();
+            update.AdditionalProperties[GenerationProgressMetadataKey] = GenerationProgressPhaseProcessing;
+            return update;
         }
 
         /// <summary>OpenAI streaming: final SSE object may have <c>choices: []</c> and root <c>usage</c> when <c>stream_options.include_usage</c> is set.</summary>
@@ -2435,6 +2497,8 @@ namespace CoreAI.Infrastructure.Llm
             /// </summary>
             internal int ArgumentMaterialisations { get; private set; }
 
+            internal int FragmentVersion { get; private set; }
+
             /// <summary>
             /// The ONE place accumulated arguments turn into a string. Single funnel on purpose: it
             /// keeps the cost countable, and it makes an accidental "just call ToString() to check
@@ -2506,6 +2570,8 @@ namespace CoreAI.Infrastructure.Llm
             /// </summary>
             public void Feed(int? index, string callId, string name, string argumentsFragment)
             {
+                if (!string.IsNullOrEmpty(callId) || !string.IsNullOrEmpty(name) || !string.IsNullOrEmpty(argumentsFragment)) FragmentVersion++;
+
                 string stableId = string.IsNullOrWhiteSpace(callId) ? null : callId;
                 PendingToolCall entry = ResolveEntry(index, stableId, name, argumentsFragment);
                 if (entry == null)

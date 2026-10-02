@@ -176,6 +176,23 @@ serialized against each other and result order is preserved. Proof:
 `MeaiStreamingToolCallEditModeTests.CompleteStreamingAsync_TwoNativeToolCallsWithParallelLimit_OverlapAndResultsInCallOrder`,
 `ToolExecutionPolicyEditModeTests`.
 
+**Generation progress remains separate from the answer.** A proxy can emit
+`generation_progress:{phase:processing}` with empty `choices` after receiving actual upstream
+reasoning. Only the whitelisted phase becomes an additive `LlmStreamChunk.GenerationInProgress`
+marker; embedded reasoning and arbitrary payloads are discarded. The marker has no text, reasoning,
+or message boundary. Client-owned endpoints retain the first semantic delta watchdog: comments,
+empty role frames, and unrelated JSON cannot disable it. Server-managed endpoints use their configured
+request timeout for that window, since a proxy may hide reasoning entirely. Caller cancellation and
+the caller's total turn deadline remain authoritative across retries.
+
+Streaming completion requires `[DONE]` or a choice `finish_reason`. An EOF without either raises a
+structured failure while preserving already emitted partial output. Error frames also raise a typed
+failure with a fixed diagnostic message; provider error payloads are never copied into the exception.
+After visible output or executed tools, the existing fallback decorator never switches providers.
+Proof: `MeaiOpenAiChatClientSseEditModeTests` (nonsemantic prefix, managed keep-alive, partial EOF,
+terminal finish reason, redacted error, metadata-only progress) and
+`MeaiLlmClientEditModeTests.CompleteStreamingAsync_GenerationProgress_YieldsAdditiveMarkerWithoutVisibleText`.
+
 **Skills are multi-document, and disclosed in stages.** `SkillSet.FromTextParts` /
 `SkillSet.FromFiles` keep each document addressable as a `SkillSection`; `read_skill` returns the entry
 document plus an index of the rest, and a second call fetches one section or `all`. The model's schema

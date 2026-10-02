@@ -702,6 +702,15 @@ namespace CoreAI.Ai
         public IReadOnlyList<LlmToolCallTrace> ExecutedToolCalls { get; set; } = Array.Empty<LlmToolCallTrace>();
 
         /// <summary>
+        /// Additive liveness signal: the backend is still generating (e.g. an SSE
+        /// <c>generation_progress</c> frame with a whitelisted phase) but has produced no displayable
+        /// content yet. Carries no <see cref="Text"/> and no <see cref="ReasoningText"/>: consumers
+        /// must not treat it as first content, only as a reason to keep waiting (typing indicator).
+        /// Never persisted to history, memory, or notes.
+        /// </summary>
+        public bool GenerationInProgress { get; set; }
+
+        /// <summary>
         /// When <c>true</c> with <see cref="BufferedStreamingNoToolBinding"/>, host UI should show a short
         /// static line from chat config (tool invocation, text-shaped execute, hybrid JSON hold).
         /// </summary>
@@ -737,6 +746,7 @@ namespace CoreAI.Ai
                 CacheReadTokens = CacheReadTokens,
                 CacheWriteTokens = CacheWriteTokens,
                 ExecutedToolCalls = ExecutedToolCalls,
+                GenerationInProgress = GenerationInProgress,
                 BufferedStreamingUseToolProgressHint = BufferedStreamingUseToolProgressHint,
                 BufferedStreamingNoToolBinding = BufferedStreamingNoToolBinding
             };
