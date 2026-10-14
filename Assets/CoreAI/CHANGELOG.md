@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+## [7.50.2] - 2026-10-15
+
+### Fixed
+
+- **`AgentSessionInspector` inspects the request that would actually be sent.** The snapshot clone copied only
+  `RoleId`, `Hint` and the Lua-repair fields, so `RoutingProfileId`, `SystemPrompt`, `RequestSystemInstructions`,
+  `Attachments`, `ActorContext`, `MaxToolCallRoundtrips` and `AllowTextShapedToolCallsOnNativeEndpoint` were dropped
+  before any runtime-context provider ran. A provider that validates request-scoped instructions (a captured
+  session snapshot) then threw on a request the orchestrator accepts, so inspecting such a role always failed. The
+  base prompt also ignored the request-scoped `SystemPrompt` override that `AiOrchestrator.BuildRequestAsync` applies,
+  so the reported system prompt was not the one a real call would send. `AiTaskRequest.Clone()` /
+  `AiTaskRequest.CloneForRole(roleId)` now copy every request-scoped field in one place, the inspector uses them, and
+  the resolved prompt uses the request-scoped override. `AgentSessionInspectorEditModeTests` covers both (with a
+  provider that rejects an uncaptured request) and adds a reflection guard that fails when `AiTaskRequest` gains a
+  public settable property the clone does not copy.
+- **A structured retry is now the same request, not a hand-copied subset.** `AiOrchestrator.CloneTaskWithStructuredHint`
+  re-listed the fields instead of copying the request, dropping `ActorContext`, `MaxToolCallRoundtrips`,
+  `CallerCancellationToken` and `DeadlineCancellationToken` — the retry lost its actor identity and could no longer
+  be attributed between the caller's stop and the deadline's. It now builds from `AiTaskRequest.Clone()` and replaces
+  only `Hint`, and the retried completion reads that retry request (payload, `LlmCompletionRequest` and cancellation
+  attribution all from one object) instead of the original, so the retry is no longer silently driven by a different
+  request than the one it reports. The old copy's `?? ""` normalisation is gone: every consumer of the retry
+  (`BuildCompletionRequest`, `BuildUserPayload`, `ResolveCancellationOutcome`) already coalesces on read, and rewriting
+  the caller's values only hid what the copy had lost. Pinned by `AiOrchestratorHistoryEditModeTests` driving a real
+  invalid-then-valid structured retry, plus a direct clone assertion.
+- **A structured retry re-hashes the audit prompt.** `AuditContext.SetPromptHash` was written once, from the first
+  attempt's user payload; the retry sends a different payload (the `structured_retry:` suffix) and the audit log kept
+  fingerprinting a request that was never sent, making a replayed turn look like the original one. The retry now
+  re-sets the hash from `bundle.SystemPrompt` + the retry payload + `bundle.ChatHistory` — exactly what the retry
+  sends. Pinned by `AiOrchestratorHistoryEditModeTests.RunTaskAsync_StructuredRetry_RehashesTheAuditPromptToTheRetryPayload`.
+- The retried completion now also pins that it is driven by the captured retry request: a caller that re-stamps its
+  request object mid-turn (a pooled or reused request) no longer changes what the in-flight retry sends. This covers
+  the retry leg only — publishing and history still read the caller's request, so a request must stay unchanged until
+  its turn completes.
+
 ## [7.50.1] - 2026-10-14
 
 ### Fixed

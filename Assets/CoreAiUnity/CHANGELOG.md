@@ -4,6 +4,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.50.2] - 2026-10-15
+
+Version aligned with `com.neoxider.coreai` 7.50.2 (`AgentSessionInspector` and structured retry carry the whole
+request — a core change). The Unity layer adds only the EditMode tests that pin it: `AgentSessionInspectorEditModeTests`
+(request-scoped fields reach the runtime-context provider, request-scoped system prompt, reflection guard over
+`AiTaskRequest.Clone()`) and `AiOrchestratorHistoryEditModeTests` (structured retry keeps actor, caps and cancellation
+tokens, re-hashes the audit prompt).
+
 ## [7.50.1] - 2026-10-14
 
 Version aligned with `com.neoxider.coreai` 7.50.1 (tool-contract, memory-hint and memory-tool prompt wording — a core

@@ -95,7 +95,10 @@ namespace CoreAI.Diagnostics
 
             AgentMemoryPolicy.RoleMemoryConfig roleConfig = _memoryPolicy.GetRoleConfig(resolvedRoleId);
             string traceId = "agent-session-inspector";
-            string resolvedSystem = _promptComposer.GetSystemPrompt(resolvedRoleId);
+            // WHY: AiOrchestrator builds the base prompt with the request-scoped SystemPrompt override
+            // (AiOrchestrator.BuildRequestAsync), so resolving the role prompt alone would report a prompt
+            // that no real call ever sends.
+            string resolvedSystem = _promptComposer.GetSystemPrompt(resolvedRoleId, inspectRequest.SystemPrompt);
             string runtimeContext = _promptComposer.BuildRuntimeContext(inspectRequest, resolvedRoleId, traceId);
             string systemWithRuntime = string.IsNullOrWhiteSpace(runtimeContext)
                 ? resolvedSystem
@@ -852,29 +855,12 @@ namespace CoreAI.Diagnostics
 
         private static AiTaskRequest CloneRequestForRole(AiTaskRequest request, string roleId)
         {
-            if (request == null)
-            {
-                return new AiTaskRequest { RoleId = roleId };
-            }
-
-            return new AiTaskRequest
-            {
-                RoleId = roleId,
-                Hint = request.Hint ?? "",
-                LuaRepairGeneration = request.LuaRepairGeneration,
-                LuaRepairPreviousCode = request.LuaRepairPreviousCode ?? "",
-                LuaRepairErrorMessage = request.LuaRepairErrorMessage ?? "",
-                TraceId = request.TraceId ?? "",
-                Priority = request.Priority,
-                SourceTag = request.SourceTag ?? "",
-                CancellationScope = request.CancellationScope ?? "",
-                LuaScriptVersionKey = request.LuaScriptVersionKey ?? "",
-                DataOverlayVersionKeysCsv = request.DataOverlayVersionKeysCsv ?? "",
-                ForcedToolMode = request.ForcedToolMode,
-                RequiredToolName = request.RequiredToolName ?? "",
-                AllowedToolNames = request.AllowedToolNames,
-                MaxOutputTokens = request.MaxOutputTokens
-            };
+            // WHY: runtime-context providers validate request-scoped instructions (a captured session
+            // snapshot, for one), so the inspected request must carry every field the orchestrator reads.
+            // A hand-written partial copy made inspection throw on requests that orchestrate fine.
+            return request == null
+                ? new AiTaskRequest { RoleId = roleId }
+                : request.CloneForRole(roleId);
         }
 
         private static IReadOnlyList<ILlmTool> FilterToolsForRequest(IReadOnlyList<ILlmTool> tools, AiTaskRequest task)

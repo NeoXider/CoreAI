@@ -1,4 +1,9 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Threading;
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Diagnostics;
 using CoreAI.Editor.Diagnostics;
 using CoreAI.Infrastructure.Prompts;
@@ -231,6 +236,252 @@ namespace CoreAI.Tests.EditMode
 
             Assert.Greater(gameScore, coreScore);
             Assert.Greater(deeperCoreScore, coreScore);
+        }
+
+        [Test]
+        public void Inspect_PassesRequestScopedFieldsToRuntimeContextProvider()
+        {
+            CapturingRuntimeContextProvider provider = new();
+            AgentMemoryPolicy policy = new();
+            policy.SetRuntimeContextProvider("Teacher", provider);
+
+            AiPromptComposer composer;
+            AgentSessionInspector inspector = CreateInspector(policy, out composer);
+
+            ActorContext actor = CreateActorContext("teacher-actor", "teacher-session");
+            AiTaskRequest request = new()
+            {
+                RoleId = "Teacher",
+                RoutingProfileId = "school-local",
+                SystemPrompt = "Request-scoped teacher prompt.",
+                RequestSystemInstructions = "Teacher runtime context captured.",
+                Hint = "Explain loops.",
+                ActorContext = actor,
+                MaxToolCallRoundtrips = 3,
+                AllowTextShapedToolCallsOnNativeEndpoint = true
+            };
+
+            AgentSessionSnapshot snapshot = inspector.Inspect("Teacher", request);
+
+            Assert.IsTrue(provider.WasCalled, "The role runtime-context provider must run during inspection.");
+            Assert.AreEqual("teacher-session", provider.SessionId);
+            Assert.AreEqual("school-local", provider.RoutingProfileId);
+            Assert.AreEqual("Request-scoped teacher prompt.", provider.SystemPrompt);
+            Assert.AreEqual("Teacher runtime context captured.", provider.RequestSystemInstructions);
+            Assert.AreEqual(3, provider.MaxToolCallRoundtrips);
+            Assert.AreEqual(true, provider.AllowTextShapedToolCallsOnNativeEndpoint);
+            Assert.AreEqual("Teacher", snapshot.RoleId);
+        }
+
+        [Test]
+        public void Inspect_ResolvedSystemPrompt_MatchesRequestScopedSystemPromptOverride()
+        {
+            AgentMemoryPolicy policy = new();
+            AiPromptComposer composer;
+            AgentSessionInspector inspector = CreateInspector(policy, out composer);
+
+            AiTaskRequest request = new()
+            {
+                RoleId = "Teacher",
+                SystemPrompt = "Request-scoped teacher prompt."
+            };
+
+            AgentSessionSnapshot snapshot = inspector.Inspect("Teacher", request);
+
+            Assert.AreEqual(
+                composer.GetSystemPrompt("Teacher", request.SystemPrompt),
+                snapshot.ResolvedSystemPrompt);
+            StringAssert.Contains("Request-scoped teacher prompt.", snapshot.ResolvedSystemPrompt);
+            StringAssert.DoesNotContain("Base teacher prompt.", snapshot.ResolvedSystemPrompt);
+        }
+
+        [Test]
+        public void AiTaskRequestClone_CopiesEveryPublicSettableProperty()
+        {
+            using CancellationTokenSource cts = new();
+
+            PropertyInfo[] writable = Array.FindAll(
+                typeof(AiTaskRequest).GetProperties(BindingFlags.Public | BindingFlags.Instance),
+                static property => property.CanWrite && property.GetIndexParameters().Length == 0);
+
+            Assert.IsNotEmpty(writable, "AiTaskRequest must expose writable request-scoped properties.");
+
+            List<string> uncopied = new();
+            for (int i = 0; i < writable.Length; i++)
+            {
+                PropertyInfo property = writable[i];
+                object probe = CreateProbeValue(property, i, cts);
+                AiTaskRequest source = new();
+                property.SetValue(source, probe);
+
+                AiTaskRequest clone = source.Clone();
+                object copied = property.GetValue(clone);
+
+                if (!ProbeMatches(property, probe, copied))
+                {
+                    uncopied.Add(property.Name);
+                }
+            }
+
+            CollectionAssert.IsEmpty(
+                uncopied,
+                "AiTaskRequest.Clone() must copy every public settable property; add the new field to it, " +
+                "or inspection and retries will silently lose it: " + string.Join(", ", uncopied));
+        }
+
+        private static AgentSessionInspector CreateInspector(AgentMemoryPolicy policy, out AiPromptComposer composer)
+        {
+            CoreAISettingsOptions settings = new()
+            {
+                UniversalSystemPromptPrefix = "Universal prefix.",
+                ContextWindowTokens = 8192
+            };
+
+            AgentPromptsDefinition prompts = new();
+            prompts.CustomAgents.Add(new AgentPromptEntryDefinition
+            {
+                RoleId = "Teacher",
+                SystemPrompt = "Base teacher prompt."
+            });
+
+            IAgentSystemPromptProvider systemProvider = new ChainedAgentSystemPromptProvider(
+                new IAgentSystemPromptProvider[]
+                {
+                    new ManifestAgentSystemPromptProvider(prompts),
+                    new BuiltInDefaultAgentSystemPromptProvider()
+                });
+
+            composer = new AiPromptComposer(
+                systemProvider,
+                new NoAgentUserPromptTemplateProvider(),
+                new NullLuaScriptVersionStore(),
+                null,
+                policy,
+                settings);
+
+            return new AgentSessionInspector(
+                composer,
+                systemProvider,
+                null,
+                null,
+                policy,
+                settings);
+        }
+
+        private static ActorContext CreateActorContext(string actorId, string sessionId)
+        {
+            return new LocalActorIdentityProvider(
+                    actorId,
+                    sessionId,
+                    "world",
+                    ActorGrantSet.None,
+                    AgentMemoryScope.Empty)
+                .GetActorContext("Teacher");
+        }
+
+        private static object CreateProbeValue(PropertyInfo property, int index, CancellationTokenSource cts)
+        {
+            Type type = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+            if (type == typeof(string))
+            {
+                return "probe-" + property.Name;
+            }
+
+            if (type == typeof(int))
+            {
+                return 4242 + index;
+            }
+
+            if (type == typeof(bool))
+            {
+                return true;
+            }
+
+            if (type.IsEnum)
+            {
+                object defaultValue = Activator.CreateInstance(type);
+                foreach (object candidate in Enum.GetValues(type))
+                {
+                    if (!Equals(candidate, defaultValue))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
+            if (type == typeof(CancellationToken))
+            {
+                return cts.Token;
+            }
+
+            if (type == typeof(string[]))
+            {
+                return new[] { "probe-" + property.Name };
+            }
+
+            if (type == typeof(ActorContext))
+            {
+                return CreateActorContext("probe-actor", "probe-session");
+            }
+
+            if (type == typeof(IReadOnlyList<AiAttachment>))
+            {
+                return new List<AiAttachment>();
+            }
+
+            Assert.Fail("AiTaskRequest." + property.Name + " has type " + type.FullName +
+                        ", which the clone guard does not know how to probe. Extend CreateProbeValue.");
+            return null;
+        }
+
+        private static bool ProbeMatches(PropertyInfo property, object probe, object copied)
+        {
+            Type type = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+            if (type == typeof(string) || type.IsValueType)
+            {
+                return Equals(probe, copied);
+            }
+
+            return ReferenceEquals(probe, copied);
+        }
+
+        /// <summary>
+        /// Mirrors a production runtime-context provider that validates request-scoped instructions
+        /// (a captured session snapshot) and rejects a request that does not carry them.
+        /// </summary>
+        private sealed class CapturingRuntimeContextProvider : IAgentRuntimeContextProvider
+        {
+            public bool WasCalled { get; private set; }
+
+            public string SessionId { get; private set; } = "";
+
+            public string RoutingProfileId { get; private set; } = "";
+
+            public string SystemPrompt { get; private set; } = "";
+
+            public string RequestSystemInstructions { get; private set; } = "";
+
+            public int? MaxToolCallRoundtrips { get; private set; }
+
+            public bool? AllowTextShapedToolCallsOnNativeEndpoint { get; private set; }
+
+            public string BuildContext(AiTaskRequest request, string roleId, string traceId)
+            {
+                if (request == null || string.IsNullOrWhiteSpace(request.RequestSystemInstructions))
+                {
+                    throw new InvalidOperationException(
+                        "Teacher runtime context must be captured before orchestration starts");
+                }
+
+                WasCalled = true;
+                SessionId = request.ActorContext?.SessionId ?? "";
+                RoutingProfileId = request.RoutingProfileId ?? "";
+                SystemPrompt = request.SystemPrompt ?? "";
+                RequestSystemInstructions = request.RequestSystemInstructions;
+                MaxToolCallRoundtrips = request.MaxToolCallRoundtrips;
+                AllowTextShapedToolCallsOnNativeEndpoint = request.AllowTextShapedToolCallsOnNativeEndpoint;
+                return "## Teacher Runtime Context\nCaptured for " + roleId + ".";
+            }
         }
 
         private static AgentSessionInspector CreateInspectorWithPromptRole(string roleId)

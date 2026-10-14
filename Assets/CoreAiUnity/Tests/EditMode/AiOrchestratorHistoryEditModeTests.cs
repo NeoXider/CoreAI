@@ -2493,6 +2493,242 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// A structured retry is a SNAPSHOT of the turn it repeats: its own request drives the retried completion
+        /// and carries every request-scoped field the caller set.
+        /// <para>
+        /// WHY the caller re-stamps its request mid-turn: a host that reuses one request object (a per-role
+        /// template, a pooled request, a host already preparing the next turn) may change it while the retry is
+        /// being assembled. A retry that re-read the caller's object would then send something the turn never
+        /// was - the role/turn it repeats has to be the one it captured.
+        /// </para>
+        /// </summary>
+        [Test]
+        public async Task RunTaskAsync_StructuredRetry_RetriedCompletionKeepsTheRequestScopedFields()
+        {
+            ToolTraceLlmClient llm = new(
+                new LlmCompletionResult { Ok = true, Content = "definitely not json" },
+                new LlmCompletionResult { Ok = true, Content = "{\"ok\":true}" });
+            AiTaskRequest task = new()
+            {
+                RoleId = "Programmer",
+                Hint = "build a quiz",
+                RoutingProfileId = "school-local",
+                RequiredToolName = "quiz",
+                ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                AllowedToolNames = new[] { "quiz" },
+                MaxToolCallRoundtrips = 1,
+                AllowTextShapedToolCallsOnNativeEndpoint = true,
+                ActorContext = CreateStructuredRetryActorContext(),
+                TraceId = "structured-retry-sourcing"
+            };
+
+            RequestRestamper restamper = new(task);
+            AiOrchestrator orchestrator = BuildOrchestrator(
+                llm,
+                new TestMemoryStore(),
+                BuildToolResultPolicy("Programmer"),
+                structuredPolicy: new FailFirstThenPassStructuredPolicy(),
+                userTemplates: restamper);
+
+            string answer = await orchestrator.RunTaskAsync(task);
+
+            Assert.AreEqual("{\"ok\":true}", answer);
+            Assert.AreEqual(2, llm.Requests.Count, "The invalid answer must trigger exactly one structured retry.");
+            Assert.AreEqual(2, restamper.Calls, "One user payload per attempt: the original and the retry.");
+            Assert.IsTrue(restamper.Restamped, "The caller must have re-stamped its request during the retry.");
+            StringAssert.Contains("structured_retry:", llm.Requests[1].UserPayload);
+            Assert.AreEqual(1, llm.Requests[1].MaxToolCallRoundtrips,
+                "The retried completion must keep the per-call roundtrip cap of the turn it repeats, not the " +
+                "caller's re-stamped value and not the policy fallback.");
+            Assert.AreEqual("school-local", llm.Requests[1].RoutingProfileId);
+            Assert.AreEqual("quiz", llm.Requests[1].RequiredToolName);
+            Assert.AreEqual(LlmToolChoiceMode.RequireSpecific, llm.Requests[1].ForcedToolMode);
+            CollectionAssert.AreEqual(new[] { "quiz" }, llm.Requests[1].AllowedToolNames);
+            Assert.AreEqual(true, llm.Requests[1].AllowTextShapedToolCallsOnNativeEndpoint);
+        }
+
+        /// <summary>
+        /// The retry sends a different user payload, so the audit fingerprint must follow it: a stored hash of
+        /// the first attempt's payload points the audit log at a request that was never sent.
+        /// </summary>
+        [Test]
+        public async Task RunTaskAsync_StructuredRetry_RehashesTheAuditPromptToTheRetryPayload()
+        {
+            ToolTraceLlmClient llm = new(
+                new LlmCompletionResult { Ok = true, Content = "definitely not json" },
+                new LlmCompletionResult { Ok = true, Content = "{\"ok\":true}" });
+            AiTaskRequest task = new()
+            {
+                RoleId = "Programmer",
+                Hint = "build a quiz",
+                RoutingProfileId = "school-local",
+                ActorContext = CreateStructuredRetryActorContext(),
+                TraceId = "structured-retry-audit-hash"
+            };
+            AiOrchestrator orchestrator = BuildOrchestrator(
+                llm,
+                new TestMemoryStore(),
+                BuildToolResultPolicy("Programmer"),
+                structuredPolicy: new FailFirstThenPassStructuredPolicy());
+
+            string answer = await orchestrator.RunTaskAsync(task);
+
+            Assert.AreEqual("{\"ok\":true}", answer);
+            Assert.AreEqual(2, llm.Requests.Count);
+            string firstAttemptHash = PromptHashOf(llm.Requests[0]);
+            string retryHash = PromptHashOf(llm.Requests[1]);
+            Assert.AreNotEqual(firstAttemptHash, retryHash,
+                "The retry payload must differ from the first attempt, or this test proves nothing.");
+            Assert.AreEqual(retryHash, CoreAI.Audit.AuditContext.GetPromptHash(task.TraceId),
+                "The audit prompt hash must fingerprint the payload that was actually sent.");
+        }
+
+        /// <summary>
+        /// The retried request itself keeps the fields the old hand-written copy dropped: the actor identity (the
+        /// retry is attributed to the same actor, and its connection identity still scopes cancellation), the
+        /// per-call roundtrip cap, and both cancellation tokens that decide whether a stop is the caller's or the
+        /// deadline's.
+        /// </summary>
+        [Test]
+        public void CloneTaskWithStructuredHint_KeepsEveryRequestScopedFieldAndOnlyReplacesTheHint()
+        {
+            using CancellationTokenSource caller = new();
+            using CancellationTokenSource deadline = new();
+            ActorContext actor = CreateStructuredRetryActorContext();
+            string[] allowed = { "quiz" };
+            AiTaskRequest task = new()
+            {
+                RoleId = "Programmer",
+                RoutingProfileId = "school-local",
+                SystemPrompt = "Programmer prompt.",
+                RequestSystemInstructions = "Snapshots captured.",
+                Hint = "build a quiz",
+                SourceTag = "Chat",
+                CancellationScope = "quiz-scope",
+                LuaScriptVersionKey = "quiz.lua",
+                DataOverlayVersionKeysCsv = "quizzes",
+                LuaRepairGeneration = 3,
+                ActorContext = actor,
+                CallerCancellationToken = caller.Token,
+                DeadlineCancellationToken = deadline.Token,
+                ForcedToolMode = LlmToolChoiceMode.RequireSpecific,
+                RequiredToolName = "quiz",
+                AllowedToolNames = allowed,
+                MaxOutputTokens = 256,
+                MaxToolCallRoundtrips = 1,
+                AllowTextShapedToolCallsOnNativeEndpoint = true
+            };
+
+            AiTaskRequest retry = AiOrchestrator.CloneTaskWithStructuredHint(task, "not a structured payload");
+
+            Assert.AreNotSame(task, retry);
+            StringAssert.StartsWith("build a quiz structured_retry: not a structured payload", retry.Hint);
+            Assert.AreEqual(actor, retry.ActorContext, "The retry must keep the actor identity.");
+            Assert.AreEqual(1, retry.MaxToolCallRoundtrips);
+            Assert.AreEqual(caller.Token, retry.CallerCancellationToken);
+            Assert.AreEqual(deadline.Token, retry.DeadlineCancellationToken);
+            Assert.AreEqual("Programmer", retry.RoleId);
+            Assert.AreEqual("school-local", retry.RoutingProfileId);
+            Assert.AreEqual("Programmer prompt.", retry.SystemPrompt);
+            Assert.AreEqual("Snapshots captured.", retry.RequestSystemInstructions);
+            Assert.AreEqual("Chat", retry.SourceTag);
+            Assert.AreEqual("quiz-scope", retry.CancellationScope);
+            Assert.AreEqual("quiz.lua", retry.LuaScriptVersionKey);
+            Assert.AreEqual("quizzes", retry.DataOverlayVersionKeysCsv);
+            Assert.AreEqual(3, retry.LuaRepairGeneration);
+            Assert.AreEqual(LlmToolChoiceMode.RequireSpecific, retry.ForcedToolMode);
+            Assert.AreEqual("quiz", retry.RequiredToolName);
+            CollectionAssert.AreEqual(allowed, retry.AllowedToolNames);
+            Assert.AreEqual(256, retry.MaxOutputTokens);
+            Assert.AreEqual(true, retry.AllowTextShapedToolCallsOnNativeEndpoint);
+            Assert.AreEqual("build a quiz", task.Hint, "The source request must be untouched.");
+
+            // WHY the old copy's `?? ""` normalisation is gone: every consumer of the retry coalesces on read
+            // (BuildCompletionRequest, BuildUserPayload, ResolveCancellationOutcome), so rewriting the caller's
+            // values only hid what the copy had lost.
+            AiTaskRequest sparse = AiOrchestrator.CloneTaskWithStructuredHint(
+                new AiTaskRequest { RoleId = "Programmer", RoutingProfileId = null, SystemPrompt = null },
+                "reason");
+            Assert.IsNull(sparse.RoutingProfileId);
+            Assert.IsNull(sparse.SystemPrompt);
+        }
+
+        private static string PromptHashOf(LlmCompletionRequest request)
+        {
+            IList<Microsoft.Extensions.AI.ChatMessage> history = request.ChatHistory;
+            return AiOrchestrator.ComputePromptHash(
+                request.SystemPrompt,
+                request.UserPayload,
+                history == null ? null : new List<Microsoft.Extensions.AI.ChatMessage>(history));
+        }
+
+        /// <summary>
+        /// Re-stamps the caller's request the first time the retry assembles its own user payload, so a test can
+        /// tell a retry driven by the captured request from one that re-reads the caller's object.
+        /// </summary>
+        private sealed class RequestRestamper : IAgentUserPromptTemplateProvider
+        {
+            private readonly AiTaskRequest _source;
+
+            public RequestRestamper(AiTaskRequest source)
+            {
+                _source = source;
+            }
+
+            public int Calls { get; private set; }
+
+            public bool Restamped { get; private set; }
+
+            public bool TryGetUserTemplate(string roleId, out string template)
+            {
+                Calls++;
+                if (Calls == 2 && !Restamped)
+                {
+                    Restamped = true;
+                    _source.RoutingProfileId = "restamped-by-the-caller";
+                    _source.MaxToolCallRoundtrips = 99;
+                    _source.RequiredToolName = "restamped";
+                }
+
+                template = "{hint}";
+                return true;
+            }
+        }
+
+        private static ActorContext CreateStructuredRetryActorContext()
+        {
+            return new LocalActorIdentityProvider(
+                    "structured-retry-actor",
+                    "structured-retry-session",
+                    "world",
+                    ActorGrantSet.None,
+                    AgentMemoryScope.Empty)
+                .GetActorContext("Programmer");
+        }
+
+        /// <summary>Rejects the first answer like a structured role, then accepts the retried one.</summary>
+        private sealed class FailFirstThenPassStructuredPolicy : IRoleStructuredResponsePolicy
+        {
+            public bool ShouldValidate(string roleId)
+            {
+                return true;
+            }
+
+            public bool TryValidate(string roleId, string rawContent, out string failureReason)
+            {
+                if (!string.IsNullOrEmpty(rawContent) &&
+                    rawContent.StartsWith("{\"ok\"", StringComparison.Ordinal))
+                {
+                    failureReason = "";
+                    return true;
+                }
+
+                failureReason = "not a structured payload";
+                return false;
+            }
+        }
+
         private static AgentMemoryPolicy BuildToolResultPolicy(string roleId, params ILlmTool[] tools)
         {
             AgentMemoryPolicy policy = new();
@@ -2508,12 +2744,14 @@ namespace CoreAI.Tests.EditMode
             AgentMemoryPolicy policy,
             IConversationContextManager contextManager = null,
             IRoleStructuredResponsePolicy structuredPolicy = null,
-            TestSettings settings = null)
+            TestSettings settings = null,
+            IAgentUserPromptTemplateProvider userTemplates = null)
         {
             settings ??= new TestSettings();
             return new AiOrchestrator(
                 new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
-                new AiPromptComposer(new NullSys(), new NullUsr(), null, null, policy, settings),
+                new AiPromptComposer(
+                    new NullSys(), userTemplates ?? new NullUsr(), null, null, policy, settings),
                 memory, policy, structuredPolicy, null, settings, TestActorIdentityProvider,
                 contextManager);
         }

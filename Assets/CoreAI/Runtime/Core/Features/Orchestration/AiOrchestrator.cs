@@ -469,10 +469,20 @@ namespace CoreAI.Ai
                 _metrics.RecordStructuredRetry(bundle.ActorId, roleId, traceId, failReason ?? "");
                 AiTaskRequest retryTask = CloneTaskWithStructuredHint(task, failReason);
                 string userRetry = _promptComposer.BuildUserPayload(bundle.Snapshot, retryTask);
+                // WHY: the retry sends a different user payload than the attempt it repeats, so the audit
+                // fingerprint must describe what was actually sent. Left at the first attempt's hash, the audit
+                // log pointed at a request nobody sent and a replayed turn looked like the original one.
+                AuditContext.SetPromptHash(
+                    traceId,
+                    ComputePromptHash(bundle.SystemPrompt, userRetry, bundle.ChatHistory));
+                // WHY: the retry IS that request, so its payload, its completion request and its cancellation
+                // attribution all read the same object. Driving the retry from the ORIGINAL task hid every field
+                // the copy dropped: the retried completion ignored the copy's tool-roundtrip cap, and a dropped
+                // caller/deadline token was attributed as the caller's stop instead of the deadline's.
                 LlmCompletionResult second = await CompleteMeasuredForTaskAsync(
                     bundle,
-                    task,
-                    BuildCompletionRequest(bundle, task, userRetry, maxOutputTokens),
+                    retryTask,
+                    BuildCompletionRequest(bundle, retryTask, userRetry, maxOutputTokens),
                     cancellationToken);
 
                 if (second == null || !second.Ok || string.IsNullOrEmpty(second.Content))
@@ -2320,7 +2330,18 @@ namespace CoreAI.Ai
             return Microsoft.Extensions.AI.ChatRole.Assistant;
         }
 
-        private static AiTaskRequest CloneTaskWithStructuredHint(AiTaskRequest task, string failureReason)
+        /// <summary>
+        /// Builds the retry request for a turn whose structured answer failed validation: the same request with
+        /// the failure reason appended to its hint. Nothing else changes — it is the SAME turn against the SAME
+        /// actor and the SAME endpoint.
+        /// <para>
+        /// WHY <see cref="AiTaskRequest.Clone"/>: a hand-written copy listed a subset of the fields and silently
+        /// dropped the actor identity, the per-call tool-roundtrip cap and both cancellation tokens. The drop
+        /// stayed invisible because the retry was then driven from the original request, so nothing read the
+        /// copy at all.
+        /// </para>
+        /// </summary>
+        internal static AiTaskRequest CloneTaskWithStructuredHint(AiTaskRequest task, string failureReason)
         {
             string hint = (task.Hint ?? "").Trim();
             string extra = "structured_retry: " +
@@ -2331,31 +2352,9 @@ namespace CoreAI.Ai
             }
 
             hint += extra;
-            return new AiTaskRequest
-            {
-                RoleId = task.RoleId,
-                RoutingProfileId = task.RoutingProfileId ?? "",
-                SystemPrompt = task.SystemPrompt ?? "",
-                RequestSystemInstructions = task.RequestSystemInstructions ?? "",
-                Hint = hint,
-                Attachments = task.Attachments,
-                LuaRepairGeneration = task.LuaRepairGeneration,
-                LuaRepairPreviousCode = task.LuaRepairPreviousCode,
-                LuaRepairErrorMessage = task.LuaRepairErrorMessage,
-                TraceId = task.TraceId,
-                Priority = task.Priority,
-                SourceTag = task.SourceTag,
-                CancellationScope = task.CancellationScope,
-                LuaScriptVersionKey = task.LuaScriptVersionKey ?? "",
-                DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? "",
-                ForcedToolMode = task.ForcedToolMode,
-                RequiredToolName = task.RequiredToolName ?? "",
-                AllowedToolNames = task.AllowedToolNames,
-                MaxOutputTokens = task.MaxOutputTokens,
-                // WHY: a structured retry is the SAME turn against the SAME endpoint; dropping the opt-in
-                // here would make the retry behave differently from the attempt it repeats.
-                AllowTextShapedToolCallsOnNativeEndpoint = task.AllowTextShapedToolCallsOnNativeEndpoint
-            };
+            AiTaskRequest retry = task.Clone();
+            retry.Hint = hint;
+            return retry;
         }
 
         private static IReadOnlyList<ILlmTool> FilterToolsForRequest(IReadOnlyList<ILlmTool> tools, AiTaskRequest task)

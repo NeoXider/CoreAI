@@ -168,5 +168,54 @@ namespace CoreAI.Ai
         /// </para>
         /// </summary>
         public bool? AllowTextShapedToolCallsOnNativeEndpoint { get; set; }
+
+        /// <summary>
+        /// Creates an independent copy carrying every request-scoped field. Consumers that must observe a
+        /// request without owning it (session inspection, retry of the same turn) copy through this helper
+        /// instead of re-listing properties: a partial copy silently drops whatever the list forgot, and the
+        /// drop surfaces far from its cause — a runtime-context provider rejecting a request the orchestrator
+        /// had accepted, or a diagnostic showing a prompt no real call builds. The copy shares reference
+        /// fields (attachments, tool names); it is a request snapshot, not a deep copy.
+        /// </summary>
+        public AiTaskRequest Clone()
+        {
+            return new AiTaskRequest
+            {
+                RoleId = RoleId,
+                RoutingProfileId = RoutingProfileId,
+                SystemPrompt = SystemPrompt,
+                RequestSystemInstructions = RequestSystemInstructions,
+                Hint = Hint,
+                Attachments = Attachments,
+                LuaRepairGeneration = LuaRepairGeneration,
+                LuaRepairPreviousCode = LuaRepairPreviousCode,
+                LuaRepairErrorMessage = LuaRepairErrorMessage,
+                TraceId = TraceId,
+                Priority = Priority,
+                SourceTag = SourceTag,
+                ActorContext = ActorContext,
+                CancellationScope = CancellationScope,
+                CallerCancellationToken = CallerCancellationToken,
+                DeadlineCancellationToken = DeadlineCancellationToken,
+                LuaScriptVersionKey = LuaScriptVersionKey,
+                DataOverlayVersionKeysCsv = DataOverlayVersionKeysCsv,
+                ForcedToolMode = ForcedToolMode,
+                RequiredToolName = RequiredToolName,
+                AllowedToolNames = AllowedToolNames,
+                MaxOutputTokens = MaxOutputTokens,
+                MaxToolCallRoundtrips = MaxToolCallRoundtrips,
+                AllowTextShapedToolCallsOnNativeEndpoint = AllowTextShapedToolCallsOnNativeEndpoint
+            };
+        }
+
+        /// <summary>
+        /// Creates a copy bound to <paramref name="roleId"/>, preserving every other request-scoped field.
+        /// </summary>
+        public AiTaskRequest CloneForRole(string roleId)
+        {
+            AiTaskRequest clone = Clone();
+            clone.RoleId = roleId;
+            return clone;
+        }
     }
 }
