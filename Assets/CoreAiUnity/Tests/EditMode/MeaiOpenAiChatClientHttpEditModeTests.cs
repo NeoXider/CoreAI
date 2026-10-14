@@ -322,7 +322,8 @@ namespace CoreAI.Tests.EditMode
         public async Task GetStreamingResponseAsync_SafeProviderParameters_MergeNestedObjectAndArray()
         {
             string capturedJson = null;
-            const string sse = "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n";
+            // WHY: since 7.49.0 a stream without a terminal frame is an interrupted answer and fails.
+            const string sse = "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\ndata: [DONE]\n\n";
             MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
                 new DelegateHttpHandler(req =>
                 {
@@ -459,9 +460,11 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task GetStreamingResponseAsync_Sse_YieldsAggregatedText()
         {
+            // WHY: since 7.49.0 a stream without a terminal frame is an interrupted answer and fails.
             string sse =
                 "data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n"
-                + "data: {\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\n";
+                + "data: {\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\n"
+                + "data: [DONE]\n\n";
             MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
                 new DelegateHttpHandler(_ => OkEventStream(new MemoryStream(Encoding.UTF8.GetBytes(sse)))))
             {

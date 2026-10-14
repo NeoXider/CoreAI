@@ -418,6 +418,63 @@
   flex-shrink: 0;
 }
 
+/* Jump-to-latest button and unread badge (CoreAiChatScrollToLatest). Hidden by default; the panel adds
+   coreai-chat-scroll-to-latest--visible while the reader stands away from the bottom. Sits above the
+   input row, over the bottom edge of the feed. */
+.coreai-chat-scroll-to-latest-wrap {
+  position: absolute;
+  right: 18px;
+  bottom: 100%;
+  margin-bottom: 10px;
+  width: 44px;
+  height: 44px;
+}
+
+.coreai-chat-scroll-to-latest {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border-radius: 22px;
+  border-width: 1px;
+  border-color: rgba(77, 208, 225, 0.7);
+  background-color: rgba(17, 60, 90, 0.95);
+  color: white;
+  font-size: 22px;
+  -unity-text-align: middle-center;
+  opacity: 0;
+  scale: 0.8 0.8;
+  transition-property: opacity, scale, background-color;
+  transition-duration: 0.15s;
+}
+
+.coreai-chat-scroll-to-latest:hover {
+  background-color: rgba(77, 208, 225, 0.85);
+}
+
+.coreai-chat-unread-count {
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background-color: rgb(255, 140, 60);
+  color: white;
+  font-size: 12px;
+  -unity-text-align: middle-center;
+  opacity: 0;
+  scale: 0.6 0.6;
+  transition-property: opacity, scale;
+  transition-duration: 0.15s;
+}
+
+.coreai-chat-scroll-to-latest--visible {
+  opacity: 1;
+  scale: 1 1;
+}
+
 .coreai-chat-input-field {
   flex-grow: 1;
   flex-shrink: 1;

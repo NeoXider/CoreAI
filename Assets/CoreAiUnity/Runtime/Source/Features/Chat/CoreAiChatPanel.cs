@@ -33,6 +33,11 @@ namespace CoreAI.Chat
     /// the reader deliberately scrolled UP: a learner re-reading the theory above a quiz was dragged
     /// down by every message the teacher wrote and had to scroll back by hand.
     /// </para>
+    /// <para>
+    /// <see cref="KeepPosition"/> is the default (7.50.0). It pairs with the built-in "jump to latest"
+    /// button and unread badge (<see cref="CoreAiChatScrollToLatest"/>): an answer that lands below the
+    /// edge of the viewport is announced by the badge instead of moving the feed - the messenger pattern.
+    /// </para>
     /// </summary>
     public enum ChatScrollAnchor
     {
@@ -41,10 +46,10 @@ namespace CoreAI.Chat
         KeepPosition = 2,
 
         /// <summary>
-        /// Messenger behaviour: the feed follows new content WHILE the reader stands at the bottom, and
-        /// stops the moment they move up. An unconditional <see cref="KeepPosition"/> turned out to be too
-        /// strict: a learner who has just sent a message IS at the bottom, and the answer together with the
-        /// task card appeared below the edge of their screen - that is, as if it had never arrived.
+        /// The feed follows new content WHILE the reader stands at the bottom, and stops the moment they move
+        /// up. It was the recommended policy before 7.50.0, when <see cref="KeepPosition"/> had no jump-to-latest
+        /// button and an answer below the edge looked as if it had never arrived; with the button and the
+        /// unread badge that problem is gone and <see cref="KeepPosition"/> is the default.
         /// </summary>
         FollowIfAtBottom = 3,
     }
@@ -1265,6 +1270,7 @@ namespace CoreAI.Chat
                 HeaderIcon.focusable = false;
             }
 
+            BindFeedScrollTracking();
             ApplyPanelStateToTree();
             ApplyShortcutTooltips();
         }
@@ -1399,6 +1405,7 @@ namespace CoreAI.Chat
             TryUnregisterCallback<KeyDownEvent>(InputField, OnInputKeyDown, ignoreReleasedElements,
                 TrickleDown.TrickleDown);
             TryUnregisterCallback<KeyDownEvent>(Root, OnRootKeyDown, ignoreReleasedElements, TrickleDown.TrickleDown);
+            UnbindFeedScrollTracking(ignoreReleasedElements);
         }
 
         private static void TryUnregisterCallback<TEventType>(
@@ -1458,7 +1465,13 @@ namespace CoreAI.Chat
             // is only about the next bind: a stuck flag would block every scroll after a UI rebuild.
             _scrollToBottomScheduled = false;
             _streamingScrollScheduled = false;
+            _pendingBottomSnapsCancelled = false;
+            _readerReleasedAnchor = false;
             _turnAnchorRow = null;
+            for (int i = 0; i < _recentProgrammaticScrollValues.Length; i++)
+            {
+                _recentProgrammaticScrollValues[i] = float.NaN;
+            }
         }
 
         protected virtual void ApplyConfig()
@@ -4041,7 +4054,15 @@ namespace CoreAI.Chat
             }
 
             VisualElement bubble = CreateMessageBubble(text, isUser);
-            RememberReaderPositionBeforeAppend();
+            if (isUser || isRestore || IsRestoringHistory)
+            {
+                RememberReaderPositionBeforeAppend();
+            }
+            else
+            {
+                NoteAssistantRowAppending();
+            }
+
             MessageScroll.Add(bubble);
             if (isUser)
             {
@@ -4050,6 +4071,7 @@ namespace CoreAI.Chat
                 // reader is following again — whatever they were reading before, they left it.
                 _turnAnchorRow = null;
                 _readerFollowsBottom = true;
+                _readerReleasedAnchor = false;
                 ScrollToBottom();
             }
             else
@@ -4719,7 +4741,7 @@ namespace CoreAI.Chat
             // WHY: record the bubble in open order — after the turn a host needs EVERY segment, not
             // just the last one (see TurnStreamingBubbles).
             _turnStreamingBubbles.Add(_streamingLabel);
-            RememberReaderPositionBeforeAppend();
+            NoteAssistantRowAppending();
             MessageScroll.Add(templateRow);
             ScrollForNewAssistantRow(templateRow);
             return _streamingLabel;
@@ -4976,7 +4998,15 @@ namespace CoreAI.Chat
         /// </summary>
         protected void ScrollToBottom()
         {
-            if (MessageScroll == null || _scrollToBottomScheduled)
+            if (MessageScroll == null)
+            {
+                return;
+            }
+
+            // WHY: a new request to go down outranks an earlier "the reader scrolled away" - it is either the
+            // reader's own action (send, the jump button) or a mode that always follows.
+            _pendingBottomSnapsCancelled = false;
+            if (_scrollToBottomScheduled)
             {
                 return;
             }
@@ -4996,6 +5026,7 @@ namespace CoreAI.Chat
                 return;
             }
 
+            _pendingBottomSnapsCancelled = false;
             if (_streamingScrollScheduled)
             {
                 return;
@@ -5008,22 +5039,23 @@ namespace CoreAI.Chat
 
         private void SnapScrollToBottom()
         {
-            if (MessageScroll?.verticalScroller == null)
+            if (MessageScroll?.verticalScroller == null || _pendingBottomSnapsCancelled)
             {
                 return;
             }
 
             Scroller vs = MessageScroll.verticalScroller;
-            vs.value = vs.highValue;
+            SetFeedScrollValue(vs, vs.highValue);
         }
 
         [Header("Scroll")]
         [SerializeField]
         [Tooltip(
-            "Where the chat scrolls when the assistant writes. Bottom — classic chat that follows the " +
-            "answer. AssistantMessageStart — the new answer is pinned by its top. KeepPosition — the " +
-            "view is never moved, new messages grow below.")]
-        private ChatScrollAnchor scrollAnchor = ChatScrollAnchor.Bottom;
+            "Where the chat scrolls when the assistant writes. KeepPosition (default) — the view is never " +
+            "moved, new messages grow below and the jump-to-latest button counts them. Bottom — classic " +
+            "chat that follows the answer. AssistantMessageStart — the new answer is pinned by its top. " +
+            "FollowIfAtBottom — follows only while the reader stands at the bottom.")]
+        private ChatScrollAnchor scrollAnchor = ChatScrollAnchor.KeepPosition;
 
         /// <summary>
         /// Scroll policy for NEW assistant messages. Comes from the inspector; a host that owns the
@@ -5072,6 +5104,195 @@ namespace CoreAI.Chat
         private void RememberReaderPositionBeforeAppend() => _readerFollowsBottom = IsReaderAtBottom();
 
         /// <summary>
+        /// An assistant row is about to be appended: remember where the reader stood and count the message
+        /// as unread when they are away from the bottom. Called BEFORE <c>MessageScroll.Add</c>.
+        /// </summary>
+        private void NoteAssistantRowAppending()
+        {
+            RememberReaderPositionBeforeAppend();
+            // WHY: "at the bottom" is not "sees it" - under KeepPosition the feed stays put and the new row
+            // lands below the edge, so only a policy that moves the view makes the message read on arrival.
+            _scrollToLatest?.ObserveAssistantMessage(_readerFollowsBottom && ShouldMoveViewForAssistantContent());
+        }
+
+        /// <summary>
+        /// A host appended its own assistant content (a card, an interactive block) outside the panel's
+        /// message paths. Counts it for the unread badge exactly like a message. Call BEFORE adding the row.
+        /// </summary>
+        protected void NoteAssistantContentArrived() => NoteAssistantRowAppending();
+
+        /// <summary>
+        /// True while a host re-renders already-delivered history through <see cref="AddMessage"/> (for example
+        /// a transcript loaded from its own backend). Such messages are not new, so they never become unread.
+        /// </summary>
+        protected virtual bool IsRestoringHistory => false;
+
+        /// <summary>Unread assistant messages shown on the jump-to-latest badge (0 without a button).</summary>
+        public int UnreadMessageCount => _scrollToLatest?.UnreadCount ?? 0;
+
+        /// <summary>
+        /// Shows or hides the jump-to-latest button or its badge. The default toggles
+        /// <see cref="CoreAiChatScrollToLatest.VisibleClassName"/> and lets USS transitions animate it; a host
+        /// with its own show/hide animation overrides this.
+        /// </summary>
+        protected virtual void ApplyScrollToLatestVisibility(VisualElement element, bool visible) =>
+            CoreAiChatScrollToLatest.ApplyVisibleClass(element, visible);
+
+        /// <summary>The jump-to-latest button was pressed: back to the bottom, following again.</summary>
+        protected virtual void OnScrollToLatestRequested() => FollowFeedAfterLearnerAction();
+
+        // WHY: the scroller cannot tell who moved it. Every value the panel sets itself is remembered here,
+        // so a change that matches none of them is the reader's own scroll (wheel, drag, touch, a host's
+        // wheel-step handler). A small ring instead of one slot: a change event can be dispatched after a
+        // newer programmatic snap already replaced the previous target.
+        private readonly float[] _recentProgrammaticScrollValues = { float.NaN, float.NaN, float.NaN, float.NaN };
+        private int _nextProgrammaticScrollSlot;
+
+        // WHY: ScrollToBottom settles over 500 ms (late layout passes). A reader who scrolls up inside that
+        // window must not be dragged back down by the tail of the chain.
+        private bool _pendingBottomSnapsCancelled;
+
+        // WHY: the reader scrolled away from the bottom and owns the view until their next own action (a sent
+        // message, the jump-to-latest button, returning to the bottom). Turn anchors and reveals do not move
+        // the feed meanwhile - in any policy except Bottom, which follows by definition.
+        private bool _readerReleasedAnchor;
+
+        private bool ReaderHoldsTheView => _readerReleasedAnchor && ScrollAnchor != ChatScrollAnchor.Bottom;
+
+        private CoreAiChatScrollToLatest _scrollToLatest;
+        private Scroller _feedScroller;
+
+        /// <summary>How far (scroller units) a reported value may drift from a value the panel set itself.</summary>
+        private const float ProgrammaticScrollTolerance = 0.5f;
+
+        /// <summary>Who moved the feed and where it ended up.</summary>
+        public enum FeedScrollChange
+        {
+            /// <summary>The panel itself set this value (a snap) somewhere above the bottom.</summary>
+            Programmatic = 0,
+
+            /// <summary>The feed stands at the bottom, whoever moved it there.</summary>
+            AtBottom = 1,
+
+            /// <summary>The reader moved the feed away from the bottom.</summary>
+            ReaderAway = 2,
+        }
+
+        /// <summary>
+        /// Classifies one scroller change. Pure, so the rule that keeps a reader's scroll from being
+        /// undone is testable without a panel.
+        /// </summary>
+        public static FeedScrollChange ClassifyFeedScroll(
+            float value,
+            float highValue,
+            IReadOnlyList<float> recentProgrammaticValues)
+        {
+            // WHY: at the bottom the feed follows, whoever put it there - a snap of the panel and a reader who
+            // scrolled back down are the same state. Checking the ring first kept the hold of a reader who
+            // returned exactly onto a bottom value the panel had set earlier (audit 7.50.0).
+            if (highValue <= 0f || value >= highValue - AtBottomEpsilon)
+            {
+                return FeedScrollChange.AtBottom;
+            }
+
+            if (recentProgrammaticValues != null)
+            {
+                foreach (float programmatic in recentProgrammaticValues)
+                {
+                    if (!float.IsNaN(programmatic) && Mathf.Abs(value - programmatic) <= ProgrammaticScrollTolerance)
+                    {
+                        return FeedScrollChange.Programmatic;
+                    }
+                }
+            }
+
+            return FeedScrollChange.ReaderAway;
+        }
+
+        /// <summary>Sets the feed position on the panel's own behalf (see <see cref="ClassifyFeedScroll"/>).</summary>
+        private void SetFeedScrollValue(Scroller scroller, float value)
+        {
+            float clamped = Mathf.Clamp(value, Mathf.Min(scroller.lowValue, scroller.highValue),
+                Mathf.Max(scroller.lowValue, scroller.highValue));
+            _recentProgrammaticScrollValues[_nextProgrammaticScrollSlot] = clamped;
+            _nextProgrammaticScrollSlot = (_nextProgrammaticScrollSlot + 1) % _recentProgrammaticScrollValues.Length;
+            scroller.value = clamped;
+        }
+
+        private void OnFeedScrollValueChanged(float value)
+        {
+            Scroller scroller = _feedScroller;
+            if (scroller == null)
+            {
+                return;
+            }
+
+            switch (ClassifyFeedScroll(value, scroller.highValue, _recentProgrammaticScrollValues))
+            {
+                case FeedScrollChange.AtBottom:
+                    _readerFollowsBottom = true;
+                    _readerReleasedAnchor = false;
+                    break;
+                case FeedScrollChange.ReaderAway:
+                    // WHY: the reader left the bottom on purpose. Every snap still queued (the settle tail of a
+                    // ScrollToBottom, a turn anchor being re-applied) would undo that - drop them all. The anchor
+                    // row itself is kept: dropping it sent ScrollToTurnAnchor down its "no anchor" branch, i.e.
+                    // straight to the bottom (audit 7.50.0, AssistantMessageStart).
+                    _readerFollowsBottom = false;
+                    _pendingBottomSnapsCancelled = true;
+                    _readerReleasedAnchor = true;
+                    break;
+            }
+        }
+
+        private void BindFeedScrollTracking()
+        {
+            // WHY: a host may call BindUI again without the unbind path (re-pointing Root at a new tree);
+            // a second subscription would classify every scroll twice.
+            if (_feedScroller != null)
+            {
+                _feedScroller.valueChanged -= OnFeedScrollValueChanged;
+            }
+
+            _feedScroller = MessageScroll?.verticalScroller;
+            if (_feedScroller != null)
+            {
+                _feedScroller.valueChanged += OnFeedScrollValueChanged;
+            }
+
+            _scrollToLatest ??= new CoreAiChatScrollToLatest(
+                IsReaderAtBottom,
+                OnScrollToLatestRequested,
+                ApplyScrollToLatestVisibility);
+            _scrollToLatest.Bind(Root, MessageScroll);
+            if (MessageScroll != null && !_scrollToLatest.IsBound && ScrollAnchor == ChatScrollAnchor.KeepPosition
+                && !_missingJumpToLatestReported)
+            {
+                // WHY: under KeepPosition an answer below the edge is announced ONLY by the jump-to-latest button;
+                // a host UXML without it silently loses every sign that an answer arrived (audit 7.50.0).
+                _missingJumpToLatestReported = true;
+                Logger.LogWarning(GameLogFeature.Core,
+                    "[CoreAiChatPanel] ScrollAnchor is KeepPosition but the UXML has no '" +
+                    CoreAiChatScrollToLatest.ButtonName + "' button: new answers below the edge will not be " +
+                    "announced. Add the button (and '" + CoreAiChatScrollToLatest.BadgeName + "') or choose " +
+                    "FollowIfAtBottom.");
+            }
+        }
+
+        private bool _missingJumpToLatestReported;
+
+        private void UnbindFeedScrollTracking(bool ignoreReleasedElements)
+        {
+            if (_feedScroller != null)
+            {
+                _feedScroller.valueChanged -= OnFeedScrollValueChanged;
+                _feedScroller = null;
+            }
+
+            _scrollToLatest?.Unbind(ignoreReleasedElements);
+        }
+
+        /// <summary>
         /// The learner acted inside the feed itself - answered an embedded card, pressed a button inside a
         /// message - and is waiting for what comes next exactly as they would after sending a message.
         /// <para>
@@ -5086,6 +5307,7 @@ namespace CoreAI.Chat
         {
             _turnAnchorRow = null;
             _readerFollowsBottom = true;
+            _readerReleasedAnchor = false;
             ScrollToBottom();
         }
 
@@ -5102,7 +5324,7 @@ namespace CoreAI.Chat
         /// </summary>
         protected void ScrollForNewAssistantRow(VisualElement row)
         {
-            if (!ShouldMoveViewForAssistantContent())
+            if (!ShouldMoveViewForAssistantContent() || ReaderHoldsTheView)
             {
                 return;
             }
@@ -5134,7 +5356,7 @@ namespace CoreAI.Chat
         /// </summary>
         protected void ScrollToRevealRow(VisualElement row)
         {
-            if (!ShouldMoveViewForAssistantContent())
+            if (!ShouldMoveViewForAssistantContent() || ReaderHoldsTheView)
             {
                 return;
             }
@@ -5159,7 +5381,7 @@ namespace CoreAI.Chat
         /// </summary>
         protected void ScrollToTurnAnchor()
         {
-            if (!ShouldMoveViewForAssistantContent())
+            if (!ShouldMoveViewForAssistantContent() || ReaderHoldsTheView)
             {
                 return;
             }
@@ -5200,9 +5422,10 @@ namespace CoreAI.Chat
 
         private void SnapScrollToAnchor(VisualElement row, TurnAnchorMode mode)
         {
-            // WHY: a newer anchor (next turn, a revealed card) supersedes a chain still in flight.
+            // WHY: a newer anchor (next turn, a revealed card) supersedes a chain still in flight, and a reader
+            // who scrolled away cancels it.
             if (MessageScroll?.verticalScroller == null || row == null || row.parent == null ||
-                !ReferenceEquals(row, _turnAnchorRow))
+                !ReferenceEquals(row, _turnAnchorRow) || ReaderHoldsTheView)
             {
                 return;
             }
@@ -5210,9 +5433,9 @@ namespace CoreAI.Chat
             Scroller vs = MessageScroll.verticalScroller;
             Rect layout = row.layout;
             float viewportHeight = MessageScroll.contentViewport?.layout.height ?? 0f;
-            vs.value = mode == TurnAnchorMode.Reveal
+            SetFeedScrollValue(vs, mode == TurnAnchorMode.Reveal
                 ? ResolveRevealScrollValue(layout.yMin, layout.yMax, viewportHeight, vs.value, vs.lowValue, vs.highValue)
-                : ResolveRowStartScrollValue(layout.yMin, vs.lowValue, vs.highValue);
+                : ResolveRowStartScrollValue(layout.yMin, vs.lowValue, vs.highValue));
         }
 
         /// <summary>Scroller value that puts <paramref name="rowTop"/> (content-space) at the top of the viewport.</summary>

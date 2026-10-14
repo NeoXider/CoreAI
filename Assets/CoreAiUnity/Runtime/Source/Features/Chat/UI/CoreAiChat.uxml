@@ -28,7 +28,12 @@
     </ui:VisualElement>
     <ui:Label name="coreai-long-request-hint" picking-mode="Ignore" text="" class="coreai-long-request-hint"
               style="display: none;"/>
-    <ui:VisualElement class="coreai-chat-input-container">
+    <ui:VisualElement class="coreai-chat-input-container" style="position: relative;">
+      <ui:VisualElement class="coreai-chat-scroll-to-latest-wrap" picking-mode="Ignore">
+        <ui:Button name="coreai-chat-scroll-to-latest" text="↓" tooltip="Jump to latest messages"
+                   class="coreai-chat-scroll-to-latest" picking-mode="Ignore"/>
+        <ui:Label name="coreai-chat-unread-count" text="" class="coreai-chat-unread-count" picking-mode="Ignore"/>
+      </ui:VisualElement>
       <ui:TextField name="coreai-chat-input" multiline="true" class="coreai-chat-input-field"/>
       <ui:Button name="coreai-chat-send" text=">" class="coreai-chat-send-button"/>
     </ui:VisualElement>

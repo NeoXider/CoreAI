@@ -4,6 +4,43 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.50.0] - 2026-10-14
+
+### Changed
+
+- **Default feed policy is `ChatScrollAnchor.KeepPosition` (was `Bottom`).** Assistant content never moves the view,
+  even for a reader standing at the bottom — the messenger pattern. The reader's own message, the jump-to-latest
+  button and history restore still go to the bottom. Hosts that relied on the old default set `scrollAnchor` in the
+  inspector or override `ScrollAnchor`. **A host UXML without the `coreai-chat-scroll-to-latest` button** has no
+  other sign that an answer arrived below the edge: the panel logs one warning at bind — add the button and badge
+  (see `CoreAiChat.uxml`) or choose `FollowIfAtBottom`.
+
+### Added
+
+- **Built-in jump-to-latest button and unread badge** — `CoreAiChatScrollToLatest` (+ `CoreAiChatUnreadCounter`).
+  The button (`coreai-chat-scroll-to-latest`) is shown while the reader is away from the bottom; the badge
+  (`coreai-chat-unread-count`) counts assistant messages that arrived meanwhile (restored history and the reader's
+  own messages never count). Opt-in by markup: the default `CoreAiChat.uxml` has both; a host UXML without the button
+  has none. Hooks: `ApplyScrollToLatestVisibility` (own show/hide animation), `OnScrollToLatestRequested`,
+  `NoteAssistantContentArrived` (host-added cards count as unread), `IsRestoringHistory` (host-rendered history is
+  not unread), `UnreadMessageCount`.
+
+### Fixed
+
+- **A reader's scroll is never undone by a snap in flight.** Every value the panel sets itself is remembered, so a
+  scroller change that matches none of them is the reader's (`ClassifyFeedScroll`). Scrolling away from the bottom
+  drops the follow flag and the settle tail of `ScrollToBottom`, and suspends turn anchors and reveals (every policy
+  except `Bottom`) until the reader's next own action — a sent message, the jump-to-latest button or returning to
+  the bottom. Before, the follow flag was only refreshed when a row was appended, so a card rebuild after the reader
+  had scrolled up dragged the feed down. Covered on a live laid-out feed by
+  `CoreAiChatFeedScrollBehaviourEditModeTests`.
+- Standing at the bottom always releases the reader's hold, even when the reader returns exactly onto a bottom
+  value the panel set earlier (`ClassifyFeedScroll` checks the bottom before the ring of programmatic values).
+- The jump-to-latest button survives a host that takes the chat tree out of its panel and re-inserts the same tree
+  without `BindUI` (a tab switch): the detached tree is no longer forgotten, only left untouched until it returns.
+- `MeaiOpenAiChatClientHttpEditModeTests`: two SSE fixtures lacked a terminal frame and failed since 7.49.0 made an
+  unterminated stream an error; they now end with `data: [DONE]`.
+
 ## [7.49.0] - 2026-10-02
 
 ### Added

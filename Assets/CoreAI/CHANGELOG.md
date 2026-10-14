@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [7.50.0] - 2026-10-14
+
+Version aligned with `com.neoxider.coreaiunity` 7.50.0 (messenger-style chat feed: `KeepPosition` by default, built-in
+jump-to-latest button and unread badge — a Unity-layer change; no core API changes).
+
 ## [7.49.0] - 2026-10-02
 
 ### Added

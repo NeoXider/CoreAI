@@ -743,6 +743,40 @@ private void HandleToolExecuted(string roleId, string toolName, IDictionary<stri
 
 The built-in **`CoreAiChatPanel`** can append one diagnostic row per tool call when **`CoreAiChatConfig.ShowToolCallsInChat`** is enabled (default **off**). Override **`CoreAiChatPanel.FormatToolExecutedForChat`** for custom text. The tool-call display and chat history are keyed to the **active** role, so switching agents (via the runtime agent dropdown or `EnableAgentSwitching()`) re-targets tool bubbles and reloads that role's transcript. The **Hub-embedded chat** forces `ShowToolCallsInChat` on (via runtime options) so tool progress is always visible there, independent of the shared chat config.
 
+### Feed scrolling and the jump-to-latest button (`CoreAiChatPanel`)
+
+Since 7.50.0 the feed follows the messenger pattern by default (`ChatScrollAnchor.KeepPosition`): assistant content
+never moves the view, even when the reader stands at the bottom. The reader's own message, the jump-to-latest button
+and history restore still scroll to the bottom. Other policies (`Bottom`, `AssistantMessageStart`,
+`FollowIfAtBottom`) stay available through the serialized `scrollAnchor` field or an override of `ScrollAnchor`.
+
+An answer that lands below the edge of the viewport is announced by `CoreAiChatScrollToLatest`: a button named
+`coreai-chat-scroll-to-latest` (shown while the reader is away from the bottom) and a `Label` named
+`coreai-chat-unread-count` (assistant messages that arrived meanwhile). The default `CoreAiChat.uxml` contains both;
+a host UXML opts in by adding elements with these names. Extension points:
+
+| Member | Use |
+|---|---|
+| `ApplyScrollToLatestVisibility(element, visible)` | Own show/hide animation (default: USS class `coreai-chat-scroll-to-latest--visible`). |
+| `OnScrollToLatestRequested()` | What the button does (default: back to the bottom, following again). |
+| `NoteAssistantContentArrived()` | Call before adding a host-built assistant row (a card) so it counts as unread. |
+| `IsRestoringHistory` | Return `true` while re-rendering already delivered history through `AddMessage`. |
+| `UnreadMessageCount` | Current badge value. |
+
+A scroll the reader makes is never undone by a snap still in flight: the panel remembers the values it sets itself,
+and any other scroller change counts as the reader's (`ClassifyFeedScroll`). After scrolling away from the bottom the
+reader holds the view until their next own action (a sent message, the button, returning to the bottom): turn
+anchors and card reveals do not move the feed meanwhile, in every policy except `Bottom`.
+Standing at the bottom always means "follow", whoever put the feed there, so a reader who scrolls back down
+releases the hold even onto a value the panel set earlier. **A host never writes `verticalScroller.value` itself:**
+such a write is indistinguishable from the reader's scroll and cancels the pending bottom snaps; use the panel's own
+`ScrollToBottom()` instead. If the host moves the chat tree between panels (a tab switch) without calling `BindUI`,
+the button keeps its tree and works again once the same tree is re-attached.
+
+What counts as unread: assistant message rows (each streamed segment is its own row) and host rows announced with
+`NoteAssistantContentArrived`. Tool-call diagnostic rows (`ShowToolCallsInChat`) and restored history never count.
+Under `KeepPosition` without the button in the UXML the panel logs one warning at bind.
+
 ### Clearing chat from UI (`CoreAiChatPanel`)
 
 The built-in chat panel header (`CoreAiChatPanel`) has a clear button (`coreai-chat-clear`, label `C`) — on click it clears all messages from the UI and resets **short-term context** (chat history) for the agent. That is the default behavior.
@@ -844,4 +878,4 @@ Practical integration pain points and ways to keep CoreAI automatic but configur
 
 Record major contract changes in **DGF_SPEC** (version in the header). **DEVELOPER_GUIDE** describes the current code map; if it diverges from code, the repository wins — update the guide in the same PR.
 
-**Version of this guide:** 7.49.0 (2026-10-02) — seven-package topology; independent library/feature log-prefix controls; UI Toolkit UXML serialization via `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+, required by Unity 6.6); independent positive `COREAI_LLM` / `COREAI_LUA` opt-ins; provider-only meaning of `COREAI_LLM`; opaque multi-user persistence keys and enqueue-time scope snapshots for queue execution/cancellation; session-only persistence and current chat lifecycle contracts. Historical feature notes remain in both package changelogs.
+**Version of this guide:** 7.50.0 (2026-10-14) — seven-package topology; independent library/feature log-prefix controls; UI Toolkit UXML serialization via `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+, required by Unity 6.6); independent positive `COREAI_LLM` / `COREAI_LUA` opt-ins; provider-only meaning of `COREAI_LLM`; opaque multi-user persistence keys and enqueue-time scope snapshots for queue execution/cancellation; session-only persistence and current chat lifecycle contracts. Historical feature notes remain in both package changelogs.
