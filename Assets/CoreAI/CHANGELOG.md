@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+## [7.50.1] - 2026-10-14
+
+### Fixed
+
+- **Tool-contract prompt no longer contradicts disclosure rules.** "After a tool succeeds, summarize the real tool
+  result briefly for the user" made hosts with engine-only tool results (RedoSchool's briefing) argue with their own
+  role prompt. The line now reads "continue from its real result; do not claim results the tool did not return".
+- **Memory hint names only a real action.** The memory hint added whenever the memory tool is registered offered
+  `action "append" or "store"`; `store` does not exist (`MemoryTool` answers "Unknown action"), so the hint now names
+  `append` only.
+- **Memory tool descriptions name only real actions.** The `MemoryTool` and `MemoryLlmTool` descriptions began
+  "Read, store, append, clear, or … edit": `store` read as an action name and the real `write` was missing.
+  `MemoryTool` now lists all eight actions (`read`, `write`, `append`, `clear`, `str_replace`, `insert`, `delete`,
+  `rename`). `MemoryLlmTool` opens with "Persistent memory document for agent recall." and then its per-action list,
+  with the "first match unless replace_all=true" note stated once. At 486 characters it fits the tool contract's
+  500-character limit, so the text channel no longer cuts off the end of the `rename` clause (it was 554).
+  `ToolContractPromisesEditModeTests` runs every action word the hint and both descriptions offer through
+  `MemoryTool`, fails on "Unknown action", and checks that both descriptions fit the limit.
+- **Fallback prompts follow the same contract.** The nudge after an empty response that followed a successful tool
+  call said "reply with a short summary"; it now says "If it is finished, reply briefly to the user; do not claim
+  results the tools did not return", so it no longer pushes the model to narrate tool output. The final
+  tools-disabled turn ("Summarize in plain text what you accomplished …") now asks for a status report from the real
+  tool results: what is done and what remains, without claiming results the tools did not return. When these turns
+  run is unchanged. Both prompts now live in the internal `ToolLoopFallbackPrompts`, which all six call sites in
+  `SmartToolCallingChatClient` and the streaming `MeaiLlmClient` (`com.neoxider.coreaiunity`) read; EditMode tests
+  pin the request each reachable site sends.
+- **Memory update block drops cache jargon.** The `## Memory (updates)` block read "New memory since cached prefix"
+  for an appended delta and "This overrides older cached ## Memory if there is a conflict" for edited memory. They
+  now read "New memory since the ## Memory block above" and "Current canonical memory. It replaces the ## Memory
+  block above where they conflict", which is what each block is relative to. Both branches are pinned in
+  `AiOrchestratorHistoryEditModeTests`.
+
 ## [7.50.0] - 2026-10-14
 
 Version aligned with `com.neoxider.coreaiunity` 7.50.0 (messenger-style chat feed: `KeepPosition` by default, built-in

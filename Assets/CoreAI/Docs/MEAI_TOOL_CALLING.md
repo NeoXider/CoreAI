@@ -88,7 +88,7 @@ public sealed class MyMemoryTool
     public AIFunction CreateAIFunction() => AIFunctionFactory.Create(
         new Func<string, string?, CancellationToken, Task<string>>(ExecuteAsync),
         "memory",
-        "Store, append, or clear persistent memory.");
+        "Read, write, append, or clear persistent memory.");
 
     public Task<string> ExecuteAsync(string action, string? content = null, CancellationToken ct = default) =>
         Task.FromResult("ok");
@@ -188,7 +188,7 @@ their descriptions, parameter schemas, and rules for tool-required tasks:
 - If the task asks to use a tool, call the matching native tool through MEAI.
 - Pass required values as structured tool arguments; do not mention them only in prose.
 - Do not claim that a registered tool is unavailable.
-- After a tool succeeds, summarize the real tool result briefly.
+- After a tool succeeds, continue from its real result; do not claim results the tool did not return.
 
 This prompt contract does not replace provider-native tool choice. It gives small/local
 models the same explicit behavioral guidance that production integrations expect, while

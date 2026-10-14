@@ -33,7 +33,7 @@ namespace CoreAI.Ai
             {
                 Name = "memory",
                 Description =
-                    "Read, store, append, clear, or granularly edit persistent memory for agent recall across sessions."
+                    "Read, write, append, clear, str_replace, insert, delete, or rename persistent memory for agent recall across sessions."
             };
             return AIFunctionFactory.Create(func, options);
         }

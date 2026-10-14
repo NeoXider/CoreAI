@@ -625,8 +625,7 @@ namespace CoreAI.Infrastructure.Llm
                 List<MEAI.ChatMessage> summaryMessages = new(chatMessages)
                 {
                     new MEAI.ChatMessage(MEAI.ChatRole.User,
-                        "Tool budget exhausted. Do not call any more tools. Summarize in plain text " +
-                        "what you accomplished and what remains to be done.")
+                        ToolLoopFallbackPrompts.ToolBudgetExhaustedFinalTurn)
                 };
 
                 // Tools deliberately omitted (not just ToolMode=None): the model physically cannot
@@ -1224,8 +1223,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     emptyResponsesAfterToolSuccess++;
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
-                        "Your last response had no text and no tool call. If the task is not finished, " +
-                        "continue with the next tool call now. If it is finished, reply with a short summary."));
+                        ToolLoopFallbackPrompts.EmptyResponseNudge));
                     _logger.LogWarning(GameLogFeature.Llm,
                         "MeaiLlmClient: Streaming model returned an empty response after a successful tool call; " +
                         $"nudging to continue ({emptyResponsesAfterToolSuccess}/{Math.Max(1, _settings.MaxToolCallRetries)}).");

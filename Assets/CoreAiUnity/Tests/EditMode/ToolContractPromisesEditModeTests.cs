@@ -2,9 +2,11 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI;
+using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Logging;
 using NUnit.Framework;
@@ -110,6 +112,143 @@ namespace CoreAI.Tests.EditMode
                 "sys", Enumerable.Reverse(tools).ToArray(), new StubSettings(), supportsNativeToolCalling: true);
 
             Assert.AreEqual(first, second);
+        }
+
+        // ==================== The prompt names only memory actions that exist ====================
+
+        /// <summary>
+        /// The memory hint offered <c>action "append" or "store"</c> and both memory tool descriptions began
+        /// "Read, store, append, …", while <c>store</c> is not an action: a model that obeyed the prompt got
+        /// "Unknown action" back, and the real <c>write</c> was never named. Every action word the hint and the two
+        /// descriptions offer must be one <see cref="MemoryTool"/> accepts, and each description must name all of them.
+        /// </summary>
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task MemoryHintAndDescriptions_NameOnlyActionsTheMemoryToolAccepts(bool nativeChannel)
+        {
+            MemoryLlmTool memoryLlmTool = new();
+            MemoryTool memoryTool = new(new InMemoryAgentMemoryStore(), "memory_contract_role", new StubSettings());
+            string contract = AiToolContractPromptFormatter.AppendStableRoleToolContract(
+                "sys", new ILlmTool[] { memoryLlmTool }, new StubSettings(), nativeChannel);
+
+            string memoryToolDescription = memoryTool.CreateAIFunction().Description;
+            string[] validActions = await AcceptedMemoryActionsAsync(memoryTool);
+            string[] hintActions = MemoryHintActions(contract);
+            string[] memoryToolActions = DescriptionActions(memoryToolDescription);
+            string[] memoryLlmToolActions = DescriptionActions(memoryLlmTool.Description);
+
+            Assert.LessOrEqual(memoryToolDescription.Length, AiToolContractPromptFormatter.ToolDescriptionMaxChars,
+                "The MemoryTool description must fit the tool contract unclipped");
+            Assert.LessOrEqual(memoryLlmTool.Description.Length, AiToolContractPromptFormatter.ToolDescriptionMaxChars,
+                "The MemoryLlmTool description must fit the tool contract unclipped, or the text channel loses its tail");
+            CollectionAssert.IsNotEmpty(hintActions, "The memory hint must name the action it asks the model to call");
+            CollectionAssert.IsSubsetOf(validActions, memoryToolActions,
+                "The MemoryTool description must name every action the tool accepts");
+            CollectionAssert.IsSubsetOf(validActions, memoryLlmToolActions,
+                "The MemoryLlmTool description must name every action the tool accepts");
+
+            foreach (string action in hintActions.Concat(memoryToolActions).Concat(memoryLlmToolActions).Distinct())
+            {
+                string result = await memoryTool.ExecuteAsync(
+                    action, content: "fact to remember", old_text: "fact to remember", new_text: "fact kept");
+
+                StringAssert.DoesNotContain("Unknown action", result,
+                    $"The prompt offers memory action '{action}', which the memory tool rejects");
+            }
+        }
+
+        /// <summary>
+        /// "Summarize the real tool result briefly for the user" made a host whose tool results are engine-only argue
+        /// with its own role prompt. The contract tells the model to continue from the real result, on both channels.
+        /// </summary>
+        [TestCase(true)]
+        [TestCase(false)]
+        public void StableRoleContract_AfterToolSuccess_ContinuesFromTheRealResult(bool nativeChannel)
+        {
+            string contract = AiToolContractPromptFormatter.AppendStableRoleToolContract(
+                "sys", new ILlmTool[] { new StubTool("buy_item", CountSchema) }, new StubSettings(), nativeChannel);
+
+            StringAssert.Contains(
+                "After a tool succeeds, continue from its real result; do not claim results the tool did not return.",
+                contract);
+            StringAssert.DoesNotContain("summarize the real tool result", contract);
+        }
+
+        private static async Task<string[]> AcceptedMemoryActionsAsync(MemoryTool memoryTool)
+        {
+            string result = await memoryTool.ExecuteAsync("no_such_memory_action");
+            string error = Newtonsoft.Json.Linq.JObject.Parse(result).Value<string>("Error") ?? "";
+            StringAssert.Contains("Unknown action", error,
+                "Sanity: an action the tool does not know must answer \"Unknown action\", or this guard proves nothing");
+            Match valid = Regex.Match(error, @"Valid actions:\s*(?<list>[a-z_, ]+)");
+            Assert.IsTrue(valid.Success, $"The unknown-action error must list the valid actions: {error}");
+            return valid.Groups["list"].Value
+                .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(a => a.Trim())
+                .Where(a => a.Length > 0)
+                .ToArray();
+        }
+
+        private static string[] MemoryHintActions(string contract)
+        {
+            string[] lines = contract.Split('\n').Select(l => l.Trim()).ToArray();
+            string hint = lines.FirstOrDefault(l => l.StartsWith("Memory:", StringComparison.Ordinal));
+            Assert.IsNotNull(hint, "The memory hint is added whenever the memory tool is registered");
+
+            List<string> actions = Regex.Matches(hint, "\"(?<word>[^\"]+)\"")
+                .Cast<Match>()
+                .Select(m => m.Groups["word"].Value)
+                .ToList();
+            foreach (string example in lines.Where(l => l.Contains("\"name\":\"memory\"")))
+            {
+                actions.AddRange(Regex.Matches(example, "\"action\":\"(?<word>[^\"]+)\"")
+                    .Cast<Match>()
+                    .Select(m => m.Groups["word"].Value));
+            }
+
+            return actions.Distinct().ToArray();
+        }
+
+        /// <summary>
+        /// Action words a memory tool description offers: an opening list ("Read, write, … persistent memory …")
+        /// and/or the first word of each clause of an "Actions:" sentence. At least one of the two must be present.
+        /// </summary>
+        private static string[] DescriptionActions(string description)
+        {
+            description ??= "";
+            Match lead = Regex.Match(description, @"^(?<list>[^.]*?)\s+(?:the\s+)?persistent memory\b");
+            Match sentence = Regex.Match(description, @"Actions:\s*(?<clauses>.*)$", RegexOptions.Singleline);
+            Assert.IsTrue(lead.Success || sentence.Success,
+                $"The description must name its actions, as an opening list or an 'Actions:' sentence: {description}");
+
+            List<string> actions = new();
+            if (lead.Success)
+            {
+                foreach (string item in Regex.Split(lead.Groups["list"].Value, @",\s*(?:or\s+)?|\s+or\s+"))
+                {
+                    string word = item.Trim().ToLowerInvariant();
+                    if (word.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    Assert.That(word, Does.Match("^[a-z_]+$"),
+                        $"Every item of the description's action list must be one action word, got '{item}'");
+                    actions.Add(word);
+                }
+            }
+
+            if (sentence.Success)
+            {
+                foreach (string clause in sentence.Groups["clauses"].Value.Split(';'))
+                {
+                    Match first = Regex.Match(clause, @"^\s*(?<word>[a-z_]+)\b");
+                    Assert.IsTrue(first.Success, $"Each 'Actions:' clause must start with its action: '{clause}'");
+                    actions.Add(first.Groups["word"].Value);
+                }
+            }
+
+            return actions.Distinct().ToArray();
         }
 
 #if COREAI_LLM

@@ -4,6 +4,21 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.50.1] - 2026-10-14
+
+Version aligned with `com.neoxider.coreai` 7.50.1 (tool-contract, memory-hint and memory-tool prompt wording — a core
+change). The one Unity-layer change of its own follows that wording.
+
+### Fixed
+
+- **Streaming fallback prompts follow the tool contract.** `MeaiLlmClient` no longer carries its own copies of the
+  two fallback prompts. It reads the core `ToolLoopFallbackPrompts`, as `SmartToolCallingChatClient` does: the nudge
+  after an empty response that followed a successful tool call ("reply with a short summary") now says "reply briefly
+  to the user; do not claim results the tools did not return". The final tools-disabled turn ("Summarize in plain
+  text what you accomplished …") now asks for a status report from the real tool results. When these turns run is
+  unchanged. `MeaiStreamingToolCallEditModeTests` pins the request each one sends, and `DEVELOPER_GUIDE.md` and
+  `TOOL_CALL_SPEC.md` quote the new final-turn wording.
+
 ## [7.50.0] - 2026-10-14
 
 ### Changed

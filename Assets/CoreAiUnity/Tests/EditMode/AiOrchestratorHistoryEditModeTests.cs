@@ -2919,6 +2919,38 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(ChatRole.System, memoryUpdates.Role);
             StringAssert.Contains("## Memory (updates)", memoryUpdates.Text);
             StringAssert.Contains("Learner prefers hints.", memoryUpdates.Text);
+            StringAssert.Contains("New memory since the ## Memory block above:", memoryUpdates.Text,
+                "The delta is relative to the ## Memory block in the same request; cache jargon means nothing to the model.");
+        }
+
+        /// <summary>
+        /// When memory was edited rather than appended to, the update block carries the whole current memory and must
+        /// say that it replaces the older ## Memory block above, without cache jargon the model cannot act on.
+        /// </summary>
+        [Test]
+        public async Task RunTaskAsync_Memory_EditedSinceSnapshot_TailReplacesTheMemoryBlockAbove()
+        {
+            TestLlmClient llm = new();
+            await RunMemoryPlacementRequestAsync(
+                llm,
+                "Learner prefers hints.",
+                "Learner likes geometry puzzles.");
+
+            Assert.IsNotNull(llm.LastRequest?.ChatHistory);
+            Microsoft.Extensions.AI.ChatMessage olderMemory = llm.LastRequest.ChatHistory.Single(m =>
+                m.Role == ChatRole.System && (m.Text ?? "").StartsWith("## Memory\n", StringComparison.Ordinal));
+            Microsoft.Extensions.AI.ChatMessage memoryUpdates = llm.LastRequest.ChatHistory.Single(m =>
+                m.Role == ChatRole.System &&
+                (m.Text ?? "").StartsWith("## Memory (updates)", StringComparison.Ordinal));
+            Assert.Less(llm.LastRequest.ChatHistory.IndexOf(olderMemory),
+                llm.LastRequest.ChatHistory.IndexOf(memoryUpdates));
+            StringAssert.Contains("Learner likes geometry puzzles.", olderMemory.Text);
+            StringAssert.Contains("Learner prefers hints.", memoryUpdates.Text);
+            StringAssert.Contains(
+                "Current canonical memory. It replaces the ## Memory block above where they conflict:",
+                memoryUpdates.Text);
+            StringAssert.DoesNotContain("cached", memoryUpdates.Text,
+                "The model sees one request; cache jargon in the memory block means nothing to it.");
         }
 
         [Test]

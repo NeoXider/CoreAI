@@ -312,6 +312,93 @@ namespace CoreAI.Tests.EditMode
                 "The global settings cap (3) must stop the loop after 3 roundtrips + 1 final no-tools summary");
         }
 
+        // ==================== Fallback prompts come from ToolLoopFallbackPrompts ====================
+
+        /// <summary>
+        /// The roundtrip cap's final tools-disabled request carries the shared budget prompt, so the core loop and
+        /// the streaming <c>MeaiLlmClient</c> cannot drift apart in what they ask of the model.
+        /// </summary>
+        [Test]
+        public async Task RoundtripCap_FinalToolsDisabledRequest_CarriesTheSharedBudgetPrompt()
+        {
+            ScriptedChatClient fakeInner = new(iteration => MakeToolCallResponse("ok_tool", "call_" + iteration));
+            MEAI.AIFunction okTool = MakeAIFunction("ok_tool", _ =>
+                Task.FromResult<object>("{\"Success\":true}"));
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
+                new CoreAISettingsOptions(),
+                true, new List<Ai.ILlmTool>(), "TestRole", 5, "",
+                null, null, 1);
+
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(),
+                new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { okTool } });
+
+            Assert.AreEqual(2, fakeInner.ObservedMessages.Count,
+                "One tool roundtrip, then the final tools-disabled roundtrip");
+            AssertLastUserPrompt(fakeInner.ObservedMessages[1], ToolLoopFallbackPrompts.ToolBudgetExhaustedFinalTurn);
+            Assert.IsNull(fakeInner.ObservedOptions[1]?.Tools, "The final roundtrip offers no tools");
+        }
+
+        /// <summary>
+        /// The consecutive-tool-error guard runs its final tools-disabled request through a separate helper; it
+        /// carries the same shared budget prompt.
+        /// </summary>
+        [Test]
+        public async Task ConsecutiveErrorGuard_FinalToolsDisabledRequest_CarriesTheSharedBudgetPrompt()
+        {
+            ScriptedChatClient fakeInner = new(iteration => MakeToolCallResponse("my_tool", "call_" + iteration));
+            MEAI.AIFunction failTool = MakeAIFunction("my_tool", _ =>
+                Task.FromResult<object>("{\"Success\":false,\"Error\":\"boom\"}"));
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
+                new CoreAISettingsOptions(),
+                true, new List<Ai.ILlmTool>(), "TestRole", 3);
+
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(),
+                new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { failTool } });
+
+            Assert.AreEqual(4, fakeInner.ObservedMessages.Count,
+                "Three failed roundtrips, then the final tools-disabled roundtrip");
+            AssertLastUserPrompt(fakeInner.ObservedMessages[3], ToolLoopFallbackPrompts.ToolBudgetExhaustedFinalTurn);
+        }
+
+        /// <summary>
+        /// An empty response after a successful tool call is answered with the shared nudge. The nudge must not ask
+        /// the model to narrate tool output: some hosts keep tool results engine-only.
+        /// </summary>
+        [Test]
+        public async Task EmptyResponseAfterToolSuccess_NextRequest_CarriesTheSharedNudge()
+        {
+            ScriptedChatClient fakeInner = new(iteration => iteration switch
+            {
+                1 => MakeToolCallResponse("ok_tool", "call_1"),
+                2 => MakeTextResponse(""),
+                _ => MakeTextResponse("Done.")
+            });
+            MEAI.AIFunction okTool = MakeAIFunction("ok_tool", _ =>
+                Task.FromResult<object>("{\"Success\":true}"));
+            SmartToolCallingChatClient client = new(fakeInner, NullLog.Instance,
+                new CoreAISettingsOptions(),
+                true, new List<Ai.ILlmTool>(), "TestRole", 3);
+
+            await client.GetResponseAsync(new List<MEAI.ChatMessage>(),
+                new MEAI.ChatOptions { Tools = new List<MEAI.AITool> { okTool } });
+
+            Assert.AreEqual(3, fakeInner.ObservedMessages.Count,
+                "Tool roundtrip, empty roundtrip, then the nudged roundtrip");
+            AssertLastUserPrompt(fakeInner.ObservedMessages[2], ToolLoopFallbackPrompts.EmptyResponseNudge);
+            StringAssert.Contains(
+                "If it is finished, reply briefly to the user; do not claim results the tools did not return.",
+                ToolLoopFallbackPrompts.EmptyResponseNudge);
+            StringAssert.DoesNotContain("tool results", ToolLoopFallbackPrompts.EmptyResponseNudge,
+                "The nudge must not push the model to narrate tool output");
+        }
+
+        private static void AssertLastUserPrompt(IReadOnlyList<MEAI.ChatMessage> request, string expected)
+        {
+            MEAI.ChatMessage last = request[request.Count - 1];
+            Assert.AreEqual(MEAI.ChatRole.User, last.Role);
+            Assert.AreEqual(expected, last.Text);
+        }
+
         [Test]
         public void TryExtractToolCallsFromText_UnconvertibleArguments_DropsOnlyThatCallAndLogsIt()
         {

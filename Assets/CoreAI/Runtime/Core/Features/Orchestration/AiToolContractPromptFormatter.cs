@@ -177,7 +177,7 @@ namespace CoreAI.Ai
                 sb.AppendLine(
                     "Memory: when memory is listed as available for the current request and the task asks you to " +
                     "remember, save, note, record, or persist something, you MUST " +
-                    "call the memory tool (action \"append\" or \"store\") to persist it before answering — prose or " +
+                    "call the memory tool (action \"append\") to persist it before answering — prose or " +
                     "reasoning alone never saves anything.");
             }
 

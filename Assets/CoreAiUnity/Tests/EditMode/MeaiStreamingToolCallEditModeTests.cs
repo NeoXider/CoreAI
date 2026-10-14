@@ -597,6 +597,70 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(23, terminal.TotalTokens);
         }
 
+        /// <summary>
+        /// The streaming loop's final tools-disabled request carries the budget prompt shared with the core
+        /// <see cref="SmartToolCallingChatClient"/>, so the two loops cannot drift apart.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_RoundtripCap_FinalRequestCarriesTheSharedBudgetPrompt()
+        {
+            FlagTool tool = new("world_tool");
+            NativeToolCallScripted inner = new(() => tool.Executed) { SuppressFirstTail = true };
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
+
+            await foreach (LlmStreamChunk _ in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool> { tool },
+                               MaxToolCallRoundtrips = 1
+                           }, CancellationToken.None))
+            {
+            }
+
+            Assert.AreEqual(2, inner.StreamCalls, "One tool roundtrip, then the final tools-disabled roundtrip");
+            MEAI.ChatMessage last = inner.SecondCallMessages.Last();
+            Assert.AreEqual(MEAI.ChatRole.User, last.Role);
+            Assert.AreEqual(ToolLoopFallbackPrompts.ToolBudgetExhaustedFinalTurn, last.Text);
+        }
+
+        /// <summary>
+        /// An empty streamed response after a successful tool call is answered with the nudge shared with the core
+        /// loop; it asks for a brief reply and does not ask the model to narrate tool output.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_EmptyResponseAfterToolSuccess_NextRequestCarriesTheSharedNudge()
+        {
+            FlagTool tool = new("world_tool");
+            RecordingRoundsScripted inner = new(round => round switch
+            {
+                1 => new MEAI.AIContent[]
+                {
+                    new MEAI.FunctionCallContent("call-1", "world_tool", new Dictionary<string, object>())
+                },
+                2 => Array.Empty<MEAI.AIContent>(),
+                _ => new MEAI.AIContent[] { new MEAI.TextContent("Done.") }
+            });
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
+
+            await foreach (LlmStreamChunk _ in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool> { tool }
+                           }, CancellationToken.None))
+            {
+            }
+
+            Assert.AreEqual(1, tool.ExecutionCount);
+            Assert.AreEqual(3, inner.Requests.Count, "Tool roundtrip, empty roundtrip, then the nudged roundtrip");
+            MEAI.ChatMessage last = inner.Requests[2].Last();
+            Assert.AreEqual(MEAI.ChatRole.User, last.Role);
+            Assert.AreEqual(ToolLoopFallbackPrompts.EmptyResponseNudge, last.Text);
+        }
+
         [Test]
         public async Task CompleteStreamingAsync_StreamThrowsBeforeAnyToolCall_ExceptionPropagates()
         {
@@ -1405,6 +1469,52 @@ namespace CoreAI.Tests.EditMode
                     cancellationToken.ThrowIfCancellationRequested();
                     yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, text);
                     await Task.Yield();
+                }
+            }
+
+            public object GetService(Type serviceType, object serviceKey = null)
+            {
+                return null;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        /// <summary>
+        /// Streaming inner client that records every request and answers round N with the contents the script
+        /// returns for N; an empty array streams nothing at all.
+        /// </summary>
+        private sealed class RecordingRoundsScripted : MEAI.IChatClient
+        {
+            private readonly Func<int, MEAI.AIContent[]> _round;
+
+            public RecordingRoundsScripted(Func<int, MEAI.AIContent[]> round)
+            {
+                _round = round;
+            }
+
+            public List<List<MEAI.ChatMessage>> Requests { get; } = new();
+
+            public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "")));
+            }
+
+            public async IAsyncEnumerable<MEAI.ChatResponseUpdate> GetStreamingResponseAsync(
+                IEnumerable<MEAI.ChatMessage> chatMessages,
+                MEAI.ChatOptions options = null,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                Requests.Add(chatMessages.ToList());
+                MEAI.AIContent[] contents = _round(Requests.Count);
+                await Task.Yield();
+                if (contents.Length > 0)
+                {
+                    yield return new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, contents.ToList());
                 }
             }
 

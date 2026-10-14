@@ -15,7 +15,7 @@ namespace CoreAI.Ai
                 "You have native tool-calling available for this role. When the user/task asks to use or call a tool, call the matching tool through the tool interface; do not claim that the tool is unavailable, and do not simulate successful execution in prose.");
             sb.AppendLine(
                 "Pass arguments as structured tool arguments matching the schema. Required values mentioned in the task must be passed as tool arguments, not only described in text.");
-            sb.AppendLine("After a tool succeeds, summarize the real tool result briefly for the user.");
+            sb.AppendLine("After a tool succeeds, continue from its real result; do not claim results the tool did not return.");
             sb.AppendLine(
                 "Natural-language-only descriptions (for example that you \"used memory\" or \"called append\") never execute tools and never persist data - they must not replace an actual invocation.");
         }
@@ -27,7 +27,7 @@ namespace CoreAI.Ai
                 "You have native tool-calling available for this role. When the user/task asks to use or call a tool, call the matching tool through the tool interface; do not claim that the tool is unavailable, and do not simulate successful execution in prose.");
             sb.AppendLine(
                 "Pass arguments as structured tool arguments matching the schema. Required values mentioned in the task must be passed as tool arguments, not only described in text.");
-            sb.AppendLine("After a tool succeeds, summarize the real tool result briefly for the user.");
+            sb.AppendLine("After a tool succeeds, continue from its real result; do not claim results the tool did not return.");
             sb.AppendLine(
                 "Natural-language-only descriptions (for example that you \"used memory\" or \"called append\") never execute tools and never persist data — they must not replace an actual invocation.");
             sb.AppendLine(

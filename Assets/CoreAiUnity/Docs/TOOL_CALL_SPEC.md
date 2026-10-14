@@ -412,8 +412,8 @@ decides what to do next (see [How tool success/failure is surfaced](#how-tool-su
 1. `MaxToolCallRetries` (default 3) counts **consecutive batches/turns in which every call failed**; a partly
    successful batch resets the counter.
 2. When that limit is reached — or the roundtrip cap (`MaxToolCallRoundtrips`) is hit — the loop makes **one**
-   final tools-disabled roundtrip ("Tool budget exhausted. Do not call any more tools. Summarize in plain
-   text …") instead of returning empty or canned text. See
+   final tools-disabled roundtrip ("Tool budget exhausted. Do not call any more tools. Reply in plain text
+   from the real tool results …") instead of returning empty or canned text. See
    [DEVELOPER_GUIDE §3.3](DEVELOPER_GUIDE.md#33-tool-call-observability).
 3. If that final summary turn produces no text (or fails), the answer is
    `Agent stopped: exceeded maximum of N tool-call roundtrips.`

@@ -92,11 +92,11 @@ namespace CoreAI.Ai
             string update = TryBuildAppendDelta(snapshot, current);
             if (!string.IsNullOrWhiteSpace(update))
             {
-                return MemoryUpdatesHeading + "\nNew memory since cached prefix:\n" + update.Trim();
+                return MemoryUpdatesHeading + "\nNew memory since the ## Memory block above:\n" + update.Trim();
             }
 
             return MemoryUpdatesHeading +
-                   "\nCurrent canonical memory. This overrides older cached ## Memory if there is a conflict:\n" +
+                   "\nCurrent canonical memory. It replaces the ## Memory block above where they conflict:\n" +
                    current.Trim();
         }
 

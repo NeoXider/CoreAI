@@ -697,8 +697,7 @@ namespace CoreAI.Infrastructure.Llm
                         requestOptions.Tools = null;
                         requestOptions.ToolMode = MEAI.ChatToolMode.None;
                         messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
-                            "Tool budget exhausted. Do not call any more tools. Summarize in plain text " +
-                            "what you accomplished and what remains to be done."));
+                            ToolLoopFallbackPrompts.ToolBudgetExhaustedFinalTurn));
                     }
                     MEAI.ChatResponse response;
                     try
@@ -782,8 +781,7 @@ namespace CoreAI.Infrastructure.Llm
                              _emptyAfterSuccess++ < Math.Max(1, _owner._maxConsecutiveErrors))
                     {
                         messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
-                            "Your last response had no text and no tool call. If the task is not finished, " +
-                            "continue with the next tool call now. If it is finished, reply with a short summary."));
+                            ToolLoopFallbackPrompts.EmptyResponseNudge));
                         continue;
                     }
                     List<MEAI.FunctionCallContent> unbound =
@@ -1056,8 +1054,7 @@ namespace CoreAI.Infrastructure.Llm
                             }
 
                             messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
-                                "Your last response had no text and no tool call. If the task is not finished, " +
-                                "continue with the next tool call now. If it is finished, reply with a short summary."));
+                                ToolLoopFallbackPrompts.EmptyResponseNudge));
                             continue;
                         }
 
@@ -1534,8 +1531,7 @@ namespace CoreAI.Infrastructure.Llm
                 HashSet<string> liftedForSummary = null;
                 LiftCameraImages(summaryMessages, ref liftedForSummary);
                 summaryMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
-                    "Tool budget exhausted. Do not call any more tools. Summarize in plain text " +
-                    "what you accomplished and what remains to be done."));
+                    ToolLoopFallbackPrompts.ToolBudgetExhaustedFinalTurn));
 
                 // Tools deliberately omitted (not just ToolMode=None): the model physically cannot
                 // emit another native tool call, so this extra turn can never loop.
