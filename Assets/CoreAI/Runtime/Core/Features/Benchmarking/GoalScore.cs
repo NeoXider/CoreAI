@@ -53,6 +53,14 @@ namespace CoreAI.Benchmarking
                 ? FailureAttribution.Model : FailureAttribution.Environment;
         }
 
+        /// <summary>Only total or scenario deadlines on a live provider response measure model work.</summary>
+        public static FailureAttribution ClassifyDeadline(bool scenarioDeadline, bool totalRequestDeadline,
+            bool responseWaitExpired, bool providerResponseObserved, bool transportFailed)
+        {
+            if (responseWaitExpired) return FailureAttribution.Environment;
+            return ClassifyDeadline(scenarioDeadline || totalRequestDeadline, providerResponseObserved, transportFailed);
+        }
+
         /// <summary>Retries infrastructure failures without replaying a measured model deadline.</summary>
         public static bool ShouldRetry(FailureAttribution attribution, string failure)
         {
@@ -156,7 +164,9 @@ namespace CoreAI.Benchmarking
     /// </summary>
     public readonly struct GoalScore
     {
-        private GoalScore(double checkpointScore, double penalties, int? hardCap, double judgeScore,
+        /// <summary>Restores a persisted measurement without regrading it under newer scoring rules.</summary>
+        [Newtonsoft.Json.JsonConstructor]
+        public GoalScore(double checkpointScore, double penalties, int? hardCap, double judgeScore,
             double judgeWeight, double mergedBase, double correctnessBonus, double tokenBonus,
             double timeBonus, double efficiencyBonus, double bonus, double @base, double total,
             BenchmarkClassification classification)
@@ -217,6 +227,14 @@ namespace CoreAI.Benchmarking
         public double Total { get; }
 
         public BenchmarkClassification Classification { get; }
+
+        /// <summary>Restores the flattened score fields in a public benchmark report.</summary>
+        internal static GoalScore Restore(double checkpointScore, double penalties, int? hardCap, double judgeScore,
+            double judgeWeight, double mergedBase, double correctnessBonus, double tokenBonus,
+            double timeBonus, double efficiencyBonus, double bonus, double @base, double total,
+            BenchmarkClassification classification) => new GoalScore(checkpointScore, penalties, hardCap,
+                judgeScore, judgeWeight, mergedBase, correctnessBonus, tokenBonus, timeBonus,
+                efficiencyBonus, bonus, @base, total, classification);
 
         /// <summary>Maximum total bonus (correctness + efficiency) a scenario may award.</summary>
         public const double MaxBonus = 20;
@@ -358,7 +376,7 @@ namespace CoreAI.Benchmarking
                 classification = BenchmarkClassification.Fail;
             }
 
-            return new GoalScore(checkpointScore, penaltyPoints, hardCap, judge, clampedJudgeWeight,
+            return Restore(checkpointScore, penaltyPoints, hardCap, judge, clampedJudgeWeight,
                 mergedBase, correctnessBonus, tokenBonus, timeBonus, efficiencyBonus, bonus, baseScore,
                 baseScore + bonus, classification);
         }

@@ -214,7 +214,7 @@ Environment shaping is also supported:
 | `COREAI_BENCHMARK_FREEBUILD_SUBJECT` | Swaps only the G6 subject (e.g. `a futuristic city`) into the generic free-build prompt, keeping the standard build/grading scaffold. The generic prompt ends with the same clock note plus subject-neutral pacing (`Complete the main structure during the first half of the budget, then spend the remaining time on secondary structures, surroundings and surface details.`); only the default castle prompt gets the castle-specific pacing (ground, curtain walls, towers, gate and keep first). A subject build is graded without the castle checks, on the subject-neutral signals only (see [G6 grading](#g6-grading)). Also settable from the benchmark window UI field. |
 | `COREAI_BENCHMARK_FREEBUILD_ROUNDTRIPS` | G6 tool-call cap per turn; `0`/unset means the default `1000` (effectively unbounded). Early-ending scored builds can continue in the same scene within the 570-second model time. |
 
-G6 counts and frames rendered Roblox parts, including parts created through `execute_lua`; the hero banner shows the real part count. The saved model-authored prefab is under the ignored `Assets/Benchmark/<model>/g6_free_build.prefab`. To retake a hero image from that prefab without contacting the model, set `COREAI_BENCHMARK_RECAPTURE_PREFAB` to its Unity asset path and `COREAI_BENCHMARK_RECAPTURE_OUTPUT` to an absolute PNG path, then run the explicit PlayMode test `CaptureSavedCastlePrefab_ForReport` in the open Editor.
+G6 counts and frames rendered Roblox parts, including parts created through `execute_lua`; the hero banner shows the real part count. The saved model-authored prefab is under the ignored `Assets/Benchmark/<target-label>/g6_free_build.prefab`. To retake a hero image from that prefab without contacting the model, set `COREAI_BENCHMARK_RECAPTURE_PREFAB` to its Unity asset path and `COREAI_BENCHMARK_RECAPTURE_OUTPUT` to an absolute PNG path, then run the explicit PlayMode test `CaptureSavedCastlePrefab_ForReport` in the open Editor.
 
 A provider `402` or `429` can leave a partial castle. Such a result records the provider failure and is not a comparable model-quality score; retain the saved scene and rerun when the provider quota is available.
 When G6 reaches its time limit during a streaming turn, the benchmark counts completed tool calls from lifecycle events and records the cut turn in the transcript (`CUT:`) with the time it ran. That time is part of the generation time, so tok/s divides tokens and time over the same turns. Because the provider never delivered usage for the cut turn, the run reports `TokensFromProvider = false`: report totals carry `~`, and the hero banner reads `partial token estimate ~N gen tokens · ~X tok/s`. Tool calls on the process-wide lifecycle hook are attributed by agent role and by the trace id each benchmark turn carries (`bench-<scenario>-<run>-t<n>`), so an orphaned call from an earlier scenario is not counted.
@@ -419,9 +419,9 @@ confirming vision-feedback is neutral for a non-vision model rather than harmful
 ### Model-authored castles are exported as prefabs
 
 Every G6 free-build run now saves the model's actual scene as a reusable Unity **prefab** — not just a flat
-screenshot — under `Assets/Benchmark/<model>/` (git-ignored, outside this package): the built hierarchy with
+screenshot — under `Assets/Benchmark/<target-label>/` (git-ignored, outside this package): the built hierarchy with
 per-object colours baked into real material assets (a `Materials/` subfolder beside the prefab) and a
-self-identifying `BuiltBy_<model>__<score>of100` child. So each model's castle is inspectable and reusable in
+self-identifying `BuiltBy_<target-label>__<score>of100` child. So each model's castle is inspectable and reusable in
 the editor, labelled with who built it. Verified on `gpt-5.3-spark`: a 101-object castle prefab, all
 renderers materialised.
 
@@ -474,3 +474,93 @@ and a public submission workflow live on the
 [How To Run](#how-to-run) above, then open a PR adding your row with the report JSON, run id,
 model file/quantization, and hardware — the leaderboard page lists the exact requirements and
 honesty rules.
+
+## Continuing interrupted runs and repairing Environment failures
+
+Every finalized scenario repetition is checkpointed immediately, including extreme scenarios and G6
+visual-lane builds. Resume retains the run id and reruns only unfinished repetitions and Environment
+failures. Model failures and low scores are measurements and are never retried by resume. A crash
+before checkpoint replacement can lose only the current scenario; it runs again.
+
+Use the same launcher entry point with `-coreAiBenchmarkResume <runId|latest>`, or set
+`COREAI_BENCHMARK_RESUME`. `latest` chooses the newest incomplete durable run. The benchmark window's
+**Resume interrupted run** action lists incomplete runs newest first. For example, add these arguments
+to the existing Unity batchmode command (do not combine `-runTests` with the launcher):
+
+```text
+-executeMethod CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunFromCli -coreAiBenchmarkResume latest
+```
+
+To repair a pre-checkpoint finished run, supply its original complete target list and explicit run id:
+
+```text
+-executeMethod CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunFromCli -coreAiBenchmarkResume 20261015_224850 -coreAiBenchmarkTargets @benchmark-targets.json -coreAiBenchmarkOnlyTargets affected-label,another-label
+```
+
+`COREAI_BENCHMARK_ONLY_TARGETS` is the equivalent comma-separated label filter (model id when unlabeled).
+Use the original full target file even with a filter: every existing report must match a target by its
+model/label filename slug. Unselected targets remain available for a later resume. Old runs have no
+endpoint manifest: the supplied endpoint is authoritative; recorded effort, temperature, streaming,
+native tools, suite version and repetitions must match for selected targets. Unselected legacy configurations are deferred without processing provider bodies; selecting one later requires its original configuration only if it still needs work. Completed targets are checked against saved state and final reports before requesting credentials. Groups and G6 vision mode are inferred from
+saved results when unset; explicitly provide the original groups/vision mode if an entire group or
+variant never produced a result. Unknown scenario ids, groups/tiers or repetitions refuse import.
+
+Durable files live beside reports, not inside the Unity asset database:
+
+```text
+TestResults/CoreAI/Benchmarks/.runs/<runId>/manifest.json
+TestResults/CoreAI/Benchmarks/.runs/<runId>/<BENCHMARK_runId_model__label>.state.json
+```
+
+The manifest freezes suite version, start time, scenario order/groups/tiers/repetitions, resolved
+model/endpoint/label/effort/temperature/provider body, vision mode and grading options. Conflicting
+current grading overrides are refused; retry count remains adjustable; clear stale overrides or restore the original values. API keys are
+never written: original `env:NAME` references are kept and resolved again. The original `@targets` file and classic local configuration secret source are reopened when available.
+Literal inline secrets must be supplied again with the targets; prefer env references. Credential-bearing URLs and secret
+fields in `extraBody` are refused. Keep the original local model/backend configuration for LLMUnity.
+
+Each target owns one atomic checkpoint (temporary file, flush, replace); concurrent targets never
+share a state file. It contains all result fields and scores without regrading, transcripts, tool
+trace JSONL, G6 Lua replay, captured PNG bytes, prefab paths and process segment timings. Temporary
+files left by a crash are ignored. Atomic commit retries transient file-lock/access failures four times with short bounded backoff before surfacing an error. State folders are retained after completion with per-target
+`<artifactStem>.state.json.completed` markers written after the state. Listing reads only manifests and these small markers, skips corrupt/invalid folders with a warning, and never deserializes screenshot-heavy checkpoints; they can be removed manually once no further repair is needed. An
+Environment result leaves the target incomplete and eligible for another resume.
+
+Final Markdown/JSON/SVG, vector and rendered model cards, screenshots, replay and INDEX are generated
+from merged results. INDEX replaces the original target row. Before reopening existing reports the
+launcher saves timestamped `.json.bak-<timestamp>` backups, plus Markdown, every screenshot/hero image, replay, cards, charts, tool trace and INDEX backups. Backup names are unique across targets and repeated attachment in the same clock tick. Legacy result JSON rows, original ISO timestamp strings and kept trace lines are preserved byte for byte. Existing rows keep their original positions, including rerun replacements; new missing rows are appended. Unchanged summary contributions retain their original numeric precision. Kept failure/penalty, session and scene Markdown sections are carried over verbatim; tool traces restore failed-call/invalid-command counts and the old Markdown token table preserves provider-versus-estimated flags. Screenshots and replay are restored from companions. Trace lines are assigned once to their scenario; ambiguous repeated-scenario or unknown trace lines remain in a separate aggregate without duplication. Combined efficiency is recovered from the old score table. Separate token/time bonus components absent from all companions remain unknown; both owner reports record zero. Session/failure/scene sections are matched by the formatter's exact row headers and repetition, independently of nested or truncated code fences. Missing kept evidence or ambiguous legacy hero ownership aborts repair with a named error. Kept sections retain their original whitespace; repeated formatting is idempotent. Fields absent from every companion cannot be invented.
+
+Metadata reports segment count, individual active wall times and their total. For a killed process,
+the previous segment duration is a lower bound measured at its last checkpoint; machine downtime is
+excluded. Legacy segments seed their duration from recorded wall time or total scenario latency instead of zero. A fresh segment receives a fresh suite wall budget. Resume reexecutes unfinished calls;
+provider output and timing of those calls can differ, while finalized results remain unchanged.
+The window re-applies targets from the manifest, looks up original file/session secrets, explains unavailable literal keys, and restores the prior process environment when the run finishes (including domain reload/watchdog cleanup). No cross-process simultaneous writers to the same run are supported.
+
+Every benchmark backend (endpoint HTTP, asset HTTP and LLMUnity) uses owned client settings, preserving the shared project asset. Total request deadline is unlimited (`0`), and response wait is pinned on those HTTP settings to 180 seconds even if a scene changes the global asset. Clients do not impose a temperature unless a
+target explicitly sets one. Response wait defaults to 180 seconds without generation progress;
+reasoning/text/tool deltas reset it. The scenario CTS remains the grading budget. A typed total
+request deadline on an accepted healthy stream grades executed work as a Model failure (zero without
+work), like the scenario deadline. Response-wait expiry and transport timeouts remain Environment
+failures and can retry, except free builds are not replayed in place: their Environment results are rerun by resume. SkillSet uses its own per-turn budget with the same unlimited client policy.
+
+### Publishing optional castle prefabs
+
+`Assets/Benchmark/<target-label>/` remains ignored local scratch. G6 saves a per-run/target scoped prefab
+and reuses one material asset per complete visual key (shader, color, textures/material properties
+and rendering flags) across that target's castles. Different target labels have separate folders and BuiltBy labels. Non-asset textures are saved as assets before material sharing; Play Mode saves create/import only needed assets and never issue a full AssetDatabase.Refresh. The runtime build, scoring, replay and screenshot
+do not require AssetDatabase; prefab export is an optional Editor convenience.
+
+After stopping/completing the run, call
+`GameCreationBenchmarkPrefabPublisher.PublishCastlePrefabs(runId, dateFolder)` from the
+`CoreAI.Tests.EditMode` namespace, or use the explicit CLI entry:
+
+```text
+-quit -executeMethod CoreAI.Tests.EditMode.GameCreationBenchmarkPrefabPublisher.RunFromCli -coreAiBenchmarkPublishRun RUN_ID -coreAiBenchmarkPublishDate 2026-10-16
+```
+
+It moves recorded prefabs and their scratch material/texture dependencies to
+`Assets/Benchmark/Published/<date>/<target-label>/` using AssetDatabase.MoveAsset in the Editor, or files
+and their `.meta` sidecars together otherwise. GUIDs and material references survive. Published
+assets and needed folder `.meta` files are trackable; nothing is committed automatically. Report
+JSON/Markdown and checkpoints receive the published prefab links, with JSON and Markdown backups. JSON path edits preserve every other byte, including numeric spelling and timestamp strings. A durable `.runs/<runId>/publish-<date>.json` move journal makes repeating the same command recover remaining moves/link updates after interruption; a completed repeat reports a no-op. CLI failure returns a nonzero exit code. Later castles can reuse materials already published for that target. Existing destination assets are preserved by choosing a unique filename. Do not publish while a benchmark writes checkpoints. Legacy reports without recorded
+prefab paths are refused because scratch assets cannot safely be attributed to their run.

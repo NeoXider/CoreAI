@@ -236,6 +236,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             private bool _sealed;
             private LlmProviderResponseState _providerResponseState;
             private bool _sealedProviderResponseObserved;
+            private LlmTimeoutKind _sealedTimeoutKind;
             private bool _transportFailed;
 
             /// <summary>Explicit transport evidence captured before orchestration can wrap cancellation.</summary>
@@ -246,6 +247,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             private void RecordTransportFailure(Exception exception)
             {
+                LlmTimeoutKind timeoutKind = LlmCancellation.FindClientException(exception)?.TimeoutKind
+                    ?? LlmTimeoutKind.None;
+                if (timeoutKind != LlmTimeoutKind.None) _providerResponseState?.RecordTimeout(timeoutKind);
+                if (timeoutKind == LlmTimeoutKind.TotalDeadline)
+                {
+                    return;
+                }
                 if (!LlmCancellation.IsTransportFailure(exception)) return;
                 lock (_gate)
                 {
@@ -260,6 +268,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public bool ProviderResponseObserved
             {
                 get { lock (_gate) { return _sealed ? _sealedProviderResponseObserved : _providerResponseState?.ResponseObserved == true; } }
+            }
+
+            /// <summary>Typed request deadline evidence preserved after the capture is sealed.</summary>
+            public LlmTimeoutKind TimeoutKind
+            {
+                get { lock (_gate) { return _sealed ? _sealedTimeoutKind : _providerResponseState?.TimeoutKind ?? LlmTimeoutKind.None; } }
             }
 
             private sealed class InFlightTurn
@@ -325,8 +339,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 {
                     result = await _inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
                 }
-                catch
+                catch (Exception exception)
                 {
+                    RecordTransportFailure(exception);
                     EndCutTurn(turn);
                     throw;
                 }
@@ -361,7 +376,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         if (!string.IsNullOrEmpty(chunk.Error) && chunk.ErrorCode != LlmErrorCode.Cancelled &&
                             !IsCancellationError(chunk.Error))
                         {
-                            RecordTransportFailure(new LlmClientException(chunk.Error, chunk.ErrorCode, chunk.HttpStatus));
+                            RecordTransportFailure(new LlmClientException(chunk.Error, chunk.ErrorCode, httpStatus: chunk.HttpStatus,
+                                timeoutKind: chunk.ErrorCode == LlmErrorCode.Timeout
+                                    ? request.ProviderResponseState?.TimeoutKind ?? LlmTimeoutKind.None : LlmTimeoutKind.None));
                         }
 
                         if (chunk.GenerationInProgress ||
@@ -439,6 +456,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                     _inFlight.Clear();
                     _sealedProviderResponseObserved = _providerResponseState?.ResponseObserved == true;
+                    _sealedTimeoutKind = _providerResponseState?.TimeoutKind ?? LlmTimeoutKind.None;
                     _sealed = true;
                 }
             }
@@ -2236,6 +2254,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// <summary>Model id the tokenizer estimates with when the report names the target by a label.</summary>
             public string TokenizerModelId;
 
+            /// <summary>Stable run and target identity used to keep optional prefab artifacts distinct.</summary>
+            public string ArtifactId;
+
             /// <summary>Prefix of this run's log lines, so concurrent targets stay distinguishable.</summary>
             public string LogPrefix = "[Benchmark]";
 
@@ -2430,8 +2451,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // WHY: a task that outlived the grace window must not append turns while they are read below.
                 capture.Seal();
 
-                // WHY: Only scenario-budget cancellation after the model already did work ends the run cleanly.
-                // WHY: Earlier provider timeouts are environment failures, not model quality.
+                // WHY: Budget cancellation after executed work can end a scenario cleanly.
+                // WHY: Typed client deadlines are reconciled with provider-response evidence before grading.
                 bool modelProducedWork = RunProducedWork(capture.ToolCalls, toolObserver.ToolCalls,
                     env.World.Commands.Count - initialWorldCommands,
                     env.Lua.ExecutionCount - initialLuaExecutions, false);
@@ -2518,22 +2539,28 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // WHY: A scenario deadline measures model performance once the provider accepted the stream.
                 // WHY: Explicit HTTP and transport errors retain their environment attribution.
                 bool scenarioDeadline = cts.IsCancellationRequested && sw.Elapsed.TotalSeconds >= timeoutSeconds;
-                bool transportFailed = capture.TransportFailed || providerFailed && !IsCancellationError(providerError) &&
-                                       !string.IsNullOrWhiteSpace(providerError);
                 Exception taskFault = task.IsFaulted ? task.Exception?.GetBaseException() : null;
-                transportFailed |= taskFault != null && (taskFault is not OperationCanceledException ||
+                LlmTimeoutKind timeoutKind = capture.TimeoutKind;
+                if (timeoutKind == LlmTimeoutKind.None)
+                    timeoutKind = LlmCancellation.FindClientException(taskFault)?.TimeoutKind ?? LlmTimeoutKind.None;
+                bool totalDeadline = timeoutKind == LlmTimeoutKind.TotalDeadline;
+                bool transportFailed = capture.TransportFailed || !totalDeadline && providerFailed &&
+                                       !IsCancellationError(providerError) && !string.IsNullOrWhiteSpace(providerError);
+                transportFailed |= !totalDeadline && taskFault != null && (taskFault is not OperationCanceledException ||
                     LlmCancellation.FindClientException(taskFault) is { ErrorCode: not LlmErrorCode.Cancelled });
                 if (capture.TransportFailed && obs.Attribution != FailureAttribution.Framework)
                 {
                     obs.Attribution = FailureAttribution.Environment;
                     obs.Failure = $"provider error: {capture.FirstProviderError}";
                 }
-                if (scenarioDeadline && capture.ProviderResponseObserved && !transportFailed &&
-                    obs.Attribution != FailureAttribution.Framework)
+                if ((scenarioDeadline || totalDeadline) && obs.Attribution != FailureAttribution.Framework &&
+                    BenchmarkProviderFailurePolicy.ClassifyDeadline(scenarioDeadline, totalDeadline,
+                        timeoutKind == LlmTimeoutKind.ResponseWait, capture.ProviderResponseObserved, transportFailed) == FailureAttribution.Model)
                 {
                     obs.TimedOut = true;
-                    obs.Attribution = BenchmarkProviderFailurePolicy.ClassifyDeadline(true, true, false);
-                    obs.Failure = "scenario deadline reached while provider response was open";
+                    obs.Attribution = FailureAttribution.Model;
+                    obs.Failure = totalDeadline ? "total request deadline reached while provider response was open"
+                        : "scenario deadline reached while provider response was open";
                 }
 
                 // Grading is harness territory too: protect the suite from a grader bug.
@@ -2691,7 +2718,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     // not just a flat screenshot — labelled with the model that authored it. Free-build only.
                     if (scenario.FreeBuildLayout && vis.HasRenderableScene)
                     {
-                        SaveCastlePrefab(vis, modelId, scenario.Id, score.Base);
+                        result.CastlePrefabPath = SaveCastlePrefab(vis, modelId, scenario.Id, score.Base, context?.ArtifactId);
                     }
 #endif
                 }
@@ -2723,104 +2750,36 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
 #if UNITY_EDITOR
-        // Saves the built free-build scene (the castle) as a Unity prefab so the model's work is inspectable
-        // and reusable beyond a flat screenshot, labelled with the model that authored it. Per-object colours
-        // live in runtime MaterialPropertyBlocks (which do NOT serialize into a prefab), so they are baked into
-        // real shared materials first. Editor-only: PrefabUtility / AssetDatabase do not exist in a player, and
-        // benchmarks only ever run in the editor. Prefabs land in Assets/Benchmark/<model>/ (git-ignored,
-        // OUTSIDE the benchmark package) as "<scenario>.prefab" with a Materials/ subfolder beside them.
-        private static void SaveCastlePrefab(
-            VisualBenchmarkWorldExecutor vis, string modelId, string scenarioId, double score)
+        /// <summary>Saves the optional editor prefab with shared visual materials outside the package.</summary>
+        private static string SaveCastlePrefab(
+            VisualBenchmarkWorldExecutor vis, string modelId, string scenarioId, double score, string artifactId = null)
         {
             try
             {
                 if (vis == null || vis.Root == null)
                 {
-                    return;
+                    return string.Empty;
                 }
 
                 GameObject root = vis.Root.gameObject;
-
-                // Written OUTSIDE the benchmark package (plain Assets/Benchmark/) so generated art never
-                // ships with com.neoxider.coreaibenchmark. Per-model layout: GeneratedCastles/<model>/ holds the
-                // prefab, with its own Materials/ subfolder.
-                const string rootDir = "Assets/Benchmark";
-                if (!UnityEditor.AssetDatabase.IsValidFolder(rootDir))
-                {
-                    UnityEditor.AssetDatabase.CreateFolder("Assets", "Benchmark");
-                }
-
-                string modelDir = $"{rootDir}/{FileSafe(modelId)}";
-                if (!UnityEditor.AssetDatabase.IsValidFolder(modelDir))
-                {
-                    UnityEditor.AssetDatabase.CreateFolder(rootDir, FileSafe(modelId));
-                }
-
+                string modelDir = $"Assets/Benchmark/{FileSafe(modelId)}";
                 string matDir = $"{modelDir}/Materials";
-                if (!UnityEditor.AssetDatabase.IsValidFolder(matDir))
-                {
-                    UnityEditor.AssetDatabase.CreateFolder(modelDir, "Materials");
-                }
-
-                // Bake MaterialPropertyBlock colours into real MATERIAL ASSETS (one per unique colour) so the
-                // prefab keeps its palette: SaveAsPrefabAsset drops runtime-instance materials (the renderer
-                // would come back null / render pink), so the shared material must be a project asset.
-                Shader lit = Shader.Find("Universal Render Pipeline/Lit")
-                             ?? Shader.Find("Standard");
-                Dictionary<int, Material> palette = new();
-                MaterialPropertyBlock mpb = new();
-                foreach (Renderer rend in root.GetComponentsInChildren<Renderer>(true))
-                {
-                    if (rend == null)
-                    {
-                        continue;
-                    }
-
-                    rend.GetPropertyBlock(mpb);
-                    Color c = mpb.GetColor(BaseColorId);
-                    if (c.a <= 0f)
-                    {
-                        c = mpb.GetColor(ColorId);
-                    }
-
-                    if (c.a <= 0f)
-                    {
-                        c = rend.sharedMaterial != null ? rend.sharedMaterial.color : Color.gray;
-                    }
-
-                    Color32 c32 = c;
-                    int key = (c32.r << 16) | (c32.g << 8) | c32.b;
-                    if (!palette.TryGetValue(key, out Material mat))
-                    {
-                        mat = new Material(lit);
-                        if (mat.HasProperty(BaseColorId))
-                        {
-                            mat.SetColor(BaseColorId, c);
-                        }
-
-                        mat.color = c;
-                        string matPath = UnityEditor.AssetDatabase.GenerateUniqueAssetPath(
-                            $"{matDir}/c_{c32.r:X2}{c32.g:X2}{c32.b:X2}.mat");
-                        UnityEditor.AssetDatabase.CreateAsset(mat, matPath);
-                        palette[key] = mat;
-                    }
-
-                    rend.sharedMaterial = mat;
-                    rend.SetPropertyBlock(null);
-                }
-
-                // A self-identifying child so the saved prefab always says who built it and how it scored.
+                BenchmarkCastleMaterialAssets.EnsureAssetFolder(matDir);
+                BenchmarkCastleMaterialAssets.Bake(root, matDir);
                 GameObject label = new($"BuiltBy_{FileSafe(modelId)}__{score:0}of100");
                 label.transform.SetParent(root.transform, false);
-
-                string path = UnityEditor.AssetDatabase.GenerateUniqueAssetPath(
-                    $"{modelDir}/{FileSafe(scenarioId)}.prefab");
+                string scope = BenchmarkCastleMaterialAssets.ArtifactScope(
+                    string.IsNullOrEmpty(artifactId) ? Guid.NewGuid().ToString("N") : artifactId);
+                string path = $"{modelDir}/{FileSafe(scenarioId)}__{scope}.prefab";
                 UnityEditor.PrefabUtility.SaveAsPrefabAsset(root, path);
+                UnityEditor.AssetDatabase.SaveAssets();
                 Debug.Log($"[Benchmark] saved castle prefab (built by {modelId}, {score:0}/100): {path}");
+                return path;
             }
             catch (Exception ex)
             {
                 Debug.LogWarning($"[Benchmark] castle prefab save failed: {ex.Message}");
+                return string.Empty;
             }
         }
 

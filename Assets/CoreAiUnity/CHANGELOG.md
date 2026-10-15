@@ -4,6 +4,23 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.53.0] - 2026-10-16
+
+### Added
+
+- Scenario-level Game-Creation resume through CLI/env and the benchmark window, including legacy finished-report Environment repair, target filtering, timestamped backups and merged report/INDEX regeneration.
+- G6 material deduplication, run-scoped prefab links and explicit GUID-preserving publishing into the trackable Published layout.
+
+### Fixed
+
+- Legacy repair preserves exact timestamps, kept result and trace text, original Markdown evidence, row order and unchanged summary precision; repeated repairs are idempotent and missing evidence fails clearly. Completed deferred targets need no credentials. Publishing changes only recorded path strings.
+- Benchmark asset HTTP and LLMUnity clients honor unlimited total timeout and pin their own response wait to 180 seconds without changing project settings; continuation silence is classified as Environment, and free builds are rerun only by resume without replaying in place.
+- Window resume reapplies manifest targets, restores process environment after completion, explains missing literal keys, permits retry-count changes and backs up every overwritten artifact.
+- Castle publishing is recoverable/idempotent with JSON and Markdown backups, a nonzero CLI failure code and tracked Published guidance; target-label folders and persisted runtime textures preserve saved visuals without full Play Mode asset refreshes.
+
+- Benchmark clients no longer impose a hidden 300 s total request limit; only the response wait applies, and each scenario keeps its own time budget.
+- Benchmark grading recognizes typed total-request deadlines on live provider streams as Model failures without retries; response-wait and transport timeouts remain Environment failures.
+
 ## [7.52.0] - 2026-10-15
 
 ### Added

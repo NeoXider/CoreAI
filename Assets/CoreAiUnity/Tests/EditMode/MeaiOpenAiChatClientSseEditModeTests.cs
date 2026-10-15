@@ -313,6 +313,7 @@ namespace CoreAI.Tests.EditMode
             MeaiOpenAiChatClient client = TimedClient(transport);
             LlmClientException failure = Assert.ThrowsAsync<LlmClientException>(() => CollectTimedResponseAsync(client));
             Assert.AreEqual(LlmErrorCode.Timeout, failure.ErrorCode);
+            Assert.AreEqual(LlmTimeoutKind.ResponseWait, failure.TimeoutKind);
             Assert.AreEqual(1, transport.StreamOpens);
             Assert.AreEqual(0, transport.NonStreamingCalls, "A response-wait deadline must not silently restart a model turn.");
             Assert.IsTrue(transport.Stream.Disposed);
@@ -345,17 +346,84 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void TotalTimeout_PositiveCeilingStopsActiveReasoning()
+        public async Task TotalTimeout_PositiveCeilingStopsActiveReasoning()
         {
             ScriptedTimeTransport transport = new();
             for (int index = 0; index < 10; index++)
                 transport.Steps.Add((30, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"}}]}\n\n"));
-            LlmClientException failure = Assert.ThrowsAsync<LlmClientException>(() =>
-                CollectTimedResponseAsync(TimedClient(transport, totalTimeout: 120)));
-            Assert.AreEqual(LlmErrorCode.Timeout, failure.ErrorCode);
-            StringAssert.Contains("total request", failure.Message);
+            LlmProviderResponseState state = new();
+            try
+            {
+                await CollectTimedResponseAsync(TimedClient(transport, totalTimeout: 120), state);
+                Assert.Fail("The configured total deadline must stop the active stream.");
+            }
+            catch (LlmClientException failure)
+            {
+                Assert.AreEqual(LlmErrorCode.Timeout, failure.ErrorCode);
+                Assert.AreEqual(LlmTimeoutKind.TotalDeadline, failure.TimeoutKind);
+                Assert.AreEqual(LlmTimeoutKind.TotalDeadline, state.TimeoutKind);
+                Assert.IsTrue(state.ResponseObserved);
+                Assert.IsTrue(state.RetrySuppressed);
+            }
             Assert.AreEqual(120, transport.Seconds);
             Assert.AreEqual(1, transport.StreamOpens);
+        }
+
+        [TestCase(120, 180, LlmTimeoutKind.TotalDeadline)]
+        [TestCase(0, 180, LlmTimeoutKind.ResponseWait)]
+        public async Task OwnedBudgetTimer_FiveMillisecondsEarlyRetainsBindingTimeoutKind(
+            int totalSeconds, int responseSeconds, LlmTimeoutKind expected)
+        {
+            ScriptedTimeTransport transport = new() { BlockReads = true };
+            ExpiringMarshaler marshaler = new(transport) { EarlySeconds = 0.005 };
+            MeaiOpenAiChatClient client = new(new OpenAiHttpOptions
+            {
+                Model = "model", RequestTimeoutSeconds = totalSeconds, ResponseWaitTimeoutSeconds = responseSeconds
+            }, transport, null, marshaler) { MonotonicSeconds = () => transport.Seconds };
+            LlmProviderResponseState state = new();
+            try
+            {
+                await CollectTimedResponseAsync(client, state);
+                Assert.Fail("The owned budget timer must terminate the blocked read.");
+            }
+            catch (LlmClientException failure)
+            {
+                Assert.AreEqual(expected, failure.TimeoutKind);
+                Assert.AreEqual(expected, state.TimeoutKind);
+                Assert.IsTrue(state.RetrySuppressed);
+            }
+            Assert.AreEqual((totalSeconds > 0 ? totalSeconds : responseSeconds) - 0.005, transport.Seconds, 0.0001);
+        }
+
+        [TestCase(120, 180, LlmTimeoutKind.TotalDeadline)]
+        [TestCase(0, 180, LlmTimeoutKind.ResponseWait)]
+        public async Task TransportTimer_FiveMillisecondsBeforeBudgetRetainsTimeoutKind(
+            int totalSeconds, int responseSeconds, LlmTimeoutKind expected)
+        {
+            double seconds = 0;
+            ToolOptionsCaptureTransport transport = new()
+            {
+                BeforeRequest = () =>
+                {
+                    seconds = (totalSeconds > 0 ? totalSeconds : responseSeconds) - 0.005;
+                    throw new OperationCanceledException("The configured transport timer fired slightly early.");
+                }
+            };
+            MeaiOpenAiChatClient client = new(new OpenAiHttpOptions
+            {
+                Model = "model", RequestTimeoutSeconds = totalSeconds, ResponseWaitTimeoutSeconds = responseSeconds
+            }, transport) { MonotonicSeconds = () => seconds };
+            LlmProviderResponseState state = new();
+            try
+            {
+                await CollectTimedResponseAsync(client, state);
+                Assert.Fail("The transport timer must surface its binding budget.");
+            }
+            catch (LlmClientException failure)
+            {
+                Assert.AreEqual(expected, failure.TimeoutKind);
+                Assert.AreEqual(expected, state.TimeoutKind);
+            }
         }
 
         [Test]
@@ -514,6 +582,8 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(LlmErrorCode.Timeout, chunks.Last().ErrorCode);
             Assert.AreEqual(typedTimeout ? 2 : 1, attempts);
             Assert.AreEqual(!typedTimeout, request.ProviderResponseState.RetrySuppressed);
+            Assert.AreEqual(typedTimeout ? LlmTimeoutKind.None : LlmTimeoutKind.Transport,
+                request.ProviderResponseState.TimeoutKind);
         }
 
 #if UNITY_EDITOR
@@ -597,12 +667,13 @@ namespace CoreAI.Tests.EditMode
         {
             private readonly ScriptedTimeTransport _clock;
             public int Delays { get; private set; }
+            public double EarlySeconds { get; set; }
             public ExpiringMarshaler(ScriptedTimeTransport clock) => _clock = clock;
             public Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken cancellationToken) => factory();
             public Task DelayAsync(int milliseconds, CancellationToken cancellationToken)
             {
                 Delays++;
-                _clock.Seconds += milliseconds / 1000.0;
+                _clock.Seconds += milliseconds / 1000.0 - EarlySeconds;
                 return Task.CompletedTask;
             }
         }
@@ -616,11 +687,19 @@ namespace CoreAI.Tests.EditMode
             return new MeaiOpenAiChatClient(settings, transport) { MonotonicSeconds = () => transport.Seconds };
         }
 
-        private static async Task<string> CollectTimedResponseAsync(MeaiOpenAiChatClient client)
+        private static async Task<string> CollectTimedResponseAsync(MeaiOpenAiChatClient client,
+            LlmProviderResponseState state = null)
         {
+            MEAI.ChatOptions options = state == null ? null : new MEAI.ChatOptions
+            {
+                AdditionalProperties = new MEAI.AdditionalPropertiesDictionary
+                {
+                    [LlmProviderResponseState.MetadataKey] = state
+                }
+            };
             StringBuilder text = new();
             await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
-                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hello") }))
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hello") }, options))
                 text.Append(update.Text);
             return text.ToString();
         }

@@ -1,0 +1,5 @@
+{"scenarioId":"g2_flat_damage","name":"execute_lua","status":"completed","arguments":"{\"code\":\"calculate_damage()\"}","result":"{\"Success\":true,\"Output\":\"ok\"}","error":"","durationMs":3.1700000000000004}
+{"scenarioId":"g2_flat_damage","name":"execute_lua","status":"completed","arguments":"{\"code\":\"calculate_damage()\"}","result":"{\"Success\":true,\"Output\":\"table: 156072866\"}","error":"","durationMs":1.867}
+{"scenarioId":"g2_flat_damage","name":"execute_lua","status":"failed","arguments":"{\"code\":\"calculate_damage()\"}","result":"","error":"{\"Success\":false,\"Error\":\"Lua-CSharp: [string \\\"sandbox_chunk\\\"]:4: attempt to call a nil value (field 'join')\"}","durationMs":2.5189}
+{"scenarioId":"g2_flat_damage","name":"execute_lua","status":"completed","arguments":"{\"code\":\"calculate_damage()\"}","result":"{\"Success\":true,\"Output\":\"ok\"}","error":"","durationMs":2.3005}
+{"scenarioId":"g2_level_damage","name":"execute_lua","status":"completed","arguments":"{\"code\":\"calculate_damage()\"}","result":"{\"Success\":true,\"Output\":\"ok\"}","error":"","durationMs":2.5583}

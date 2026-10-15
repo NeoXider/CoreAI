@@ -1,5 +1,20 @@
 # TODO
 
+- [x] Benchmark resume round 3: lossless date/result/trace/Markdown recovery, repetition and hero ownership checks, stable legacy ordering/summary precision, corrupt-run discovery, deferred-target completion, unique backups, credential validation and minimal publishing path edits.
+- [x] Benchmark resume round 3 file-only validation: all four requested Unity-generated projects compile; portable Release suite passes 2602/2602; all-six real-report TEMP repair probe preserves kept JSON/Markdown/trace bytes, metadata, unaffected summaries, row order and repair idempotence.
+- [ ] Benchmark resume round 3 verification gate: run the new EditMode/PlayMode regressions on the next owner-driven Editor start; Unity was not started for this round.
+
+- [x] Benchmark resume round 2: preserve legacy evidence/counters, fix continuation silence and every backend timeout, harden filtered/window resume, atomic commit/listing/backups, and recoverable target-scoped prefab publishing with persistent textures.
+- [x] Benchmark resume round 2 file-only validation: all four requested Unity-generated projects compile; portable Release suite passes 2560/2560; explicit real-report temp-copy repair probe passes with all kept rows/evidence preserved.
+- [ ] Benchmark resume round 2 verification gate: run new continuation/backend, window environment, legacy fixture and runtime texture tests in Unity on the next owner-driven Editor start; no Unity was started for this round.
+
+- [x] Benchmark durability: atomic per-scenario checkpoints, frozen secret-free manifests, interrupted and legacy report resume, Environment repair/filtering, backups, merged artifacts and segment metadata.
+- [x] Benchmark timeout/material fixes: unlimited client total deadlines, typed deadline attribution, shared castle materials and explicit GUID-preserving prefab publishing.
+- [x] Benchmark durability file-only validation: all four requested Unity-generated projects compile; portable Release suite passes 2536/2536, including checkpoint/legacy repair, timeout attribution and filesystem publishing regressions.
+- [x] Benchmark resume verification: Unity EditMode 7271/7272 (the one failure was a D3D11 texture allocation under GPU memory pressure and passes alone, 10/10) and the Benchmark PlayMode fixtures 50/50 pass on the released tree.
+- [ ] Benchmark resume live gate: a real interrupted multi-target G6 run resumed on the next Editor start (fixtures cover it; the legacy repair of run 20261015_224850 is the first real use).
+- [ ] Benchmark headroom (later, owner request 2026-10-16): suite v2.0 saturated at the top — GPT-6.1 Sol and Sonnet 5.5 scored 100.0 with the extreme tier at 100.0 (run 20261015_224850). Add a couple of scenarios several times harder than the current extreme tier (long multi-step builds with interacting constraints, multi-turn observe/act with hidden state, large Lua systems graded by property tests) so frontier models no longer reach 100; graded as a separate tier, new suite version, not comparable with v2.0.
+
 - [x] Benchmark sampling: remove the imposed temperature; add optional JSON target temperature (0..2), persisted window field, nullable metadata/model summaries, docs and captured-request regressions for provider defaults and MiniCPM-V 4.7 sampling passthrough.
 - [x] Benchmark sampling file-only validation: Benchmarking, Benchmark.Tests and Tests compile with zero errors; portable Release suite passes 2499/2499. CoreAI temperature-override omission guards are preserved.
 - [ ] Benchmark sampling verification gate: run the new target/window/report EditMode and captured-request PlayMode fixtures on the next Unity start; Unity remains closed during file-only validation.

@@ -340,3 +340,101 @@ The suite honors `COREAI_BENCHMARK_GROUPS` (CSV of group ids) and `COREAI_BENCHM
 repetitions; the report keeps the per-scenario mean). For a single local server that loads one model at
 a time, a multi-model **matrix** is still a shell loop over `-coreAiBenchmarkModel`; each invocation
 writes its own date+model report.
+
+## Durable scenario execution and resume
+
+The portable `BenchmarkRunStore` owns engine-free JSON checkpoint data and atomic storage; the suite
+owns configuration resolution, secret retrieval, Unity execution and final artifact generation.
+`BenchmarkTargetState.IsFinalized` is the shared resume predicate: a scenario id/repetition is skipped
+only when its saved result is not Environment. `Merge` replaces exactly that identity and restores
+canonical plan order for new runs, independent of cooperative visual-lane scheduling. Legacy imports retain original row positions; replacement rows occupy the original identity's position and missing rows append. No result is recomputed
+from checkpoints or rounded public scores. Every finalized repetition is flushed before progress
+advances. An in-flight or computed-but-uncommitted result runs again after interruption.
+
+`.runs/<runId>/manifest.json` freezes immutable resolved inputs and the complete ordered scenario plan;
+`<artifactStem>.state.json` is private to one target. The coordinator writes the manifest once; each
+target atomically replaces only its own checkpoint. State includes full result objects, original
+legacy JSON rows, traces, replay, screenshot bytes and segment clocks. Files use UTF-8 and flush to
+disk before same-directory atomic replacement. A torn temporary file is never read as committed
+state. Replacement failure surfaces as a harness failure instead of silently claiming durability.
+The completed marker is `ReportsWritten` on each target and is set only after all report artifacts
+are written and every planned identity is finalized. Completed folders remain available for repair.
+
+Resume resolves env secret references again, requires externally held literal secrets again, and
+validates suite/schema, plan and all resolved target inputs before executing scenarios. There is no
+silent suite migration. Raw API keys never enter manifests. Resolved streaming/native-tool settings
+and benchmark shaping options are frozen as well. LLMUnity retains its backend route and validates
+its original configuration. Only the selected target labels are reopened; all others keep state.
+Public report names retain the original run id. INDEX upserts by exact Markdown filename.
+
+Without a manifest, explicit-id resume imports every matching report, validates selected target
+metadata, restores companion artifacts and writes the manifest before execution. The original full
+target list is mandatory; it supplies endpoints absent from old JSON. Missing entire groups/vision
+variants require explicit original shaping because old reports contain no declaration of intended
+coverage. Existing result JSON rows remain intact through merging, including unknown fields. Old
+Markdown and trace companions recover evidence omitted by early JSON: preserve original sections,
+provider flags, counters and combined efficiency. Separate token/time bonus components absent from
+all companions remain unknown (zero in the two owner's reports). Unassigned or ambiguous old traces
+remain separate from per-result traces without duplication. Backups precede replacement of reports that need repair.
+
+Report metadata carries process segments and their active wall-time sum. Clean segments measure
+scenario execution (excluding final card rendering/report I/O); crashed segments retain the last checkpoint's lower-bound duration.
+Downtime is excluded. Each resume gets a fresh soft suite budget, while every remaining scenario
+keeps its original grading budget. A provider can generate different output for the repeated
+in-flight/Environment scenario; persisted measurements are unchanged. Concurrent processes writing
+the same run are outside this protocol.
+
+The benchmark client total deadline is zero/unlimited; the response-wait default is 180 seconds
+without a generation delta. Scenario CTS owns grading deadlines. Typed `LlmTimeoutKind` evidence
+separates TotalDeadline from ResponseWait and Transport. A total/scenario deadline with an accepted
+provider response and no transport failure is a Model result, graded on work already executed and
+never retried; silence, HTTP/load/transport failures remain Environment. SkillSet similarly enforces
+its turn budget outside the client and leaves temperature to the provider.
+
+G6 runtime geometry/scoring and replay remain primary. Optional Editor prefab export records
+`castlePrefabPath`, scopes scratch filenames to run/target, and bakes material property blocks into
+shared materials keyed by their complete visual configuration. Sharing spans castles and previously
+published assets for the same target label. `PublishCastlePrefabs(runId, dateFolder)` moves only recorded
+prefabs and their scratch material/texture dependencies to the trackable
+`Assets/Benchmark/Published/<date>/<target-label>/` tree. AssetDatabase.MoveAsset or paired file/meta moves
+preserve GUIDs; collisions choose a unique filename. Report and checkpoint links follow the moves. Publishing runs only
+when the benchmark has stopped, and refuses legacy reports that cannot attribute scratch prefabs.
+See the package README for CLI/env/window usage and repair caveats.
+
+### Resume hardening after legacy validation
+
+Legacy import restores kept evidence from the old JSON, Markdown and tool trace together: frozen
+per-result failure/session/scene blocks remain verbatim, provider token flags come from the original
+token table, and failed/invalid call counters come from their scenario trace and table. Unique
+scenario traces are assigned once; unknown/ambiguous repeated-scenario lines remain separate.
+Only selected targets undergo provider-config compatibility checks. Unselected legacy targets keep
+a safe deferred identity and resolve their original configuration only when selected and still needing work. Window and PlayMode share the same saved-state/final-report completion predicate.
+Legacy process timing starts from recorded wall time or summed scenario latency rather than zero.
+
+Atomic state commit retries transient I/O/access errors four times. Per-target small completion
+markers are written only after committed state and final artifacts; run listing never reads large
+state payloads and warns while skipping invalid/corrupt folders. Resume backs up every artifact the
+writer can replace, including replay, hero/scene PNGs, cards, charts, tool traces and INDEX. Window
+resume replaces stale target settings from the manifest and restores its complete prior process
+environment on finish/watchdog, with SessionState preserving cleanup across domain reloads. Missing
+literal keys have a target-specific recovery message. Retry count stays adjustable; execution
+parallelism/trace isolation is explicit and independent of secret-source selection.
+
+ResponseWait is always Environment even following usable output; only TotalDeadline is excluded
+from transport evidence. Endpoint HTTP, asset HTTP and LLMUnity benchmark clients all own timeout
+settings (zero total, explicit HTTP response wait 180), with no mutation of the shared project asset.
+
+Prefab folders and BuiltBy names use target labels. Runtime textures become persistent assets
+before material keys are calculated. Per-castle saves create/import only the required assets;
+no full Refresh runs in Play Mode. Publishing records planned GUID moves in
+`.runs/<runId>/publish-<date>.json`, recovers incomplete moves and stale report links, backs up JSON
+and Markdown, and reports completed repeats as no-ops. The CLI returns nonzero on failure; use
+`-quit` in batch commands. Published contains a tracked README and folder metadata for fresh clones.
+
+### Lossless legacy repair
+
+Report and state readers disable date coercion, retaining complete ISO timestamp strings across imports and process segments. Raw kept result objects and trace lines retain their original text. Summary serialization carries original numeric values when the reconstructed contribution is unchanged; companion restoration refreshes the baseline before reruns begin.
+
+Markdown recovery uses exact formatter-generated row headers in JSON order, keyed by scenario and repetition, without interpreting code fences. Kept sections own their original separators, making repeated rewrites idempotent. Missing required sessions, failed-checkpoint sections or captured scenes refuse repair. Legacy hero/replay ownership uses the writer's shared eligibility rules; ambiguous successful owners refuse recovery rather than overwrite another screenshot.
+
+INDEX backups include target identity and a collision counter. Run listing tolerates corrupt schema/id/target metadata, and the window guards discovery errors. Nested secret keys and Bearer/Basic values are rejected. Publishing patches only path string spans in report/state JSON, preserving all other bytes. A deadline-bound timer retains its recorded timeout kind even when cancellation fires slightly early. Free-build response silence is Environment and eligible for resume, without replaying the build in place.

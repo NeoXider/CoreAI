@@ -4,6 +4,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -996,7 +997,25 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         public IEnumerator GameCreationBenchmark_Suite()
         {
             string targetSpec = Environment.GetEnvironmentVariable(BenchmarkTargetList.EnvTargets);
-            if (!string.IsNullOrWhiteSpace(targetSpec))
+            string resumeId = ResolveResumeId();
+            BenchmarkRunStore resumeStore = resumeId.Length > 0 ? new BenchmarkRunStore(DefaultResultsDirectory(), resumeId) : null;
+            bool localResume = resumeStore?.HasManifest == true && resumeStore.LoadManifest().LocalBackend.Length > 0;
+            if (localResume)
+            {
+                BenchmarkRunManifest saved = resumeStore.LoadManifest();
+                foreach (KeyValuePair<string, string> option in saved.Options)
+                    if (option.Key != EnvRetries) SetSavedOption(option.Key, option.Value);
+                saved.Validate(SuiteVersion, DurablePlan(AllScenarios(), saved.Repetitions));
+            }
+            if (resumeId.Length > 0 && !localResume)
+            {
+                if (!BenchmarkTargetList.TryParse(targetSpec, out List<BenchmarkTarget> supplied, out string parseError))
+                    throw new InvalidOperationException(parseError);
+                List<BenchmarkTarget> resumedTargets = ResolveResumeTargets(resumeId, supplied);
+                yield return RunMultiTargetSuite(resumedTargets);
+                yield break;
+            }
+            if (!localResume && !string.IsNullOrWhiteSpace(targetSpec))
             {
                 if (!BenchmarkTargetList.TryParse(targetSpec, out List<BenchmarkTarget> targets, out string targetError))
                 {
@@ -1011,7 +1030,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
-                    null, null, 300, out PlayModeProductionLikeLlmHandle handle, out string ignore))
+                    null, null, 0, out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
                 Assert.Ignore(ignore);
             }
@@ -1019,6 +1038,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             CoreAISettingsAsset settings = CreateBenchmarkSettings();
             BenchmarkReport report = new();
             BenchmarkVisualLane visualLane = new();
+            TargetSuiteRun singleRun = null;
 
             try
             {
@@ -1047,7 +1067,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // From the resolved config when present, else the actual client capability (the asset-driven
                 // path carries no ResolvedConfig). Streaming is forced off per-agent for determinism, so it is
                 // reported as false here regardless of the provider default.
-                report.Metadata = CreateRunMetadata(DateTime.Now.ToString("yyyyMMdd_HHmmss"), modelId,
+                report.Metadata = CreateRunMetadata(localResume ? resumeId : DateTime.Now.ToString("yyyyMMdd_HHmmss"), modelId,
                     handle.ResolvedBackend.ToString(),
                     handle.ResolvedConfig?.NativeTools ?? handle.Client.SupportsNativeToolCalling,
                     handle.ResolvedConfig?.Streaming ?? false, settings, repetitions,
@@ -1071,9 +1091,41 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     Repetitions = repetitions,
                     SuiteBudgetSeconds = ResolveSuiteBudgetSeconds(),
                     SuiteClock = System.Diagnostics.Stopwatch.StartNew(),
-                    VisualLane = visualLane
+                    VisualLane = visualLane,
+                    ScenarioContext = new ScenarioRunContext { ArtifactId = ArtifactStem(report.Metadata.RunId, modelId) }
                 };
-                yield return RunTargetSuite(run);
+                singleRun = run;
+                string endpoint = handle.ResolvedConfig?.BaseUrl ?? CoreAISettingsAsset.Instance?.ApiBaseUrl;
+                if (string.IsNullOrWhiteSpace(endpoint)) endpoint = "http://localhost";
+                string resolvedKey = handle.ResolvedConfig?.ApiKey ?? CoreAISettingsAsset.Instance?.ApiKey ?? "";
+                string keySource = !string.IsNullOrEmpty(resolvedKey) && Environment.GetEnvironmentVariable("COREAI_TEST_API_KEY") == resolvedKey
+                    ? "env:COREAI_TEST_API_KEY" : resolvedKey;
+                BenchmarkTarget durableTarget = new(modelId, endpoint, keySource, reasoningEffort: report.Metadata.ReasoningEffort,
+                    extraBodyJson: handle.ResolvedConfig?.ExtraBodyJson ?? "", temperature: handle.Temperature);
+                BenchmarkRunManifest manifest = CreateManifest(report.Metadata.RunId, new[] { durableTarget }, scenarios, repetitions);
+                manifest.UseDefaultSecretSource = true;
+                manifest.ParallelExecution = false;
+                manifest.Options["COREAI_TEST_STREAMING"] = report.Metadata.Streaming ? "1" : "0";
+                manifest.Options["COREAI_TEST_NATIVE_TOOLS"] = report.Metadata.NativeToolCalling ? "1" : "0";
+                manifest.LocalBackend = handle.ResolvedBackend == PlayModeProductionLikeLlmBackend.LlmUnity ? handle.ResolvedBackend.ToString() : "";
+                BenchmarkRunStore store = new(DefaultResultsDirectory(), report.Metadata.RunId);
+                if (localResume)
+                {
+                    BenchmarkRunManifest saved = store.LoadManifest();
+                    if (saved.LocalBackend != manifest.LocalBackend)
+                        throw new InvalidOperationException("Cannot resume: local benchmark backend changed.");
+                    saved.Targets[0].Validate(manifest.Targets[0]);
+                    manifest = saved;
+                }
+                else
+                {
+                    if (store.HasManifest) throw new InvalidOperationException("A benchmark run with this timestamp already exists.");
+                    store.SaveManifest(manifest);
+                }
+                AttachCheckpoint(run, store, manifest, manifest.Targets[0].Slug, localResume);
+                report = run.Report;
+                if (!run.SkipCompleted) yield return RunTargetSuite(run);
+                SaveCheckpoint(run, segmentFinished: true);
             }
             finally
             {
@@ -1085,12 +1137,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
             }
 
+            if (singleRun?.SkipCompleted == true) yield break;
+
             // A suite-level "model card" (radar of the six dimensions + game-fitness bars) so two models'
             // results are comparable at a glance — rendered with a throwaway camera while still in Play mode.
             byte[] modelCardPng = null;
             yield return CaptureReportModelCard(report, visualLane, png => modelCardPng = png);
 
             string artifactPath = WriteArtifacts(report, modelCardPng);
+            if (artifactPath != "(not written)" && singleRun != null)
+                SaveCheckpoint(singleRun, singleRun.Plan.All(p => singleRun.Checkpoint.IsFinalized(p.Id, p.Repetition)), true);
 
             Debug.Log($"[Benchmark] ===== SUITE COMPLETE =====\n" +
                       $"Suite base score: {report.SuiteBaseScore:0.#}/100 (mean bonus {report.MeanBonus:0.#})\n" +
@@ -1200,9 +1256,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 string heroScenarioId = null;
 
                 // Visual results card, embedded near the top of the Markdown report.
-                File.WriteAllText(Path.Combine(dir, svgName), BenchmarkReportFormatter.ToSvg(report));
+                BenchmarkRunStore.AtomicWrite(Path.Combine(dir, svgName), BenchmarkReportFormatter.ToSvg(report));
                 string md = EmbedResultsImage(BenchmarkReportFormatter.ToMarkdown(report), svgName);
-                System.Text.StringBuilder toolTrace = new();
+                System.Text.StringBuilder toolTrace = new(report.PreservedToolTraceJsonl);
                 foreach (ScenarioResult scenarioResult in report.Results)
                 {
                     toolTrace.Append(scenarioResult.ToolTraceJsonl);
@@ -1211,13 +1267,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 if (toolTrace.Length > 0)
                 {
                     string traceName = stem + ".tools.jsonl";
-                    File.WriteAllText(Path.Combine(dir, traceName), toolTrace.ToString());
+                    BenchmarkRunStore.AtomicWrite(Path.Combine(dir, traceName), toolTrace.ToString());
                     md += $"\n[Tool-call arguments and result previews (up to 2,000 characters each)]({traceName})\n";
                 }
 
                 // WHY: the vector card needs no GPU, so a headless run still gets a model card.
                 string cardSvgName = stem + "_modelcard.svg";
-                File.WriteAllText(Path.Combine(dir, cardSvgName), BenchmarkReportFormatter.ToModelCardSvg(report));
+                BenchmarkRunStore.AtomicWrite(Path.Combine(dir, cardSvgName), BenchmarkReportFormatter.ToModelCardSvg(report));
 
                 // The rendered model card leads the report when available, else its vector twin.
                 if (modelCardPng == null || modelCardPng.Length == 0)
@@ -1244,7 +1300,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     if (!string.IsNullOrWhiteSpace(hero.LuaReplayScript))
                     {
                         string luaName = stem + "_g6_replay.lua";
-                        File.WriteAllText(Path.Combine(dir, luaName), hero.LuaReplayScript);
+                        BenchmarkRunStore.AtomicWrite(Path.Combine(dir, luaName), hero.LuaReplayScript);
                         md += $"\n[Replay the model's complete G6 Lua calls]({luaName})\n";
                     }
 
@@ -1263,17 +1319,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
 
                 md += WriteSceneScreenshots(report, dir, stem, heroScenarioId);
-                File.WriteAllText(mdPath, md);
-                File.WriteAllText(Path.Combine(dir, stem + ".json"), BenchmarkReportFormatter.ToJson(report));
+                BenchmarkRunStore.AtomicWrite(mdPath, md);
+                BenchmarkRunStore.AtomicWrite(Path.Combine(dir, stem + ".json"), BenchmarkReportFormatter.ToJson(report));
 
                 // Append a one-line row to the rolling index so many runs stay easy to scan/compare.
                 string indexPath = Path.Combine(dir, "INDEX.md");
                 if (!File.Exists(indexPath))
                 {
-                    File.WriteAllText(indexPath, BenchmarkReportFormatter.IndexHeader());
+                    BenchmarkRunStore.AtomicWrite(indexPath, BenchmarkReportFormatter.IndexHeader());
                 }
 
-                File.AppendAllText(indexPath, BenchmarkReportFormatter.IndexRow(report, mdName) + "\n");
+                List<string> indexLines = File.ReadAllLines(indexPath).Where(line => !line.Contains("](" + mdName + ")")).ToList();
+                indexLines.Add(BenchmarkReportFormatter.IndexRow(report, mdName));
+                BenchmarkRunStore.AtomicWrite(indexPath, string.Join("\n", indexLines) + "\n");
 
                 return mdPath;
             }
@@ -1284,40 +1342,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
         }
 
-        internal static ScenarioResult FindFreeBuildHeroResult(BenchmarkReport report)
-        {
-            ScenarioResult plainBuild = null;
-            foreach (ScenarioResult r in report.Results)
-            {
-                if (r.SceneScreenshotPng == null || r.SceneScreenshotPng.Length == 0 ||
-                    !string.Equals(r.Group, "G6", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                // WHY: a failed build (provider 5xx, crash, harness fault) is not the model's showcase;
-                // WHY: its screenshot still lands in the regular scene-screenshot section.
-                if (!string.IsNullOrEmpty(r.Failure) || r.Attribution == FailureAttribution.Environment ||
-                    r.Attribution == FailureAttribution.Framework)
-                {
-                    continue;
-                }
-
-                // WHY: in A/B mode the text-only run is listed first, but the hero/replay should show
-                // WHY: the vision-enabled build when it produced a usable screenshot.
-                if (string.Equals(r.ScenarioId, "g6_free_build_vision", StringComparison.OrdinalIgnoreCase))
-                {
-                    return r;
-                }
-
-                if (plainBuild == null && string.Equals(r.ScenarioId, "g6_free_build", StringComparison.OrdinalIgnoreCase))
-                {
-                    plainBuild = r;
-                }
-            }
-
-            return plainBuild;
-        }
+        internal static ScenarioResult FindFreeBuildHeroResult(BenchmarkReport report) =>
+            BenchmarkArtifactRecovery.FindFreeBuildHeroResult(report.Results);
 
         /// <summary>Writes each captured scene screenshot as a PNG and returns a Markdown section linking them.</summary>
         private static string WriteSceneScreenshots(BenchmarkReport report, string dir, string stem,
@@ -1332,7 +1358,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     continue;
                 }
 
-                if (r.SceneScreenshotPng == null || r.SceneScreenshotPng.Length == 0)
+                if ((r.SceneScreenshotPng == null || r.SceneScreenshotPng.Length == 0) && string.IsNullOrEmpty(r.ImportedSceneMarkdown))
                 {
                     continue;
                 }
@@ -1340,7 +1366,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 string png = $"{stem}_{r.ScenarioId}.png";
                 try
                 {
-                    File.WriteAllBytes(Path.Combine(dir, png), r.SceneScreenshotPng);
+                    if (r.SceneScreenshotPng != null && r.SceneScreenshotPng.Length > 0)
+                        File.WriteAllBytes(Path.Combine(dir, png), r.SceneScreenshotPng);
                 }
                 catch (Exception ex)
                 {
@@ -1357,13 +1384,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                               "shows the score and verdict._\n";
                 }
 
-                string verdict = r.Classification switch
+                if (!string.IsNullOrEmpty(r.ImportedSceneMarkdown))
                 {
-                    BenchmarkClassification.Pass => "✅ PASS",
-                    BenchmarkClassification.Partial => "🟡 PARTIAL",
-                    _ => "❌ FAIL"
-                };
-                section += $"\n### {r.Group} · {r.ScenarioName} — {r.Score.Base:0}/100 {verdict}\n";
+                    section += r.ImportedSceneMarkdown;
+                    continue;
+                }
+                section += "\n" + BenchmarkReportFormatter.SceneHeading(r) + "\n";
                 if (!string.IsNullOrEmpty(r.WhatItChecks))
                 {
                     section += $"_{r.WhatItChecks}_\n";

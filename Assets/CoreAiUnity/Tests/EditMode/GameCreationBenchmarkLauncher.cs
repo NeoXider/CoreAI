@@ -42,6 +42,12 @@ namespace CoreAI.Tests.EditMode
         public const string EnvRetries = "COREAI_BENCHMARK_RETRIES";
         public const string EnvSuiteBudget = "COREAI_BENCHMARK_SUITE_BUDGET";
 
+        /// <summary>Existing run id, or <c>latest</c>, to continue from its durable state or reports.</summary>
+        public const string EnvResume = "COREAI_BENCHMARK_RESUME";
+
+        /// <summary>Comma-separated target labels to reopen during resume.</summary>
+        public const string EnvOnlyTargets = "COREAI_BENCHMARK_ONLY_TARGETS";
+
         /// <summary>Target list of a parallel multi-model run; see <see cref="BenchmarkTargetList"/> for the formats.</summary>
         public const string EnvTargets = BenchmarkTargetList.EnvTargets;
 
@@ -57,6 +63,8 @@ namespace CoreAI.Tests.EditMode
         public const string ArgTargets = "-coreAiBenchmarkTargets";
         public const string ArgParallel = "-coreAiBenchmarkParallel";
         public const string ArgReasoningEffort = "-coreAiBenchmarkReasoningEffort";
+        public const string ArgResume = "-coreAiBenchmarkResume";
+        public const string ArgOnlyTargets = "-coreAiBenchmarkOnlyTargets";
 
         // EditorPrefs keys shared by the window and the one-click menu, so the menu reuses window settings.
         public const string PrefPrefix = "CoreAI.Benchmark.";
@@ -113,7 +121,122 @@ namespace CoreAI.Tests.EditMode
             // One-click run honors the last settings chosen in the Benchmark Window (groups, reps, and
             // connection override). Set them once in the window, then this menu reuses them.
             ApplySavedConfig();
+            ConfigureResume(null);
             RunViaTestRunner(true, false);
+        }
+
+        /// <summary>Chooses the existing run to continue; null starts a new run.</summary>
+        public static void ConfigureResume(string runId, string onlyTargetsCsv = null)
+        {
+            SetOrClear(EnvResume, runId);
+            SetOrClear(EnvOnlyTargets, onlyTargetsCsv);
+        }
+
+        /// <summary>Continues an interrupted run using its original manifest settings.</summary>
+        public static void ResumeInterruptedRun(string runId)
+        {
+            if (IsRunning) return;
+            try
+            {
+                PrepareResumeEnvironment(ResultsRoot(), runId);
+                RunViaTestRunner(true, false);
+            }
+            catch (Exception error)
+            {
+                RestoreResumeEnvironment();
+                LastStatus = error.Message;
+                Debug.LogWarning("[Benchmark] Cannot resume: " + error.Message);
+            }
+        }
+
+        private const string ResumeEnvironmentSnapshotKey = PrefPrefix + "resume.environment";
+
+        [InitializeOnLoadMethod]
+        private static void RegisterResumeEnvironmentCleanup()
+        {
+            EditorApplication.playModeStateChanged -= HandleResumePlayModeState;
+            EditorApplication.playModeStateChanged += HandleResumePlayModeState;
+        }
+
+        /// <summary>Recovers the snapshot after a Play Mode domain reload even if the old callback object was lost.</summary>
+        internal static void HandleResumePlayModeState(PlayModeStateChange state)
+        {
+            if (state == PlayModeStateChange.EnteredEditMode) RestoreResumeEnvironment();
+        }
+
+        private static bool IsRunEnvironment(string key) => key.StartsWith("COREAI_BENCHMARK_", StringComparison.Ordinal) ||
+            key.StartsWith("COREAI_TEST_", StringComparison.Ordinal);
+
+        /// <summary>Restores the editor's environment after the runner, including across Play Mode domain reloads.</summary>
+        internal static void RestoreResumeEnvironment()
+        {
+            string saved = SessionState.GetString(ResumeEnvironmentSnapshotKey, "");
+            if (saved.Length == 0) return;
+            Dictionary<string, string> snapshot = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<string, string>>(saved);
+            foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+                if (IsRunEnvironment((string)entry.Key)) Environment.SetEnvironmentVariable((string)entry.Key, null);
+            foreach (KeyValuePair<string, string> entry in snapshot) Environment.SetEnvironmentVariable(entry.Key, entry.Value);
+            SessionState.EraseString(ResumeEnvironmentSnapshotKey);
+        }
+
+        /// <summary>Uses manifest configuration and existing secret sources, never a stale target specification.</summary>
+        internal static void PrepareResumeEnvironment(string root, string runId)
+        {
+            if (SessionState.GetString(ResumeEnvironmentSnapshotKey, "").Length > 0)
+                throw new InvalidOperationException("A benchmark resume environment is already active.");
+            Dictionary<string, string> snapshot = new(StringComparer.Ordinal);
+            foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+                if (IsRunEnvironment((string)entry.Key)) snapshot[(string)entry.Key] = (string)entry.Value;
+            SessionState.SetString(ResumeEnvironmentSnapshotKey, Newtonsoft.Json.JsonConvert.SerializeObject(snapshot));
+            try
+            {
+                BenchmarkRunStore store = new(root, runId);
+                BenchmarkRunManifest manifest = store.LoadManifest();
+                List<BenchmarkTarget> secretSources = new();
+                string originalSpec = Environment.GetEnvironmentVariable(EnvTargets);
+                if (BenchmarkTargetList.TryParse(originalSpec, out List<BenchmarkTarget> processTargets, out _))
+                    secretSources.AddRange(processTargets);
+                if (manifest.TargetsFileReference.Length > 0 &&
+                    BenchmarkTargetList.TryParse(manifest.TargetsFileReference, out List<BenchmarkTarget> fileTargets, out _))
+                    secretSources.AddRange(fileTargets);
+                List<BenchmarkTargetRow> sessionRows = LoadSessionTargetRows();
+                if (sessionRows != null)
+                    foreach (BenchmarkTargetRow row in sessionRows)
+                        if (BenchmarkTargetList.TryParse("[" + Newtonsoft.Json.JsonConvert.SerializeObject(row) + "]", out List<BenchmarkTarget> rows, out _))
+                            secretSources.AddRange(rows);
+                List<BenchmarkTarget> resolved = new();
+                foreach (BenchmarkStoredTarget target in manifest.Targets)
+                {
+                    List<BenchmarkTarget> matching = secretSources.Where(t => t.Model == target.Model && t.Label == target.Label &&
+                        (target.ConfigurationDeferred || t.BaseUrl == target.BaseUrl)).ToList();
+                    BenchmarkTarget source = matching.LastOrDefault(t => !string.IsNullOrWhiteSpace(t.ApiKey)) ?? matching.LastOrDefault();
+                    bool complete = !store.NeedsWork(manifest, target);
+                    if (target.ConfigurationDeferred)
+                    {
+                        if (source == null && !complete) throw new InvalidOperationException($"Target '{target.LabelOrModel}' needs its original legacy target configuration.");
+                        resolved.Add(source ?? new BenchmarkTarget(target.Model, target.BaseUrl, target.KeyReference, target.Label));
+                        continue;
+                    }
+                    string key = target.KeyReference;
+                    if (target.RequiresExternalKey)
+                    {
+                        key = source?.ApiKey ?? "";
+                        if (!complete && string.IsNullOrWhiteSpace(key) && !target.UsesDefaultSecretSource && !manifest.UseDefaultSecretSource)
+                            throw new InvalidOperationException($"Target '{target.LabelOrModel}' needs a literal API key that is unavailable. Restore its original targets file or enter its key in the benchmark window before resuming.");
+                    }
+                    resolved.Add(new BenchmarkTarget(target.Model, target.BaseUrl, key, target.Label,
+                        target.ReasoningEffort, target.ExtraBodyJson, target.Temperature));
+                }
+                SetOrClear(EnvTargets, BenchmarkTargetList.ToJson(resolved, true));
+                foreach (KeyValuePair<string, string> option in manifest.Options)
+                    if (option.Key != EnvRetries) SetOrClear(option.Key, option.Value);
+                ConfigureResume(runId);
+            }
+            catch
+            {
+                RestoreResumeEnvironment();
+                throw;
+            }
         }
 
         /// <summary>
@@ -379,7 +502,7 @@ namespace CoreAI.Tests.EditMode
             try
             {
                 normalized = Infrastructure.Llm.OpenAiProviderBodyParameters.NormalizeRawJson(json);
-                foreach (JProperty property in JObject.Parse(normalized).Properties())
+                foreach (JProperty property in BenchmarkJson.ParseObject(normalized).Properties())
                 {
                     if (Infrastructure.Llm.OpenAiProviderBodyParameters.IsReserved(property.Name))
                     {
@@ -859,6 +982,7 @@ namespace CoreAI.Tests.EditMode
 
         private static void Cleanup()
         {
+            RestoreResumeEnvironment();
             EditorApplication.update -= Watchdog;
             IsRunning = false;
             if (_api != null)
@@ -879,7 +1003,8 @@ namespace CoreAI.Tests.EditMode
         /// CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunFromCli</c>. Reads
         /// <c>-coreAiBenchmarkModel</c> / <c>-coreAiBenchmarkGroups</c> / <c>-coreAiBenchmarkReps</c> /
         /// <c>-coreAiBenchmarkReasoningEffort</c> and, for a parallel multi-model run, <c>-coreAiBenchmarkTargets</c> /
-        /// <c>-coreAiBenchmarkParallel</c> from the command line (or the COREAI_* env vars) and exits with a status
+        /// <c>-coreAiBenchmarkParallel</c>, <c>-coreAiBenchmarkResume</c>, and
+        /// <c>-coreAiBenchmarkOnlyTargets</c> from the command line (or the COREAI_* env vars) and exits with a status
         /// code. An argument that is absent leaves its env var untouched; an invalid target list or effort exits
         /// with code 2 before Unity runs anything.
         /// </summary>
@@ -912,6 +1037,36 @@ namespace CoreAI.Tests.EditMode
             int? reps = int.TryParse(repsRaw, out int r) ? r : (int?)null;
             string targetsArg = ReadArg(args, ArgTargets);
             string parallelArg = ReadArg(args, ArgParallel);
+            string resumeArg = ReadArg(args, ArgResume);
+            string onlyTargetsArg = ReadArg(args, ArgOnlyTargets);
+            string resume = HasArg(args, ArgResume)
+                ? resumeArg.Trim()
+                : Environment.GetEnvironmentVariable(EnvResume)?.Trim();
+            string onlyTargets = HasArg(args, ArgOnlyTargets)
+                ? onlyTargetsArg.Trim()
+                : Environment.GetEnvironmentVariable(EnvOnlyTargets)?.Trim();
+
+            if ((HasArg(args, ArgResume) && string.IsNullOrWhiteSpace(resume)) ||
+                (!string.IsNullOrEmpty(resume) &&
+                 resume.Any(c => !(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') &&
+                                 !(c >= '0' && c <= '9') && c != '_' && c != '-')))
+            {
+                error = $"{ArgResume}/{EnvResume} must be a run id or 'latest'.";
+                return false;
+            }
+
+            if ((HasArg(args, ArgOnlyTargets) && string.IsNullOrWhiteSpace(onlyTargets)) ||
+                (!string.IsNullOrEmpty(onlyTargets) && onlyTargets.Split(',').Any(string.IsNullOrWhiteSpace)))
+            {
+                error = $"{ArgOnlyTargets}/{EnvOnlyTargets} must contain comma-separated target labels.";
+                return false;
+            }
+
+            if (HasArg(args, ArgReps) && (!reps.HasValue || reps.Value < 1))
+            {
+                error = $"{ArgReps} must be a positive whole number, got '{repsRaw}'.";
+                return false;
+            }
 
             string targetSpec = string.IsNullOrWhiteSpace(targetsArg)
                 ? Environment.GetEnvironmentVariable(EnvTargets)
@@ -923,6 +1078,7 @@ namespace CoreAI.Tests.EditMode
 
             foreach (BenchmarkTarget target in targets)
             {
+                if (!string.IsNullOrWhiteSpace(onlyTargets) && !onlyTargets.Split(',').Any(label => label.Trim() == target.DisplayName)) continue;
                 if (!TryValidateExtraBody(target.ExtraBodyJson, out _, out string bodyError))
                 {
                     error = $"Target '{target.DisplayName}': {bodyError}";
@@ -953,10 +1109,30 @@ namespace CoreAI.Tests.EditMode
                 ConfigureReasoningEffort(effort);
             }
 
-            Configure(
-                string.IsNullOrWhiteSpace(model) ? null : model,
-                groupsCsv: string.IsNullOrWhiteSpace(groups) ? null : groups,
-                repetitions: reps);
+            if (HasArg(args, ArgModel))
+            {
+                SetOrClear(EnvModel, model);
+            }
+
+            if (HasArg(args, ArgGroups))
+            {
+                SetOrClear(EnvGroups, groups);
+            }
+
+            if (HasArg(args, ArgReps))
+            {
+                SetOrClear(EnvRepetitions, repsRaw.Trim());
+            }
+
+            if (HasArg(args, ArgResume))
+            {
+                SetOrClear(EnvResume, string.Equals(resume, "latest", StringComparison.OrdinalIgnoreCase) ? "latest" : resume);
+            }
+
+            if (HasArg(args, ArgOnlyTargets))
+            {
+                SetOrClear(EnvOnlyTargets, string.Join(",", onlyTargets.Split(',').Select(label => label.Trim())));
+            }
 
             if (!string.IsNullOrWhiteSpace(targetsArg))
             {
@@ -1015,11 +1191,17 @@ namespace CoreAI.Tests.EditMode
             {
                 if (string.Equals(args[i], name, StringComparison.Ordinal))
                 {
-                    return args[i + 1] ?? "";
+                    string value = args[i + 1] ?? "";
+                    return value.StartsWith("-", StringComparison.Ordinal) ? "" : value;
                 }
             }
 
             return "";
+        }
+
+        private static bool HasArg(string[] args, string name)
+        {
+            return Array.Exists(args, arg => string.Equals(arg, name, StringComparison.Ordinal));
         }
 
         private sealed class Callbacks : ICallbacks

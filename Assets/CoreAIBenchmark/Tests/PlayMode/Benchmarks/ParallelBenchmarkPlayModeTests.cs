@@ -5,6 +5,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -461,6 +462,163 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 Assert.AreEqual(FailureAttribution.None, result.Attribution, result.Failure);
                 Assert.IsTrue(string.IsNullOrEmpty(result.Failure), result.Failure);
+            }
+        }
+
+        [UnityTest, Timeout(15000)]
+        public IEnumerator CheckpointedTarget_ResumeSkipsCompletedRepetitionsAndMergesBothTiersAndVisualLane()
+        {
+            Environment.SetEnvironmentVariable("COREAI_BENCHMARK_RETRIES", "0");
+            BenchmarkProgress.BeginSession();
+            ProbeLog baselineLog = new();
+            ProbeLlmClient baselineClient = new("bench-probe-alpha-", 0);
+            RunTarget baseline = MakeRun("alpha", "model", baselineClient, new BenchmarkVisualLane(), baselineLog,
+                ResumeProbes(baselineLog));
+            EnableCheckpoint(baseline, new BenchmarkRunStore(_artifactDir, "baseline"));
+            yield return GameCreationBenchmarkPlayModeTests.RunTargetSuite(baseline);
+            Assert.AreEqual(5, baseline.Report.Results.Count);
+
+            ProbeLog interruptedLog = new();
+            ProbeLlmClient interruptedClient = new("bench-probe-alpha-", 0);
+            RunTarget interrupted = MakeRun("alpha", "model", interruptedClient, new BenchmarkVisualLane(), interruptedLog,
+                ResumeProbes(interruptedLog));
+            BenchmarkRunStore store = new(_artifactDir, "interrupted");
+            EnableCheckpoint(interrupted, store);
+            int graded = 0;
+            interruptedLog.AfterGrade = _ =>
+            {
+                if (++graded == 2) interrupted.Progress.RequestStop();
+            };
+            yield return GameCreationBenchmarkPlayModeTests.RunTargetSuite(interrupted);
+            Assert.IsTrue(interrupted.BudgetHit);
+            Assert.AreEqual(2, interruptedClient.Calls);
+            BenchmarkTargetState saved = store.Load("alpha");
+            Assert.AreEqual(2, saved.Results.Count, "Each completed result must be durable before final reports exist.");
+            Assert.IsTrue(saved.Results.Any(r => r.Group == "G6"), "The lane runs first and must checkpoint independently.");
+            Assert.IsFalse(File.Exists(Path.Combine(_artifactDir, interrupted.ArtifactStem + ".json")));
+            Dictionary<string, string> originalRows = saved.Results.ToDictionary(
+                r => r.ScenarioId + "/" + r.Repetition, r => Newtonsoft.Json.JsonConvert.SerializeObject(r));
+
+            ProbeLog resumedLog = new();
+            ProbeLlmClient resumedClient = new("bench-probe-alpha-", 0);
+            RunTarget resumed = MakeRun("alpha", "model", resumedClient, new BenchmarkVisualLane(), resumedLog,
+                ResumeProbes(resumedLog));
+            EnableCheckpoint(resumed, store, saved);
+            yield return GameCreationBenchmarkPlayModeTests.RunTargetSuite(resumed);
+
+            Assert.AreEqual(3, resumedClient.Calls, "Only the unfinished regular/extreme repetitions execute after reload.");
+            Assert.AreEqual(0, resumed.VisualLane.Holds.Count, "The completed G6 lane result must be skipped.");
+            CollectionAssert.AreEqual(baseline.Report.Results.Select(ResultIdentity), resumed.Report.Results.Select(ResultIdentity));
+            CollectionAssert.AreEqual(baseline.Report.Results.Select(r => r.Score.Base), resumed.Report.Results.Select(r => r.Score.Base));
+            CollectionAssert.AreEqual(baseline.Report.Results.Select(r => r.Extreme), resumed.Report.Results.Select(r => r.Extreme));
+            CollectionAssert.AreEqual(baseline.Report.Results.Select(r => r.PromptTokens), resumed.Report.Results.Select(r => r.PromptTokens));
+            Assert.AreEqual(baseline.Report.RegularBaseScore, resumed.Report.RegularBaseScore);
+            Assert.AreEqual(baseline.Report.ExtremeBaseScore, resumed.Report.ExtremeBaseScore);
+            Assert.AreEqual(baseline.Report.SuiteBaseScore, resumed.Report.SuiteBaseScore);
+            foreach (ScenarioResult result in resumed.Report.Results)
+            {
+                if (originalRows.TryGetValue(ResultIdentity(result), out string original))
+                    Assert.AreEqual(original, Newtonsoft.Json.JsonConvert.SerializeObject(result), "A finalized row must remain unchanged.");
+            }
+            Assert.AreEqual(5, store.Load("alpha").Results.Count);
+        }
+
+        [UnityTest, Timeout(15000)]
+        public IEnumerator CheckpointedTarget_ResumeReexecutesEnvironmentResultAndKeepsFinalizedRow()
+        {
+            Environment.SetEnvironmentVariable("COREAI_BENCHMARK_RETRIES", "0");
+            BenchmarkProgress.BeginSession();
+            ProbeLlmClient broken = new("bench-probe-alpha-", 0, "HTTP 503 Service Unavailable");
+            RunTarget interrupted = MakeRun("alpha", "model", broken, new BenchmarkVisualLane(), null, Plain(null, "alpha", 2));
+            BenchmarkRunStore store = new(_artifactDir, "environment");
+            EnableCheckpoint(interrupted, store);
+            yield return GameCreationBenchmarkPlayModeTests.RunTargetSuite(interrupted);
+            BenchmarkTargetState saved = store.Load("alpha");
+            Assert.AreEqual(2, saved.Results.Count);
+            Assert.IsTrue(saved.Results.All(r => r.Attribution == FailureAttribution.Environment));
+            saved.Results[0].Attribution = FailureAttribution.Model;
+            string finalized = Newtonsoft.Json.JsonConvert.SerializeObject(saved.Results[0]);
+            store.Save("alpha", saved);
+
+            ProbeLlmClient healthy = new("bench-probe-alpha-", 0);
+            RunTarget resumed = MakeRun("alpha", "model", healthy, new BenchmarkVisualLane(), null, Plain(null, "alpha", 2));
+            EnableCheckpoint(resumed, store, store.Load("alpha"));
+            yield return GameCreationBenchmarkPlayModeTests.RunTargetSuite(resumed);
+            Assert.AreEqual(1, healthy.Calls);
+            Assert.AreEqual(2, resumed.Report.Results.Count);
+            Assert.AreEqual(finalized, Newtonsoft.Json.JsonConvert.SerializeObject(resumed.Report.Results[0]));
+            Assert.AreEqual(FailureAttribution.None, resumed.Report.Results[1].Attribution);
+            Assert.IsEmpty(resumed.Report.Results[1].Failure);
+            Assert.AreEqual(FailureAttribution.None, store.Load("alpha").Results[1].Attribution);
+        }
+
+        [UnityTest, Timeout(15000)]
+        public IEnumerator TypedTotalDeadline_OnLiveProviderStream_IsGradedWithoutRetry()
+        {
+            yield return RunTypedTimeoutScenario(LlmTimeoutKind.TotalDeadline, FailureAttribution.Model, 1);
+        }
+
+        [UnityTest, Timeout(15000)]
+        public IEnumerator TypedResponseWait_OnAcceptedProviderStream_IsEnvironmentAndRetried()
+        {
+            yield return RunTypedTimeoutScenario(LlmTimeoutKind.ResponseWait, FailureAttribution.Environment, 2);
+        }
+
+        [UnityTest, Timeout(15000)]
+        public IEnumerator TypedTransportTimeout_OnAcceptedProviderStream_IsEnvironmentAndRetried()
+        {
+            yield return RunTypedTimeoutScenario(LlmTimeoutKind.Transport, FailureAttribution.Environment, 2);
+        }
+
+        [UnityTest, Timeout(15000)]
+        public IEnumerator TypedResponseWait_AfterUsableTurn_IsEnvironmentAndNotReplayedInPlace()
+        {
+            // WHY: the continuation path needs a free-build scenario, which the suite never replays in place;
+            // WHY: the Environment result is re-run by a resume instead, so one attempt is the contract here.
+            yield return RunTypedTimeoutScenario(LlmTimeoutKind.ResponseWait, FailureAttribution.Environment, 1,
+                afterUsableTurn: true);
+        }
+
+        [UnityTest, Timeout(15000)]
+        public IEnumerator TypedTotalDeadline_AfterUsableTurn_IsGradedWithoutRetry()
+        {
+            yield return RunTypedTimeoutScenario(LlmTimeoutKind.TotalDeadline, FailureAttribution.Model, 1,
+                afterUsableTurn: true);
+        }
+
+        private IEnumerator RunTypedTimeoutScenario(LlmTimeoutKind kind, FailureAttribution expected, int attempts,
+            bool afterUsableTurn = false)
+        {
+            Environment.SetEnvironmentVariable("COREAI_BENCHMARK_RETRIES", "1");
+            BenchmarkProgress.BeginSession();
+            TypedTimeoutLlmClient client = new(kind, afterUsableTurn);
+            RunTarget run = MakeRun("alpha", "model", client, new BenchmarkVisualLane(), null,
+                new[] { new ProbeScenario(null, "alpha", 1, false, false,
+                    timeoutSeconds: afterUsableTurn ? 120 : 20, freeBuild: afterUsableTurn) });
+
+            yield return GameCreationBenchmarkPlayModeTests.RunTargetSuite(run);
+
+            Assert.AreEqual(attempts, client.Calls, "Only Environment failures may replay a scenario.");
+            Assert.AreEqual(afterUsableTurn ? attempts : 0, client.SuccessfulTurns);
+            Assert.AreEqual(1, run.Report.Results.Count);
+            ScenarioResult result = run.Report.Results[0];
+            Assert.AreEqual(expected, result.Attribution, result.Failure);
+            Assert.IsNotEmpty(result.Failure);
+            Assert.AreEqual(expected == FailureAttribution.Model ? 1 : 0, run.Report.ScenarioCount,
+                "An accepted-stream total deadline must remain in the graded aggregate.");
+            Assert.AreEqual(expected == FailureAttribution.Environment ? 1 : 0, run.Report.EnvironmentFailures);
+            if (expected == FailureAttribution.Model && afterUsableTurn)
+            {
+                Assert.AreEqual(1, result.ToolCalls);
+                Assert.Greater(result.Score.Base, 0, "A completed usable turn must retain its work grade.");
+            }
+            else if (expected == FailureAttribution.Model)
+            {
+                Assert.AreEqual(0, result.ToolCalls);
+                Assert.AreEqual(0, result.Score.Base, "A deadline without executed work earns zero points.");
+                Assert.AreEqual(0, result.Score.HardCap);
+                Assert.AreEqual(BenchmarkClassification.Fail, result.Score.Classification);
+                Assert.AreEqual(0, run.Report.SuiteBaseScore);
             }
         }
 
@@ -1014,6 +1172,36 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return list;
         }
 
+        private static List<GameBenchmarkScenario> ResumeProbes(ProbeLog log)
+        {
+            return new List<GameBenchmarkScenario>
+            {
+                new ProbeScenario(log, "alpha", 1, false, false, repsOverride: null),
+                new ProbeScenario(log, "alpha", 2, false, false, repsOverride: null, extreme: true),
+                new ProbeScenario(log, "alpha", 3, true, false, group: "G6")
+            };
+        }
+
+        private static string ResultIdentity(ScenarioResult result) => result.ScenarioId + "/" + result.Repetition;
+
+        private static void EnableCheckpoint(RunTarget run, BenchmarkRunStore store, BenchmarkTargetState state = null)
+        {
+            run.Repetitions = 2;
+            run.Report.Metadata.Repetitions = 2;
+            run.Plan = run.Scenarios.SelectMany(scenario => Enumerable.Range(1, scenario.RepsOverride ?? run.Repetitions)
+                .Select(repetition => new BenchmarkPlannedScenario
+                {
+                    Id = scenario.Id, Group = scenario.Group, Extreme = scenario.IsExtreme, Repetition = repetition
+                })).ToList();
+            run.CheckpointStore = store;
+            run.CheckpointSlug = "alpha";
+            run.Checkpoint = state ?? new BenchmarkTargetState { Metadata = run.Report.Metadata };
+            run.Checkpoint.Segments.Add(new BenchmarkRunSegment { StartedUtc = DateTime.UtcNow.ToString("o") });
+            run.Report = run.Checkpoint.ToReport();
+            run.Progress = BenchmarkProgress.BeginRun(run.DisplayName, run.Plan.Count, true);
+            store.Save(run.CheckpointSlug, run.Checkpoint);
+        }
+
         private static IEnumerator Outer(List<string> trace)
         {
             trace.Add("outer-start");
@@ -1127,6 +1315,73 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public void Release()
             {
                 _pending.TrySetResult(new LlmCompletionResult { Ok = true, Content = "done" });
+            }
+        }
+
+        /// <summary>Produces an accepted-stream delta and a typed deadline without network calls or delays.</summary>
+        private sealed class TypedTimeoutLlmClient : ILlmClient
+        {
+            private readonly LlmTimeoutKind _kind;
+            private readonly bool _afterUsableTurn;
+            private bool _nextTurnIsUsable;
+            public int SuccessfulTurns { get; private set; }
+            public int Calls { get; private set; }
+
+            public TypedTimeoutLlmClient(LlmTimeoutKind kind, bool afterUsableTurn = false)
+            {
+                _kind = kind;
+                _afterUsableTurn = afterUsableTurn;
+                _nextTurnIsUsable = afterUsableTurn;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                if (TryUsableTurn())
+                    return Task.FromResult(new LlmCompletionResult
+                    {
+                        Ok = true, Content = "Built one part", ExecutedToolCalls = CompletedTools()
+                    });
+                return Task.FromException<LlmCompletionResult>(Failure(request));
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                await Task.CompletedTask;
+                request.ProviderResponseState.RecordResponse();
+                if (TryUsableTurn())
+                {
+                    yield return new LlmStreamChunk
+                    {
+                        Text = "Built one part", IsDone = true, ExecutedToolCalls = CompletedTools()
+                    };
+                    yield break;
+                }
+                yield return new LlmStreamChunk { ReasoningText = "Still working", GenerationInProgress = true };
+                throw Failure(request);
+            }
+
+            private bool TryUsableTurn()
+            {
+                if (!_nextTurnIsUsable) return false;
+                _nextTurnIsUsable = false;
+                SuccessfulTurns++;
+                return true;
+            }
+
+            private static LlmToolCallTrace[] CompletedTools() => new[]
+            {
+                new LlmToolCallTrace("execute_lua", true, 1, "native", "Built one part")
+            };
+
+            private LlmClientException Failure(LlmCompletionRequest request)
+            {
+                Calls++;
+                _nextTurnIsUsable = _afterUsableTurn;
+                request.ProviderResponseState.RecordResponse();
+                request.ProviderResponseState.RecordTimeout(_kind);
+                return new LlmClientException("Opaque scripted failure", LlmErrorCode.Timeout, timeoutKind: _kind);
             }
         }
 
@@ -1282,9 +1537,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             private readonly bool _shared;
             private readonly bool _visual;
             private readonly float _timeoutSeconds;
+            private readonly int? _repsOverride;
+            private readonly bool _extreme;
+            private readonly string _group;
+            private readonly bool _freeBuild;
 
             public ProbeScenario(ProbeLog log, string owner, int index, bool shared, bool visual,
-                float timeoutSeconds = 20f)
+                float timeoutSeconds = 20f, int? repsOverride = 1, bool extreme = false, string group = "G2",
+                bool freeBuild = false)
             {
                 _log = log;
                 Owner = owner;
@@ -1292,15 +1552,21 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 _shared = shared;
                 _visual = visual;
                 _timeoutSeconds = timeoutSeconds;
+                _repsOverride = repsOverride;
+                _extreme = extreme;
+                _group = group;
+                _freeBuild = freeBuild;
             }
 
             public string Owner { get; }
             public override string Id => $"probe-{Owner}-{_index}";
             public override string Name => $"Probe {Owner} {_index}";
-            public override string Group => "G2";
+            public override string Group => _group;
             public override string Goal => "Reply with the single word done.";
             public override float TimeoutSeconds => _timeoutSeconds;
-            public override int? RepsOverride => 1;
+            public override int? RepsOverride => _repsOverride;
+            public override bool IsExtreme => _extreme;
+            public override bool FreeBuildLayout => _freeBuild;
             public override bool CaptureScene => _visual;
             public override bool UsesSharedScene => _shared || _visual;
 

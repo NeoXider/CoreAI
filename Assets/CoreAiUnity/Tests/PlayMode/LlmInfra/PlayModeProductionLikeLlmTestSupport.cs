@@ -401,7 +401,7 @@ namespace CoreAI.Tests.PlayMode
                             return true;
                         }
 
-                        if (TryCreateLlmUnity(settings, out handle, out _))
+                        if (TryCreateLlmUnity(settings, openAiTemperature, openAiTimeoutSeconds, out handle, out _))
                         {
                             return true;
                         }
@@ -409,7 +409,7 @@ namespace CoreAI.Tests.PlayMode
                     else
                     {
                         // LLMUnity  HTTP API  Offline ( )
-                        if (TryCreateLlmUnity(settings, out handle, out _))
+                        if (TryCreateLlmUnity(settings, openAiTemperature, openAiTimeoutSeconds, out handle, out _))
                         {
                             return true;
                         }
@@ -445,7 +445,7 @@ namespace CoreAI.Tests.PlayMode
                         out handle, out ignoreReason);
 
                 case PlayModeProductionLikeLlmBackend.LlmUnity:
-                    return TryCreateLlmUnity(settings, out handle, out ignoreReason);
+                    return TryCreateLlmUnity(settings, openAiTemperature, openAiTimeoutSeconds, out handle, out ignoreReason);
 
                 case PlayModeProductionLikeLlmBackend.Offline:
                     handle = new PlayModeProductionLikeLlmHandle(
@@ -543,7 +543,6 @@ namespace CoreAI.Tests.PlayMode
                         "asset). Set COREAI_TEST_BASE_URL/MODEL or the local config file to apply it.");
                 }
 
-                ILlmClient client = new OpenAiChatLlmClient(settings, supportsNativeToolCalling: true);
                 if (modelOverride != null && !string.IsNullOrWhiteSpace(modelOverride))
                 {
                     // The asset path cannot retarget the model without mutating the shared asset; surface a clear hint.
@@ -553,11 +552,7 @@ namespace CoreAI.Tests.PlayMode
                         "(or the local config file) to use per-test model overrides.");
                 }
 
-                handle = new PlayModeProductionLikeLlmHandle(
-                    client,
-                    PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
-                    coreAiSettings: settings,
-                    rebuildWithMemoryStore: store => new OpenAiChatLlmClient(settings, supportsNativeToolCalling: true, memoryStore: store));
+                handle = CreateAssetHttpHandle(settings, temperature, timeoutSeconds);
                 ignoreReason = null;
                 return true;
             }
@@ -607,6 +602,9 @@ namespace CoreAI.Tests.PlayMode
                 }
             }
 
+            OpenAiHttpOptions httpOptions = httpSettings.ToOptions();
+            httpOptions.ResponseWaitTimeoutSeconds = 180;
+            httpSettings.ApplyOptions(httpOptions);
             CoreAISettingsAsset behavior = BuildBehaviorSettings(config.Streaming, timeoutSeconds);
 
             ILlmClient BuildClient(IAgentMemoryStore memoryStore)
@@ -630,6 +628,38 @@ namespace CoreAI.Tests.PlayMode
                 rebuildWithMemoryStore: BuildClient);
         }
 
+        /// <summary>Builds an isolated asset-backed client with the requested budgets for either HTTP backend.</summary>
+        internal static PlayModeProductionLikeLlmHandle CreateAssetHttpHandle(CoreAISettingsAsset settings,
+            float? temperature, int timeoutSeconds,
+            PlayModeProductionLikeLlmBackend backend = PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
+            int port = 13333, string model = null, GameObject harnessRoot = null)
+        {
+            if (settings == null) throw new ArgumentNullException(nameof(settings));
+            CoreAISettingsAsset behavior = UnityEngine.Object.Instantiate(settings);
+            CoreAISettingsOptions options = behavior.ToOptions();
+            options.LlmRequestTimeoutSeconds = Math.Max(0, timeoutSeconds);
+            options.LlmResponseWaitTimeoutSeconds = 180;
+            behavior.ApplyOptions(options);
+            behavior.ConfigureHttpApi(settings.ApiBaseUrl, settings.ApiKey, settings.ModelName,
+                temperature, Math.Max(0, timeoutSeconds), overrideTemperature: temperature.HasValue);
+            bool nativeTools = backend != PlayModeProductionLikeLlmBackend.LlmUnity ||
+                LlmToolChannelResolution.ResolveWithoutProbe(settings.LlmUnityToolChannel,
+                    LlmToolChannelResolution.BundledLlamaLibReason).Native;
+            IOpenAiHttpSettings httpSettings = backend == PlayModeProductionLikeLlmBackend.LlmUnity
+                ? new LlmUnityServerHttpSettings(behavior, port, model ?? settings.ModelName, "")
+                : null;
+            ILlmClient BuildClient(IAgentMemoryStore store)
+            {
+                return httpSettings == null
+                    ? new OpenAiChatLlmClient(behavior, nativeTools, store)
+                    : new OpenAiChatLlmClient(httpSettings, behavior, GameLoggerUnscopedFallback.Instance,
+                        nativeTools, store);
+            }
+            return new PlayModeProductionLikeLlmHandle(BuildClient(null), backend,
+                coreAiSettings: behavior, llmUnityHarnessRoot: harnessRoot, ownsCoreAiSettings: true,
+                rebuildWithMemoryStore: BuildClient);
+        }
+
         /// <summary>
         /// Builds a throwaway <see cref="CoreAISettingsAsset"/> carrying the resolved behavioral flags
         /// (streaming, orchestration timeout). The asset has no public streaming setter, so the serialized
@@ -638,7 +668,8 @@ namespace CoreAI.Tests.PlayMode
         private static CoreAISettingsAsset BuildBehaviorSettings(bool enableStreaming, int timeoutSeconds)
         {
             CoreAISettingsAsset behavior = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            behavior.SetOrchestratorTimeoutSeconds(timeoutSeconds);
+            // WHY: Zero disables the total budget; a scenario owns its grading deadline independently.
+            behavior.SetOrchestratorTimeoutSeconds(Math.Max(0, timeoutSeconds));
 
             // The tool-call roundtrip cap lives on the SETTINGS the HTTP client reads (SmartToolCallingChatClient
             // resolves _settings.MaxToolCallRoundtrips), NOT on the per-run benchmark settings passed to the
@@ -673,6 +704,8 @@ namespace CoreAI.Tests.PlayMode
 
         private static bool TryCreateLlmUnity(
             CoreAISettingsAsset settings,
+            float? temperature,
+            int timeoutSeconds,
             out PlayModeProductionLikeLlmHandle handle,
             out string ignoreReason)
         {
@@ -706,21 +739,8 @@ namespace CoreAI.Tests.PlayMode
             string model = settings != null && !string.IsNullOrWhiteSpace(settings.ModelName)
                 ? settings.ModelName
                 : "local";
-            ILlmClient client = new OpenAiChatLlmClient(new LlmUnityServerHttpSettings(settings, port, model, ""),
-                settings,
-                GameLoggerUnscopedFallback.Instance,
-                supportsNativeToolCalling: LlmToolChannelResolution.ResolveWithoutProbe(settings.LlmUnityToolChannel, LlmToolChannelResolution.BundledLlamaLibReason).Native,
-                memoryStore: new InMemoryStore());
-            handle = new PlayModeProductionLikeLlmHandle(
-                client,
-                PlayModeProductionLikeLlmBackend.LlmUnity,
-                coreAiSettings: settings,
-                llmUnityHarnessRoot: go,
-                rebuildWithMemoryStore: store => new OpenAiChatLlmClient(new LlmUnityServerHttpSettings(settings, port, model, ""),
-                    settings,
-                    GameLoggerUnscopedFallback.Instance,
-                    supportsNativeToolCalling: LlmToolChannelResolution.ResolveWithoutProbe(settings.LlmUnityToolChannel, LlmToolChannelResolution.BundledLlamaLibReason).Native,
-                    memoryStore: store));
+            handle = CreateAssetHttpHandle(settings, temperature, timeoutSeconds,
+                PlayModeProductionLikeLlmBackend.LlmUnity, port, model, go);
             ignoreReason = null;
             return true;
 #endif

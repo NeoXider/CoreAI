@@ -7,11 +7,35 @@ namespace CoreAI.Benchmarking
 {
     /// <summary>
     /// Renders a <see cref="BenchmarkReport"/> to a compact human-readable Markdown table and to
-    /// canonical machine-readable JSON. Dependency-free (hand-rolled JSON) so it lives in the
-    /// portable core and produces identical output on every host.
+    /// canonical machine-readable JSON in the portable core, preserving imported report evidence.
     /// </summary>
     public static class BenchmarkReportFormatter
     {
+        private static readonly Newtonsoft.Json.JsonSerializerSettings CamelCaseJson = new()
+        {
+            ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver()
+        };
+        /// <summary>Exact per-result session heading shared by writing and legacy evidence recovery.</summary>
+        public static string SessionHeading(ScenarioResult result) =>
+            $"### {result.Group} \u00b7 {result.ScenarioName}{RepetitionLabel(result)}";
+
+        /// <summary>Exact per-result failure heading, including the repetition when needed.</summary>
+        public static string FailureHeading(ScenarioResult result) => $"### {result.ScenarioName}{RepetitionLabel(result)}";
+
+        /// <summary>Exact scene heading shared by writing and legacy evidence recovery.</summary>
+        public static string SceneHeading(ScenarioResult result)
+        {
+            string verdict = result.Classification switch
+            {
+                BenchmarkClassification.Pass => "\u2705 PASS",
+                BenchmarkClassification.Partial => "\U0001f7e1 PARTIAL",
+                _ => "\u274c FAIL"
+            };
+            return $"### {result.Group} \u00b7 {result.ScenarioName}{RepetitionLabel(result)} \u2014 {result.Score.Base:0}/100 {verdict}";
+        }
+
+        private static string RepetitionLabel(ScenarioResult result) => result.Repetition > 1 ? $" (run {result.Repetition})" : "";
+
         public static string ToMarkdown(BenchmarkReport report)
         {
             BenchmarkRunMetadata m = report.Metadata;
@@ -26,6 +50,20 @@ namespace CoreAI.Benchmarking
                           $"· reps {m.Repetitions} · {BenchmarkInfo.SuiteName} {BenchmarkInfo.Version}");
             sb.AppendLine();
 
+            if (m.Segments.Count > 0)
+            {
+                sb.AppendLine($"- **Resumed:** {m.Resumed}; {m.Segments.Count} segment(s), total active wall time {F(m.TotalWallSeconds)} s.");
+                for (int segment = 0; segment < m.Segments.Count; segment++)
+                {
+                    BenchmarkRunSegment timing = m.Segments[segment];
+                    sb.AppendLine($"  - Segment {segment + 1}: {timing.StartedUtc}, {F(timing.WallSeconds)} s ({(timing.Finished ? "finished" : "checkpoint lower bound")}).");
+                }
+            }
+            foreach (ScenarioResult prefabResult in report.Results)
+            {
+                if (!string.IsNullOrEmpty(prefabResult.CastlePrefabPath))
+                    sb.AppendLine($"- **{prefabResult.ScenarioName} prefab:** [{prefabResult.CastlePrefabPath}](../../../{prefabResult.CastlePrefabPath})");
+            }
             sb.AppendLine($"- **Scores:** suite **{F(report.SuiteBaseScore)}**/100 · regular tier " +
                           $"{F(report.RegularBaseScore)}/100 ({report.RegularScenarioCount} scenarios) · " +
                           (report.HasExtreme
@@ -192,6 +230,12 @@ namespace CoreAI.Benchmarking
             bool anyFailure = false;
             foreach (ScenarioResult r in report.Results)
             {
+                if (!string.IsNullOrEmpty(r.ImportedFailureMarkdown))
+                {
+                    anyFailure = true;
+                    sb.Append(r.ImportedFailureMarkdown);
+                    continue;
+                }
                 List<BenchmarkCheckpoint> failed = new();
                 foreach (BenchmarkCheckpoint cp in r.Checkpoints)
                 {
@@ -208,7 +252,7 @@ namespace CoreAI.Benchmarking
 
                 anyFailure = true;
                 sb.AppendLine();
-                sb.AppendLine($"### {r.ScenarioName}");
+                sb.AppendLine(FailureHeading(r));
                 if (!string.IsNullOrEmpty(r.Failure))
                 {
                     sb.AppendLine($"- ❌ run failure ({r.Attribution}): {r.Failure}");
@@ -239,6 +283,12 @@ namespace CoreAI.Benchmarking
             bool anyTranscript = false;
             foreach (ScenarioResult r in report.Results)
             {
+                if (!string.IsNullOrEmpty(r.ImportedSessionMarkdown))
+                {
+                    anyTranscript = true;
+                    sb.Append(r.ImportedSessionMarkdown);
+                    continue;
+                }
                 if (string.IsNullOrWhiteSpace(r.SessionTranscript))
                 {
                     continue;
@@ -246,8 +296,7 @@ namespace CoreAI.Benchmarking
 
                 anyTranscript = true;
                 sb.AppendLine();
-                string repLabel = r.Repetition > 1 ? $" (run {r.Repetition})" : "";
-                sb.AppendLine($"### {r.Group} · {r.ScenarioName}{repLabel}");
+                sb.AppendLine(SessionHeading(r));
                 sb.AppendLine();
                 sb.AppendLine(r.SessionTranscript.TrimEnd());
             }
@@ -904,7 +953,11 @@ namespace CoreAI.Benchmarking
             sb.Append(Str("reasoningEffort", m.ReasoningEffort ?? "")).Append(',');
             sb.Append(Num("repetitions", m.Repetitions)).Append(',');
             sb.Append(Str("unityVersion", m.UnityVersion)).Append(',');
-            sb.Append(Str("suiteVersion", m.SuiteVersion));
+            sb.Append(Str("suiteVersion", m.SuiteVersion)).Append(',');
+            sb.Append(Bool("resumed", m.Resumed)).Append(',');
+            sb.Append(Num("segmentCount", m.Segments.Count)).Append(',');
+            sb.Append(Num("totalWallSeconds", m.TotalWallSeconds)).Append(',');
+            sb.Append("\"segments\":").Append(Newtonsoft.Json.JsonConvert.SerializeObject(m.Segments, CamelCaseJson));
             sb.Append("},");
 
             sb.Append("\"summary\":{");
@@ -1006,7 +1059,29 @@ namespace CoreAI.Benchmarking
                     sb.Append(',');
                 }
 
+                if (!string.IsNullOrEmpty(r.ImportedJson))
+                {
+                    sb.Append(r.ImportedJson);
+                    continue;
+                }
                 sb.Append('{');
+                sb.Append(Str("castlePrefabPath", r.CastlePrefabPath)).Append(',');
+                sb.Append(Str("sessionTranscript", r.SessionTranscript)).Append(',');
+                sb.Append(Str("whatItChecks", r.WhatItChecks)).Append(',');
+                sb.Append(Num("failedToolCalls", r.FailedToolCalls)).Append(',');
+                sb.Append(Num("invalidCommands", r.InvalidCommands)).Append(',');
+                sb.Append(Bool("tokensFromProvider", r.TokensFromProvider)).Append(',');
+                sb.Append(Num("correctnessBonus", r.Score.CorrectnessBonus)).Append(',');
+                sb.Append(Num("tokenBonus", r.Score.TokenBonus)).Append(',');
+                sb.Append(Num("timeBonus", r.Score.TimeBonus)).Append(',');
+                sb.Append(Num("efficiencyBonus", r.Score.EfficiencyBonus)).Append(',');
+                sb.Append(Num("mergedBase", r.Score.MergedBase)).Append(',');
+                sb.Append(Num("judgeWeight", r.Score.JudgeWeight)).Append(',');
+                sb.Append(double.IsNaN(r.Score.JudgeScore) ? "\"judgeScore\":null" : Num("judgeScore", r.Score.JudgeScore)).Append(',');
+                sb.Append(r.Score.HardCap.HasValue ? Num("hardCap", r.Score.HardCap.Value) : "\"hardCap\":null").Append(',');
+                sb.Append(r.ProviderPromptTokens.HasValue ? Num("providerPromptTokens", r.ProviderPromptTokens.Value) : "\"providerPromptTokens\":null").Append(',');
+                sb.Append(r.ProviderCompletionTokens.HasValue ? Num("providerCompletionTokens", r.ProviderCompletionTokens.Value) : "\"providerCompletionTokens\":null").Append(',');
+                sb.Append("\"penaltyDetails\":").Append(Newtonsoft.Json.JsonConvert.SerializeObject(r.Penalties, CamelCaseJson)).Append(',');
                 sb.Append(Str("scenarioId", r.ScenarioId)).Append(',');
                 sb.Append(Str("scenarioName", r.ScenarioName)).Append(',');
                 sb.Append(Str("group", r.Group)).Append(',');
@@ -1056,7 +1131,7 @@ namespace CoreAI.Benchmarking
 
             sb.Append(']');
             sb.Append('}');
-            return sb.ToString();
+            return report.PreserveSummary(sb.ToString());
         }
 
         private static string Verdict(ScenarioResult r)

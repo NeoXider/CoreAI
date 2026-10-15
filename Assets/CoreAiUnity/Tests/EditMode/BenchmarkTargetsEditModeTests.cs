@@ -23,13 +23,148 @@ namespace CoreAI.Tests.EditMode
             GameCreationBenchmarkLauncher.EnvNativeTools, GameCreationBenchmarkLauncher.EnvGroups,
             GameCreationBenchmarkLauncher.EnvRepetitions, GameCreationBenchmarkLauncher.EnvRetries,
             GameCreationBenchmarkLauncher.EnvTimeout, GameCreationBenchmarkLauncher.EnvTargets,
-            GameCreationBenchmarkLauncher.EnvParallel, GameCreationBenchmarkLauncher.EnvReasoningEffort
+            GameCreationBenchmarkLauncher.EnvParallel, GameCreationBenchmarkLauncher.EnvReasoningEffort,
+            GameCreationBenchmarkLauncher.EnvResume, GameCreationBenchmarkLauncher.EnvOnlyTargets
         };
 
         private readonly Dictionary<string, string> _savedEnv = new();
         private string _tempDir;
         private string _savedTargetsPref;
         private bool _hadTargetsPref;
+
+        [Test]
+        public void WindowResume_CompletedDeferredTargetNeedsNoOriginalConfiguration()
+        {
+            string model = "deferred-" + Guid.NewGuid().ToString("N");
+            BenchmarkStoredTarget deferred = BenchmarkStoredTarget.Deferred(
+                new BenchmarkTarget(model, "http://localhost:8899/v1", "", "deferred"), "deferred");
+            BenchmarkRunStore store = new(_tempDir, "deferred_test");
+            store.SaveManifest(new BenchmarkRunManifest
+            {
+                RunId = "deferred_test", Targets = new List<BenchmarkStoredTarget>
+                {
+                    deferred, BenchmarkStoredTarget.From(new BenchmarkTarget("pending", "http://localhost:8898/v1", "", "pending"), "pending")
+                }
+            });
+            store.Save("deferred", new BenchmarkTargetState
+            {
+                ReportsWritten = true,
+                Metadata = new BenchmarkRunMetadata { RunId = "deferred_test", ModelId = "deferred" }
+            });
+            File.WriteAllText(Path.Combine(_tempDir, "deferred.json"), "{}");
+            File.Delete(store.CompletionPath("deferred"));
+            Environment.SetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvTargets, null);
+            try
+            {
+                GameCreationBenchmarkLauncher.PrepareResumeEnvironment(_tempDir, "deferred_test");
+                Assert.AreEqual(2, BenchmarkTargetList.Parse(Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvTargets)).Count);
+            }
+            finally
+            {
+                GameCreationBenchmarkLauncher.RestoreResumeEnvironment();
+            }
+            File.Delete(Path.Combine(_tempDir, "deferred.json"));
+            InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
+                GameCreationBenchmarkLauncher.PrepareResumeEnvironment(_tempDir, "deferred_test"));
+            StringAssert.Contains("original legacy target configuration", error.Message);
+        }
+
+        [Test]
+        public void WindowResume_ReplacesStaleTargetsAndRestoresAllProcessOverrides()
+        {
+            BenchmarkRunStore store = new(_tempDir, "resume_test");
+            store.SaveManifest(new BenchmarkRunManifest
+            {
+                RunId = "resume_test",
+                Options = new Dictionary<string, string>
+                {
+                    [GameCreationBenchmarkLauncher.EnvGroups] = "G1",
+                    [GameCreationBenchmarkLauncher.EnvStreaming] = "1",
+                    [GameCreationBenchmarkLauncher.EnvRetries] = "1"
+                },
+                Targets = new List<BenchmarkStoredTarget>
+                {
+                    BenchmarkStoredTarget.From(new BenchmarkTarget("original-model", "http://localhost:8899/v1", "", "original"), "original")
+                }
+            });
+            Environment.SetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvTargets, "stale|other-model|http://localhost:8898/v1");
+            Environment.SetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvGroups, "G8");
+            Environment.SetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvRetries, "9");
+            const string addedOption = "COREAI_BENCHMARK_WINDOW_RESUME_TEST";
+            string previousAddedOption = Environment.GetEnvironmentVariable(addedOption);
+            try
+            {
+                GameCreationBenchmarkLauncher.PrepareResumeEnvironment(_tempDir, "resume_test");
+                Assert.AreEqual("original-model", BenchmarkTargetList.Parse(Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvTargets))[0].Model);
+                Assert.AreEqual("G1", Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvGroups));
+                Assert.AreEqual("9", Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvRetries));
+                Environment.SetEnvironmentVariable(addedOption, "created while running");
+                GameCreationBenchmarkLauncher.HandleResumePlayModeState(PlayModeStateChange.EnteredPlayMode);
+                Assert.AreEqual("G1", Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvGroups));
+                GameCreationBenchmarkLauncher.HandleResumePlayModeState(PlayModeStateChange.EnteredEditMode);
+                StringAssert.Contains("stale", Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvTargets));
+                Assert.AreEqual("G8", Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvGroups));
+                Assert.AreEqual(previousAddedOption, Environment.GetEnvironmentVariable(addedOption));
+            }
+            finally
+            {
+                GameCreationBenchmarkLauncher.RestoreResumeEnvironment();
+                Environment.SetEnvironmentVariable(addedOption, previousAddedOption);
+            }
+        }
+
+        [Test]
+        public void WindowResume_MissingLiteralKeyExplainsRecoveryAndRestoresEnvironment()
+        {
+            string model = "missing-secret-" + Guid.NewGuid().ToString("N");
+            BenchmarkRunStore store = new(_tempDir, "literal_test");
+            store.SaveManifest(new BenchmarkRunManifest
+            {
+                RunId = "literal_test",
+                Targets = new List<BenchmarkStoredTarget>
+                {
+                    BenchmarkStoredTarget.From(new BenchmarkTarget(model, "http://localhost:8899/v1", "secret", "target"), "target")
+                }
+            });
+            Environment.SetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvTargets, "stale|other-model|http://localhost:8898/v1");
+            string previousResume = Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvResume);
+            InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
+                GameCreationBenchmarkLauncher.PrepareResumeEnvironment(_tempDir, "literal_test"));
+            StringAssert.Contains("literal API key", error.Message);
+            StringAssert.Contains("targets file", error.Message);
+            Assert.AreEqual(previousResume, Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvResume));
+            StringAssert.Contains("stale", Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvTargets));
+        }
+
+        [Test]
+        public void WindowResume_EmptySessionRowDoesNotShadowAvailableOriginalLiteralKey()
+        {
+            string model = "available-secret-" + Guid.NewGuid().ToString("N");
+            BenchmarkTarget original = new(model, "http://localhost:8899/v1", "available-key", "target");
+            BenchmarkRunStore store = new(_tempDir, "available_test");
+            store.SaveManifest(new BenchmarkRunManifest
+            {
+                RunId = "available_test",
+                Targets = new List<BenchmarkStoredTarget> { BenchmarkStoredTarget.From(original, "target") }
+            });
+            string previousRows = SessionState.GetString(GameCreationBenchmarkLauncher.SessionTargetsKey, "");
+            try
+            {
+                GameCreationBenchmarkLauncher.SaveSessionTargetRows(new[]
+                {
+                    new TargetRow { model = model, baseUrl = original.BaseUrl, label = original.Label, apiKey = "" }
+                });
+                Environment.SetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvTargets, BenchmarkTargetList.ToJson(new[] { original }, true));
+                GameCreationBenchmarkLauncher.PrepareResumeEnvironment(_tempDir, "available_test");
+                BenchmarkTarget resumed = BenchmarkTargetList.Parse(Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvTargets))[0];
+                Assert.AreEqual("available-key", resumed.ResolveApiKey());
+            }
+            finally
+            {
+                GameCreationBenchmarkLauncher.RestoreResumeEnvironment();
+                SessionState.SetString(GameCreationBenchmarkLauncher.SessionTargetsKey, previousRows);
+            }
+        }
 
         [SetUp]
         public void SetUp()
@@ -40,6 +175,8 @@ namespace CoreAI.Tests.EditMode
             }
 
             Environment.SetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvReasoningEffort, null);
+            Environment.SetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvResume, null);
+            Environment.SetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvOnlyTargets, null);
 
             _hadTargetsPref = EditorPrefs.HasKey(GameCreationBenchmarkLauncher.PrefTargets);
             _savedTargetsPref = EditorPrefs.GetString(GameCreationBenchmarkLauncher.PrefTargets, "");
@@ -386,6 +523,112 @@ namespace CoreAI.Tests.EditMode
             GameCreationBenchmarkLauncher.ConfigureTargets(null, 3);
             Assert.IsNull(Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvTargets));
             Assert.IsNull(Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvParallel));
+        }
+
+        [TestCase("20261015_224850")]
+        [TestCase("latest")]
+        [TestCase("LATEST")]
+        public void CliArguments_ResumeAndTargetFilterOverrideEnvironment(string runId)
+        {
+            Environment.SetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvTargets, null);
+            Environment.SetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvResume, "previous_run");
+            Assert.IsTrue(GameCreationBenchmarkLauncher.TryApplyCliArguments(new[]
+            {
+                "Unity.exe", GameCreationBenchmarkLauncher.ArgResume, runId,
+                GameCreationBenchmarkLauncher.ArgOnlyTargets, " affected, second "
+            }, out string error), error);
+
+            Assert.AreEqual(string.Equals(runId, "latest", StringComparison.OrdinalIgnoreCase) ? "latest" : runId,
+                Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvResume));
+            Assert.AreEqual("affected,second",
+                Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvOnlyTargets));
+        }
+
+        [Test]
+        public void CliArguments_AbsentOverridesPreserveResumeShapingAndConnectionEnvironment()
+        {
+            Environment.SetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvTargets, null);
+            Dictionary<string, string> expected = new()
+            {
+                [GameCreationBenchmarkLauncher.EnvResume] = "latest",
+                [GameCreationBenchmarkLauncher.EnvOnlyTargets] = "affected",
+                [GameCreationBenchmarkLauncher.EnvModel] = "model-from-env",
+                [GameCreationBenchmarkLauncher.EnvBaseUrl] = "http://localhost:8831/v1",
+                [GameCreationBenchmarkLauncher.EnvApiKey] = "session-secret",
+                [GameCreationBenchmarkLauncher.EnvStreaming] = "1",
+                [GameCreationBenchmarkLauncher.EnvNativeTools] = "0",
+                [GameCreationBenchmarkLauncher.EnvGroups] = "G2,G6",
+                [GameCreationBenchmarkLauncher.EnvRepetitions] = "3",
+                [GameCreationBenchmarkLauncher.EnvRetries] = "2",
+                [GameCreationBenchmarkLauncher.EnvTimeout] = "480"
+            };
+            foreach (KeyValuePair<string, string> pair in expected)
+            {
+                Environment.SetEnvironmentVariable(pair.Key, pair.Value);
+            }
+
+            Assert.IsTrue(GameCreationBenchmarkLauncher.TryApplyCliArguments(new[] { "Unity.exe" },
+                out string error), error);
+            foreach (KeyValuePair<string, string> pair in expected)
+            {
+                Assert.AreEqual(pair.Value, Environment.GetEnvironmentVariable(pair.Key), pair.Key);
+            }
+        }
+
+        [TestCase("../outside")]
+        [TestCase("folder/run")]
+        [TestCase("")]
+        public void CliArguments_RejectInvalidResumeWithoutChangingEnvironment(string runId)
+        {
+            Environment.SetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvResume, "previous_run");
+            Assert.IsFalse(GameCreationBenchmarkLauncher.TryApplyCliArguments(new[]
+            {
+                "Unity.exe", GameCreationBenchmarkLauncher.ArgResume, runId,
+                GameCreationBenchmarkLauncher.ArgModel, "replacement"
+            }, out string error));
+            StringAssert.Contains(GameCreationBenchmarkLauncher.ArgResume, error);
+            Assert.AreEqual("previous_run", Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvResume));
+        }
+
+        [Test]
+        public void CliArguments_RejectInvalidResumeEnvironment()
+        {
+            Environment.SetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvResume, "../outside");
+            Assert.IsFalse(GameCreationBenchmarkLauncher.TryApplyCliArguments(new[] { "Unity.exe" },
+                out string error));
+            StringAssert.Contains(GameCreationBenchmarkLauncher.EnvResume, error);
+        }
+
+        [Test]
+        public void CliArguments_RejectMissingResumeValueBeforeAnotherFlag()
+        {
+            Assert.IsFalse(GameCreationBenchmarkLauncher.TryApplyCliArguments(new[]
+            {
+                "Unity.exe", GameCreationBenchmarkLauncher.ArgResume,
+                GameCreationBenchmarkLauncher.ArgOnlyTargets, "affected"
+            }, out string error));
+            StringAssert.Contains(GameCreationBenchmarkLauncher.ArgResume, error);
+        }
+
+        [TestCase("a,,b")]
+        [TestCase(" ")]
+        public void CliArguments_RejectEmptyTargetFilterLabels(string labels)
+        {
+            Assert.IsFalse(GameCreationBenchmarkLauncher.TryApplyCliArguments(new[]
+            {
+                "Unity.exe", GameCreationBenchmarkLauncher.ArgResume, "latest",
+                GameCreationBenchmarkLauncher.ArgOnlyTargets, labels
+            }, out string error));
+            StringAssert.Contains(GameCreationBenchmarkLauncher.ArgOnlyTargets, error);
+        }
+
+        [Test]
+        public void ConfigureResume_FreshRunClearsResumeAndTargetFilter()
+        {
+            GameCreationBenchmarkLauncher.ConfigureResume("latest", "affected");
+            GameCreationBenchmarkLauncher.ConfigureResume(null);
+            Assert.IsNull(Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvResume));
+            Assert.IsNull(Environment.GetEnvironmentVariable(GameCreationBenchmarkLauncher.EnvOnlyTargets));
         }
 
         [Test]

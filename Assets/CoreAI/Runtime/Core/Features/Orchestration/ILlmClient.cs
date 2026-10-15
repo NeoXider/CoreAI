@@ -75,6 +75,19 @@ namespace CoreAI.Ai
         ClientLimitExceeded = 14
     }
 
+    /// <summary>Identifies the budget that expired without parsing provider error text.</summary>
+    public enum LlmTimeoutKind
+    {
+        /// <summary>No specific timeout budget was recorded.</summary>
+        None = 0,
+        /// <summary>The total request deadline expired.</summary>
+        TotalDeadline = 1,
+        /// <summary>The provider produced no generation delta during the response-wait window.</summary>
+        ResponseWait = 2,
+        /// <summary>The transport timed out independently of generation budgets.</summary>
+        Transport = 3
+    }
+
     /// <summary>
     /// Exception type used by LLM adapters to preserve structured failure details across abstraction layers.
     /// </summary>
@@ -87,13 +100,29 @@ namespace CoreAI.Ai
             int? httpStatus = null,
             int? retryAfterSeconds = null,
             string providerErrorBody = null)
+            : this(message, errorCode, LlmTimeoutKind.None, httpStatus, retryAfterSeconds, providerErrorBody)
+        {
+        }
+
+        /// <summary>Creates an exception with an explicitly identified timeout budget.</summary>
+        public LlmClientException(
+            string message,
+            LlmErrorCode errorCode,
+            LlmTimeoutKind timeoutKind,
+            int? httpStatus = null,
+            int? retryAfterSeconds = null,
+            string providerErrorBody = null)
             : base(message ?? "")
         {
             ErrorCode = errorCode;
+            TimeoutKind = timeoutKind;
             HttpStatus = httpStatus;
             RetryAfterSeconds = retryAfterSeconds;
             ProviderErrorBody = providerErrorBody ?? "";
         }
+
+        /// <summary>The budget that expired, when known.</summary>
+        public LlmTimeoutKind TimeoutKind { get; }
 
         /// <summary>Stable failure category.</summary>
         public LlmErrorCode ErrorCode { get; }
@@ -203,7 +232,8 @@ namespace CoreAI.Ai
         {
             LlmClientException provider = LlmCancellation.FindClientException(exception);
             if (provider != null && provider.ErrorCode != LlmErrorCode.Cancelled &&
-                provider.ErrorCode != LlmErrorCode.EmptyResponse) return true;
+                provider.ErrorCode != LlmErrorCode.EmptyResponse &&
+                provider.TimeoutKind != LlmTimeoutKind.TotalDeadline) return true;
             for (Exception current = exception; current != null; current = current.InnerException)
             {
                 if (current is System.IO.IOException || current is System.Net.Http.HttpRequestException) return true;
@@ -401,6 +431,7 @@ namespace CoreAI.Ai
         public const string MetadataKey = "coreai.provider_response_state";
         private int _responseObserved;
         private int _retrySuppressed;
+        private int _timeoutKind;
 
         /// <summary>True once the current provider attempt opened successfully or produced output.</summary>
         public bool ResponseObserved => Volatile.Read(ref _responseObserved) != 0;
@@ -410,6 +441,7 @@ namespace CoreAI.Ai
         {
             Volatile.Write(ref _responseObserved, 0);
             Volatile.Write(ref _retrySuppressed, 0);
+            Volatile.Write(ref _timeoutKind, 0);
         }
 
         /// <summary>True when the request's own deadline expired and replay would restart its budget.</summary>
@@ -417,6 +449,12 @@ namespace CoreAI.Ai
 
         /// <summary>Preserves deadline expiry across adapters that translate exceptions into terminal chunks.</summary>
         public void SuppressRetries() => Volatile.Write(ref _retrySuppressed, 1);
+
+        /// <summary>The expired request budget, retained when adapters map exceptions into chunks.</summary>
+        public LlmTimeoutKind TimeoutKind => (LlmTimeoutKind)Volatile.Read(ref _timeoutKind);
+
+        /// <summary>Records the budget that ended the current provider attempt.</summary>
+        public void RecordTimeout(LlmTimeoutKind kind) => Volatile.Write(ref _timeoutKind, (int)kind);
 
         /// <summary>Records a successful response or generated delta on this attempt.</summary>
         public void RecordResponse() => Volatile.Write(ref _responseObserved, 1);

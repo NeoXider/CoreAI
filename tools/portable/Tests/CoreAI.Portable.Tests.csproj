@@ -31,6 +31,10 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="RepositoryTestSetup.cs" />
+    <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/GameCreationBenchmarkPrefabPublisher.cs" />
+    <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/GameCreationBenchmarkPrefabPublisherEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/BenchmarkRunStoreEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/BenchmarkRunStoreEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/BenchmarkLegacyReportEvidenceEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/LlmRequestSettingsCompatibilityEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/LlmRequestSettingsCompatibilityEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/ActorAdmissionEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/ActorAdmissionEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/ActorContextEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/ActorContextEditModeTests.cs" />

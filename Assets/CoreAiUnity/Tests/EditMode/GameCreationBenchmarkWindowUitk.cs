@@ -825,7 +825,41 @@ namespace CoreAI.Tests.EditMode
             _stopButton.style.display = DisplayStyle.None;
             row.Add(_stopButton);
             section.Add(row);
+            section.Add(new Button(ShowInterruptedRuns) { text = "Resume interrupted run" });
             return section;
+        }
+
+        private void ShowInterruptedRuns()
+        {
+            GenericMenu menu = new();
+            IReadOnlyList<string> runs;
+            try
+            {
+                runs = BenchmarkRunStore.ListIncompleteRuns(GameCreationBenchmarkLauncher.ResultsRoot(), message => Debug.LogWarning(message));
+            }
+            catch (Exception error) when (error is System.IO.IOException || error is System.IO.InvalidDataException ||
+                                           error is FormatException || error is Newtonsoft.Json.JsonException || error is UnauthorizedAccessException)
+            {
+                Debug.LogWarning("[Benchmark] Cannot list interrupted runs: " + error.Message);
+                menu.AddDisabledItem(new GUIContent("Cannot read interrupted runs; see Console"));
+                menu.ShowAsContext();
+                return;
+            }
+            if (runs.Count == 0)
+            {
+                menu.AddDisabledItem(new GUIContent("No interrupted runs"));
+            }
+            else
+            {
+                foreach (string runId in runs.OrderByDescending(id => id, StringComparer.Ordinal))
+                {
+                    string selectedRun = runId;
+                    menu.AddItem(new GUIContent(selectedRun), false,
+                        () => GameCreationBenchmarkLauncher.ResumeInterruptedRun(selectedRun));
+                }
+            }
+
+            menu.ShowAsContext();
         }
 
         private VisualElement BuildStatusSection()
@@ -976,6 +1010,7 @@ namespace CoreAI.Tests.EditMode
 
             Persist();
             GameCreationBenchmarkLauncher.ApplySavedConfig();
+            GameCreationBenchmarkLauncher.ConfigureResume(null);
             // WHY: after ApplySavedConfig, which only knows the saved rows; these rows carry this session's keys.
             GameCreationBenchmarkLauncher.ConfigureTargets(targetSpec, _parallel);
             GameCreationBenchmarkLauncher.ConfigureReasoningEffort(_reasoningEffort);

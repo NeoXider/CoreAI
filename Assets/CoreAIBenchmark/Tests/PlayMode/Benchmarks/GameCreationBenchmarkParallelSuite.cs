@@ -5,6 +5,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
+using System.Linq;
 using CoreAI.Ai;
 using CoreAI.Benchmarking;
 using CoreAI.Infrastructure.Llm;
@@ -64,6 +65,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             /// <summary>True when the budget gate or a stop ended the loop early.</summary>
             public bool BudgetHit;
+            public bool SkipCompleted;
+            public BenchmarkTargetState Checkpoint;
+            public BenchmarkRunStore CheckpointStore;
+            public string CheckpointSlug;
+            public IReadOnlyList<BenchmarkPlannedScenario> Plan;
+            public double SegmentStartedSeconds;
 
             /// <summary>Path of the written Markdown report.</summary>
             public string ArtifactPath = "";
@@ -147,7 +154,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 int scenarioReps = scenario.RepsOverride ?? run.Repetitions;
                 for (int rep = 1; rep <= scenarioReps; rep++)
                 {
-                    pending.Add(new PlannedRep(scenario, rep, scenarioReps));
+                    if (run.Checkpoint?.IsFinalized(scenario.Id, rep) != true)
+                        pending.Add(new PlannedRep(scenario, rep, scenarioReps));
                 }
             }
 
@@ -269,7 +277,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     if (captured != null)
                     {
                         captured.Repetition = planned.Rep;
-                        run.Report.Add(captured);
+                        if (run.Checkpoint != null)
+                        {
+                            run.Checkpoint.Merge(captured, run.Plan);
+                            run.Report.Results.Clear();
+                            run.Report.Results.AddRange(run.Checkpoint.Results);
+                            SaveCheckpoint(run);
+                        }
+                        else run.Report.Add(captured);
                         run.Progress.CompleteScenario(ProgressLine(captured),
                             Stars(BenchmarkInfo.DifficultyFor(current.Group)));
                     }
@@ -389,9 +404,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 run.Progress.End();
             }
 
+            SaveCheckpoint(run, segmentFinished: true);
             byte[] modelCardPng = null;
             yield return CaptureReportModelCard(run.Report, run.VisualLane, png => modelCardPng = png);
             run.ArtifactPath = WriteArtifacts(run.Report, modelCardPng, run.ArtifactStem, run.ArtifactDirectory);
+            if (run.ArtifactPath != "(not written)")
+                SaveCheckpoint(run, run.Plan == null || run.Plan.All(p => run.Checkpoint.IsFinalized(p.Id, p.Repetition)), true);
             BenchmarkReport report = run.Report;
             Debug.Log($"{run.LogPrefix} ===== TARGET COMPLETE =====\n" +
                       $"Suite base score: {report.SuiteBaseScore:0.#}/100 (mean bonus {report.MeanBonus:0.#})\n" +
@@ -479,7 +497,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         {
             int parallel = BenchmarkTargetList.ResolveParallelism(
                 Environment.GetEnvironmentVariable(BenchmarkTargetList.EnvParallel), targets.Count);
-            string runId = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string resumeId = ResolveResumeId();
+            bool resume = resumeId.Length > 0;
+            string runId = resume ? resumeId : DateTime.Now.ToString("yyyyMMdd_HHmmss");
             double budget = ResolveSuiteBudgetSeconds(targets.Count);
             int repetitions = ResolveRepetitions();
             BenchmarkVisualLane visualLane = new();
@@ -501,18 +521,119 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             Debug.Log($"[Benchmark] Multi-target run {runId}: {targets.Count} target(s), up to {parallel} at a " +
                       $"time, suite budget {budget:0}s, reasoning effort " +
                       $"{(defaultEffort.Length > 0 ? defaultEffort : "provider default")} unless a target sets its own.");
+            ValidateTargetFilter(targets);
+            GameBenchmarkScenario[] plannedScenarios = AllScenarios();
+            BenchmarkRunStore checkpointStore = new(DefaultResultsDirectory(), runId);
+            BenchmarkRunManifest priorManifest = resume && checkpointStore.HasManifest ? checkpointStore.LoadManifest() : null;
+            HashSet<string> inactiveTargets = new(StringComparer.Ordinal);
+            List<BenchmarkTarget> durableTargets = new();
+            HashSet<string> defaultSecretSources = new(StringComparer.Ordinal);
+            bool? resolvedStreaming = null;
+            bool? resolvedNativeTools = null;
+            foreach (BenchmarkTarget target in targets)
+            {
+                string slug = ArtifactStem(runId, target.Model, target.Label);
+                BenchmarkStoredTarget savedTarget = priorManifest?.Targets.First(t => t.Slug == slug);
+                if (!WantsTarget(target.Label, target.Model))
+                {
+                    inactiveTargets.Add(slug);
+                    durableTargets.Add(target);
+                    continue;
+                }
+                if (savedTarget != null && (!WantsTarget(target.Label, target.Model) || !TargetNeedsWork(checkpointStore, priorManifest, savedTarget)))
+                {
+                    inactiveTargets.Add(slug);
+                    durableTargets.Add(target);
+                    continue;
+                }
+                PlayModeOpenAiTestConfig.ResolvedConfig resolved = PlayModeOpenAiTestConfig.ResolveForEndpoint(
+                    target.BaseUrl, target.Model, target.ResolveApiKey(), target.ExtraBodyJson,
+                    target.ReasoningEffort, defaultEffort, target.Temperature);
+                if (target.ApiKey.Length == 0 && resolved.ApiKey.Length > 0) defaultSecretSources.Add(slug);
+                resolvedStreaming ??= resolved.Streaming;
+                resolvedNativeTools ??= resolved.NativeTools;
+                string keySource = target.HasKeyReference ? target.ApiKey : resolved.ApiKey;
+                if (!target.HasKeyReference && resolved.ApiKey.Length > 0 &&
+                    Environment.GetEnvironmentVariable("COREAI_TEST_API_KEY") == resolved.ApiKey)
+                    keySource = "env:COREAI_TEST_API_KEY";
+                durableTargets.Add(new BenchmarkTarget(resolved.Model, resolved.BaseUrl, keySource, target.Label,
+                    resolved.ReasoningEffort, resolved.ExtraBodyJson, target.Temperature));
+            }
+            Dictionary<string, BenchmarkStoredTarget> frozenTargets = priorManifest?.Targets
+                .Where(target => inactiveTargets.Contains(target.Slug)).ToDictionary(target => target.Slug, StringComparer.Ordinal);
+            BenchmarkRunManifest currentManifest = CreateManifest(runId, durableTargets, plannedScenarios, repetitions, frozenTargets);
+            foreach (BenchmarkStoredTarget candidate in currentManifest.Targets)
+                if (!inactiveTargets.Contains(candidate.Slug)) candidate.UsesDefaultSecretSource = defaultSecretSources.Contains(candidate.Slug);
+            if (priorManifest != null)
+                for (int i = 0; i < currentManifest.Targets.Count; i++)
+                {
+                    BenchmarkStoredTarget candidate = currentManifest.Targets[i];
+                    if (!WantsTarget(candidate.Label, candidate.Model))
+                        currentManifest.Targets[i] = priorManifest.Targets.First(t => t.Slug == candidate.Slug);
+                    else if (inactiveTargets.Contains(candidate.Slug))
+                        candidate.RequiresExternalKey = priorManifest.Targets.First(t => t.Slug == candidate.Slug).RequiresExternalKey;
+                }
+            currentManifest.Options["COREAI_TEST_STREAMING"] = resolvedStreaming == true ? "1" : "0";
+            currentManifest.Options["COREAI_TEST_NATIVE_TOOLS"] = resolvedNativeTools == true ? "1" : "0";
+            BenchmarkRunManifest manifest = resume && checkpointStore.HasManifest ? checkpointStore.LoadManifest() : currentManifest;
+            manifest.Validate(SuiteVersion, currentManifest.Scenarios);
+            if (resume && checkpointStore.HasManifest)
+            {
+                bool materialized = false;
+                for (int i = 0; i < currentManifest.Targets.Count; i++)
+                {
+                    BenchmarkStoredTarget candidate = currentManifest.Targets[i];
+                    if (!WantsTarget(candidate.Label, candidate.Model) || inactiveTargets.Contains(candidate.Slug)) continue;
+                    if (manifest.Targets[i].ConfigurationDeferred)
+                    {
+                        BenchmarkTargetState original = checkpointStore.Load(candidate.Slug);
+                        if (original != null) candidate.ValidateLegacyMetadata(original.Metadata, true,
+                            resolvedStreaming == true, resolvedNativeTools == true);
+                        manifest.Targets[i] = candidate;
+                        materialized = true;
+                    }
+                    else manifest.Targets[i].Validate(candidate);
+                }
+                if (materialized) checkpointStore.SaveManifest(manifest);
+            }
+            if (!resume && checkpointStore.HasManifest)
+                throw new InvalidOperationException("A benchmark run with this timestamp already exists; wait a second before starting another run.");
+            if (!checkpointStore.HasManifest)
+            {
+                if (resume)
+                {
+                    foreach (BenchmarkStoredTarget savedTarget in manifest.Targets)
+                    {
+                        string oldReport = System.IO.Path.Combine(DefaultResultsDirectory(), savedTarget.Slug + ".json");
+                        if (!System.IO.File.Exists(oldReport)) continue;
+                        BenchmarkTargetState imported = BenchmarkRunStore.ImportReport(System.IO.File.ReadAllText(oldReport));
+                        bool selected = WantsTarget(savedTarget.Label, savedTarget.Model);
+                        if (selected) imported.Validate(manifest.Scenarios);
+                        savedTarget.ValidateLegacyMetadata(imported.Metadata, selected,
+                            resolvedStreaming == true, resolvedNativeTools == true);
+                        RestoreLegacyArtifacts(imported, savedTarget.Slug);
+                        imported.ReportsWritten = selected
+                            ? manifest.Scenarios.All(p => imported.IsFinalized(p.Id, p.Repetition))
+                            : imported.Results.All(r => r.Attribution != FailureAttribution.Environment);
+                        checkpointStore.Save(savedTarget.Slug, imported);
+                    }
+                }
+                checkpointStore.SaveManifest(manifest);
+            }
+            ValidateTargetFilter(targets);
             BenchmarkProgress.BeginSession();
             try
             {
                 foreach (BenchmarkTarget target in targets)
                 {
+                    if (!WantsTarget(target.Label, target.Model) || inactiveTargets.Contains(ArtifactStem(runId, target.Model, target.Label))) continue;
                     PlayModeProductionLikeLlmHandle handle;
                     string reason;
                     bool created;
                     try
                     {
                         created = PlayModeProductionLikeLlmFactory.TryCreateForEndpoint(target.BaseUrl, target.Model,
-                            target.ResolveApiKey(), target.Temperature, 300, out handle, out reason, target.ExtraBodyJson,
+                            target.ResolveApiKey(), target.Temperature, 0, out handle, out reason, target.ExtraBodyJson,
                             target.ReasoningEffort, defaultEffort);
                     }
                     catch (ArgumentException ex)
@@ -543,7 +664,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                             handle.ResolvedConfig?.ReasoningEffort, handle.Temperature)
                     };
                     string logPrefix = $"[Benchmark][{target.DisplayName}]";
-                    runs.Add(new TargetSuiteRun
+                    TargetSuiteRun targetRun = new TargetSuiteRun
                     {
                         DisplayName = target.DisplayName,
                         TokenizerModelId = target.Model,
@@ -559,16 +680,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         SuiteBudgetSeconds = budget,
                         SuiteClock = suiteClock,
                         VisualLane = visualLane,
-                        SharedSceneFirst = true,
+                        SharedSceneFirst = manifest.ParallelExecution,
                         LogPrefix = logPrefix,
                         ScenarioContext = new ScenarioRunContext
                         {
                             TokenizerModelId = target.Model,
+                            ArtifactId = ArtifactStem(runId, target.Model, target.Label),
                             LogPrefix = logPrefix,
-                            RequireTraceId = true,
-                            Parallel = true
+                            RequireTraceId = manifest.ParallelExecution,
+                            Parallel = manifest.ParallelExecution
                         }
-                    });
+                    };
+                    AttachCheckpoint(targetRun, checkpointStore, manifest, targetRun.ArtifactStem, resume);
+                    if (targetRun.SkipCompleted) targetRun.Progress.End();
+                    else runs.Add(targetRun);
                 }
 
                 RaiseSharedEndpointConnectionLimits(targets);

@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [7.53.0] - 2026-10-16
+
+### Fixed
+
+- Benchmark repair retains ISO timestamps, exact kept JSON/Markdown/trace evidence, repetition identity, legacy row order and unchanged summary numbers; corrupt manifests and missing evidence are handled explicitly. Secret rejection covers nested credentials and authorization values.
+- Deadline-driven cancellation keeps its typed timeout attribution even when a timer fires early; the original LLM exception constructor remains binary compatible.
+- Benchmark legacy repair preserves per-scenario Markdown evidence, provider token flags, tool-failure counters and scores; selected-target checks, measured legacy timing, bounded atomic commit retries and lightweight tolerant run listing harden resume.
+- Typed response-wait expiry remains an Environment failure after usable provider output. Benchmarking uses the precompiled Newtonsoft reference; report segments and penalty details use camelCase.
+
+### Added
+
+- Portable benchmark run manifests, atomic per-target scenario checkpoints, compatibility validation, legacy report import and ordered resume/merge with preserved grading evidence and segment metadata.
+- Typed LLM timeout evidence distinguishing total request deadlines, response-wait expiry and transport timeouts.
+
 ## [7.52.0] - 2026-10-15
 
 ### Added

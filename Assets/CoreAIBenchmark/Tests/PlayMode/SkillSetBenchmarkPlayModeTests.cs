@@ -237,7 +237,7 @@ Some merchants only trade specific item types.",
             Debug.Log("[SkillBenchmark] BENCHMARK — Skills (2 meta-tools) vs Direct (19 tools)");
             Debug.Log("[SkillBenchmark] ═══════════════════════════════════════════");
 
-            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, 0.2f, (int)BenchmarkTurnTimeoutSeconds,
+            if (!PlayModeProductionLikeLlmFactory.TryCreate(null, null, 0,
                     out PlayModeProductionLikeLlmHandle handle,
                     out string ignore))
             {

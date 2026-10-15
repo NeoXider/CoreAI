@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Benchmarking
 {
@@ -28,6 +30,10 @@ namespace CoreAI.Benchmarking
         public int Repetitions { get; set; } = 1;
         public string UnityVersion { get; set; } = string.Empty;
         public string SuiteVersion { get; set; } = string.Empty;
+        /// <summary>Process segments; a crashed segment's duration is a checkpointed lower bound.</summary>
+        public List<BenchmarkRunSegment> Segments { get; set; } = new();
+        public bool Resumed => Segments.Count > 1;
+        public double TotalWallSeconds => Segments.Sum(s => s.WallSeconds);
     }
 
     /// <summary>
@@ -40,6 +46,39 @@ namespace CoreAI.Benchmarking
     {
         public BenchmarkRunMetadata Metadata { get; set; } = new();
         public List<ScenarioResult> Results { get; } = new();
+        /// <summary>Legacy aggregate trace retained separately because old reports do not identify each call's result row.</summary>
+        public string PreservedToolTraceJsonl { get; set; } = "";
+        /// <summary>Original aggregate values and their reconstruction baseline preserve legacy rounding for unchanged contributions.</summary>
+        public string OriginalSummaryJson { get; set; } = "";
+        public string BaselineSummaryJson { get; set; } = "";
+
+        /// <summary>Keeps original aggregate numbers whenever their underlying reconstructed contribution has not changed.</summary>
+        public string PreserveSummary(string outputJson)
+        {
+            if (string.IsNullOrEmpty(OriginalSummaryJson) || string.IsNullOrEmpty(BaselineSummaryJson)) return outputJson;
+            JObject original = BenchmarkJson.ParseObject(OriginalSummaryJson);
+            JObject baseline = BenchmarkJson.ParseObject(BaselineSummaryJson);
+            JObject output = BenchmarkJson.ParseObject(outputJson);
+            JObject current = (JObject)output["summary"];
+            PreserveUnchanged(current, baseline, original);
+            const string prefix = "\"summary\":";
+            int start = outputJson.IndexOf(prefix, StringComparison.Ordinal) + prefix.Length;
+            int end = outputJson.IndexOf(",\"results\":", start, StringComparison.Ordinal);
+            return outputJson.Substring(0, start) + current.ToString(Formatting.None) + outputJson.Substring(end);
+        }
+
+        private static void PreserveUnchanged(JObject current, JObject baseline, JObject original)
+        {
+            foreach (JProperty property in current.Properties().ToArray())
+            {
+                JToken before = baseline[property.Name];
+                JToken saved = original[property.Name];
+                if (before == null || saved == null) continue;
+                if (property.Value is JObject child && before is JObject beforeChild && saved is JObject savedChild)
+                    PreserveUnchanged(child, beforeChild, savedChild);
+                else if (JToken.DeepEquals(property.Value, before)) property.Value = saved.DeepClone();
+            }
+        }
 
         public void Add(ScenarioResult result)
         {
@@ -330,7 +369,7 @@ namespace CoreAI.Benchmarking
         /// </summary>
         public IReadOnlyList<GroupScore> GroupBreakdown()
         {
-            return Scenarios()
+            List<GroupScore> groups = Scenarios()
                 .GroupBy(s => s.Group)
                 .Select(g => new GroupScore
                 {
@@ -346,6 +385,18 @@ namespace CoreAI.Benchmarking
                 })
                 .OrderBy(g => g.Group, StringComparer.Ordinal)
                 .ToList();
+            if (string.IsNullOrEmpty(OriginalSummaryJson)) return groups;
+            JObject original = BenchmarkJson.ParseObject(OriginalSummaryJson);
+            foreach (GroupScore group in groups)
+            {
+                if (Results.Any(result => result.Group == group.Group && string.IsNullOrEmpty(result.ImportedJson))) continue;
+                JObject saved = original["groups"]?[group.Group] as JObject;
+                if (saved == null) continue;
+                group.MeanBase = (double?)saved["meanBase"] ?? group.MeanBase;
+                group.RegularMeanBase = (double?)saved["regularBase"] ?? group.RegularMeanBase;
+                group.ExtremeMeanBase = (double?)saved["extremeBase"] ?? group.ExtremeMeanBase;
+            }
+            return groups;
         }
 
         /// <summary>Mean (average) base score per scenario id, averaged over its repetitions.</summary>

@@ -10,6 +10,12 @@ namespace CoreAI.Benchmarking
     /// </summary>
     public sealed class ScenarioResult
     {
+        /// <summary>Original legacy result row retained verbatim when repairing a finished report.</summary>
+        public string ImportedJson { get; set; } = "";
+        /// <summary>Original Markdown evidence retained unchanged for a legacy row that is not rerun.</summary>
+        public string ImportedFailureMarkdown { get; set; } = "";
+        public string ImportedSessionMarkdown { get; set; } = "";
+        public string ImportedSceneMarkdown { get; set; } = "";
         public string ScenarioId { get; set; } = string.Empty;
         public string ScenarioName { get; set; } = string.Empty;
 
@@ -42,6 +48,9 @@ namespace CoreAI.Benchmarking
 
         /// <summary>Full model session transcript (per-turn prompt/answer/tool-calls), appended to the report.</summary>
         public string SessionTranscript { get; set; } = string.Empty;
+
+        /// <summary>Optional editor prefab asset path for the model-authored castle.</summary>
+        public string CastlePrefabPath { get; set; } = string.Empty;
 
         /// <summary>Complete model-authored Lua call replay for G6, written as a separate .lua artifact.</summary>
         public string LuaReplayScript { get; set; } = string.Empty;

@@ -16,6 +16,16 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class BenchmarkExtremeTierEditModeTests
     {
+        [Test]
+        public void GoalScore_KeepsOnePublicConstructionPathAndInternalReportRestoration()
+        {
+            Assert.AreEqual(1, typeof(GoalScore).GetConstructors().Length);
+            Assert.IsNull(typeof(GoalScore).GetMethod("Restore",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static));
+            Assert.IsNotNull(typeof(GoalScore).GetMethod("Restore",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static));
+        }
+
         [TestCase(true, true, false, FailureAttribution.Model)]
         [TestCase(true, false, false, FailureAttribution.Environment)]
         [TestCase(true, true, true, FailureAttribution.Environment)]
@@ -25,6 +35,48 @@ namespace CoreAI.Tests.EditMode
         {
             Assert.AreEqual(expected,
                 BenchmarkProviderFailurePolicy.ClassifyDeadline(deadline, opened, transportFailed));
+        }
+
+        [TestCase(LlmTimeoutKind.TotalDeadline, true, false, FailureAttribution.Model)]
+        [TestCase(LlmTimeoutKind.TotalDeadline, false, false, FailureAttribution.Environment)]
+        [TestCase(LlmTimeoutKind.TotalDeadline, true, true, FailureAttribution.Environment)]
+        [TestCase(LlmTimeoutKind.ResponseWait, true, false, FailureAttribution.Environment)]
+        [TestCase(LlmTimeoutKind.Transport, true, false, FailureAttribution.Environment)]
+        public void ProviderTypedTimeout_ClassifiesAndRetriesWithoutParsingMessages(LlmTimeoutKind kind,
+            bool opened, bool transportFailed, FailureAttribution expected)
+        {
+            FailureAttribution attribution = BenchmarkProviderFailurePolicy.ClassifyDeadline(false,
+                kind == LlmTimeoutKind.TotalDeadline, kind == LlmTimeoutKind.ResponseWait, opened,
+                transportFailed || kind == LlmTimeoutKind.Transport);
+            Assert.AreEqual(expected, attribution);
+            Assert.AreEqual(expected == FailureAttribution.Environment,
+                BenchmarkProviderFailurePolicy.ShouldRetry(attribution, "opaque failure"));
+            if (attribution == FailureAttribution.Model)
+            {
+                Assert.IsTrue(BenchmarkProviderFailurePolicy.ZeroUnperformedWork(attribution, false));
+                BenchmarkReport report = Report("model", Result("deadline", "G2", 0, attribution: attribution),
+                    Result("success", "G2", 100));
+                Assert.AreEqual(50, report.SuiteBaseScore);
+            }
+        }
+
+        [Test]
+        public void ProviderTimeoutMetadata_SurvivesMappingAndResetsBetweenAttempts()
+        {
+            LlmProviderResponseState state = new();
+            state.RecordResponse();
+            state.RecordTimeout(LlmTimeoutKind.TotalDeadline);
+            state.SuppressRetries();
+            Assert.AreEqual(LlmTimeoutKind.TotalDeadline, state.TimeoutKind);
+            Assert.IsTrue(state.RetrySuppressed);
+            Assert.IsFalse(LlmCancellation.IsTransportFailure(new LlmClientException("opaque",
+                LlmErrorCode.Timeout, timeoutKind: state.TimeoutKind)));
+            Assert.IsTrue(LlmCancellation.IsTransportFailure(new LlmClientException("opaque",
+                LlmErrorCode.Timeout, timeoutKind: LlmTimeoutKind.Transport)));
+            state.ResetAttempt();
+            Assert.AreEqual(LlmTimeoutKind.None, state.TimeoutKind);
+            Assert.IsFalse(state.RetrySuppressed);
+            Assert.IsFalse(state.ResponseObserved);
         }
 
         [Test]

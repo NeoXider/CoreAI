@@ -59,6 +59,35 @@ namespace CoreAI.Tests.EditMode
             public IRequestHeaderProvider HeaderProvider => null;
         }
 
+        [TestCase(LlmTimeoutKind.ResponseWait, true)]
+        [TestCase(LlmTimeoutKind.Transport, true)]
+        [TestCase(LlmTimeoutKind.TotalDeadline, false)]
+        public void TypedTimeout_TransportEvidenceExcludesOnlyTotalDeadline(LlmTimeoutKind kind, bool expected)
+        {
+            LlmClientException failure = new("Opaque failure", LlmErrorCode.Timeout, timeoutKind: kind);
+            Assert.AreEqual(expected, LlmCancellation.IsTransportFailure(failure));
+            Assert.AreEqual(expected, LlmCancellation.IsTransportFailure(
+                new OperationCanceledException("Caller stopped", failure)));
+        }
+
+        [Test]
+        public void ClientException_RetainsOriginalFiveParameterConstructorForPrecompiledCallers()
+        {
+            System.Reflection.ConstructorInfo original = typeof(LlmClientException).GetConstructor(new[]
+            {
+                typeof(string), typeof(LlmErrorCode), typeof(int?), typeof(int?), typeof(string)
+            });
+            Assert.IsNotNull(original);
+            LlmClientException failure = (LlmClientException)original.Invoke(new object[]
+            {
+                "Original binary signature", LlmErrorCode.Timeout, 504, 3, "Evidence"
+            });
+            Assert.AreEqual(LlmTimeoutKind.None, failure.TimeoutKind);
+            Assert.AreEqual(504, failure.HttpStatus);
+            Assert.AreEqual(3, failure.RetryAfterSeconds);
+            Assert.AreEqual("Evidence", failure.ProviderErrorBody);
+        }
+
         private static List<MEAI.ChatMessage> Messages()
         {
             return new List<MEAI.ChatMessage>

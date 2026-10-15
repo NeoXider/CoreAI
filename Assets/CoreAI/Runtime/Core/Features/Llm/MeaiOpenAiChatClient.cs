@@ -868,7 +868,7 @@ namespace CoreAI.Infrastructure.Llm
             operationCts.Cancel();
             _ = DisposeAbandonedOperationAsync(operationTask);
             cancellationToken.ThrowIfCancellationRequested();
-            throw budget.BuildTimeoutException();
+            throw budget.BuildTimeoutException(budgetTimerFired: true);
         }
 
         private sealed class ResponseWaitBudget
@@ -877,6 +877,7 @@ namespace CoreAI.Infrastructure.Llm
             private readonly double _started;
             private readonly int _totalSeconds;
             private double _lastProgress;
+            private LlmTimeoutKind _bindingKind;
             private readonly LlmProviderResponseState _providerResponseState;
             public int ResponseWaitSeconds { get; }
 
@@ -897,12 +898,12 @@ namespace CoreAI.Infrastructure.Llm
 
             public int? RemainingMilliseconds()
             {
-                double remaining = double.PositiveInfinity;
                 double now = _now();
-                if (_totalSeconds > 0)
-                    remaining = Math.Min(remaining, _totalSeconds - (now - _started));
-                if (ResponseWaitSeconds > 0)
-                    remaining = Math.Min(remaining, ResponseWaitSeconds - (now - _lastProgress));
+                double totalRemaining = _totalSeconds > 0 ? _totalSeconds - (now - _started) : double.PositiveInfinity;
+                double responseRemaining = ResponseWaitSeconds > 0 ? ResponseWaitSeconds - (now - _lastProgress) : double.PositiveInfinity;
+                double remaining = Math.Min(totalRemaining, responseRemaining);
+                _bindingKind = double.IsPositiveInfinity(remaining) ? LlmTimeoutKind.Transport
+                    : totalRemaining <= responseRemaining ? LlmTimeoutKind.TotalDeadline : LlmTimeoutKind.ResponseWait;
                 if (remaining <= 0)
                     throw BuildTimeoutException();
                 return double.IsPositiveInfinity(remaining) ? null
@@ -911,14 +912,23 @@ namespace CoreAI.Infrastructure.Llm
 
             public void ThrowIfExpired() => RemainingMilliseconds();
 
-            public LlmClientException BuildTimeoutException()
+            public LlmClientException BuildTimeoutException(bool budgetTimerFired = false)
             {
                 _providerResponseState?.SuppressRetries();
-                bool totalExpired = _totalSeconds > 0 && _now() - _started >= _totalSeconds;
-                string message = totalExpired
+                double now = _now();
+                // WHY: Owned timers can fire slightly before the monotonic clock reaches their rounded deadline.
+                const double timerToleranceSeconds = 0.25;
+                bool totalExpired = _totalSeconds > 0 && now - _started >= _totalSeconds - timerToleranceSeconds;
+                bool responseWaitExpired = ResponseWaitSeconds > 0 && now - _lastProgress >= ResponseWaitSeconds - timerToleranceSeconds;
+                LlmTimeoutKind kind = budgetTimerFired ? _bindingKind : totalExpired ? LlmTimeoutKind.TotalDeadline
+                    : responseWaitExpired ? LlmTimeoutKind.ResponseWait : LlmTimeoutKind.Transport;
+                _providerResponseState?.RecordTimeout(kind);
+                string message = kind == LlmTimeoutKind.TotalDeadline
                     ? $"LLM total request timeout expired after {_totalSeconds}s."
-                    : $"LLM response wait expired after {ResponseWaitSeconds}s without generation progress.";
-                return new LlmClientException(message, LlmErrorCode.Timeout);
+                    : kind == LlmTimeoutKind.ResponseWait
+                        ? $"LLM response wait expired after {ResponseWaitSeconds}s without generation progress."
+                        : "LLM transport timed out before the request budget expired.";
+                return new LlmClientException(message, LlmErrorCode.Timeout, timeoutKind: kind);
             }
         }
 
