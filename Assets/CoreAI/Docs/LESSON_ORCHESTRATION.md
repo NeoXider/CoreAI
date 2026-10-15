@@ -4,7 +4,7 @@
 
 ## Runtime Context
 
-Use `AgentMemoryPolicy.SetRuntimeContextProvider(roleId, provider)` for role-specific context such as the current lesson slot, practice attempt, topic id, and allowed pedagogical behavior. The provider output is appended to the system prompt under `## Runtime Context`.
+Use `AgentMemoryPolicy.SetRuntimeContextProvider(roleId, provider)` for role-specific context such as the current lesson slot, practice attempt, topic id, and allowed pedagogical behavior. `AiOrchestrator` sends the provider output as a trailing system message headed `## World State`, after the chat history. Callers outside the orchestrator can use `AiPromptComposer.AppendRuntimeContext`, which appends the same block to the system prompt under `## Runtime Context`.
 
 Global `IAiPromptContextProvider` registrations still work and run after the per-role provider.
 

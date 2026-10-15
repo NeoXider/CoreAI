@@ -15,6 +15,11 @@ provenance are recorded here instead.
 Each set ships its Color, NormalGL and Roughness map at 1K, plus a
 Metalness map where the source provides one.
 
+The folder also includes 26 `_Cavity.jpg` maps baked by CoreAI's `RbxCavityMapBake` from the
+bundled NormalGL maps for materials with cavity relief enabled. These are derived works of the
+same CC0 sets listed below, distributed under CC0 1.0 Universal. They are generated maps, rather
+than additional downloaded texture sets; each filename retains its source set's stem.
+
 | Enum.Material | Set | Source | Page |
 |---|---|---|---|
 | `Asphalt` | `Asphalt016` | ambientCG | https://ambientcg.com/a/Asphalt016 |
@@ -69,8 +74,8 @@ Downloaded 2026-09-01 from `https://ambientcg.com/get?file=<AssetId>_1K-JPG.zip`
 NormalGL, Roughness and (where present) Metalness maps were kept; the Blender/Godot/MaterialX/USD,
 preview, displacement, ambient-occlusion and DirectX-normal files in each archive were discarded.
 
-| Asset ID | Source page | Used for |
-|---|---|---|
+The Bundled sets table above records each source set, its source page, and its material mapping;
+the generated cavity maps inherit the provenance of their corresponding normal maps.
 
 Normal maps use the **OpenGL** convention (`NormalGL`, +Y up). Unity expects this convention for its
 standard normal-map import, so do not substitute the `NormalDX` variants without flipping green.

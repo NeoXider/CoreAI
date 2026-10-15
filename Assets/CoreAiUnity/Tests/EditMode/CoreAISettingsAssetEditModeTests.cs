@@ -4,7 +4,9 @@ using CoreAI.Config;
 using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;
 using UnityEditor;
+using UnityEditor.UIElements;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -13,6 +15,41 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class CoreAISettingsAssetEditModeTests
     {
+        [TestCase("maxToolCallRoundtrips")]
+        [TestCase("llmUnityToolChannel")]
+        public void SettingsInspector_ExposesSerializedToolControls(string propertyName)
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                VisualTreeAsset template = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(
+                    "Assets/CoreAiUnity/Editor/CoreAISettingsAssetEditor.uxml");
+                Assert.IsNotNull(template);
+                TemplateContainer content = template.CloneTree();
+                PropertyField field = content.Query<PropertyField>().ToList().Find(
+                    candidate => candidate.bindingPath == propertyName);
+                Assert.IsNotNull(field, "The custom inspector must expose " + propertyName + ".");
+                SerializedObject serialized = new(settings);
+                SerializedProperty property = serialized.FindProperty(propertyName);
+                Assert.IsNotNull(property);
+                field.BindProperty(property);
+                property.intValue = 1;
+                serialized.ApplyModifiedPropertiesWithoutUndo();
+                if (propertyName == "maxToolCallRoundtrips")
+                {
+                    Assert.AreEqual(1, settings.MaxToolCallRoundtrips);
+                }
+                else
+                {
+                    Assert.AreEqual(LlmToolChannel.Native, settings.LlmUnityToolChannel);
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(settings);
+            }
+        }
+
         [Test]
         public void CreateAsset_WithDefaults_ShouldHaveCorrectValues()
         {
@@ -65,6 +102,66 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(3, settings.MaxRetainedToolResultMessages);
 
             Object.DestroyImmediate(settings);
+        }
+
+        [Test]
+        public void ReasoningFields_DefaultToLegacyCompatibleValues_AndBindInInspector()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                Assert.AreEqual(LlmReasoningEffort.Default, settings.ReasoningEffort);
+                Assert.AreEqual(LlmReasoningDialect.Auto, settings.ReasoningDialect);
+                Assert.AreEqual(LlmReasoningEffort.Default, settings.SecondaryReasoningEffort);
+                Assert.AreEqual(LlmReasoningDialect.Auto, settings.SecondaryReasoningDialect);
+                SerializedObject serialized = new(settings);
+                foreach (string field in new[] { "reasoningEffort", "reasoningDialect",
+                             "secondaryReasoningEffort", "secondaryReasoningDialect" })
+                {
+                    Assert.IsNotNull(serialized.FindProperty(field), field);
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(settings);
+            }
+        }
+
+        [Test]
+        public void ReasoningFields_SurviveApiPresetsAndPortableRoundTrip()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            CoreAISettingsAsset copy = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                settings.ConfigureReasoning(LlmReasoningEffort.High, LlmReasoningDialect.OpenAi);
+                settings.ConfigureFallbackReasoning(LlmReasoningEffort.Low, LlmReasoningDialect.OpenRouter,
+                    LlmReasoningMode.Enabled, 2048, "{\"top_k\":20}");
+                settings.ConfigureHttpApi("https://primary.test/v1", "", "primary");
+                settings.ConfigureClientOwnedApi("https://primary.test/v1", "", "primary");
+                settings.ConfigureClientLimited("https://primary.test/v1", "", "primary", 3, 1024);
+                settings.ConfigureServerManagedApi("https://proxy.test/v1", "primary");
+                settings.ConfigureLlmUnity("", "model.gguf");
+                settings.ConfigureOffline();
+                settings.ConfigureAuto();
+                settings.ConfigureFallbackBackend(true, "https://fallback.test/v1", "secondary");
+                copy.ApplyOptions(settings.ToOptions());
+                foreach (CoreAISettingsAsset actual in new[] { settings, copy })
+                {
+                    Assert.AreEqual(LlmReasoningEffort.High, actual.ReasoningEffort);
+                    Assert.AreEqual(LlmReasoningDialect.OpenAi, actual.ReasoningDialect);
+                    Assert.AreEqual(LlmReasoningEffort.Low, actual.SecondaryReasoningEffort);
+                    Assert.AreEqual(LlmReasoningDialect.OpenRouter, actual.SecondaryReasoningDialect);
+                }
+                Assert.AreEqual(LlmReasoningMode.Enabled, settings.SecondaryReasoningMode);
+                Assert.AreEqual(2048, settings.SecondaryThinkingBudgetTokens);
+                Assert.AreEqual("{\"top_k\":20}", settings.SecondaryExtraBodyJson);
+            }
+            finally
+            {
+                Object.DestroyImmediate(settings);
+                Object.DestroyImmediate(copy);
+            }
         }
 
         [Test]
@@ -216,7 +313,7 @@ namespace CoreAI.Tests.EditMode
         public void ConfigureHttpApi_ShouldSetAllValues()
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            settings.ConfigureHttpApi("https://api.test.com/v1", "sk-123", "test-model", 0.5f, 60, 2048);
+            settings.ConfigureHttpApi("https://api.test.com/v1", "sk-123", "test-model", 0.5f, 60, 2048, true);
 
             Assert.AreEqual(LlmBackendType.OpenAiHttp, settings.BackendType);
             Assert.AreEqual(LlmExecutionMode.ClientOwnedApi, settings.ExecutionMode);

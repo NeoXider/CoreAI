@@ -262,6 +262,75 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task Echo_PayloadIdentifiesCanonicalToolAndArguments()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
+                new List<ILlmTool> { new StubTool { Name = "world_command" } }, false, "test", 3);
+            MEAI.ChatOptions opts = MakeChatOptions(("world_command", "done"));
+            await RunSingleCallTurnAsync(policy, opts, "world_command",
+                new Dictionary<string, object?> { { "a", 1 }, { "z", "last" } });
+
+            ToolExecutionPolicy.BatchToolCallResult echo = await RunSingleCallTurnAsync(policy, opts,
+                "WORLD_COMMAND", new Dictionary<string, object?> { { "z", "last" }, { "a", 1 } });
+
+            Assert.IsTrue(echo.AllDuplicates);
+            Newtonsoft.Json.Linq.JObject payload = Newtonsoft.Json.Linq.JObject.Parse(
+                ((MEAI.FunctionResultContent)echo.Results[0]).Result.ToString());
+            Assert.IsTrue(payload.Value<bool>("ok"));
+            Assert.IsTrue(payload.Value<bool>("duplicate"));
+            Assert.AreEqual("world_command", payload.Value<string>("tool"));
+            Assert.AreEqual("{\"a\":1,\"z\":\"last\"}",
+                payload["arguments"].ToString(Newtonsoft.Json.Formatting.None));
+        }
+
+        [Test]
+        public async Task StreamedEcho_PayloadIdentifiesCanonicalToolAndArguments()
+        {
+            ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings { MaxParallelToolCalls = 1 },
+                new List<ILlmTool> { new StubTool { Name = "world_command" } }, false, "test", 3);
+            MEAI.ChatOptions opts = MakeChatOptions(("world_command", "done"));
+            Dictionary<string, object?> args = new() { { "command", "spawn" } };
+            await RunSingleCallTurnAsync(policy, opts, "world_command", args);
+            ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+
+            ToolExecutionPolicy.ToolCallResult? echo = await policy.ExecuteStreamedAsync(turn,
+                MakeToolCall("WORLD_COMMAND", args), opts, CancellationToken.None);
+            policy.CompleteStreamedTurn(turn);
+
+            Assert.IsTrue(echo.HasValue);
+            Newtonsoft.Json.Linq.JObject payload = Newtonsoft.Json.Linq.JObject.Parse(
+                echo.Value.Result.Result.ToString());
+            Assert.IsTrue(payload.Value<bool>("ok"));
+            Assert.IsTrue(payload.Value<bool>("duplicate"));
+            Assert.AreEqual("world_command", payload.Value<string>("tool"));
+            Assert.AreEqual("spawn", payload["arguments"].Value<string>("command"));
+        }
+
+        [Test]
+        public void DuplicatePayload_LongCanonicalArguments_AreBoundedWithMarker()
+        {
+            string canonicalArguments = "{\"text\":\"" + new string('x', 10000) + "\"}";
+            Newtonsoft.Json.Linq.JObject payload = Newtonsoft.Json.Linq.JObject.Parse(
+                ToolExecutionPolicy.BuildDuplicateNoOpPayload("world_command", canonicalArguments));
+
+            Assert.AreEqual("world_command", payload.Value<string>("tool"));
+            Assert.AreEqual(canonicalArguments.Substring(0, 2048) + "[truncated]",
+                payload.Value<string>("arguments"));
+            Assert.IsTrue(payload.Value<bool>("ok"));
+            Assert.IsTrue(payload.Value<bool>("duplicate"));
+        }
+
+        [Test]
+        public void DuplicatePayload_EmptyCanonicalArguments_UsesEmptyObject()
+        {
+            Newtonsoft.Json.Linq.JObject payload = Newtonsoft.Json.Linq.JObject.Parse(
+                ToolExecutionPolicy.BuildDuplicateNoOpPayload("world_command"));
+
+            Assert.AreEqual(Newtonsoft.Json.Linq.JTokenType.Object, payload["arguments"].Type);
+            Assert.AreEqual("{}", payload["arguments"].ToString(Newtonsoft.Json.Formatting.None));
+        }
+
+        [Test]
         public async Task Echo_RecordsSuccessfulDuplicateTrace()
         {
             ToolExecutionPolicy policy = new(new StubLogger(), new StubSettings(),
@@ -978,6 +1047,57 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(2, countingMarshaler.InvokeCount, "The echo turn must not invoke the tool again");
             Assert.IsTrue(IsDuplicateNoOp(echoTurn.Results[0]));
             Assert.IsTrue(IsDuplicateNoOp(echoTurn.Results[1]));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task JsonElementArguments_DistinctValuesExecuteAndOnlyTrueEchoIsSuppressed(bool streaming)
+        {
+            int invocations = 0;
+            DelegateLlmTool tool = new("spawn", "Spawn an object", (Func<string>)(() =>
+            {
+                invocations++;
+                return "ok";
+            }));
+            ToolExecutionPolicy policy = new(NullLog.Instance, new CoreAISettingsOptions(),
+                new ILlmTool[] { tool }, false, "test");
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool.CreateAIFunction() } };
+            string[] calls =
+            {
+                "{\"name\":\"A\",\"x\":1,\"shape\":{\"sizes\":[1,2]}}",
+                "{\"name\":\"B\",\"x\":1,\"shape\":{\"sizes\":[1,2]}}",
+                "{\"name\":\"B\",\"x\":2,\"shape\":{\"sizes\":[1,2]}}",
+                "{\"name\":\"B\",\"x\":2,\"shape\":{\"sizes\":[1,3]}}",
+                "{\"shape\":{\"sizes\":[1,3]},\"x\":2,\"name\":\"B\"}"
+            };
+            for (int i = 0; i < calls.Length; i++)
+            {
+                Dictionary<string, object> arguments =
+                    System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(calls[i]);
+                MEAI.FunctionCallContent call = new("call_" + i, "spawn", arguments);
+                if (streaming)
+                {
+                    ToolExecutionPolicy.StreamedTurn turn = policy.BeginStreamedTurn();
+                    await policy.ExecuteStreamedAsync(turn, call, options, CancellationToken.None);
+                    await policy.CompleteStreamedTurnAsync(turn, CancellationToken.None);
+                }
+                else
+                {
+                    ToolExecutionPolicy.BatchToolCallResult result = await policy.ExecuteBatchAsync(
+                        new List<MEAI.FunctionCallContent> { call }, options, CancellationToken.None);
+                    Assert.IsFalse(result.AnyFailed);
+                    Assert.AreEqual(i == calls.Length - 1, result.AllDuplicates);
+                }
+                Assert.AreEqual(Math.Min(i + 1, 4), invocations,
+                    "Distinct string, number and nested argument values must reach the tool.");
+            }
+
+            LlmToolCallTrace echo = policy.ExecutedTraces.Last();
+            Assert.AreEqual("duplicate", echo.Source);
+            Newtonsoft.Json.Linq.JObject payload = Newtonsoft.Json.Linq.JObject.Parse(echo.Detail);
+            Assert.AreEqual("B", (string)payload["arguments"]["name"]);
+            Assert.AreEqual(2, (int)payload["arguments"]["x"]);
+            Assert.AreEqual(3, (int)payload["arguments"]["shape"]["sizes"][1]);
         }
 
         [Test]

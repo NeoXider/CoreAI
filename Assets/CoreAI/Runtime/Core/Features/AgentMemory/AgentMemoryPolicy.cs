@@ -39,6 +39,8 @@ namespace CoreAI.Ai
             public int? MaxOutputTokens;
             public int? MaxToolCallRoundtrips;
             public float? Temperature;
+            public LlmReasoningOptions? Reasoning;
+            public LlmSamplingOptions Sampling;
             public ToolResultMemoryPolicy ToolResultMemory;
             public float? CompactionTriggerRatio;
             public bool OverrideUniversalPrefix;
@@ -97,6 +99,8 @@ namespace CoreAI.Ai
                 SetMaxOutputTokens(roleId, prepared.MaxOutputTokens);
                 SetMaxToolCallRoundtrips(roleId, prepared.MaxToolCallRoundtrips);
                 SetTemperature(roleId, prepared.Temperature);
+                SetReasoning(roleId, prepared.Reasoning);
+                SetSampling(roleId, prepared.Sampling);
                 SetToolResultMemoryPolicy(roleId, prepared.ToolResultMemory);
                 SetCompactionTriggerRatio(roleId, prepared.CompactionTriggerRatio);
 
@@ -424,6 +428,8 @@ namespace CoreAI.Ai
             /// Set via <see cref="AgentBuilder.WithTemperature"/>.
             /// </summary>
             public float? Temperature;
+            public LlmReasoningOptions? Reasoning;
+            public LlmSamplingOptions Sampling;
 
             /// <summary>
             /// When true, long chat history may be folded with an auxiliary LLM request (requires global <see cref="ICoreAISettings.EnableLlmContextCompaction"/>).
@@ -437,12 +443,25 @@ namespace CoreAI.Ai
             /// </summary>
             public float? CompactionTriggerRatio;
 
+            /// <summary>Preserves the original constructor signature for existing compiled hosts.</summary>
+            public RoleMemoryConfig(bool useMemoryTool, MemoryToolAction defaultAction,
+                bool withChatHistory, bool persistChatHistory, int contextTokens,
+                bool? allowDuplicateToolCalls, int maxChatHistoryMessages, int? maxOutputTokens,
+                bool useLlmContextCompaction, float? temperature,
+                ToolResultMemoryPolicy toolResultMemory, float? compactionTriggerRatio)
+                : this(useMemoryTool, defaultAction, withChatHistory, persistChatHistory, contextTokens,
+                    allowDuplicateToolCalls, maxChatHistoryMessages, maxOutputTokens, useLlmContextCompaction,
+                    temperature, toolResultMemory, compactionTriggerRatio, null, null)
+            {
+            }
+
             public RoleMemoryConfig(bool useMemoryTool = true, MemoryToolAction defaultAction = MemoryToolAction.Append,
                 bool withChatHistory = true, bool persistChatHistory = false, int contextTokens = 0,
                 bool? allowDuplicateToolCalls = null, int maxChatHistoryMessages = 30, int? maxOutputTokens = null,
                 bool useLlmContextCompaction = true, float? temperature = null,
                 ToolResultMemoryPolicy toolResultMemory = ToolResultMemoryPolicy.CompactSummary,
-                float? compactionTriggerRatio = null)
+                float? compactionTriggerRatio = null,
+                LlmReasoningOptions? reasoning = null, LlmSamplingOptions sampling = null)
             {
                 UseMemoryTool = useMemoryTool;
                 DefaultAction = defaultAction;
@@ -454,6 +473,8 @@ namespace CoreAI.Ai
                 MaxOutputTokens = maxOutputTokens;
                 UseLlmContextCompaction = useLlmContextCompaction;
                 Temperature = temperature;
+                Reasoning = reasoning;
+                Sampling = sampling;
                 ToolResultMemory = toolResultMemory;
                 CompactionTriggerRatio = NormalizeCompactionTriggerRatio(compactionTriggerRatio);
                 MaxToolCallRoundtrips = null;
@@ -670,6 +691,8 @@ namespace CoreAI.Ai
                     MaxToolCallRoundtrips = existing.MaxToolCallRoundtrips,
                     ToolResultMemory = existing.ToolResultMemory,
                     Temperature = existing.Temperature,
+                    Reasoning = existing.Reasoning,
+                    Sampling = existing.Sampling,
                     UseLlmContextCompaction = existing.UseLlmContextCompaction,
                     CompactionTriggerRatio = existing.CompactionTriggerRatio
                 };
@@ -717,6 +740,40 @@ namespace CoreAI.Ai
                 existing.MaxToolCallRoundtrips = maxRoundtrips.HasValue && maxRoundtrips.Value >= 0
                     ? maxRoundtrips.Value
                     : null;
+                _roleConfigs[roleId] = existing;
+            }
+        }
+
+        /// <summary>Sets per-role reasoning overrides; null clears them.</summary>
+        public void SetReasoning(string roleId, LlmReasoningOptions? reasoning)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
+            roleId = roleId.Trim();
+            lock (_lock)
+            {
+                RoleMemoryConfig existing = GetRoleConfigLocked(roleId);
+                existing.Reasoning = reasoning;
+                _roleConfigs[roleId] = existing;
+            }
+        }
+
+        /// <summary>Sets per-role sampling overrides; null clears them.</summary>
+        public void SetSampling(string roleId, LlmSamplingOptions sampling)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
+            roleId = roleId.Trim();
+            lock (_lock)
+            {
+                RoleMemoryConfig existing = GetRoleConfigLocked(roleId);
+                existing.Sampling = sampling;
                 _roleConfigs[roleId] = existing;
             }
         }

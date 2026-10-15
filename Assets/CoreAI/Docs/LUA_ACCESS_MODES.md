@@ -7,13 +7,16 @@ Related implementation: `LuaCapabilities`, `LuaCsGameplayBindings`,
 
 CoreAI uses explicit trust levels for Lua written by a model. Each level is a flag in
 `LuaCapabilities`; bindings are registered only for the intersection of script level and host level.
-If a capability is absent, the corresponding functions are physically absent from Lua globals.
+If a capability is absent, the corresponding functions are absent from Lua globals. Two groups are
+replaced by stubs instead, so a call fails with an error that names the missing grant rather than
+"attempt to call a nil value": the `unity_*` names without `Full`, and the classic build functions
+when the composition withholds them (see the `WorldEdit` row).
 
 | Mode | Flag | What Lua can do |
 |---|---|---|
-| Read-only | `Read` | Logs (`print`/`report`), world queries, version stores, with no side effects |
+| Read-only | `Read` | Logs (`print`/`report`), the [Rbx API](RBX_API.md) globals for reading the world (`game`, `workspace`, `Instance`, datatypes, `task`), world queries, version stores, with no side effects |
 | Gameplay | `Gameplay` | `time_*` (time scale, etc.), `input_*` (keyboard/mouse, read-only) |
-| WorldEdit | `WorldEdit` | The [Rbx API](RBX_API.md) — `Instance.new`, `workspace`, `instance:Destroy()` — is how a mod spawns/moves/destroys world objects. The classic `coreai_world_*` build commands (spawn/change/destroy, scenes, batch/grid, transactions, sound/animation) are **not registered in the default production composition** (`RegisterWorldEditBuildBindings = false`): each one is a stub that raises an error pointing at the Rbx API. They only work on a host that deliberately opts in |
+| WorldEdit | `WorldEdit` | The [Rbx API](RBX_API.md) mutations — `Instance.new`, property writes, `instance:Destroy()` — are how a mod spawns/moves/destroys world objects. The classic `coreai_world_*` build commands (spawn/change/destroy, scenes, batch/grid, transactions, sound/animation) are **not registered in the default production composition** (`RegisterWorldEditBuildBindings = false`): each one is a stub that raises an error pointing at the Rbx API. They only work on a host that composes its own stack with `LuaCsModStackOptions.RegisterWorldEditBuildBindings = true` |
 | Logic | `LogicOverride` | `logic_define`/`logic_reset`/`logic_list` |
 | Full | `Full` | Reflection-style access to `GameObject`/components through `unity_*` APIs |
 
@@ -30,7 +33,7 @@ host grant is what `execute_lua`, `manage_mods` and rehydrated mods receive; a C
 `LoadMod(caller, id, code, caps | Full)` gets `Full` only when the host grant already contains it,
 because every requested tier is intersected with the host grant. Read the grant back through
 `CoreAiModsLifetimeScope.FullLuaAccessEnabled` / `FullLuaPrivateAccessEnabled`. `CoreAiLuaWorldModule`
-no longer shows a Full checkbox: its legacy serialized flags never granted `Full`, and their accessors
+has no Full checkbox: its legacy serialized flags never granted `Full`, and their accessors
 (and `CoreAILifetimeScope.FullLuaAccessEnabled`) are `[Obsolete]`.
 
 **Persisted and shared mods are non-Full by default.** A mod that is rehydrated from the source store
@@ -40,7 +43,7 @@ host grant and then strip `Full` unless the host explicitly passes `allowFull: t
 composition passes it on startup rehydrate only when **Enable Full Lua Access** is on, and the
 `manage_mods import` action never passes it. A shared capability set is only ever a request; the
 receiving host decides. See
-[LUA_GAME_API.md § Persistence & Sharing](LUA_GAME_API.md) and [FIRST_MOD.md](FIRST_MOD.md).
+[LUA_GAME_API.md § Persistence & Sharing](LUA_GAME_API.md#persistence--sharing) and [FIRST_MOD.md](FIRST_MOD.md).
 
 ### Hub Mods tab
 
@@ -114,8 +117,10 @@ file APIs that a host game exposes through components.
 ## Mod LLM Tools
 
 `manage_mods` (`list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`,
-`versions`, `revert`, `diagnostics`) and `execute_lua` are attached to the built-in Programmer role by
-`CoreAiModsInstaller.RegisterCoreAiMods`. Mod source is retrieved through
+`versions`, `revert`, `diagnostics`), `execute_lua` and `get_mod_logs` are attached to the built-in
+Programmer role by `CoreAiModsInstaller.RegisterCoreAiMods`, together with the world-package tools
+(`save_world`, `load_world`, `list_autosaves`, `load_autosave`; see
+[RBX_API.md § Saving and loading a world](RBX_API.md#saving-and-loading-a-world)). Mod source is retrieved through
 `ILuaModRuntime.TryGetModSource(caller, id, out source)`; `export`/`import`/`forget` move mods between
 players through the source store. `execute_lua` refuses empty or whitespace-only `code` before
 anything runs.
@@ -165,10 +170,13 @@ in the package `link.xml`):
 - `UnityEngine.CoreModule`: `UnityEngine.Resources` and `UnityEngine.TextAsset` —
   the Lua script loader reaches them purely via reflection; stripping them
   crashes the player with `RuntimeError: null function`.
-- Every Lua-CSharp runtime-bindings class the player uses
+- The `CoreAI.Mods` assembly — `preserve="all"`. It holds every Lua-CSharp runtime-bindings class
   (`LuaCsWorldRuntimeBindings`, `LuaCsWorldQueryBindings`, `LuaCsTimeBindings`,
-  `LuaCsInputRuntimeBindings`, `LuaCsFullUnityRuntimeBindings`, ...) — their callback
-  bodies are reflection-invoked by the Lua-CSharp runtime.
+  `LuaCsInputRuntimeBindings`, `LuaCsFullUnityRuntimeBindings`, ...), whose callback bodies the
+  Lua-CSharp runtime invokes by reflection.
+- The Rbx API assemblies (`CoreAI.RbxApi.Instances`, `CoreAI.RbxApi.Datatypes`,
+  `CoreAI.RbxApi.Binding`, `CoreAI.RbxApi.Unity`) — `preserve="all"`; without them mods load but
+  `Instance.new` and world mutations produce nothing in an IL2CPP player.
 
 DI note: VContainer's `Register<T>()` finds constructors via reflection; under Medium stripping
 an unused parameterless ctor can be stripped and container build fails with

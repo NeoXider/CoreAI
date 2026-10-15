@@ -15,7 +15,7 @@ namespace CoreAI.Ai
         /// <summary>World queries, logging, version info — no side effects on the game.</summary>
         Read = 1 << 0,
 
-        /// <summary>Gameplay-level effects: time scale, sounds, animations, UI text.</summary>
+        /// <summary>Gameplay time queries and time-scale control, plus host-provided input queries.</summary>
         Gameplay = 1 << 1,
 
         /// <summary>World structure edits: spawn, move, destroy, scenes, batch/level primitives.</summary>

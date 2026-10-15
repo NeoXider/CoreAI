@@ -22,8 +22,9 @@ Detailed Unity installation steps follow below.
 Mods and Hub are installed independently — neither requires the other. When both are present, Mods'
 Hub integration assembly (`CoreAI.Mods.Hub`) auto-enables via the `COREAI_HAS_HUB` version define and
 adds a Mods page to the Hub window; without Hub, that assembly compiles out and Mods still works
-standalone through its tools. Benchmark and MCP both build on Mods, so installing either pulls
-`coreaimods` in as well.
+standalone through its tools. Benchmark and MCP both depend on Mods: add `coreaimods` first, because
+Unity Package Manager does not fetch a Git-hosted dependency on its own (the same reason `coreai` goes
+in before `coreaiunity`).
 
 **Install profiles** — jump to the matching section below:
 
@@ -205,10 +206,11 @@ not need any modding assets or APIs.
 - **Disable** (the default): remove `COREAI_LUA`, or use
   `CoreAI → Setup → Modules → Lua (Lua-CSharp) → Disable Lua`.
   Lua-dependent runtime and tests are guarded by `#if COREAI_LUA`.
-- **WebGL:** when `COREAI_LUA` is compiled in, Lua on the WebGL player is **on by default** in new
-  settings assets; toggle the runtime allowance with `CoreAISettingsAsset.EnableLuaOnWebGl`.
-  Lua-CSharp is AOT-safe, so it runs under IL2CPP; the Full
-  `unity_*` reflection tier stays disabled on WebGL. Managed stripping is handled by the `link.xml`
+- **WebGL:** when `COREAI_LUA` is compiled in, Lua runs on the WebGL player; Lua-CSharp is AOT-safe,
+  so it runs under IL2CPP. `CoreAISettingsAsset.EnableLuaOnWebGl` exists (default on), but no Lua
+  runtime reads it yet, so turning it off does not stop Lua on WebGL. The Full `unity_*` reflection
+  tier has no WebGL-specific block: it is granted only by *Enable Full Lua Access* on
+  `CoreAiModsLifetimeScope` — keep that off in browser builds. Managed stripping is handled by the `link.xml`
   shipped in the CoreAiUnity package, which preserves the Lua VM, the CoreAI assemblies, the Rbx API
   assemblies and VContainer — verified on a WebGL/IL2CPP player at stripping level **Medium**, where
   the container, mod seeding and mod-driven `Instance.new` spawning all survive. **If your own game
@@ -232,7 +234,9 @@ can render pages on your own uGUI/UITK canvas via the API.
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAIHub
 ```
 
-No further setup — the Hub window picks up any pages already registered by the base and Mods packages.
+Put the Hub in a scene with `CoreAI → Setup → Add Hub`: it instantiates the Hub prefab and, when the
+Mods package is present, also wires its Mods tab. The Hub picks up any pages already registered by the
+base and Mods packages.
 
 ---
 

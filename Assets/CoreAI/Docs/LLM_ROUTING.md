@@ -4,9 +4,12 @@
 
 ## Execution Modes
 
+`LlmExecutionMode` values:
+
+- `Auto` (default value) — the legacy backend selection rules, kept for existing scenes and serialized assets.
 - `LocalModel` — local model adapter, such as LLMUnity or a future non-Unity local runtime.
 - `ClientOwnedApi` — direct OpenAI-compatible API with a key owned by the user or application developer.
-- `ClientLimited` — client path with local or server-enforced request/prompt limits.
+- `ClientLimited` — OpenAI-compatible API with client-side usage limits or policy checks (`ClientLimitedLlmClientDecorator`).
 - `ServerManagedApi` — production backend/proxy owns provider keys, subscriptions, quotas, model allowlists, usage, and audit.
 - `Offline` / `Stub` — deterministic fallback for tests and demos.
 
@@ -78,7 +81,7 @@ authenticated backend.
 #### Route snapshots, endpoint health, and descriptor behavior fields (5.9)
 
 - `ILlmClientRegistry.ResolveRouteForRole(roleId, explicitProfileId)` returns an atomic
-  `LlmRoleRouteSnapshot` — client, effective profile id, context window, execution mode, `IsRouted` —
+  `LlmRoleRouteSnapshot` — client, effective profile id, context window, `MaxOutputTokens`, execution mode, `IsRouted` —
   observed together so a concurrent switch cannot mix one endpoint's client with another's metadata.
   `IsRouted == false` marks the reserved `"fallback"` diagnostic (legacy backend, settings-owned window).
 - Profile-aware `ILlmClient` capability queries — `SupportsNativeToolCallingForRole(roleId, profileId)` and
@@ -94,9 +97,12 @@ authenticated backend.
   on): a report whose generation no longer matches the endpoint's current generation is dropped, so a late
   completion from a replaced endpoint cannot mutate its successor's health; a report with generation `0` is
   ignored. Both streaming and non-streaming paths publish the report. Default: no-op for legacy registries.
-- `LlmEndpointDescriptor` behavior fields for HTTP endpoints — `MaxTokens`, `ReasoningMode`,
-  `ThinkingBudgetTokens`, `ExtraBodyJson` — are validated by `Validate()` and travel with the persisted
-  descriptor. `DeriveEndpointSlug` / `EnsureUniqueEndpointId` provide portable endpoint-id derivation.
+- `LlmEndpointDescriptor` request settings — nullable `Temperature`, `MaxTokens`, `OverrideMaxTokens`,
+  `ReasoningEffort`, `ReasoningDialect`, legacy `ReasoningMode`, `ThinkingBudgetTokens`, and `ExtraBodyJson` —
+  reach the HTTP request for both HTTP and LLMUnity endpoints and travel with the persisted descriptor.
+  LLMUnity uses its own descriptor's reasoning and provider body; an Auto dialect resolves to `QwenTemplate`.
+  `Validate()` rejects an HTTP endpoint with an empty or whitespace model (`HTTP endpoint model is required.`).
+  `DeriveEndpointSlug` / `EnsureUniqueEndpointId` provide portable endpoint-id derivation.
 
 - `LlmRouteProfile` describes a profile id, execution mode, model alias, context window, response cap, and capabilities.
 - `LlmRouteRule` maps role patterns to profile ids. Exact role ids, prefix patterns ending with `*`, and `*` wildcard are supported.
@@ -104,8 +110,8 @@ authenticated backend.
 - `ILlmRouteResolver` resolves an agent role to a route profile.
 - `ILlmClientRegistry` is the portable role-to-client registry contract used by host adapters.
 - `LlmProviderError` maps stable backend codes such as `quota_exceeded`, `subscription_required`, `model_not_allowed`, and `rate_limited` to `LlmErrorCode`.
-- `LlmUsageRecord` and `ILlmUsageSink` provide portable usage accounting **contracts**. Free CoreAI does not register a default sink — use a custom adapter or rely on the backend to record usage. CoreAiPro ships a backend `BackendUsageSink` adapter.
-- `ILlmEntitlementPolicy` and `LlmEntitlementDecision` provide portable subscription/quota/allowlist **contracts**. Free CoreAI does not run a client-side entitlement decorator — the backend (`ServerManagedApi`) is the source of truth and surfaces decisions through `LlmErrorCode.QuotaExceeded` / `RateLimited` / etc. CoreAiPro ships a backend `BackendEntitlementPolicy` adapter that calls `GET /entitlements`.
+- `LlmUsageRecord` and `ILlmUsageSink` provide portable usage accounting **contracts**. The Unity installer registers the no-op `NullLlmUsageSink`, and no CoreAI pipeline layer calls the sink: record usage in your own adapter (for example from the `LlmUsageReported` message) or on the backend.
+- `ILlmEntitlementPolicy` and `LlmEntitlementDecision` provide portable subscription/quota/allowlist **contracts**. The Unity installer registers `AllowAllLlmEntitlementPolicy`, and no client-side decorator enforces entitlement: the backend (`ServerManagedApi`) is the source of truth and surfaces decisions through `LlmErrorCode.QuotaExceeded` / `RateLimited` / `PaymentRequired`.
 - `ILlmAuthContextProvider` exposes auth/session context for server-managed routes. Register via `LlmAuthContextRegistry.SetProvider(...)`; `MeaiOpenAiChatClient` reads it on every request and emits `X-Tenant-Id` / `X-User-Id` / `X-Session-Id` headers.
 - `LlmRequestContext` (AsyncLocal) carries the per-request idempotency key, role id, and trace id. `MeaiLlmClient` populates a frame on every `CompleteAsync`/`CompleteStreamingAsync`; HTTP transports emit `Idempotency-Key`, `X-Request-Id`, `X-Coreai-Role`. The same key is reused across decorator retries (e.g. `RefreshOnUnauthorizedDecorator`) so the backend can deduplicate without double-billing.
 - `IRequestHeaderProvider` (on `IOpenAiHttpSettings.HeaderProvider`) exposes a per-settings hook for additional static headers (defaults to `null` on built-in adapters).
@@ -129,11 +135,14 @@ settings.RemoveProviderBodyParameter("session_id");
 serialize compactly with recursive key sorting; array order is preserved. Passing C# `null`
 removes the key, `JValue.CreateNull()` sends JSON `null`. The operation is atomic: invalid source JSON,
 duplicate property or reserved key leaves the previous `ExtraBodyJson` unchanged. CoreAI protects
-`model`, `messages`, `temperature`, `max_tokens`, `stream`, `stream_options`, `tools`, `tool_choice` because
-these fields are built by the transport/orchestrator.
+`model`, `messages`, `stream`, `stream_options`, `tools` and `tool_choice` because these fields define
+request structure. Sampling and provider reasoning keys remain writable. At request time, typed settings
+own only the fields they actually write: an unset typed temperature or reasoning effort leaves a provider
+body value intact. An explicit zero output cap removes both token-cap spellings; a positive typed cap
+removes the competing spelling. Conflicts produce one warning per HTTP client. These rules apply equally
+to streaming and non-streaming requests.
 
-Raw `ExtraBodyJson` remains a compatible advanced escape hatch and historically may override even
-a reserved field. New application code should use the safe setters. Safe API exception texts do not
+Raw `ExtraBodyJson` remains an advanced escape hatch for fields without a typed override. New application code should use the safe setters. Safe API exception texts do not
 contain JSON values/body, so a provider secret never leaks into an error.
 
 For OpenRouter, `session_id` is an opaque application/agent-cohort id, for example `coreai-teacher-v3`, not
@@ -159,9 +168,9 @@ Lesson and practice orchestrators can keep routing portable while adding per-tur
 ## Host Boundary
 
 `CoreAI.Core` ships the portable OpenAI-compatible HTTP path: `IOpenAiHttpTransport`,
-`HttpClientOpenAiTransport`, and `MeaiOpenAiChatClient`. It also ships
-`ILlmEndpointReadinessProbe`, `LlmEndpointReadinessRequest`, the shared status policy, and
-`HttpClientOpenAiReadinessProbe`. A plain .NET host can therefore construct both the chat client and endpoint
+`HttpClientOpenAiTransport`, and `MeaiOpenAiChatClient` (compiled when `COREAI_LLM` is defined; the
+portable DLL defines it). It also ships `ILlmEndpointReadinessProbe`, `LlmEndpointReadinessRequest`, the
+shared status policy, and `HttpClientOpenAiReadinessProbe` (also `COREAI_LLM`). A plain .NET host can therefore construct both the chat client and endpoint
 readiness pipeline directly without Unity. `ModelsThenCompletions` checks `/models` first and falls back to
 the completion handler only when `/models` is unsupported (`404`/`405`); `CompletionsOnly` is available for
 embedded servers that expose no models route. Loopback URLs bypass the system proxy so local model sockets
@@ -187,3 +196,55 @@ A production host should put provider keys and quota enforcement behind `ServerM
 - **Typed timeout vs cancel:** When only the library timeout fires, callers may receive `LlmOperationTimeoutException`. `RoutingLlmClient` publishes `LlmRequestCompleted` with `LlmErrorCode.Timeout` vs `Cancelled`. Transport/internal timeouts — including a header phase that never completes and the timeout decorator's own linked token — surface as typed `Timeout` on both streaming and non-streaming paths; a timeout is never reported as `Cancelled` while the caller is still waiting, so timeouts stay retry/fallback-eligible (see [`MEAI_TOKENS_FACT_VS_ESTIMATE.md`](MEAI_TOKENS_FACT_VS_ESTIMATE.md), §4). The rule lives in one place, `LlmCancellation` (since 7.44.0): a cancelled caller token wins over everything — any exception observed after the caller cancelled, typed or untyped, timeout or not, is `Cancelled` for the user-facing code, the completion metric and the circuit breaker; with the caller alive, `LlmOperationTimeoutException` (also inside an `AggregateException`) is a timeout and any other `OperationCanceledException` is a cancellation (someone else stopped the work: `CoreAi.StopAgent`, a cancellation scope, a disposed orchestrator). `AiOrchestrator` (both paths), `QueuedAiOrchestrator`, `RoutingLlmClient` (exceptions, results and stream chunks alike), `LoggingLlmClientDecorator` (thrown faults), `CircuitBreakerLlmClientDecorator` (no failure is recorded after a caller cancel; the half-open probe slot is released), `RetryingStreamingLlmClientDecorator`, `FallbackLlmClientDecorator`, `CoreAiChatService` and `CoreAiChatPanel` classify through it. A layer that has to throw for a fault it observed after the cancel throws `OperationCanceledException` with the fault as `InnerException` (`LlmCancellation.WrapAsCancellation`; `LlmCancellation.FindClientException` finds it again); a failed result or terminal chunk that arrives after the cancel — whatever its error code — is re-issued as a `Cancelled` copy with the error text `cancelled` (`ClassifyCode`, `LlmCompletionResult.WithError` / `LlmStreamChunk.WithError`, copy-on-write — inner clients may reuse instances). With the caller alive, a fault that is neither a timeout nor a cancellation is classified by the layer itself (its typed code, otherwise `ProviderError`). `RetryingStreamingLlmClientDecorator`, `LoggingLlmClientDecorator` and `FallbackLlmClientDecorator` never retry or fall back after a caller cancel. `CircuitBreakerLlmClientDecorator` records nothing after a caller cancel — thrown faults and `Timeout`/`ProviderError` chunks alike — while a transport timeout with the caller still waiting (a typed `LlmClientException` with `Timeout`) still counts; the default Unity pipeline does not compose the breaker, hosts add it. `AiOrchestrator` records a terminal `Timeout` as `DeadlineCancellation` however it arrived — thrown, or as a `Timeout` chunk from `TimeoutLlmClientDecorator` on the streaming path — both when the stream opens and inside the tool loop. Endpoint health is the one consumer that still looks at the fault itself (see `ReportRouteFailure` above): after a caller cancel it still reports the permanent refusals `AuthExpired` and `PaymentRequired`, and nothing else. A host that runs its own deadline keeps it on a separate token and uses the `deadlineToken` overloads (see **Host deadline** above).
 - **Retry/fallback replay guard:** a failed completion that carries evidence of an **executed** tool call is not replayed by the HTTP retry loop or the fallback chain — the failure propagates instead of re-mutating the world. Rejected tool calls (duplicate-suppressed, parse errors, unknown tool names, schema/argument-conversion failures) are treated as never-invoked and do not block retries or fallback.
 - **Usage accounting:** `LlmUsageRecord` / `ILlmUsageSink` and `LlmUsageReported` (MessagePipe) complement routing; token counts from HTTP usage are described in [`MEAI_TOKENS_FACT_VS_ESTIMATE.md`](MEAI_TOKENS_FACT_VS_ESTIMATE.md).
+
+## Request sampling and reasoning
+
+Request settings apply in this order: per-call `AiTaskRequest`, per-agent `AgentBuilder`, selected
+endpoint, then global settings. Null values inherit; reasoning effort `Default` inherits. An explicit
+output-token cap of zero means unlimited and prevents lower layers from supplying a cap. A route
+profile's `MaxOutputTokens` supplies the endpoint default when neither call nor agent sets a cap.
+Endpoint `Temperature = null` inherits, while a numeric value overrides. `OverrideMaxTokens` distinguishes
+an explicit zero endpoint cap from inheritance; a positive `MaxTokens` also enables the endpoint override.
+
+```csharp
+AgentConfig config = new AgentBuilder("planner")
+    .WithReasoning(LlmReasoningEffort.High, budgetTokens: 8192)
+    .WithTemperature(0.2f)
+    .WithSampling(new LlmSamplingOptions { TopP = 0.9f, Seed = 42 })
+    .Build();
+AiTaskRequest task = new AiTaskRequest
+{
+    RoleId = "planner",
+    Reasoning = new LlmReasoningOptions(LlmReasoningEffort.None),
+    Temperature = 0.1f,
+    Sampling = new LlmSamplingOptions { Stop = new[] { "END" } }
+};
+```
+
+`IOpenAiHttpSettings.ReasoningEffort` configures the endpoint default. `ReasoningDialect` selects
+`OpenAi`, `OpenRouter`, `QwenTemplate`, `AnthropicCompat`, `GeminiCompat`, `PassthroughEffort`, or `Off`.
+`Auto` recognizes OpenAI/Azure OpenAI, OpenRouter, Gemini, Anthropic, DashScope and named LLMUnity
+endpoints. Unknown endpoints use the effort string unchanged. Use `QwenTemplate` explicitly for a
+local Qwen server whose URL does not identify its implementation.
+
+| Dialect | Reasoning fields written when reasoning is configured | Output cap |
+|---|---|---|
+| `OpenAi` | `reasoning_effort`: lower-case effort, including `none`, `minimal`, and `xhigh` | `max_completion_tokens` |
+| `OpenRouter` | `reasoning.effort`, plus `reasoning.max_tokens` for a positive thinking budget | `max_tokens` |
+| `QwenTemplate` | `enable_thinking` and `chat_template_kwargs.enable_thinking`; optional positive `thinking_budget`. `None` sets both flags to false. | `max_tokens` |
+| `AnthropicCompat` | `thinking.type` = `disabled` for `None`, otherwise `enabled` with `budget_tokens` (at least 1024). Default budgets: Minimal/Low 1024, Medium 4096, High 8192, XHigh 16384. | `max_tokens` |
+| `GeminiCompat` | `reasoning_effort`; Minimal maps to `low`, XHigh to `high` | `max_tokens` |
+| `PassthroughEffort` | `reasoning_effort` unchanged, lower-case | `max_tokens` |
+| `Off` | No typed reasoning fields | `max_tokens` |
+
+Without a typed effort or legacy reasoning controls, no typed reasoning fields are added and the cap
+uses `max_tokens`. `Off` leaves any manually supplied provider reasoning fields untouched.
+Legacy `ReasoningMode` profiles with Auto retain the existing Qwen bytes, including on recognized
+hosts; selecting a typed effort opts into dialect detection. Context compaction requests disable
+reasoning by default.
+
+MEAI callers can set `ChatOptions.TopP`, `StopSequences`, `Seed`, `ResponseFormat`,
+`FrequencyPenalty` and `PresencePenalty`; both HTTP paths serialize them. Reasoning travels in
+`ChatOptions.AdditionalProperties["coreai.reasoning"]` as `LlmReasoningOptions`. Request-start
+telemetry and the `LLM >` log include resolved effort, dialect, temperature and output-token cap;
+reported reasoning-token usage remains separate from visible output.

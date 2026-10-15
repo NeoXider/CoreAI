@@ -185,6 +185,129 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(ContainsLabel(root, LocalModelPlatformSupport.BrowserUnavailableMessage));
         }
 
+        [TestCase(LlmEndpointKind.HttpOpenAi)]
+        [TestCase(LlmEndpointKind.LlmUnity)]
+        public void EndpointEditor_RoundTripsRequestSettingsAndPreservesHiddenFields(LlmEndpointKind kind)
+        {
+            FakeRoutingController controller = new();
+            controller.Add("configured", "Configured");
+            LlmEndpointDescriptor original = controller.GetEndpoints()[0].Descriptor;
+            original.Kind = kind;
+            original.Model = "model-alias";
+            original.LocalModelPath = kind == LlmEndpointKind.LlmUnity ? "model.gguf" : "";
+            original.ReasoningEffort = LlmReasoningEffort.High;
+            original.ReasoningDialect = LlmReasoningDialect.OpenRouter;
+            original.Temperature = 0.75f;
+            original.OverrideMaxTokens = true;
+            original.MaxTokens = 2048;
+            original.ExtraBodyJson = "{\"custom_option\":true}";
+            original.ThinkingBudgetTokens = 512;
+            HubSettingsPage page = new(_settings, RuntimePlatform.WindowsPlayer, controller);
+            page.CreatePageContent();
+
+            Invoke(page, "LoadEndpointById", "configured");
+            LlmEndpointDescriptor edited = ReadEndpoint(page);
+
+            Assert.AreEqual(LlmReasoningEffort.High, edited.ReasoningEffort);
+            Assert.AreEqual(LlmReasoningDialect.OpenRouter, edited.ReasoningDialect);
+            Assert.AreEqual(0.75f, edited.Temperature);
+            Assert.IsTrue(edited.OverrideMaxTokens);
+            Assert.AreEqual(2048, edited.MaxTokens);
+            Assert.AreEqual(original.ExtraBodyJson, edited.ExtraBodyJson);
+            Assert.AreEqual(512, edited.ThinkingBudgetTokens);
+            Assert.AreEqual("model-alias", edited.Model);
+            Assert.AreEqual(original.LocalModelPath, edited.LocalModelPath);
+            Assert.AreNotSame(original, edited);
+        }
+
+        [Test]
+        public void EndpointEditor_ChangesRequestSettingsWithoutMutatingTheStoredDescriptor()
+        {
+            FakeRoutingController controller = new();
+            controller.Add("configured", "Configured");
+            LlmEndpointDescriptor original = controller.GetEndpoints()[0].Descriptor;
+            original.Kind = LlmEndpointKind.HttpOpenAi;
+            original.Model = "model";
+            HubSettingsPage page = new(_settings, routingController: controller);
+            page.CreatePageContent();
+            Invoke(page, "LoadEndpointById", "configured");
+
+            ((DropdownField)Field(page, "_endpointReasoningEffort").GetValue(page)).value = "Low";
+            ((DropdownField)Field(page, "_endpointReasoningDialect").GetValue(page)).value = "OpenAi";
+            ((Toggle)Field(page, "_endpointOverrideTemperature").GetValue(page)).value = true;
+            ((FloatField)Field(page, "_endpointTemperature").GetValue(page)).value = 0f;
+            ((Toggle)Field(page, "_endpointOverrideMaxTokens").GetValue(page)).value = true;
+            ((IntegerField)Field(page, "_endpointMaxTokens").GetValue(page)).value = 0;
+            LlmEndpointDescriptor edited = ReadEndpoint(page);
+
+            Assert.AreEqual(LlmReasoningEffort.Low, edited.ReasoningEffort);
+            Assert.AreEqual(LlmReasoningDialect.OpenAi, edited.ReasoningDialect);
+            Assert.AreEqual(0f, edited.Temperature);
+            Assert.IsTrue(edited.OverrideMaxTokens, "An explicit zero cap must preserve the override flag.");
+            Assert.AreEqual(0, edited.MaxTokens);
+            Assert.AreEqual(LlmReasoningEffort.Default, original.ReasoningEffort);
+            Assert.AreEqual(LlmReasoningDialect.Auto, original.ReasoningDialect);
+            Assert.IsNull(original.Temperature);
+            Assert.IsFalse(original.OverrideMaxTokens);
+        }
+
+        [Test]
+        public void EndpointEditor_DisablingOverridesRestoresNullableDefaults()
+        {
+            FakeRoutingController controller = new();
+            controller.Add("configured", "Configured");
+            LlmEndpointDescriptor original = controller.GetEndpoints()[0].Descriptor;
+            original.Kind = LlmEndpointKind.HttpOpenAi;
+            original.Model = "model";
+            original.Temperature = 0.6f;
+            original.MaxTokens = 1000;
+            HubSettingsPage page = new(_settings, routingController: controller);
+            EndpointEditorHostWindow window = ScriptableObject.CreateInstance<EndpointEditorHostWindow>();
+            try
+            {
+                // WHY: change callbacks require an attached panel; detached value setters only change stored values.
+                window.Show();
+                window.rootVisualElement.Add((VisualElement)page.CreatePageContent());
+                Invoke(page, "LoadEndpointById", "configured");
+
+                Toggle overrideTokens = (Toggle)Field(page, "_endpointOverrideMaxTokens").GetValue(page);
+                Assert.IsTrue(overrideTokens.value, "Legacy positive caps must remain enabled when opened.");
+                ((Toggle)Field(page, "_endpointOverrideTemperature").GetValue(page)).value = false;
+                overrideTokens.value = false;
+                LlmEndpointDescriptor edited = ReadEndpoint(page);
+
+                Assert.IsNull(edited.Temperature);
+                Assert.IsFalse(edited.OverrideMaxTokens);
+                Assert.AreEqual(0, edited.MaxTokens);
+                Assert.IsFalse(((FloatField)Field(page, "_endpointTemperature").GetValue(page)).enabledSelf);
+                Assert.IsFalse(((IntegerField)Field(page, "_endpointMaxTokens").GetValue(page)).enabledSelf);
+
+                Invoke(page, "ClearEndpointEditor");
+                ((TextField)Field(page, "_endpointName").GetValue(page)).value = "New endpoint";
+                LlmEndpointDescriptor fresh = ReadEndpoint(page);
+                Assert.AreEqual(LlmReasoningEffort.Default, fresh.ReasoningEffort);
+                Assert.AreEqual(LlmReasoningDialect.Auto, fresh.ReasoningDialect);
+                Assert.IsNull(fresh.Temperature);
+                Assert.IsFalse(fresh.OverrideMaxTokens);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(window);
+            }
+        }
+
+        private sealed class EndpointEditorHostWindow : UnityEditor.EditorWindow
+        {
+        }
+
+        private static LlmEndpointDescriptor ReadEndpoint(HubSettingsPage page)
+        {
+            MethodInfo read = typeof(HubSettingsPage).GetMethod(
+                "ReadEndpointEditor", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(read);
+            return (LlmEndpointDescriptor)read.Invoke(page, null);
+        }
+
         private static Button RemoveButton(HubSettingsPage page, string endpointId)
         {
             VisualElement list = (VisualElement)Field(page, "_endpointListContainer").GetValue(page);

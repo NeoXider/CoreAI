@@ -30,9 +30,8 @@ namespace CoreAI.Ai
     public enum LlmToolChannel
     {
         /// <summary>
-        /// Decide at activation time: for an OpenAI-compatible HTTP endpoint the channel exists by
-        /// definition of the API; for local llama.cpp under LLMUnity it takes one probe request with a
-        /// declared tool.
+        /// Decide at activation time using one probe request with a declared tool for HTTP endpoints
+        /// and local llama.cpp under LLMUnity.
         /// </summary>
         Auto = 0,
 
@@ -98,6 +97,18 @@ namespace CoreAI.Ai
 
         /// <summary>Max completion tokens for HTTP endpoints; 0 leaves the provider default.</summary>
         public int MaxTokens { get; set; }
+
+        /// <summary>Whether a zero MaxTokens explicitly overrides inherited limits.</summary>
+        public bool OverrideMaxTokens { get; set; }
+
+        /// <summary>Endpoint sampling temperature; null inherits global settings.</summary>
+        public float? Temperature { get; set; }
+
+        /// <summary>Typed reasoning effort; Default inherits legacy or provider settings.</summary>
+        public LlmReasoningEffort ReasoningEffort { get; set; } = LlmReasoningEffort.Default;
+
+        /// <summary>Reasoning wire format selected for this endpoint.</summary>
+        public LlmReasoningDialect ReasoningDialect { get; set; } = LlmReasoningDialect.Auto;
 
         /// <summary>Provider reasoning/thinking request mode for HTTP endpoints.</summary>
         public LlmReasoningMode ReasoningMode { get; set; } = LlmReasoningMode.ProviderDefault;
@@ -174,6 +185,11 @@ namespace CoreAI.Ai
                 !Uri.TryCreate(BaseUrl?.Trim(), UriKind.Absolute, out Uri uri))
             {
                 errors.Add("HTTP endpoint base URL must be absolute.");
+            }
+
+            if (Kind == LlmEndpointKind.HttpOpenAi && string.IsNullOrWhiteSpace(Model))
+            {
+                errors.Add("HTTP endpoint model is required.");
             }
 
             if (Kind == LlmEndpointKind.HttpOpenAi &&

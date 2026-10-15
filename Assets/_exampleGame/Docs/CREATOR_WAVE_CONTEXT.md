@@ -1,4 +1,4 @@
-﻿# Creator Context for Wave Plans (Arena Example)
+# Creator Context for Wave Plans (Arena Example)
 
 **Contract version:** `1` (telemetry key `arena.context.version`).
 

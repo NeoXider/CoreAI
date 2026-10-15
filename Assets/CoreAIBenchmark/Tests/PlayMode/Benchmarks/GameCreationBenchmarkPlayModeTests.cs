@@ -21,9 +21,11 @@ using MEAI = Microsoft.Extensions.AI;
 namespace CoreAI.Tests.PlayMode.Benchmarks
 {
     /// <summary>
-    /// Entry point for the game-creation benchmark (G1 + G2). Runs every scenario through the resolved
-    /// live model, grades each 0..100 via the portable scoring core, and writes
-    /// <c>TestResults/CoreAI/Benchmarks/&lt;runId&gt;/BENCHMARK_RESULTS.{md,json}</c>.
+    /// Entry point for the game-creation benchmark. Runs every scenario through the resolved live model, grades
+    /// each 0..100 via the portable scoring core, and writes
+    /// <c>TestResults/CoreAI/Benchmarks/BENCHMARK_&lt;runId&gt;_&lt;model&gt;.{md,json}</c>. With
+    /// <see cref="BenchmarkTargetList.EnvTargets"/> set it runs several models at once instead, one report each
+    /// (see <c>GameCreationBenchmarkParallelSuite.cs</c>).
     /// <para>
     /// Gated on a configured provider (<see cref="PlayModeOpenAiTestConfig"/> env vars / local config or a
     /// local LLMUnity model); <see cref="Assert.Ignore(string)"/> when unconfigured. This is a benchmark,
@@ -31,8 +33,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// model score — the score is the measurement.
     /// </para>
     /// </summary>
-    public sealed class GameCreationBenchmarkPlayModeTests
+    public sealed partial class GameCreationBenchmarkPlayModeTests
     {
+        // WHY: Suite 2.0 adds one extreme scenario to every group except G6 (reported as a separate extreme
+        // sub-score), regrades G6 on build geometry and closes grader loopholes in G1-G5, G7 and G8, so no
+        // 2.0 score is comparable with 1.x.
         // WHY: Suite 1.16 makes each tool-error checkpoint declare what it covers (G4 clean_tool now also fails on
         // a failed call that never ran Lua) and accounts for a turn cut by the deadline. Rows whose G4 had no such
         // failed call are unchanged and were carried over from 1.15.
@@ -41,7 +46,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         // new grader, and the free-build prompt now describes that runtime honestly (section size, the
         // writable Part surface, how Color really composes). The versioning policy says scores compare
         // only within a suite version; every published v1.7 G6 number is the old world_command build.
-        private const string SuiteVersion = "1.16";
+        private const string SuiteVersion = "2.0";
         private const float FreeBuildTotalBudgetSeconds = 600f;
 
         /// <summary>
@@ -52,13 +57,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         private const float FreeBuildTimeoutSeconds = FreeBuildTotalBudgetSeconds - FreeBuildCaptureReserveSeconds;
 
         /// <summary>
-        /// NUnit hard-abort backstop (110 min). Attribute arguments must be compile-time constants, so the
-        /// soft-budget clamp below reuses this exact value instead of a second hand-maintained number.
+        /// NUnit hard-abort backstop (6 h), sized for a multi-target run of the full suite on slow bridged
+        /// models. Attribute arguments must be compile-time constants, so the soft-budget clamp below reuses
+        /// this exact value instead of a second hand-maintained number. The launcher watchdog must stay above it.
         /// </summary>
-        private const int NUnitTimeoutMs = 6_600_000;
+        internal const int NUnitTimeoutMs = 21_600_000;
 
         /// <summary>Headroom reserved for report/screenshot/model-card writing after the last scenario.</summary>
         private const double ReportMarginSeconds = 300;
+
+        /// <summary>Extra report headroom per additional target: its model card and artifacts are written in turn.</summary>
+        private const double ReportMarginPerExtraTargetSeconds = 30;
+
+        /// <summary>Soft budget of a single-model run when <see cref="EnvSuiteBudget"/> is unset (100 minutes).</summary>
+        private const double DefaultSingleTargetBudgetSeconds = 6000;
 
         /// <summary>Env var (CSV of group ids, e.g. "G1,G2") to restrict which scenarios run. Empty = all.</summary>
         public const string EnvGroups = "COREAI_BENCHMARK_GROUPS";
@@ -85,19 +97,27 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// WORST case — every retry attempt running the full per-scenario timeout — still fits inside this
         /// budget; once nothing more fits, the suite stops and writes the report/screenshots for everything
         /// finished so far — unlike the NUnit [Timeout], which hard-aborts and produces NO artifacts.
-        /// Default 6000s (100 min). The effective value is clamped so that budget + report margin (300s)
-        /// never exceeds the NUnit [Timeout] (6600s), keeping the graceful path in charge even for
-        /// oversized env values.
+        /// A multi-target run shares one budget, measured from the start of the run, across all targets.
+        /// Default: 6000s (100 min) for a single model, the full ceiling for a multi-target run. The effective
+        /// value is clamped so that budget + report margin (300s, plus 30s per extra target) never exceeds the
+        /// NUnit [Timeout] (6 h), keeping the graceful path in charge even for oversized env values.
         /// </summary>
         public const string EnvSuiteBudget = "COREAI_BENCHMARK_SUITE_BUDGET";
 
-        private static double ResolveSuiteBudgetSeconds()
+        /// <summary>Report headroom between the soft budget and the NUnit hard abort for a run of <paramref name="targetCount"/> targets.</summary>
+        internal static double ReportMarginFor(int targetCount)
+        {
+            return ReportMarginSeconds + ReportMarginPerExtraTargetSeconds * Math.Max(0, targetCount - 1);
+        }
+
+        internal static double ResolveSuiteBudgetSeconds(int targetCount = 1)
         {
             // Hard ceiling for the soft budget. The rep start-gate reserves the FULL worst case
             // (maxAttempts x this rep's timeout) inside the budget, so scenario work always finishes by
             // the budget itself; only the report/screenshot margin has to fit between the budget and the
             // NUnit hard abort (which writes no artifacts).
-            double cap = NUnitTimeoutMs / 1000d - ReportMarginSeconds;
+            double margin = ReportMarginFor(targetCount);
+            double cap = NUnitTimeoutMs / 1000d - margin;
 
             string raw = Environment.GetEnvironmentVariable(EnvSuiteBudget);
             if (!string.IsNullOrWhiteSpace(raw)
@@ -109,7 +129,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     Debug.LogWarning(
                         $"[Benchmark] {EnvSuiteBudget}={s:0}s exceeds the safe ceiling; clamped to {cap:0}s " +
                         $"(NUnit [Timeout] {NUnitTimeoutMs / 1000d:0}s - report margin " +
-                        $"{ReportMarginSeconds:0}s), otherwise the NUnit hard abort could fire before the " +
+                        $"{margin:0}s), otherwise the NUnit hard abort could fire before the " +
                         "report is written.");
                     return cap;
                 }
@@ -117,7 +137,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 return s;
             }
 
-            return Math.Min(6000, cap); // 100 minutes, kept under the NUnit-backstop ceiling
+            // WHY: a single model keeps its historical 100-minute default; parallel targets are typically slow
+            // bridged models, and the shared budget is only a graceful upper bound, so they get the ceiling.
+            return targetCount > 1 ? cap : Math.Min(DefaultSingleTargetBudgetSeconds, cap);
         }
 
         private static int ResolveBenchmarkRoundtrips()
@@ -188,11 +210,17 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return 1;
         }
 
-        /// <summary>Per-scenario model timeout; a free build is capped at the 600 s budget minus the capture reserve.</summary>
+        /// <summary>
+        /// Per-scenario model timeout; a free build is capped at the 600 s budget minus the capture reserve.
+        /// <c>COREAI_BENCHMARK_TIMEOUT</c> overrides regular scenarios and the free build, never an extreme-tier
+        /// scenario, whose own longer budget is part of its task.
+        /// </summary>
         private static float ResolveTimeoutSeconds(GameBenchmarkScenario scenario)
         {
             string raw = Environment.GetEnvironmentVariable(EnvTimeout);
-            if (float.TryParse(raw, System.Globalization.NumberStyles.Float,
+            // WHY: the flat override is sized for regular scenarios; applied to an extreme scenario it cut
+            // its stated time and turned hard tasks into timeouts.
+            if (!scenario.IsExtreme && float.TryParse(raw, System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out float s) && s >= 1f && s <= 1200f)
             {
                 return scenario.FreeBuildLayout ? Math.Min(s, FreeBuildTimeoutSeconds) : s;
@@ -252,6 +280,34 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 Environment.SetEnvironmentVariable(EnvTimeout, previousTimeout);
                 Environment.SetEnvironmentVariable(EnvRetries, previousRetries);
+            }
+        }
+
+        [Test]
+        public void TimeoutOverride_AppliesToRegularScenariosButNotToExtremeOnes()
+        {
+            GameBenchmarkScenario regular = Array.Find(GameInstructionScenariosG5.All(), s => !s.IsExtreme);
+            GameBenchmarkScenario g5Extreme = Array.Find(GameInstructionScenariosG5.All(), s => s.IsExtreme);
+            GameBenchmarkScenario g8Extreme = Array.Find(GameObserveActScenariosG8.All(), s => s.IsExtreme);
+            Assert.IsNotNull(regular);
+            Assert.IsNotNull(g5Extreme);
+            Assert.IsNotNull(g8Extreme);
+            string previousTimeout = Environment.GetEnvironmentVariable(EnvTimeout);
+            try
+            {
+                Environment.SetEnvironmentVariable(EnvTimeout, "60");
+                Assert.AreEqual(60f, ResolveTimeoutSeconds(regular));
+                Assert.AreEqual(g5Extreme.TimeoutSeconds, ResolveTimeoutSeconds(g5Extreme));
+                Assert.AreEqual(g8Extreme.TimeoutSeconds, ResolveTimeoutSeconds(g8Extreme));
+
+                Environment.SetEnvironmentVariable(EnvTimeout, "1200");
+                Assert.AreEqual(1200f, ResolveTimeoutSeconds(regular));
+                Assert.AreEqual(g5Extreme.TimeoutSeconds, ResolveTimeoutSeconds(g5Extreme),
+                    "the override neither shrinks nor stretches an extreme scenario's own budget");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(EnvTimeout, previousTimeout);
             }
         }
 
@@ -412,7 +468,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 Environment.SetEnvironmentVariable(subjectVar, null);
                 Environment.SetEnvironmentVariable(promptVar, null);
-                // WHY: the default castle goal is byte-identical to suite 1.15 (clock, castle pacing, stop rule).
+                // WHY: the default castle goal ends with the clock, the castle pacing and the stop rule, in that order.
                 StringAssert.EndsWith(GameFreeBuildScenariosG6.FreeBuildTimeBudgetClockNote +
                                       GameFreeBuildScenariosG6.FreeBuildCastlePacingNote +
                                       GameFreeBuildScenariosG6.FreeBuildTimeBudgetStopNote,
@@ -843,9 +899,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         [UnityTest]
-        [Timeout(NUnitTimeoutMs)] // 110 min — last-resort NUnit backstop; the SOFT suite budget (which still
+        [Timeout(NUnitTimeoutMs)] // 6 h — last-resort NUnit backstop; the SOFT suite budget (which still
         // writes artifacts) is the real terminator, clamped in
-        // ResolveSuiteBudgetSeconds to this value minus a report margin (300s).
+        // ResolveSuiteBudgetSeconds to this value minus a report margin.
         // The rep start-gate reserves maxAttempts x timeout inside the budget, so
         // scenario work plus report writing always finishes before the hard abort.
         // NUnit's hard abort writes nothing.
@@ -853,21 +909,30 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         [Explicit("Live game-creation benchmark; run manually with a configured model.")]
         public IEnumerator GameCreationBenchmark_Suite()
         {
+            string targetSpec = Environment.GetEnvironmentVariable(BenchmarkTargetList.EnvTargets);
+            if (!string.IsNullOrWhiteSpace(targetSpec))
+            {
+                if (!BenchmarkTargetList.TryParse(targetSpec, out List<BenchmarkTarget> targets, out string targetError))
+                {
+                    Assert.Fail(targetError);
+                }
+
+                if (targets.Count > 0)
+                {
+                    yield return RunMultiTargetSuite(targets);
+                    yield break;
+                }
+            }
+
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     null, 0.1f, 300, out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
                 Assert.Ignore(ignore);
             }
 
-            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            // Free-build scenes (the castle) spawn 24+ objects, which needs more tool-call roundtrips than the
-            // default. Overridable via env.
-            settings.SetMaxToolCallRoundtrips(ResolveBenchmarkRoundtrips());
-            // CRITICAL for free-build: do NOT truncate tool-call history (0 = unlimited). With the default cap
-            // of 20, a 30+ spawn build forgets the first ~15 objects it placed and re-spawns duplicates. The
-            // model must see everything it has already built to avoid repeating itself.
-            settings.SetMaxToolCallHistoryMessages(0);
+            CoreAISettingsAsset settings = CreateBenchmarkSettings();
             BenchmarkReport report = new();
+            BenchmarkVisualLane visualLane = new();
 
             try
             {
@@ -876,7 +941,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     yield return PlayModeProductionLikeLlmFactory.EnsureLlmUnityModelReady(handle);
                 }
 
-                ITokenCounter tokenCounter = new BpeTokenCounter();
                 // Model id: from the resolved env/file config, else the project CoreAISettings asset (the
                 // backend-driven path carries no ResolvedConfig), else the backend name as a last resort.
                 string modelId = handle.ResolvedConfig?.Model;
@@ -894,151 +958,36 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 int repetitions = ResolveRepetitions();
 
-                report.Metadata = new BenchmarkRunMetadata
-                {
-                    RunId = DateTime.Now.ToString("yyyyMMdd_HHmmss"),
-                    TimestampUtc = DateTime.UtcNow.ToString("o"),
-                    ModelId = modelId,
-                    Backend = handle.ResolvedBackend.ToString(),
-                    // From the resolved config when present, else the actual client capability (the
-                    // asset-driven path carries no ResolvedConfig). Streaming is forced off per-agent for
-                    // determinism, so it is reported as false here regardless of the provider default.
-                    NativeToolCalling = handle.ResolvedConfig?.NativeTools ?? handle.Client.SupportsNativeToolCalling,
-                    Streaming = handle.ResolvedConfig?.Streaming ?? false,
-                    MaxParallelToolCalls = settings.MaxParallelToolCalls,
-                    Temperature = 0.1f,
-                    Repetitions = repetitions,
-                    UnityVersion = Application.unityVersion,
-                    SuiteVersion = SuiteVersion
-                };
+                // From the resolved config when present, else the actual client capability (the asset-driven
+                // path carries no ResolvedConfig). Streaming is forced off per-agent for determinism, so it is
+                // reported as false here regardless of the provider default.
+                report.Metadata = CreateRunMetadata(DateTime.Now.ToString("yyyyMMdd_HHmmss"), modelId,
+                    handle.ResolvedBackend.ToString(),
+                    handle.ResolvedConfig?.NativeTools ?? handle.Client.SupportsNativeToolCalling,
+                    handle.ResolvedConfig?.Streaming ?? false, settings, repetitions,
+                    handle.ResolvedConfig?.ReasoningEffort);
 
                 GameBenchmarkScenario[] scenarios = AllScenarios();
-                // Per-scenario RepsOverride (e.g. G6/G7 always run once) means the true total is not simply
-                // scenarios.Length * repetitions — sum each scenario's actual planned rep count instead, or
-                // the progress bar/ETA would overshoot 100% whenever any scenario overrides its rep count.
-                int totalPlannedRuns = 0;
-                foreach (GameBenchmarkScenario s in scenarios)
+                BenchmarkProgress.BeginSession();
+                BenchmarkRunProgress progress =
+                    BenchmarkProgress.BeginRun(modelId, PlannedRunCount(scenarios, repetitions), false);
+
+                TargetSuiteRun run = new()
                 {
-                    totalPlannedRuns += s.RepsOverride ?? repetitions;
-                }
-
-                BenchmarkProgress.Begin(totalPlannedRuns, modelId);
-
-                // Soft whole-suite time budget: a scenario rep only starts when its FULL per-scenario timeout
-                // still fits in the remaining budget, so a rep can never start just under the wire and blow
-                // through the NUnit [Timeout] mid-run. Once nothing more fits, stop and fall through to
-                // writing the report/screenshots for whatever finished. This is graceful — unlike the NUnit
-                // [Timeout] which hard-aborts mid-scenario and writes nothing.
-                double suiteBudgetSeconds = ResolveSuiteBudgetSeconds();
-                System.Diagnostics.Stopwatch suiteClock = System.Diagnostics.Stopwatch.StartNew();
-                bool budgetHit = false;
-
-                foreach (GameBenchmarkScenario scenario in scenarios)
-                {
-                    float timeout = ResolveTimeoutSeconds(scenario);
-                    int maxAttempts = ResolveMaxAttempts(scenario);
-                    // Scenarios with a RepsOverride (e.g. the G6 castle hero, G7 comprehensive integration)
-                    // always run their own fixed count, even when the suite repeats every other scenario
-                    // for an averaged score.
-                    int scenarioReps = scenario.RepsOverride ?? repetitions;
-                    for (int rep = 1; rep <= scenarioReps; rep++)
-                    {
-                        // Manual Stop button (BenchmarkProgress.RequestStop): break GRACEFULLY between reps so
-                        // the report for everything finished so far is still written, instead of losing the
-                        // whole run when Play mode is exited mid-scenario. Same graceful path as the budget gate.
-                        if (BenchmarkProgress.StopRequested)
-                        {
-                            budgetHit = true;
-                            Debug.LogWarning(
-                                $"[Benchmark] Stop requested after {report.Results.Count} scenario result(s); " +
-                                "stopping early and writing the report for everything finished so far.");
-                            break;
-                        }
-
-                        // Start-gate on every rep (not just per scenario). The worst case for the NUnit
-                        // backstop is NOT one timeout: the retry loop below reruns a hard-failed attempt
-                        // up to maxAttempts times, each allowed the full per-scenario timeout (which the
-                        // COREAI_BENCHMARK_TIMEOUT env can raise well past the suite defaults). Reserve
-                        // the whole worst case, or a provider that hangs on every attempt blows straight
-                        // through the NUnit hard abort with no artifacts written.
-                        double worstCaseSeconds = ScenarioWorstCaseSeconds(scenario, timeout, maxAttempts);
-                        if (suiteClock.Elapsed.TotalSeconds + worstCaseSeconds > suiteBudgetSeconds)
-                        {
-                            budgetHit = true;
-                            Debug.LogWarning(
-                                $"[Benchmark] Suite time budget ({suiteBudgetSeconds:0}s) would be exceeded by " +
-                                $"{scenario.Name} ({maxAttempts} attempt(s) x {timeout:0}s timeout, " +
-                                $"{worstCaseSeconds:0}s planned) after " +
-                                $"{report.Results.Count} scenario result(s); stopping early and writing the " +
-                                "report for everything finished so far.");
-                            break;
-                        }
-
-                        BenchmarkProgress.StartScenario(
-                            $"{scenario.Group} · {scenario.Name}  {Stars(BenchmarkInfo.DifficultyFor(scenario.Group))}" +
-                            (scenarioReps > 1 ? $" (run {rep}/{scenarioReps})" : ""),
-                            timeout);
-                        ScenarioResult captured = null;
-                        bool droppedForStop = false;
-                        // Retry on ANY hard failure that produced no measurement — provider/model crash,
-                        // failed-to-load, timeout, dropped connection — so a crash never counts as a model
-                        // failure. A run that COMPLETED but scored low is NOT retried (that is the
-                        // measurement); harness (Framework) bugs are NOT retried (fail fast to surface them).
-                        for (int attempt = 1; attempt <= maxAttempts; attempt++)
-                        {
-                            ScenarioResult attemptResult = null;
-                            yield return RunScenario(scenario, handle.Client, settings, tokenCounter, modelId,
-                                timeout, r => attemptResult = r);
-                            captured = attemptResult;
-
-                            bool hardFailure = captured != null
-                                               && !string.IsNullOrEmpty(captured.Failure)
-                                               && captured.Attribution != FailureAttribution.Framework;
-                            if (!hardFailure || attempt >= maxAttempts)
-                            {
-                                break;
-                            }
-
-                            // WHY: the stop flag is otherwise only read at the top of the reps loop, so with
-                            // retries a pressed Stop against a dead provider would still wait out maxAttempts
-                            // full timeouts; exclude the stop-aborted scenario from model scoring instead.
-                            if (AbortRetryForStop(BenchmarkProgress.StopRequested, ref captured))
-                            {
-                                droppedForStop = true;
-                                // TODO: Preserve the dropped attempt's token and cost totals without adding it to scored report results.
-                                Debug.LogWarning($"[Benchmark] {scenario.Name}: stop requested — skipping " +
-                                                 $"remaining retry attempt(s) after attempt {attempt}/{maxAttempts}.");
-                                break;
-                            }
-
-                            Debug.LogWarning($"[Benchmark] {scenario.Name}: run failed " +
-                                             $"({captured.Failure}); retry {attempt}/{maxAttempts - 1}.");
-                        }
-
-                        if (!ShouldCountCompletedRepetition(droppedForStop))
-                        {
-                            continue;
-                        }
-
-                        if (captured != null)
-                        {
-                            captured.Repetition = rep;
-                            report.Add(captured);
-                            BenchmarkProgress.CompleteScenario(ProgressLine(captured),
-                                Stars(BenchmarkInfo.DifficultyFor(scenario.Group)));
-                        }
-                        else
-                        {
-                            BenchmarkProgress.CompleteScenario($"⚠ {scenario.Name} — no result",
-                                Stars(BenchmarkInfo.DifficultyFor(scenario.Group)));
-                        }
-                    }
-
-                    if (budgetHit)
-                    {
-                        break; // the gate covers both loops: stop the scenario loop too
-                    }
-                }
+                    DisplayName = modelId,
+                    TokenizerModelId = modelId,
+                    Client = handle.Client,
+                    Settings = settings,
+                    TokenCounter = new BpeTokenCounter(),
+                    Report = report,
+                    Progress = progress,
+                    Scenarios = scenarios,
+                    Repetitions = repetitions,
+                    SuiteBudgetSeconds = ResolveSuiteBudgetSeconds(),
+                    SuiteClock = System.Diagnostics.Stopwatch.StartNew(),
+                    VisualLane = visualLane
+                };
+                yield return RunTargetSuite(run);
             }
             finally
             {
@@ -1053,11 +1002,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             // A suite-level "model card" (radar of the six dimensions + game-fitness bars) so two models'
             // results are comparable at a glance — rendered with a throwaway camera while still in Play mode.
             byte[] modelCardPng = null;
-            if (SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null
-                && report.Results.Count > 0)
-            {
-                yield return CaptureModelCard(report, png => modelCardPng = png);
-            }
+            yield return CaptureReportModelCard(report, visualLane, png => modelCardPng = png);
 
             string artifactPath = WriteArtifacts(report, modelCardPng);
 
@@ -1133,16 +1078,36 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return $"{glyph} {r.ScenarioName} — {r.Score.Base:0.#}";
         }
 
-        private static string WriteArtifacts(BenchmarkReport report, byte[] modelCardPng = null)
+        /// <summary>Project-root <c>TestResults/CoreAI/Benchmarks</c>, where every report lands.</summary>
+        internal static string DefaultResultsDirectory()
+        {
+            string projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
+            return Path.Combine(projectRoot, "TestResults", "CoreAI", "Benchmarks");
+        }
+
+        /// <summary>
+        /// Artifact file stem: run date + model, so reports are self-identifying and never overwrite. A target
+        /// label that differs from the model id is appended after a double underscore, which keeps two targets
+        /// serving the same model apart.
+        /// </summary>
+        internal static string ArtifactStem(string runId, string modelId, string label = null)
+        {
+            string stem = $"BENCHMARK_{runId}_{SanitizeForFileName(modelId)}";
+            return string.IsNullOrWhiteSpace(label) ||
+                   string.Equals(label.Trim(), modelId?.Trim(), StringComparison.Ordinal)
+                ? stem
+                : $"{stem}__{SanitizeForFileName(label)}";
+        }
+
+        internal static string WriteArtifacts(BenchmarkReport report, byte[] modelCardPng = null, string stem = null,
+            string directory = null)
         {
             try
             {
-                string projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
-                string dir = Path.Combine(projectRoot, "TestResults", "CoreAI", "Benchmarks");
+                string dir = string.IsNullOrWhiteSpace(directory) ? DefaultResultsDirectory() : directory;
                 Directory.CreateDirectory(dir);
 
-                // Date + model in the filename so reports are self-identifying and never overwrite.
-                string stem = $"BENCHMARK_{report.Metadata.RunId}_{SanitizeForFileName(report.Metadata.ModelId)}";
+                stem ??= ArtifactStem(report.Metadata.RunId, report.Metadata.ModelId);
                 string mdName = stem + ".md";
                 string svgName = stem + ".svg";
                 string mdPath = Path.Combine(dir, mdName);
@@ -1164,8 +1129,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     md += $"\n[Tool-call arguments and result previews (up to 2,000 characters each)]({traceName})\n";
                 }
 
-                // The rendered model card (radar + role bars) leads the report when available.
-                if (modelCardPng != null && modelCardPng.Length > 0)
+                // WHY: the vector card needs no GPU, so a headless run still gets a model card.
+                string cardSvgName = stem + "_modelcard.svg";
+                File.WriteAllText(Path.Combine(dir, cardSvgName), BenchmarkReportFormatter.ToModelCardSvg(report));
+
+                // The rendered model card leads the report when available, else its vector twin.
+                if (modelCardPng == null || modelCardPng.Length == 0)
+                {
+                    md = EmbedResultsImage(md, cardSvgName);
+                }
+                else
                 {
                     string cardName = stem + "_modelcard.png";
                     try

@@ -62,10 +62,17 @@ namespace CoreAI.Tests.EditMode
         private sealed class NamedClient : ILlmClient
         {
             private readonly string _content;
+            public int SettingsResolutions { get; private set; }
 
             public NamedClient(string content)
             {
                 _content = content;
+            }
+
+            public void ResolveRequestSettings(LlmCompletionRequest request)
+            {
+                SettingsResolutions++;
+                request.EffectiveTemperature = 0.75f;
             }
 
             public Task<LlmCompletionResult> CompleteAsync(
@@ -282,6 +289,63 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(registry.ResolveContextWindowForRole("Chat"), route.ContextWindowTokens);
             Assert.AreEqual(registry.ResolveExecutionModeForRole("Chat"), route.Mode);
             Assert.AreEqual("routed", (await route.Client.CompleteAsync(new LlmCompletionRequest())).Content);
+        }
+
+        [Test]
+        public async Task TrackedEndpoint_ResolvesSettingsWithoutTakingLease()
+        {
+            NamedClient client = new("ready");
+            using LlmClientRegistry registry = BuildRegistry(new MemoryStore(), new FakeFactory { Client = client });
+            await registry.AddOrUpdateEndpointAsync(Descriptor("cloud", "https://example.test/v1"));
+            LlmCompletionRequest request = new();
+            registry.ResolveClientForRole("Chat", "cloud").ResolveRequestSettings(request);
+            Assert.AreEqual(1, client.SettingsResolutions);
+            Assert.AreEqual(0.75f, request.EffectiveTemperature);
+            Assert.AreEqual(0, registry.GetEndpoints().Single().InFlightRequests);
+        }
+
+        [Test]
+        public async Task ActivatingEndpoint_SettingsResolutionDoesNotActivateAndForwardsWhenReady()
+        {
+            NamedClient client = new("ready");
+            FakeFactory factory = new() { Pending = new TaskCompletionSource<LlmEndpointClientActivation>() };
+            using LlmClientRegistry registry = BuildRegistry(new MemoryStore(), factory);
+            Task<LlmEndpointSnapshot> activation = registry.AddOrUpdateEndpointAsync(
+                Descriptor("cloud", "https://example.test/v1"));
+            ILlmClient activating = registry.ResolveClientForRole("Chat", "cloud");
+            LlmCompletionRequest request = new();
+            activating.ResolveRequestSettings(request);
+            Assert.AreEqual(1, factory.Calls);
+            Assert.IsFalse(activation.IsCompleted);
+            Assert.AreEqual(0, client.SettingsResolutions);
+            factory.Pending.SetResult(new LlmEndpointClientActivation
+            {
+                Client = client,
+                Mode = LlmExecutionMode.ClientOwnedApi
+            });
+            await activation;
+            activating.ResolveRequestSettings(request);
+            Assert.AreEqual(1, factory.Calls);
+            Assert.AreEqual(1, client.SettingsResolutions);
+            Assert.AreEqual(0.75f, request.EffectiveTemperature);
+        }
+
+        [TestCase(null)]
+        [TestCase(0)]
+        [TestCase(345)]
+        public void RouteSnapshot_PreservesSelectedManifestOutputCap(int? cap)
+        {
+            using LlmClientRegistry registry = BuildRegistry(new MemoryStore(), new FakeFactory());
+            registry.ApplyRouteTable(new LlmRouteTable
+            {
+                Profiles = new[] { new LlmRouteProfile { ProfileId = "manifest", MaxOutputTokens = cap } },
+                Rules = new[] { new LlmRouteRule { RolePattern = "Chat", ProfileId = "manifest" } }
+            }, new[] { new LlmBackendProfileEntry { profileId = "manifest", kind = LlmBackendKind.Offline } });
+            Assert.AreEqual(cap, registry.ResolveRouteForRole("Chat", "").MaxOutputTokens);
+            Assert.AreEqual(cap, registry.ResolveRouteForRole("Other", "manifest").MaxOutputTokens);
+            Assert.IsNull(registry.ResolveRouteForRole("Other", "").MaxOutputTokens);
+            registry.ApplyRouteTable(null, null, false);
+            Assert.IsNull(registry.ResolveRouteForRole("Chat", "").MaxOutputTokens);
         }
 
         private sealed class NativeToolsClient : ILlmClient

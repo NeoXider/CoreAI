@@ -20,7 +20,7 @@ as a Lua-CSharp `ILuaCsGameRuntimeBindings` set intended for the **WorldEdit** c
 When wired into the mod runtime, a mod granted WorldEdit (the default tier) gets these extra
 Lua functions:
 
-> NOTE: the mod runtime now exposes the seam (`LuaCsModStackOptions.AdditionalGameplayBindings`), but the
+> NOTE: the mod runtime exposes the seam (`LuaCsModStackOptions.AdditionalGameplayBindings`), but the
 > demo's composition layer does not yet thread it through, so the forge functions below are authored and
 > ready but not currently surfaced to running mods. They become live once the demo wires that option through
 > `CoreAiModsInstaller.RegisterCoreAiMods` / `CoreAiModsLifetimeScope` with a lazy forge lookup — tracked as
@@ -44,13 +44,14 @@ spawns and team wipes are emitted back to mods as events:
 | `team_wiped` | `team` |
 
 The intended design lets a mod react to its own world with `hooks_on(...)` and drive it over time with
-`hooks_every(...)`, so a complete game emerges from mods alone. See the NOTE below: the `forge_*` scene
+`hooks_every(...)`, so a complete game emerges from mods alone. See the NOTE above: the `forge_*` scene
 bindings are authored but not yet threaded into the mod runtime, so this demo is currently aspirational.
 
 ## Requirements
 
-- `COREAI_LUA` defined.
-- An LLM endpoint configured in `Resources/CoreAISettings` (LM Studio / OpenAI-compatible).
+- `COREAI_LUA` defined (the demo controller compiles only with it).
+- `COREAI_LLM` defined and an LLM endpoint configured in `Resources/CoreAISettings` (LM Studio /
+  OpenAI-compatible).
 - The scene's `CoreAI` scope uses the built-in **Programmer** role (already wired in the
   scene) so `manage_mods` is available in chat.
 
@@ -96,7 +97,8 @@ report("Endless waves armed.")
 
 ## Safety
 
-`forge_*` lives behind the **WorldEdit** tier — read-only mods cannot spawn anything.
+`forge_*` is meant to be registered for the **WorldEdit** tier only, so read-only mods could not spawn
+anything.
 The Lua-CSharp sandbox (no `io`/`load`, `os` limited to `os.time`/`os.clock`), per-call
 instruction/time limits and the quarantine-after-repeated-errors policy (the mod stays loaded with
 dispatch suspended until a reload) all still apply. Spawns are capped (`MaxUnits`)
@@ -105,6 +107,6 @@ during mod ticks, which the mod-runtime ticker guarantees.
 
 ## Related
 
-- `Assets/CoreAI/Docs/LUA_GAME_API.md` — full Lua game API.
-- `Assets/CoreAI.Demos/LiveMechanicsMods/README.md` — Wave Auto-Battler (number-tuning mods).
-- `Assets/CoreAI/Docs/LUA_ACCESS_MODES.md` — capability tiers (Read → Full).
+- [LUA_GAME_API.md](../../CoreAI/Docs/LUA_GAME_API.md) — full Lua game API.
+- [LiveMechanicsMods README](../LiveMechanicsMods/README.md) — Wave Auto-Battler (number-tuning mods).
+- [LUA_ACCESS_MODES.md](../../CoreAI/Docs/LUA_ACCESS_MODES.md) — capability tiers (Read → Full).

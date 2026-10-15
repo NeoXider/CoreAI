@@ -5,7 +5,8 @@ entirely on your machine turns it into one real, code-guarded game action — wi
 on the HUD.
 
 These scenes run through CoreAI's normal LLMUnity bootstrap path with a dedicated
-`QwenDemoSettings.asset` configured for `Qwen3.5-0.8B-Q4_K_M.gguf`:
+`QwenDemoSettings.asset` configured for `Qwen3.5-0.8B-Q4_K_M.gguf`. They need `COREAI_LLM` and the
+LLMUnity package (`ai.undream.llm` in `Packages/manifest.json`):
 
 - `QwenGenieDemo.unity` — a free-form wish is mapped to one guarded world action.
 - `QwenSpellcraftDemo.unity` — a spell description is mapped to an element and power, while C# owns mana and vetoes invalid casts.

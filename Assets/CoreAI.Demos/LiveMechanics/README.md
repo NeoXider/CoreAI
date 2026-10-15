@@ -18,9 +18,9 @@ in-game chat and creates/changes gameplay mechanics on the fly while the game is
   `LuaCsGameToolExecutor -> LuaCsSecureEnvironment` with the full standard binding set
   (`LuaCapabilities.All`, no Full): logic slots, `ILuaModRuntime`, and world building through the
   [Rbx API](../../CoreAI/Docs/RBX_API.md) (`Instance.new('Part')`). The classic `coreai_world_*`
-  build calls are withheld stubs on this composition; the read-only queries
-  (`coreai_world_find`/`_pos`/`_exists`) still work, as does `Shared/DemoPrefabRegistry` for the C#
-  JSON world-command pipeline.
+  build calls are withheld stubs on this composition; the read-only queries (`coreai_world_find`,
+  `coreai_world_pos`, `coreai_world_exists`) still work, as does `Shared/DemoPrefabRegistry.asset` for the
+  C# JSON world-command pipeline.
 - Status panel (uGUI `CoreAiDemoPanel`): boss HP, gold, slot states (C# default / Lua override),
   loaded mods, combat log. Open chat with **C**.
 
@@ -28,7 +28,9 @@ in-game chat and creates/changes gameplay mechanics on the fly while the game is
 
 - LM Studio (or any OpenAI-compatible server) at `http://127.0.0.1:1234/v1` with a loaded model;
   the endpoint is configured in `Assets/Resources/CoreAISettings.asset`.
-- The Lua-CSharp runtime (shipped via the CoreAI.Mods package), with `COREAI_LUA` defined.
+- `COREAI_LLM` defined (the LLM pipeline is opt-in).
+- The Lua-CSharp runtime (shipped via the CoreAI.Mods package), with `COREAI_LUA` defined (the demo
+  controller compiles only with it).
 
 ## How to Use It
 

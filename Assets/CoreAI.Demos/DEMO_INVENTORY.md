@@ -15,12 +15,12 @@ part of that matrix.
 **UI tech legend**
 - **UITK** — UI Toolkit (`UIDocument` + `.uxml`/`.uss`): the `CoreAiHubWindow` Hub and `CoreAiChatPanel`.
 - **uGUI** — Unity UI (`Canvas` + `TextMeshProUGUI`) built at runtime by the shared `CoreAiDemoPanel`
-  (`Assets/CoreAI.Demos/Shared/CoreAiDemoPanel.cs`) that every former-IMGUI demo controller now draws on.
+  (`Assets/CoreAI.Demos/Shared/CoreAiDemoPanel.cs`) that the demo controllers draw on.
 - **IMGUI** — immediate-mode `OnGUI`/`GUILayout` overlay (the ratchet target; see `ImguiBanRatchetEditModeTests`).
 - **mixed** — a UITK/uGUI surface plus one or more IMGUI overlays in the same scene.
 
 The UI tech column is derived from the scene's own `MonoBehaviour` list: a scene is marked IMGUI only
-when it actually instantiates a whitelisted IMGUI script, so the column cannot drift from what loads.
+when its YAML instantiates a whitelisted IMGUI script.
 
 **Tutorial panel** = the in-scene guided surface that explains what is happening.
 
@@ -30,7 +30,7 @@ and never rehydrate in another demo.
 
 ---
 
-## Priority order for the DemoPanel redesign (showcase first)
+## Scenes by showcase priority
 
 ### P1 — Showcase (flagship, redesign first)
 
@@ -38,7 +38,7 @@ and never rehydrate in another demo.
 |---|---|---|---|---|---|
 | Live Mechanics | `LiveMechanics/LiveMechanicsDemo.unity` | The headline scenario: a **real LLM writes Lua through chat and changes gameplay live** (damage/attack-interval/loot logic slots via `execute_lua` → `LuaCsSecureEnvironment`). | mixed — `CoreAiChatPanel` (UITK) + `LiveMechanicsDemoController` status panel (uGUI — `CoreAiDemoPanel`) | Status overlay (HP/gold/slot state/mods/log); press **C** for chat | Yes — `live-mechanics-demo` |
 | Hub | `Hub/CoreAiHubDemo.unity` | The drop-in **UI Toolkit Hub** prefab: Chat, Settings (multi-endpoint switching), Statistics, Mods, World State pages. The flagship reusable UI. | UITK (Hub prefab) | Hub tab pages | Yes — `hub-demo` |
-| Full Access | `FullAccess/FullAccessDemo.unity` | **Full-tier** `unity_*` reflection access (opt-in): the Programmer inspects and moves/rotates/parents live scene objects from Lua. Also hosts the no-LLM Lua platform example (self-test + pure-Lua Tetris). | UITK — `CoreAiHubWindow` with Full Access / Lua Platform / Token Budget tabs | Hub tabs + the chat's example-prompt menu (`EnableExamplePrompts`) | Yes — `full-access-demo` |
+| Full Access | `FullAccess/FullAccessDemo.unity` | **Full-tier** `unity_*` reflection access (opt-in): the Programmer inspects and moves/rotates/parents live scene objects from Lua. Also hosts the no-LLM Lua platform example (self-test + pure-Lua Tetris). | UITK — `CoreAiChatPanel` + `CoreAiHubWindow` with Full Access / Lua Platform / AI Settings (Settings, Token Budget, Statistics sub-tabs) / Mods / World tabs | Hub tabs + the chat's example-prompt menu (`EnableExamplePrompts`) | Yes — `full-access-demo` |
 | CoreAi Chat | `CoreAiUnity/Scenes/CoreAiChatDemo.unity` | The canonical **UITK chat panel** (`CoreAiChatPanel`, `CoreAiChat.uxml`/`.uss`, message-bubble elements) — the reference chat UI other demos embed. | UITK | None (bare chat); **C** opens, **Esc** closes | No |
 
 ### P2 — Strong (broad appeal)
@@ -61,14 +61,14 @@ and never rehydrate in another demo.
 | Skills | `Skills/SkillsDemo.unity` | `SkillSet` + `AgentBuilder`: a `DemoGameMaster` agent with Crafting/Combat skills exposed as only two meta-tools (`read_skill`, `call_skill_tool`); on-demand tool-schema loading. | uGUI — `CoreAiDemoPanel` | "Ask the Game Master" button + response panel | No |
 | World Commands | `WorldCommands/WorldCommandsDemo.unity` | The raw AI-command pipeline (`IAiGameCommandSink` → `AiGameCommandRouter` → `CoreAiWorldCommandExecutor`) — the same path LLM agents and Lua bindings use. **No LLM, no Lua.** | uGUI — `CoreAiDemoPanel` | Buttons that publish spawn/move/recolor/destroy envelopes | No (shared pipeline only) |
 | Live Mechanics Mods Chat | `LiveMechanicsMods/LiveMechanicsModsChatDemo.unity` | Chat-driven persistent `manage_mods` workflow (boss-rule sandbox) with a runtime mod manager and auto-repair. | mixed — `CoreAiChatPanel` (UITK) + mod manager (F9, uGUI — `CoreAiDemoPanel`) + IMGUI Token Budget overlay (F10) | F9 mod manager / F10 usage panels | Yes — `live-mechanics-chat-demo` |
-| Online Authority | `OnlineAuthority/OnlineAuthorityDemo.unity` | MVP11/MVP12 write authority made visible: a guest's move request is refused, allowed after a host grant, refused again after a revoke — in one process, with no network transport claimed. | uGUI (scene `Canvas`, `OnlineAuthorityDemoController`) | Guest-move / grant / revoke / host-move buttons + status and grant labels | Yes — `online-authority-demo` |
+| Online Authority | `OnlineAuthority/OnlineAuthorityDemo.unity` | Online write authority made visible: a guest's move request is refused, allowed after a host grant, refused again after a revoke — in one process, with no network transport claimed. | uGUI (scene `Canvas`, `OnlineAuthorityDemoController`) | Guest-move / grant / revoke / host-move buttons + status and grant labels | Yes — `online-authority-demo` |
 
 ### P4 — Low priority (aspirational or internal)
 
 | Demo | Scene | What it demonstrates | UI tech | Tutorial panel | Mods/Lua (`storeId`) |
 |---|---|---|---|---|---|
 | Moddable Units | `ModdableUnits/ModdableUnitsDemo.unity` | *Aspirational.* Intended "empty arena, mods build the army" (`forge_define`/`forge_spawn`). The forge bindings are **authored but not yet wired** to the mod runtime (`TODO(moddableunits-binding-seam)`). | mixed — `CoreAiChatPanel` (UITK) + uGUI status/mod-manager panel (`CoreAiDemoPanel`) | Status panel (unit types, loaded mods, event log) — **read-only, no buttons** | Yes — `moddable-units-demo` |
-| Main CoreAI (dev harness) | `CoreAiUnity/Scenes/_mainCoreAI.unity` | Internal composition/dev scene: `CompositionRoot` + `LLM` host + IMGUI diagnostics overlays (`AiDashboardPresenter`, `OrchestrationDashboard`, `CoreAiTokenBudgetOverlay`). Not a curated showcase, not in the G11 matrix. | IMGUI (diagnostics overlays) | None (dev-only) | No |
+| Main CoreAI (dev harness) | `CoreAiUnity/Scenes/_mainCoreAI.unity` | Internal composition/dev scene: a `CompositionRoot` GameObject with `CoreAILifetimeScope` plus an LLMUnity `LLM` / `LLMAgent` host. Not a curated showcase, not in the G11 matrix. | None | None (dev-only) | No |
 
 ---
 
@@ -90,20 +90,20 @@ and never rehydrate in another demo.
   that text in their status panel and keep their action buttons disabled — see `QwenDemo/README.md`.
 - Any demo that needs a model in the browser must be pointed at an OpenAI-compatible HTTP endpoint.
 
-## Redesign notes
+## Notes
 
-- **IMGUI left every demo controller in 7.34.0 (`54fa272f`).** All ten former `OnGUI` controllers
+- **No demo controller uses IMGUI (since 7.34.0).** The ten controllers that used `OnGUI` before
   (DirectorAi, LiveMechanics, LiveMechanicsMods, LuaMods, ModdableUnits, both Qwen demos, Skills,
-  WebGL Lua self-test, WorldCommands) now draw on the shared uGUI `CoreAiDemoPanel`. Hub, CoreAiChatDemo,
-  Full Access, Wave Auto-Battler and Multiplayer Foundation stay pure UITK; MiniRpg and Live Mechanics
-  Mods Chat are UITK/uGUI mixed with one remaining IMGUI overlay each (`CoreAiTokenBudgetOverlay`, F10 —
-  tracked as an open item in root `TODO.md`); Gameplay Services and Online Authority draw on their own
-  scene `Canvas`; Procedural Materials uses neither.
+  WebGL Lua self-test, WorldCommands) draw on the shared uGUI `CoreAiDemoPanel`. Hub, CoreAiChatDemo,
+  Full Access, Wave Auto-Battler and Multiplayer Foundation are pure UITK; MiniRpg and Live Mechanics
+  Mods Chat are UITK/uGUI mixed with one IMGUI overlay each (`CoreAiTokenBudgetOverlay`, F10);
+  Gameplay Services and Online Authority draw on their own scene `Canvas`; Procedural Materials uses
+  neither.
 - **Remaining IMGUI: 3 files, all runtime diagnostics overlays** under `CoreAiUnity/Runtime`
   (`AiDashboardPresenter.cs`, `CoreAiTokenBudgetOverlay.cs`, `OrchestrationDashboard.cs`) — none under
-  `CoreAI.Demos` any more. That is exactly the `ImguiBanRatchetEditModeTests` whitelist; nothing outside
-  it uses IMGUI. Every migration deletes a line. (Verified 2026-09-09 by re-running the ratchet's own scan.)
-- **Isolated mod-store fix — DONE**: all eleven mods scenes with a store (Live Mechanics, both
+  `CoreAI.Demos`. That is exactly the `ImguiBanRatchetEditModeTests` whitelist, which may only shrink;
+  nothing outside it in the scanned package and demo folders uses IMGUI.
+- **Isolated mod stores**: all eleven mods scenes with a store (Live Mechanics, both
   LiveMechanicsMods scenes, MiniRpg, Full Access, Moddable Units, Lua Mods, Hub, Multiplayer Foundation,
   Gameplay Services, Online Authority) set a distinct `CoreAiModsLifetimeScope.storeId`; an empty
   `storeId` (the main-game default) keeps the original shared location.
@@ -112,7 +112,7 @@ and never rehydrate in another demo.
   is enabled only by `FullAccessHubDemoController` and `DemoHubPagesBinder`. The component is still
   present in `LiveMechanicsModsChatDemo`, `MiniRpgModsDemo` and `ModdableUnitsDemo`, where neither surface
   exists, so those three scenes currently offer no ready-made prompts.
-- **Moddable Units** is aspirational — its `forge_*` bindings compile but are not surfaced to running mods;
-  it should stay P4 until `TODO(moddableunits-binding-seam)` is threaded through the mods installer.
-- **DirectorAi** and **WebGlLuaSelfTest** ship as scripts only and need a host scene before they can be
-  shown in a DemoPanel.
+- **Moddable Units** is aspirational — its `forge_*` bindings compile but are not surfaced to running mods
+  until `TODO(moddableunits-binding-seam)` is threaded through the mods installer.
+- **DirectorAi** and **WebGlLuaSelfTest** ship as scripts only; attach them to a scene that has a
+  `CoreAILifetimeScope` (DirectorAi) or to any scene (WebGlLuaSelfTest).

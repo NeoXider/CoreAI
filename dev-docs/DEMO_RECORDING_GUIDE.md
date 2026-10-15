@@ -1,6 +1,7 @@
 # 🎬 Preparing CoreAI demo video / GIF
 
-Guide for recording demo videos and GIF animations to showcase CoreAI.
+Guide for recording demo videos and GIF animations to showcase CoreAI. A maintainer process document, moved
+here from `Assets/CoreAiUnity/Docs/` on 2026-10-15.
 
 ---
 
@@ -99,7 +100,7 @@ Guide for recording demo videos and GIF animations to showcase CoreAI.
 
 ### Demo 5: Full crafting pipeline (45–60 sec)
 
-**Goal:** Show multi-agent workflow: CoreMechanicAI → Programmer → Memory. `create_item` / `add_effect` are game functions you register through `ILuaCsGameRuntimeBindings` (see [EXAMPLES.md](EXAMPLES.md) Example 2).
+**Goal:** Show multi-agent workflow: CoreMechanicAI → Programmer → Memory. `create_item` / `add_effect` are game functions you register through `ILuaCsGameRuntimeBindings` (see [EXAMPLES.md](../Assets/CoreAiUnity/Docs/EXAMPLES.md) Example 2).
 
 **Recording script:**
 ```
@@ -275,5 +276,5 @@ For each demo:
 ---
 
 > 📖 **Related documents:**
-> - [EXAMPLES.md](EXAMPLES.md) — code examples
-> - [QUICK_START_FULL.md](QUICK_START_FULL.md) — full quick start
+> - [EXAMPLES.md](../Assets/CoreAiUnity/Docs/EXAMPLES.md) — code examples
+> - [QUICK_START_FULL.md](../Assets/CoreAiUnity/Docs/QUICK_START_FULL.md) — full quick start

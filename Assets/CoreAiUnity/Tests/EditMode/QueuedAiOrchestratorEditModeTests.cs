@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
@@ -1248,6 +1248,85 @@ namespace CoreAI.Tests.EditMode
             await CompleteAllScriptedAsync(inner, backlogCount + 2);
             await Task.WhenAll(tasks);
             queue.Dispose();
+        }
+
+        [TestCase(false, false)]
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        [TestCase(true, true)]
+        public async Task CancelRoleTasks_CancelsAllRunningAndQueuedRoleTurnsAcrossScopes(
+            bool withActorContext, bool streaming)
+        {
+            RecordingOrchestrator inner = new();
+            using QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 3 });
+            AiTaskRequest first = CreateRoleStopRequest(withActorContext, "first", "first-scope");
+            AiTaskRequest second = CreateRoleStopRequest(withActorContext, "second", "second-scope");
+            AiTaskRequest pending = CreateRoleStopRequest(withActorContext, "pending", "pending-scope");
+            AiTaskRequest survivorRequest = CreateRoleStopRequest(
+                withActorContext, "survivor", withActorContext ? "first-scope" : "survivor-scope");
+            survivorRequest.RoleId = "OtherRole";
+            List<Task> cancelled = new();
+            List<Task<List<LlmStreamChunk>>> streams = new();
+
+            foreach (AiTaskRequest request in new[] { first, second })
+            {
+                if (streaming)
+                {
+                    streams.Add(DrainAsync(queue.RunStreamingAsync(request)));
+                }
+                else
+                {
+                    cancelled.Add(queue.RunTaskAsync(request));
+                }
+            }
+
+            Task<string> survivor = queue.RunTaskAsync(survivorRequest);
+            await WaitUntilAsync(() => inner.Gates.Count == 3, "All provider slots must be occupied before queuing.");
+            if (streaming)
+            {
+                streams.Add(DrainAsync(queue.RunStreamingAsync(pending)));
+            }
+            else
+            {
+                cancelled.Add(queue.RunTaskAsync(pending));
+            }
+
+            ((IRoleAiTaskCancellation)queue).CancelRoleTasks(" Teacher ");
+
+            foreach (Task task in cancelled)
+            {
+                await WaitUntilAsync(() => task.IsCompleted, "Role stop must finish both running and queued tasks.");
+                await CaptureExceptionAsync<OperationCanceledException>(() => task);
+                Assert.IsTrue(task.IsCanceled);
+            }
+
+            foreach (Task<List<LlmStreamChunk>> task in streams)
+            {
+                await WaitUntilAsync(() => task.IsCompleted, "Role stop must finish both running and queued streams.");
+                List<LlmStreamChunk> chunks = await task;
+                Assert.AreEqual(1, chunks.Count);
+                Assert.IsTrue(chunks[0].IsDone);
+                Assert.AreEqual(LlmErrorCode.Cancelled, chunks[0].ErrorCode);
+            }
+
+            Assert.IsFalse(survivor.IsCompleted, "Stopping a role must leave a different role running.");
+            CollectionAssert.DoesNotContain(inner.ExecutionLog, "pending");
+            AssertSingleUnstartedTurn(inner, "Teacher", "pending");
+            inner.Gates[2].TrySetResult("survived");
+            Assert.AreEqual("survived", await survivor);
+        }
+
+        private static AiTaskRequest CreateRoleStopRequest(bool withActorContext, string hint, string scope)
+        {
+            ActorContext? actorContext = withActorContext ? CreateActorContext("actor-" + scope, "session-" + scope) : null;
+            return new AiTaskRequest
+            {
+                RoleId = "Teacher",
+                Hint = hint,
+                SourceTag = "Chat",
+                ActorContext = actorContext,
+                CancellationScope = actorContext.HasValue ? actorContext.Value.SessionId : scope
+            };
         }
 
         [Test]

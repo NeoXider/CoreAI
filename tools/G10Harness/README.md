@@ -4,10 +4,18 @@ The harness resolves `IAiOrchestrationService`, `ILuaModRuntime`, and `LuaCsModS
 `RegisterCorePortable` and `RegisterCoreAiMods` composition. It never constructs the orchestrator.
 It runs the 20-actor workload once for staggered chat and once for synchronized bursts.
 
+Prerequisites: the .NET 10 SDK, Unity 6000.3.14f1 installed at the default Hub path
+(`C:/Program Files/Unity/Hub/Editor/6000.3.14f1`, referenced for `UnityEngine.*.dll`), and the project
+opened in Unity once, so the Unity-generated project files (`CoreAI.Mods.csproj` and the projects it
+references) exist at the repository root and
+`Library/ScriptAssemblies` holds `VContainer.dll` and the MessagePipe assemblies. Run the commands from
+the repository root; the default actor script is
+`Assets/CoreAIMods/Runtime/Resources/CoreAI/G10/bench_actor.lua` (`--script <lua>` overrides it).
+
 Run the manifest-duration scripted mode (about three minutes plus build/drain time):
 
 ```powershell
-dotnet test tools/G10Harness.Tests/G10Harness.Tests.csproj -- `
+dotnet test tools/G10Harness.Tests/G10Harness.Tests.csproj `
   --logger "trx;LogFileName=g10-tests.trx" `
   --results-directory Temp/G10/TestResults
 
@@ -36,7 +44,8 @@ matching subscriber write and zero writes by the other 19 actors for every emit.
 For LM Studio, copy `g10.real-provider.example.json`, then supply the actual endpoint, model id,
 context cap, output cap, backend concurrency, orchestrator concurrency, and timeout. Empty or null
 values fail configuration; the harness does not substitute provider facts. Do not put secrets in a
-tracked config file.
+tracked config file. `g10.real-provider.local.json` is the tracked configuration of the recorded
+LM Studio run (frozen before measuring; see its `_comment`).
 
 The scripted result reports model/caps/backend concurrency/provider-produced responses as
 `not_measured` with `null` values. Only a real-provider run can produce those fields and the summative

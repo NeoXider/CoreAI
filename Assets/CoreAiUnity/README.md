@@ -35,8 +35,11 @@ https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI
 https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity
 ```
 
-Then `CoreAI → Setup → Install Git Dependencies` (VContainer / MessagePipe / UniTask) and install
-`Microsoft.Extensions.AI` via NuGetForUnity. Step-by-step: [INSTALL.md](../../INSTALL.md).
+Then `CoreAI → Setup → Install Git Dependencies` (VContainer / MessagePipe / UniTask, and LLMUnity —
+remove `ai.undream.llm` from `Packages/manifest.json` afterwards if you only use HTTP APIs) and install
+`Microsoft.Extensions.AI` 9.10.2 via NuGetForUnity (10.x cannot load under Unity; see INSTALL.md §2.1).
+To call a real model, enable the provider module: `CoreAI → Setup → Modules → LLM Providers → Enable
+Providers` (adds `COREAI_LLM`). Step-by-step: [INSTALL.md](../../INSTALL.md).
 
 **2. Make a scene:**
 
@@ -102,7 +105,7 @@ Reference: [AGENT_BUILDER](../CoreAI/Docs/AGENT_BUILDER.md) · [COREAI_SINGLETON
 | **Providers** | `MeaiLlmClient` (streaming tool loop), `OpenAiChatLlmClient` (HTTP APIs, and on-device GGUF through LLMUnity's built-in OpenAI-compatible server via `LlmUnityServerHttpSettings`), routing/timeout/retry/fallback decorators |
 | **WebGL** | `FetchSseOpenAiTransport` + `CoreAiSseFetch.jslib` for real incremental SSE, `UnityWebRequestOpenAiTransport` fallback, `UnityMainThreadLlmAsyncMarshaler` |
 | **Persistence** | `FileAgentMemoryStore`, `FileConversationSummaryStore`, `FileSkillStore`, `persistentDataPath`; on WebGL the engine persists (`config.autoSyncPersistentDataPath = true`) and `CoreAiWebGlPersistence` only reports whether it is armed |
-| **Unity-only tools** | `world_command` (`WorldLlmTool`), `component_command` (`ComponentLlmTool`), `scene_tool` (`SceneLlmTool`), `camera` (`CameraLlmTool`) |
+| **Unity-only tools** | `world_command` (`WorldLlmTool`), `component_command` (`ComponentLlmTool`), `scene_tool` (`SceneLlmTool`), `camera` (`Vision.CameraLlmTool`: `camera_capture` / `screenshot`), `camera_tool` (`Infrastructure.World.CameraLlmTool`: `capture_camera`) |
 | **Editor** | `CoreAI → Setup → …` scene/asset wizards, Settings window, Agent Session Inspector, production-settings validation |
 
 Tools that are **not** in this package: `memory`, `game_config`, `game_state`, `get_inventory`,
@@ -118,15 +121,16 @@ Base install is core + this package. Everything else is independent and additive
 | Package | Adds | If absent |
 |---|---|---|
 | `com.neoxider.coreaimods` | Lua sandbox, `execute_lua`, `manage_mods`, mod runtime, RbxApi | Nothing in the base references it; the project compiles unchanged |
-| `com.neoxider.coreaihub` | Tabbed Hub window (Chat / Settings / Statistics / Mods) | `HubPageRegistry` still exists in the core; the Mods↔Hub bridge assembly compiles out via `defineConstraints: ["COREAI_HAS_HUB"]` — silently, so check the Hub page is really gone before filing a bug |
+| `com.neoxider.coreaihub` | Tabbed Hub window (Chat / AI Settings / Statistics / Mods) | `HubPageRegistry` still exists in the core; the Mods↔Hub bridge assembly compiles out via `defineConstraints: ["COREAI_HAS_HUB"]` — silently, so check the Hub page is really gone before filing a bug |
 | `com.neoxider.coreaimcp` | [In-game MCP server](../CoreAIMcp/README.md) | Leaf package — nothing depends on it |
 | `com.neoxider.coreaimirror` | Mirror networking transport | Assemblies carry `defineConstraints: ["MIRROR"]`; without Mirror installed they never build |
 | `com.neoxider.coreaibenchmark` | PlayMode game-creation benchmark (G1–G8) | Only the benchmark scenarios disappear; the report types ship inside the core |
 | `ai.undream.llm` (LLMUnity) | On-device GGUF inference | `COREAI_HAS_LLMUNITY` stays undefined; the HTTP paths are unaffected |
 
 Two project-level scripting symbols, **both opt-in and absent by default**: `COREAI_LLM` (provider-backed
-HTTP/MEAI/LLMUnity execution) and `COREAI_LUA`. Toggle them from `CoreAI → Setup → Modules`. CI builds
-all four combinations (`core` / `llm` / `lua` / `full`).
+HTTP/MEAI/LLMUnity execution) and `COREAI_LUA`. Toggle them from `CoreAI → Setup → Modules` (the menu
+changes the currently selected build target only). CI builds all four combinations (`core` / `llm` /
+`lua` / `full`). Details: [OPTIONAL_MODULES](Docs/OPTIONAL_MODULES.md).
 
 ---
 
@@ -238,6 +242,7 @@ Requirements for writing tests here: [Tests/README.md](Tests/README.md) and
 | Start | [QUICK_START](Docs/QUICK_START.md) · [QUICK_START_FULL](Docs/QUICK_START_FULL.md) · [COREAI_SINGLETON_API](Docs/COREAI_SINGLETON_API.md) · [COREAI_SETTINGS](Docs/COREAI_SETTINGS.md) · [EXAMPLES](Docs/EXAMPLES.md) |
 | Chat & streaming | [README_CHAT](Runtime/Source/Features/Chat/README_CHAT.md) · [STREAMING_ARCHITECTURE](Docs/STREAMING_ARCHITECTURE.md) · [HTTP_TRANSPORT_SPEC](Docs/HTTP_TRANSPORT_SPEC.md) |
 | Agents, tools, memory | [AGENT_BUILDER](../CoreAI/Docs/AGENT_BUILDER.md) · [TOOL_CALL_SPEC](Docs/TOOL_CALL_SPEC.md) · [MemorySystem](Docs/MemorySystem.md) · [AI_AGENT_ROLES](Docs/AI_AGENT_ROLES.md) |
+| Backends & shipping | [RUNTIME_BACKEND_SWITCHING](Docs/RUNTIME_BACKEND_SWITCHING.md) · [LLMUNITY_SETUP_AND_MODELS](Docs/LLMUNITY_SETUP_AND_MODELS.md) · [SHIPPING_PLAYER_MACHINES](Docs/SHIPPING_PLAYER_MACHINES.md) · [CLOUD_COST_BUDGETING](Docs/CLOUD_COST_BUDGETING.md) · [OPTIONAL_MODULES](Docs/OPTIONAL_MODULES.md) |
 | Architecture | [ARCHITECTURE](Docs/ARCHITECTURE.md) · [DEVELOPER_GUIDE](Docs/DEVELOPER_GUIDE.md) · [DGF_SPEC](Docs/DGF_SPEC.md) · [MULTIPLAYER_AI](Docs/MULTIPLAYER_AI.md) |
 | When it breaks | [TROUBLESHOOTING](Docs/TROUBLESHOOTING.md) · [KNOWN_ISSUES](Docs/KNOWN_ISSUES.md) · [WEBGL_BUILD_TROUBLESHOOTING](Docs/WEBGL_BUILD_TROUBLESHOOTING.md) |
 

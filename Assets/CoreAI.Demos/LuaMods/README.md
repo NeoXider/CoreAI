@@ -40,7 +40,7 @@ Scene: `LuaModsDemo.unity`. No LLM is required; the demo shows the runtime used 
 
 - The `wave_director` mod has no `logic_define` (no `LogicOverride` level), and `damage_tuner`
   has no world-building globals at all: capability levels really restrict the global set.
-- The wave counter survives mod Unload/Load (stored in `FileLuaModStore`,
-  `persistentDataPath/CoreAI/LuaMods`).
-- API details: `Assets/CoreAI/Docs/LUA_GAME_API.md`; security:
-  `Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md`.
+- The wave counter survives mod Unload/Load (stored by `FileLuaModStore` under
+  `persistentDataPath/CoreAI/LuaMods/Stores/lua-mods-demo`).
+- API details: [LUA_GAME_API.md](../../CoreAI/Docs/LUA_GAME_API.md); security:
+  [LUA_SANDBOX_SECURITY.md](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md).

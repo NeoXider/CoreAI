@@ -163,6 +163,17 @@ A test that cannot fail for a real defect is noise. Do not write or keep:
 The fast, deterministic contract gate. Runs without entering Play mode, without loading a
 model, without real I/O.
 
+EditMode assemblies (all Editor-only, gated by `UNITY_INCLUDE_TESTS`):
+
+| Folder | Assembly |
+|--------|----------|
+| `Assets/CoreAiUnity/Tests/` (`EditMode/` and the root) | `CoreAI.Tests` |
+| `Assets/CoreAI/Tests/EditMode/` | `CoreAI.Core.Tests` |
+| `Assets/CoreAIMods/Tests/` (`EditMode/`) | `CoreAI.Mods.Tests` |
+| `Assets/CoreAIMcp/Tests/EditMode/` | `CoreAI.Mcp.Tests` |
+| `Assets/CoreAIMirror/Tests/EditMode/` | `CoreAI.Net.Mirror.Tests` (also requires `MIRROR`) |
+| `Assets/_exampleGame/Tests/EditMode/` | `CoreAI.ExampleGame.Tests` |
+
 ## B1. Scope
 
 EditMode is for deterministic, synchronous contracts:
@@ -214,8 +225,8 @@ committed — Unity exposes no signal for that. A build cannot ship without the 
 
 # Part C — PlayMode
 
-PlayMode assemblies live under `Assets/CoreAiUnity/Tests/PlayMode/` and replace the legacy
-single `PlayModeTest` DLL. Filter by **Assembly** in the Test Runner to run suites
+The CoreAI PlayMode assemblies live under `Assets/CoreAiUnity/Tests/PlayMode/`; the Mods, MCP
+and Benchmark packages ship their own. Filter by **Assembly** in the Test Runner to run suites
 separately.
 
 ## C1. Layout
@@ -281,26 +292,30 @@ require a player test run.
   with a warning at its bound for one that ignores cancellation), sources are disposed, `CancelAll` is
   idempotent, and the shared `InFlightMeter` counts concurrent and sequential completions and streams.
 - Fixtures on this pattern: every live fixture in `LlmVerification` and `Scenarios` —
-  `AgentMemoryOpenAiApi`, `AgentMemoryWithRealModel`, `AiAttachmentLive`,
-  `AiOrchestratorBuiltInRolesProductionLlm` (through the shared role harness), `AllToolCalls`,
-  `BuilderAgentCastleBuildLive`, `ChatSpeedDirectVsAgent`, `MerchantWithToolCalling`
-  (`ChatWithToolCallingPlayModeTests.cs`), `CompatibilityTool`, `CoreAiChatDemoRealModelWebGl`,
-  `CoreAiChatServiceIntegration`, `CreatorAndLuaCastleBuildLive`, `CustomAgents`, `FullPipelineResilience`,
-  `MeaiLlmClient`, `MixedBackendParallelAgents`, `ParallelHttpAgents`, `MultiToolChain`, `ProgrammerLuaModsLive`,
-  `RbxCastleMaterialsShowcaseLive`, `RuntimeBackendSwitchLive` and `PromptCacheLive` (both in
-  `RuntimeBackendSwitchLivePlayModeTests.cs`), `SkillSetReadSkillVerification`,
-  `SkillSetRealToolCalling`, `SkillSetToolDiscovery`, `SmartChatAndAINpc`, `Streaming`,
-  `StreamingToolCalling`, `TokensPerSecond`, `ToolNameRepair`, `WorldCommand`, `CraftingMemoryViaLlmUnity`,
-  `CraftingMemoryViaOpenAi`, `MultiAgentCraftingWorkflow`, `FullPipelineE2E`, and
-  `MerchantBehaviorChatWithTools` (all `…PlayModeTests`). The scripted-client test
-  `UnknownTool_RemainsVisible_AndDoesNotExecute` in `ToolNameRepair` sends no live request but uses the
-  scope like its neighbours. Not on it because they send no live request: `TestAgentSetupHttpRouting`
-  (loopback fake server; it still restores the settings instance and `COREAI_TEST_*` variables in
-  `[UnityTearDown]`), `ChatHistory` (stub client), and the Rbx material sheet / variant /
-  castle-screenshot renders (local Lua only). In `CoreAiChatDemoRealModelWebGl` the chat panel owns its
-  turns (its submit API takes no token), so those waits — including both Stop-settle waits, which keep a
-  5s floor — are capped but the turns are stopped through the panel's own Stop path in teardown, not by
-  the scope. The `CoreAIBenchmark` fixtures are not converted.
+  `AgentMemoryOpenAiApiPlayModeTests`, `AgentMemoryWithRealModelPlayModeTests`, `AiAttachmentLivePlayModeTests`,
+  `AiOrchestratorBuiltInRolesProductionLlmPlayModeTests` (through the shared role harness),
+  `AllToolCallsPlayModeTests`, `BuilderAgentCastleBuildLivePlayModeTests`, `ChatSpeedDirectVsAgentPlayModeTests`,
+  `MerchantWithToolCallingPlayModeTests` (`ChatWithToolCallingPlayModeTests.cs`), `CompatibilityToolPlayModeTests`,
+  `CoreAiChatDemoRealModelWebGlPlayModeTests`, `CoreAiChatServiceIntegrationPlayModeTests`,
+  `CreatorAndLuaCastleBuildLivePlayModeTests`, `CustomAgentsPlayModeTests`, `FullPipelineResiliencePlayModeTests`,
+  `MeaiLlmClientPlayModeTests`, `MixedBackendParallelAgentsPlayModeTests`, `ParallelHttpAgentsPlayModeTests`,
+  `MultiToolChainPlayModeTests`, `ProgrammerLuaModsLivePlayModeTests`, `RbxCastleMaterialsShowcaseLivePlayModeTests`,
+  `RuntimeBackendSwitchLivePlayModeTests` and `PromptCacheLivePlayModeTests` (both in
+  `RuntimeBackendSwitchLivePlayModeTests.cs`), `SkillSetReadSkillVerificationPlayModeTests`,
+  `SkillSetRealToolCallingPlayModeTests`, `SkillSetToolDiscoveryPlayModeTests`, `SmartChatAndAINpcPlayModeTests`,
+  `StreamingPlayModeTests`, `StreamingToolCallingPlayModeTests`, `TokensPerSecondPlayModeTests`,
+  `ToolNameRepairPlayModeTests`, `WorldCommandPlayModeTests`, `CraftingMemoryViaLlmUnityPlayModeTests`,
+  `CraftingMemoryViaOpenAiPlayModeTests`, `MultiAgentCraftingWorkflowPlayModeTests`, `FullPipelineE2EPlayModeTests`,
+  and `MerchantBehaviorChatWithToolsPlayModeTests`. The scripted-client test
+  `UnknownTool_RemainsVisible_AndDoesNotExecute` in `ToolNameRepairPlayModeTests` sends no live request but
+  uses the scope like its neighbours. Not on it because they send no live request:
+  `TestAgentSetupHttpRoutingPlayModeTests` (loopback fake server; it still restores the settings instance and
+  `COREAI_TEST_*` variables in `[UnityTearDown]`), `ChatHistoryPlayModeTests` (stub client), and the Rbx
+  renders `RbxAllMaterialsSheetPlayModeTests`, `RbxMaterialVariantRenderPlayModeTests` and
+  `RbxCastleShowcaseScreenshotPlayModeTests` (local Lua only). In `CoreAiChatDemoRealModelWebGlPlayModeTests`
+  the chat panel owns its turns (its submit API takes no token), so those waits — including both Stop-settle
+  waits, which keep a 5s floor — are capped but the turns are stopped through the panel's own Stop path in
+  teardown, not by the scope. The `CoreAIBenchmark` fixtures are not converted.
 
 ## C4. Backends and running
 
@@ -309,9 +324,14 @@ require a player test run.
 `COREAI_PLAYMODE_LLM_BACKEND`:
 
 - `auto` or empty → tries LLMUnity, then HTTP.
-- `llmunity` / `local` / `gguf` → local GGUF model only.
-- `http` / `openai` / `openai_http` → OpenAI-compatible API only (e.g. OpenRouter or LM Studio);
-  configure `COREAI_TEST_BASE_URL` (usually ending in `/v1`) and `COREAI_TEST_MODEL`.
+- `llmunity` / `llm_unity` / `local` / `gguf` → local GGUF model only.
+- `http` / `openai` / `openai_http` / `openai-http` → OpenAI-compatible API only (e.g. OpenRouter or
+  LM Studio); configure `COREAI_TEST_BASE_URL` (usually ending in `/v1`) and `COREAI_TEST_MODEL`.
+- `offline` / `no_llm` / `stub` → the offline stub client.
+
+With a settings asset whose backend type is **Auto**, its **Auto Priority** decides whether HTTP or
+LLMUnity is tried first. When neither resolves, `TryCreate` returns an ignore reason unless the caller
+passes `allowOfflineFallback: true`.
 
 For the HTTP backend, set `COREAI_TEST_BASE_URL`, `COREAI_TEST_MODEL`, and
 `COREAI_TEST_API_KEY` when required. `TestAgentSetup` ignores `COREAI_PLAYMODE_LLM_BACKEND` and switches
@@ -325,7 +345,8 @@ that process. Run via Unity Test Runner → PlayMode, filtered by assembly when 
 
 ## References
 
-- `Docs/ARCHITECTURE.md` — global Test Integrity Rule (mirrors Part A).
-- `Tests/TOOL_CALL_TESTS.md` — tool-call test matrix and tool-call JSON format.
-- `Tests/PlayMode/Scenarios/CraftingMemory_README.md`, `Tests/PlayMode/Scenarios/Complex/README.md`
-  — scenario-specific docs.
+- [ARCHITECTURE.md § Test Integrity Rule](../Docs/ARCHITECTURE.md#test-integrity-rule) — global rule (mirrors Part A).
+- [TESTING_TOOL_CALLING.md](../Docs/TESTING_TOOL_CALLING.md) — which tests cover tool calling.
+- [RUNNING_LIVE_TESTS.md](../Docs/RUNNING_LIVE_TESTS.md) — live-suite configuration.
+- [CraftingMemory_README.md](PlayMode/Scenarios/CraftingMemory_README.md),
+  [Complex/README.md](PlayMode/Scenarios/Complex/README.md) — scenario-specific docs.

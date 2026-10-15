@@ -31,16 +31,19 @@
 | Component | Purpose | Where |
 |-----------|------------|-----|
 | `IGameConfigStore` | Interface: `TryLoad(key, out json)`, `TrySave(key, json)`, `GetKnownKeys()` | CoreAI |
-| `GameConfigTool` | `ILlmTool` for AI function calling (read/update) | CoreAI |
-| `GameConfigPolicy` | Which roles may read/write which keys | CoreAI |
-| `UnityGameConfigStore` | ScriptableObject implementation | CoreAIUnity |
+| `GameConfigPolicy` | Which roles may use which keys; `CreateLlmTool(store, roleId)` builds the tool | CoreAI |
+| `GameConfigTool` | Runs `read` / `update` and builds the MEAI function | CoreAI |
+| `GameConfigLlmTool` | The `game_config` tool (`IAIFunctionLlmTool`) you attach to a role | CoreAI |
+| `NullGameConfigStore` | Fallback store when nothing else is registered; saves nothing | CoreAI |
+| `UnityGameConfigStore` | `IGameConfigStore` over registered ScriptableObjects (`JsonUtility`); `CoreAILifetimeScope` registers it as `IGameConfigStore` | CoreAiUnity |
 
 ### 2. Your game:
 
 1. Creates a ScriptableObject with parameters
 2. Registers it in `UnityGameConfigStore`
 3. Configures `GameConfigPolicy` for roles
-4. AI accesses configs through function calling
+4. Attaches the `game_config` tool to those roles (it is not attached to any role by default)
+5. AI accesses configs through function calling
 
 ---
 
@@ -49,7 +52,7 @@
 ### Step 1: Create a ScriptableObject config
 
 ```csharp
-// Assets/_exampleGame/Config/GameSessionConfig.cs
+// Assets/MyGame/Config/GameSessionConfig.cs
 using UnityEngine;
 
 [CreateAssetMenu(menuName = "MyGame/Session Config")]
@@ -62,38 +65,73 @@ public class GameSessionConfig : ScriptableObject
 }
 ```
 
-### Step 2: Register the config in DI
+### Step 2: Register the config and the policy
+
+`CoreAILifetimeScope` is sealed, so register from a scene component once the scope is built (it builds
+in `Awake`):
 
 ```csharp
-// In your LifetimeScope:
-var configStore = container.Resolve<UnityGameConfigStore>();
-configStore.Register("session", mySessionConfigAsset);
+using CoreAI.Ai;
+using CoreAI.Composition;
+using CoreAI.Config;
+using CoreAI.Infrastructure.Config;
+using UnityEngine;
+using VContainer;
 
-// Configure policy
-var configPolicy = container.Resolve<GameConfigPolicy>();
-configPolicy.SetKnownKeys(new[] { "session", "crafting" });
-configPolicy.GrantFullAccess("Creator"); // Creator can do everything
-configPolicy.ConfigureRole("CoreMechanicAI", 
-    readKeys: new[] { "session" }, 
-    writeKeys: new[] { "session" });
-```
-
-### Step 3: AI receives the tool automatically
-
-`AiOrchestrator` **automatically** passes `GameConfigTool` to the LLM when:
-- The role has config access (via `GameConfigPolicy`)
-- `AgentMemoryPolicy.GetToolsForRole()` includes GameConfigTool
-
-```csharp
-// In AiOrchestrator — tools are assembled automatically:
-var tools = _memoryPolicy?.GetToolsForRole(roleId);
-// GameConfigTool is added separately if the role has access
-if (_configPolicy.GetAllowedKeys(roleId).Length > 0)
+public class ConfigBootstrap : MonoBehaviour
 {
-    var configTool = _configPolicy.CreateLlmTool(_configStore, roleId);
-    tools.Add(configTool.CreateAIFunction());
+    [SerializeField] private CoreAILifetimeScope scope;
+    [SerializeField] private GameSessionConfig sessionConfig;
+
+    private void Start()
+    {
+        IObjectResolver container = scope.Container;
+
+        IGameConfigStore store = container.Resolve<IGameConfigStore>();
+        ((UnityGameConfigStore)store).Register("session", sessionConfig);
+
+        GameConfigPolicy configPolicy = container.Resolve<GameConfigPolicy>();
+        configPolicy.SetKnownKeys(new[] { "session", "crafting" });
+        configPolicy.GrantFullAccess(BuiltInAgentRoleIds.Creator); // Creator can use every known key
+        configPolicy.ConfigureRole(BuiltInAgentRoleIds.CoreMechanic,
+            readKeys: new[] { "session" },
+            writeKeys: new[] { "session" });
+
+        // Step 3: attach the tool (once per role; AddToolForRole appends, it does not replace).
+        AgentMemoryPolicy agents = container.Resolve<AgentMemoryPolicy>();
+        agents.AddToolForRole(BuiltInAgentRoleIds.Creator,
+            configPolicy.CreateLlmTool(store, BuiltInAgentRoleIds.Creator));
+        agents.AddToolForRole(BuiltInAgentRoleIds.CoreMechanic,
+            configPolicy.CreateLlmTool(store, BuiltInAgentRoleIds.CoreMechanic));
+    }
 }
 ```
+
+### Step 3: Attach the tool to roles
+
+Nothing adds `game_config` automatically. Either attach it to an existing role as above, or put it on a
+custom agent:
+
+```csharp
+AgentConfig designer = new AgentBuilder("LevelDesigner")
+    .WithSystemPrompt("You tune the session config. Config keys: session.")
+    .WithTool(configPolicy.CreateLlmTool(store, "LevelDesigner"))
+    .Build();
+```
+
+The tool description lists the keys the role may use (`GameConfigPolicy.GetAllowedKeys`).
+
+### What the tool can reach
+
+- `read` and `update` both work on `GetAllowedKeys(roleId)`, which returns the role's **write** keys
+  (all keys from `SetKnownKeys` for a role with full write access). A role with read keys but no write
+  keys gets `Role '…' has no allowed config keys.` from `read`; `CanRead` is a host-side check that the
+  tool does not use.
+- `update` writes the whole `content` object to the role's **first** allowed key. To split one update
+  across several keys, subclass `GameConfigPolicy` and override `TryApplyChanges`; a non-empty `error`
+  from it rejects the update.
+- With `UnityGameConfigStore` the JSON keys are the ScriptableObject's serialized field names
+  (`JsonUtility`), for example `Difficulty`, not `difficulty`.
 
 ---
 
@@ -110,11 +148,12 @@ if (_configPolicy.GetAllowedKeys(roleId).Length > 0)
   }
 }
 
-// Response:
+// Response (GameConfigTool.GameConfigResult):
 {
-  "success": true,
-  "message": "Config read successfully",
-  "config_json": "{\"session\":{\"difficulty\":1,\"enemy_hp_mult\":1.0}}"
+  "Success": true,
+  "Message": "Config read successfully for keys: session",
+  "Error": null,
+  "ConfigJson": "{\"session\":{\"Difficulty\":1,\"EnemyHealthMultiplier\":1.0,\"EnemyDamageMultiplier\":1.0,\"MaxActiveEnemies\":50}}"
 }
 ```
 
@@ -126,14 +165,16 @@ if (_configPolicy.GetAllowedKeys(roleId).Length > 0)
   "name": "game_config",
   "arguments": {
     "action": "update",
-    "content": "{\"difficulty\":2,\"enemy_hp_mult\":1.5,\"max_enemies\":80}"
+    "content": "{\"Difficulty\":2,\"EnemyHealthMultiplier\":1.5,\"MaxActiveEnemies\":80}"
   }
 }
 
 // Confirmation:
 {
-  "success": true,
-  "message": "Config updated for key: session"
+  "Success": true,
+  "Message": "Config updated for key: session",
+  "Error": null,
+  "ConfigJson": "{\"Difficulty\":2,\"EnemyHealthMultiplier\":1.5,\"MaxActiveEnemies\":80}"
 }
 ```
 
@@ -142,12 +183,14 @@ if (_configPolicy.GetAllowedKeys(roleId).Length > 0)
 ## 🔒 Security
 
 ```csharp
-// Restrict role access:
+// Restrict a role to one key:
 configPolicy.ConfigureRole("AINpc",
-    readKeys: new[] { "dialogue" },   // Read only
-    writeKeys: Array.Empty<string>()); // No write
+    readKeys: new[] { "dialogue" },
+    writeKeys: new[] { "dialogue" });   // the tool reads and writes only "dialogue"
 
-configPolicy.RevokeAccess("SmartChat"); // No access
+configPolicy.RevokeAccess("SmartChat"); // No access: read and update both fail
+
+// null for readKeys / writeKeys means "all known keys" (SetKnownKeys).
 ```
 
 ---
@@ -176,13 +219,13 @@ public sealed class MyConfigToolTests
     [Test]
     public async Task ConfigTool_ReadModifyWrite_Works()
     {
-        var store = new InMemoryConfigStore();
+        InMemoryConfigStore store = new InMemoryConfigStore();
         store.TrySave("session", "{\"difficulty\":1}");
 
-        var policy = new GameConfigPolicy();
+        GameConfigPolicy policy = new GameConfigPolicy();
         policy.ConfigureRole("Creator", new[] { "session" }, new[] { "session" }); // read keys, write keys
 
-        var tool = new GameConfigTool(store, policy, "Creator");
+        GameConfigTool tool = new GameConfigTool(store, policy, "Creator");
 
         // ExecuteAsync returns the serialized GameConfigTool.GameConfigResult
         string readJson = await tool.ExecuteAsync("read");
@@ -205,20 +248,20 @@ public sealed class MyConfigToolTests
 CoreAI (portable):
 ├── Features/Config/
 │   ├── IGameConfigStore.cs          # Interface
-│   ├── GameConfigTool.cs            # ILlmTool
-│   ├── GameConfigPolicy.cs          # Access policy
-│   ├── GameConfigLlmTool.cs         # ILlmTool wrapper
-│   └── NullGameConfigStore.cs       # Stub
+│   ├── GameConfigTool.cs            # read/update logic + MEAI function
+│   ├── GameConfigPolicy.cs          # Access policy, CreateLlmTool
+│   ├── GameConfigLlmTool.cs         # game_config tool (IAIFunctionLlmTool)
+│   └── NullGameConfigStore.cs       # Fallback store (saves nothing)
 
 CoreAIUnity (Unity):
 ├── Features/Config/Infrastructure/
-│   └── UnityGameConfigStore.cs      # ScriptableObject implementation
+│   └── UnityGameConfigStore.cs      # Store over registered ScriptableObjects
 
 Your game:
 ├── Config/
 │   ├── GameSessionConfig.cs         # Your ScriptableObject
 │   ├── GameSessionConfig.asset      # Asset
-│   └── ConfigInstaller.cs           # DI registration
+│   └── ConfigBootstrap.cs           # Registers the asset, policy and tool
 ```
 
 ---
@@ -229,6 +272,7 @@ Your game:
 - [ ] Config asset created (`CreateAssetMenu`)
 - [ ] `UnityGameConfigStore.Register("key", configAsset)` called
 - [ ] `GameConfigPolicy` configured for roles
+- [ ] `game_config` tool attached to those roles (`CreateLlmTool` + `AddToolForRole` or `WithTool`)
 - [ ] AI system prompt mentions available keys
 - [ ] Tests written (EditMode + PlayMode)
 
@@ -237,7 +281,9 @@ Your game:
 ## 💡 Tips
 
 1. **One key = one ScriptableObject** — do not mix unrelated config types
-2. **Validate on the SO** — use `[Range]` to block absurd values
-3. **Logging** — `UnityGameConfigStore` logs all changes
-4. **Editor** — changes persist to the asset via `EditorUtility.SetDirty`
-5. **Runtime** — in builds, changes last until scene reload
+2. **Validate in the policy** — `[Range]` limits only the Inspector; `JsonUtility.FromJsonOverwrite` writes
+   any value. Reject bad values in a `GameConfigPolicy` subclass (`TryApplyChanges` with a non-empty `error`)
+3. **Logging** — `UnityGameConfigStore` logs every registration and update
+4. **Editor** — the store marks the asset dirty (`EditorUtility.SetDirty`), so changes made in Play Mode
+   stay in the asset
+5. **Player** — changes live in memory only; the shipped asset is not rewritten

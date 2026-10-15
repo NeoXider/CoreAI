@@ -1,7 +1,8 @@
 # CoreAI Backlog
 
 This document tracks future work that should not block the current CoreAI MVP gate for production hosts.
-Items here are intentionally not active TODO checkboxes.
+Items here are intentionally not active TODO checkboxes; open work by priority is in [`TODO.md`](../TODO.md).
+Moved here from `Assets/CoreAiUnity/Docs/` on 2026-10-15.
 
 ## Provider-Specific Work
 

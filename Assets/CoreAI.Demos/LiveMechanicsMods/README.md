@@ -6,8 +6,10 @@ battle changes on the spot — then the mod is still there after you restart the
 Folder: `Assets/CoreAI.Demos/LiveMechanicsMods/`
 
 This folder contains two chat-driven Lua mod demos. Both use `manage_mods`, persist successful mod
-sources, expose a runtime mod manager, and opt in to Full Lua scene-object APIs so the Programmer can
-inspect and modify live GameObjects after a diagnostic `execute_lua` call.
+sources, expose a runtime mod manager, and opt in to Full Lua scene-object APIs (**Enable Full Lua
+Access** on the scene's `CoreAiModsLifetimeScope`) so the Programmer can inspect and modify live
+GameObjects after a diagnostic `execute_lua` call. Both need `COREAI_LUA` (the demo controllers compile
+only with it) and, for the chat, `COREAI_LLM` and a configured backend in `Resources/CoreAISettings`.
 
 ## Scenes
 
@@ -18,8 +20,8 @@ inspect and modify live GameObjects after a diagnostic `execute_lua` call.
 
 ## On-screen surfaces
 
-The two scenes no longer share one UI. `WaveAutoBattlerModsDemo` was migrated to the UI Toolkit Hub;
-`LiveMechanicsModsChatDemo` keeps two hotkey panels: the mod manager, drawn on the shared uGUI
+The two scenes use different UI. `WaveAutoBattlerModsDemo` uses the UI Toolkit Hub;
+`LiveMechanicsModsChatDemo` has two hotkey panels: the mod manager, drawn on the shared uGUI
 `CoreAiDemoPanel`, and the IMGUI Token Budget overlay.
 
 ### `WaveAutoBattlerModsDemo` — UI Toolkit Hub tabs
@@ -30,9 +32,10 @@ The scene hosts `CoreAiHubWindow` with `CoreAiHubDemo` (built-in Chat / Settings
 | Tab | Source | Purpose |
 |---|---|---|
 | **Auto-Battler** | `WaveAutoBattlerHubPage` | Status, hero/battle stats, per-slot override flags, loaded mods and the battle log, polled live. |
-| **Token Budget** | `TokenBudgetHubPage` | Model, token counts and estimated session cost — the retained-mode replacement for the old `F10` overlay. |
-| **Mods** | `CoreAiModsHubBinder` | Active / saved mods, activate, deactivate, edit and reload. |
-| **Chat** | Hub built-in | Embeds `CoreAiChatPanel`; ready-made prompts live in the chat's own `≡` examples menu. |
+| **Token Budget** | `TokenBudgetHubPage` | Model, token counts and estimated session cost (the same data as the `F10` overlay). |
+| **Mods** | `CoreAiModsHubBinder` | Active / saved mods, activate, deactivate, edit and reload, with a **Logs** sub-tab. |
+| **Chat** | Hub built-in | Embeds `CoreAiChatPanel`; `DemoHubPagesBinder` turns on the chat's `≡` example-prompt menu. |
+| **AI Settings**, **Statistics** | Hub built-in | Backend/endpoint settings and orchestration metrics. |
 
 There are no `F9` / `F10` hotkeys and no draggable IMGUI windows in this scene.
 
@@ -128,12 +131,13 @@ Events emitted to mods:
 | `hero_level_up` | `heroLevel` |
 | `hero_died` | `wave` |
 
-Ready-made prompts live in the Hub Chat tab's `≡` examples menu:
+The Hub Chat tab's `≡` examples menu offers the generic CoreAI examples (Tetris mod, Clicker game,
+Build a castle, Fix the broken arena). For this scene, type requests such as:
 
-- Add healer aura: creates a regen + wave-cleared hook mod.
-- Make waves harder: changes enemy count, HP, damage and rewards.
-- Make rewards generous: asks the model to inspect and reload the existing difficulty mod so
-  enemies are less tanky but rewards go up.
+- "Add a healer aura": a regen + wave-cleared hook mod.
+- "Make waves harder": changes enemy count, HP, damage and rewards.
+- "Make rewards generous": inspect and reload the existing difficulty mod so enemies are less tanky
+  but rewards go up.
 
 Visible spawn path:
 
@@ -146,25 +150,26 @@ Visible spawn path:
 
 Scene: `Assets/CoreAI.Demos/LiveMechanicsMods/LiveMechanicsModsChatDemo.unity`
 
-This is still useful as a small boss-rule sandbox. Its `ChatPromptButtonsController` still carries
-ready requests (Boss Reward 1000, modifying the existing boss reward mod, Fast Attacks), but nothing
-renders those buttons any more; type such requests into the chat.
+A small boss-rule sandbox. Its `ChatPromptButtonsController` carries ready requests (**Big boss
+reward**, **Scale boss reward**, **Faster hero attacks**), but nothing renders those buttons; type such
+requests into the chat.
 
 This is the scene that keeps the `F9` mod manager panel described above; the auto-battler uses the
 Hub **Mods** tab instead.
 
 ## Persistence
 
-The demo's own saved list is stored through `ILuaScriptVersionStore`, normally backed by
-`persistentDataPath/CoreAI/LuaScriptVersions`. Independently, every mod loaded through `manage_mods`
-is persisted by the composition's source store for the scene's `storeId`.
+In `LiveMechanicsModsChatDemo`, `LiveMechanicsModsChatPersistenceController` keeps its own saved list
+through `ILuaScriptVersionStore`, normally backed by `persistentDataPath/CoreAI/LuaScriptVersions`.
+Independently, every mod loaded through `manage_mods` is persisted by the composition's source store for
+the scene's `storeId` (`live-mechanics-chat-demo`, `wave-auto-battler-demo`); that is the only
+persistence the Wave Auto-Battler uses.
 
 Only ordinary saved mod ids are restored. Transient validation ids are ignored, and deactivated mods
 remain saved but inactive until the user activates them from the `F9` panel.
 
-Scene prefixes:
+The saved-list key prefix in `LiveMechanicsModsChatDemo` (the controller's `modKeyPrefix` field):
 
 ```text
 demo.live_mechanics.mods_chat.mod.
-demo.wave_auto_battler.mods_chat.mod.
 ```

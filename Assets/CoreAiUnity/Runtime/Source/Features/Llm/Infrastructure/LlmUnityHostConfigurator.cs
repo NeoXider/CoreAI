@@ -64,6 +64,7 @@ namespace CoreAI.Infrastructure.Llm
             // to CoreAI's configured port and exposes POST /v1/chat/completions with native tool_calls.
             llm.remote = true;
             llm.port = settings.LlmUnityServerPort;
+            llm.parallelPrompts = settings.LlmUnityMaxConcurrentChats;
 
             llm.dontDestroyOnLoad = settings.LlmUnityDontDestroyOnLoad;
             llm.numGPULayers = settings.NumGPULayers;

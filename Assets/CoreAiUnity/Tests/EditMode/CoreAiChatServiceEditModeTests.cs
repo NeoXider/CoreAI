@@ -325,12 +325,13 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void StopAgent_CallsFacade_DoesNotThrowWithoutScope()
+        public void StopAgent_WithoutScene_CancelsInjectedOrchestratorScope()
         {
-            CoreAiChatService service = new(new FakeAiOrchestrator("ok"));
+            FakeAiOrchestrator orchestrator = new("ok");
+            CoreAiChatService service = new(orchestrator);
 
-            // EditMode has no CoreAILifetimeScope, so StopAgent has to degrade quietly instead of throwing.
             Assert.DoesNotThrow(() => service.StopAgent("Role"));
+            Assert.AreEqual("Role", orchestrator.CancelledScope);
         }
 
         // ===================== v1.5.1 — Timeout + Error Propagation =====================
@@ -940,6 +941,7 @@ namespace CoreAI.Tests.EditMode
 
         private sealed class FakeAiOrchestrator : IAiOrchestrationService
         {
+            public string CancelledScope { get; private set; }
             private readonly string _content;
             private readonly string _error;
             private readonly string[] _streamChunks;
@@ -1000,6 +1002,7 @@ namespace CoreAI.Tests.EditMode
 
             public void CancelTasks(string scopeId)
             {
+                CancelledScope = scopeId;
             }
         }
 

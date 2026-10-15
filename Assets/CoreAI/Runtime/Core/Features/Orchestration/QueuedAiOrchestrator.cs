@@ -15,7 +15,7 @@ namespace CoreAI.Ai
     /// Adds per-actor fair queueing, concurrency limits, and cancellation scopes around an orchestrator.
     /// </summary>
     public sealed class QueuedAiOrchestrator : IAiOrchestrationService, IAiTaskResultService, IAiActorContextResolver,
-        IScopedAiTaskCancellation, IDisposable
+        IScopedAiTaskCancellation, IRoleAiTaskCancellation, IDisposable
     {
         private readonly IAiOrchestrationService _inner;
         private readonly IAiActorContextResolver _actorContextResolver;
@@ -687,6 +687,30 @@ namespace CoreAI.Ai
             CancelScopeKeys(ResolveCurrentScopeKeys(
                 cancellationScope.Trim(),
                 NormalizeRoleId(roleId)));
+        }
+
+        /// <summary>Cancels every tracked scope for a role across actor sessions and memory partitions.</summary>
+        public void CancelRoleTasks(string roleId)
+        {
+            if (string.IsNullOrWhiteSpace(roleId))
+            {
+                return;
+            }
+
+            string normalizedRoleId = NormalizeRoleId(roleId);
+            List<string> scopeKeys = new();
+            lock (_lock)
+            {
+                foreach (KeyValuePair<string, ScopeEntry> pair in _scopeTokens)
+                {
+                    if (string.Equals(pair.Value.RoleId, normalizedRoleId, StringComparison.Ordinal))
+                    {
+                        scopeKeys.Add(pair.Key);
+                    }
+                }
+            }
+
+            CancelScopeKeys(scopeKeys);
         }
 
         private List<string> ResolveCurrentScopeKeys(string cancellationScope, string roleId)

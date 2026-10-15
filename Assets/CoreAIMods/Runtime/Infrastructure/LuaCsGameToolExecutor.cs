@@ -378,13 +378,10 @@ namespace CoreAI.Mods.WorldPackages
 namespace CoreAI.Ai.LuaCs
 {
     /// <summary>
-    /// Gameplay bindings seam for the Lua-CSharp one-shot/envelope path. This is the ADDITIVE
-    /// Lua-CSharp counterpart of <c>CoreAI.Ai.IGameLuaRuntimeBindings</c> (which is coupled to
-    /// the MoonSharp <see cref="CoreAI.Sandbox.LuaApiRegistry"/> and therefore cannot be reused for the
-    /// managed VM). Implementations register the game's callable APIs on a
-    /// <see cref="LuaCsApiRegistry"/>. Both <c>LuaCsWorldRuntimeBindings</c> and
-    /// <c>LuaCsFullUnityRuntimeBindings</c> already expose this exact method shape, so a host can adapt
-    /// them into this interface for a later type-swap away from the MoonSharp executor.
+    /// Gameplay bindings seam for the Lua-CSharp one-shot/envelope path. Implementations register
+    /// the game's callable APIs on a <see cref="LuaCsApiRegistry"/>. Hosts can adapt
+    /// <c>LuaCsWorldRuntimeBindings</c> or <c>LuaCsFullUnityRuntimeBindings</c> through their
+    /// <c>RegisterGameplayApis</c> methods.
     /// </summary>
     public interface ILuaCsGameRuntimeBindings
     {

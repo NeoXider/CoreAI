@@ -6,9 +6,10 @@ Roblox-style surface is what a mod builds with. For the mod runtime itself (ever
 capability tiers, transactions, Full mode) read [LUA_GAME_API.md](LUA_GAME_API.md). For the security
 model read [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md).
 
-> Lua is an optional module. This guide applies only when your project defines
-> `COREAI_LUA`; without it the runtime ships stub bindings instead. See
-> [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md).
+> Lua is an optional module and is off by default. It ships in the `com.neoxider.coreaimods`
+> package and runs only in a scene that composes `CoreAiModsLifetimeScope`; the `COREAI_LUA`
+> scripting define (absent by default) compiles in the Lua demo scenes and the Lua test fixtures. See
+> [LUA_SANDBOX_SECURITY.md § Optional Module](LUA_SANDBOX_SECURITY.md#optional-module-coreai_lua).
 
 ## What a mod is
 
@@ -20,8 +21,11 @@ so a mod can only call the functions its **capability tier** grants it — nothi
 A mod has two halves:
 
 - its **source** (the Lua code), and
-- a small **manifest** (`id`, `name`, `description`, `version`, `author`, `capabilities`, `active`,
-  `entry`) that travels with the source so the mod can be persisted and shared.
+- a small **manifest** (`id`, `name`, `description`, `version`, `author`, `category`, `tags`,
+  `capabilities`, `active`, `entry`) that travels with the source so the mod can be persisted and
+  shared. `name`, `version`, `description`, `author`, `category` and `tags` are read from the
+  `--[[@coreai ... ]]` header at the top of the source; `capabilities` records the tier the host
+  actually granted.
 
 ## A minimal mod (copy-paste)
 
@@ -32,15 +36,17 @@ name: Greeter
 description: Logs a line when a wave starts and counts how many it has seen.
 ]]
 hooks_on("wave_started", function(evt, payload)
-  local seen = tonumber(store_get("waves") or "0") + 1
+  local seen = (tonumber(store_get("waves")) or 0) + 1
   store_set("waves", tostring(seen))
   print("greeter: wave " .. payload .. " started (wave #" .. seen .. ")")
 end)
 
 hooks_every(5.0, function()
-  print("greeter: still running, " .. (store_get("waves") or "0") .. " waves so far")
+  print("greeter: still running, " .. (tonumber(store_get("waves")) or 0) .. " waves so far")
 end)
 ```
+
+`store_get` returns `""` (not `nil`) for a key that was never set, so convert with `tonumber(...) or 0`.
 
 That mod calls no capability-gated game bindings at all: `print` (routed to the mod's log/report
 pipeline), `hooks_on`, `hooks_every`, and `store_*` are part of the mod-runtime surface and are
@@ -56,14 +62,15 @@ let a mod read or call another mod's state directly by id — see
 
 ## Capability tiers (short version)
 
-Each mod is loaded at a capability tier; if a tier is not granted, those functions are physically
-absent from the mod's globals.
+Each mod is loaded at a capability tier; if a tier is not granted, those functions are absent from
+the mod's globals. The `unity_*` names of the `Full` tier are the exception: without `Full` each one
+is a stub that raises an error naming the missing grant.
 
 | Tier | What it unlocks |
 |---|---|
-| `Read` | world queries (`coreai_world_exists/pos/find/list_prefabs/raycast`), version stores (`coreai_lua_*`/`coreai_data_*`) |
+| `Read` | the [Rbx API](RBX_API.md) globals (`game`, `workspace`, `Instance`, datatypes, `task`), world queries (`coreai_world_exists/pos/find/list_prefabs/raycast`), version stores (`coreai_lua_*`/`coreai_data_*`) |
 | `Gameplay` | `time_*` (time scale, etc.), `input_*` (keyboard/mouse, read-only) |
-| `WorldEdit` | `Instance.new` and the rest of the [Rbx API](RBX_API.md) — how a mod creates world objects. The classic `coreai_world_spawn`/`_change`/`_destroy` build functions are **disabled in the default production composition** (a stub errors and points at the Rbx API); they exist only on hosts that deliberately opt in |
+| `WorldEdit` | `Instance.new` and every other Rbx API mutation — how a mod creates world objects. The classic `coreai_world_spawn`/`coreai_world_change`/`coreai_world_destroy` build functions are **disabled in the default composition** (each name is a stub that errors and points at the Rbx API); only a host that composes its own stack with `LuaCsModStackOptions.RegisterWorldEditBuildBindings = true` registers them |
 | `LogicOverride` | `logic_define/reset/list` |
 | `Full` | reflection (`unity_*`) — **opt-in, off by default** |
 
@@ -98,7 +105,7 @@ runtime and the actor from the `CoreAiModsLifetimeScope` container, the way
 `Assets/CoreAI.Demos/LuaMods/Scripts/LuaModsDemoController.cs` does:
 
 ```csharp
-// using CoreAI.Ai; using CoreAI.Ai.LuaCs; using CoreAI.Authority; using VContainer;
+// using CoreAI.Ai; using CoreAI.Authority; using VContainer;
 ILuaModRuntime modRuntime = modsContainer.Resolve<ILuaModRuntime>();
 ActorContext host = modsContainer.Resolve<IActorIdentityProvider>()
     .GetActorContext(BuiltInAgentRoleIds.Programmer);
@@ -124,8 +131,9 @@ widen the host tier.
 ### (c) Assign a `.lua` TextAsset to a demo controller
 
 `.lua` files are first-class `TextAsset`s in CoreAI — the `LuaScriptedImporter` imports any `*.lua`
-asset so you can author a mod with a real `.lua` extension (editor recognition, drag-and-drop) instead
-of the old `.lua.txt` workaround. `myLuaAsset.text` returns the source.
+asset (and `LuauScriptedImporter` any `*.luau` asset), so you can author a mod with a real extension
+(editor recognition, drag-and-drop) without renaming it to `.lua.txt`. `myLuaAsset.text` returns the
+source.
 
 Author `greeter.lua` under `Assets/`, then drag it onto a demo controller's `TextAsset` field; the
 controller passes `asset.text` to `LoadMod` (the LuaMods demo does it from its **Load mod** button).
@@ -139,12 +147,12 @@ package out as:
 
 ```
 <persistentDataPath>/CoreAI/Mods/<id>/
-    manifest.json   -- id, name, description, version, author, capabilities, active, entry
+    manifest.json   -- id, name, description, version, author, category, tags, capabilities, active, entry, ...
     main.lua        -- the mod source (entry-point file)
 ```
 
 The default Unity composition (`CoreAiModsLifetimeScope` → `CoreAiModsInstaller`) wires a
-`FileLuaModSourceStore` (under a per-scene subfolder when the scope sets a `storeId`) and, on
+`FileLuaModSourceStore` (under a `Stores/<storeId>/` subfolder when the scope sets a **Store Id**) and, on
 startup, first seeds the bundled mods and then rehydrates the store for you: every stored package whose
 manifest is `Active` is re-loaded automatically, with its requested capabilities masked down to the
 host grant (and stripped of `Full` unless the host explicitly allows it). So a mod you loaded once via

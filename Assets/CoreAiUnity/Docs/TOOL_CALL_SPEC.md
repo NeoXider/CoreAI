@@ -107,12 +107,14 @@ public Task<string> ExecuteAsync(
 
 ## Generation temperature
 
-**Global temperature:** `CoreAISettings.Temperature` (default **0.1**). Applies to all agents, and is sent to the backend only while **General → Enable temperature overriding** is on.
+**Global temperature:** **Temperature** on the `CoreAISettings` asset (Advanced Settings → General, default
+**0.1**). It applies to all agents and is sent to the backend only while **Enable temperature overriding** is
+on.
 
-**Per-agent override:**
+**Per-agent override** (also sent only while temperature overriding is on):
 
 ```csharp
-var agent = new AgentBuilder("Creator")
+AgentConfig agent = new AgentBuilder("Creator")
     .WithSystemPrompt("...")
     .WithTemperature(0.0f)  // Strict JSON
     .Build();
@@ -140,41 +142,89 @@ This pattern enables:
 - **Easier porting** — new engines implement the same interfaces
 - **One API** — the LLM invokes tools the same way on every platform
 
-Since **v1.5.0**, `ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingLlmClientDecorator`, and `ClientLimitedLlmClientDecorator` live in `CoreAI.Core` (portable). Tool lifecycle events flow through `IToolCallEventPublisher` → `MessagePipeToolCallEventPublisher` (Unity adapter). Tool subscriber notifications flow through `IToolExecutionNotifier` → `CoreAiToolExecutionNotifier` (Unity adapter).
+`ToolExecutionPolicy`, `SmartToolCallingChatClient`, `LoggingLlmClientDecorator`, and `ClientLimitedLlmClientDecorator` live in `CoreAI.Core` (portable). Tool lifecycle events flow through `IToolCallEventPublisher` → `MessagePipeToolCallEventPublisher` (Unity adapter). Tool subscriber notifications flow through `IToolExecutionNotifier` → `CoreAiToolExecutionNotifier` (Unity adapter).
 
 ## Available tools
 
+Which role gets which tool by default, and which tools the host wires itself, is in
+[LLM_TOOLS.md](../../CoreAI/Docs/LLM_TOOLS.md). Results are JSON strings; the key casing is the tool's own
+(PascalCase for the serialized result classes, lower case for the anonymous envelopes).
+
+| Tool (function names) | Arguments | Result |
+|---|---|---|
+| `memory` | `action` (`read`, `write`, `append`, `clear`, `str_replace`, `insert`, `delete`, `rename`), `content`, `old_text`, `new_text`, `anchor`, `line`, `replace_all` | `{Success, Message, Error, Version, MemoryLength, Memory}` |
+| `execute_lua` | `code` | `{Success, Output, Error}` (null fields omitted) |
+| `manage_mods` | `action` (`list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`, `versions`, `revert`, `diagnostics`), `mod_id`, `code`, `bundle`, `revision`, `keep_objects` | `{success, message, data}` |
+| `world_command` | see [§4](#4-world-command-tool) | `{Success, Message, Action}` |
+| `component_command` | see [§5](#5-component-command-tool) | `{Success, Message, Action}` |
+| `get_inventory` | none | `{Success, Error, Items: [{Name, Type, Quantity, Price}]}` |
+| `game_config` | `action` (`read`, `update`), `content` | `{Success, Message, Error, ConfigJson}` |
+| `game_state` | none | `{"telemetry": {key: value, …}}` |
+| `wait` | `seconds` (required, clamped to the tool's maximum, 60 by default), `reason` | `{Success, Message, Error, RequestedSeconds, WaitedSeconds, Reason}` |
+| `read_skill` | `skill_name`, `section`, `all` | `{success, skill, instructions, sections, tools: [{tool_name, description, parameters_schema, invocable}]}` or `{success: false, error, available}` |
+| `call_skill_tool` | `tool_name`, `arguments_json` (a JSON object string) | the called tool's own result |
+| `manage_skills` | `action` (`create`, `update`, `list`, `get`, `delete`), `name`, `description`, `instructions`, `tool_names` | `{success, message, data}` |
+| `scene_tool` (`find_objects`, `get_hierarchy`, `get_transform`, `set_transform`) | `find_objects(searchTerm, searchMethod, includeInactive)` (`searchMethod`: `name` or `tag`), `get_hierarchy(rootInstanceId)`, `get_transform(instanceId)`, `set_transform(instanceId, px, py, pz, rx, ry, rz, sx, sy, sz)` | `{success, data}` or `{success: false, error}` |
+| `camera` (`camera_capture`, `screenshot`, `camera_look`, `camera_list`) | `camera_capture` / `screenshot`: `cameraName`, `maxSize`; `camera_look`: `cameraName`, `posX`…`posZ`, `rotX`…`rotZ`, `lookAt` | capture: summary JSON `{ok, summary, camera, isMain, width, height, format, sizeBytes, pose, imageAttached}` plus the image as a follow-up user image part |
+
+The Programmer role also gets `get_mod_logs` and the world-package tools `save_world`, `load_world`,
+`list_autosaves` and `load_autosave` from the Mods package (see
+[WORLD_PACKAGE.md](../../../Docs/CoreAIMods/WORLD_PACKAGE.md)).
+
 ### 1. Actions and events (`DelegateLlmTool`)
 
-**Purpose:** Turn any C# delegate (method) into an `ILlmTool` at runtime without writing dedicated tool classes. The model gets a correct JSON skeleton from the delegate signature. This is also the basis for global event triggers (`WithEventTool`).
+**Purpose:** Turn any C# delegate (`Action` / `Func`) into a tool at runtime without writing a tool class.
+`DelegateLlmTool` uses `AIFunctionFactory` (MEAI), which reads the delegate signature and exposes its
+parameters to the model as the tool schema. This is also the basis for global event triggers
+(`WithEventTool`).
 
 **Usage:**
 
 - `AgentBuilder.WithAction` (invoke a specific delegate)
 - `AgentBuilder.WithEventTool` (publish to `CoreAiEvents` for decoupling)
 
-**Prompting rule:** If you add an Action or EventTool to an agent, **strongly recommend** documenting its use in `WithSystemPrompt`. Example: `"If you want to alarm guards, call the 'alarm_guards' tool"`.
+```csharp
+AgentConfig agent = new AgentBuilder("Helper")
+    .WithAction("heal_player", "Heals the player fully", new Action(() => player.Heal())) // C# 9: wrap lambdas passed as Delegate
+    .WithEventTool("trigger_scare", "Use to scare the player") // Publishes to CoreAiEvents
+    .Build();
+```
+
+**Format:** depends on your method signature.
+
+**How does the model know when to use a trigger?** The function becomes available to the LLM like any other
+tool. To steer usage:
+
+1. **Write a clear `description`** (second argument to `WithAction`) explaining why the function exists (e.g. *"Call this to heal the player"*).
+2. **State it in the system prompt:** in `WithSystemPrompt`, say explicitly: *"If the player asks for help, you MUST call heal_player"*.
+
+A delegate whose task completes asynchronously must return it through `MeaiToolTaskBridge.Publish(...)`, or
+the turn never resumes in a WebGL player (see [TOOL_AUTHORING_GUIDE.md](TOOL_AUTHORING_GUIDE.md)).
 
 ### 2. Memory tool
 
-**Purpose:** Read and edit agent memory.
+**Purpose:** Read and edit agent memory. Every built-in role except PlainChat has it; custom agents get it
+with `.WithMemory()`.
 
 **Format:**
 
 ```json
-{"name": "memory", "arguments": {"action": "write|append|clear", "content": "text"}}
+{"name": "memory", "arguments": {"action": "append", "content": "text"}}
 ```
 
-Actions: `read`, `write`, `append`, `clear`, `str_replace`, `insert`, `delete`, `rename` (see `MemoryTool`).
+Actions: `read`, `write`, `append`, `clear`, `str_replace`, `insert`, `delete`, `rename`. `str_replace`,
+`delete` and `rename` use `old_text` / `new_text`; `insert` uses `anchor` or `line`; `replace_all` edits every
+match. Details: [MemorySystem.md](MemorySystem.md).
 
 **Code:**
 
-- `MemoryTool.cs` — MEAI `AIFunction`
-- `MemoryLlmTool.cs` — `ILlmTool` wrapper
+- `MemoryTool.cs` — runs the actions and builds the MEAI `AIFunction`
+- `MemoryLlmTool.cs` — `ILlmTool` descriptor the client binds to `MemoryTool`
 
 ### 3. Execute Lua tool
 
-**Purpose:** Run Lua scripts from the Programmer agent.
+**Purpose:** Run Lua from the Programmer agent. Needs the Mods package and the `COREAI_LUA` define; the
+built-in Programmer role gets it automatically.
 
 **Format:**
 
@@ -182,14 +232,17 @@ Actions: `read`, `write`, `append`, `clear`, `str_replace`, `insert`, `delete`, 
 {"name": "execute_lua", "arguments": {"code": "Lua code"}}
 ```
 
+**Result:** `{"Success":true,"Output":"…"}` or `{"Success":false,"Error":"…"}`.
+
 **Code** (package `com.neoxider.coreaimods`):
 
-- `LuaTool.cs` — MEAI `AIFunction`
-- `LuaLlmTool.cs` — `ILlmTool` wrapper
+- `LuaTool.cs` — runs the code and builds the MEAI `AIFunction`
+- `LuaLlmTool.cs` — `IAIFunctionLlmTool` wrapper
 
 ### 4. World command tool
 
 **Purpose:** Control the game world: spawn, partially change, recolour, destroy objects, animations, audio, physics, UI, and scenes.
+The built-in Creator and Builder roles get it automatically.
 
 **Format:**
 
@@ -197,10 +250,15 @@ Actions: `read`, `write`, `append`, `clear`, `str_replace`, `insert`, `delete`, 
 {"name": "world_command", "arguments": {"action": "spawn", "prefabKey": "Enemy", "targetName": "enemy_1", "x": 0, "y": 0, "z": 0}}
 ```
 
+**Result:** `{"Success":true,"Message":"World command 'spawn' executed successfully at (0,0,0)","Action":"spawn"}`.
+A missing argument returns `Success: false` with a `Missing required parameters for action '…'` message; an
+unknown `prefabKey` lists the available keys. `list_prefabs` puts `{prefabs, primitives}` JSON in `Message`,
+`list_objects` the matching objects, `spawn_batch` `{ok, spawned, failed, names}`.
+
 | Action | Description | Required parameters |
 |--------|-------------|---------------------|
 | `spawn` | Spawn a registered prefab or built-in primitive (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `empty`) | `prefabKey`, `targetName` |
-| `spawn_batch` | Spawn several prefabs/primitives in one call | see [WORLD_COMMANDS.md](WORLD_COMMANDS.md) |
+| `spawn_batch` | Spawn up to 100 prefabs/primitives in one call | `itemsJson` (see [WORLD_COMMANDS.md](WORLD_COMMANDS.md)) |
 | `list_prefabs` | List the registered prefab keys available to `spawn` | none |
 | `change` | Apply only supplied position, rotation, scale, or parent fields | `targetName` |
 | `set_color` | Set renderer colour from HTML colour | `targetName`, `stringValue` |
@@ -208,16 +266,16 @@ Actions: `read`, `write`, `append`, `clear`, `str_replace`, `insert`, `delete`, 
 | `list_objects` | List objects | optional: `stringValue` for search |
 | `load_scene` | Load a scene | `stringValue` (scene name) |
 | `reload_scene` | Reload the scene | none |
-| `set_active` | Enable (show) an object — the public action always activates; disable through Lua/WorldEdit | `targetName` |
-| `play_animation` | Play an animation | `targetName`, `animationName` |
+| `set_active` | Enable (show) an object; the action always activates | `targetName` |
+| `play_animation` | Play an animation | `targetName`, `animationName` (or `stringValue`) |
 | `stop_animation` | Stop animation playback | `targetName` |
 | `list_animations` | List animations | `targetName` |
-| `play_sound` | Play an AudioSource or named clip binding | `targetName`, optional `stringValue`, `volume` |
-| `set_volume` | Set AudioSource volume | `targetName`, `volume` |
-| `show_text` | Show text | `targetName`, `textToDisplay` |
+| `play_sound` | Play an AudioSource or named clip binding | `targetName`, `stringValue` (clip), optional `volume` |
+| `set_volume` | Set AudioSource volume | `targetName`, `volume` (default 1) |
+| `show_text` | Show text | `targetName`, `textToDisplay` (or `stringValue`) |
 | `hide_panel` | Hide UI panel/object | `targetName` |
-| `apply_force` | Apply a force | `targetName`, `fx`, `fy`, `fz` |
-| `set_velocity` | Set Rigidbody velocity | `targetName`, `fx`, `fy`, `fz` |
+| `apply_force` | Apply a force | `targetName`, at least one of `fx`, `fy`, `fz` |
+| `set_velocity` | Set Rigidbody velocity | `targetName`, at least one of `fx`, `fy`, `fz` |
 
 `move`, `rotate`, `set_scale`, `parent`, `set_transform`, `update_score`, and `spawn_particles` are not public `world_command` actions.
 
@@ -236,7 +294,8 @@ Actions: `read`, `write`, `append`, `clear`, `str_replace`, `insert`, `delete`, 
 | `worldPositionStays` | bool | Parenting policy for `spawn`/`change`. Default `false`: coordinates are local to the named parent. `true`: preserve world transform. |
 | `animationName` | string | Animation name. |
 | `textToDisplay` | string | Text to display. |
-| `volume` | float | Audio volume. |
+| `volume` | float | Audio volume, 0–1 (default 1). |
+| `itemsJson` | string | `spawn_batch` only: JSON array of up to 100 items `{prefabKey?, name?, x, y, z, rx?, ry?, rz?, scale? or scaleX/Y/Z?, parent?, worldPositionStays?, color?}`; an item without its own `prefabKey`, rotation, scale, parent or `worldPositionStays` uses the call's values (position does not fall back). |
 
 **Examples:**
 
@@ -260,15 +319,18 @@ Actions: `read`, `write`, `append`, `clear`, `str_replace`, `insert`, `delete`, 
 {"name": "world_command", "arguments": {"action": "load_scene", "stringValue": "Level_2"}}
 ```
 
-**When to use:** Creator / Designer AI that dynamically drives the world. For scene inspection and instance-level scene operations, use `scene_tool`; it is separate from `world_command`.
+**When to use:** Creator / Builder, or a custom agent that drives the world (attach `WorldLlmTool` with
+`WithTool`). For scene inspection and instance-level scene operations, use `scene_tool`; it is separate from `world_command`.
 
 For compound spawned objects, create a named `empty` root first and parent related pieces beneath it. Use
 local coordinates (the default) for parts such as posts, roofs and props; use `worldPositionStays: true`
 only when attaching an already world-positioned object. This keeps the hierarchy meaningful and lets the
 whole object move as one unit.
+
 ### 5. Component command tool
 
 **Purpose:** Add, remove, configure, and list Unity components on existing GameObjects through a curated catalog. This tool does not use reflection.
+It is host-wired: attach `new ComponentLlmTool(componentExecutor, settings, logger)` with `WithTool`.
 
 **Format:**
 
@@ -298,7 +360,26 @@ whole object move as one unit.
 
 Supported `componentType` values: `rigidbody`, `rigidbody2d`, `boxcollider`, `spherecollider`, `capsulecollider`, `meshcollider`, `light`, `audiosource`, `camera`, `linerenderer`, `trailrenderer`, `textmesh`, `meshrenderer`, `particlesystem`.
 
-Example properties include `rigidbody.mass`, `rigidbody.useGravity`, `rigidbody.isKinematic`, `rigidbody.drag`, `rigidbody.angularDrag`; `light.type`, `light.intensity`, `light.range`, `light.color`, `light.spotAngle`; `boxcollider.isTrigger`, `boxcollider.size`, `boxcollider.center`; and `audiosource.volume`, `audiosource.pitch`, `audiosource.loop`.
+Supported properties (`propertyName`, case-insensitive) per component:
+
+| `componentType` | Properties |
+|---|---|
+| `rigidbody` | `mass`, `useGravity`, `isKinematic`, `linearDamping` (alias `drag`), `angularDamping` (alias `angularDrag`) |
+| `rigidbody2d` | `mass`, `gravityScale` |
+| `boxcollider` | `isTrigger`, `size`, `center` |
+| `spherecollider` | `isTrigger`, `radius` |
+| `capsulecollider` | `isTrigger`, `radius`, `height` |
+| `meshcollider` | `convex`, `isTrigger` |
+| `light` | `type`, `intensity`, `range`, `color`, `spotAngle` |
+| `audiosource` | `volume`, `pitch`, `loop`, `playOnAwake`, `spatialBlend` |
+| `camera` | `fieldOfView`, `orthographic`, `orthographicSize` |
+| `linerenderer` | `startWidth`, `endWidth`, `positionCount`, `loop` |
+| `trailrenderer` | `time`, `startWidth`, `endWidth` |
+| `textmesh` | `text`, `fontSize`, `characterSize` |
+| `meshrenderer`, `particlesystem` | none (`add` / `remove` only) |
+
+**Result:** `{"Success":true,"Message":"…","Action":"set"}`; an unknown object, component type or property
+returns `Success: false`.
 
 **Examples:**
 
@@ -329,12 +410,12 @@ Example properties include `rigidbody.mass`, `rigidbody.useGravity`, `rigidbody.
 {"name": "get_inventory", "arguments": {}}
 ```
 
-**Returns:** A list of items with name, type, quantity, and price.
+**Returns:** `{"Success":true,"Error":null,"Items":[{"Name":"Iron Sword","Type":"weapon","Quantity":3,"Price":50}]}`.
 
 **Code:**
 
-- `InventoryTool.cs` — MEAI `AIFunction`
-- `InventoryLlmTool.cs` — `ILlmTool` wrapper
+- `InventoryTool.cs` — runs the provider and builds the MEAI `AIFunction`
+- `InventoryLlmTool.cs` — `IAIFunctionLlmTool` wrapper; takes an `InventoryTool.IInventoryProvider`
 
 **Example:**
 
@@ -343,66 +424,53 @@ Player: "What do you have?"
   ↓
 Merchant: {"name": "get_inventory", "arguments": {}}
   ↓
-Tool: [{name: "Iron Sword", price: 50, qty: 3}]
+Tool: {"Success":true,"Items":[{"Name":"Iron Sword","Price":50,"Quantity":3,…}]}
   ↓
 Merchant: "I have an Iron Sword for 50 coins..."
 ```
 
-**When to use:** Merchant / shopkeeper NPCs that sell items.
+**When to use:** Merchant / shopkeeper NPCs that sell items. Host-wired: `WithTool(new InventoryLlmTool(provider))`.
 
 ### 7. Game config tool
 
-**Purpose:** Read and update game configuration.
+**Purpose:** Read and update game configuration. Host-wired with `GameConfigPolicy.CreateLlmTool(store, roleId)`;
+see [GAME_CONFIG_GUIDE.md](GAME_CONFIG_GUIDE.md).
 
 **Format:**
 
 ```json
-{"name": "game_config", "arguments": {"action": "read|update", "content": "JSON"}}
+{"name": "game_config", "arguments": {"action": "update", "content": "{\"Difficulty\":2}"}}
 ```
+
+`action` is `read` or `update`; `content` (a JSON object string) is required for `update`.
+
+**Result:** `{"Success":true,"Message":"Config updated for key: session","Error":null,"ConfigJson":"…"}`.
 
 **Code:**
 
-- `GameConfigTool.cs` — MEAI `AIFunction`
-- `GameConfigLlmTool.cs` — `ILlmTool` wrapper
-
-### 8. Action / event tool (`DelegateLlmTool`)
-
-**Purpose:** Invoke C# methods or events (`Action` / `Func`) directly without implementing `ILlmTool` classes. Ideal for wiring game mechanics.
-
-**Code:**
-
-- `DelegateLlmTool.cs`
-- Uses `AIFunctionFactory` (MEAI), which parses method arguments and exposes them to the LLM as a tool.
-
-**Format:** Depends on your method signature.
-
-**Via `AgentBuilder`:**
-
-```csharp
-var agent = new AgentBuilder("Helper")
-    .WithAction("heal_player", "Heals the player fully", new Action(() => player.Heal())) // C# 9: wrap lambdas passed as Delegate
-    .WithEventTool("trigger_scare", "Use to scare the player") // Publishes to CoreAiEvents
-    .Build();
-```
-
-**How does the model know when to use a trigger?**
-
-The function becomes available to the LLM like any other tool. To steer usage:
-
-1. **Write a clear `description`** (second argument to `WithAction`) explaining why the function exists (e.g. *"Call this to heal the player"*).
-2. **State it in the system prompt:** In `WithSystemPrompt`, say explicitly: *"If the player asks for help, you MUST call heal_player"*.
+- `GameConfigTool.cs` — runs `read` / `update` and builds the MEAI `AIFunction`
+- `GameConfigLlmTool.cs` — `IAIFunctionLlmTool` wrapper
 
 ## Settings
 
 ### `CoreAISettings`
 
-```csharp
-// Before initialization:
-CoreAISettings.MaxLuaRepairRetries = 3;        // Max consecutive failed Lua repairs
-CoreAISettings.MaxToolCallRetries = 3;         // Max consecutive failed tool calls
-CoreAISettings.EnableMeaiDebugLogging = true;  // MEAI debug logging
-CoreAISettings.LlmRequestTimeoutSeconds = 300; // LLM timeout
-```
+Set these on the `CoreAISettings` asset (Advanced Settings):
+
+| Inspector field | Tab | Default | Meaning |
+|---|---|---|---|
+| **Lua Repair Retries** | General | 3 | Repair generations on the Lua envelope path |
+| **Tool Call Retries** | General | 3 | Consecutive all-failed tool batches before the summary turn |
+| **Max Tool Call Roundtrips** | General | 20 | Global tool-roundtrip cap; 0 = unlimited. Also settable with `settings.SetMaxToolCallRoundtrips(value)` |
+| **LLM Timeout (sec)** | General | 120 | Per-turn idle budget, re-armed by tool-call events |
+| **MEAI Debug Logging** | Debug | off | MEAI diagnostics |
+
+`MaxToolResultChars` (8000), `DefaultToolTimeoutMs`
+(30000) and `MaxParallelToolCalls` (4) are serialized on the same asset without an Inspector field.
+
+Configure tool retries on the asset in **Advanced Settings -> General -> Tool Call Retries** and the
+global roundtrip cap with **Max Tool Call Roundtrips** or `settings.SetMaxToolCallRoundtrips(value)`.
+MEAI clients read the injected `ICoreAISettings`; static assignments do not change their limits.
 
 ### Tool call retry
 
@@ -470,18 +538,19 @@ A tool that throws is always logged as an error: `[ToolPolicy] <name> threw: <me
 
 ## Custom agents via `AgentBuilder`
 
-Creating a new agent with custom tools — a few lines:
+Creating a new agent with custom tools:
 
 ```csharp
-var merchant = new AgentBuilder("Merchant")
+AgentConfig merchant = new AgentBuilder("Merchant")
     .WithSystemPrompt("You are a shopkeeper...")
     .WithTool(new InventoryLlmTool(myProvider))
     .WithMemory()
     .WithMode(AgentMode.ToolsAndChat)
     .Build();
-
-merchant.ApplyToPolicy(policy);
 ```
+
+`Build()` registers the role with `CoreAIAgent.Policy` when CoreAI is running; the first `AskAsync` /
+`AskWithCallback` registers it otherwise. `ApplyToPolicy(policy)` is only for a custom `AgentMemoryPolicy`.
 
 ### Agent modes
 
@@ -490,6 +559,10 @@ merchant.ApplyToPolicy(policy);
 | `ToolsOnly` | Tools only (no chat text) | Background telemetry analysis |
 | `ToolsAndChat` | Tools + text (default) | Merchant, crafter, advisor |
 | `ChatOnly` | Text only (no tools) | Player chat, storyteller |
+
+The mode declares intent; it does not remove tools or history. It sets the streaming default (on for
+`ToolsOnly` and `ToolsAndChat` unless `WithStreaming` says otherwise) and drives build warnings. For a
+text-only agent register no tools (and no `WithMemory()`); to drop history use `WithoutChatHistory()`.
 
 ### Custom tools
 
@@ -522,7 +595,8 @@ public sealed class WeatherLlmTool : IAIFunctionLlmTool
 
     public AIFunction CreateAIFunction()
     {
-        Func<CancellationToken, Task<string>> func = ct => _provider.GetWeatherAsync(ct);
+        // Publish lets the result reach MEAI in a WebGL player (no thread pool) once the body awaits.
+        Func<CancellationToken, Task<string>> func = ct => MeaiToolTaskBridge.Publish(_provider.GetWeatherAsync(ct));
         return AIFunctionFactory.Create(func, new AIFunctionFactoryOptions { Name = Name, Description = Description });
     }
 }
@@ -550,7 +624,7 @@ Use `IAIFunctionLlmTool` for one MEAI function and `IAIFunctionsLlmTool` when on
 **2. Attach to an agent:**
 
 ```csharp
-var agent = new AgentBuilder("Farmer")
+AgentConfig agent = new AgentBuilder("Farmer")
     .WithSystemPrompt("You are a farmer. Check weather before answering.")
     .WithTool(new WeatherLlmTool(weatherProvider))
     .WithMode(AgentMode.ToolsAndChat)
@@ -635,16 +709,16 @@ CoreAI supports a **universal prefix** — text prepended to the **start** of ev
 **How to configure:**
 
 - **Inspector:** CoreAISettings → Advanced Settings → General → Universal Prompt Prefix
-- **Code:** `CoreAISettings.UniversalSystemPromptPrefix = "..."`
+- **Code without a settings asset** (portable hosts, tests): `CoreAISettings.UniversalSystemPromptPrefix = "..."`.
+  Inside a `CoreAILifetimeScope` the asset value wins.
 
 The prefix applies to **all** agents: built-in (Creator, Programmer, Analyzer, …) and custom (`AgentBuilder`).
+An agent built with `WithOverrideUniversalPrefix()` skips it.
 
 ---
 
-## Breaking changes v0.7.0
+## What is not a tool call
 
-- `AgentMemoryDirectiveParser` removed
-- Fenced code blocks tagged `memory` or `lua` are no longer used for tool calls
-- `{"tool": "memory", ...}` → `{"name": "memory", "arguments": {...}}`
-- Programmer uses the `execute_lua` tool instead of fenced blocks
-- Chat agent may call `get_inventory` before replying to the player
+- Fenced code blocks tagged `memory` or `lua` are text, not tool calls. Memory changes go through the
+  `memory` tool and Programmer Lua through `execute_lua`.
+- The `{"tool": "memory", ...}` shape is not recognized; calls use `{"name": ..., "arguments": {...}}`.

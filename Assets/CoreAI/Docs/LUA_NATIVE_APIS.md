@@ -18,7 +18,7 @@ whole CLR, and reuse what the VM already provides where it is safe.
 | **Frame coroutines** | `coroutine.yield()` in Lua + `LuaCsCoroutineHandle` ticking Resume | Standard Lua coroutine pattern; the handle only drives Resume per frame |
 | **API registration** | `LuaCsApiRegistry.Register(name, delegate)` / `RegisterCallback` | Typed host delegates marshalled to `LuaFunction`; no CLR surface leaks |
 | **Logic slots / mod hooks** | C# guarded invoke + `LuaCsExecutionGuard` | Errors surface host-side; scripts cannot silently swallow failures |
-| **Optional module** | `#if COREAI_LUA` | Define to enable Lua; default build keeps stub/null DI surfaces |
+| **Optional module** | `com.neoxider.coreaimods` package, composed by `CoreAiModsLifetimeScope`; `COREAI_LUA` gates the Lua demos and test fixtures | Lua is off unless a scene composes the mods scope; nothing in the core depends on it |
 
 ## What Is Intentionally Not Exposed
 
@@ -60,14 +60,14 @@ local n = forge_count("enemy")
 
 Argument coercion (`LuaCsValueMarshaller.CoerceArgument`) handles `string`, `bool`, `double`/`float`,
 `int`/`long`, enums, `LuaTable`, and `LuaValue`; return values (numbers, strings, bools, dictionaries,
-`IEnumerable`) are converted back to Lua values. Host exceptions become `LuaRuntimeException` prefixed
-with the API name.
+`IEnumerable`) are converted back to Lua values. A host exception becomes a `LuaCsHostFunctionException`
+(a `LuaRuntimeException`) whose error value is the one line `name: message`.
 
 ## Full Mode: Opt-in Reflection Tier
 
 The Full tier (`unity_find`, `unity_get_member`, …) in `LuaCsFullUnityRuntimeBindings` is a curated
 reflection wrapper (public members by default) gated behind explicit access modes and a
-type/member denial policy (`IFullLuaAccessBlacklistPolicy`, see `LUA_ACCESS_MODES.md`). It follows the
+type/member denial policy (`IFullLuaAccessBlacklistPolicy`, see [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md)). It follows the
 host's **Enable Full Lua Access** grant on `CoreAiModsLifetimeScope` on every platform (there is no
 WebGL-specific switch). Prefer registering explicit typed APIs over the Full tier for anything shipped.
 
@@ -101,4 +101,4 @@ Detailed **✅/❌** guidance: [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md).
 - [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) - security boundaries
 - [LUA_GAME_API.md](LUA_GAME_API.md) - game API for scripts
 - [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md) - best practices and anti-patterns
-- `LUA_ACCESS_MODES.md` - access modes (Read -> Full), blacklist policy
+- [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md) - access modes (Read -> Full), blacklist policy

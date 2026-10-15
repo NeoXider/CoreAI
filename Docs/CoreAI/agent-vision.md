@@ -12,6 +12,7 @@ lives in `Assets/CoreAiUnity/Runtime/Source/Features/Vision/`:
 | `CoreAiAgentCamera.cs` | Opt-in marker `MonoBehaviour` that makes a camera agent-controllable. |
 | `AgentCameraService.cs` | Ownership resolution, marker gating, rate limiting, and the capture/render pipeline. |
 | `CameraLlmTool.cs` | One `ILlmTool` (`camera`) exposing `camera_capture` (alias `screenshot`) / `camera_look` / `camera_list`. |
+| `VisionSelfProbe.cs` | Sends the routed model a test image and checks the answer, so vision support is measured instead of guessed from the model name. |
 
 ---
 
@@ -36,16 +37,19 @@ lives in `Assets/CoreAiUnity/Runtime/Source/Features/Vision/`:
 
 `Camera.Render()` into an offscreen `RenderTexture` → `Texture2D.ReadPixels` → encode (JPEG default,
 PNG optional) → `byte[]` → returned as an `LlmToolImageResult` image (no base64 in the tool message; §5).
+The render/readback/encode step is shared with the chat attachment path
+(`AiAttachmentUnityExtensions.CaptureCamera`).
 
 Decisions & tradeoffs:
 - **Render to an offscreen RT, not `ScreenCapture`.** Rendering a specific `Camera` to our own RT lets us
   capture *any* camera at *any* size without touching the display, and never disturbs the player's view.
   We save/restore `Camera.targetTexture` and `RenderTexture.active` so the camera keeps rendering to the
   screen afterward.
-- **End of frame + async-friendly.** The service awaits `UniTask.WaitForEndOfFrame()` before the explicit
-  `Render()` so a capture reflects a fully-drawn frame and does not stall the LLM worker thread. The tool
-  hops to the main thread (`UniTask.SwitchToMainThread`), captures, then returns to the thread pool —
-  matching the existing tools (`SceneLlmTool`, etc.).
+- **End of frame + async-friendly.** The service yields to `PlayerLoopTiming.LastPostLateUpdate`
+  (`UniTask.Yield`) before the explicit `Render()` so a capture reflects a fully-drawn frame and does not
+  stall the LLM worker thread. The tool hops to the main thread (`UniTask.SwitchToMainThread`), captures,
+  then returns to the thread pool (not on WebGL, which has no thread pool) — matching the existing tools
+  (`SceneLlmTool`, etc.).
 - **Downscale by long edge.** Default `maxSize = 512` px on the longer edge, clamped to `[64, 1024]`.
   Aspect ratio is derived from `Camera.pixelWidth/pixelHeight` (fallback 16:9). 512px keeps a JPEG at
   roughly a few thousand vision tokens; 1024 is the hard cap so a model can request more detail without
@@ -83,8 +87,9 @@ Design rationale — **secure by default**:
   assembly needed — keeps the runtime asmdef clean).
 
 `AgentCameraService` centralizes the rules so the tool stays thin and the logic is unit-testable:
-- `ListCameras(agentRoleId)` — every scene camera with `name`, `isMain`, `isMarked`, `movable` (for this
-  agent), and pose.
+- `ListCameras(agentRoleId)` — every scene camera as an `AgentCameraInfo` (`Name`, `IsMain`, `IsMarked`,
+  `Movable` for this agent, `Pose`); `camera_list` reports them as `name`, `isMain`, `marked`, `movable`,
+  `pose`.
 - `ResolveCaptureCamera(cameraName, agentRoleId)` — read-only resolution: explicit `cameraName` →
   the agent's own marked camera → `Camera.main` → first active camera.
 - `TryResolveMovableCamera(cameraName, agentRoleId, out cam, out denial)` — the movement gate; returns a
@@ -123,7 +128,7 @@ an image:
 ```json
 {
   "ok": true,
-  "summary": "Captured 'DroneCam' (agent camera) at 512x288, pos (3.0, 5.0, -8.0), looking (15, 90, 0).",
+  "summary": "Captured 'DroneCam' (agent camera) at 512x288, pos (3, 5, -8), rot (15, 90, 0).",
   "camera": "DroneCam",
   "isMain": false,
   "width": 512,
@@ -140,14 +145,15 @@ an image:
 - **`imageAttached`** tells the model the picture follows in the next user message (§5). Errors are plain JSON
   strings: `{ "ok": false, "error": "<code>", "message": "<human text>" }`.
 
-Failures are structured: `no_camera`, `rate_limited` (`retryAfterMs`), `scene_loading`,
-`camera_not_movable` (with the marker instructions), `target_not_found`, `no_change`.
+Failures are structured: `no_camera`, `rate_limited` (`retryAfterMs`), `scene_loading`, `capture_failed`,
+`camera_not_movable` (with the marker instructions), `target_not_found`, `no_change`, `look_failed`, and
+`exception` for an unexpected error.
 
 ---
 
-## 5. How the image gets back to the model (investigation)
+## 5. How the image gets back to the model
 
-Grepping `FunctionResultContent` usage (`ToolExecutionPolicy`, `MeaiOpenAiChatClient`, tests) confirms:
+Why a tool result cannot carry the image itself:
 
 - `MeaiOpenAiChatClient` serializes MEAI `DataContent` with an `image/*` media type to an OpenAI
   `image_url` content part **only for user/assistant messages**.
@@ -207,8 +213,9 @@ For a chat use case that does not need the model to *decide* to look, the simple
 - **Rate limit.** Minimum 1s between captures **per agent role** (configurable). A too-soon capture returns
   `rate_limited` with `retryAfterMs`. The clock is injected (`Func<double>`, `Stopwatch`-based default) so
   the limit is deterministically unit-testable.
-- **Size cap.** `maxSize` clamped to `[64, 1024]` px long edge; the RT/`Texture2D` are always destroyed in a
-  `finally` so repeated captures don't leak GPU/native memory.
+- **Size cap.** `maxSize` clamped to `[64, 1024]` px long edge. The render target comes from
+  `RenderTexture.GetTemporary` and is released in a `finally`; one cached readback `Texture2D` is reused
+  (resized when the capture size changes), so repeated captures don't leak GPU/native memory.
 - **No capture during scene load.** Capture is refused (`scene_loading`) while
   `SceneManager.GetActiveScene().isLoaded` is false, avoiding a null/half-built camera.
 - **No player-camera hijack.** Movement is impossible without the opt-in marker (§3); capture never mutates
@@ -229,9 +236,11 @@ services) are unaffected.
 
 - **Programmer** gets the tool by default: autonomous world-manipulating agents benefit most from
   look/list/capture.
-- **SmartChat is not auto-registered.** The chat role already has a capture path
-  (`CoreAi.AskWithCameraAsync` + on-demand `CoreAi.RegisterCameraVisionTool`), and adding a second vision
-  tool by default would duplicate surface and grow the chat token budget. Hosts that want it call
+- **SmartChat is not registered by the installer.** The chat role already has a capture path
+  (`CoreAi.AskWithCameraAsync` + on-demand `CoreAi.RegisterCameraVisionTool`). In a chat-panel host the
+  panel attaches the tool itself: `CoreAiChatPanel` calls `CoreAiChatService.TryEnsureCameraToolForRole`
+  for the active chat role on start and on every role switch, when **Enable Camera Tool** is on in its
+  `CoreAiChatConfig` (default on); the call is idempotent. Other hosts call
   `policy.AddToolForRole(BuiltInAgentRoleIds.SmartChat, new CoreAI.Vision.CameraLlmTool(service, BuiltInAgentRoleIds.SmartChat))`.
 
 The tool is constructed with the role id it is registered for, which is how it knows *whose* camera is
@@ -250,7 +259,7 @@ prompt; it used to put a base64 `dataUri` into the tool text, which was never li
 `CoreAI.Vision.CameraLlmTool` (`camera` → `camera_capture`/`camera_look`/`camera_list`) is a superset for
 autonomous agents: it adds the ownership/marker model, camera movement, and listing. They can coexist
 (different tool/function names, different default roles). The vision tool is self-contained and does not
-depend on the old one. Long term, hosts can standardize on the new tool and retire the old one.
+depend on the old one; prefer it for autonomous agents.
 
 ---
 

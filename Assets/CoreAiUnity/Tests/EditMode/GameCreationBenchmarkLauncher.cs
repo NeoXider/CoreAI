@@ -40,6 +40,23 @@ namespace CoreAI.Tests.EditMode
         public const string EnvRepetitions = "COREAI_BENCHMARK_REPS";
         public const string EnvTimeout = "COREAI_BENCHMARK_TIMEOUT";
         public const string EnvRetries = "COREAI_BENCHMARK_RETRIES";
+        public const string EnvSuiteBudget = "COREAI_BENCHMARK_SUITE_BUDGET";
+
+        /// <summary>Target list of a parallel multi-model run; see <see cref="BenchmarkTargetList"/> for the formats.</summary>
+        public const string EnvTargets = BenchmarkTargetList.EnvTargets;
+
+        /// <summary>How many targets run at once; empty or 0 means all.</summary>
+        public const string EnvParallel = BenchmarkTargetList.EnvParallel;
+
+        /// <summary>Suite-wide <c>reasoning_effort</c> for the single model and for targets without their own.</summary>
+        public const string EnvReasoningEffort = BenchmarkTargetList.EnvReasoningEffort;
+
+        public const string ArgModel = "-coreAiBenchmarkModel";
+        public const string ArgGroups = "-coreAiBenchmarkGroups";
+        public const string ArgReps = "-coreAiBenchmarkReps";
+        public const string ArgTargets = "-coreAiBenchmarkTargets";
+        public const string ArgParallel = "-coreAiBenchmarkParallel";
+        public const string ArgReasoningEffort = "-coreAiBenchmarkReasoningEffort";
 
         // EditorPrefs keys shared by the window and the one-click menu, so the menu reuses window settings.
         public const string PrefPrefix = "CoreAI.Benchmark.";
@@ -60,18 +77,27 @@ namespace CoreAI.Tests.EditMode
         public const string PrefRetries = PrefPrefix + "retries";
         public const string PrefTimeout = PrefPrefix + "timeout";
 
-        // Must stay ABOVE the suite's own soft budget (COREAI_BENCHMARK_SUITE_BUDGET, default
-        // 6000s) plus report/screenshot time: this launcher-side watchdog is only a last-resort
-        // guard against a hung Test Runner, and when it fires the run dies WITHOUT a report.
+        /// <summary>Saved target rows (JSON); literal API keys are never stored, <c>env:</c> references are.</summary>
+        public const string PrefTargets = PrefPrefix + "targets";
+
+        /// <summary>Saved parallel cap; 0 runs every target at once.</summary>
+        public const string PrefParallel = PrefPrefix + "parallel";
+
+        /// <summary>Saved suite-wide reasoning effort; empty is the provider default.</summary>
+        public const string PrefReasoningEffort = PrefPrefix + "reasoningEffort";
+
+        // Must stay ABOVE the suite's own soft budget (COREAI_BENCHMARK_SUITE_BUDGET) plus
+        // report/screenshot time: this launcher-side watchdog is only a last-resort guard against a
+        // hung Test Runner, and when it fires the run dies WITHOUT a report.
         // Required ordering across the whole timeout chain:
-        //   soft suite budget < NUnit [Timeout] (6600s) < launcher watchdog (7200s).
+        //   soft suite budget < NUnit [Timeout] (6 h) < launcher watchdog (6 h 10 min).
         // The first inequality is enforced by the clamp in
         // GameCreationBenchmarkPlayModeTests.ResolveSuiteBudgetSeconds (budget + report margin
-        // 300s <= 6600s; the rep start-gate reserves maxAttempts x timeout inside the budget, so
+        // <= NUnit timeout; the rep start-gate reserves maxAttempts x timeout inside the budget, so
         // scenario work always ends by the budget itself); this constant only has to stay above
         // the NUnit [Timeout]. 1900s here killed a full Opus 4.8 cloud run mid-suite (slow ~5-7 min
         // turns are normal for large CLI-bridged models, not a hang).
-        private const double TimeoutSeconds = 7200d;
+        internal const double TimeoutSeconds = 22_200d;
         private static double _startedAt;
         private static TestRunnerApi _api;
         private static ICallbacks _callbacks;
@@ -127,6 +153,252 @@ namespace CoreAI.Tests.EditMode
                 reps,
                 retries,
                 timeout > 0 ? timeout : (int?)null);
+
+            // WHY: this editor session's rows still hold the keys typed in the window; after a restart only the
+            // saved rows remain, which carry env: references but no literal keys. An invalid list is not applied.
+            List<BenchmarkTargetRow> rows = LoadSessionTargetRows() ?? LoadSavedTargetRows();
+            if (TryBuildTargetSpec(rows, out string spec, out string error))
+            {
+                ConfigureTargets(spec, EditorPrefs.GetInt(PrefParallel, 0));
+            }
+            else
+            {
+                Debug.LogWarning($"[Benchmark] Saved target list ignored: {error}");
+                ConfigureTargets(null, null);
+            }
+
+            string savedEffort = EditorPrefs.GetString(PrefReasoningEffort, "");
+            if (BenchmarkTargetList.TryNormalizeReasoningEffort(savedEffort, out string effort))
+            {
+                ConfigureReasoningEffort(effort);
+            }
+            else
+            {
+                Debug.LogWarning($"[Benchmark] Saved {BenchmarkTargetList.ReasoningEffortError(savedEffort)}; " +
+                                 "using the provider default.");
+                ConfigureReasoningEffort(null);
+            }
+        }
+
+        /// <summary>
+        /// Sets the suite-wide reasoning effort for the next launch, or clears it (provider default) so a value
+        /// from an earlier run never leaks into the next one.
+        /// </summary>
+        public static void ConfigureReasoningEffort(string effort)
+        {
+            SetOrClear(EnvReasoningEffort, effort);
+        }
+
+        /// <summary>One editable row of the window's target list.</summary>
+        [Serializable]
+        public sealed class BenchmarkTargetRow
+        {
+            public bool enabled = true;
+            public string label = "";
+            public string model = "";
+            public string baseUrl = "";
+
+            /// <summary>Literal key (kept for the editor session only) or an <c>env:VAR</c> reference.</summary>
+            public string apiKey = "";
+
+            /// <summary>This target's reasoning effort; empty uses the suite default.</summary>
+            public string reasoningEffort = "";
+
+            /// <summary>Provider body fields for this target: one JSON object, or empty.</summary>
+            public string extraBody = "";
+        }
+
+        [Serializable]
+        private sealed class SavedTargetRows
+        {
+            public List<BenchmarkTargetRow> rows = new();
+        }
+
+        /// <summary>The window's saved target rows; a literal API key is never part of them.</summary>
+        public static List<BenchmarkTargetRow> LoadSavedTargetRows()
+        {
+            string json = EditorPrefs.GetString(PrefTargets, "");
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return new List<BenchmarkTargetRow>();
+            }
+
+            try
+            {
+                return JsonUtility.FromJson<SavedTargetRows>(json)?.rows ?? new List<BenchmarkTargetRow>();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[Benchmark] Saved target rows are unreadable: {ex.Message}");
+                return new List<BenchmarkTargetRow>();
+            }
+        }
+
+        /// <summary>SessionState key of the rows including literal keys: kept across domain reloads, never written to disk.</summary>
+        public const string SessionTargetsKey = PrefPrefix + "targets.session";
+
+        /// <summary>This editor session's rows (literal keys included), or null when the window stored none.</summary>
+        public static List<BenchmarkTargetRow> LoadSessionTargetRows()
+        {
+            string json = SessionState.GetString(SessionTargetsKey, "");
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return null;
+            }
+
+            try
+            {
+                return JsonUtility.FromJson<SavedTargetRows>(json)?.rows;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>Stores <paramref name="rows"/> with their keys for this editor session only.</summary>
+        public static void SaveSessionTargetRows(IEnumerable<BenchmarkTargetRow> rows)
+        {
+            SavedTargetRows session = new();
+            session.rows.AddRange(rows ?? Enumerable.Empty<BenchmarkTargetRow>());
+            SessionState.SetString(SessionTargetsKey, JsonUtility.ToJson(session));
+        }
+
+        /// <summary>Saves <paramref name="rows"/>, dropping literal API keys (env: references are kept).</summary>
+        public static void SaveTargetRows(IEnumerable<BenchmarkTargetRow> rows)
+        {
+            SavedTargetRows saved = new();
+            foreach (BenchmarkTargetRow row in rows ?? Enumerable.Empty<BenchmarkTargetRow>())
+            {
+                string key = (row.apiKey ?? "").Trim();
+                saved.rows.Add(new BenchmarkTargetRow
+                {
+                    enabled = row.enabled,
+                    label = row.label ?? "",
+                    model = row.model ?? "",
+                    baseUrl = row.baseUrl ?? "",
+                    apiKey = key.StartsWith(BenchmarkTarget.ApiKeyEnvPrefix, StringComparison.OrdinalIgnoreCase)
+                        ? key
+                        : "",
+                    reasoningEffort = row.reasoningEffort ?? "",
+                    extraBody = row.extraBody ?? ""
+                });
+            }
+
+            EditorPrefs.SetString(PrefTargets, JsonUtility.ToJson(saved));
+        }
+
+        /// <summary>
+        /// Builds the <see cref="EnvTargets"/> value for the enabled rows (literal keys included, for this process
+        /// only). An empty spec means a single-model run. Fails with every row problem when a row is invalid.
+        /// </summary>
+        public static bool TryBuildTargetSpec(IEnumerable<BenchmarkTargetRow> rows, out string spec,
+            out string error)
+        {
+            spec = null;
+            List<BenchmarkTarget> targets = new();
+            List<string> problems = new();
+            int number = 0;
+            foreach (BenchmarkTargetRow row in rows ?? Enumerable.Empty<BenchmarkTargetRow>())
+            {
+                number++;
+                if (!row.enabled)
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(row.model))
+                {
+                    problems.Add($"row {number} has no model id");
+                    continue;
+                }
+
+                if (!BenchmarkTargetList.IsHttpUrl(row.baseUrl))
+                {
+                    problems.Add($"row {number} ({row.model.Trim()}) needs an absolute http(s) base URL");
+                    continue;
+                }
+
+                if (!BenchmarkTargetList.TryNormalizeReasoningEffort(row.reasoningEffort, out string effort))
+                {
+                    problems.Add($"row {number} ({row.model.Trim()}): " +
+                                 BenchmarkTargetList.ReasoningEffortError(row.reasoningEffort));
+                    continue;
+                }
+
+                if (!TryValidateExtraBody(row.extraBody, out string body, out string bodyError))
+                {
+                    problems.Add($"row {number} ({row.model.Trim()}): {bodyError}");
+                    continue;
+                }
+
+                targets.Add(new BenchmarkTarget(row.model, row.baseUrl, row.apiKey, row.label, effort, body));
+            }
+
+            if (problems.Count > 0)
+            {
+                error = string.Join("; ", problems);
+                return false;
+            }
+
+            if (targets.Count > 0)
+            {
+                // WHY: round-trips through the parser so duplicate names get the same #n labels the suite uses.
+                spec = BenchmarkTargetList.ToJson(
+                    BenchmarkTargetList.Parse(BenchmarkTargetList.ToJson(targets, true)), true);
+            }
+
+            error = null;
+            return true;
+        }
+
+        /// <summary>
+        /// Checks a target's provider body the way the suite will: one JSON object without a CoreAI-owned
+        /// field (<c>messages</c>, <c>model</c>, <c>tools</c>, …). <paramref name="normalized"/> is its compact,
+        /// key-sorted text, empty for an empty body. The suite additionally rejects a personal <c>session_id</c>.
+        /// </summary>
+        public static bool TryValidateExtraBody(string json, out string normalized, out string error)
+        {
+            normalized = "";
+            error = null;
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return true;
+            }
+
+            try
+            {
+                normalized = Infrastructure.Llm.OpenAiProviderBodyParameters.NormalizeRawJson(json);
+                foreach (JProperty property in JObject.Parse(normalized).Properties())
+                {
+                    if (Infrastructure.Llm.OpenAiProviderBodyParameters.IsReserved(property.Name))
+                    {
+                        normalized = "";
+                        error = $"extra body field '{property.Name}' is controlled by CoreAI";
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+            catch (ArgumentException ex)
+            {
+                normalized = "";
+                error = ex.Message;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Sets the multi-target env vars for the next launch, or clears them for a single-model run so a stale
+        /// list never leaks into it. <paramref name="parallel"/> 0/null runs every target at once.
+        /// </summary>
+        public static void ConfigureTargets(string targetSpec, int? parallel)
+        {
+            SetOrClear(EnvTargets, targetSpec);
+            SetOrClear(EnvParallel, string.IsNullOrWhiteSpace(targetSpec) || parallel is null or <= 0
+                ? null
+                : parallel.Value.ToString());
         }
 
         /// <summary>Tri-state connection toggle: 0 = use config (null), 1 = force On, 2 = force Off.</summary>
@@ -295,6 +567,10 @@ namespace CoreAI.Tests.EditMode
             string mdPath = Path.Combine(root, "COMPARISON.md");
             File.WriteAllText(mdPath, md);
             File.WriteAllText(Path.Combine(root, "COMPARISON.svg"), svg);
+            File.WriteAllText(Path.Combine(root, "COMPARISON_groups.svg"),
+                ModelComparison.ToGroupHeatmapSvg(models, pinnedModelId));
+            File.WriteAllText(Path.Combine(root, "COMPARISON_extreme.svg"),
+                ModelComparison.ToExtremeRankingSvg(models, pinnedModelId));
             Debug.Log($"[Benchmark] Comparison of {models.Count} model(s): {mdPath}");
             EditorUtility.RevealInFinder(mdPath);
             return mdPath;
@@ -354,15 +630,9 @@ namespace CoreAI.Tests.EditMode
                     return false;
                 }
 
-                // "<stem>.*" catches .json/.md/.svg; "<stem>_*" catches modelcard/hero/per-scenario PNGs.
-                // Matching on the exact stem boundary (not a raw prefix) avoids deleting an unrelated run
-                // whose stem happens to start with this one's characters.
-                foreach (string pattern in new[] { stem + ".*", stem + "_*" })
+                foreach (string file in RunCompanionFiles(dir, stem))
                 {
-                    foreach (string file in Directory.GetFiles(dir, pattern))
-                    {
-                        File.Delete(file);
-                    }
+                    File.Delete(file);
                 }
 
                 return true;
@@ -372,6 +642,42 @@ namespace CoreAI.Tests.EditMode
                 Debug.LogWarning($"[Benchmark] could not delete run: {ex.Message}");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Files of the run whose report stem is <paramref name="stem"/>: <c>&lt;stem&gt;.*</c> (.json/.md/.svg/
+        /// .tools.jsonl) and <c>&lt;stem&gt;_*</c> (model card, hero, per-scenario PNGs, replay script). Files of
+        /// another run whose stem starts with this one are excluded: the targets of a multi-target run share
+        /// the run id, so <c>BENCHMARK_&lt;id&gt;_qwen</c> and <c>BENCHMARK_&lt;id&gt;_qwen__q8</c> sit side by side.
+        /// </summary>
+        public static List<string> RunCompanionFiles(string dir, string stem)
+        {
+            List<string> files = new();
+            if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(stem) || !Directory.Exists(dir))
+            {
+                return files;
+            }
+
+            List<string> longerStems = Directory.GetFiles(dir, "BENCHMARK_*.json")
+                .Select(Path.GetFileNameWithoutExtension)
+                .Where(other => other.Length > stem.Length && other.StartsWith(stem, StringComparison.Ordinal))
+                .ToList();
+            foreach (string pattern in new[] { stem + ".*", stem + "_*" })
+            {
+                foreach (string file in Directory.GetFiles(dir, pattern))
+                {
+                    string name = Path.GetFileName(file);
+                    bool otherRun = longerStems.Any(other =>
+                        name.StartsWith(other + ".", StringComparison.Ordinal) ||
+                        name.StartsWith(other + "_", StringComparison.Ordinal));
+                    if (!otherRun && !files.Contains(file))
+                    {
+                        files.Add(file);
+                    }
+                }
+            }
+
+            return files;
         }
 
         /// <summary>Deletes all saved benchmark runs. Returns the number of runs successfully deleted.</summary>
@@ -417,57 +723,9 @@ namespace CoreAI.Tests.EditMode
         {
             try
             {
-                JObject root = JObject.Parse(File.ReadAllText(jsonPath));
-                JObject meta = (JObject)root["metadata"];
-                JObject sum = (JObject)root["summary"];
-                if (meta == null || sum == null)
-                {
-                    return null;
-                }
-
-                ModelSummary s = new()
-                {
-                    ModelId = (string)meta["modelId"] ?? "unknown",
-                    RunId = (string)meta["runId"] ?? "",
-                    TimestampUtc = (string)meta["timestampUtc"] ?? "",
-                    Repetitions = (int?)meta["repetitions"] ?? 1,
-                    SuiteBase = (double?)sum["suiteBaseScore"] ?? 0,
-                    PassRate = (double?)sum["passRate"] ?? 0,
-                    Pass = (int?)sum["pass"] ?? 0,
-                    Partial = (int?)sum["partial"] ?? 0,
-                    Fail = (int?)sum["fail"] ?? 0,
-                    TotalTokens = (long?)sum["totalTokens"] ?? 0,
-                    TotalCompletionTokens = (long?)sum["totalCompletionTokens"] ?? 0,
-                    TotalGenerationMs = (double?)sum["totalGenerationMs"] ?? 0,
-                    TotalLatencyMs = (double?)sum["totalLatencyMs"] ?? 0,
-                    MeanEfficiencyBonus = (double?)sum["meanEfficiencyBonus"] ?? 0,
-                    MeanTokenBonus = (double?)sum["meanTokenBonus"] ?? 0,
-                    MeanTimeBonus = (double?)sum["meanTimeBonus"] ?? 0
-                };
-
-                long totalCalls = (long?)sum["totalToolCalls"] ?? 0;
-                long failedCalls = (long?)sum["failedToolCalls"] ?? 0;
-                s.ToolErrorRate = totalCalls == 0 ? 0 : (double)failedCalls / totalCalls;
-
-                s.GameFitOverall = (double?)sum["gameFitOverall"] ?? 0;
-                s.BestRole = (string)sum["bestRole"] ?? "";
-                if (sum["roles"] is JObject roles)
-                {
-                    foreach (KeyValuePair<string, JToken> kv in roles)
-                    {
-                        s.Roles[kv.Key] = (double?)kv.Value ?? 0;
-                    }
-                }
-
-                if (sum["dimensions"] is JObject dims)
-                {
-                    foreach (KeyValuePair<string, JToken> kv in dims)
-                    {
-                        s.Dimensions[kv.Key] = (double?)kv.Value ?? 0;
-                    }
-                }
-
-                return s;
+                // WHY: one parser for the window, editor scripts and the core comparison, so the group and
+                // extreme-tier fields reach the heatmap; it also reads pre-2.0 reports.
+                return ModelComparison.ParseSummaryJson(File.ReadAllText(jsonPath));
             }
             catch (Exception ex)
             {
@@ -609,23 +867,105 @@ namespace CoreAI.Tests.EditMode
         /// <summary>
         /// Batchmode entry: <c>Unity.exe -batchmode -projectPath … -executeMethod
         /// CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunFromCli</c>. Reads
-        /// <c>-coreAiBenchmarkModel</c> / <c>-coreAiBenchmarkGroups</c> / <c>-coreAiBenchmarkReps</c> from
-        /// the command line (or the COREAI_* env vars) and exits with a status code.
+        /// <c>-coreAiBenchmarkModel</c> / <c>-coreAiBenchmarkGroups</c> / <c>-coreAiBenchmarkReps</c> /
+        /// <c>-coreAiBenchmarkReasoningEffort</c> and, for a parallel multi-model run, <c>-coreAiBenchmarkTargets</c> /
+        /// <c>-coreAiBenchmarkParallel</c> from the command line (or the COREAI_* env vars) and exits with a status
+        /// code. An argument that is absent leaves its env var untouched; an invalid target list or effort exits
+        /// with code 2 before Unity runs anything.
         /// </summary>
         public static void RunFromCli()
         {
-            string[] args = Environment.GetCommandLineArgs();
-            string model = ReadArg(args, "-coreAiBenchmarkModel");
-            string groups = ReadArg(args, "-coreAiBenchmarkGroups");
-            string repsRaw = ReadArg(args, "-coreAiBenchmarkReps");
+            if (!TryApplyCliArguments(Environment.GetCommandLineArgs(), out string error))
+            {
+                Debug.LogError($"[Benchmark] {error}");
+                LastStatus = error;
+                if (Application.isBatchMode)
+                {
+                    EditorApplication.Exit(2);
+                }
+
+                return;
+            }
+
+            RunViaTestRunner(false, true);
+        }
+
+        /// <summary>
+        /// Applies the batchmode arguments as env vars. Targets come from <see cref="ArgTargets"/> or, when it is
+        /// absent, from an already set <see cref="EnvTargets"/>; either way the list is validated here.
+        /// </summary>
+        internal static bool TryApplyCliArguments(string[] args, out string error)
+        {
+            string model = ReadArg(args, ArgModel);
+            string groups = ReadArg(args, ArgGroups);
+            string repsRaw = ReadArg(args, ArgReps);
             int? reps = int.TryParse(repsRaw, out int r) ? r : (int?)null;
+            string targetsArg = ReadArg(args, ArgTargets);
+            string parallelArg = ReadArg(args, ArgParallel);
+
+            string targetSpec = string.IsNullOrWhiteSpace(targetsArg)
+                ? Environment.GetEnvironmentVariable(EnvTargets)
+                : targetsArg;
+            if (!BenchmarkTargetList.TryParse(targetSpec, out List<BenchmarkTarget> targets, out error))
+            {
+                return false;
+            }
+
+            foreach (BenchmarkTarget target in targets)
+            {
+                if (!TryValidateExtraBody(target.ExtraBodyJson, out _, out string bodyError))
+                {
+                    error = $"Target '{target.DisplayName}': {bodyError}";
+                    return false;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(parallelArg) &&
+                (!int.TryParse(parallelArg, out int parallel) || parallel < 0))
+            {
+                error = $"{ArgParallel} must be a whole number (0 = all targets), got '{parallelArg}'.";
+                return false;
+            }
+
+            string effortArg = ReadArg(args, ArgReasoningEffort);
+            string effortSource = string.IsNullOrWhiteSpace(effortArg)
+                ? Environment.GetEnvironmentVariable(EnvReasoningEffort)
+                : effortArg;
+            if (!BenchmarkTargetList.TryNormalizeReasoningEffort(effortSource, out string effort))
+            {
+                error = $"{(string.IsNullOrWhiteSpace(effortArg) ? EnvReasoningEffort : ArgReasoningEffort)}: " +
+                        BenchmarkTargetList.ReasoningEffortError(effortSource);
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(effortArg))
+            {
+                ConfigureReasoningEffort(effort);
+            }
 
             Configure(
                 string.IsNullOrWhiteSpace(model) ? null : model,
                 groupsCsv: string.IsNullOrWhiteSpace(groups) ? null : groups,
                 repetitions: reps);
 
-            RunViaTestRunner(false, true);
+            if (!string.IsNullOrWhiteSpace(targetsArg))
+            {
+                SetOrClear(EnvTargets, targetsArg);
+            }
+
+            if (!string.IsNullOrWhiteSpace(parallelArg))
+            {
+                SetOrClear(EnvParallel, parallelArg.Trim());
+            }
+
+            if (targets.Count > 0)
+            {
+                Debug.Log($"[Benchmark] Multi-target run: {string.Join(", ", targets.Select(t => t.DisplayName))}" +
+                          $" (parallel {BenchmarkTargetList.ResolveParallelism(Environment.GetEnvironmentVariable(EnvParallel), targets.Count)}).");
+            }
+
+            error = null;
+            return true;
         }
 
         private static void Watchdog()

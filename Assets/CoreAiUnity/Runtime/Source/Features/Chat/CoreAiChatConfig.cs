@@ -69,7 +69,7 @@ namespace CoreAI.Chat
         [SerializeField]
         private bool _loadPersistedChatOnStartup = true;
 
-        [Tooltip("Maximum number of persisted messages restored into the UI. Zero disables restore.")]
+        [Tooltip("Maximum number of persisted messages restored into the UI. Zero restores all available messages.")]
         [SerializeField]
         private int _maxPersistedMessagesForUi = 50;
 

@@ -1,4 +1,5 @@
 #if COREAI_LLM
+using System;
 using CoreAI.Ai;
 using CoreAI.Config;
 
@@ -26,7 +27,12 @@ namespace CoreAI.Infrastructure.Llm
         {
             _s = settings;
             _baseUrl = $"http://localhost:{port}/v1";
-            _model = string.IsNullOrWhiteSpace(modelName) ? "local" : modelName;
+            if (string.IsNullOrWhiteSpace(modelName))
+            {
+                throw new ArgumentException("LLMUnity HTTP model is required.", nameof(modelName));
+            }
+
+            _model = modelName.Trim();
             _apiKey = apiKey ?? "";
         }
 
@@ -35,10 +41,15 @@ namespace CoreAI.Infrastructure.Llm
         public string AuthorizationHeader => "";
         public string Model => _model;
         public float Temperature => _s.Temperature;
+        public float? TemperatureOverride => _s.OverrideTemperature ? _s.Temperature : null;
         public int RequestTimeoutSeconds => _s.EffectiveHttpRequestTimeoutSeconds;
         public int MaxTokens => _s.MaxTokens;
+        public int? MaxTokensOverride => _s.OverrideMaxTokens ? _s.MaxTokens : null;
         public string ExtraBodyJson => _s.ExtraBodyJson;
         public LlmReasoningMode ReasoningMode => _s.ReasoningMode;
+        public LlmReasoningEffort ReasoningEffort => _s.ReasoningEffort;
+        public LlmReasoningDialect ReasoningDialect => _s.ReasoningDialect == LlmReasoningDialect.Auto
+            ? LlmReasoningDialect.QwenTemplate : _s.ReasoningDialect;
         public int ThinkingBudgetTokens => _s.ThinkingBudgetTokens;
         public bool LogLlmInput => _s.LogLlmInput;
         public bool LogLlmOutput => _s.LogLlmOutput;

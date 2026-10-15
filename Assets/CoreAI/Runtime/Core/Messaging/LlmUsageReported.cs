@@ -7,6 +7,15 @@ namespace CoreAI.Messaging
     /// </summary>
     public readonly struct LlmUsageReported
     {
+        /// <summary>Preserves the original constructor signature for existing compiled hosts.</summary>
+        public LlmUsageReported(string traceId, string roleId, string routingProfileId,
+            LlmExecutionMode executionMode, string model, int? promptTokens, int? completionTokens,
+            int? totalTokens, bool streaming, bool success, int? cacheReadTokens, int? cacheWriteTokens)
+            : this(traceId, roleId, routingProfileId, executionMode, model, promptTokens, completionTokens,
+                totalTokens, streaming, success, cacheReadTokens, cacheWriteTokens, null)
+        {
+        }
+
         /// <summary>
         /// Creates an immutable token usage event.
         /// </summary>
@@ -22,7 +31,8 @@ namespace CoreAI.Messaging
             bool streaming,
             bool success,
             int? cacheReadTokens = null,
-            int? cacheWriteTokens = null)
+            int? cacheWriteTokens = null,
+            int? reasoningTokens = null)
         {
             TraceId = traceId ?? "";
             RoleId = roleId ?? "";
@@ -32,6 +42,7 @@ namespace CoreAI.Messaging
             PromptTokens = promptTokens;
             CompletionTokens = completionTokens;
             TotalTokens = totalTokens;
+            ReasoningTokens = reasoningTokens;
             CacheReadTokens = cacheReadTokens;
             CacheWriteTokens = cacheWriteTokens;
             Streaming = streaming;
@@ -61,6 +72,9 @@ namespace CoreAI.Messaging
 
         /// <summary>Total token count.</summary>
         public int? TotalTokens { get; }
+
+        /// <summary>Provider-reported tokens spent on reasoning.</summary>
+        public int? ReasoningTokens { get; }
 
         /// <summary>Prompt/input tokens read from a provider cache.</summary>
         public int? CacheReadTokens { get; }

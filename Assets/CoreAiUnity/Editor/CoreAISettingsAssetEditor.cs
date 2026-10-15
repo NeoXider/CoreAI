@@ -291,14 +291,28 @@ namespace CoreAI.Infrastructure.Llm.Editor
                         "Reset all settings to default values?",
                         "Reset", "Cancel"))
                 {
-                    Settings.ConfigureAuto();
-                    Settings.ConfigureHttpApi("http://localhost:1234/v1", "", "gpt-4o-mini");
-                    Settings.ConfigureLlmUnity();
+                    ResetToDefaults(Settings);
                     EditorUtility.SetDirty(target);
                     serializedObject.Update();
                     RefreshDynamicState();
                 }
             };
+        }
+
+        /// <summary>Restores the asset's serialized defaults, including its backend and model policy.</summary>
+        internal static void ResetToDefaults(CoreAISettingsAsset settings)
+        {
+            CoreAISettingsAsset defaults = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            string assetName = settings.name;
+            try
+            {
+                EditorUtility.CopySerialized(defaults, settings);
+                settings.name = assetName;
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(defaults);
+            }
         }
 
         private static void BuildLlmUnityStatus(VisualElement container)

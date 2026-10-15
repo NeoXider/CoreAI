@@ -1,4 +1,8 @@
-﻿# MultiAgent Workflow Plan (v2.0)
+# MultiAgent Workflow Plan (v2.0)
+
+> **Status: plan, not implemented.** None of the types below (`SubAgentDefinition`, `IAgentRegistry`,
+> `AgentOrchestrator`, `AgentLlmTool`) exist in the code; the work is tracked as R9 (lowest priority) in
+> [`TODO.md`](../TODO.md). Moved here from `TODO/MultiAgent_Orchestration_v2.0.md` on 2026-10-15.
 
 ## Goal
 Implement multi-agent orchestration following the Claude Agent SDK / Anthropic Research System pattern.

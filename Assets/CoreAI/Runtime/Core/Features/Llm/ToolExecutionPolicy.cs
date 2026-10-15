@@ -1,4 +1,4 @@
-﻿#if COREAI_LLM
+#if COREAI_LLM
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -311,7 +311,7 @@ namespace CoreAI.Infrastructure.Llm
                     if (_succeededCallSignatures.Contains(signature))
                     {
                         plan.IsDuplicateIndex[i] = true;
-                        plan.IndexedResults[i] = CreateDuplicateNoOp(toolCalls[i]);
+                        plan.IndexedResults[i] = CreateDuplicateNoOp(plan.Calls[i]);
                         continue;
                     }
                 }
@@ -330,9 +330,11 @@ namespace CoreAI.Infrastructure.Llm
         /// arguments must not count as a failed turn and abort the run with an abort message after three
         /// repeats.
         /// </summary>
-        private ToolCallResult CreateDuplicateNoOp(MEAI.FunctionCallContent fc)
+        private ToolCallResult CreateDuplicateNoOp(ResolvedCall resolved)
         {
-            string message = BuildDuplicateNoOpPayload(fc?.Name ?? "");
+            MEAI.FunctionCallContent fc = resolved.Call;
+            string message = BuildDuplicateNoOpPayload(GetDuplicateToolName(resolved),
+                GetDuplicateArguments(resolved));
             AddTrace(new LlmToolCallTrace(fc?.Name ?? "", true, 0d, "duplicate", message));
             return new ToolCallResult
             {
@@ -342,12 +344,18 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>The echo no-op payload; extracted so the streaming and batch paths return the same text.</summary>
-        internal static string BuildDuplicateNoOpPayload(string toolName)
+        internal static string BuildDuplicateNoOpPayload(string toolName, string canonicalArguments = "")
         {
+            const int maxArgumentChars = 2048;
+            JToken arguments = canonicalArguments.Length > maxArgumentChars
+                ? new JValue(canonicalArguments.Substring(0, maxArgumentChars) + "[truncated]")
+                : canonicalArguments.Length == 0 ? new JObject() : JToken.Parse(canonicalArguments);
             return JsonConvert.SerializeObject(new
             {
                 ok = true,
                 duplicate = true,
+                tool = toolName,
+                arguments,
                 message =
                     $"Duplicate tool call '{toolName}' with identical arguments: this exact call already " +
                     "succeeded earlier in this request and was NOT executed again. Use its earlier result; " +
@@ -364,30 +372,32 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         private bool TryBuildDuplicateSignature(ResolvedCall resolved, out string signature)
         {
-            MEAI.FunctionCallContent fc = resolved.Call;
             signature = null;
-            string canonicalName = GetCanonicalToolName(fc?.Name, out ILlmTool match, out _);
-            if (canonicalName == null)
-            {
-                canonicalName = fc?.Name ?? "";
-            }
-
             if (resolved.Metadata != null && resolved.Metadata.AllowDuplicates)
             {
                 return false;
             }
 
-            string argsSig = "";
+            signature = $"{GetDuplicateToolName(resolved)}({GetDuplicateArguments(resolved)})";
+            return true;
+        }
+
+        private string GetDuplicateToolName(ResolvedCall resolved)
+        {
+            return resolved.Invocation?.Name ??
+                GetCanonicalToolName(resolved.Call?.Name, out _, out _) ?? resolved.Call?.Name ?? "";
+        }
+
+        private static string GetDuplicateArguments(ResolvedCall resolved)
+        {
             try
             {
-                argsSig = CanonicalizeArguments(resolved.Invocation?.Arguments ?? fc?.Arguments);
+                return CanonicalizeArguments(resolved.Invocation?.Arguments ?? resolved.Call?.Arguments);
             }
             catch
             {
+                return "";
             }
-
-            signature = $"{resolved.Invocation?.Name ?? canonicalName}({argsSig})";
-            return true;
         }
 
         /// <summary>
@@ -410,7 +420,25 @@ namespace CoreAI.Infrastructure.Llm
                 sorted[kv.Key] = kv.Value;
             }
 
-            return JsonConvert.SerializeObject(sorted);
+            return JsonConvert.SerializeObject(sorted, new JsonElementArgumentConverter());
+        }
+
+        private sealed class JsonElementArgumentConverter : JsonConverter<System.Text.Json.JsonElement>
+        {
+            public override void WriteJson(JsonWriter writer, System.Text.Json.JsonElement value,
+                JsonSerializer serializer)
+            {
+                // WHY: Newtonsoft otherwise serializes ValueKind instead of the argument value, collapsing distinct calls.
+                JToken.Parse(value.GetRawText()).WriteTo(writer);
+            }
+
+            public override bool CanRead => false;
+
+            public override System.Text.Json.JsonElement ReadJson(JsonReader reader, Type objectType,
+                System.Text.Json.JsonElement existingValue, bool hasExistingValue, JsonSerializer serializer)
+            {
+                throw new NotSupportedException("Argument signature conversion is write-only.");
+            }
         }
 
         /// <summary>
@@ -1693,7 +1721,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (hasSignature && _succeededCallSignatures.Contains(signature))
             {
-                ToolCallResult suppressed = CreateDuplicateNoOp(fc);
+                ToolCallResult suppressed = CreateDuplicateNoOp(resolved);
                 turn.DuplicateSlots.Add(slot);
                 slot.Set(suppressed);
                 return suppressed;

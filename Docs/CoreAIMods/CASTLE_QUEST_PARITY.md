@@ -20,12 +20,15 @@ COREAI_CASTLE_QUEST_PARITY|parts=51>47;coins=3;key=true;health=2;gate=true;win=t
 - Roblox Studio's documented `RunScript` task executed the exact `.lua` file in a Baseplate place.
   Its output matched the line above. The open Studio GUI showed upright towers, bridge, raised
   gate, and the completed castle.
-- The same file ran through CoreAI's Lua mod runtime in the open Unity Editor. The
-  `RobloxCoreAiParityEditModeTests` fixture passed 2/2 tests. Its castle test also checked that
-  the rendered tower's vertical extent exceeds its horizontal extent after a quarter-turn roll.
+- The same file runs through CoreAI's Lua mod runtime in
+  `RobloxCoreAiParityEditModeTests.CastleQuestParityScript_CompletesTheSameCollectibleGateAndVictoryRoute`
+  (the fixture's other test runs `RobloxCoreAiParity.lua`). It loads the file as a mod, reads the
+  summary (the part after `|`) that the script also stores under the mod store key
+  `castleQuestSummary`, and checks that the rendered tower's vertical extent exceeds 1.5 times its
+  horizontal extent after the quarter-turn roll.
 - The Roblox Cylinder's length follows local X. The fixture therefore uses `Size.X = 13` and
-  a 90-degree `CFrame` roll for each upright tower. An initial unrotated script made the towers
-  lie sideways in Studio; the corrected shared script matches the geometry in both engines.
+  a 90-degree `CFrame` roll for each upright tower; without the roll the towers lie on their side
+  in Studio. The shared script matches the geometry in both engines.
 
 | Roblox Studio | CoreAI Unity |
 |---|---|

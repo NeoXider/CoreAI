@@ -50,21 +50,21 @@ and measured in world-size metres, so `StudsPerTile` means the same on a 2-stud 
   mirrored or upside down. The four sides are unrolled round the part (+X, +Z, -X, -Z in Unity object
   space) with offsets that make three vertical edges continuous, so a brick course or a plank carries
   on round a corner; the one wrap seam sits on the +X/-Z edge. A slope gets its own undistorted frame
-  instead of a stretched axis projection, so a 45-degree wedge no longer shows two ghosted
+  instead of a stretched axis projection, so a 45-degree wedge does not show two ghosted
   projections. The upright guarantee is for blocks and wedges: the cylinder mesh is turned so that a
-  standing cylinder's cap frame is rotated half a turn (recorded as a follow-up in the binder).
+  standing cylinder's cap frame is rotated half a turn.
 - **Curved surfaces** (balls, cylinder sides) blend the three axis projections with
   power-normalised weights: components below `RBX_CURVED_BLEND_FLOOR` (0.3) get no weight and the rest
   are raised to the fourth power. Between two projections the weights go from 5% to 95% over about
-  +-11 degrees around each 45-degree boundary, which softens the cross a narrow band drew on every
-  ball. Weights under `RBX_CURVED_WEIGHT_CUTOFF` (2.5%) are dropped before renormalising, so a ball
+  +-11 degrees around each 45-degree boundary, which keeps a ball free of the hard cross a narrow
+  band would draw. Weights under `RBX_CURVED_WEIGHT_CUTOFF` (2.5%) are dropped before renormalising, so a ball
   samples one projection on about half its surface, two on about 40%, and three only near the eight
   triple-axis points (about 5%).
 
 Continuity between parts: on side faces each edge offset depends on the part's size, so only the
 three vertical edges of one part are guaranteed continuous. Top and bottom faces have no size term;
 they are anchored at the part centre, so floor or road plates of different sizes laid side by side
-share one grid whenever their centres are a whole number of tiles apart, as before. World-anchored
+share one grid whenever their centres are a whole number of tiles apart. World-anchored
 tiling would make textures slide when a part moves, which Roblox materials do not do.
 
 Flatness is detected by comparing how fast the interpolated geometric normal turns with how fast the
@@ -78,9 +78,9 @@ scale), so a stretched wedge or ball picks the right projection. Edge offsets ar
 before the position term is added, which keeps UVs small on huge parts.
 
 Normal maps are applied through a per-pixel cotangent frame built from screen-space derivatives. Its
-guard epsilon only protects a zero-length frame: an earlier `1e-6` floor was larger than the squared
-frame length at ordinary distances and left a packaged normal map at about 5% of its strength at
-10 m and almost nothing at 1 m.
+guard epsilon only protects a zero-length frame, so a packaged normal map keeps its strength at every
+distance (a fixed `1e-6` floor would be larger than the squared frame length at ordinary distances
+and leave about 5% of the strength at 10 m and almost nothing at 1 m).
 
 ## Relief that survives distance: baked cavity maps
 
@@ -92,11 +92,11 @@ baked from its own normal map (`<set>_1K-JPG_Cavity.jpg`, half the normal map's 
 `RbxCavityMapBake` integrates the height field from the normals with a periodic FFT, measures how far
 each texel lies below the blurred height around it at three scales, and maps that to 0..1.
 
-The map sits in the entry's ambient-occlusion slot, so URP scales ambient light by it as before. The
+The map sits in the entry's ambient-occlusion slot, so URP scales ambient light by it. The
 entry's `CavityStrength` (shader `_CavityStrength`, default 0) additionally lets it darken the albedo,
 which also affects direct sunlight; that is what keeps a mortar joint or a cobble gap reading as
 recessed at 20 m. The cost is one extra texture read per projection. Imported Bridge/Fab sets keep
-`CavityStrength` 0, so their AO still affects only ambient light and they render exactly as before.
+`CavityStrength` 0, so their AO affects only ambient light.
 A `MaterialVariant` that brings its own normal map drops the cavity strength, because the baked map
 belongs to the base normal map. Regenerate the maps with
 **CoreAI > Materials > Bake cavity maps for packaged textures**, then rebuild the packaged catalog.
@@ -104,7 +104,7 @@ belongs to the base normal map. Regenerate the maps with
 ## Metal reflectance lift
 
 The packaged ambientCG metal colour maps are photographs with a linear reflectance of about
-0.11-0.16, which real metals never have (0.5 and up); used directly they rendered as near-black
+0.11-0.16, which real metals never have (0.5 and up); used directly they render as near-black
 mirrors. The packaged Metal, DiamondPlate and CorrodedMetal entries set `MetalAlbedoLift`
 (`_MetalAlbedoLift`, default 0): their metallic texels move that share of the way toward the brightest
 shade of their own hue, which keeps the tint. The lift fades out below a brightness of 0.1, so dark
@@ -154,9 +154,11 @@ Expected output:
 - `Assets/CoreAIRbxTexturesLocal/ambientCG/LICENSE.md` with CC0 1.0, asset IDs, resolution,
   download date, and source URLs.
 
-The frozen mappings were verified against ambientCG's exact `id=` API filter on 2026-09-02. Five old
-base IDs now require the `A` variant: RoofingTiles014A, RoofingTiles012A, Granite001A, Asphalt025A,
-and Snow010A. The API's `q=<compactId>` form tokenizes many IDs and is not a valid exact-ID check.
+The mappings are the 34 ambientCG entries of the packaged set table (`RbxCc0TextureSets`, Editor),
+so a download fetches the same asset ids as the bundled sets at the chosen resolution; the two Poly
+Haven sets are skipped. Each set is fetched as
+`https://ambientcg.com/get?file=<AssetId>_<resolution>-JPG.zip`. Some ids carry ambientCG's `A`
+variant suffix (Granite002A, RoofingTiles014A, Snow010A).
 
 ## Licensing and repository hygiene
 

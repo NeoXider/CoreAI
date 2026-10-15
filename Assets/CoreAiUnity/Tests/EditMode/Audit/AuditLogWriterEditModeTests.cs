@@ -48,6 +48,24 @@ namespace CoreAI.Tests.EditMode.Audit
         }
 
         [Test]
+        public void Flush_PreservesRoleInWrittenJsonLineAndHashChain()
+        {
+            _writer = new AuditLogWriter(_testFolder);
+            _writer.Record(AuditEntry.ForToolCall(
+                0, "trace-role", "actor", "model", "prompt", "tool", "{}", "allowed", "ok", "", 0,
+                role: "Teacher"));
+            _writer.FlushForTesting();
+
+            string[] lines = File.ReadAllLines(_writer.FilePath);
+            Assert.AreEqual(1, lines.Length);
+            Newtonsoft.Json.Linq.JObject line = Newtonsoft.Json.Linq.JObject.Parse(lines[0]);
+            Assert.AreEqual("Teacher", (string)line["Role"]);
+            Assert.AreEqual("Teacher", AuditLogVerifier.ReadAll(_writer.FilePath)[0].Role);
+            AuditVerifyResult verification = AuditLogVerifier.Verify(_writer.FilePath);
+            Assert.IsTrue(verification.Ok, verification.Error);
+        }
+
+        [Test]
         public void AuditContext_SetAndGetPromptHash()
         {
             AuditContext.SetPromptHash("trace-1", "hash-value");

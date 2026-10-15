@@ -2,6 +2,8 @@
 
 **Purpose:** a single vocabulary of **agent types** (AI behaviors), their goals, typical inputs/outputs, and **placement** rules (host / local / hybrid). A game on the template **enables only the roles it needs**; the orchestrator is not required to spin up all of them. Recommendations on **model size/type** (local vs API) — §6.
 
+**Which built-in roles exist and which tools each one has by default** is listed, with code references, in [AGENT_ROLES_AND_TOOLS.md](../../../Docs/CoreAI/AGENT_ROLES_AND_TOOLS.md). This page does not repeat that list; it covers role design, placement, model choice and response validation.
+
 **Related docs:** [QUICK_START.md](QUICK_START.md), [DGF_SPEC.md](DGF_SPEC.md) (networking, authority, Mirror transport), [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) (code map, Lua, tests, **traceId** / **Llm** logs), [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) (LLMUnity, Qwen, OpenAI-compatible, request timeout), [../../_exampleGame/Docs/UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md) (demo scene setup).
 
 ---
@@ -21,7 +23,7 @@
 | **LocalPerClient** | Each client may call LLM locally (cosmetics, “in-head” lines, offline helper). Does **not** change combat rules without separate sync. |
 | **Hybrid** | Some stages on the host (validation, seed), some locally (voice/text); the game contract defines what is replicated. |
 
-The game developer **explicitly** assigns placement for each enabled role in config (ScriptableObject / policy) so world authority and local flavor are not mixed accidentally.
+Placement is a design decision of the game: CoreAI has no per-role placement setting. The one switch in code is scope-wide: **Ai Network Execution Policy** on `CoreAILifetimeScope` (`AiNetworkExecutionPolicy.AllPeers` / `HostOnly` / `ClientPeersOnly`) decides on which peers the orchestrator runs at all — see [MULTIPLAYER_AI.md](MULTIPLAYER_AI.md). Decide placement per role explicitly so world authority and local flavor are not mixed accidentally.
 
 ### 1.3.5 Universal system prompt (Universal System Prompt Prefix)
 
@@ -36,10 +38,12 @@ CoreAI supports a **universal opening prompt** — text prepended to the **start
 - **Inspector:** `CoreAISettings` → **Advanced Settings** → **General** → **Universal Prompt Prefix**
 - **Code:** `CoreAISettings.UniversalSystemPromptPrefix = "..."`
 
-**How it works:**
+**How it works** (`AiPromptComposer.GetSystemPrompt`):
 ```
-Final system prompt = UniversalPrefix + " " + AgentSpecificPrompt
+Final system prompt = UniversalPrefix + "\n" + RolePrompt [+ "\n\n" + per-role additional prompt]
 ```
+
+The package default prefix is not empty: it is a short "CRITICAL RULES FOR ALL AGENTS" block (use tools when available, follow the task exactly, no chit-chat, do not repeat a successful tool call). Clearing the field sends no prefix. A single role can skip the prefix with `AgentBuilder.WithOverrideUniversalPrefix()`, `AgentMemoryPolicy.SetOverrideUniversalPrefix(roleId, true)`, or the **overrideUniversalPrefix** flag on its `AgentPromptsManifest` entry.
 
 **Prefix example:**
 ```
@@ -73,15 +77,17 @@ flowchart TB
   Creator -->|"Craft params / risk"| Mech
 ```
 
-This is a **logical** diagram: physically all tasks go through the **orchestrator** (queue, priority, budget).
+This is a **logical** diagram. CoreAI does not route work from one role to another by itself: the game issues every task, and all tasks go through the **orchestrator** (`QueuedAiOrchestrator`: queue, priority, concurrency limit).
 
-### 1.4 Builds without AI models on the host (core roadmap)
+### 1.4 Builds without AI models on the host
 
-If **all** LLM is on the host (**HostAuthoritative** for every role), the template should eventually allow **builds without neural weights**: host DI uses an **`ILlmClient` stub** (deterministic or tabular responses per role), without Ollama or weights in the build. Networking (Mirror or another transport) and state replication work as usual; only the decision source changes. Details: [DGF_SPEC.md §5.2](DGF_SPEC.md).
+A host can run every role without model weights: an **Offline** endpoint (`LlmEndpointKind.Offline`, `OfflineLlmClient`) answers with a configured line or structured stubs per role, and `StubLlmClient` / `ScriptedLlmClient` give deterministic replies. Without the `COREAI_LLM` define the provider-backed HTTP/MEAI/LLMUnity clients are compiled out entirely; portable orchestration and the stub/scripted clients remain. Only the decision source changes; the rest of the game works as usual. Design notes: [DGF_SPEC.md §5.2](DGF_SPEC.md).
 
 ---
 
 ## 2. Base template roles
+
+The tables below describe what each built-in role is for and how a game should use it. Default tools, chat-history and roundtrip defaults per role are in [AGENT_ROLES_AND_TOOLS.md](../../../Docs/CoreAI/AGENT_ROLES_AND_TOOLS.md); "Inputs" and "Examples" are design guidance for what your game feeds the role.
 
 ### 2.1 Creator
 
@@ -89,13 +95,13 @@ If **all** LLM is on the host (**HostAuthoritative** for every role), the templa
 |--|--|
 | **ID** | `Creator` |
 | **Goal** | Change **session intent**: rules, use-case data, wave modifiers, meta-events, “what should happen next”. |
-| **Behavior** | From a world snapshot and design goals outputs **structured** packages (JSON): new affixes, phase changes, tasks for other agents. |
+| **Behavior** | From a world snapshot and design goals it changes the scene through `world_command` tool calls and proposes session-level changes (waves, modifiers, beats). It never outputs Lua/C#. |
 | **Inputs** | Session snapshot, **Analyzer** reports, design limits, designer flags. |
-| **Outputs** | Commands on MessagePipe; tasks for **Programmer** (generate/fix Lua); parameters for **AINpc** / **CoreMechanicAI**. |
+| **Outputs** | `world_command` tool calls (spawn / change / set_color / …) and `memory` tool calls. The final reply text must contain a JSON object (`CreatorResponsePolicy`, §8). Handing work to **Programmer**, **AINpc** or **CoreMechanicAI** is the game's code: it reads the Creator's result and issues the next task. |
 | **Placement** | Usually **HostAuthoritative** in multiplayer. |
 | **Examples** | “Player is dominating — toughen wave 7”; “enable story branch B”; “grant weekly modifier”. |
-| **Risks** | High orchestrator priority; require a **schema validator** and limits on rule-change frequency. |
-| **Format** | JSON tool calls: `{"name": "memory", "arguments": {"action": "write", "content": "..."}}` for memory. |
+| **Risks** | High orchestrator priority; validate what you apply and limit how often rules may change. |
+| **Format** | One JSON format for all tool calls, e.g. `{"name": "memory", "arguments": {"action": "append", "content": "..."}}` (the role's default memory action is `append`). |
 
 ---
 
@@ -121,8 +127,8 @@ If **all** LLM is on the host (**HostAuthoritative** for every role), the templa
 | **ID** | `Analyzer` |
 | **Goal** | **Understand** what is going on: play style, bottlenecks, boredom, cheat patterns, economy. |
 | **Behavior** | Aggregates telemetry → short report (structure for LLM or heuristics) → recommendations for **Creator** or “attention” flags. |
-| **Inputs** | **Ready streams from the core:** combat events, DPS/deaths, time in zones, inventory, upgrade picks (see §4 “Core telemetry”). |
-| **Outputs** | `AnalyzerReport` (DTO), publish to bus; does not change the world directly. |
+| **Inputs** | Telemetry the game collects: combat events, DPS/deaths, time in zones, inventory, upgrade picks (see §4 “Telemetry for the Analyzer”). |
+| **Outputs** | A short report: compact JSON with fields such as `metric`, `recommendation`, `analysis` or `status` (checked by `AnalyzerResponsePolicy`, §8). It has no world tool, so it does not change the world; the game decides what to do with the report. |
 | **Placement** | **HostAuthoritative** (whole-match picture). Local analysis only for **non-authoritative** metrics (UX), without affecting rules. |
 | **Examples** | “Aggressive style, low death risk”; “ignores crafting”; “weapon X imbalance”. |
 | **Orchestration** | Lower priority than **Creator** on conflict; can **batch** (every N minutes). |
@@ -136,14 +142,14 @@ If **all** LLM is on the host (**HostAuthoritative** for every role), the templa
 | **ID** | `Programmer` |
 | **Goal** | From **Creator** spec (rarely others) **write, fix, and narrow** **Lua** snippets for the sandbox. |
 | **Behavior** | Loop: prompt with whitelist API → `execute_lua` tool call → host execution → the error (if any) returns to the model as the tool result, and the model may fix the code in the next roundtrip. |
-| **Inputs** | Spec from Creator, Lua error context, current APIRegistry version. |
-| **Outputs** | `execute_lua` / `manage_mods` tool calls (`com.neoxider.coreaimods`) and memory tool calls: `{"name": "memory", "arguments": {"action": "append", "content": "..."}}`. |
+| **Inputs** | Spec from Creator (or the player in chat), Lua error context, the API skills it reads on demand (`read_skill`: "Lua Modding", "Rbx API", "Full Lua"). |
+| **Outputs** | `execute_lua` / `manage_mods` tool calls (`com.neoxider.coreaimods`; the scene composes `CoreAiModsLifetimeScope`), world-package tools, and memory tool calls: `{"name": "memory", "arguments": {"action": "append", "content": "..."}}`. Visible world content is built through the Roblox-style Rbx API from Lua. |
 | **Placement** | Almost always **HostAuthoritative** (code affects simulation). |
 | **Examples** | “Ambush spawn script for forest”; “reward logic patch on boss death”. |
 | **Relations** | Reports to **Creator**; does not initiate global rules without a request. |
 
 **Additional (runtime tools):**
-- Built-in **World Commands** let Programmer publish world commands from Lua safely (spawn/move/scenes) without direct Unity API access. See **[WORLD_COMMANDS.md](WORLD_COMMANDS.md)**.
+- Lua `coreai_world_*` bindings publish world commands from Lua (spawn/move/scenes) through the same command boundary as `world_command`, without direct Unity API access. See **[WORLD_COMMANDS.md](WORLD_COMMANDS.md)**.
 - Recommendation: component changes go through **typed** commands or allowlist policy (not arbitrary reflection from Lua).
 - **Tool call format:** All agents use a **single JSON format** for tool calls: `{"name": "tool_name", "arguments": {...}}`. Programmer calls the `execute_lua` tool for Lua and the memory tool to persist memory.
 
@@ -157,7 +163,7 @@ If **all** LLM is on the host (**HostAuthoritative** for every role), the templa
 | **Goal** | Behavior of **specific actors**: boss, merchant, crowd, minor worker — dialogue, tactics, reactions to the player. |
 | **Behavior** | Short requests: line, action choice from a **closed menu** (not arbitrary world code), sometimes local “intent scoring”. |
 | **Inputs** | NPC context (id, role, quest memory), player proximity, story flags. |
-| **Outputs** | Text / action choice / animation tree parameters; commands only on allowed **NPC** MessagePipe channel. |
+| **Outputs** | Natural dialogue text (1–3 sentences), or an explicit pick from the actions the user message offers. The built-in role has only the `memory` tool; turning a pick into animation or world changes is the game's code. |
 | **Placement** | **Often HostAuthoritative** for combat and sync reactions; **LocalPerClient** possible for **purely visual/text** flavor if design allows line desync (rare for co-op). Safer: host or dedicated scene “conductor”. |
 | **Examples** | Boss rephrases threat to match party style; worker crowd gets collective “mood”; merchant offers discount after Analyzer report. |
 | **Orchestration** | High frequency → **micro-budget**, priority below **CoreMechanicAI** during craft/risk if the game decides so. |
@@ -170,9 +176,9 @@ If **all** LLM is on the host (**HostAuthoritative** for every role), the templa
 |--|--|
 | **ID** | `CoreMechanicAI` |
 | **Goal** | AI as part of **core gameplay**: crafting, luck, incompatibility, procedural outcomes with **clear bounds**. |
-| **Behavior** | Input: item composition / ingredients + constraint tables; output: **numbers and flags** (stats, break chance, “unique affix”), sometimes short Lua only if the player enabled “dynamic rules”. |
+| **Behavior** | Input: item composition / ingredients + constraint tables; output: **numbers and flags** (stats, break chance, “unique affix”). No code: Lua belongs to Programmer. |
 | **Inputs** | Recipe, inventory, host seed, optional player style from Analyzer. |
-| **Outputs** | `CraftOutcome`, `AffixRoll`, “item destroyed” events, etc. — only via typed commands. |
+| **Outputs** | Small JSON with numeric fields and flags (checked by `CoreMechanicResponsePolicy`, §8). Your game maps it to its own types (a craft outcome, an affix roll, an “item destroyed” event) and applies it through typed commands. |
 | **Placement** | **Option A:** **HostAuthoritative** only (fair co-op, one outcome). **Option B:** **LocalPerClient** for solo “luck simulator” without affecting others. **Option C:** **Hybrid** — host fixes seed and validates result. Choice is **game config**, not core default. |
 | **Examples** | Armor forging: alloy compatibility, crack chance, unique prefix for build; alchemy: explosion on mismatch; procedural loot with “boredom” from Analyzer. |
 | **Relations** | May receive **recommendations** from Creator; should **not** call Programmer directly without policy (usually data, not code). |
@@ -197,11 +203,20 @@ If **all** LLM is on the host (**HostAuthoritative** for every role), the templa
 | **Placement** | Local or host, depending on your title authority policy. |
 | **Use case** | Personalized assistant that can remember durable player preferences/facts. |
 
+### 2.7 Merchant
+
+| | |
+|--|--|
+| **ID** | `Merchant` |
+| **Goal** | Shopkeeper NPC that sells from an inventory and stays in character. |
+| **Defaults** | `memory` tool; chat history on, not persisted. |
+| **Note** | The system prompt tells the model to call `get_inventory` first, but no built-in installer wires that tool: attach `InventoryLlmTool` to the role yourself. |
+
 ---
 
-## 3. Additional roles (template recommendations)
+## 3. Custom roles (examples, not built in)
 
-They need not ship in v1 core, but the names help the roadmap.
+CoreAI does not ship these roles. They are examples of roles a game can define itself with `AgentBuilder` (see [AGENT_BUILDER.md](../../CoreAI/Docs/AGENT_BUILDER.md)).
 
 | ID | Name | Goal | Notes |
 |----|----------|------|---------|
@@ -212,9 +227,9 @@ They need not ship in v1 core, but the names help the roadmap.
 
 ---
 
-## 4. Core telemetry (expectations for Analyzer)
+## 4. Telemetry for the Analyzer
 
-The **CoreAI** package (`com.neoxider.coreai`) should offer **ready building blocks** (subscriptions / aggregators); the game enables what it needs:
+CoreAI does not collect gameplay telemetry itself. The game writes key/value pairs into `SessionTelemetryCollector` (the default `ISessionTelemetryProvider`, via `SetTelemetry(key, value)`); while it holds any keys, the orchestrator puts the resulting `GameSessionSnapshot` into the user payload of every task (as a `telemetry` JSON object, or through the `{telemetry}` placeholder of a user prompt template). `CoreAi.RegisterGameStateTool(roleId)` additionally gives a role an on-demand `game_state` tool that reads the same provider. Useful keys for an Analyzer:
 
 - **Combat tick:** damage in/out, deaths, fight time, wave #.
 - **Position / zone:** time in triggers, biome change.
@@ -222,7 +237,7 @@ The **CoreAI** package (`com.neoxider.coreai`) should offer **ready building blo
 - **Run economy:** currency, craft attempts, failures.
 - **Network (optional):** latency, desync flags (for debugging, not for LLM in prod without policy).
 
-Format: normalized **events** on MessagePipe + periodic **SessionSnapshot** for LLM (see DGF_SPEC, Session Snapshot).
+Send aggregates, not raw event logs.
 
 ---
 
@@ -234,7 +249,7 @@ Format: normalized **events** on MessagePipe + periodic **SessionSnapshot** for 
 | Co-op shooter with bosses | Creator, Analyzer, AINpc (boss), Programmer on events | |
 | Trading sim with dialogue | AINpc, Analyzer, Creator | Programmer optional |
 | Pure craft / survival | CoreMechanicAI, Analyzer | Weak Creator; host vs local per PvP fairness |
-| Story single-player | All five + Director | Easier Local for NPC cosmetics |
+| Story single-player | Creator, Analyzer, Programmer, AINpc, CoreMechanicAI + a custom Director | Easier Local for NPC cosmetics |
 
 ---
 
@@ -269,8 +284,8 @@ Format: normalized **events** on MessagePipe + periodic **SessionSnapshot** for 
 | **AINpc (boss / key)** | Tactical line + combat phase hooks | **Small–Medium** | Cinematic + complex logic → **Large** / API | Low call frequency — can afford a heavier model. |
 | **Programmer** | Lua in sandbox, fixes on error | **Small** (strict whitelist API + examples) | Reliable codegen, fewer self-heal iterations → **Medium–Large** / API | **Lua error context** and short allowed-API list matter. |
 | **Creator** | Rule packs, affixes, tasking | **Medium** as compromise | “Smart” session mode shifts, fine balance → **Large** / API | High **orchestrator priority**, not high frequency. |
-| **Director / LoreWeaver** | Text, rare events | **Small–Medium** | — | Often one **Medium** model with different prompts per role. |
-| **Moderator** | Classification / filter | **Tiny** | Fine legal/safety context → specialized APIs | Prefer a separate fast pass before showing text to the player. |
+| **Director / LoreWeaver** (custom, §3) | Text, rare events | **Small–Medium** | — | Often one **Medium** model with different prompts per role. |
+| **Moderator** (custom, §3) | Classification / filter | **Tiny** | Fine legal/safety context → specialized APIs | Prefer a separate fast pass before showing text to the player. |
 
 ### 6.4 Practical advice for your setup (local up to ~35B)
 
@@ -300,35 +315,36 @@ Format: normalized **events** on MessagePipe + periodic **SessionSnapshot** for 
 
 ## 7. Network stack swap
 
-Shipped transport: **Mirror** via `com.neoxider.coreaimirror` behind `INetworkBridge` (DGF_SPEC §5.1). Roles and placement are **not** tied to a transport: `INetworkAuthority` remains the swap point for NGO or another stack.
+Roles and placement are **not** tied to a transport. Where the orchestrator may run is decided by `IAiNetworkPeer` (`IsHostAuthority`, `IsPureClient`), which you supply as a `CoreAiNetworkPeerBehaviour` for NGO, Mirror or any other stack, together with `AiNetworkExecutionPolicy` ([MULTIPLAYER_AI.md](MULTIPLAYER_AI.md)). Separately, the Rbx world's remotes travel over `INetworkBridge`; the shipped implementation is **Mirror** via `com.neoxider.coreaimirror` ([Assets/CoreAIMirror/README.md](../../CoreAIMirror/README.md)).
 
 ---
 
 ## 8. LLM response validation
 
-Starting with **v0.5.0**, each role has a **specialized validation policy**. This ensures the model returns the expected format; on failure an automatic retry runs.
+`CompositeRoleStructuredResponsePolicy` validates the final reply text per role id. A role without a registered policy (Builder, Merchant, any custom role) falls back to `NoOpRoleStructuredResponsePolicy`: no validation.
 
 ### 8.1 Policies by role
 
-| Role | Policy | Expected | Retry on error |
+| Role | Policy | Expected final reply | Validated |
 |------|----------|-------------|----------------|
-| **Programmer** | `ProgrammerResponsePolicy` | Tool call `execute_lua` | ✅ Yes |
-| **CoreMechanicAI** | `CoreMechanicResponsePolicy` | JSON with numeric fields | ✅ Yes |
-| **Creator** | `CreatorResponsePolicy` | JSON object (world command) | ✅ Yes |
-| **Analyzer** | `AnalyzerResponsePolicy` | JSON with `metric` / `recommendation` / `analysis` | ✅ Yes |
-| **AINpc** | `AINpcResponsePolicy` | JSON OR non-empty text (soft) | ✅ Yes |
+| **Programmer** | `ProgrammerResponsePolicy` | Any non-empty text | ✅ Yes |
+| **CoreMechanicAI** | `CoreMechanicResponsePolicy` | A JSON object with at least one numeric field | ✅ Yes |
+| **Creator** | `CreatorResponsePolicy` | A JSON object somewhere in the reply | ✅ Yes |
+| **Analyzer** | `AnalyzerResponsePolicy` | A JSON object with a field such as `metric`, `recommendation`, `suggestion`, `analysis`, `status`, `finding` or `issue` | ✅ Yes |
+| **AINpc** | `AINpcResponsePolicy` | Non-empty text of at least 2 characters | ✅ Yes |
 | **PlainChat** / **SmartChat** | `PlayerChatResponsePolicy` | No validation (free text) | ❌ No |
-| **Merchant** | `NoOpRoleStructuredResponsePolicy` | Tool call `get_inventory` + text | ❌ No (tool failures follow the tool-loop rules below) |
+| **Builder**, **Merchant**, custom roles | `NoOpRoleStructuredResponsePolicy` (fallback) | No validation | ❌ No |
 
 ### 8.2 How retry works
 
-1. LLM returns a response
-2. `CompositeRoleStructuredResponsePolicy` checks format by roleId
-3. On failure → `AiOrchestrator` makes **one follow-up request** with hint:
+1. The LLM returns a reply.
+2. `CompositeRoleStructuredResponsePolicy` checks it by role id.
+3. On failure, `RunTaskAsync` makes **one follow-up request** with the failure reason appended to the task hint, e.g.:
    ```
-   structured_retry: Expected execute_lua tool call
+   structured_retry: Expected JSON command object. Got plain text instead.
    ```
-4. Metric `RecordStructuredRetry(roleId, traceId, failureReason)` is logged
+   If the turn already executed tool calls, there is no retry (it would run the tools again): the task fails with `LlmErrorCode.InvalidRequest`. A retry that fails validation again fails the same way. The streaming API (`RunStreamingAsync`) does not retry: the stream ends with `structured validation failed: <reason>`.
+4. `IAiOrchestrationMetrics.RecordStructuredRetry(actorId, roleId, traceId, reason)` records the failure.
 
 ### Tool call failures
 
@@ -343,7 +359,7 @@ This helps small models (Qwen3.5-0.8B/2B) that sometimes get the arguments wrong
 
 For custom roles use:
 ```csharp
-var composite = container.Resolve<CompositeRoleStructuredResponsePolicy>();
+CompositeRoleStructuredResponsePolicy composite = container.Resolve<CompositeRoleStructuredResponsePolicy>();
 composite.RegisterPolicy("MyRole", new MyCustomValidationPolicy());
 ```
 
@@ -358,18 +374,3 @@ All policies are covered by EditMode tests:
 - `RoleStructuredResponsePolicyEditModeTests.cs` — validation per role
 - Valid / invalid response checks
 - `failureReason` message checks
-
----
-
-## 9. Document versions
-
-| Version | Changes |
-|--------|-----------|
-| 1.0 | First catalog: Creator, Analyzer, Programmer, AINpc, CoreMechanicAI; placement; extra roles; telemetry |
-| 1.1 | §6 model recommendations (local/API) by role; Tiny–XL classes; fast/slow queues |
-| 1.2 | §1.4 + HostAuthoritative fix: LLM or stub; link to DGF_SPEC §5.2 |
-| 1.3 | §6.6 Qwen 3.5 2B/4B/9B and OpenAI-compatible via CoreAI |
-| 1.4 | §8 per-role LLM validation, retry flow, custom roles |
-| 1.5 | §1.3.5 Universal System Prompt Prefix — shared opening prompt for all agents |
-| 1.7 | Doc sync: UPM **1.7.0**, WebGL **`FileAgentMemoryStore`** + **`CoreAiPersistFs`**, **`CoreAiSseFetch`** console noise, chat **`StreamingToolProgressHint`** + **`LlmStreamChunk`** typing markers |
-| 1.8 | Doc sync: UPM **1.7.1** — chat typing dots after hint-only buffered marker; EditMode **`BackendUnavailable`** retry test; settings doc **override temperature** / **max LLM request retries** |

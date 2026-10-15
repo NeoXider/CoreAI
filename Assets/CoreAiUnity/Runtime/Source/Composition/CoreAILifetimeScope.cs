@@ -24,7 +24,7 @@ namespace CoreAI.Composition
     /// <summary>Backing-store lifetime for agent memory and conversation state owned by a Unity host.</summary>
     public enum AgentMemoryPersistenceMode
     {
-        /// <summary>Persist memory/chat/transcripts and, outside WebGL, summaries across launches.</summary>
+        /// <summary>Persist memory, chat, transcripts, and summaries across launches, including on WebGL.</summary>
         Persistent = 0,
 
         /// <summary>Keep memory, flat chat, structured transcripts, and summaries in process memory only.</summary>

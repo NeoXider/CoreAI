@@ -27,7 +27,7 @@ namespace CoreAI.Hub.UI
         {
             _body = string.IsNullOrEmpty(body)
                 ? "This is the CoreAI Hub — an optional UI Toolkit window that renders pages " +
-                  "registered into the HubPageRegistry. C# modules and (later) Lua mods can add their own tabs."
+                  "registered into the HubPageRegistry. C# modules can register their own tabs."
                 : body;
         }
 

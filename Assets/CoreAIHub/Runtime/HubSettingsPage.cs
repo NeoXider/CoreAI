@@ -85,6 +85,12 @@ namespace CoreAI.Hub.UI
         private TextField _endpointSessionKey;
         private Button _endpointClearSessionKeyButton;
         private IntegerField _endpointContextWindow;
+        private DropdownField _endpointReasoningEffort;
+        private DropdownField _endpointReasoningDialect;
+        private Toggle _endpointOverrideTemperature;
+        private FloatField _endpointTemperature;
+        private Toggle _endpointOverrideMaxTokens;
+        private IntegerField _endpointMaxTokens;
         private IntegerField _endpointPort;
         private IntegerField _endpointGpuLayers;
         private IntegerField _endpointParallelSlots;
@@ -473,6 +479,45 @@ namespace CoreAI.Hub.UI
             StyleField(_endpointContextWindow);
             _endpointAdvanced.Add(_endpointContextWindow);
 
+            _endpointReasoningEffort = new DropdownField("Reasoning effort",
+                new List<string>(Enum.GetNames(typeof(LlmReasoningEffort))), 0);
+            StyleField(_endpointReasoningEffort);
+            _endpointAdvanced.Add(_endpointReasoningEffort);
+
+            _endpointReasoningDialect = new DropdownField("Reasoning dialect",
+                new List<string>(Enum.GetNames(typeof(LlmReasoningDialect))), 0);
+            StyleField(_endpointReasoningDialect);
+            _endpointAdvanced.Add(_endpointReasoningDialect);
+
+            _endpointOverrideTemperature = new Toggle("Override temperature")
+            {
+                tooltip = "Enable an endpoint temperature override. Disabled inherits global temperature settings."
+            };
+            StyleField(_endpointOverrideTemperature);
+            _endpointOverrideTemperature.RegisterValueChangedCallback(_ =>
+                _endpointTemperature.SetEnabled(_endpointOverrideTemperature.value));
+            _endpointAdvanced.Add(_endpointOverrideTemperature);
+
+            _endpointTemperature = new FloatField("Temperature");
+            StyleField(_endpointTemperature);
+            _endpointAdvanced.Add(_endpointTemperature);
+
+            _endpointOverrideMaxTokens = new Toggle("Override max output tokens")
+            {
+                tooltip = "Enable an endpoint output cap. Zero explicitly removes an inherited cap."
+            };
+            StyleField(_endpointOverrideMaxTokens);
+            _endpointOverrideMaxTokens.RegisterValueChangedCallback(_ =>
+                _endpointMaxTokens.SetEnabled(_endpointOverrideMaxTokens.value));
+            _endpointAdvanced.Add(_endpointOverrideMaxTokens);
+
+            _endpointMaxTokens = new IntegerField("Max output tokens")
+            {
+                tooltip = "Maximum response tokens. Zero leaves the response length to the provider."
+            };
+            StyleField(_endpointMaxTokens);
+            _endpointAdvanced.Add(_endpointMaxTokens);
+
             _endpointParallelSlots = new IntegerField("Parallel slots") { value = 1 };
             StyleField(_endpointParallelSlots);
             _endpointAdvanced.Add(_endpointParallelSlots);
@@ -760,6 +805,15 @@ namespace CoreAI.Hub.UI
                         endpoint.ContextWindowTokens >= CoreAISettings.UnlimitedContextWindowTokens
                             ? 0
                             : endpoint.ContextWindowTokens);
+                    _endpointReasoningEffort.SetValueWithoutNotify(endpoint.ReasoningEffort.ToString());
+                    _endpointReasoningDialect.SetValueWithoutNotify(endpoint.ReasoningDialect.ToString());
+                    _endpointOverrideTemperature.SetValueWithoutNotify(endpoint.Temperature.HasValue);
+                    _endpointTemperature.SetValueWithoutNotify(endpoint.Temperature ?? _settings?.Temperature ?? 0.2f);
+                    _endpointTemperature.SetEnabled(endpoint.Temperature.HasValue);
+                    bool overrideMaxTokens = endpoint.OverrideMaxTokens || endpoint.MaxTokens > 0;
+                    _endpointOverrideMaxTokens.SetValueWithoutNotify(overrideMaxTokens);
+                    _endpointMaxTokens.SetValueWithoutNotify(endpoint.MaxTokens);
+                    _endpointMaxTokens.SetEnabled(overrideMaxTokens);
                     _endpointPort.SetValueWithoutNotify(endpoint.Port);
                     _endpointGpuLayers.SetValueWithoutNotify(endpoint.GpuLayers);
                     _endpointParallelSlots.SetValueWithoutNotify(endpoint.ParallelSlots);
@@ -794,6 +848,14 @@ namespace CoreAI.Hub.UI
             _endpointModel.SetValueWithoutNotify("");
             SyncEndpointGgufDropdown("");
             _endpointContextWindow.SetValueWithoutNotify(0);
+            _endpointReasoningEffort.SetValueWithoutNotify(LlmReasoningEffort.Default.ToString());
+            _endpointReasoningDialect.SetValueWithoutNotify(LlmReasoningDialect.Auto.ToString());
+            _endpointOverrideTemperature.SetValueWithoutNotify(false);
+            _endpointTemperature.SetValueWithoutNotify(_settings?.Temperature ?? 0.2f);
+            _endpointTemperature.SetEnabled(false);
+            _endpointOverrideMaxTokens.SetValueWithoutNotify(false);
+            _endpointMaxTokens.SetValueWithoutNotify(0);
+            _endpointMaxTokens.SetEnabled(false);
             _endpointPort.SetValueWithoutNotify(13333);
             _endpointGpuLayers.SetValueWithoutNotify(0);
             _endpointParallelSlots.SetValueWithoutNotify(1);
@@ -1024,30 +1086,56 @@ namespace CoreAI.Hub.UI
                 _endpointId.SetValueWithoutNotify(id);
             }
 
-            return new LlmEndpointDescriptor
+            LlmEndpointDescriptor endpoint = null;
+            foreach (LlmEndpointSnapshot snapshot in _routingController?.GetEndpoints() ??
+                     Array.Empty<LlmEndpointSnapshot>())
             {
-                EndpointId = id,
-                DisplayName = name,
-                Kind = LabelKind(_endpointKind.value),
-                BaseUrl = (_endpointBaseUrl.value ?? "").Trim(),
-                Model = (_endpointModel.value ?? "").Trim(),
-                SecretReference = (_endpointSecretReference.value ?? "").Trim(),
-                Active = _endpointActive.value,
-                KeepWarm = _endpointKeepWarm.value,
-                // WHY: 0 / empty means "no limit" in the UI; the descriptor rejects < 256, so map it to the
-                // unlimited sentinel the rest of the stack already understands (provider decides the window).
-                ContextWindowTokens = _endpointContextWindow.value <= 0
-                    ? CoreAISettings.UnlimitedContextWindowTokens
-                    : _endpointContextWindow.value,
-                LocalModelPath = LabelKind(_endpointKind.value) == LlmEndpointKind.LlmUnity
-                    ? (_endpointModel.value ?? "").Trim()
-                    : "",
-                UnityAgentName = (_endpointUnityAgentName.value ?? "").Trim(),
-                Port = _endpointPort.value,
-                GpuLayers = Mathf.Max(0, _endpointGpuLayers.value),
-                ParallelSlots = _endpointParallelSlots.value,
-                FlashAttention = _endpointFlashAttention.value
-            };
+                if (snapshot?.Descriptor != null &&
+                    string.Equals(snapshot.Descriptor.EndpointId, _editingEndpointId, StringComparison.Ordinal))
+                {
+                    endpoint = FileLlmEndpointRegistryStore.CloneDescriptor(snapshot.Descriptor);
+                    break;
+                }
+            }
+
+            bool preserveModelAlias = endpoint?.Kind == LlmEndpointKind.LlmUnity &&
+                                      LabelKind(_endpointKind.value) == LlmEndpointKind.LlmUnity &&
+                                      !string.IsNullOrWhiteSpace(endpoint.LocalModelPath);
+            endpoint ??= new LlmEndpointDescriptor();
+            endpoint.EndpointId = id;
+            endpoint.DisplayName = name;
+            endpoint.Kind = LabelKind(_endpointKind.value);
+            endpoint.BaseUrl = (_endpointBaseUrl.value ?? "").Trim();
+            string model = (_endpointModel.value ?? "").Trim();
+            if (!preserveModelAlias)
+            {
+                endpoint.Model = model;
+            }
+            endpoint.SecretReference = (_endpointSecretReference.value ?? "").Trim();
+            endpoint.Active = _endpointActive.value;
+            endpoint.KeepWarm = _endpointKeepWarm.value;
+            endpoint.ReasoningEffort = (LlmReasoningEffort)Enum.Parse(
+                typeof(LlmReasoningEffort), _endpointReasoningEffort.value);
+            endpoint.ReasoningDialect = (LlmReasoningDialect)Enum.Parse(
+                typeof(LlmReasoningDialect), _endpointReasoningDialect.value);
+            endpoint.Temperature = _endpointOverrideTemperature.value ? _endpointTemperature.value : (float?)null;
+            endpoint.OverrideMaxTokens = _endpointOverrideMaxTokens.value;
+            endpoint.MaxTokens = endpoint.OverrideMaxTokens ? Mathf.Max(0, _endpointMaxTokens.value) : 0;
+            // WHY: zero in the UI represents the provider-managed context window sentinel.
+            endpoint.ContextWindowTokens = _endpointContextWindow.value <= 0
+                ? CoreAISettings.UnlimitedContextWindowTokens
+                : _endpointContextWindow.value;
+            if (endpoint.Kind == LlmEndpointKind.LlmUnity)
+            {
+                endpoint.LocalModelPath = model;
+            }
+
+            endpoint.UnityAgentName = (_endpointUnityAgentName.value ?? "").Trim();
+            endpoint.Port = _endpointPort.value;
+            endpoint.GpuLayers = Mathf.Max(0, _endpointGpuLayers.value);
+            endpoint.ParallelSlots = _endpointParallelSlots.value;
+            endpoint.FlashAttention = _endpointFlashAttention.value;
+            return endpoint;
         }
 
         internal static string ValidateEndpoint(LlmEndpointDescriptor endpoint)
@@ -1060,6 +1148,11 @@ namespace CoreAI.Hub.UI
             if (string.IsNullOrWhiteSpace(endpoint.DisplayName))
             {
                 return "Name is required.";
+            }
+
+            if (endpoint.Kind == LlmEndpointKind.HttpOpenAi && string.IsNullOrWhiteSpace(endpoint.Model))
+            {
+                return "HTTP endpoint model is required.";
             }
 
             IReadOnlyList<string> errors = endpoint.Validate();
@@ -1102,6 +1195,12 @@ namespace CoreAI.Hub.UI
             SetVisible(_endpointUnityAgentName, local);
             SetVisible(_endpointFlashAttention, local);
             SetVisible(_endpointParallelSlots, kind != LlmEndpointKind.Offline);
+            SetVisible(_endpointReasoningEffort, http || local);
+            SetVisible(_endpointReasoningDialect, http || local);
+            SetVisible(_endpointOverrideTemperature, http || local);
+            SetVisible(_endpointTemperature, http || local);
+            SetVisible(_endpointOverrideMaxTokens, http || local);
+            SetVisible(_endpointMaxTokens, http || local);
             _endpointKeepWarm?.SetEnabled(kind != LlmEndpointKind.Offline);
             _endpointSaveButton?.SetEnabled(_routingController != null && (!local || localAvailable));
             if (local && !localAvailable && _endpointOperationStatus != null)

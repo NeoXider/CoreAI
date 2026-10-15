@@ -22,14 +22,14 @@ Merchant: "Welcome! I have an Iron Sword for 50 coins, Health Potion for 25..."
 
 ### 1. Merchant agent
 
-Merchant system prompt:
+`Merchant` is a built-in role (`BuiltInAgentRoleIds.Merchant`). Its built-in system prompt (abridged):
 
 ```
-You are a shopkeeper/merchant NPC. You have an inventory of items to sell.
-When the player asks to buy, browse, or see what you have, 
-FIRST call the get_inventory tool to check your stock.
-Then respond in-character as a merchant, listing items with prices.
-Remember what the player bought using the memory tool.
+You are a shopkeeper/merchant NPC. You have an inventory of items to sell to the player.
+When the player asks to buy, browse, or see what you have, FIRST call the get_inventory tool to check your stock.
+Then respond in-character as a merchant, listing items with prices from the tool result.
+...
+Remember what the player bought from you using the memory tool.
 ```
 
 ### 2. InventoryTool
@@ -50,15 +50,20 @@ public class MyInventoryProvider : InventoryTool.IInventoryProvider
 
 ### 3. Configuring Merchant
 
+`get_inventory` is host-wired: give the built-in role its tool once CoreAI is running (for example from a
+scene component). The memory tool is already on for `Merchant` (`AgentMemoryPolicy.EnableMemoryTool` /
+`DisableMemoryTool` toggle it).
+
 ```csharp
-var policy = new AgentMemoryPolicy();
-policy.SetToolsForRole(BuiltInAgentRoleIds.Merchant, new List<ILlmTool>
+CoreAIAgent.Policy.SetToolsForRole(BuiltInAgentRoleIds.Merchant, new List<ILlmTool>
 {
-    new MemoryLlmTool(),
     new InventoryLlmTool(new MyInventoryProvider())
 });
-policy.EnableMemoryTool(BuiltInAgentRoleIds.Merchant);
 ```
+
+`SetToolsForRole` replaces the role's custom tool list, so calling it again does not duplicate the tool.
+A custom agent can carry the same tool instead:
+`new AgentBuilder("Merchant").WithTool(new InventoryLlmTool(provider)).WithMemory().Build()`.
 
 ## Architecture
 
@@ -69,13 +74,13 @@ Merchant AI (System: "You are a shopkeeper...")
   ↓
 AiOrchestrator → tools=[memory, get_inventory]
   ↓
-MEAI FunctionInvokingChatClient
+SmartToolCallingChatClient (MEAI FunctionInvokingChatClient + ToolExecutionPolicy)
   ↓
 Model: {"name": "get_inventory", "arguments": {}}
   ↓
-InventoryTool.GetInventoryAsync()
+InventoryTool.ExecuteAsync() → MyInventoryProvider.GetInventoryAsync()
   ↓
-Returns: [{name: "Iron Sword", price: 50, qty: 3}]
+Returns: {"Success":true,"Items":[{"Name":"Iron Sword","Price":50,"Quantity":3,…}]}
   ↓
 Model: "I have an Iron Sword for 50 coins..."
 ```
@@ -83,8 +88,10 @@ Model: "I have an Iron Sword for 50 coins..."
 ## Testing
 
 `MerchantWithToolCallingPlayModeTests` picks its backend through `PlayModeProductionLikeLlmFactory`: the
-`CoreAISettingsAsset` backend type decides (set it to LLMUnity for a local GGUF model, or HTTP for an
-OpenAI-compatible endpoint). `COREAI_PLAYMODE_LLM_BACKEND` is read only when no settings asset is loaded.
+**LLM Backend** field of `CoreAISettingsAsset` (`BackendType`, not **LLM Mode**) decides — `LlmUnity` for a
+local GGUF model, `OpenAiHttp` for an OpenAI-compatible endpoint, `Auto` to try both.
+`COREAI_PLAYMODE_LLM_BACKEND` (`auto`, `http`, `llmunity`, `offline`) is read only when no settings asset is
+loaded.
 
 ```bash
 Unity Test Runner → PlayMode → MerchantWithToolCallingPlayModeTests
@@ -96,18 +103,26 @@ Unity Test Runner → PlayMode → MerchantWithToolCallingPlayModeTests
 |-------|-------------|------------|
 | **PlainChat** | None by default | Simple chat helper; dialogue only |
 | **SmartChat** | memory (built-in) | Chat + durable facts via MemoryTool |
-| **Merchant** | get_inventory, memory | Shopkeeper with inventory and memory |
+| **Merchant** | memory; `get_inventory` once the host adds it | Shopkeeper with inventory and memory |
 
 **PlainChat** has no MemoryTool by default — dialogue only. **SmartChat** exposes the memory tool for long-term recall.  
 **Merchant** is an NPC with tools for grounded replies.
 
-## Stream/non-stream parity (since 1.3.0)
+## Stream/non-stream parity
 
-Both paths handle three tool-call shapes identically:
+Streaming and non-streaming paths handle the same tool-call shapes:
 
-1. **Native** — provider populates `delta.tool_calls` (OpenAI, Anthropic, etc.). Extracted as `MEAI.FunctionCallContent`.
-2. **Text JSON** — model emits `{"name":"...","arguments":{...}}` inside an assistant text turn (Ollama, llama.cpp, LM Studio, some Qwen builds). The pipeline scans assistant text for balanced `{...}` objects with both `name` and `arguments` keys, executes them through the same `ToolExecutionPolicy`, and strips the JSON from the visible reply.
-3. **Requested but unbound** — request lists a tool (e.g., `MemoryLlmTool`) that the backend could not bind (e.g., `IAgentMemoryStore` is `null`). The pipeline strips the JSON, logs a warning, and emits cleaned text. Nothing is executed; the trace records `source=missing`.
+1. **Native** — the provider fills `tool_calls` (OpenAI-compatible servers, LM Studio, LLMUnity's server).
+   They arrive as `MEAI.FunctionCallContent`. On an endpoint with a native tool channel these are the only
+   calls executed; assistant prose is never parsed for calls.
+2. **Text-shaped** — only on an endpoint without a native tool channel (or when the host sets
+   `AllowTextShapedToolCallsOnNativeEndpoint` on the `AiTaskRequest`). `LlmToolCallTextExtractor` reads calls
+   to **declared** tools from the assistant text (`{"name":"...","arguments":{...}}`, Hermes/Qwen XML, a
+   reply that is just `tool_name(arg=...)`), runs them through the same `ToolExecutionPolicy`, and strips them
+   from the visible reply. See [JSON_COMMAND_FORMAT.md §11](JSON_COMMAND_FORMAT.md#text-shaped-calls).
+3. **Requested but unbound** — on the text-shaped path, a declared tool that could not be bound (e.g.
+   `MemoryLlmTool` while `IAgentMemoryStore` is `null`). The pipeline strips the JSON, logs a warning, and
+   emits the cleaned text. Nothing is executed; the trace records `source=missing`.
 
 ### Diagnostics
 
@@ -129,4 +144,8 @@ The `LLM <` summary line also gets a tail like `tools=[memory(ok,12ms),get_inven
 
 ### Defense-in-depth
 
-`AiOrchestrator` runs `LlmToolCallTextExtractor.StripForDisplay` on the assistant text before persisting to chat history or publishing `ApplyAiGameCommand`. If a brand-new tool-call shape ever leaks past streaming/non-streaming extraction, this catches it and logs `tool-call JSON leaked through extraction; stripped for chat/envelope`.
+On the text-shaped path, `AiOrchestrator` runs `LlmToolCallTextExtractor.StripForDisplay` on the assistant
+text before persisting it to chat history or publishing `ApplyAiGameCommand`. If a tool-call shape leaks past
+streaming/non-streaming extraction, this removes it and logs
+`[AiOrchestrator] role='…' trace='…' tool-call JSON leaked; stripped.` On a native tool channel the text is left
+intact, so an agent can show JSON to a reader.

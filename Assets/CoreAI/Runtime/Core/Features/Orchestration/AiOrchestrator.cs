@@ -647,6 +647,7 @@ namespace CoreAI.Ai
                 int? promptTokens = null;
                 int? lastRoundtripPromptTokens = null;
                 int? completionTokens = null;
+                int? reasoningTokens = null;
                 int? totalTokens = null;
                 int cacheReadTokens = 0;
                 int cacheWriteTokens = 0;
@@ -656,7 +657,7 @@ namespace CoreAI.Ai
                 {
                     IsDone = true, Error = error, ErrorCode = code, HttpStatus = status, RetryAfterSeconds = retry,
                     Model = model, ExecutedToolCalls = executedToolCalls, PromptTokens = promptTokens,
-                    LastRoundtripPromptTokens = lastRoundtripPromptTokens, CompletionTokens = completionTokens,
+                    LastRoundtripPromptTokens = lastRoundtripPromptTokens, CompletionTokens = completionTokens, ReasoningTokens = reasoningTokens,
                     TotalTokens = totalTokens, CacheReadTokens = cacheReadTokens, CacheWriteTokens = cacheWriteTokens
                 };
 
@@ -911,6 +912,11 @@ namespace CoreAI.Ai
                             lastRoundtripPromptTokens = current.LastRoundtripPromptTokens;
                         }
 
+                        if (current?.ReasoningTokens > 0)
+                        {
+                            reasoningTokens = current.ReasoningTokens;
+                        }
+
                         if (current?.CompletionTokens > 0)
                         {
                             completionTokens = current.CompletionTokens;
@@ -941,6 +947,7 @@ namespace CoreAI.Ai
                             current.PromptTokens = promptTokens;
                             current.LastRoundtripPromptTokens = lastRoundtripPromptTokens;
                             current.CompletionTokens = completionTokens;
+                            current.ReasoningTokens = reasoningTokens;
                             current.TotalTokens = totalTokens;
                             current.CacheReadTokens = cacheReadTokens;
                             current.CacheWriteTokens = cacheWriteTokens;
@@ -1078,7 +1085,7 @@ namespace CoreAI.Ai
                         Content = content,
                         PromptTokens = promptTokens,
                         LastRoundtripPromptTokens = lastRoundtripPromptTokens,
-                        CompletionTokens = completionTokens,
+                        CompletionTokens = completionTokens, ReasoningTokens = reasoningTokens,
                         TotalTokens = totalTokens,
                         CacheReadTokens = cacheReadTokens,
                         CacheWriteTokens = cacheWriteTokens,
@@ -1104,6 +1111,7 @@ namespace CoreAI.Ai
                     failure.PromptTokens = promptTokens;
                     failure.LastRoundtripPromptTokens = lastRoundtripPromptTokens;
                     failure.CompletionTokens = completionTokens;
+                    failure.ReasoningTokens = reasoningTokens;
                     failure.TotalTokens = totalTokens;
                     failure.CacheReadTokens = cacheReadTokens;
                     failure.CacheWriteTokens = cacheWriteTokens;
@@ -1284,6 +1292,7 @@ namespace CoreAI.Ai
             int? promptTokens = null;
             int? lastRoundtripPromptTokens = null;
             int? completionTokens = null;
+            int? reasoningTokens = null;
             int? totalTokens = null;
             int cacheReadTokens = 0;
             int cacheWriteTokens = 0;
@@ -1393,6 +1402,11 @@ namespace CoreAI.Ai
                         lastRoundtripPromptTokens = current.LastRoundtripPromptTokens;
                     }
 
+                    if (current.ReasoningTokens > 0)
+                    {
+                        reasoningTokens = current.ReasoningTokens;
+                    }
+
                     if (current.CompletionTokens > 0)
                     {
                         completionTokens = current.CompletionTokens;
@@ -1436,6 +1450,7 @@ namespace CoreAI.Ai
                 failure.PromptTokens = promptTokens;
                 failure.LastRoundtripPromptTokens = lastRoundtripPromptTokens;
                 failure.CompletionTokens = completionTokens;
+                failure.ReasoningTokens = reasoningTokens;
                 failure.TotalTokens = totalTokens;
                 failure.CacheReadTokens = cacheReadTokens;
                 failure.CacheWriteTokens = cacheWriteTokens;
@@ -1450,7 +1465,7 @@ namespace CoreAI.Ai
                 Model = model,
                 PromptTokens = promptTokens,
                 LastRoundtripPromptTokens = lastRoundtripPromptTokens,
-                CompletionTokens = completionTokens,
+                CompletionTokens = completionTokens, ReasoningTokens = reasoningTokens,
                 TotalTokens = totalTokens,
                 CacheReadTokens = cacheReadTokens,
                 CacheWriteTokens = cacheWriteTokens,
@@ -3089,6 +3104,35 @@ namespace CoreAI.Ai
             return carried;
         }
 
+        private static LlmReasoningOptions? ResolveReasoning(LlmReasoningOptions? perCall, LlmReasoningOptions? perAgent)
+        {
+            if (!perCall.HasValue)
+            {
+                return perAgent;
+            }
+
+            LlmReasoningEffort effort = perCall.Value.Effort != LlmReasoningEffort.Default
+                ? perCall.Value.Effort : perAgent?.Effort ?? LlmReasoningEffort.Default;
+            return new LlmReasoningOptions(effort, perCall.Value.BudgetTokens ?? perAgent?.BudgetTokens);
+        }
+
+        private static LlmSamplingOptions ResolveSampling(LlmSamplingOptions perCall, LlmSamplingOptions perAgent)
+        {
+            if (perCall == null)
+            {
+                return perAgent;
+            }
+
+            return new LlmSamplingOptions
+            {
+                TopP = perCall.TopP ?? perAgent?.TopP,
+                Seed = perCall.Seed ?? perAgent?.Seed,
+                Stop = perCall.Stop ?? perAgent?.Stop,
+                FrequencyPenalty = perCall.FrequencyPenalty ?? perAgent?.FrequencyPenalty,
+                PresencePenalty = perCall.PresencePenalty ?? perAgent?.PresencePenalty
+            };
+        }
+
         /// <summary>
         /// ARCH-6: Single source of truth for <see cref="LlmCompletionRequest"/> construction.
         /// Eliminates 3x copy-paste between RunTaskAsync (main + structured retry) and RunStreamingAsync.
@@ -3122,8 +3166,12 @@ namespace CoreAI.Ai
                 // LlmCompletionRequest by hand - every host that goes through the package's public API
                 // (AiTaskRequest) could not reach it, while the docs prescribed it as the cure.
                 AllowTextShapedToolCallsOnNativeEndpoint = task.AllowTextShapedToolCallsOnNativeEndpoint,
-                SendTemperature = bundle.RoleConfig.Temperature.HasValue || _settings.OverrideTemperature,
-                Temperature = bundle.RoleConfig.Temperature ?? _settings.Temperature
+                Reasoning = ResolveReasoning(task.Reasoning, bundle.RoleConfig.Reasoning),
+                Sampling = ResolveSampling(task.Sampling, bundle.RoleConfig.Sampling),
+                TemperatureOverride = task.Temperature ?? bundle.RoleConfig.Temperature,
+                TemperatureIsFallback = !task.Temperature.HasValue && !bundle.RoleConfig.Temperature.HasValue,
+                SendTemperature = task.Temperature.HasValue || bundle.RoleConfig.Temperature.HasValue || _settings.OverrideTemperature,
+                Temperature = task.Temperature ?? bundle.RoleConfig.Temperature ?? _settings.Temperature
             };
         }
 

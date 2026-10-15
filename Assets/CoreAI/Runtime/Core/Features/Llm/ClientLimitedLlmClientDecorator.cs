@@ -57,6 +57,12 @@ namespace CoreAI.Infrastructure.Llm
         public ILlmClient Inner => _inner;
 
         /// <inheritdoc />
+        public void ResolveRequestSettings(LlmCompletionRequest request)
+        {
+            _inner.ResolveRequestSettings(request);
+        }
+
+        /// <inheritdoc />
         public bool SupportsNativeToolCalling => _inner?.SupportsNativeToolCalling == true;
 
         /// <inheritdoc />

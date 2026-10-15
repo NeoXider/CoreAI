@@ -91,6 +91,11 @@ namespace CoreAI.Infrastructure.Llm
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (descriptor.Kind == LlmEndpointKind.HttpOpenAi && string.IsNullOrWhiteSpace(descriptor.Model))
+            {
+                throw new ArgumentException("HTTP endpoint model is required.", nameof(descriptor));
+            }
+
             switch (descriptor.Kind)
             {
                 case LlmEndpointKind.HttpOpenAi:
@@ -194,6 +199,17 @@ namespace CoreAI.Infrastructure.Llm
             string sessionApiKey,
             ICoreAISettings settings)
         {
+            if (string.IsNullOrWhiteSpace(descriptor.Model))
+            {
+                throw new ArgumentException("HTTP endpoint model is required.", nameof(descriptor));
+            }
+
+            int httpTimeout = settings is CoreAISettingsAsset unitySettings
+                ? unitySettings.EffectiveHttpRequestTimeoutSeconds
+                : settings.LlmRequestTimeoutSeconds <= 0f
+                    ? 120
+                    : Math.Min(120, Math.Max(1, (int)Math.Ceiling(settings.LlmRequestTimeoutSeconds)));
+
             // WHY: descriptor-level behavior settings (max tokens, reasoning, extra body) must survive
             // a switch from the legacy backend to a runtime endpoint, otherwise the same model silently
             // changes behavior after routing.
@@ -203,13 +219,35 @@ namespace CoreAI.Infrastructure.Llm
                 ExecutionMode = LlmExecutionMode.ClientOwnedApi,
                 ApiBaseUrl = descriptor.BaseUrl.Trim(),
                 ApiKey = sessionApiKey ?? "",
-                Model = string.IsNullOrWhiteSpace(descriptor.Model) ? "default" : descriptor.Model.Trim(),
-                RequestTimeoutSeconds = Math.Max(1, (int)settings.LlmRequestTimeoutSeconds),
+                Model = descriptor.Model.Trim(),
+                RequestTimeoutSeconds = httpTimeout,
+                Temperature = descriptor.Temperature ?? settings.Temperature,
+                OverrideTemperature = descriptor.Temperature.HasValue,
                 MaxTokens = Math.Max(0, descriptor.MaxTokens),
+                OverrideMaxTokens = descriptor.OverrideMaxTokens || descriptor.MaxTokens > 0,
+                ReasoningEffort = descriptor.ReasoningEffort,
+                ReasoningDialect = descriptor.Kind == LlmEndpointKind.LlmUnity &&
+                                   descriptor.ReasoningDialect == LlmReasoningDialect.Auto
+                    ? LlmReasoningDialect.QwenTemplate
+                    : descriptor.ReasoningDialect,
                 ReasoningMode = descriptor.ReasoningMode,
                 ThinkingBudgetTokens = Math.Max(0, descriptor.ThinkingBudgetTokens),
                 ExtraBodyJson = descriptor.ExtraBodyJson ?? ""
             };
+        }
+
+        /// <summary>Shapes a local server request using its endpoint descriptor and resolved host address.</summary>
+        internal static OpenAiHttpOptions BuildLlmUnityHttpOptions(
+            LlmEndpointDescriptor descriptor,
+            string sessionApiKey,
+            ICoreAISettings settings,
+            int port,
+            string modelName)
+        {
+            LlmEndpointDescriptor resolved = FileLlmEndpointRegistryStore.CloneDescriptor(descriptor);
+            resolved.BaseUrl = $"http://localhost:{port}/v1";
+            resolved.Model = modelName;
+            return BuildHttpOptions(resolved, sessionApiKey, settings);
         }
 #endif
 
@@ -356,16 +394,8 @@ namespace CoreAI.Infrastructure.Llm
                 string modelName = string.IsNullOrWhiteSpace(descriptor.Model)
                     ? Path.GetFileName(llm.model)
                     : descriptor.Model.Trim();
-                IOpenAiHttpSettings http = _unitySettings != null
-                    ? new LlmUnityServerHttpSettings(_unitySettings, port, modelName, sessionApiKey)
-                    : new OpenAiHttpOptions
-                    {
-                        UseOpenAiCompatibleHttp = true,
-                        ApiBaseUrl = $"http://localhost:{port}/v1",
-                        ApiKey = sessionApiKey ?? "",
-                        Model = modelName,
-                        MaxTokens = 0
-                    };
+                IOpenAiHttpSettings http = BuildLlmUnityHttpOptions(
+                    descriptor, sessionApiKey, _settings, port, modelName);
                 long readinessStart = LlmUnityActivationLog.StartTimer();
                 _logger.LogInfo(GameLogFeature.Llm, LlmUnityActivationLog.ReadinessStarted(logContext));
                 try

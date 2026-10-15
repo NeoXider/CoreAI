@@ -12,7 +12,8 @@ Switch the active LLM backend **at runtime** — between an OpenAI-compatible HT
 
 ### Multiple active APIs and per-agent routing (5.9)
 
-The legacy `Apply*` methods continue to update `legacy/default`. New code should resolve
+The `CoreAiBackend.Apply*` methods update the legacy fallback client (the route reported with the reserved
+profile id `"fallback"`). New code should resolve
 `ILlmEndpointRegistry` from the running scope and register named endpoints/profiles. Multiple HTTP APIs and
 LLMUnity may stay active simultaneously; assigning a different profile changes only subsequent requests for
 that role. In-flight requests retain the endpoint generation they started with.
@@ -26,10 +27,43 @@ The registry supports zero, one, or many configured endpoints. With zero endpoin
 (including Offline) remains usable. With one endpoint, it can be assigned to any number of agents. With
 many endpoints, HTTP APIs and separately hosted LLMUnity endpoints can serve different agents concurrently.
 
+### Configuration preservation
+
+`ConfigureHttpApi`, `ConfigureClientOwnedApi`, `ConfigureClientLimited`, and
+`ConfigureServerManagedApi` accept nullable temperature, timeout, token-cap, and temperature-override
+options. Omit an option (or pass `null`) to keep its current value. Explicit positive `maxTokens`
+enables the output cap; zero disables it. Backend switches retain the temperature override flag.
+
+Hub endpoint edits expose reasoning effort/dialect, nullable temperature, output-token cap, and its
+override flag. Editing clones the existing descriptor and merges exposed values, preserving hidden
+fields such as tool channel, legacy thinking controls, and provider body parameters. HTTP endpoints require an explicit
+model; the LLMUnity HTTP adapter also requires its loaded model name rather than substituting `local`.
+Runtime HTTP endpoints use the same transport timeout as the legacy path: the HTTP timeout (120 seconds
+by default), limited by the rounded-up positive orchestration ceiling. A non-positive orchestration
+ceiling leaves the HTTP timeout in force. Orchestration concurrency honours `MaxConcurrentOrchestrations`
+(including 1 or 2); legacy LLMUnity hosts use `LlmUnityMaxConcurrentChats` for native parallel prompts.
+Named LLMUnity endpoints continue to use their descriptor's `ParallelSlots`.
+
+Primary `ReasoningEffort` / `ReasoningDialect` and fallback `SecondaryReasoningEffort` /
+`SecondaryReasoningDialect` are independent asset settings. Their defaults (`Default` / `Auto`) keep
+legacy reasoning bytes unchanged. Each legacy HTTP adapter copies its own reasoning mode, thinking
+budget, and provider body JSON; the fallback never inherits the primary provider's body or dialect.
+Presets and runtime switches preserve reasoning settings and keep current temperature/token limits
+when their nullable arguments are omitted. `ApplyServerManagedApi` also preserves the temperature
+override flag. Named endpoints use their own descriptor reasoning and provider body values, including
+LLMUnity endpoints, whose Auto dialect resolves to `QwenTemplate`.
+
+Call settings override agent settings, then the selected profile/endpoint, then global defaults.
+An endpoint temperature of null inherits; a value (including zero) overrides. A positive endpoint
+`MaxTokens` enables a cap. `OverrideMaxTokens = true` with zero explicitly removes inherited caps.
+The [portable request-settings reference](../../CoreAI/Docs/LLM_ROUTING.md#request-sampling-and-reasoning)
+lists sampling controls, dialect mapping, and typed-value precedence over provider body JSON.
+
 ### Routing metadata and endpoint health (5.9)
 
 - **`ILlmClientRegistry.ResolveRouteForRole(roleId, explicitProfileId)`** returns one atomic
-  `LlmRoleRouteSnapshot` — client, effective profile id, context window, execution mode, and `IsRouted` —
+  `LlmRoleRouteSnapshot` — client, effective profile id, context window, profile `MaxOutputTokens`, execution mode (`Mode`),
+  `IsRouted` and endpoint `Generation` —
   observed under a single lock acquisition, so a concurrent endpoint switch can never pair one endpoint's
   client with another endpoint's metadata. `IsRouted == false` means the reserved `"fallback"` diagnostic:
   the legacy backend serves the request and the context window is a settings default, not endpoint knowledge.
@@ -50,7 +84,8 @@ many endpoints, HTTP APIs and separately hosted LLMUnity endpoints can serve dif
   degrade its successor (mismatched or `0` generations are dropped). Both streaming and non-streaming
   completion paths publish the report.
 - **Descriptor behavior fields.** `LlmEndpointDescriptor` carries per-endpoint request shaping for HTTP
-  endpoints — `MaxTokens`, `ReasoningMode`, `ThinkingBudgetTokens`, `ExtraBodyJson` — validated by
+  and LLMUnity endpoints — `Temperature`, `MaxTokens`, `OverrideMaxTokens`, `ReasoningEffort`,
+  `ReasoningDialect`, `ReasoningMode`, `ThinkingBudgetTokens`, `ExtraBodyJson` — validated by
   `Validate()`, persisted, and part of the client fingerprint (editing them re-activates the client).
 - **Endpoint id helpers.** `LlmEndpointDescriptor.DeriveEndpointSlug(displayName)` and
   `EnsureUniqueEndpointId(slug, existingIds)` are the portable id-derivation used by the Hub editor.
@@ -197,11 +232,12 @@ UITK editor over the same endpoint registry. Two conveniences reduce guesswork w
 OpenAI-compatible server:
 
 - **Fetch models.** A button on the HTTP backend and in the endpoint editor queries
-  `GET {baseUrl}/models` (`CoreAiBackend.ListModelsAsync`) and lists the advertised model ids in a dropdown,
-  so an exact name can be copied into the model field instead of typed from memory. Local servers (LM Studio,
-  llama.cpp, Ollama's OpenAI shim) all advertise their loaded models here.
+  `GET {baseUrl}/models` (`CoreAiBackend.ListModelsAsync`) and lists the advertised model ids in a
+  **Discovered models** dropdown, so an exact name can be copied into the model field instead of typed from
+  memory. Local servers (LM Studio, llama.cpp, Ollama's OpenAI shim) all advertise their loaded models here.
 - **Vision override.** An Auto / On / Off dropdown forces the vision/camera gate for a multimodal model whose
-  name the auto-heuristic does not recognise — see [LLM_TOOLS.md § Vision / multimodal](../../CoreAI/Docs/LLM_TOOLS.md).
+  name the auto-heuristic does not recognise; **Detect vision** sets it from a measured answer (needs a
+  running CoreAI scope) — see [LLM_TOOLS.md § Vision / multimodal](../../CoreAI/Docs/LLM_TOOLS.md).
 
 The endpoint editor itself:
 
@@ -221,11 +257,11 @@ The endpoint editor itself:
 - **Takes effect on the next request.** A switch mutates the shared `CoreAISettingsAsset` and hot-swaps the routed primary client inside the live `LlmClientRegistry` (rebuilt via `LlmPipelineInstaller.BuildRoutedPrimaryClient`). **In-flight requests keep the old client** and finish on it; only requests started after the switch use the new backend.
 - **Per-role routing manifest profiles are NOT touched.** Only the **legacy-fallback primary client** is swapped. Roles pinned to explicit `LlmRoutingManifest` profiles keep resolving to those profiles; if you use per-role routing, `CoreAiBackend` changes what the fallback path uses, not your manifest mapping.
 - **Pre-bootstrap: returns `false`.** When no live `CoreAILifetimeScope` (with a built container) exists yet, `Apply*` / `Set*` mutate the settings only and return `false`; the normal bootstrap then builds the pipeline from the updated settings. `false` is *not* an error — check `CoreAiBackend.Status.IsLive` to distinguish "no scope yet" from a live scene.
-- **LLMUnity requirements.** `ApplyLlmUnity` needs the LLMUnity package installed (**`COREAI_HAS_LLMUNITY`**, set automatically via `versionDefines`) and a resolvable `LLMAgent` (scene-provided or auto-created — see [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)). Without them the switch degrades to a stub client — the `Apply` call still succeeds, but `VerifyAsync` reports the stub/failure, so always probe after switching to LLMUnity.
+- **LLMUnity requirements.** `ApplyLlmUnity` needs the LLMUnity package installed (**`COREAI_HAS_LLMUNITY`**, set automatically via `versionDefines`) and a resolvable `LLMAgent` (scene-provided or auto-created — see [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)). Without them the switch degrades to a stub client — the `Apply` call still succeeds, but `VerifyAsync` reports the stub/failure, so always probe after switching to LLMUnity. On a platform without local-model support (WebGL and any platform other than Windows, macOS, Linux, Android, iOS and visionOS) `ApplyLlmUnity` returns `false`, logs the reason once, and leaves the settings unchanged.
 - **LLMUnity zero-downtime boundary.** Do not mutate the model/port of the same already-running `LLMAgent`.
   CoreAI rejects that replacement because stopping the shared llama.cpp host would interrupt requests on the
   published generation. Configure a separate named `LLMAgent` on a unique port, wait until the candidate is
   Ready, then reassign the profile. Multiple local endpoints therefore require multiple named hosts.
 - **`VerifyAsync` needs a live scope.** Without a running `CoreAILifetimeScope` it returns `Ok = false` with an explanatory error instead of throwing. On timeout it returns `Ok = false` with `"Probe timed out after Ns."`.
 - **Thread-safety:** switch/mutate calls are serialized behind an internal lock; `VerifyAsync` is safe to call from UI handlers.
-- **Secrets:** keys set at runtime land on the `CoreAISettingsAsset` instance. In the Editor that asset lives in `Assets/Resources` — do not commit real keys ([DEVELOPER_GUIDE.md §10](DEVELOPER_GUIDE.md)).
+- **Secrets:** keys set at runtime land on the `CoreAISettingsAsset` instance. In the Editor that asset is usually `Assets/Resources/CoreAISettings.asset`, and changes made in Play Mode stay on that asset after Play Mode ends — do not commit real keys. A non-empty key on an asset under `Resources/` fails the build ([COREAI_SETTINGS.md § Production validation](COREAI_SETTINGS.md#production-validation)).

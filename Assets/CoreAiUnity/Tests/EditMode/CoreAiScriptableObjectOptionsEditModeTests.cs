@@ -117,6 +117,44 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void OpenAiHttpLlmSettings_OriginalRuntimeConfigurationSignatureForwardsValues()
+        {
+            System.Type[] parameterTypes = { typeof(bool), typeof(string), typeof(string), typeof(string),
+                typeof(float), typeof(int), typeof(int), typeof(LlmExecutionMode), typeof(int), typeof(int) };
+            MethodInfo method = typeof(OpenAiHttpLlmSettings).GetMethod("SetRuntimeConfiguration", parameterTypes);
+            Assert.IsNotNull(method, "Existing compiled callers require the original CLR signature.");
+            foreach (ParameterInfo parameter in method.GetParameters())
+            {
+                Assert.IsFalse(parameter.IsOptional, parameter.Name);
+            }
+            OpenAiHttpLlmSettings asset = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+            try
+            {
+                method.Invoke(asset, new object[] { true, "https://legacy.test/v1", "key", "model",
+                    0.8f, 41, 512, LlmExecutionMode.ClientLimited, 5, 2000 });
+                OpenAiHttpOptions options = asset.ToOptions();
+                Assert.IsTrue(options.UseOpenAiCompatibleHttp);
+                Assert.AreEqual(LlmExecutionMode.ClientLimited, options.ExecutionMode);
+                Assert.AreEqual("https://legacy.test/v1", options.ApiBaseUrl);
+                Assert.AreEqual("key", options.ApiKey);
+                Assert.AreEqual("model", options.Model);
+                Assert.AreEqual(0.8f, options.Temperature);
+                Assert.AreEqual(41, options.RequestTimeoutSeconds);
+                Assert.AreEqual(512, options.MaxTokens);
+                Assert.AreEqual(5, options.MaxRequestsPerSession);
+                Assert.AreEqual(2000, options.MaxPromptChars);
+                Assert.AreEqual(LlmReasoningEffort.Default, options.ReasoningEffort);
+                Assert.AreEqual(LlmReasoningDialect.Auto, options.ReasoningDialect);
+                Assert.IsTrue(options.OverrideTemperature);
+                Assert.IsTrue(options.OverrideMaxTokens);
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
         public void OpenAiHttpLlmSettings_ToOptionsAndApplyOptions_PreservePortableValues()
         {
             OpenAiHttpLlmSettings asset = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
@@ -130,6 +168,10 @@ namespace CoreAI.Tests.EditMode
                     ApiKey = "sk-test",
                     Model = "model-a",
                     Temperature = 0.7f,
+                    OverrideTemperature = false,
+                    OverrideMaxTokens = false,
+                    ReasoningEffort = LlmReasoningEffort.High,
+                    ReasoningDialect = LlmReasoningDialect.OpenRouter,
                     RequestTimeoutSeconds = 44,
                     MaxTokens = 512,
                     MaxRequestsPerSession = 3,
@@ -146,6 +188,13 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreEqual("https://api.example.com/v1", options.ApiBaseUrl);
                 Assert.AreEqual("sk-test", options.ApiKey);
                 Assert.AreEqual("model-a", options.Model);
+                Assert.AreEqual(0.7f, options.Temperature);
+                Assert.IsFalse(options.OverrideTemperature);
+                Assert.IsNull(asset.TemperatureOverride);
+                Assert.IsFalse(options.OverrideMaxTokens);
+                Assert.IsNull(asset.MaxTokensOverride);
+                Assert.AreEqual(LlmReasoningEffort.High, options.ReasoningEffort);
+                Assert.AreEqual(LlmReasoningDialect.OpenRouter, options.ReasoningDialect);
                 Assert.AreEqual(3, options.MaxRequestsPerSession);
                 Assert.AreEqual(900, options.MaxPromptChars);
                 Assert.IsTrue(options.EnableHttpDebugLogging);

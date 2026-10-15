@@ -120,6 +120,16 @@
                                  tooltip="Bearer token for the secondary provider. Leave empty for local servers that do not require auth."/>
               <uie:PropertyField binding-path="secondaryModelName" label="Secondary Model"
                                  tooltip="Model id used by the secondary provider."/>
+              <uie:PropertyField binding-path="secondaryReasoningEffort" label="Secondary Reasoning Effort"
+                                 tooltip="Default uses secondary legacy controls or provider defaults."/>
+              <uie:PropertyField binding-path="secondaryReasoningDialect" label="Secondary Reasoning Dialect"
+                                 tooltip="Auto resolves from the secondary endpoint independently of the primary."/>
+              <uie:PropertyField binding-path="secondaryReasoningMode" label="Secondary Reasoning Mode"
+                                 tooltip="Legacy thinking controls for the fallback provider."/>
+              <uie:PropertyField binding-path="secondaryThinkingBudgetTokens" label="Secondary Thinking Budget Tokens"
+                                 tooltip="Optional secondary thinking budget. 0 = omit."/>
+              <uie:PropertyField binding-path="secondaryExtraBodyJson" label="Secondary Extra Body JSON"
+                                 tooltip="Optional JSON body fields for the fallback provider only."/>
               <ui:HelpBox name="fallback-incomplete-warning" message-type="Warning" class="coreai-dynamic"
                           text="Fallback is enabled, but Secondary Base URL and Secondary Model must both be set before the runtime can use it."/>
               <ui:HelpBox name="fallback-active-info" message-type="Info" class="coreai-dynamic"
@@ -168,6 +178,8 @@
                                    tooltip="Keep the local server warm between prompts."/>
                 <uie:PropertyField binding-path="llmUnityMaxConcurrentChats" label="Max Concurrent Chats"
                                    tooltip="1 = serial chats; greater values allow parallel chat sessions."/>
+                <uie:PropertyField binding-path="llmUnityToolChannel" label="Tool Channel"
+                                   tooltip="Auto probes the local server for native tool support. Native sends structured tool calls; Text uses text-shaped tool calls."/>
               </ui:VisualElement>
               <ui:VisualElement name="llmunity-status-container"/>
               <ui:HelpBox name="llmunity-auto-hint" message-type="Info" class="coreai-dynamic"/>
@@ -184,7 +196,7 @@
                                  tooltip="0 = automatic from context window. When set, caps the verbatim tail to this many estimated tokens; older lines roll into the summary when summarization is on."/>
               <uie:PropertyField binding-path="conversationRolledSummaryMaxTokens"
                                  label="Max rolled summary (tokens)"
-                                 tooltip="0 = unlimited. When set, truncates the persisted rolling summary to roughly this many estimated tokens after each rollup."/>
+                                 tooltip="0 = no explicit cap on the stored summary; the request copy still fits the conversation budget. Positive values cap persisted summary tokens after each rollup."/>
               <uie:PropertyField binding-path="conversationCompactionTriggerRatio"
                                  label="Compaction trigger ratio"
                                  tooltip="Roadmap §2. Summarize older turns only when estimated history tokens reach this fraction of the history budget. Invalid values fall back to the CoreAI default."/>
@@ -216,15 +228,19 @@
               <uie:PropertyField name="temperature-field" binding-path="temperature" label="Temperature"
                                  tooltip="Sampling temperature (0.0 = deterministic, 2.0 = creative). Used only when temperature overriding is enabled."/>
 
+              <uie:PropertyField binding-path="reasoningEffort" label="Reasoning Effort"
+                                 tooltip="Typed primary reasoning effort. Default preserves legacy controls and provider defaults."/>
+              <uie:PropertyField binding-path="reasoningDialect" label="Reasoning Dialect"
+                                 tooltip="Provider reasoning wire format. Auto resolves from the endpoint; LLMUnity uses Qwen Template."/>
               <uie:PropertyField binding-path="reasoningMode" label="Reasoning Mode"
-                                 tooltip="Provider Default sends no reasoning controls. Disabled/Enabled sends provider-specific thinking controls for compatible HTTP APIs and LLMUnity."/>
+                                 tooltip="Legacy controls used when typed effort is Default. Provider Default omits legacy controls; Disabled/Enabled maps to the selected provider dialect."/>
               <uie:PropertyField binding-path="thinkingBudgetTokens" label="Thinking Budget Tokens"
                                  tooltip="Optional provider-specific thinking budget. 0 = omit."/>
               <uie:PropertyField binding-path="extraBodyJson" label="Extra Body JSON"
                                  tooltip="Optional JSON object merged into OpenAI-compatible HTTP request bodies. Empty = provider default."/>
 
               <uie:PropertyField binding-path="enableMaxTokensOverriding" label="Override Max Output Tokens"
-                                 tooltip="When enabled, the Max Output Tokens value below caps completions (max_tokens on HTTP, numPredict on LLMUnity). When disabled, no output cap is sent and the provider decides."/>
+                                 tooltip="When enabled, the Max Output Tokens value below caps completions (max_completion_tokens for the OpenAi dialect; max_tokens otherwise). When disabled, no output cap is sent and the provider decides."/>
               <uie:PropertyField name="max-tokens-field" binding-path="maxTokens" label="Max Output Tokens"
                                  tooltip="Global max output tokens for HTTP API and LLMUnity. Per-call AiTaskRequest.MaxOutputTokens and per-request LlmCompletionRequest values take priority. Used only when the override is enabled."/>
               <uie:PropertyField binding-path="enableContextWindowOverriding" label="Override Context Window"
@@ -241,6 +257,8 @@
                                  tooltip="Maximum Lua repair attempts for the Programmer role."/>
               <uie:PropertyField binding-path="maxToolCallRetries" label="Tool Call Retries"
                                  tooltip="Maximum consecutive failed tool calls before stopping."/>
+              <uie:PropertyField binding-path="maxToolCallRoundtrips" label="Max Tool Call Roundtrips"
+                                 tooltip="Global tool-call roundtrip cap. 0 = unlimited. Per-call, per-agent and role policy overrides take priority."/>
               <uie:PropertyField binding-path="maxContextOverflowRetries" label="Context Overflow Retries"
                                  tooltip="Max bounded retries after a provider context-length-exceeded error; each retry drops ~25% more of the oldest history. 0 disables overflow recovery."/>
             </ui:VisualElement>

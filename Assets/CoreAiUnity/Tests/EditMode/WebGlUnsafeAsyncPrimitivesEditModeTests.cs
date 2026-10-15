@@ -279,11 +279,6 @@ namespace CoreAI.Tests.EditMode
                 RiskMarker + " agent memory/context contour, owned by the open memory-boundary task; it IS " +
                 "constructed in production by ConversationContextManagerFactories"),
 
-            [("Assets/CoreAI/Runtime/Core/Features/AgentMemory/InventoryTool.cs", Primitive.ConfigureAwaitFalse)] = new(
-                Claim.RiskAcceptedNotEnforced,
-                RiskMarker + " tool body of the same class as execute_lua before 7.3.1; fixed after the " +
-                "LuaTool pattern (drop ConfigureAwait(false) + MeaiToolTaskBridge.Publish at the MEAI border)"),
-
             [("Assets/CoreAI/Runtime/Core/Features/AgentMemory/MemoryTool.cs", Primitive.ConfigureAwaitFalse)] = new(
                 Claim.RiskAcceptedNotEnforced,
                 RiskMarker + " tool body of the same class as execute_lua before 7.3.1; fixed after the " +

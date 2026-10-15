@@ -56,13 +56,16 @@ product; your game logic stays yours.
    https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAI
    https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAiUnity
    ```
-2. **Dependencies:** `Microsoft.Extensions.AI` through [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity),
-   then `CoreAI → Setup → Install Git Dependencies` (VContainer / MessagePipe / UniTask, plus LLMUnity
-   for local models — drop that entry if you only use an HTTP API). Full walkthrough, including the
+2. **Dependencies:** `Microsoft.Extensions.AI` 9.10.2 through [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity)
+   (10.x cannot load under Unity), then `CoreAI → Setup → Install Git Dependencies` (VContainer /
+   MessagePipe / UniTask, plus LLMUnity for local models — if you only use an HTTP API, remove it again
+   with `CoreAI → Setup → Modules → LLMUnity → Remove package`). Full walkthrough, including the
    manual-DLL path: **[INSTALL.md](INSTALL.md)**.
 3. **Scene:** `CoreAI → Setup → Create Chat Demo Scene`.
-4. **Backend:** `CoreAI → Settings` — a local GGUF via LLMUnity, or any OpenAI-compatible endpoint
-   (LM Studio, Ollama, vLLM, a hosted provider, or your own proxy).
+4. **Backend:** turn on provider-backed execution with `CoreAI → Setup → Modules → LLM Providers →
+   Enable Providers` (the `COREAI_LLM` define; without it the scene runs on scripted/stub clients), then
+   pick the backend in `CoreAI → Settings` — a local GGUF via LLMUnity, or any OpenAI-compatible
+   endpoint (LM Studio, Ollama, vLLM, a hosted provider, or your own proxy).
 5. **Press Play and type.**
 
 Then, from any script:
@@ -126,8 +129,8 @@ exposes several functions), or wrap a delegate:
 checks before the tool body runs, retry-with-feedback, tool-name repair (`MEMORY` → `memory`), a
 result-size cap, and bounded parallelism. Built-ins: `memory`, `game_config`, `game_state`,
 `get_inventory`, `wait`, `read_skill`, `call_skill_tool`, `manage_skills` (core); `world_command`,
-`component_command`, `scene_tool`, `camera` (Unity); `execute_lua`, `manage_mods` (Mods). A
-multi-function tool such as `camera` reaches the model as its functions (`camera_capture`,
+`component_command`, `scene_tool`, `camera` (Unity); `execute_lua`, `manage_mods`, `get_mod_logs`,
+`save_world`, `load_world`, `list_autosaves`, `load_autosave` (Mods). A multi-function tool such as `camera` reaches the model as its functions (`camera_capture`,
 `screenshot`, `camera_look`, `camera_list`), and those are the names the model calls.
 
 **Skills.** A skill is a named group of tools plus instructions that may span several documents. The
@@ -323,8 +326,9 @@ be visible while `Ok` is false — a non-empty string is never treated as proof 
 
 CoreAI ships a benchmark that scores how well an LLM builds and changes a game by driving real
 `execute_lua` and `world_command` tools — 0–100 across eight scenario groups (G1–G8), against any
-OpenAI-compatible endpoint. The current suite is **v1.8**; the table below is the historical **suite
-v1.7** frontier sweep (benchmark v2 prompts), and v1.8 scores are not mixed with it.
+OpenAI-compatible endpoint. The current suite is **v2.0**, which adds an extreme tier (one very hard
+scenario per group except G6); its results are pending. The table below is the historical **suite
+v1.7** frontier sweep (benchmark v2 prompts), and later scores are not mixed with it.
 
 <img src="Docs/Images/benchmark_v2_frontier.png" alt="CoreAI Game-Creation Benchmark v2 — top-tier frontier-model comparison ranked by suite score" width="900">
 
@@ -378,9 +382,9 @@ multi-agent workflows, chat history and NPC dialogue. Results vary by build, qua
 Unity → Window → General → Test Runner
   ├── EditMode  — large deterministic suite, no real LLM: prompts, streaming, tools, skills,
   │               memory scopes, Lua sandbox, rate limits, WebGL async guards, architecture fitness
-  └── PlayMode  — needs a configured HTTP or local GGUF backend
-       ├── FastNoLlm/       — stubs: skill pipeline, catalog injection, meta-tool registration
-       └── LlmVerification/ — real model: tool discovery, resilience, benchmark
+  └── PlayMode
+       ├── FastNoLlm/       — stubs, no backend: skill pipeline, catalog injection, meta-tool registration
+       └── LlmVerification/ — needs a configured HTTP or local GGUF backend: tool discovery, resilience
 ```
 
 Without Unity at all:
@@ -390,10 +394,11 @@ dotnet test tools/portable/Tests/CoreAI.Portable.Tests.csproj -c Release
 ```
 
 It runs as the CI job `portable-core` on every push and must finish with 0 failures. The full Unity
-EditMode suite is much larger (~4,200 executed cases in the full profile) but **profile-dependent** — `COREAI_LLM`, `COREAI_LUA` and Hub
-change which assemblies compile at all. Compare the *number of executed cases* between runs, not just
+EditMode suite is much larger (about 6,700 cases in the full profile; 6,753 in the 7.50.2 run) but
+**profile-dependent** — `COREAI_LLM`, `COREAI_LUA` and Hub change which assemblies compile at all. Compare the *number of executed cases* between runs, not just
 the colour: a suite that failed to compile also reports green.
 
+The game-creation benchmark scenarios live in their own package ([CoreAIBenchmark](Assets/CoreAIBenchmark/README.md)).
 Test-writing rules: [ARCHITECTURE §Test Integrity Rule](Assets/CoreAiUnity/Docs/ARCHITECTURE.md) and
 [Tests/README.md](Assets/CoreAiUnity/Tests/README.md).
 
@@ -413,10 +418,12 @@ All documentation is English. Entry points: **[Docs/README.md](Docs/README.md)**
 | Chat UI and streaming | [README_CHAT](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md) · [STREAMING_ARCHITECTURE](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) |
 | Memory, context budget, compaction | [MemorySystem](Assets/CoreAiUnity/Docs/MemorySystem.md) · [ARCHITECTURE](Assets/CoreAiUnity/Docs/ARCHITECTURE.md) |
 | Endpoints, profiles, per-role routing | [LLM_ROUTING](Assets/CoreAI/Docs/LLM_ROUTING.md) · [RUNTIME_BACKEND_SWITCHING](Assets/CoreAiUnity/Docs/RUNTIME_BACKEND_SWITCHING.md) |
-| Lua modding and its sandbox | [LUA_GAME_API](Assets/CoreAI/Docs/LUA_GAME_API.md) · [LUA_SANDBOX_SECURITY](Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md) · [RBX_API](Assets/CoreAI/Docs/RBX_API.md) |
+| Lua modding and its sandbox | [Mods package](Assets/CoreAIMods/README.md) · [LUA_GAME_API](Assets/CoreAI/Docs/LUA_GAME_API.md) · [LUA_SANDBOX_SECURITY](Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md) · [RBX_API](Assets/CoreAI/Docs/RBX_API.md) |
 | Drive a running game from Claude Code | [CoreAI MCP](Assets/CoreAIMcp/README.md) |
+| Hub window, online worlds | [CoreAI Hub](Assets/CoreAIHub/README.md) · [CoreAI Mirror](Assets/CoreAIMirror/README.md) |
+| Runnable demo scenes | [CoreAI.Demos](Assets/CoreAI.Demos/README.md) |
 | Embed as a DLL | [tools/portable](tools/portable/README.md) · [.NET sample](examples/dotnet/README.md) |
-| Codebase map, PR checklist | [DEVELOPER_GUIDE](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md) · [DGF_SPEC](Assets/CoreAiUnity/Docs/DGF_SPEC.md) |
+| Codebase map, PR checklist | [DEVELOPER_GUIDE](Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md) · [DGF_SPEC](Assets/CoreAiUnity/Docs/DGF_SPEC.md) · [CONTRIBUTING](CONTRIBUTING.md) |
 | When it breaks | [TROUBLESHOOTING](Assets/CoreAiUnity/Docs/TROUBLESHOOTING.md) · [KNOWN_ISSUES](Assets/CoreAiUnity/Docs/KNOWN_ISSUES.md) |
 | Where this is going | [ROADMAP](Docs/ROADMAP.md) |
 

@@ -66,19 +66,27 @@ MEAI → `AIFunction` details: [`MEAI_TOOL_CALLING.md`](MEAI_TOOL_CALLING.md). R
 
 ---
 
-## 6. Pre-flight estimate: current heuristic & planned API calibration (TODO)
+## 6. Pre-flight estimates and calibration
 
-Today the only pre-flight estimator is **`HeuristicTokenEstimator`** (`tokens ≈ (chars+3)/4`), used by
-`DefaultContextBudgetPolicy` to decide what fits before the call. It is a **rough approximation**, not the
-provider's tokenizer — and `chars/4` under-counts **Cyrillic/CJK** (≈ 2.5–3 chars/token), so non-Latin prompts
-look cheaper than they are. The context window is still measured in **tokens** (text is estimated first, then
-compared to `MaxContextTokens`); it is **not** measured in characters.
+The context budget (`DefaultContextBudgetPolicy`) estimates text **before** the call and compares the result
+with `MaxContextTokens`; the window is measured in **tokens**, not characters.
 
-**Planned:** calibrate the chars→tokens ratio from the real `usage.prompt_tokens` the provider already returns
-(§1–§2), keeping the heuristic as a pre-flight fallback only. There is no local tokenizer on WebGL/IL2CPP, so
-post-hoc calibration from `usage` is the realistic accuracy path. Tracked in
-[`CONTEXT_MANAGEMENT_ROADMAP.md`](../../../dev-docs/CONTEXT_MANAGEMENT_ROADMAP.md) → *Token accounting from
-the API* and root `TODO.md` → `[R5] Summarization & context-overflow`.
+- **`CalibratingTokenEstimator`** — the estimator the Unity installer registers as `ITokenEstimator`. It
+  weights each character by script (0.25 tokens per Latin character, 0.4 per Cyrillic/CJK character) and
+  multiplies by a calibration scale. After each orchestrated turn `AiOrchestrator` feeds it the provider's
+  real `usage.prompt_tokens` (§1–§2); the scale moves toward the observed ratio and stays within 0.5–2.0.
+  Calibration is on by default (`ICoreAISettings.EnableTokenCalibration`) and keyed by
+  `ICoreAISettings.TokenCalibrationModelKey`. On Unity the scale persists in
+  `persistentDataPath/CoreAI/TokenCalibration/scales.json` (`FileTokenCalibrationStore`); WebGL and plain
+  .NET hosts use `NullTokenCalibrationStore` unless they supply their own `ITokenCalibrationStore`.
+- **`HeuristicTokenEstimator`** (`tokens ≈ (chars+3)/4`) — the fallback when no estimator is supplied
+  (for example an `AiOrchestrator` built without one). It under-counts Cyrillic/CJK text.
+- **`BpeTokenCounter`** — exact counts for OpenAI-family encodings (`cl100k_base`, `o200k_base`) when the
+  host supplies the tiktoken rank files through `IBpeRanksProvider`; wrap it in `TokenCounterEstimatorAdapter`
+  to use it as the `ITokenEstimator`. CoreAI ships no rank data and does not wire it by default; without data
+  it falls back to `CalibratingTokenEstimator`.
+
+All of these are estimates for budgeting. For quotas and accounting, use the provider's `usage` (§1).
 
 ---
 

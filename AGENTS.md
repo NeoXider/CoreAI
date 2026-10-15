@@ -39,11 +39,15 @@ player-hosted co-op game, a dedicated-server game, or an AI layer embedded into 
 - **No audit reports live in the repo** — findings become `TODO.md` items; report files get deleted.
 - **Releases**: run `python tools/bump_version.py <version>` — it moves ALL SEVEN `package.json` in
   lockstep (`com.neoxider.coreai`, `coreaiunity`, `coreaimods`, `coreaihub`, `coreaibenchmark`,
-  `coreaimcp`, `coreaimirror`) plus `McpServerInfo.Version`, which is the one a hand-edit forgets. Changelog entries go
+  `coreaimcp`, `coreaimirror`) plus `McpServerInfo.Version`, which is the one a hand-edit forgets, and the
+  release lines in `Docs/ROADMAP.md` and the Developer Guide footer. Changelog entries go
   in the only two changelogs: `Assets/CoreAI/CHANGELOG.md` (core + mods) and
   `Assets/CoreAiUnity/CHANGELOG.md` (host).
 - **Commits**: NEVER add `Co-Authored-By` or any AI-attribution trailers.
 - **TODO.md** is the living priority tracker; every fix wave updates it.
+- **Docs placement**: user documentation (`Docs/`, package READMEs, package `Docs/` folders) and developer
+  documents never mix. Plans, backlog, research, process and release notes go in `dev-docs/` (indexed in
+  `dev-docs/README.md`). Each package has one README as its entry point.
 - Every bug fix ships with a regression test; every feature ships with tests and docs.
 - **Language: English for all prose, and it is enforced.** READMEs, `Docs/`, package docs,
   `TODO.md`/`PLAN.md` additions, code comments (`///` XML docs, `// WHY:`), test names, assertion

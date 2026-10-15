@@ -53,6 +53,8 @@ namespace CoreAI.Ai
         private bool _persistChatHistory;
         private int _maxChatHistoryMessages = 30;
         private float? _temperature;
+        private LlmReasoningOptions? _reasoning;
+        private LlmSamplingOptions _sampling;
         private int? _maxOutputTokens;
         private int? _maxToolCallRoundtrips;
         private string _llmProfileId = "";
@@ -94,7 +96,7 @@ namespace CoreAI.Ai
         /// <para>This means the literal string you pass here is <i>not</i> the full prompt the model sees;
         /// it is concatenated with the universal prefix and the role base prompt. To inspect the final
         /// composed prompt at runtime, enable <c>logLlmInput</c> on <c>CoreAISettingsAsset</c> or read
-        /// <c>AgentTurnTrace.SystemPrompt</c>.</para>
+        /// <c>AgentTurnTrace.SystemPromptPreview</c>.</para>
         /// </remarks>
         public AgentBuilder WithSystemPrompt(string prompt, SystemPromptWriteMode mode = SystemPromptWriteMode.Replace)
         {
@@ -364,11 +366,25 @@ namespace CoreAI.Ai
         /// Assigns the preferred sampling temperature for requests issued by this agent.
         /// </summary>
         /// <remarks>
-        /// The value is applied only when the active settings allow temperature overrides.
+        /// Per-call temperature takes precedence; this value overrides endpoint and global defaults.
         /// </remarks>
         public AgentBuilder WithTemperature(float temperature)
         {
             _temperature = temperature;
+            return this;
+        }
+
+        /// <summary>Sets reasoning overrides for this agent. Default effort inherits endpoint settings.</summary>
+        public AgentBuilder WithReasoning(LlmReasoningEffort effort, int? budgetTokens = null)
+        {
+            _reasoning = new LlmReasoningOptions(effort, budgetTokens);
+            return this;
+        }
+
+        /// <summary>Sets sampling overrides for this agent; null clears the overrides.</summary>
+        public AgentBuilder WithSampling(LlmSamplingOptions sampling)
+        {
+            _sampling = sampling;
             return this;
         }
 
@@ -570,6 +586,8 @@ namespace CoreAI.Ai
                 PersistChatHistoryBetweenSessions = _persistChatHistory,
                 MaxChatHistoryMessages = _maxChatHistoryMessages,
                 Temperature = _temperature,
+                Reasoning = _reasoning,
+                Sampling = _sampling,
                 MaxOutputTokens = _maxOutputTokens,
                 MaxToolCallRoundtrips = _maxToolCallRoundtrips,
                 LlmProfileId = _llmProfileId,
@@ -714,6 +732,8 @@ namespace CoreAI.Ai
         public bool PersistChatHistoryBetweenSessions { get; internal set; }
         public int MaxChatHistoryMessages { get; internal set; }
         public float? Temperature { get; internal set; }
+        public LlmReasoningOptions? Reasoning { get; internal set; }
+        public LlmSamplingOptions Sampling { get; internal set; }
         public int? MaxOutputTokens { get; internal set; }
 
         /// <summary>Preferred runtime LLM routing profile for this agent.</summary>
@@ -863,7 +883,7 @@ namespace CoreAI.Ai
             // WHY: Self-service skills: register catalog context provider + meta-tools.
             // The catalog (name + description per skill) goes into the system prompt.
             // The model calls read_skill(name) to load instructions + tool schemas,
-            // then call_skill_tool(tool_name, args_json) to execute them.
+            // WHY: the model then calls call_skill_tool(tool_name, arguments_json) to execute them.
             // This keeps the model's visible tool count at exactly 2 (+1 for manage_skills when
             // authoring is enabled) regardless of skill count.
             ILlmTool readSkillTool = null;
@@ -938,6 +958,8 @@ namespace CoreAI.Ai
                 MaxOutputTokens = MaxOutputTokens,
                 MaxToolCallRoundtrips = MaxToolCallRoundtrips,
                 Temperature = Temperature,
+                Reasoning = Reasoning,
+                Sampling = Sampling,
                 ToolResultMemory = ToolResultMemory,
                 CompactionTriggerRatio = CompactionTriggerRatio,
                 OverrideUniversalPrefix = OverrideUniversalPrefix,

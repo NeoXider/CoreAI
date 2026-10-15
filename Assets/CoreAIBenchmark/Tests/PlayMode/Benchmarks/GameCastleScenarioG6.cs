@@ -8,15 +8,17 @@ using static CoreAI.Tests.PlayMode.Benchmarks.GameCreationBenchmarkHarness;
 namespace CoreAI.Tests.PlayMode.Benchmarks
 {
     /// <summary>
-    /// G6 — free-form visual build. This group gives the model creative freedom and grades leniently,
-    /// while preserving the model-authored positions for the report hero screenshot.
+    /// G6 — free-form visual build. The model composes a whole scene with creative freedom, the grade
+    /// measures what was built, and the model-authored positions are kept for the report hero screenshot.
     /// <para>
-    /// What the grader measures since the move to the Roblox API (7.5.0): part count, distinct names,
-    /// build volume, the number of distinct <c>Enum.Material</c> values and of <c>Enum.PartType</c>
-    /// shapes. It does NOT measure composition, colour or whether the result reads as a castle — 40
-    /// parts of 20 materials heaped at the origin score the same as a castle. The pre-7.5.0
-    /// <c>world_command</c> grader scored castle signals (towers/walls/gate/keep by position), so G6
-    /// scores across that change are not comparable; the leaderboard's v1.7 G6 column is the old build.
+    /// The grade reads every part back through the world's Lua surface (<see cref="G6BuildAnalysis"/>)
+    /// and scores, besides tool hygiene, part count, names, build volume, materials and shapes: the
+    /// castle's measured structure — an enclosed open courtyard, a ground-level gate, towers above the
+    /// wall crest, a free-standing keep, roofs, objects inside and beyond the walls, spread over the
+    /// area — and construction quality — grounding, duplicates, z-fighting, hidden and squashed parts.
+    /// A heap of parts or a bare ring of walls scores clearly below a coherent castle. A
+    /// COREAI_BENCHMARK_FREEBUILD_SUBJECT build is judged only on the subject-neutral signals. Colour is
+    /// not scored. Earlier G6 grades (part and variety counts only) are not comparable with this one.
     /// </para>
     /// </summary>
     internal static class GameFreeBuildScenariosG6
@@ -138,12 +140,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             protected static void AddToolHygiene(ScenarioGrading g, BenchmarkEnvironment env, RunObservation run)
             {
-                g.Add("used_tools", "issued at least one tool call", 10, run.ToolCalls >= 1,
+                g.Add("used_tools", "issued at least one tool call", 4, run.ToolCalls >= 1,
                     true,
-                    dimension: BenchmarkDimension.ToolCorrectness);
+                    dimension: BenchmarkDimension.ToolCorrectness, detail: $"{run.ToolCalls} calls");
                 // WHY: require at least one tool call so a DO-NOTHING run cannot bank these points vacuously
                 // (zero calls trivially has zero failures/invalid commands). "Clean" must mean "acted cleanly".
-                g.AddToolErrorCheckpoint("clean_tools", "no failed tool calls", 10,
+                g.AddToolErrorCheckpoint("clean_tools", "no failed tool calls", 4,
                     run.ToolCalls >= 1 && run.FailedToolCalls == 0,
                     scoresFailedToolCalls: true, scoresInvalidCommands: false,
                     detail: $"{run.ToolCalls} calls, {run.FailedToolCalls} failed");
@@ -165,7 +167,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public override bool ExcludeFromScoring => HasFullCustomPrompt();
 
             public override string WhatItChecks =>
-                "Free-form build: the model designs and places a whole scene from scratch — judged loosely on scale and variety, shown as the report hero image.";
+                "Free-form build: the model designs and places a whole scene from scratch — judged on scale, " +
+                "surfacing, the measured castle structure and construction quality, shown as the report hero image.";
 
             // The visual free-build is overridable with no code change:
             //   COREAI_BENCHMARK_FREEBUILD_PROMPT      — a full custom prompt, used verbatim plus only the
@@ -196,9 +199,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// </summary>
             internal const string TimeBudgetNote = TimeBudgetClockNote + TimeBudgetStopNote;
 
-            // WHY: the default castle goal keeps the suite 1.15 order (clock, castle pacing, stop rule) so its
-            // scored prompt stays byte-identical and existing rows stay comparable; the note is therefore
-            // composed from two parts around the pacing sentence.
+            // WHY: the default castle goal ends with the clock, the castle pacing and the stop rule in that
+            // order, so the note is composed from two parts around the pacing sentence.
             internal const string TimeBudgetClockNote =
                 "\n\nYou are on a time budget. Every execute_lua result carries a TimeLeft note with the " +
                 "seconds remaining.";
@@ -242,12 +244,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     "believably surfaced it is, the better you score.\n\n" + RbxHowTo +
                     $"Aim for AT LEAST 40 parts — ideally 60+ — arranged so the result clearly reads as {subject}. " +
                     "Keep every Name distinct and prefixed with 'Castle' so the grader can find your parts " +
-                    "(for example CastleGround, CastleWallNorth, CastleTowerNE).";
+                    "(for example CastleGround, CastleWallNorth, CastleTowerNE).\n\n" +
+                    "WHAT IS MEASURED — besides the construction rules above, the grader maps the build from " +
+                    "above: the parts standing 2 or more studs above the ground must cover at least 1500 " +
+                    "square studs and span at least 48 studs in both x and z; the build must rise at least 16 " +
+                    "studs above the ground; and it must consist of at least 6 separate objects rather than " +
+                    "one heap, where an object is a group of touching parts standing on the ground and flat " +
+                    "slabs (ground, floors, roads, water) do not count.";
             }
 
             /// <summary>
             /// The Roblox-API contract every G6 goal shares: how to spawn a Part, the shapes that exist,
-            /// the materials worth using and the build volume the hero camera frames.
+            /// the materials worth using, the build volume the hero camera frames and the construction rules
+            /// the geometry grade checks.
             /// <para>
             /// Every claim here is checked against the runtime rather than Roblox: the property list is
             /// the BasePart write surface of LuaCsRbxInstanceBindings (anything else throws "is not a
@@ -288,7 +297,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "floors and slabs; Cylinder for round towers, pillars, wells, chimneys and bars (a Cylinder " +
                 "runs along X, so a vertical drum needs CFrame.Angles(0, 0, math.rad(90))); Wedge for " +
                 "gabled roofs, ramps and stairs; CornerWedge for cone roof quadrants and corner braces; " +
-                "Ball for domes, finials and lamps.\n\n" +
+                "Ball for domes, finials and lamps. Every shape is stretched to fill its Size box, so keep " +
+                "Size.Y equal to Size.Z on a Cylinder and all three sides equal on a Ball, or it renders as " +
+                "a squashed oval.\n\n" +
                 "MATERIALS — choose what each surface would really be. Available Enum.Material values " +
                 "include Cobblestone, Brick, Slate, Limestone, Sandstone, Granite, Basalt, Rock, Concrete, " +
                 "Marble, Plaster, Pavement, Pebble, CeramicTiles, ClayRoofTiles, RoofShingles, Wood, " +
@@ -303,7 +314,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "strong colours only where the colour IS the surface — Plastic, SmoothPlastic, Neon, " +
                 "Fabric, Carpet, Glass — for banners, lamps, flags and props.\n\n" +
                 "VOLUME — keep every part within x and z of -64..64 studs and y of 0..96 studs so the whole " +
-                "scene fits in one screenshot. Ground sits at y = 0.\n\n";
+                "scene fits in one screenshot. Ground sits at y = 0.\n\n" +
+                "CONSTRUCTION — the grader reads every part back and checks how it is built: at least 95% " +
+                "of parts must rest on the ground (y = 0) or touch, within half a stud, a part that does — " +
+                "nothing hovers, a roof sits on its walls and a canopy on its posts; no two parts may repeat " +
+                "the same shape, size and placement; at most 10% of parts may have a face lying flush in the " +
+                "same plane as a face of an overlapping Block that faces the same way, because it flickers " +
+                "(where two walls overlap at a corner, make one taller or end it at the other's face); at " +
+                "most 5% may sit entirely inside an opaque Block or be thinner than 0.05 studs; and at most " +
+                "5% may be squashed round shapes.\n\n";
 
             private const string CastleGoal =
                 "Build the most impressive castle you can with the Roblox API. This is a showcase of your 3D " +
@@ -317,10 +336,24 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 "continues past the walls — outbuildings, gardens, tents, trees, rocks, fences. The area " +
                 "BEHIND and AROUND the castle should not be empty. Uneven, asymmetric, hand-placed layouts " +
                 "read as more real than a perfect grid.\n\n" +
-                "Depth and detail are what score here: aim for AT LEAST 40 parts, ideally 60+, with at least " +
-                "12 different Enum.Material values and all five Enum.PartType shapes. Name every part " +
-                "distinctly and start every Name with 'Castle' (CastleGround, CastleTowerNE, CastleGate, ...) " +
-                "so the grader can find them.";
+                "WHAT IS MEASURED — besides the construction rules above, the grader maps the castle from " +
+                "above and checks: curtain walls standing on the ground (at least 5 studs tall and 1.5 studs " +
+                "thick, their base within 3 studs of the ground) that enclose at least 400 square studs of " +
+                "open courtyard, ground nothing taller than 2.5 studs stands on; a real gate, an opening " +
+                "through the curtain at ground level 3 to 16 studs wide (an arch or lintel above it is fine; " +
+                "a door, portcullis bars or a drawbridge thinner than 1.5 studs do not close it); towers " +
+                "touching the curtain, at least 4 of them, each at least 6 by 6 studs and rising at least 4 " +
+                "studs above the wall crest; a keep standing free in the courtyard, at least 8 studs in from " +
+                "the outer face of the walls, with a footprint of at least 36 square studs and at least as " +
+                "tall as the walls; at least 3 towers or buildings capped by Wedge, CornerWedge or Ball " +
+                "roofs; at least 5 separate objects inside the walls (the keep counts as one) and at least 4 " +
+                "beyond them, where an object is a group of touching parts standing on the ground and flat " +
+                "slabs (ground, floors, roads, moats) do not count; and a castle spread over the area — the " +
+                "parts standing 2 or more studs above the ground cover at least 1500 square studs and span " +
+                "at least 48 studs in both x and z. Depth and detail score too: aim for AT LEAST 40 parts, " +
+                "ideally 60+, with at least 12 different Enum.Material values and all five Enum.PartType " +
+                "shapes. Name every part distinctly and start every Name with 'Castle' (CastleGround, " +
+                "CastleTowerNE, CastleGate, ...) so the grader can find them.";
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
@@ -333,41 +366,79 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     ? env.RbxWorld.Measure()
                     : default;
                 bool genericFreeBuild = IsCustomFreeBuild();
+                IReadOnlyList<string> materials = scene.Materials ?? System.Array.Empty<string>();
+                IReadOnlyList<string> shapes = scene.Shapes ?? System.Array.Empty<string>();
 
                 g.Add("substantial_scene",
                     genericFreeBuild ? "built at least 40 scene parts" : "built at least 40 castle parts",
-                    genericFreeBuild ? 20 : 16, scene.Parts >= 40, true,
+                    4, scene.Parts >= 40, true,
                     dimension: BenchmarkDimension.TaskCompletion, detail: $"{scene.Parts} parts in the world");
-                g.Add("distinct_named_pieces", "gave every part a distinct name", 10,
+                g.Add("scene_depth", "built at least 60 parts", 2,
+                    scene.Parts >= 60,
+                    dimension: BenchmarkDimension.TaskCompletion, detail: $"{scene.Parts} parts");
+                g.Add("distinct_named_pieces", "gave every part a distinct name", 2,
                     scene.DistinctNames >= 20,
                     dimension: BenchmarkDimension.ToolCorrectness, detail: $"{scene.DistinctNames} distinct names");
-                g.Add("within_build_volume", "kept parts inside the build volume", 10,
+                g.Add("within_build_volume", "kept parts inside the build volume", 4,
                     scene.Parts >= 1 && scene.OutOfBounds == 0, true,
                     dimension: BenchmarkDimension.InstructionAdherence,
                     detail: scene.OutOfBounds == 0 ? "all parts in bounds" : $"{scene.OutOfBounds} out of bounds");
-
-                // The two checkpoints this scenario exists for: real materials and the full shape set.
                 g.Add("material_variety", "surfaced the scene with at least 12 different Enum.Material values",
-                    20, scene.Materials.Count >= 12,
+                    5, materials.Count >= 12,
                     dimension: BenchmarkDimension.TaskCompletion,
-                    detail: $"{scene.Materials.Count} materials: {string.Join(",", scene.Materials)}");
-                g.Add("material_breadth", "went beyond a couple of stone-and-wood defaults", 8,
-                    scene.Materials.Count >= 20,
+                    detail: $"{materials.Count} materials: {string.Join(",", materials)}");
+                g.Add("shape_variety", "used all five Enum.PartType shapes", 5,
+                    shapes.Count >= 5,
                     dimension: BenchmarkDimension.TaskCompletion,
-                    detail: $"{scene.Materials.Count} materials");
-                g.Add("shape_variety", "used all five Enum.PartType shapes", 20,
-                    scene.Shapes.Count >= 5,
+                    detail: $"{shapes.Count} shapes: {string.Join(",", shapes)}");
+                g.Add("shape_beyond_blocks", "did not build out of blocks alone", 2,
+                    shapes.Count >= 3,
                     dimension: BenchmarkDimension.TaskCompletion,
-                    detail: $"{scene.Shapes.Count} shapes: {string.Join(",", scene.Shapes)}");
-                g.Add("shape_beyond_blocks", "did not build out of blocks alone", 8,
-                    scene.Shapes.Count >= 3,
-                    dimension: BenchmarkDimension.TaskCompletion,
-                    detail: $"{scene.Shapes.Count} shapes");
-                g.Add("scene_depth", "kept building past a bare wall ring", 8,
-                    scene.Parts >= 60,
-                    dimension: BenchmarkDimension.TaskCompletion, detail: $"{scene.Parts} parts");
+                    detail: $"{shapes.Count} shapes");
+
+                // WHY: composition and construction are measured from the parts' geometry, so a heap of
+                // varied parts or a bare ring of walls no longer scores like a castle.
+                G6BuildMetrics geometry = ReadGeometry(env, scene, out string readNote);
+                foreach (G6Check check in G6BuildAnalysis.Checks(geometry, !genericFreeBuild))
+                {
+                    g.Add(check.Id, check.Description, check.Weight, check.Passed,
+                        dimension: check.Adherence
+                            ? BenchmarkDimension.InstructionAdherence
+                            : BenchmarkDimension.TaskCompletion,
+                        detail: readNote == null ? check.Detail : check.Detail + "; " + readNote);
+                    readNote = null;
+                }
 
                 return g;
+            }
+
+            /// <summary>
+            /// Reads the built parts back for the geometry checkpoints. Nothing built measures as an empty
+            /// scene; a world that holds parts but cannot be read back is a harness fault and throws, so
+            /// the run is attributed to the framework instead of failing the model's geometry checkpoints.
+            /// </summary>
+            private static G6BuildMetrics ReadGeometry(BenchmarkEnvironment env, RbxBenchmarkWorld.Snapshot scene,
+                out string readNote)
+            {
+                readNote = null;
+                if (!env.HasRbxWorld || scene.Parts == 0)
+                {
+                    return G6BuildAnalysis.Analyze(new List<G6Part>());
+                }
+
+                List<G6Part> parts = G6BuildAnalysis.ReadParts(env.RbxWorld.TryEvaluateLua,
+                    RbxBenchmarkWorld.BuildPrefix, out int total, out string error);
+                if (parts == null)
+                {
+                    throw new System.InvalidOperationException($"G6 geometry read-back failed: {error}");
+                }
+
+                if (parts.Count < total)
+                {
+                    readNote = $"first {parts.Count} of {total} parts analysed";
+                }
+
+                return G6BuildAnalysis.Analyze(parts);
             }
 
             private static bool HasFullCustomPrompt()

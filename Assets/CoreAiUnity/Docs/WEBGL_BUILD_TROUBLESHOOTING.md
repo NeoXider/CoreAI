@@ -26,13 +26,17 @@ console is error-free, then build. Automated build scripts must poll for this ex
 ## Managed stripping and DI (what is actually verified)
 
 CoreAI ships WebGL as **IL2CPP** with managed stripping level **Medium** and
-`il2cppCodeGeneration = OptimizeSize`, compressed **Brotli** with the JS decompression fallback on —
-hence the `*.unityweb` file names, which a plain static HTTP server can serve as-is.
+`il2cppCodeGeneration = OptimizeSize` (**Faster (smaller) builds**), compressed **Brotli** with the JS
+decompression fallback on — hence the `*.unityweb` file names, which a plain static HTTP server can serve
+as-is. Player settings cannot ship in a package, so set **Managed Stripping Level = Medium** (not High)
+and **IL2CPP Code Generation = Faster (smaller) builds** in your own project.
 
 At that stripping level the VContainer registrations, `RbxWorldHost` instance binding, bundled-mod
 seeding, the Lua VM and mod-driven `Instance.new` part spawning are all **verified working in a real
-WebGL player**. The protection comes from `Assets/CoreAiUnity/link.xml`, which preserves the Lua VM,
-the CoreAI assemblies, the Rbx API assemblies and VContainer.
+WebGL player**. The protection comes from the `link.xml` at the root of `com.neoxider.coreaiunity`
+(`Assets/CoreAiUnity/link.xml`), which preserves the Lua VM, the CoreAI assemblies, the Rbx API
+assemblies and VContainer. Unity picks up package `link.xml` files automatically, so a consumer project
+needs no `link.xml` of its own for CoreAI.
 
 **If DI or reflection resolves types from your own assemblies, add them to your project's own
 `link.xml`** — CoreAI's covers CoreAI's assemblies only. A container that builds in the editor but
@@ -55,7 +59,7 @@ The WebGL toolchain compiles huge generated C files with **clang**. **32-bit** `
 
 1. **Close other heavy apps** (browsers, IDEs on the same drive) and retry; ensure **page file** is not disabled on Windows.
 2. **Player Settings → Publishing Settings → Enable Exceptions** — use **Explicitly Thrown** or **None** instead of **Full** to reduce generated code size where acceptable.
-3. **Managed stripping** — **High** (or at least Medium) in Player Settings to shrink IL2CPP output.
+3. **IL2CPP Code Generation = Faster (smaller) builds** (`OptimizeSize`) and **Managed Stripping Level = Medium** — the verified CoreAI setup above. `OptimizeSize` shrinks the generic-method tables (Lua-CSharp produces many); do not go to **High** stripping, which the CoreAI preserve rules are not verified for.
 4. **Reduce managed code in the WebGL build** — disable optional **assemblies** / define constraints so test-only or Editor-only code is not referenced from player code.
 5. **IL2CPP additional arguments** (Project Settings → Player → Other Settings) — e.g. limit parallel compile jobs to lower peak memory (Unity documents vary by version; search Unity manual for *IL2CPP additional arguments* and *max parallel jobs* for your editor).
 6. **Build on a machine with more free RAM** or use a **CI** agent sized for WebGL IL2CPP.
@@ -73,7 +77,11 @@ Often appears alongside **FileSystemWatcher** stacks while Unity or the OS enume
 
 ## `[CoreAI] WebGL build: temporarily excluded … StreamingAssets`
 
-Comes from **`CoreAIWebGlStreamingAssetsGuard`** (Editor preprocess). It intentionally skips certain StreamingAssets folders for WebGL so the build stays valid. **Informational**, not an error.
+Comes from **`CoreAIWebGlStreamingAssetsGuard`** (Editor preprocess). LLMUnity cannot run in the browser, so the guard moves its StreamingAssets folders (`LlamaLib*`, `LLMUnity*`) out of the WebGL build after LLMUnity's own preprocess and restores them when the build ends (or, after a crashed or cancelled build, on the next domain load or editor quit). **Informational**, not an error.
+
+## `[CoreAI] WebGL build: EnableStreaming is ON but WebGlNativeStreaming is OFF`
+
+A warning from **`CoreAIProductionSettingsValidator`** (build preprocess and **`CoreAI/Validate Production Settings`**). With the fetch bridge off, the player uses `UnityWebRequest`, which cannot deliver SSE incrementally, so chat replies arrive in one block. Turn on **Native SSE (fetch)** (`WebGlNativeStreaming`) under **Advanced Settings → WebGL** on the settings asset, or turn global streaming off on purpose. Transport details and the player tests that verify streaming: [STREAMING_ARCHITECTURE — Transport details](STREAMING_ARCHITECTURE.md#2-transport-details).
 
 ## `[CoreAI] Build aborted: the WebGL template … never sets config.autoSyncPersistentDataPath = true`
 

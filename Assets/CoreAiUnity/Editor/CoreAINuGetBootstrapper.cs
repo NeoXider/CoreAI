@@ -28,7 +28,7 @@ namespace CoreAI.Editor
         private const string MeaiPackageId = "Microsoft.Extensions.AI";
 
         /// <summary>Version pinned by Assets/packages.config and INSTALL.md section 2.</summary>
-        private const string MeaiPackageVersion = "10.7.0";
+        private const string MeaiPackageVersion = "9.10.2";
 
         /// <summary>A type that only exists once the MEAI DLLs are restored.</summary>
         private const string MeaiProbeTypeName = "Microsoft.Extensions.AI.IChatClient";

@@ -29,6 +29,9 @@ namespace CoreAI.Ai
         /// <summary>Total token count.</summary>
         public int TotalTokens { get; set; }
 
+        /// <summary>Provider-reported tokens spent on reasoning.</summary>
+        public int ReasoningTokens { get; set; }
+
         /// <summary>Prompt/input tokens read from a provider cache.</summary>
         public int CacheReadTokens { get; set; }
 
@@ -52,6 +55,7 @@ namespace CoreAI.Ai
             PromptTokens += other.PromptTokens;
             CompletionTokens += other.CompletionTokens;
             TotalTokens += other.TotalTokens;
+            ReasoningTokens += other.ReasoningTokens;
             CacheReadTokens += other.CacheReadTokens;
             CacheWriteTokens += other.CacheWriteTokens;
         }

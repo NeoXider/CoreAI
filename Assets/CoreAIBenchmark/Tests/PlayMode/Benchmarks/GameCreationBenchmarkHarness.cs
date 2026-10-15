@@ -45,6 +45,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             private readonly List<string> _luaChunks = new();
             private readonly string _scenarioId;
             private readonly string _traceIdPrefix;
+            private readonly bool _requireTraceId;
             private int _toolCalls;
             private int _failedToolCalls;
             private int _cameraCalls;
@@ -56,11 +57,17 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// belongs to another run (for example an orphaned task that outlived its cancel grace) and is
             /// ignored. Null or empty disables the trace filter.
             /// </param>
-            internal ScenarioToolCallObserver(string roleId, string scenarioId = "", string traceIdPrefix = null)
+            /// <param name="requireTraceId">
+            /// Also ignores calls without a trace id. Parallel targets share the role id, so an untraced call
+            /// cannot be attributed to this run.
+            /// </param>
+            internal ScenarioToolCallObserver(string roleId, string scenarioId = "", string traceIdPrefix = null,
+                bool requireTraceId = false)
             {
                 _roleId = roleId;
                 _scenarioId = scenarioId;
                 _traceIdPrefix = traceIdPrefix;
+                _requireTraceId = requireTraceId && !string.IsNullOrEmpty(traceIdPrefix);
             }
 
             internal int ToolCalls
@@ -105,6 +112,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // the request trace) falls back to the role filter.
                 if (!string.IsNullOrEmpty(_traceIdPrefix) && !string.IsNullOrEmpty(record.Info.TraceId)
                     && !record.Info.TraceId.StartsWith(_traceIdPrefix, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                if (_requireTraceId && string.IsNullOrEmpty(record.Info.TraceId))
                 {
                     return;
                 }
@@ -612,7 +624,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         {
             public readonly LuaCsSecureEnvironment Sandbox = new();
             public readonly LuaCsApiRegistry Registry = new();
-            public readonly LuaCsLogicSlots LogicSlots = new();
+
+            /// <summary>
+            /// Wall-clock cap of one logic-slot call while grading. The deterministic cap is the
+            /// <see cref="LuaCsLogicSlots.DefaultInvokeMaxSteps"/> (200,000) VM-instruction budget.
+            /// </summary>
+            public const int SlotInvokeTimeoutMs = 5000;
+
+            // WHY: the production 200 ms wall-clock budget made grading depend on machine speed, GC pauses
+            // and parallel targets; a trip uninstalls the slot, so a correct formula could score zero.
+            public readonly LuaCsLogicSlots LogicSlots = new(
+                log: null,
+                invokeTimeoutMs: SlotInvokeTimeoutMs,
+                invokeMaxSteps: LuaCsLogicSlots.DefaultInvokeMaxSteps);
             public int ExecutionCount;
             public int FailedExecutions;
 
@@ -725,17 +749,31 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public int InvalidCommandCount { get; private set; }
             public CoreAiSpawnBatchResult LastSpawnBatchResult { get; private set; }
 
-            /// <summary>Seeds an existing described scene without counting setup as model actions.</summary>
+            /// <summary>
+            /// Seeds an existing described scene at the origin without counting setup as model actions. Use
+            /// <see cref="SeedObject"/> when the scenario describes where the objects stand.
+            /// </summary>
             public void SeedObjects(params string[] names)
             {
                 foreach (string name in names)
                 {
-                    if (!string.IsNullOrWhiteSpace(name))
-                    {
-                        _knownObjectNames.Add(name.Trim());
-                        _objectPositions[name.Trim()] = Vector3.zero;
-                    }
+                    SeedObject(name, Vector3.zero);
                 }
+            }
+
+            /// <summary>
+            /// Seeds one existing object at a world position (metres), so <c>list_objects</c> and the Lua
+            /// <c>coreai_world_pos</c> query report the position the scenario describes.
+            /// </summary>
+            public void SeedObject(string name, Vector3 position)
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    return;
+                }
+
+                _knownObjectNames.Add(name.Trim());
+                _objectPositions[name.Trim()] = position;
             }
 
             public bool TryExecute(ApplyAiGameCommand cmd)
@@ -810,14 +848,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             /// <summary>
-            /// Records a <c>spawn_batch</c> as one <c>spawn</c> per item, named the way the production
-            /// executor (<c>CoreAiWorldCommandExecutor.TrySpawnBatch</c>) names them: <c>item.name</c>,
-            /// else <c>targetName_i</c>, else <c>prefab_i</c>.
+            /// Records a <c>spawn_batch</c> as one <c>spawn</c> per item, resolved exactly as the production
+            /// executor (<c>CoreAiWorldCommandExecutor.TrySpawnBatch</c>) resolves it: at most
+            /// <see cref="CoreAiWorldCommandExecutor.MaxSpawnBatchSize"/> items, a null entry treated as an
+            /// empty item, the name from <c>item.name</c>, else <c>targetName_i</c>, else <c>prefab_i</c>, and
+            /// every field an item omits taken from the batch envelope: prefab, rotation (when the item has
+            /// none), per-axis scale (when the item has none), uniform scale, parent and worldPositionStays.
+            /// The position is always the item's own.
             /// <para>
             /// WHY: the tool schema tells the model "ONE call spawns every item" and the production
             /// executor instantiates each item; recording the batch as a single non-spawn command made
             /// every object in it invisible to <c>Count("spawn")</c> and the spawn graders, so a model
-            /// that took the schema's own hint scored zero for objects it did place.
+            /// that took the schema's own hint scored zero for objects it did place. Ignoring the batch
+            /// defaults likewise graded a different rotation, scale or parent than the one production builds.
             /// </para>
             /// </summary>
             private void RecordSpawnBatch(CoreAiWorldCommandEnvelope env)
@@ -831,20 +874,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     return;
                 }
 
+                int count = Math.Min(items.Length, CoreAiWorldCommandExecutor.MaxSpawnBatchSize);
                 string namePrefix = (env.targetName ?? "").Trim();
-                for (int i = 0; i < items.Length; i++)
+                string defaultPrefab = (env.prefabKeyOrName ?? "").Trim();
+                for (int i = 0; i < count; i++)
                 {
-                    CoreAiSpawnBatchItem item = items[i];
-                    if (item == null)
-                    {
-                        InvalidCommandCount++;
-                        result.Failed++;
-                        continue;
-                    }
-
-                    string prefab = !string.IsNullOrWhiteSpace(item.prefabKey)
-                        ? item.prefabKey.Trim()
-                        : (env.prefabKeyOrName ?? "").Trim();
+                    CoreAiSpawnBatchItem item = items[i] ?? new CoreAiSpawnBatchItem();
+                    string prefab = !string.IsNullOrWhiteSpace(item.prefabKey) ? item.prefabKey.Trim() : defaultPrefab;
                     bool named = !string.IsNullOrWhiteSpace(item.name);
                     if (!named && namePrefix.Length == 0 && prefab.Length == 0)
                     {
@@ -856,34 +892,49 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     string name = named
                         ? item.name.Trim()
                         : namePrefix.Length > 0 ? $"{namePrefix}_{i + 1}" : $"{prefab}_{i + 1}";
+                    string parent = !string.IsNullOrWhiteSpace(item.parent) ? item.parent : env.stringValue;
+                    bool worldPositionStays = item.hasWorldPositionStays
+                        ? item.worldPositionStays
+                        : env.worldPositionStays;
 
-                    bool rotated = item.rx != 0f || item.ry != 0f || item.rz != 0f;
+                    bool itemRotated = item.rx != 0f || item.ry != 0f || item.rz != 0f;
+                    Vector3 euler = itemRotated
+                        ? new Vector3(item.rx, item.ry, item.rz)
+                        : new Vector3(env.fx, env.fy, env.fz);
+                    bool itemAxisScale = item.scaleX > 0f || item.scaleY > 0f || item.scaleZ > 0f;
+                    Vector3 axisScale = itemAxisScale
+                        ? new Vector3(item.scaleX, item.scaleY, item.scaleZ)
+                        : new Vector3(env.scaleX, env.scaleY, env.scaleZ);
+                    float uniformScale = item.scale > 0f ? item.scale : env.floatValue;
+
                     RecordedWorldCommand recorded = new()
                     {
                         Action = "spawn",
                         TargetName = name,
                         PrefabKeyOrName = prefab,
-                        StringValue = item.parent ?? "",
+                        StringValue = parent ?? "",
                         X = item.x,
                         Y = item.y,
                         Z = item.z,
-                        FloatValue = item.scale,
-                        Fx = item.rx,
-                        Fy = item.ry,
-                        Fz = item.rz,
-                        ScaleX = item.scaleX,
-                        ScaleY = item.scaleY,
-                        ScaleZ = item.scaleZ,
-                        WorldPositionStays = item.worldPositionStays,
+                        FloatValue = uniformScale,
+                        Fx = euler.x,
+                        Fy = euler.y,
+                        Fz = euler.z,
+                        ScaleX = axisScale.x,
+                        ScaleY = axisScale.y,
+                        ScaleZ = axisScale.z,
+                        WorldPositionStays = worldPositionStays,
                         HasPosition = true,
-                        HasRotation = rotated,
-                        HasScale = item.scale > 0f || item.scaleX > 0f || item.scaleY > 0f || item.scaleZ > 0f,
+                        HasRotation = euler != Vector3.zero,
+                        HasScale = uniformScale > 0f || axisScale != Vector3.zero,
+                        // WHY: a batch item always carries an explicit position, and these per-axis flags are
+                        // what tells a batch item apart from a single spawn when no tool trace survives.
                         HasX = true,
                         HasY = true,
                         HasZ = true,
-                        HasFx = item.rx != 0f,
-                        HasFy = item.ry != 0f,
-                        HasFz = item.rz != 0f
+                        HasFx = euler.x != 0f,
+                        HasFy = euler.y != 0f,
+                        HasFz = euler.z != 0f
                     };
                     Commands.Add(recorded);
                     _knownObjectNames.Add(name);
@@ -908,11 +959,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         continue;
                     }
 
+                    // WHY: production lists the transform position; a placeholder origin contradicted every
+                    // described scene and every spawn the model had just placed.
+                    Vector3 position = _objectPositions.TryGetValue(name, out Vector3 known) ? known : Vector3.zero;
                     LastListedObjects.Add(new Dictionary<string, object>
                     {
                         { "name", name },
                         { "active", true },
-                        { "position", new float[] { 0f, 0f, 0f } },
+                        { "position", new float[] { position.x, position.y, position.z } },
                         { "tag", "Untagged" },
                         { "layer", 0 },
                         { "childCount", 0 }
@@ -1858,6 +1912,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public virtual bool FreeBuildLayout => false;
 
             /// <summary>
+            /// True when the scenario puts objects into the Unity scene: a visual world, an Rbx world
+            /// (<see cref="BenchmarkEnvironment.RbxWorld"/>), cameras, lights or a screenshot. Parallel targets run
+            /// such scenarios one at a time on the visual lane, because Rbx parts are bound in world space at the
+            /// model's own coordinates and captures change global lighting. Override it to true for any scenario
+            /// that touches <see cref="BenchmarkEnvironment.RbxWorld"/> or <see cref="BenchmarkEnvironment.CameraTool"/>
+            /// without <see cref="CaptureScene"/>.
+            /// </summary>
+            public virtual bool UsesSharedScene => CaptureScene;
+
+            /// <summary>
             /// When true, this run is deliberately excluded from the model's score (<see cref="FailureAttribution.NotGraded"/>) —
             /// still runs, still screenshots, just doesn't feed the aggregate. For a scenario whose prompt
             /// was fully overridden by an operator env var, so the built-in checkpoints no longer describe
@@ -1883,6 +1947,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             /// <summary>Relative difficulty 1 (easiest) .. 5 (hardest). Drives ordering and the UI indicator.</summary>
             public virtual int Difficulty => 3;
+
+            /// <summary>
+            /// Marks the group's extreme-tier scenario. Its results are also aggregated into a separate
+            /// extreme sub-score, which keeps separating frontier models after the regular tier saturates.
+            /// </summary>
+            public virtual bool IsExtreme => false;
 
             /// <summary>Object names the scene SHOULD contain — the screenshot tints these green, others red.</summary>
             public virtual IReadOnlyList<string> ExpectedSceneObjectNames => Array.Empty<string>();
@@ -1980,9 +2050,17 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             AiOrchestrator orch, AiTaskRequest request, CancellationToken cancellationToken,
             Action<string> onError)
         {
+            int chunks = 0;
             await foreach (LlmStreamChunk chunk in orch.RunStreamingAsync(request, cancellationToken)
                                .WithCancellation(cancellationToken))
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                // WHY: a synchronously producing stream must give the main loop time to poll deadlines.
+                if (++chunks % 32 == 0)
+                {
+                    await Task.Yield();
+                }
+
                 // WHY: orchestration can catch a provider exception and surface it only as an error
                 // WHY: chunk. In that case the inner client never reaches its terminal capture record.
                 if (!string.IsNullOrWhiteSpace(chunk?.Error))
@@ -2096,6 +2174,33 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         /// <summary>
+        /// What a parallel multi-target run adds to <see cref="RunScenario"/>. Null keeps the single-model behaviour.
+        /// </summary>
+        public sealed class ScenarioRunContext
+        {
+            /// <summary>Model id the tokenizer estimates with when the report names the target by a label.</summary>
+            public string TokenizerModelId;
+
+            /// <summary>Prefix of this run's log lines, so concurrent targets stay distinguishable.</summary>
+            public string LogPrefix = "[Benchmark]";
+
+            /// <summary>
+            /// Drops lifecycle records without a trace id: every target uses the same role, so an untraced call
+            /// cannot be attributed to this run.
+            /// </summary>
+            public bool RequireTraceId;
+
+            /// <summary>True while other targets run at the same time.</summary>
+            public bool Parallel;
+
+            /// <summary>Requests cancellation for this target's Stop or elapsed suite budget.</summary>
+            public Func<bool> ShouldCancel;
+
+            /// <summary>Maximum wind-down time after cancellation, independent of provider cooperation.</summary>
+            public double CancellationGraceSeconds = CancelGraceSeconds;
+        }
+
+        /// <summary>
         /// Drives one scenario through the model and reports a graded <see cref="ScenarioResult"/> via
         /// <paramref name="onResult"/>. Never throws on model/timeout/fault — it records the failure and
         /// still grades + reports. Coroutine so it can await the model on the PlayMode loop.
@@ -2107,8 +2212,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             ITokenCounter tokenCounter,
             string modelId,
             float timeoutSeconds,
-            Action<ScenarioResult> onResult)
+            Action<ScenarioResult> onResult,
+            ScenarioRunContext context = null)
         {
+            string tokenizerModelId = string.IsNullOrWhiteSpace(context?.TokenizerModelId)
+                ? modelId
+                : context.TokenizerModelId;
+            string logPrefix = context?.LogPrefix ?? "[Benchmark]";
             // Scenario setup is harness territory: a throw here is a Framework failure, not a model one.
             BenchmarkEnvironment env = new(settings, scenario.CaptureScene)
             {
@@ -2140,6 +2250,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
 
                 config = scenario.BuildAgent(env);
+                if (context is { Parallel: true } && env.HasRbxWorld && !scenario.UsesSharedScene)
+                {
+                    Debug.LogWarning($"{logPrefix} {scenario.Id} built an Rbx world without declaring " +
+                                     "UsesSharedScene, so it ran outside the visual lane and may share the " +
+                                     "scene with another target.");
+                }
             }
             catch (Exception ex)
             {
@@ -2161,7 +2277,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             SessionCapturingLlmClient capture = new(client);
             string traceIdPrefix = $"bench-{scenario.Id}-{Guid.NewGuid():N}";
             int turnNumber = 0;
-            ScenarioToolCallObserver toolObserver = new(scenario.RoleId, scenario.Id, traceIdPrefix);
+            ScenarioToolCallObserver toolObserver = new(scenario.RoleId, scenario.Id, traceIdPrefix,
+                context?.RequireTraceId ?? false);
             using IDisposable toolSubscription = CoreAi.SubscribeToolCalls(toolObserver.Record);
             ListSink sink = new();
             AiOrchestrator orch = new(
@@ -2201,302 +2318,322 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 TraceId = $"{traceIdPrefix}-t{++turnNumber}"
             }, cts.Token, error => streamError ??= error);
 
-            Task task = StartTurn(scenario.Goal);
-
-            // Non-throwing wait: poll, cancel on timeout, give cancellation a grace window — never Assert.
-            while (!task.IsCompleted && sw.Elapsed.TotalSeconds < timeoutSeconds)
-            {
-                yield return null;
-            }
-
-            // WHY: a model can end a free build after a few valid calls despite the ten-minute
-            // budget. Continue in the same world, without resetting its scene or its deadline.
-            int previousToolCalls = 0;
-            int continuations = 0;
-            while (scenario.FreeBuildLayout && !scenario.ExcludeFromScoring && task.IsCompleted &&
-                   !task.IsFaulted && !task.IsCanceled && string.IsNullOrEmpty(streamError) &&
-                   CanContinueFreeBuild(Math.Max(capture.ToolCalls, toolObserver.ToolCalls),
-                       previousToolCalls, continuations, sw.Elapsed.TotalSeconds, timeoutSeconds))
-            {
-                previousToolCalls = Math.Max(capture.ToolCalls, toolObserver.ToolCalls);
-                continuations++;
-                int secondsLeft = Math.Max(0, (int)(timeoutSeconds - sw.Elapsed.TotalSeconds));
-                string followUp =
-                    $"Continue improving the scene already in workspace. About {secondsLeft} seconds remain. " +
-                    "Inspect existing parts first, then add missing major structures and details rather than " +
-                    "rebuilding or duplicating them. Use more appropriate materials and all five PartType " +
-                    "shapes; keep every part within the build volume. Use execute_lua and spend the remaining " +
-                    "time on the scene. Finish at least 20 seconds before the deadline.";
-                task = StartTurn(followUp);
-                while (!task.IsCompleted && sw.Elapsed.TotalSeconds < timeoutSeconds)
-                {
-                    yield return null;
-                }
-            }
-
-            if (!task.IsCompleted)
-            {
-                cts.Cancel();
-                double deadline = sw.Elapsed.TotalSeconds + CancelGraceSeconds;
-                while (!task.IsCompleted && sw.Elapsed.TotalSeconds < deadline)
-                {
-                    yield return null;
-                }
-            }
-
-            sw.Stop();
-            obs.LatencyMs = sw.Elapsed.TotalMilliseconds;
-            // WHY: a task that outlived the grace window must not append turns while they are read below.
-            capture.Seal();
-
-            // WHY: Only scenario-budget cancellation after a scene exists ends the build cleanly.
-            // WHY: Earlier provider timeouts are environment failures, not model quality.
-            bool sceneWasBuilt = env.World.Count("spawn") >= 1 || capture.ToolCalls >= 1 ||
-                                 env.World is VisualBenchmarkWorldExecutor { HasRenderableScene: true } ||
-                                 env.HasRbxWorld && env.RbxWorld.Measure().Parts >= 1;
-
-            if (task.IsFaulted)
-            {
-                Exception baseEx = task.Exception?.GetBaseException();
-                bool cancelStop = IsCleanBudgetCancellation(cts.IsCancellationRequested, sceneWasBuilt,
-                    (baseEx is OperationCanceledException or LlmOperationTimeoutException) ||
-                    IsCancellationError(baseEx?.Message));
-                if (!cancelStop)
-                {
-                    obs.Attribution = ClassifyException(baseEx);
-                    obs.Failure = baseEx?.Message ?? "faulted";
-                }
-            }
-            else if (task.IsCanceled || !task.IsCompleted)
-            {
-                // The scenario time budget elapsed and we cancelled the orchestrator. If a scene already
-                // exists, this is a clean stop — grade what was built, no failure/retry.
-                obs.TimedOut = cts.IsCancellationRequested;
-                if (!IsCleanBudgetCancellation(cts.IsCancellationRequested, sceneWasBuilt, true))
-                {
-                    obs.Attribution = FailureAttribution.Environment;
-                    obs.Failure = obs.TimedOut ? "timed out" : "task canceled before scenario deadline";
-                }
-            }
-
-            StringBuilder finalText = new();
-            foreach (ApplyAiGameCommand item in sink.Items)
-            {
-                finalText.Append(item.JsonPayload).Append('\n');
-            }
-
-            obs.FinalText = finalText.ToString();
-            obs.GenerationMs = capture.GenerationMs;
-            obs.Turns = capture.Turns.Count;
-            obs.CapturedTurns = capture.Turns;
-            // WHY: a time-limited streaming turn may execute tools without emitting its terminal
-            // chunk. The global lifecycle records preserve those calls and their failures.
-            obs.ToolCalls = Math.Max(capture.ToolCalls, toolObserver.ToolCalls);
-            // WHY: the lifecycle observer covers failed calls from an unfinished streamed turn.
-            // Max avoids double-counting calls that also reached the terminal client capture.
-            obs.FailedToolCalls = Math.Max(capture.FailedToolCalls, toolObserver.FailedToolCalls);
-            obs.InvalidCommands = env.World.InvalidCommandCount;
-
-            // A mid-build empty/blank response AFTER the model has already built something is the weak
-            // model signalling it is done, not an infrastructure failure: a long unbounded conversation
-            // eventually yields a turn with no tool call and no visible text ("Empty response from LLM").
-            // When a scene already exists (>=1 spawn or >=1 tool call), treat it as a CLEAN STOP — grade
-            // and screenshot what was built, and do NOT trigger the scenario retry. A clearly transient
-            // transport error (HTTP/crash/timeout) still falls through to the Environment branch below.
-            // (sceneWasBuilt is computed above, where the fault/cancel clean-stop also uses it.)
-            string providerError = !string.IsNullOrWhiteSpace(capture.FirstProviderError)
-                ? capture.FirstProviderError
-                : streamError;
-            bool providerFailed = capture.FailedTurnCount > 0 || !string.IsNullOrWhiteSpace(streamError);
-            bool emptyResponseStop = providerFailed
-                                     && IsEmptyResponseError(providerError)
-                                     && !LooksTransient(providerError)
-                                     && sceneWasBuilt;
-
-            // WHY: A cooperative cancellation surfaced as Ok=false is clean only after our scenario deadline.
-            bool cancellationStop = providerFailed &&
-                                    IsCleanBudgetCancellation(cts.IsCancellationRequested, sceneWasBuilt,
-                                        IsCancellationError(providerError));
-
-            // WHY: A provider/model crash returned as a failed result is an environment failure.
-            // Classify it (so it is retried and excluded from the model's score) when the error text looks
-            // transient OR the run produced no usable output at all despite a failed turn.
-            if (!emptyResponseStop && !cancellationStop
-                                   && obs.Attribution == FailureAttribution.None && string.IsNullOrEmpty(obs.Failure)
-                                   && providerFailed
-                                   && (LooksTransient(providerError) || !capture.AnyUsableOutput))
-            {
-                obs.Attribution = FailureAttribution.Environment;
-                obs.Failure = $"provider error: {providerError}";
-            }
-
-            // Grading is harness territory too: protect the suite from a grader bug.
-            ScenarioGrading grading;
+            Task task = null;
             try
             {
-                grading = scenario.Grade(env, obs);
-            }
-            catch (Exception ex)
-            {
-                (env.World as VisualBenchmarkWorldExecutor)?.Cleanup();
-                env.DisposeRbxWorld();
-                onResult?.Invoke(FailedResult(scenario, modelId, FailureAttribution.Framework,
-                    $"grading failed: {ex.Message}"));
-                yield break;
-            }
+                task = StartTurn(scenario.Goal);
 
-            ApplyUnscoredToolErrorPenalties(grading, obs);
-
-            // An incomplete run (timeout/fault) cannot be a perfect build.
-            if (!string.IsNullOrEmpty(obs.Failure))
-            {
-                grading.HardCap = Math.Min(grading.HardCap ?? 100, 60);
-            }
-
-            // Real token usage when the provider reports it; otherwise a labeled BPE estimate. Streaming
-            // local backends (e.g. LM Studio) frequently under-report completion usage on tool-call turns,
-            // which made decode tok/s read as ~0.3; guard against that by never trusting a provider completion
-            // count that falls below a tokenizer estimate of everything the model generated (incl. tool calls).
-            int estCompletion = Math.Max(
-                tokenCounter.CountTokens(capture.CompletionTextForEstimate(), modelId),
-                tokenCounter.CountTokens(toolObserver.CompletionText, modelId));
-            int estPrompt = capture.AnyProviderUsage
-                ? 0
-                : tokenCounter.CountTokens(capture.Turns.Count > 0
-                    ? capture.PromptTextForEstimate()
-                    : scenario.SystemPrompt + "\n" + scenario.Goal, modelId);
-            TokenAccounting tokens = ResolveTokenAccounting(capture, estCompletion, estPrompt);
-            int promptTokens = tokens.PromptTokens;
-            int completionTokens = tokens.CompletionTokens;
-            bool fromProvider = tokens.FromProvider;
-
-            double totalTokens = promptTokens + completionTokens;
-            GoalScore score = GoalScore.Compute(
-                grading.Checkpoints, grading.Penalties, grading.Bonus, grading.HardCap,
-                actualTokens: totalTokens, tokenBudget: scenario.TokenBudget,
-                actualMs: obs.LatencyMs, timeBudgetMs: scenario.TimeBudgetMs);
-
-            // A genuine crash/timeout attribution always wins — ExcludeFromScoring only downgrades a
-            // CLEAN run (obs.Attribution == None) to "ran fine, just not comparable", never masks a
-            // real framework/environment failure.
-            FailureAttribution attribution = obs.Attribution == FailureAttribution.None && scenario.ExcludeFromScoring
-                ? FailureAttribution.NotGraded
-                : obs.Attribution;
-
-            ScenarioResult result = new()
-            {
-                ScenarioId = scenario.Id,
-                ScenarioName = scenario.Name,
-                Group = scenario.Group,
-                ModelId = modelId,
-                Score = score,
-                Attribution = attribution,
-                Checkpoints = grading.Checkpoints,
-                Penalties = grading.Penalties,
-                Turns = obs.Turns,
-                ToolCalls = obs.ToolCalls,
-                FailedToolCalls = obs.FailedToolCalls,
-                InvalidCommands = obs.InvalidCommands,
-                PromptTokens = promptTokens,
-                CompletionTokens = completionTokens,
-                ProviderPromptTokens = capture.AnyProviderUsage ? capture.ProviderPromptTokens : (int?)null,
-                ProviderCompletionTokens = capture.AnyProviderUsage ? capture.ProviderCompletionTokens : (int?)null,
-                // WHY: false when a turn was cut before its usage arrived, so the report labels the total "~".
-                TokensFromProvider = fromProvider,
-                LatencyMs = obs.LatencyMs,
-                GenerationMs = obs.GenerationMs,
-                CostKnown = false,
-                TimedOut = obs.TimedOut,
-                Failure = obs.Failure,
-                SessionTranscript = capture.BuildTranscript(scenario.Goal)
-                    + (string.IsNullOrEmpty(obs.Failure) ? "" : $"\nRUN FAILURE: {obs.Failure}\n"),
-                LuaReplayScript = scenario.Group == "G6"
-                    ? toolObserver.BuildLuaReplayScript(modelId, scenario.Id)
-                    : "",
-                ToolTraceJsonl = toolObserver.ToolTraceJsonl
-            };
-
-            Debug.Log($"[Benchmark] {scenario.Group}/{scenario.Name}: base={score.Base:0.#} " +
-                      $"bonus={score.Bonus:0.#} (eff {score.EfficiencyBonus:0.#}) verdict={score.Classification} " +
-                      $"turns={obs.Turns} tools={obs.ToolCalls} err={obs.FailedToolCalls + obs.InvalidCommands} " +
-                      $"tok={totalTokens:0}{(fromProvider ? "" : "~")} {obs.LatencyMs:0}ms");
-
-            result.WhatItChecks = scenario.WhatItChecks;
-
-            // Capture a real screenshot of the built scene (world scenarios with a graphics device). The
-            // baked header shows the scenario, its score and verdict, so the picture alone says how it did.
-            if (env.World is VisualBenchmarkWorldExecutor vis)
-            {
-                // Capture when anything was built, or when the scenario expected objects (so a total
-                // failure still produces a picture full of "missing" ghosts rather than no picture).
-                if (scenario.CaptureScene && (vis.HasRenderableScene || vis.ExpectedNames.Count > 0))
+                // Non-throwing wait: poll, cancel on timeout, give cancellation a grace window — never Assert.
+                while (!task.IsCompleted && sw.Elapsed.TotalSeconds < timeoutSeconds &&
+                       !(context?.ShouldCancel?.Invoke() ?? false))
                 {
-                    string verdict = score.Classification switch
+                    yield return null;
+                }
+
+                // WHY: a model can end a free build after a few valid calls despite the ten-minute
+                // budget. Continue in the same world, without resetting its scene or its deadline.
+                int previousToolCalls = 0;
+                int continuations = 0;
+                while (scenario.FreeBuildLayout && !scenario.ExcludeFromScoring && task.IsCompleted &&
+                       !task.IsFaulted && !task.IsCanceled && string.IsNullOrEmpty(streamError) &&
+                       !(context?.ShouldCancel?.Invoke() ?? false) &&
+                       CanContinueFreeBuild(Math.Max(capture.ToolCalls, toolObserver.ToolCalls),
+                           previousToolCalls, continuations, sw.Elapsed.TotalSeconds, timeoutSeconds))
+                {
+                    previousToolCalls = Math.Max(capture.ToolCalls, toolObserver.ToolCalls);
+                    continuations++;
+                    int secondsLeft = Math.Max(0, (int)(timeoutSeconds - sw.Elapsed.TotalSeconds));
+                    string followUp =
+                        $"Continue improving the scene already in workspace. About {secondsLeft} seconds remain. " +
+                        "Inspect existing parts first, then add missing major structures and details rather than " +
+                        "rebuilding or duplicating them. Use more appropriate materials and all five PartType " +
+                        "shapes; keep every part within the build volume. Use execute_lua and spend the remaining " +
+                        "time on the scene. Finish at least 20 seconds before the deadline.";
+                    task = StartTurn(followUp);
+                    while (!task.IsCompleted && sw.Elapsed.TotalSeconds < timeoutSeconds &&
+                           !(context?.ShouldCancel?.Invoke() ?? false))
                     {
-                        BenchmarkClassification.Pass => "PASS",
-                        BenchmarkClassification.Partial => "PARTIAL",
-                        _ => "FAIL"
-                    };
-                    string header = $"{scenario.Name} — {score.Base:0}/100 {verdict}";
-                    // Free-build hero shots get a second stats line showing the real effort behind the scene:
-                    // how many tool-calls (build steps) and spawns the model issued, how long generation took,
-                    // and how many tokens it cost — so the picture carries its own provenance.
-                    string heroStats = null;
-                    if (scenario.FreeBuildLayout)
+                        yield return null;
+                    }
+                }
+
+                if (!task.IsCompleted)
+                {
+                    cts.Cancel();
+                    double deadline = sw.Elapsed.TotalSeconds +
+                        Math.Max(0, context?.CancellationGraceSeconds ?? CancelGraceSeconds);
+                    while (!task.IsCompleted && sw.Elapsed.TotalSeconds < deadline)
                     {
-                        int builtParts = env.HasRbxWorld
-                            ? env.RbxWorld.Measure().Parts
-                            : env.World.Count("spawn");
-                        // Count camera/vision tool calls so the picture itself shows whether the model actually
-                        // LOOKED at its build (image-feedback variant) or never used vision at all — "0 looks"
-                        // makes an unused vision run obvious at a glance.
-                        int cameraCalls = 0;
-                        foreach (CapturedTurn capturedTurn in obs.CapturedTurns)
+                        yield return null;
+                    }
+                }
+
+                sw.Stop();
+                obs.LatencyMs = sw.Elapsed.TotalMilliseconds;
+                // WHY: a task that outlived the grace window must not append turns while they are read below.
+                capture.Seal();
+
+                // WHY: Only scenario-budget cancellation after the model already did work ends the run cleanly.
+                // WHY: Earlier provider timeouts are environment failures, not model quality.
+                bool sceneWasBuilt = RunProducedWork(capture.ToolCalls, toolObserver.ToolCalls,
+                    env.World.Commands.Count, env.Lua.ExecutionCount,
+                    env.World is VisualBenchmarkWorldExecutor { HasRenderableScene: true } ||
+                    env.HasRbxWorld && env.RbxWorld.Measure().Parts >= 1);
+
+                if (task.IsFaulted)
+                {
+                    Exception baseEx = task.Exception?.GetBaseException();
+                    bool cancelStop = IsCleanBudgetCancellation(cts.IsCancellationRequested, sceneWasBuilt,
+                        (baseEx is OperationCanceledException or LlmOperationTimeoutException) ||
+                        IsCancellationError(baseEx?.Message));
+                    if (!cancelStop)
+                    {
+                        obs.Attribution = ClassifyException(baseEx);
+                        obs.Failure = baseEx?.Message ?? "faulted";
+                    }
+                }
+                else if (task.IsCanceled || !task.IsCompleted)
+                {
+                    // The scenario time budget elapsed and we cancelled the orchestrator. If a scene already
+                    // exists, this is a clean stop — grade what was built, no failure/retry.
+                    obs.TimedOut = cts.IsCancellationRequested;
+                    if (!IsCleanBudgetCancellation(cts.IsCancellationRequested, sceneWasBuilt, true))
+                    {
+                        obs.Attribution = FailureAttribution.Environment;
+                        obs.Failure = obs.TimedOut ? "timed out" : "task canceled before scenario deadline";
+                    }
+                }
+
+                StringBuilder finalText = new();
+                foreach (ApplyAiGameCommand item in sink.Items)
+                {
+                    finalText.Append(item.JsonPayload).Append('\n');
+                }
+
+                obs.FinalText = finalText.ToString();
+                obs.GenerationMs = capture.GenerationMs;
+                obs.Turns = capture.Turns.Count;
+                obs.CapturedTurns = capture.Turns;
+                // WHY: a time-limited streaming turn may execute tools without emitting its terminal
+                // chunk. The global lifecycle records preserve those calls and their failures.
+                obs.ToolCalls = Math.Max(capture.ToolCalls, toolObserver.ToolCalls);
+                // WHY: the lifecycle observer covers failed calls from an unfinished streamed turn.
+                // Max avoids double-counting calls that also reached the terminal client capture.
+                obs.FailedToolCalls = Math.Max(capture.FailedToolCalls, toolObserver.FailedToolCalls);
+                obs.InvalidCommands = env.World.InvalidCommandCount;
+
+                // A mid-build empty/blank response AFTER the model has already built something is the weak
+                // model signalling it is done, not an infrastructure failure: a long unbounded conversation
+                // eventually yields a turn with no tool call and no visible text ("Empty response from LLM").
+                // When a scene already exists (>=1 spawn or >=1 tool call), treat it as a CLEAN STOP — grade
+                // and screenshot what was built, and do NOT trigger the scenario retry. A clearly transient
+                // transport error (HTTP/crash/timeout) still falls through to the Environment branch below.
+                // (sceneWasBuilt is computed above, where the fault/cancel clean-stop also uses it.)
+                string providerError = !string.IsNullOrWhiteSpace(capture.FirstProviderError)
+                    ? capture.FirstProviderError
+                    : streamError;
+                bool providerFailed = capture.FailedTurnCount > 0 || !string.IsNullOrWhiteSpace(streamError);
+                bool emptyResponseStop = providerFailed
+                                         && IsEmptyResponseError(providerError)
+                                         && !LooksTransient(providerError)
+                                         && sceneWasBuilt;
+
+                // WHY: A cooperative cancellation surfaced as Ok=false is clean only after our scenario deadline.
+                bool cancellationStop = providerFailed &&
+                                        IsCleanBudgetCancellation(cts.IsCancellationRequested, sceneWasBuilt,
+                                            IsCancellationError(providerError));
+
+                // WHY: A provider/model crash returned as a failed result is an environment failure.
+                // Classify it (so it is retried and excluded from the model's score) when the error text looks
+                // transient OR the run produced no usable output at all despite a failed turn.
+                if (!emptyResponseStop && !cancellationStop
+                                       && obs.Attribution == FailureAttribution.None && string.IsNullOrEmpty(obs.Failure)
+                                       && providerFailed
+                                       && (LooksTransient(providerError) || !capture.AnyUsableOutput))
+                {
+                    obs.Attribution = FailureAttribution.Environment;
+                    obs.Failure = $"provider error: {providerError}";
+                }
+
+                // Grading is harness territory too: protect the suite from a grader bug.
+                ScenarioGrading grading;
+                try
+                {
+                    grading = scenario.Grade(env, obs);
+                }
+                catch (Exception ex)
+                {
+                    onResult?.Invoke(FailedResult(scenario, modelId, FailureAttribution.Framework,
+                        $"grading failed: {ex.Message}"));
+                    yield break;
+                }
+
+                ApplyUnscoredToolErrorPenalties(grading, obs);
+
+                // An incomplete run (timeout/fault) cannot be a perfect build.
+                if (!string.IsNullOrEmpty(obs.Failure))
+                {
+                    grading.HardCap = Math.Min(grading.HardCap ?? 100, 60);
+                }
+
+                // Real token usage when the provider reports it; otherwise a labeled BPE estimate. Streaming
+                // local backends (e.g. LM Studio) frequently under-report completion usage on tool-call turns,
+                // which made decode tok/s read as ~0.3; guard against that by never trusting a provider completion
+                // count that falls below a tokenizer estimate of everything the model generated (incl. tool calls).
+                int estCompletion = Math.Max(
+                    tokenCounter.CountTokens(capture.CompletionTextForEstimate(), tokenizerModelId),
+                    tokenCounter.CountTokens(toolObserver.CompletionText, tokenizerModelId));
+                int estPrompt = capture.AnyProviderUsage
+                    ? 0
+                    : tokenCounter.CountTokens(capture.Turns.Count > 0
+                        ? capture.PromptTextForEstimate()
+                        : scenario.SystemPrompt + "\n" + scenario.Goal, tokenizerModelId);
+                TokenAccounting tokens = ResolveTokenAccounting(capture, estCompletion, estPrompt);
+                int promptTokens = tokens.PromptTokens;
+                int completionTokens = tokens.CompletionTokens;
+                bool fromProvider = tokens.FromProvider;
+
+                double totalTokens = promptTokens + completionTokens;
+                GoalScore score = GoalScore.Compute(
+                    grading.Checkpoints, grading.Penalties, grading.Bonus, grading.HardCap,
+                    actualTokens: totalTokens, tokenBudget: scenario.TokenBudget,
+                    actualMs: obs.LatencyMs, timeBudgetMs: scenario.TimeBudgetMs);
+
+                // A genuine crash/timeout attribution always wins — ExcludeFromScoring only downgrades a
+                // CLEAN run (obs.Attribution == None) to "ran fine, just not comparable", never masks a
+                // real framework/environment failure.
+                FailureAttribution attribution = obs.Attribution == FailureAttribution.None && scenario.ExcludeFromScoring
+                    ? FailureAttribution.NotGraded
+                    : obs.Attribution;
+
+                ScenarioResult result = new()
+                {
+                    ScenarioId = scenario.Id,
+                    ScenarioName = scenario.Name,
+                    Group = scenario.Group,
+                    Extreme = scenario.IsExtreme,
+                    ModelId = modelId,
+                    Score = score,
+                    Attribution = attribution,
+                    Checkpoints = grading.Checkpoints,
+                    Penalties = grading.Penalties,
+                    Turns = obs.Turns,
+                    ToolCalls = obs.ToolCalls,
+                    FailedToolCalls = obs.FailedToolCalls,
+                    InvalidCommands = obs.InvalidCommands,
+                    PromptTokens = promptTokens,
+                    CompletionTokens = completionTokens,
+                    ProviderPromptTokens = capture.AnyProviderUsage ? capture.ProviderPromptTokens : (int?)null,
+                    ProviderCompletionTokens = capture.AnyProviderUsage ? capture.ProviderCompletionTokens : (int?)null,
+                    // WHY: false when a turn was cut before its usage arrived, so the report labels the total "~".
+                    TokensFromProvider = fromProvider,
+                    LatencyMs = obs.LatencyMs,
+                    GenerationMs = obs.GenerationMs,
+                    CostKnown = false,
+                    TimedOut = obs.TimedOut,
+                    Failure = obs.Failure,
+                    SessionTranscript = capture.BuildTranscript(scenario.Goal)
+                        + (string.IsNullOrEmpty(obs.Failure) ? "" : $"\nRUN FAILURE: {obs.Failure}\n"),
+                    LuaReplayScript = scenario.Group == "G6"
+                        ? toolObserver.BuildLuaReplayScript(modelId, scenario.Id)
+                        : "",
+                    ToolTraceJsonl = toolObserver.ToolTraceJsonl
+                };
+
+                Debug.Log($"{logPrefix} {scenario.Group}/{scenario.Name}: base={score.Base:0.#} " +
+                          $"bonus={score.Bonus:0.#} (eff {score.EfficiencyBonus:0.#}) verdict={score.Classification} " +
+                          $"turns={obs.Turns} tools={obs.ToolCalls} err={obs.FailedToolCalls + obs.InvalidCommands} " +
+                          $"tok={totalTokens:0}{(fromProvider ? "" : "~")} {obs.LatencyMs:0}ms");
+
+                result.WhatItChecks = scenario.WhatItChecks;
+
+                // Capture a real screenshot of the built scene (world scenarios with a graphics device). The
+                // baked header shows the scenario, its score and verdict, so the picture alone says how it did.
+                if (env.World is VisualBenchmarkWorldExecutor vis)
+                {
+                    // Capture when anything was built, or when the scenario expected objects (so a total
+                    // failure still produces a picture full of "missing" ghosts rather than no picture).
+                    if (scenario.CaptureScene && (vis.HasRenderableScene || vis.ExpectedNames.Count > 0))
+                    {
+                        string verdict = score.Classification switch
                         {
-                            foreach (LlmToolCallTrace tr in capturedTurn.Tools)
+                            BenchmarkClassification.Pass => "PASS",
+                            BenchmarkClassification.Partial => "PARTIAL",
+                            _ => "FAIL"
+                        };
+                        string header = $"{scenario.Name} — {score.Base:0}/100 {verdict}";
+                        // Free-build hero shots get a second stats line showing the real effort behind the scene:
+                        // how many tool-calls (build steps) and spawns the model issued, how long generation took,
+                        // and how many tokens it cost — so the picture carries its own provenance.
+                        string heroStats = null;
+                        if (scenario.FreeBuildLayout)
+                        {
+                            int builtParts = env.HasRbxWorld
+                                ? env.RbxWorld.Measure().Parts
+                                : env.World.Count("spawn");
+                            // Count camera/vision tool calls so the picture itself shows whether the model actually
+                            // LOOKED at its build (image-feedback variant) or never used vision at all — "0 looks"
+                            // makes an unused vision run obvious at a glance.
+                            int cameraCalls = 0;
+                            foreach (CapturedTurn capturedTurn in obs.CapturedTurns)
                             {
-                                if (tr.Name != null &&
-                                    tr.Name.StartsWith("camera", StringComparison.OrdinalIgnoreCase))
+                                foreach (LlmToolCallTrace tr in capturedTurn.Tools)
                                 {
-                                    cameraCalls++;
+                                    if (tr.Name != null &&
+                                        tr.Name.StartsWith("camera", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        cameraCalls++;
+                                    }
                                 }
                             }
+
+                            // WHY: the captured turns miss the calls of a turn cut by the deadline (its traces arrive
+                            // only on the terminal chunk), and a G6 image run is normally one long turn cut at the
+                            // budget, so the banner would claim "0 camera looks". The tool total already takes the
+                            // larger of the two sources; the camera count does the same.
+                            cameraCalls = Math.Max(cameraCalls, toolObserver.CameraCalls);
+                            heroStats = FormatFreeBuildHeroStats(obs.ToolCalls, builtParts, cameraCalls,
+                                obs.LatencyMs, tokens);
                         }
 
-                        // WHY: the captured turns miss the calls of a turn cut by the deadline (its traces arrive
-                        // only on the terminal chunk), and a G6 image run is normally one long turn cut at the
-                        // budget, so the banner would claim "0 camera looks". The tool total already takes the
-                        // larger of the two sources; the camera count does the same.
-                        cameraCalls = Math.Max(cameraCalls, toolObserver.CameraCalls);
-                        heroStats = FormatFreeBuildHeroStats(obs.ToolCalls, builtParts, cameraCalls,
-                            obs.LatencyMs, tokens);
+                        yield return CaptureSceneScreenshot(vis, modelId, header, scenario.WhatItChecks,
+                            scenario.FreeBuildLayout, heroStats, png => result.SceneScreenshotPng = png);
                     }
 
-                    yield return CaptureSceneScreenshot(vis, modelId, header, scenario.WhatItChecks,
-                        scenario.FreeBuildLayout, heroStats, png => result.SceneScreenshotPng = png);
-                }
-
 #if UNITY_EDITOR
-                // Persist the built free-build scene (the castle) as a reusable, inspectable Unity prefab —
-                // not just a flat screenshot — labelled with the model that authored it. Free-build only.
-                if (scenario.FreeBuildLayout && vis.HasRenderableScene)
-                {
-                    SaveCastlePrefab(vis, modelId, scenario.Id, score.Base);
-                }
+                    // Persist the built free-build scene (the castle) as a reusable, inspectable Unity prefab —
+                    // not just a flat screenshot — labelled with the model that authored it. Free-build only.
+                    if (scenario.FreeBuildLayout && vis.HasRenderableScene)
+                    {
+                        SaveCastlePrefab(vis, modelId, scenario.Id, score.Base);
+                    }
 #endif
+                }
 
-                // Always tear down the spawned scene, even when no screenshot was taken, so a visual
-                // scenario never leaks its GameObjects into the next run.
-                env.DisposeRbxWorld();
-                vis.Cleanup();
+                onResult?.Invoke(result);
             }
-
-            if (env.World is not VisualBenchmarkWorldExecutor)
+            finally
             {
-                env.DisposeRbxWorld();
-            }
+                // WHY: scheduler disposal after Stop, budget or a fault must cancel the provider and
+                // release the scene even when no result or screenshot was reached.
+                capture.Seal();
+                try
+                {
+                    cts.Cancel();
+                }
+                finally
+                {
+                    if (task != null)
+                    {
+                        _ = task.ContinueWith(faulted => { _ = faulted.Exception; },
+                            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted |
+                            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                    }
 
-            onResult?.Invoke(result);
+                    env.DisposeRbxWorld();
+                    (env.World as VisualBenchmarkWorldExecutor)?.Cleanup();
+                }
+            }
         }
 
 #if UNITY_EDITOR
@@ -2666,228 +2803,235 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             UnityEngine.Rendering.AmbientMode prevAmbientMode = RenderSettings.ambientMode;
             Color prevAmbientLight = RenderSettings.ambientLight;
 
-            try
-            {
-                // Flat daylight ambient for the duration of the capture: with only a directional key,
-                // views looking at the shadow side of the build read several stops darker than the hero
-                // view — as if each inset had a different sun. A flat ambient floor lifts the unlit
-                // faces so every angle reads as the same daytime scene. Restored in finally.
-                RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-                RenderSettings.ambientLight = new Color(0.42f, 0.46f, 0.53f);
-
-                // Switch off the live preview camera/light so only the capture rig lights the final shot.
-                vis.HideLivePreview();
-
-                if (!freeBuildLayout)
-                {
-                    vis.AddMissingGhosts();
-                    vis.LayoutForCapture();
-                }
-
-                Bounds bounds = vis.ComputeBounds();
-                float ext = Mathf.Max(bounds.extents.magnitude, 1.2f);
-                sceneCenter = bounds.center;
-                sceneExt = ext;
-
-                camGo = new GameObject("BenchmarkCamera");
-                cam = camGo.AddComponent<Camera>();
-                cam.clearFlags = CameraClearFlags.SolidColor;
-                // Daylight sky, not a void: the report shots must read as DAYTIME (the dark
-                // near-black backdrop made every hero image look like a night scene).
-                cam.backgroundColor = DaySkyColor;
-                cam.fieldOfView = 50f;
-                cam.nearClipPlane = 0.05f;
-                cam.farClipPlane = 500f;
-                cam.allowMSAA = true;
-                // 1.5x closer than the old (1.7, 1.5, -2.7)*ext framing — free-build scenes sit on a
-                // large ground plate that inflates the bounds, which left the actual build tiny in the
-                // middle of empty ground. Flipped 180° around the scene center (was +X,-Z): models
-                // consistently build castles gate-forward toward -Z, so the old offset photographed
-                // every scene from BEHIND (user-reported); from (-X,+Z) the hero shot faces the front.
-                cam.transform.position =
-                    bounds.center + new Vector3(-ext * 1.13f, ext * 1.0f, ext * 1.8f);
-                cam.transform.LookAt(bounds.center);
-
-                // A grounded floor so the objects sit on a surface instead of floating in a void.
-                groundGo = GameObject.CreatePrimitive(PrimitiveType.Quad);
-                groundGo.name = "BenchmarkGround";
-                DestroyCollider(groundGo);
-                groundGo.transform.position =
-                    new Vector3(bounds.center.x, bounds.min.y - 0.02f, bounds.center.z);
-                groundGo.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-                float gsize = Mathf.Max(bounds.size.x, bounds.size.z) + ext * 4f + 6f;
-                groundGo.transform.localScale = new Vector3(gsize, gsize, 1f);
-                Renderer gr = groundGo.GetComponent<Renderer>();
-                if (gr != null)
-                {
-                    // Light warm-grey ground for the daytime look — dark enough that white
-                    // primitives and their shadows still separate from it.
-                    TintRenderer(gr, new Color(0.47f, 0.49f, 0.45f));
-                }
-
-                // Key + cool fill so the cubes read as 3D instead of flat silhouettes. A freshly
-                // AddComponent'd Light defaults to LightShadows.None, so without setting it explicitly
-                // the "3D" scene renders with no shadows at all — only the key casts (soft), so there is
-                // one clean shadow direction instead of the fill adding a second, conflicting one.
-                keyGo = new GameObject("BenchmarkKey");
-                Light key = keyGo.AddComponent<Light>();
-                key.type = LightType.Directional;
-                key.intensity = 1.35f;
-                key.color = new Color(1.0f, 0.96f, 0.87f); // warm afternoon sun
-                key.shadows = LightShadows.Soft;
-                // Full strength + a small bias: the default bias is tuned for room/level-scale scenes and
-                // "peter-pans" (detaches/hides) the shadow on these ~1m benchmark objects, which was why
-                // shadows looked barely-there even with shadows correctly enabled.
-                key.shadowStrength = 1f;
-                key.shadowBias = 0.01f;
-                key.shadowNormalBias = 0.2f;
-                // Afternoon-sun elevation: at the old 48 deg the shadows were shorter than the objects
-                // (~0.9x height) and read as barely-there in the report; 33 deg throws ~1.5x-height
-                // shadows across the ground — the screenshot light is static and independent of the
-                // live-preview day/night orbit, so the report always gets "daytime" shadows.
-                keyGo.transform.rotation = Quaternion.Euler(33f, -40f, 0f);
-
-                fillGo = new GameObject("BenchmarkFill");
-                Light fill = fillGo.AddComponent<Light>();
-                fill.type = LightType.Directional;
-                fill.intensity = 0.7f; // brighter sky-bounce fill for the daytime look
-                fill.color = new Color(0.72f, 0.82f, 1.0f);
-                fillGo.transform.rotation = Quaternion.Euler(-15f, 150f, 0f);
-
-                // Screen-aligned overlay (parented to the camera): a top results bar and a bottom caption
-                // bar with solid backdrops, so the header and "what it checks" read as a clean card, not
-                // text floating in the scene. Front-parallel quads never skew under perspective.
-                const float zb = 1.5f;
-                float halfH = zb * Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
-                float fullW = 2f * halfH * (ShotWidth / (float)ShotHeight);
-                Transform p = cam.transform;
-                Color verdict = VerdictColor(header);
-
-                float topH = 0.62f * halfH;
-                float topY = halfH - topH * 0.5f;
-                AddQuad(p, new Vector3(0f, topY, zb), new Vector2(fullW, topH),
-                    new Color(0.09f, 0.10f, 0.12f));
-                AddQuad(p, new Vector3(0f, halfH - 0.012f, zb - 0.01f),
-                    new Vector2(fullW, 0.024f), verdict);
-                // Model name is the headline (so each scene/castle image says which model built it),
-                // with the scenario + score + verdict as the line below. Long hyphenated model ids are
-                // wrapped (and shrunk) so they never overflow the banner.
-                string m = model ?? "";
-                float mSize = m.Length > 42 ? 0.0064f : m.Length > 26 ? 0.0086f : 0.0112f;
-                AddCameraText(p, WrapModel(m, 30), new Vector3(0f, halfH - 0.085f, zb - 0.02f),
-                    mSize, Color.white, true);
-                AddCameraText(p, WrapText(header ?? "", 58), new Vector3(0f, halfH - 0.225f, zb - 0.02f),
-                    0.0068f, verdict, true);
-
-                // Stats line (free-build hero only): tool-calls · spawns · generation time · tokens, in a
-                // muted colour just under the score line, so the effort behind the scene is on the image.
-                if (!string.IsNullOrEmpty(heroStats))
-                {
-                    AddCameraText(p, WrapText(heroStats, 72), new Vector3(0f, halfH - 0.315f, zb - 0.02f),
-                        0.0044f, new Color(0.78f, 0.82f, 0.88f), false);
-                }
-
-                string cap = WrapText(subtitle ?? "", 52);
-                if (!string.IsNullOrEmpty(cap))
-                {
-                    float botH = 0.42f * halfH;
-                    float botY = -halfH + botH * 0.5f;
-                    AddQuad(p, new Vector3(0f, botY, zb), new Vector2(fullW, botH),
-                        new Color(0.09f, 0.10f, 0.12f));
-                    AddCameraText(p, cap, new Vector3(0f, botY, zb - 0.02f),
-                        0.0072f, new Color(0.84f, 0.86f, 0.90f), false);
-                }
-
-                rt = new RenderTexture(ShotWidth, ShotHeight, 24) { antiAliasing = 8 };
-                vis.FaceCamera(cam);
-                cam.targetTexture = rt;
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[Benchmark] screenshot setup failed: {ex.Message}");
-            }
-
-            // Frame 1: the main camera (with its banner overlay) renders to rt under the SRP render loop
-            // (Camera.Render() is not supported under SRP, so we rely on the normal render loop).
-            yield return new WaitForEndOfFrame();
-
-            Texture2D texMain = ReadRenderTexture(rt);
-
-            // Hide the main camera (and its parented banner quads) so the two inset cameras capture a clean
-            // scene, then render the scene from two other angles for the composite.
-            if (camGo != null)
-            {
-                camGo.SetActive(false);
-            }
-
-            try
-            {
-                // RIGHT column — top slot is a GATE-LEVEL close-up: models build the entrance facing +Z
-                // (same convention as the hero camera flip), so stand just outside the front gate, low to
-                // the ground, and look through the gap toward the keep. Uses the zoom extent floor so a
-                // tiny scene still fits the narrow frustum. Below it stays the top-down overview.
-                float gateExt = Mathf.Max(sceneExt, 2.8f);
-                rtB = new RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
-                camBGo = MakeInsetCamera("BenchmarkCameraB",
-                    sceneCenter + new Vector3(gateExt * 0.06f, gateExt * 0.22f, gateExt * 1.25f),
-                    sceneCenter + new Vector3(0f, gateExt * 0.08f, 0f), rtB, 42f);
-                rtC = new RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
-                camCGo = MakeInsetCamera("BenchmarkCameraC",
-                    sceneCenter + new Vector3(sceneExt * 0.13f, sceneExt * 1.5f, -sceneExt * 0.35f),
-                    sceneCenter, rtC);
-                // LEFT column — two close-up "zoom" shots at different magnifications (narrow FOV, near,
-                // low angle): detail views the wide hero framing can't show (larger models build
-                // compositions worth zooming into). The zoom cameras get a HIGHER extent floor than the
-                // scene's own 1.2 minimum: at 20-32 deg FOV and these offsets, a tiny scene (a lone 1m
-                // cube) would not fit the frustum at all — found by the independent Codex audit.
-                float zoomExt = Mathf.Max(sceneExt, 2.8f);
-                rtD = new RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
-                camDGo = MakeInsetCamera("BenchmarkCameraD",
-                    sceneCenter + new Vector3(zoomExt * 1.0f, zoomExt * 0.4f, -zoomExt * 1.3f),
-                    sceneCenter, rtD, 32f);
-                rtE = new RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
-                camEGo = MakeInsetCamera("BenchmarkCameraE",
-                    sceneCenter + new Vector3(-zoomExt * 0.9f, zoomExt * 0.55f, zoomExt * 1.15f),
-                    sceneCenter, rtE, 20f);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[Benchmark] inset camera setup failed: {ex.Message}");
-            }
-
-            // Frame 2: the inset cameras render their small views.
-            yield return new WaitForEndOfFrame();
-
             byte[] png = null;
             Texture2D texB = null;
             Texture2D texC = null;
             Texture2D texD = null;
             Texture2D texE = null;
+            Texture2D texMain = null;
+            // WHY: disposal at a render wait must release the capture rig and restore global state.
             try
             {
-                if (texMain != null)
+                try
                 {
-                    texB = ReadRenderTextureDownscaled(rtB, InsetWidth, InsetHeight);
-                    texC = ReadRenderTextureDownscaled(rtC, InsetWidth, InsetHeight);
-                    texD = ReadRenderTextureDownscaled(rtD, InsetWidth, InsetHeight);
-                    texE = ReadRenderTextureDownscaled(rtE, InsetWidth, InsetHeight);
-                    CompositeInsets(texMain, texB, texC, texD, texE);
-                    png = ImageConversion.EncodeToPNG(texMain);
+                    // Flat daylight ambient for the duration of the capture: with only a directional key,
+                    // views looking at the shadow side of the build read several stops darker than the hero
+                    // view — as if each inset had a different sun. A flat ambient floor lifts the unlit
+                    // faces so every angle reads as the same daytime scene. Restored in finally.
+                    RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
+                    RenderSettings.ambientLight = new Color(0.42f, 0.46f, 0.53f);
+
+                    // Switch off the live preview camera/light so only the capture rig lights the final shot.
+                    vis.HideLivePreview();
+
+                    if (!freeBuildLayout)
+                    {
+                        vis.AddMissingGhosts();
+                        vis.LayoutForCapture();
+                    }
+
+                    Bounds bounds = vis.ComputeBounds();
+                    float ext = Mathf.Max(bounds.extents.magnitude, 1.2f);
+                    sceneCenter = bounds.center;
+                    sceneExt = ext;
+
+                    camGo = new GameObject("BenchmarkCamera");
+                    cam = camGo.AddComponent<Camera>();
+                    cam.clearFlags = CameraClearFlags.SolidColor;
+                    // Daylight sky, not a void: the report shots must read as DAYTIME (the dark
+                    // near-black backdrop made every hero image look like a night scene).
+                    cam.backgroundColor = DaySkyColor;
+                    cam.fieldOfView = 50f;
+                    cam.nearClipPlane = 0.05f;
+                    cam.farClipPlane = 500f;
+                    cam.allowMSAA = true;
+                    // 1.5x closer than the old (1.7, 1.5, -2.7)*ext framing — free-build scenes sit on a
+                    // large ground plate that inflates the bounds, which left the actual build tiny in the
+                    // middle of empty ground. Flipped 180° around the scene center (was +X,-Z): models
+                    // consistently build castles gate-forward toward -Z, so the old offset photographed
+                    // every scene from BEHIND (user-reported); from (-X,+Z) the hero shot faces the front.
+                    cam.transform.position =
+                        bounds.center + new Vector3(-ext * 1.13f, ext * 1.0f, ext * 1.8f);
+                    cam.transform.LookAt(bounds.center);
+
+                    // A grounded floor so the objects sit on a surface instead of floating in a void.
+                    groundGo = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                    groundGo.name = "BenchmarkGround";
+                    DestroyCollider(groundGo);
+                    groundGo.transform.position =
+                        new Vector3(bounds.center.x, bounds.min.y - 0.02f, bounds.center.z);
+                    groundGo.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+                    float gsize = Mathf.Max(bounds.size.x, bounds.size.z) + ext * 4f + 6f;
+                    groundGo.transform.localScale = new Vector3(gsize, gsize, 1f);
+                    Renderer gr = groundGo.GetComponent<Renderer>();
+                    if (gr != null)
+                    {
+                        // Light warm-grey ground for the daytime look — dark enough that white
+                        // primitives and their shadows still separate from it.
+                        TintRenderer(gr, new Color(0.47f, 0.49f, 0.45f));
+                    }
+
+                    // Key + cool fill so the cubes read as 3D instead of flat silhouettes. A freshly
+                    // AddComponent'd Light defaults to LightShadows.None, so without setting it explicitly
+                    // the "3D" scene renders with no shadows at all — only the key casts (soft), so there is
+                    // one clean shadow direction instead of the fill adding a second, conflicting one.
+                    keyGo = new GameObject("BenchmarkKey");
+                    Light key = keyGo.AddComponent<Light>();
+                    key.type = LightType.Directional;
+                    key.intensity = 1.35f;
+                    key.color = new Color(1.0f, 0.96f, 0.87f); // warm afternoon sun
+                    key.shadows = LightShadows.Soft;
+                    // Full strength + a small bias: the default bias is tuned for room/level-scale scenes and
+                    // "peter-pans" (detaches/hides) the shadow on these ~1m benchmark objects, which was why
+                    // shadows looked barely-there even with shadows correctly enabled.
+                    key.shadowStrength = 1f;
+                    key.shadowBias = 0.01f;
+                    key.shadowNormalBias = 0.2f;
+                    // Afternoon-sun elevation: at the old 48 deg the shadows were shorter than the objects
+                    // (~0.9x height) and read as barely-there in the report; 33 deg throws ~1.5x-height
+                    // shadows across the ground — the screenshot light is static and independent of the
+                    // live-preview day/night orbit, so the report always gets "daytime" shadows.
+                    keyGo.transform.rotation = Quaternion.Euler(33f, -40f, 0f);
+
+                    fillGo = new GameObject("BenchmarkFill");
+                    Light fill = fillGo.AddComponent<Light>();
+                    fill.type = LightType.Directional;
+                    fill.intensity = 0.7f; // brighter sky-bounce fill for the daytime look
+                    fill.color = new Color(0.72f, 0.82f, 1.0f);
+                    fillGo.transform.rotation = Quaternion.Euler(-15f, 150f, 0f);
+
+                    // Screen-aligned overlay (parented to the camera): a top results bar and a bottom caption
+                    // bar with solid backdrops, so the header and "what it checks" read as a clean card, not
+                    // text floating in the scene. Front-parallel quads never skew under perspective.
+                    const float zb = 1.5f;
+                    float halfH = zb * Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
+                    float fullW = 2f * halfH * (ShotWidth / (float)ShotHeight);
+                    Transform p = cam.transform;
+                    Color verdict = VerdictColor(header);
+
+                    float topH = 0.62f * halfH;
+                    float topY = halfH - topH * 0.5f;
+                    AddQuad(p, new Vector3(0f, topY, zb), new Vector2(fullW, topH),
+                        new Color(0.09f, 0.10f, 0.12f));
+                    AddQuad(p, new Vector3(0f, halfH - 0.012f, zb - 0.01f),
+                        new Vector2(fullW, 0.024f), verdict);
+                    // Model name is the headline (so each scene/castle image says which model built it),
+                    // with the scenario + score + verdict as the line below. Long hyphenated model ids are
+                    // wrapped (and shrunk) so they never overflow the banner.
+                    string m = model ?? "";
+                    float mSize = m.Length > 42 ? 0.0064f : m.Length > 26 ? 0.0086f : 0.0112f;
+                    AddCameraText(p, WrapModel(m, 30), new Vector3(0f, halfH - 0.085f, zb - 0.02f),
+                        mSize, Color.white, true);
+                    AddCameraText(p, WrapText(header ?? "", 58), new Vector3(0f, halfH - 0.225f, zb - 0.02f),
+                        0.0068f, verdict, true);
+
+                    // Stats line (free-build hero only): tool-calls · spawns · generation time · tokens, in a
+                    // muted colour just under the score line, so the effort behind the scene is on the image.
+                    if (!string.IsNullOrEmpty(heroStats))
+                    {
+                        AddCameraText(p, WrapText(heroStats, 72), new Vector3(0f, halfH - 0.315f, zb - 0.02f),
+                            0.0044f, new Color(0.78f, 0.82f, 0.88f), false);
+                    }
+
+                    string cap = WrapText(subtitle ?? "", 52);
+                    if (!string.IsNullOrEmpty(cap))
+                    {
+                        float botH = 0.42f * halfH;
+                        float botY = -halfH + botH * 0.5f;
+                        AddQuad(p, new Vector3(0f, botY, zb), new Vector2(fullW, botH),
+                            new Color(0.09f, 0.10f, 0.12f));
+                        AddCameraText(p, cap, new Vector3(0f, botY, zb - 0.02f),
+                            0.0072f, new Color(0.84f, 0.86f, 0.90f), false);
+                    }
+
+                    rt = new RenderTexture(ShotWidth, ShotHeight, 24) { antiAliasing = 8 };
+                    vis.FaceCamera(cam);
+                    cam.targetTexture = rt;
                 }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[Benchmark] screenshot composite failed: {ex.Message}");
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[Benchmark] screenshot setup failed: {ex.Message}");
+                }
+
+                // Frame 1: the main camera (with its banner overlay) renders to rt under the SRP render loop
+                // (Camera.Render() is not supported under SRP, so we rely on the normal render loop).
+                // WHY: Editor batch mode does not resume WaitForEndOfFrame; read the previous rendered frame.
+                yield return Application.isBatchMode ? null : new WaitForEndOfFrame();
+
+                texMain = ReadRenderTexture(rt);
+
+                // Hide the main camera (and its parented banner quads) so the two inset cameras capture a clean
+                // scene, then render the scene from two other angles for the composite.
+                if (camGo != null)
+                {
+                    camGo.SetActive(false);
+                }
+
+                try
+                {
+                    // RIGHT column — top slot is a GATE-LEVEL close-up: models build the entrance facing +Z
+                    // (same convention as the hero camera flip), so stand just outside the front gate, low to
+                    // the ground, and look through the gap toward the keep. Uses the zoom extent floor so a
+                    // tiny scene still fits the narrow frustum. Below it stays the top-down overview.
+                    float gateExt = Mathf.Max(sceneExt, 2.8f);
+                    rtB = new RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
+                    camBGo = MakeInsetCamera("BenchmarkCameraB",
+                        sceneCenter + new Vector3(gateExt * 0.06f, gateExt * 0.22f, gateExt * 1.25f),
+                        sceneCenter + new Vector3(0f, gateExt * 0.08f, 0f), rtB, 42f);
+                    rtC = new RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
+                    camCGo = MakeInsetCamera("BenchmarkCameraC",
+                        sceneCenter + new Vector3(sceneExt * 0.13f, sceneExt * 1.5f, -sceneExt * 0.35f),
+                        sceneCenter, rtC);
+                    // LEFT column — two close-up "zoom" shots at different magnifications (narrow FOV, near,
+                    // low angle): detail views the wide hero framing can't show (larger models build
+                    // compositions worth zooming into). The zoom cameras get a HIGHER extent floor than the
+                    // scene's own 1.2 minimum: at 20-32 deg FOV and these offsets, a tiny scene (a lone 1m
+                    // cube) would not fit the frustum at all — found by the independent Codex audit.
+                    float zoomExt = Mathf.Max(sceneExt, 2.8f);
+                    rtD = new RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
+                    camDGo = MakeInsetCamera("BenchmarkCameraD",
+                        sceneCenter + new Vector3(zoomExt * 1.0f, zoomExt * 0.4f, -zoomExt * 1.3f),
+                        sceneCenter, rtD, 32f);
+                    rtE = new RenderTexture(InsetWidth * 2, InsetHeight * 2, 24) { antiAliasing = 8 };
+                    camEGo = MakeInsetCamera("BenchmarkCameraE",
+                        sceneCenter + new Vector3(-zoomExt * 0.9f, zoomExt * 0.55f, zoomExt * 1.15f),
+                        sceneCenter, rtE, 20f);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[Benchmark] inset camera setup failed: {ex.Message}");
+                }
+
+                // Frame 2: the inset cameras render their small views.
+                // WHY: Editor batch mode does not resume WaitForEndOfFrame; read the previous rendered frame.
+                yield return Application.isBatchMode ? null : new WaitForEndOfFrame();
+
                 try
                 {
                     if (texMain != null)
                     {
+                        texB = ReadRenderTextureDownscaled(rtB, InsetWidth, InsetHeight);
+                        texC = ReadRenderTextureDownscaled(rtC, InsetWidth, InsetHeight);
+                        texD = ReadRenderTextureDownscaled(rtD, InsetWidth, InsetHeight);
+                        texE = ReadRenderTextureDownscaled(rtE, InsetWidth, InsetHeight);
+                        CompositeInsets(texMain, texB, texC, texD, texE);
                         png = ImageConversion.EncodeToPNG(texMain);
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Give up — a null png is handled downstream (report just omits the image).
+                    Debug.LogWarning($"[Benchmark] screenshot composite failed: {ex.Message}");
+                    try
+                    {
+                        if (texMain != null)
+                        {
+                            png = ImageConversion.EncodeToPNG(texMain);
+                        }
+                    }
+                    catch
+                    {
+                        // Give up — a null png is handled downstream (report just omits the image).
+                    }
                 }
             }
             finally
@@ -3091,212 +3235,217 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             Camera cam = null;
             RenderTexture rt = null;
 
-            try
-            {
-                camGo = new GameObject("ModelCardCamera");
-                cam = camGo.AddComponent<Camera>();
-                cam.clearFlags = CameraClearFlags.SolidColor;
-                cam.backgroundColor = new Color(0.07f, 0.08f, 0.10f);
-                cam.fieldOfView = 50f;
-                cam.nearClipPlane = 0.05f;
-                cam.farClipPlane = 50f;
-                cam.allowMSAA = true;
-                cam.transform.position = Vector3.zero;
-                cam.transform.rotation = Quaternion.identity;
-
-                Transform p = cam.transform;
-                const float zb = 1.6f;
-                float halfH = zb * Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
-
-                // --- data ---
-                Dictionary<BenchmarkDimension, double> dim = new();
-                foreach (DimensionScore d in report.DimensionBreakdown())
-                {
-                    dim[d.Dimension] = d.Score;
-                }
-
-                BenchmarkDimension[] order =
-                {
-                    BenchmarkDimension.ToolCorrectness, BenchmarkDimension.IntentSequence,
-                    BenchmarkDimension.TaskCompletion, BenchmarkDimension.Determinism,
-                    BenchmarkDimension.Reasoning, BenchmarkDimension.InstructionAdherence
-                };
-                string[] axisLabels = { "Tool", "Intent", "Task", "Determ", "Reason", "Instr" };
-
-                RoleFitness.Result fit = RoleFitness.Evaluate(report);
-
-                // --- header ---
-                // Long/hyphenated model ids (OpenRouter-style: "qwen3.6-27b-heretic-...-imatrix-max")
-                // must never overflow the card at a fixed size, or they run off the frustum edges.
-                // Shrink by length like the hero header does, but AddCameraText has no wrap/measure —
-                // so a hard truncation is the actual backstop for arbitrarily long ids, not the size floor.
-                System.Globalization.CultureInfo inv = System.Globalization.CultureInfo.InvariantCulture;
-                string modelId = report.Metadata.ModelId ?? "";
-                if (modelId.Length > 68)
-                {
-                    modelId = modelId.Substring(0, 65) + "…";
-                }
-
-                string headerLine = $"{modelId} — {report.SuiteBaseScore.ToString("0", inv)}/100";
-                float headerSize = headerLine.Length > 60 ? 0.0060f
-                    : headerLine.Length > 46 ? 0.0080f
-                    : headerLine.Length > 34 ? 0.0100f
-                    : 0.0135f;
-                AddCameraText(p, headerLine,
-                    new Vector3(0f, halfH - 0.085f, zb - 0.05f), headerSize, Color.white, true);
-                bool anyAssessed = false;
-                foreach (RoleFitness.RoleScore r in fit.Roles)
-                {
-                    if (r.Assessed)
-                    {
-                        anyAssessed = true;
-                        break;
-                    }
-                }
-
-                string fitTxt = anyAssessed
-                    ? $"game-fit {fit.Overall.ToString("0.#", inv)}/10 · best {Shorten(fit.BestRole)}"
-                    : "partial run";
-                // Length varies with PASS/PARTIAL/FAIL digit counts and the best-role name — centered text
-                // at a fixed size can overflow BOTH frustum edges for a long combination (e.g. double-digit
-                // counts + "Programmer"), same failure mode as the header above — shrink by length too.
-                string summaryLine =
-                    $"PASS {report.PassCount}  ·  PARTIAL {report.PartialCount}  ·  FAIL {report.FailCount}      {fitTxt}";
-                float summarySize = summaryLine.Length > 70 ? 0.0060f
-                    : summaryLine.Length > 55 ? 0.0075f
-                    : 0.0085f;
-                AddCameraText(p, summaryLine,
-                    new Vector3(0f, halfH - 0.185f, zb - 0.05f), summarySize,
-                    new Color(0.62f, 0.66f, 0.72f), false);
-
-                // --- radar (left) ---
-                GameObject radar = new("Radar");
-                radar.transform.SetParent(p, false);
-                radar.transform.localPosition = new Vector3(-0.62f, -0.10f, zb);
-                radar.transform.localRotation = Quaternion.identity;
-                Transform rp = radar.transform;
-                const float R = 0.40f;
-
-                Vector2[] dir = new Vector2[6];
-                Vector2[] rim = new Vector2[6];
-                Vector2[] data = new Vector2[6];
-                for (int i = 0; i < 6; i++)
-                {
-                    float ang = (90f - i * 60f) * Mathf.Deg2Rad;
-                    dir[i] = new Vector2(Mathf.Cos(ang), Mathf.Sin(ang));
-                    rim[i] = dir[i] * R;
-                    double v = dim.TryGetValue(order[i], out double sv) ? sv : 0.0;
-                    data[i] = dir[i] * (R * (float)Mathf.Clamp01((float)v / 100f));
-                }
-
-                // Concentric grid rings at 25/50/75/100% + spokes, so the hexagon reads as a real radar.
-                Color gridOuter = new(0.34f, 0.37f, 0.43f);
-                Color gridInner = new(0.22f, 0.24f, 0.29f);
-                float[] rings = { 0.25f, 0.5f, 0.75f, 1f };
-                foreach (float frac in rings)
-                {
-                    bool outer = frac > 0.99f;
-                    Color rc = outer ? gridOuter : gridInner;
-                    float th = outer ? 0.0035f : 0.002f;
-                    for (int i = 0; i < 6; i++)
-                    {
-                        AddLine(rp, dir[i] * (R * frac), dir[(i + 1) % 6] * (R * frac), 0.02f, th, rc);
-                    }
-                }
-
-                for (int i = 0; i < 6; i++)
-                {
-                    AddLine(rp, Vector2.zero, rim[i], 0.018f, 0.002f, gridInner);
-                }
-
-                AddFilledPolygon(rp, data, 0.0f, new Color(0.26f, 0.56f, 0.92f));
-                for (int i = 0; i < 6; i++)
-                {
-                    AddLine(rp, data[i], data[(i + 1) % 6], -0.01f, 0.005f, new Color(0.62f, 0.85f, 1f));
-                }
-
-                for (int i = 0; i < 6; i++)
-                {
-                    double v = dim.TryGetValue(order[i], out double sv) ? sv : 0.0;
-                    Vector2 lp = rim[i] * 1.34f;
-                    AddCameraText(rp, $"{axisLabels[i]} {v:0}",
-                        new Vector3(lp.x, lp.y, -0.02f), 0.0072f,
-                        new Color(0.80f, 0.84f, 0.90f), false);
-                }
-
-                // The headline game-fit number, big, in the dead centre of the radar so it stands out.
-                AddQuad(rp, new Vector3(0f, 0f, -0.03f), new Vector2(0.27f, 0.175f),
-                    new Color(0.05f, 0.06f, 0.08f));
-                string centre = anyAssessed ? fit.Overall.ToString("0.#", inv) : "n/a";
-                AddCameraText(rp, centre, new Vector3(0f, 0.016f, -0.05f), 0.0135f,
-                    Color.white, true);
-                AddCameraText(rp, "game-fit /10", new Vector3(0f, -0.052f, -0.05f), 0.0047f,
-                    new Color(0.66f, 0.70f, 0.76f), false);
-
-                // --- role bars (right) ---
-                AddCameraText(p, "Game-fitness by role (0–10)",
-                    new Vector3(0.02f, 0.40f, zb - 0.05f), 0.0085f,
-                    new Color(0.62f, 0.66f, 0.72f), false, TextAnchor.MiddleLeft);
-
-                // barW is kept short of the ~1.326-unit perspective-frustum half-width so the rating
-                // number (up to "10", drawn from barX0+barW+0.02) never gets clipped at the right edge.
-                const float barX0 = 0.55f, barW = 0.48f;
-                for (int j = 0; j < fit.Roles.Count && j < 6; j++)
-                {
-                    RoleFitness.RoleScore role = fit.Roles[j];
-                    float y = 0.28f - j * 0.125f;
-                    AddCameraText(p, Shorten(role.Role), new Vector3(0.02f, y, zb - 0.05f),
-                        0.0078f, Color.white, false, TextAnchor.MiddleLeft);
-
-                    AddQuad(p, new Vector3(barX0 + barW * 0.5f, y, zb),
-                        new Vector2(barW, 0.05f),
-                        new Color(0.16f, 0.17f, 0.20f));
-
-                    if (role.Assessed)
-                    {
-                        float frac = Mathf.Clamp01((float)role.Rating / 10f);
-                        float fw = Mathf.Max(barW * frac, 0.004f);
-                        AddQuad(p, new Vector3(barX0 + fw * 0.5f, y, zb - 0.01f),
-                            new Vector2(fw, 0.05f), RatingColor(role.Rating));
-                        AddCameraText(p, role.Rating.ToString("0.#", inv),
-                            new Vector3(barX0 + barW + 0.02f, y, zb - 0.05f),
-                            0.0078f, Color.white, true, TextAnchor.MiddleLeft);
-                    }
-                    else
-                    {
-                        AddCameraText(p, "n/a", new Vector3(barX0 + 0.04f, y, zb - 0.05f),
-                            0.0072f, new Color(0.55f, 0.58f, 0.62f), false,
-                            TextAnchor.MiddleLeft);
-                    }
-                }
-
-                rt = new RenderTexture(ShotWidth, ShotHeight, 24) { antiAliasing = 8 };
-                cam.targetTexture = rt;
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[Benchmark] model-card setup failed: {ex.Message}");
-            }
-
-            yield return new WaitForEndOfFrame();
-
             byte[] png = null;
             Texture2D tex = null;
             RenderTexture prevActive = RenderTexture.active;
+            // WHY: disposal at a render wait must release the capture rig and restore global state.
             try
             {
-                if (cam != null && rt != null)
+                try
                 {
-                    RenderTexture.active = rt;
-                    tex = new Texture2D(rt.width, rt.height, TextureFormat.RGB24, false);
-                    tex.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
-                    tex.Apply();
-                    png = ImageConversion.EncodeToPNG(tex);
+                    camGo = new GameObject("ModelCardCamera");
+                    cam = camGo.AddComponent<Camera>();
+                    cam.clearFlags = CameraClearFlags.SolidColor;
+                    cam.backgroundColor = new Color(0.07f, 0.08f, 0.10f);
+                    cam.fieldOfView = 50f;
+                    cam.nearClipPlane = 0.05f;
+                    cam.farClipPlane = 50f;
+                    cam.allowMSAA = true;
+                    cam.transform.position = Vector3.zero;
+                    cam.transform.rotation = Quaternion.identity;
+
+                    Transform p = cam.transform;
+                    const float zb = 1.6f;
+                    float halfH = zb * Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
+
+                    // --- data ---
+                    Dictionary<BenchmarkDimension, double> dim = new();
+                    foreach (DimensionScore d in report.DimensionBreakdown())
+                    {
+                        dim[d.Dimension] = d.Score;
+                    }
+
+                    BenchmarkDimension[] order =
+                    {
+                        BenchmarkDimension.ToolCorrectness, BenchmarkDimension.IntentSequence,
+                        BenchmarkDimension.TaskCompletion, BenchmarkDimension.Determinism,
+                        BenchmarkDimension.Reasoning, BenchmarkDimension.InstructionAdherence
+                    };
+                    string[] axisLabels = { "Tool", "Intent", "Task", "Determ", "Reason", "Instr" };
+
+                    RoleFitness.Result fit = RoleFitness.Evaluate(report);
+
+                    // --- header ---
+                    // Long/hyphenated model ids (OpenRouter-style: "qwen3.6-27b-heretic-...-imatrix-max")
+                    // must never overflow the card at a fixed size, or they run off the frustum edges.
+                    // Shrink by length like the hero header does, but AddCameraText has no wrap/measure —
+                    // so a hard truncation is the actual backstop for arbitrarily long ids, not the size floor.
+                    System.Globalization.CultureInfo inv = System.Globalization.CultureInfo.InvariantCulture;
+                    string modelId = report.Metadata.ModelId ?? "";
+                    if (modelId.Length > 68)
+                    {
+                        modelId = modelId.Substring(0, 65) + "…";
+                    }
+
+                    string headerLine = $"{modelId} — {report.SuiteBaseScore.ToString("0", inv)}/100";
+                    float headerSize = headerLine.Length > 60 ? 0.0060f
+                        : headerLine.Length > 46 ? 0.0080f
+                        : headerLine.Length > 34 ? 0.0100f
+                        : 0.0135f;
+                    AddCameraText(p, headerLine,
+                        new Vector3(0f, halfH - 0.085f, zb - 0.05f), headerSize, Color.white, true);
+                    bool anyAssessed = false;
+                    foreach (RoleFitness.RoleScore r in fit.Roles)
+                    {
+                        if (r.Assessed)
+                        {
+                            anyAssessed = true;
+                            break;
+                        }
+                    }
+
+                    string fitTxt = anyAssessed
+                        ? $"game-fit {fit.Overall.ToString("0.#", inv)}/10 · best {Shorten(fit.BestRole)}"
+                        : "partial run";
+                    // Length varies with PASS/PARTIAL/FAIL digit counts and the best-role name — centered text
+                    // at a fixed size can overflow BOTH frustum edges for a long combination (e.g. double-digit
+                    // counts + "Programmer"), same failure mode as the header above — shrink by length too.
+                    string summaryLine =
+                        $"PASS {report.PassCount}  ·  PARTIAL {report.PartialCount}  ·  FAIL {report.FailCount}      {fitTxt}";
+                    float summarySize = summaryLine.Length > 70 ? 0.0060f
+                        : summaryLine.Length > 55 ? 0.0075f
+                        : 0.0085f;
+                    AddCameraText(p, summaryLine,
+                        new Vector3(0f, halfH - 0.185f, zb - 0.05f), summarySize,
+                        new Color(0.62f, 0.66f, 0.72f), false);
+
+                    // --- radar (left) ---
+                    GameObject radar = new("Radar");
+                    radar.transform.SetParent(p, false);
+                    radar.transform.localPosition = new Vector3(-0.62f, -0.10f, zb);
+                    radar.transform.localRotation = Quaternion.identity;
+                    Transform rp = radar.transform;
+                    const float R = 0.40f;
+
+                    Vector2[] dir = new Vector2[6];
+                    Vector2[] rim = new Vector2[6];
+                    Vector2[] data = new Vector2[6];
+                    for (int i = 0; i < 6; i++)
+                    {
+                        float ang = (90f - i * 60f) * Mathf.Deg2Rad;
+                        dir[i] = new Vector2(Mathf.Cos(ang), Mathf.Sin(ang));
+                        rim[i] = dir[i] * R;
+                        double v = dim.TryGetValue(order[i], out double sv) ? sv : 0.0;
+                        data[i] = dir[i] * (R * (float)Mathf.Clamp01((float)v / 100f));
+                    }
+
+                    // Concentric grid rings at 25/50/75/100% + spokes, so the hexagon reads as a real radar.
+                    Color gridOuter = new(0.34f, 0.37f, 0.43f);
+                    Color gridInner = new(0.22f, 0.24f, 0.29f);
+                    float[] rings = { 0.25f, 0.5f, 0.75f, 1f };
+                    foreach (float frac in rings)
+                    {
+                        bool outer = frac > 0.99f;
+                        Color rc = outer ? gridOuter : gridInner;
+                        float th = outer ? 0.0035f : 0.002f;
+                        for (int i = 0; i < 6; i++)
+                        {
+                            AddLine(rp, dir[i] * (R * frac), dir[(i + 1) % 6] * (R * frac), 0.02f, th, rc);
+                        }
+                    }
+
+                    for (int i = 0; i < 6; i++)
+                    {
+                        AddLine(rp, Vector2.zero, rim[i], 0.018f, 0.002f, gridInner);
+                    }
+
+                    AddFilledPolygon(rp, data, 0.0f, new Color(0.26f, 0.56f, 0.92f));
+                    for (int i = 0; i < 6; i++)
+                    {
+                        AddLine(rp, data[i], data[(i + 1) % 6], -0.01f, 0.005f, new Color(0.62f, 0.85f, 1f));
+                    }
+
+                    for (int i = 0; i < 6; i++)
+                    {
+                        double v = dim.TryGetValue(order[i], out double sv) ? sv : 0.0;
+                        Vector2 lp = rim[i] * 1.34f;
+                        AddCameraText(rp, $"{axisLabels[i]} {v:0}",
+                            new Vector3(lp.x, lp.y, -0.02f), 0.0072f,
+                            new Color(0.80f, 0.84f, 0.90f), false);
+                    }
+
+                    // The headline game-fit number, big, in the dead centre of the radar so it stands out.
+                    AddQuad(rp, new Vector3(0f, 0f, -0.03f), new Vector2(0.27f, 0.175f),
+                        new Color(0.05f, 0.06f, 0.08f));
+                    string centre = anyAssessed ? fit.Overall.ToString("0.#", inv) : "n/a";
+                    AddCameraText(rp, centre, new Vector3(0f, 0.016f, -0.05f), 0.0135f,
+                        Color.white, true);
+                    AddCameraText(rp, "game-fit /10", new Vector3(0f, -0.052f, -0.05f), 0.0047f,
+                        new Color(0.66f, 0.70f, 0.76f), false);
+
+                    // --- role bars (right) ---
+                    AddCameraText(p, "Game-fitness by role (0–10)",
+                        new Vector3(0.02f, 0.40f, zb - 0.05f), 0.0085f,
+                        new Color(0.62f, 0.66f, 0.72f), false, TextAnchor.MiddleLeft);
+
+                    // barW is kept short of the ~1.326-unit perspective-frustum half-width so the rating
+                    // number (up to "10", drawn from barX0+barW+0.02) never gets clipped at the right edge.
+                    const float barX0 = 0.55f, barW = 0.48f;
+                    for (int j = 0; j < fit.Roles.Count && j < 6; j++)
+                    {
+                        RoleFitness.RoleScore role = fit.Roles[j];
+                        float y = 0.28f - j * 0.125f;
+                        AddCameraText(p, Shorten(role.Role), new Vector3(0.02f, y, zb - 0.05f),
+                            0.0078f, Color.white, false, TextAnchor.MiddleLeft);
+
+                        AddQuad(p, new Vector3(barX0 + barW * 0.5f, y, zb),
+                            new Vector2(barW, 0.05f),
+                            new Color(0.16f, 0.17f, 0.20f));
+
+                        if (role.Assessed)
+                        {
+                            float frac = Mathf.Clamp01((float)role.Rating / 10f);
+                            float fw = Mathf.Max(barW * frac, 0.004f);
+                            AddQuad(p, new Vector3(barX0 + fw * 0.5f, y, zb - 0.01f),
+                                new Vector2(fw, 0.05f), RatingColor(role.Rating));
+                            AddCameraText(p, role.Rating.ToString("0.#", inv),
+                                new Vector3(barX0 + barW + 0.02f, y, zb - 0.05f),
+                                0.0078f, Color.white, true, TextAnchor.MiddleLeft);
+                        }
+                        else
+                        {
+                            AddCameraText(p, "n/a", new Vector3(barX0 + 0.04f, y, zb - 0.05f),
+                                0.0072f, new Color(0.55f, 0.58f, 0.62f), false,
+                                TextAnchor.MiddleLeft);
+                        }
+                    }
+
+                    rt = new RenderTexture(ShotWidth, ShotHeight, 24) { antiAliasing = 8 };
+                    cam.targetTexture = rt;
                 }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[Benchmark] model-card capture failed: {ex.Message}");
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[Benchmark] model-card setup failed: {ex.Message}");
+                }
+
+                // WHY: Editor batch mode does not resume WaitForEndOfFrame; read the previous rendered frame.
+                yield return Application.isBatchMode ? null : new WaitForEndOfFrame();
+
+                try
+                {
+                    if (cam != null && rt != null)
+                    {
+                        RenderTexture.active = rt;
+                        tex = new Texture2D(rt.width, rt.height, TextureFormat.RGB24, false);
+                        tex.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
+                        tex.Apply();
+                        png = ImageConversion.EncodeToPNG(tex);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[Benchmark] model-card capture failed: {ex.Message}");
+                }
             }
             finally
             {
@@ -3711,6 +3860,23 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         /// <summary>
+        /// True when the run already did work worth grading: a tool call seen by either source, a recorded world
+        /// command, a Lua execution, or a rendered scene.
+        /// <para>
+        /// WHY: a streamed turn cut by the scenario deadline never reaches its terminal chunk, so the session
+        /// capture reports no tool calls for it; only the lifecycle observer and the environment saw them. A
+        /// Lua-only or mutation-only run still working at its deadline must be graded, not retried and excluded
+        /// as an environment timeout.
+        /// </para>
+        /// </summary>
+        internal static bool RunProducedWork(int capturedToolCalls, int observedToolCalls, int worldCommands,
+            int luaExecutions, bool renderedScene)
+        {
+            return Math.Max(capturedToolCalls, observedToolCalls) >= 1 || worldCommands > 0 || luaExecutions > 0 ||
+                   renderedScene;
+        }
+
+        /// <summary>
         /// True only when our scenario deadline canceled a run after the model built a scene.
         /// </summary>
         internal static bool IsCleanBudgetCancellation(
@@ -3799,6 +3965,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 ScenarioId = scenario.Id,
                 ScenarioName = scenario.Name,
                 Group = scenario.Group,
+                Extreme = scenario.IsExtreme,
                 ModelId = modelId,
                 Score = zero,
                 Attribution = attribution,

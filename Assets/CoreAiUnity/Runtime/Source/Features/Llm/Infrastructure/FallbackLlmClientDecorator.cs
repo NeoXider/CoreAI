@@ -32,6 +32,12 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <inheritdoc />
+        public void ResolveRequestSettings(LlmCompletionRequest request)
+        {
+            _primary.ResolveRequestSettings(request);
+        }
+
+        /// <inheritdoc />
         public bool SupportsNativeToolCalling =>
             _primary.SupportsNativeToolCalling && _secondary.SupportsNativeToolCalling;
 

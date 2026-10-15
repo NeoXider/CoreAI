@@ -235,7 +235,7 @@ public sealed class UnityAudioController : IAudioController
 
     public Task PlaySoundAsync(string clipName, float volume = 1f)
     {
-        var clip = Resources.Load<AudioClip>(clipName);
+        AudioClip clip = Resources.Load<AudioClip>(clipName);
         _source.volume = volume;
         _source.PlayOneShot(clip);
         return Task.CompletedTask;
@@ -314,9 +314,9 @@ public:
 - ➖ It ships with the mod runtime and its Unity bindings, so it is part of `com.neoxider.coreaimods`,
   not of the engine-free core
 
-Lua-CSharp is a managed, AOT-safe VM and works on WebGL player builds by
-default (toggle with `CoreAISettingsAsset.EnableLuaOnWebGl`). See
-[`LUA_SANDBOX_SECURITY.md`](LUA_SANDBOX_SECURITY.md) for platform support
+Lua-CSharp is a managed, AOT-safe VM and runs in WebGL player builds.
+`CoreAISettingsAsset.EnableLuaOnWebGl` exists, but no Lua runtime reads it yet, so turning it off does not
+stop Lua on WebGL. See [`LUA_SANDBOX_SECURITY.md`](LUA_SANDBOX_SECURITY.md) for platform support
 details and IL2CPP/WebGL stripping requirements.
 
 ### Why does WorldCommand live in CoreAiUnity?

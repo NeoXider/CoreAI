@@ -3718,16 +3718,16 @@ end)";
                     process.Controller, ToolIdentity(), BuiltInAgentRoleIds.Programmer).ExecuteAsync("chosen"));
 
                 Assert.IsFalse(confirmed.Success);
-                StringAssert.Contains("MVP11 session handoff", confirmed.Error);
+                StringAssert.Contains("session handoff is unavailable", confirmed.Error);
                 StringAssert.Contains("disconnect clients or stop the server first", confirmed.Error);
                 Assert.IsFalse(confirmed.StartupSelectionPersisted);
                 Assert.AreSame(live, process.Controller.CurrentRbxApi.Registry, "the live world is not changed");
                 Assert.IsFalse(Directory.Exists(disk.StartupDirectory), "a refused load records no startup selection");
                 Assert.AreEqual("network_sessions_active", manual.Status);
-                StringAssert.Contains("MVP11 session handoff", manual.Message);
+                StringAssert.Contains("session handoff is unavailable", manual.Message);
                 Assert.AreEqual("network_sessions_active", auto.Status);
                 Assert.IsFalse(raw.Success);
-                StringAssert.Contains("MVP11 session handoff", raw.Error);
+                StringAssert.Contains("session handoff is unavailable", raw.Error);
                 AssertUnloadableAutosave(tool, "chosen", "network_sessions_active");
                 Assert.AreEqual(0, process.Controller.GetPendingManualLoads().Count);
 

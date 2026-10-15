@@ -1,66 +1,77 @@
-# CoreAI Mod System & UI — Design Spec
+# CoreAI Mod System & UI
 
-Status: design spec. Sections marked **implemented** describe shipped behaviour; the rest is
-planned. The historical performance analysis and the phase plan live in
-`dev-docs/MOD_SYSTEM_DESIGN_NOTES.md`.
+How mods are identified, stored, shipped with a game, managed on the Hub, and kept alive when they
+fail. Everything on this page is built; §7 lists what is not built yet.
 
-## 0. Goals
+## 0. What the mod system does
 
-A powerful, optimized, convenient, future-proof mod core:
-
-- Mods are authored by the **LLM** (already via `manage_mods`) or by the **player** (paste text,
-  edit, create) — same store, same lifecycle.
-- The **game ships with mods** (bundled), some **enabled by default**, and mods **update** when the
-  game updates or new content is downloaded at runtime.
-- The world changes **dynamically at runtime** — AI writes/edits mods, player writes mods — without
-  a rebuild.
-- **Categories** give a folder-like tree in the UI.
-- A single **CoreAI Hub** (UI Toolkit, event-driven) replaces the scattered IMGUI debug panels and
-  fixes the per-frame cost.
+- Mods are authored by the **LLM** (through `manage_mods`) or by the **player** (paste, edit and create
+  on the Hub). Both go to the same store and have the same lifecycle.
+- The **game ships with mods** (bundled), some enabled by default, and a newer bundled version
+  updates the installed copy at the next start (§3).
+- The world changes **at runtime**: the AI and the player write and edit mods without a rebuild.
+- **Categories** group mods on the Hub's Mods tab.
+- One **CoreAI Hub** window (UI Toolkit, event-driven) hosts the Mods tab.
 
 ## 1. Mod identity & in-source manifest (the "passport")
 
-Every mod carries a frontmatter block at the very top of its `.lua` source. Lua ignores it
-(comment); C# parses it. This is the single source of metadata for bundled mods (no separate
-`manifest.json` needed at authoring time).
+A mod declares its metadata in a header at the very top of its `.lua` source. Lua ignores it (it is a
+comment); C# parses it with `LuaModHeader.Parse(source, fallbackId)`
+(`Assets/CoreAIMods/Runtime/LuaExecution/LuaModHeader.cs`). It is the single source of metadata for
+bundled mods; no separate `manifest.json` is needed at authoring time.
 
 ```lua
 --[[@coreai
-id: first_person            # stable key; NEVER changes; drives update matching
+id: first_person
 name: First-Person Controller
-version: 1.0.0              # semver; update trigger
-active: false              # default enabled-state at FIRST seed only
-capabilities: All, Full    # requested tiers (intersected with host grant on load)
-category: player/controllers   # "/"-separated path -> UI tree
+version: 1.0.0
+active: false
+capabilities: All, Full
+category: player/controllers
 author: CoreAI
 description: WASD to move, mouse to look.
-tags: movement, camera     # optional, comma-separated
+tags: movement, camera
 ]]
 ```
 
+- `id` — stable key; never change it, it drives update matching.
+- `version` — semantic version; a higher bundled version triggers an update (§3.2).
+- `active` — the enabled state at the **first** seed only.
+- `capabilities` — the requested tiers, intersected with the host grant on load.
+- `category` — a `/`-separated path; the Hub groups mods by it.
+- `tags` — optional, comma-separated.
+
 Parsing rules:
-- Recognize a leading block comment whose first token is `@coreai` (`--[[@coreai ... ]]`). Also accept
-  a run of `-- @coreai key: value` line comments as a fallback.
-- Each entry is `key: value`; keys are case-insensitive; unknown keys ignored.
-- Defaults when absent: `id` = provided fallback (e.g. file name), `name` = id, `version` = "0.0.0",
-  `active` = true, `capabilities` = "All", `category` = "" (root), others empty.
-- `capabilities` parses to `LuaCapabilities` via the existing string round-trip (comma/space list).
-- Pure function, no Unity dependency, no allocation in the hot path beyond the parse itself.
+- The block form must be the first thing in the file: the source starts with `--[[@coreai` and the
+  block ends at the first `]]`. A run of `-- @coreai key: value` line comments at the top is accepted
+  instead.
+- Each entry is `key: value`; keys are case-insensitive; unknown keys are ignored. The value runs to
+  the end of the line, so do not put a comment after it.
+- Defaults when absent: `id` = the fallback id (e.g. the file name), `name` = id, `version` = `0.0.0`,
+  `active` = true (any value other than `false` counts as true), `capabilities` = `All`,
+  `category` = "" (root), others empty.
+- `capabilities` is a comma- or space-separated list of `LuaCapabilities` names; unknown names are
+  skipped.
+- The parser is a pure function with no Unity dependency.
 
-## 2. Manifest extension (persisted metadata)
+## 2. Persisted manifest
 
-Extend `LuaModManifest` (`Assets/CoreAIMods/Runtime/LuaExecution/LuaModManifest.cs`) with new
-fields. It is a plain JSON DTO; new fields are backward-compatible (missing => default):
+`LuaModManifest` (`Assets/CoreAIMods/Runtime/LuaExecution/LuaModManifest.cs`) is a plain JSON DTO
+stored next to each mod's source; fields missing from older JSON read as their defaults. Besides id,
+name, description, version, author, owner, capabilities, `Active` and `Entry`, it carries:
 
-- `string Category = "";`     — "/"-separated category path for the tree.
+- `string Category = "";`     — "/"-separated category path.
 - `string Tags = "";`         — comma-separated tags.
-- `string Origin = "";`       — "" = user-authored; otherwise bundled source id ("resources",
-  "streamingassets", "addressables:<label>", "remote:<url>").
+- `string Origin = "";`       — "" = user-authored; otherwise the bundled source that seeded it (its
+  `IBundledModSource.Origin`: `resources` for the shipped Resources source, `bundled` when a source
+  leaves it blank).
 - `string SeededVersion = "";`— last bundled version seeded into this store entry.
-- `string SeededHash = "";`   — hash of the source at seed time (detects user edits).
-- `bool UpdateAvailable = false;` — set by the seeder when a newer bundled version exists but the
-  local copy was user-edited (manual update offered in UI).
-- `long LoadOrder = 0;` — where the mod sits in its world's load order (implemented). A first load, and
+- `string SeededHash = "";`   — FNV-1a hash of the source at seed time.
+- `bool UpdateAvailable = false;` — when true, the Hub row shows **Update available** with an
+  **Apply update** button (`IHubModService.ApplyBundledUpdate`, which re-seeds the mod from its bundled
+  source and clears the flag). `BundledModSeeder` writes it as false, because it applies a newer
+  bundled version itself (§3.2).
+- `long LoadOrder = 0;` — where the mod sits in its world's load order. A first load, and
   a mod created on the Hub, is stamped with one past the highest value in the store (dormant mods
   included; `LuaModManifest.NextLoadOrder(store)` is the shared rule for host tools that write
   manifests). A reload, a Hub edit, a bundled update and a seeder update keep it; an unload followed by a
@@ -93,47 +104,44 @@ store lists fewer manifests than the limit.
 
 ## 3. Bundled sources & the seeder
 
-> **Status: implemented (PR1).** `IBundledModSource`, `BundledMod`, `ResourcesBundledModSource`, and
-> `BundledModSeeder` live in `Assets/CoreAIMods/Runtime/Infrastructure/`. `CoreAiModsInstaller` registers
-> `ResourcesBundledModSource` and runs the seeder in the play-mode build callback **before**
-> `RehydrateFromStore`. Five sample mods ship in `Assets/CoreAIMods/Runtime/Resources/CoreAIMods/`
-> (`sample_welcome.lua` active; `sample_lane_racer.lua`, `sample_tetris3d.lua`, `sample_clicker.lua`
-> and `sample_castle3d.lua` opt-in). Unit-tested in `BundledModSeederEditModeTests`.
+`IBundledModSource`, `BundledMod`, `ResourcesBundledModSource` and `BundledModSeeder` live in
+`Assets/CoreAIMods/Runtime/Infrastructure/`. `CoreAiModsInstaller` registers
+`ResourcesBundledModSource`, and at startup in play mode it runs the seeder into the default mod store
+**before** the startup world is restored or `LuaCsModRuntime.RehydrateFromStore` runs. Five sample mods
+ship in `Assets/CoreAIMods/Runtime/Resources/CoreAIMods/` (`sample_welcome.lua` active;
+`sample_lane_racer.lua`, `sample_tetris3d.lua`, `sample_clicker.lua` and `sample_castle3d.lua` opt-in).
+Unit-tested in `BundledModSeederEditModeTests`.
 
-### 3.1 Sources (pluggable)
+### 3.1 Sources
 
-`IBundledModSource` returns discovered bundled mods as `BundledMod { string Id, string Source,
-string Version }` (id/version parsed from the `@coreai` header) plus an `Origin` marker on the source.
-Implementations:
+`IBundledModSource` has an `Origin` marker and `Load()`, which returns the discovered mods as
+`BundledMod { string Id, string Source, string Version }` (id and version parsed from the `@coreai`
+header). CoreAI ships one source:
 
-- **PR1 (done):** `ResourcesBundledModSource` — `Resources.LoadAll<TextAsset>("CoreAIMods")` (the
-  project's Lua scripted importer makes `.lua` a `TextAsset`). Synchronous, all platforms, built into the
-  player. Base source. This is how a game ships with ready-made mods.
-- **Planned:** `StreamingAssetsBundledModSource` — scan `StreamingAssets/CoreAIMods/*.lua` via
-  `UnityWebRequest` (async; needed on Android/WebGL). Editable post-ship; path to Addressables.
-- **Planned:** `AddressablesBundledModSource` — load `.lua` TextAssets by label `coreai-mod`. Runtime/DLC
-  delivery.
-- **Future:** `RemoteBundledModSource` — download from a URL/manifest.
+- `ResourcesBundledModSource` — `Resources.LoadAll<TextAsset>("CoreAIMods")`, origin `resources`
+  (the project's Lua scripted importer makes `.lua` a `TextAsset`). Synchronous, works on every
+  platform, built into the player. This is how a game ships with ready-made mods.
 
-Collision precedence when the same `id` appears in multiple sources:
-`remote > addressables > streamingassets > resources` (outer layer overrides built-in).
+A host can register more `IBundledModSource` implementations in the same container; the seeder takes
+all of them in registration order. When two sources ship the same `id`, the first one installs it and
+a later one replaces it only with a strictly newer version.
 
-### 3.2 Seeder state machine
+### 3.2 Seeder rules
 
-`BundledModSeeder` runs at startup **before** `LuaModRuntime.RehydrateFromStore`. For each discovered
-bundled mod, compared against the `ILuaModSourceStore` entry with the same `id`:
+`BundledModSeeder.Seed()` compares each discovered bundled mod with the `ILuaModSourceStore` entry of
+the same `id`:
 
-| Store state | Condition | Action |
-|---|---|---|
-| absent | — | **install**: `Save` source; `Active = header.active`; `Origin`, `SeededVersion=header.version`, `SeededHash=hash(source)` |
-| present, `header.version > SeededVersion`, stored source hash == `SeededHash` (untouched) | — | **update**: `Save` new source (the subsequent rehydrate/`LoadMod` records a revision for rollback); **keep the user's `Active`**; bump `SeededVersion`/`SeededHash` |
-| present, newer version, stored source hash != `SeededHash` (user-edited) | — | **skip + flag**: set `UpdateAvailable=true`; leave user's copy; manual update in UI |
-| present, `header.version <= SeededVersion` | — | leave as-is |
-| present, `Origin == ""` (user mod, id clash) | — | never touch user mods |
+| Store state | Action |
+|---|---|
+| absent | **install**: `Save` the source; `Active = header.active`; set `Origin`, `SeededVersion`, `SeededHash`; no load order |
+| present, `Origin == ""` (user mod, id clash) | **skip**: user mods are never touched |
+| present, bundled `version` <= `SeededVersion` | **skip** |
+| present, bundled `version` > `SeededVersion` | **update**: `Save` the new source, **keep the stored `Active` and `LoadOrder`**, refresh `SeededVersion`/`SeededHash`. A copy the player edited is updated too; an edit that ran stays in the mod's revision history (`manage_mods versions` / `revert`) |
 
-Result: `active:` from the header applies only on first install; `version` drives updates and never
-clobbers the user's runtime toggle or edits. Hash: stable non-crypto (e.g. FNV-1a over UTF-8), same
-algorithm everywhere.
+So `active:` from the header applies only on first install, and `version` drives updates without
+touching the player's enabled/disabled choice. Versions compare as dotted numbers (`1.10.0` > `1.2.0`;
+missing parts count as 0). The hash is FNV-1a 32-bit over the UTF-8 source. Seeding is best-effort: a
+failing source or mod is logged and skipped, and never stops startup.
 
 ## 4. Authoring surfaces
 
@@ -146,70 +154,67 @@ previous run's startup objects (§5c) unless the optional `keep_objects: true` i
 `keep_objects`) and what it cleaned. When a mutating action changed the live startup world but the change
 will not reopen after a restart, the result carries a `startup_warning`
 ([`WORLD_PACKAGE.md`](WORLD_PACKAGE.md), "Startup selection"). The `category` from the `@coreai` header
-is persisted into the manifest; a `category` argument and a category column in `list` output are
-planned.
+is persisted into the manifest.
 
 ### 4.2 Player — CoreAI Hub (UI Toolkit, event-driven)
 
-> **Status: implemented.** The Hub is a **UI Toolkit** window (`CoreAiHubWindow` + `CoreAiHub.uxml` /
-> `CoreAiHubUss.uss`, Unity 6.3 `UIDocument`), not uGUI/IMGUI. Pages register into `HubPageRegistry`;
-> the module's `CoreAiModsHubBinder` lights up the Mods tab and upgrades Settings/Statistics with live
-> DI sources. Menu `CoreAI → Setup → Add Hub` drops in the ready prefab (install/usage: `INSTALL.md` §4).
-
-A single floating window (`CoreAI Hub`) built on UI Toolkit, replacing the old F7–F10 IMGUI panels.
-Collapses to a compact bar via the top-right toggle. Tabs:
+The Hub is a **UI Toolkit** window (`CoreAiHubWindow` + `CoreAiHub.uxml` / `CoreAiHubUss.uss`,
+`UIDocument`). Pages register into `HubPageRegistry`; the module's `CoreAiModsHubBinder` adds the Mods
+tab and upgrades Settings/Statistics with live DI sources. Menu `CoreAI → Setup → Add Hub` drops in the
+ready prefab (install/usage: `INSTALL.md` §4). The window collapses to a compact toggle. Tabs:
 
 - **Chat** — the agent chat (embedded `CoreAiChatPanel`).
-- **Settings** — live backend config (context window, timeouts, streaming, pricing, logging).
-- **Statistics** — token budget + live orchestration metrics (`InMemoryAiOrchestrationMetrics`).
-- **Mods** — category tree; per-mod row with actions; header buttons.
-- **About**, and extensible (C# modules and Lua mods can add pages).
+- **Settings** — live backend config.
+- **Statistics** — live orchestration metrics (`InMemoryAiOrchestrationMetrics`).
+- **Mods** — sub-tabs **Mods** and **Logs** (`HubModsPages`, `HubModsPage`, `HubModLogsPage` in
+  `Assets/CoreAIMods/Runtime/HubIntegration/`).
+- **About**, and more pages from C# modules and Lua mods.
 
-Mods tab requirements:
-- Category tree (collapsible folders derived from `Category` paths).
-- Buttons: **Add mod** (new blank mod in the editor), **Paste** (from system clipboard via
-  `GUIUtility.systemCopyBuffer`), and per-mod **Copy** (source to clipboard), **Edit**, **Enable/Disable**
-  toggle, **Delete**, **Import**/**Export** (bundle JSON), **Update** (visible when `UpdateAvailable` or a
-  newer bundled version exists; re-seeds from the bundled source).
-- Editor sub-panel: a top **← Back** to the list plus a **Save & run** / **Copy** / **Paste** /
-  **Refresh diagnostics** action bar above the code area; Save validates by running the mod (errors shown
-  in the status line) and records a revision. **Save & run** of a loaded mod is a clean reload (§5c): the
-  status line says what it did — `Saved & ran 'castle'; cleaned 126 objects of the previous run.`
-  (`HubModSaveResult.Describe`). A **Keep objects on Save & run** toggle switches it to the old hot reload:
-  off by default, one Hub-wide setting kept under the PlayerPrefs key `CoreAI.Hub.Mods.KeepObjectsOnSave`
-  by `PlayerPrefsHubModEditorPreferences`; a host with its own settings store supplies an
+The Mods sub-tab:
+- Toolbar: a search box (name / category / tags), **Refresh**, **Add** (new mod in the editor),
+  **Paste** (opens the Lua in the system clipboard, `GUIUtility.systemCopyBuffer`, in the editor) and
+  **Import** (installs an export bundle from the clipboard).
+- Mods are grouped into one collapsible group per `Category` (blank → `Uncategorized`).
+- Each row: an **On/Off** toggle (load / unload), name and status line, **Edit**, **Export** (bundle to
+  the clipboard) and **Delete**; **Update available** with **Apply update** when the manifest's
+  `UpdateAvailable` is set.
+- Editor: a top **← Back** to the list plus a **Save & run** / **Copy** / **Paste** /
+  **Refresh diagnostics** / **History** action bar above the code area (**History** lists revisions,
+  each with **Revert**). Save runs the mod (errors shown in the status line) and records a revision.
+  **Save & run** of a loaded mod is a clean reload (§5c): the status line says what it did —
+  `Saved & ran 'castle'; cleaned 126 objects of the previous run.` (`HubModSaveResult.Describe`). A
+  **Keep objects on Save & run** toggle switches it to the hot reload: off by default, one Hub-wide
+  setting kept under the PlayerPrefs key `CoreAI.Hub.Mods.KeepObjectsOnSave` by
+  `PlayerPrefsHubModEditorPreferences`; a host with its own settings store supplies an
   `IHubModEditorPreferences` (`Assets/CoreAIMods/Runtime/HubIntegration/HubModEditorPage.cs`).
-- **Add mod** opens a template matched to the composition (`HubModTemplates.For`,
+- **Add** opens a template matched to the composition (`HubModTemplates.For`,
   `IHubModService.NewModTemplate`): with the Rbx API it runs per-frame work on `RunService.Heartbeat` and
   periodic work in a `task.spawn` loop that yields with `task.wait` (each resume under the short
   per-resume budget); without it, the legacy `hooks_every` timer.
 - A mod the runtime suspended after repeated budget trips (§5a) shows "suspended after repeated budget
-  trips — start it manually" on its row (`HubModRecord.SuspendedAfterBudgetTrips`); **Enable**, a load or
-  a Save & run clears it.
+  trips — start it manually" on its row (`HubModRecord.SuspendedAfterBudgetTrips`); turning it on, a
+  load or a Save & run clears it.
 
-`IHubModService` gained `SaveOrReload(id, code, ModReloadMode)` (returning `HubModSaveResult`) and
-`NewModTemplate`. They have no default bodies, so a host's own implementation of the interface must add
-them (`Assets/CoreAI/CHANGELOG.md`, Changed).
+`IHubModService.SaveOrReload(id, code, ModReloadMode)` (returning `HubModSaveResult`) and
+`IHubModService.NewModTemplate` have no default bodies: a host that implements the interface itself
+must implement them.
 
-Performance rule (critical): the Mods list/tree is built **once** and rebuilt only on the runtime's
+Performance rule (critical): the Mods list is built **once** and rebuilt only on the runtime's
 source-loaded / source-unloaded notifications (`AddModSourceLoadedListener` /
 `AddModSourceUnloadedListener`) and explicit user actions. NEVER call disk-backed stores
 (`ILuaScriptVersionStore.GetKnownKeys/TryGetSnapshot`, `ILuaModSourceStore.List`) from a per-frame
 path. The Mods and Logs tabs coalesce their notifications: however many `ModsChanged` or `LogsChanged`
 events arrive, from whatever thread, each tab rebuilds at most once per panel update and always on the
-main thread, through the panel's own scheduler (`HubModsPage.cs` and `HubModLogsPage.cs` in
-`Assets/CoreAIMods/Runtime/HubIntegration/`). Before, 500 failing `Heartbeat` handlers queued 500 rebuilds
-of the Logs list in one frame, and a rehydrate of 30 mods rebuilt the Mods list 30 times synchronously on
-the thread that raised the event — part of the Unity crash the owner hit while editing a mod on the Hub.
-See §6.
+main thread, through the panel's own scheduler (`HubModsPage.cs` and `HubModLogsPage.cs`). See §6.
 
-## 5. Dynamic world event contract (planned)
+## 5. Events mods can hook
 
-`CoreAiWorldEvents` (not implemented yet) — string constants the host would emit into the mod runtime
-so mods hook a live world:
-`world_ready`, `scene_loaded` (payload: scene), `object_spawned`/`object_despawned` (payload: id, name),
-`tick` (~20 Hz, existing), `save`, `load`. Mods subscribe via `hooks_on`. Combine with existing world
-transactions (`coreai_world_begin/commit`), persistence (`store_set/get`), and capability tiers.
+A mod subscribes with `hooks_on(name, fn)`. The host raises an event with
+`ILuaModRuntime.EmitEvent(caller, name, payload)`, and mods raise events for each other with
+`events_emit(name, payload)`. `hooks_on('tick' | 'update' | 'frame', fn)` maps to a 0.05 s (~20 Hz)
+timer. CoreAI defines no standard world event names; a host that wants mods to react to its world
+(world ready, scene loaded, object spawned) emits its own events. Combine events with world
+transactions (`coreai_world_begin/commit`), persistence (`store_set/get`) and capability tiers.
 
 ## 5a. Error policy: quarantine, not unload
 
@@ -235,15 +240,16 @@ configurable via `LuaCsModStackOptions.MaxErrorsBeforeQuarantine` — the mod is
 
 **Budget trips quarantine sooner, and survive a restart.** A budget trip — the instruction, time or
 memory budget of one call or resume — is a stall as long as the budget (10 s for a hook or timer by
-default), so eight in a row froze the game for over a minute, and the next start ran the mod and froze
-again. Two trips in a row (`LuaCsModRuntime.MaxBudgetTripsBeforeQuarantine`, default
+default), so eight in a row would freeze the game for over a minute, and the next start would run the
+mod and freeze again. Two trips in a row (`LuaCsModRuntime.MaxBudgetTripsBeforeQuarantine`, default
 `DefaultMaxBudgetTripsBeforeQuarantine` = 2, set through `LuaCsModStackOptions.MaxBudgetTripsBeforeQuarantine`
 or the runtime's constructor; ordinary errors in between do not
 break the run, a clean call or frame does) quarantine the mod whatever its error streak, and its stored
 package is marked `Active = false` with `SuspendedAfterBudgetTrips` (§2), so neither a restart nor a
-world restore starts it. A load or reload by hand, or the Hub's **Enable**, clears the mark. An instance
-quota refusal is an ordinary error, not a budget trip; ordinary errors still quarantine at 8. The
-classification reads the trip's typed cause, with a text fallback that a mod can imitate (`TODO.md`).
+world restore starts it. A load or reload by hand, or turning it on in the Hub, clears the mark. An
+instance quota refusal is an ordinary error, not a budget trip; ordinary errors still quarantine at 8.
+The classification reads the trip's typed cause, with a text fallback that a mod's own error message
+can imitate.
 
 **Disconnect is the one runtime path that does unload.** When an actor disconnects,
 `LuaCsRbxApiBindings.ActorModsDisconnected` names the mods loaded for that actor and the runtime unloads
@@ -262,32 +268,31 @@ formula the chunk reset, and a formula defined inside a `coroutine.create` body,
 mod like any other (a successful reload still replaces them, and a reset by the formula's own mod
 stays); a failed first load also drops its instance-quota attribution and removes the `OnServerInvoke`
 callbacks, tweens and pending waits its chunk created, and an unload drops the attribution too, so the
-attribution map no longer grows with every mod id ever tried. A failed **reload** also destroys the
+attribution map does not grow with every mod id ever tried. A failed **reload** also destroys the
 objects its chunk built (a tween among them) and puts the previous run's startup objects back (§5c); a
 failed **first** load keeps what its chunk built, as a Roblox script that errors does. The checks that
 can still refuse a built candidate (the second capacity check) run inside the build's rollback, and a
 load or reload of an id whose build is still running — a chunk that loads or reloads its own id, a
 `ModTearingDown` listener that reloads the same id during a reload — is refused before any of its code
 runs (`Mod '<id>' was loaded concurrently.` / `reloaded concurrently.`), so a rollback can only undo its
-own build. Still open (`TODO.md`): a failed reload's `RemoteFunction` waits, and the instances a failed
-first load's chunk created are not swept.
+own build. Not cleaned up: a failed reload's `RemoteFunction` waits, and the instances a failed first
+load's chunk created.
 
-Observability: quarantine entry raises `LuaCsModRuntime.ModQuarantined(modId, errorCount)`, and every
-teardown of a mod instance's side effects (unload, reload pre-swap, quarantine entry) raises
-`ModTearingDown(modId, reason)` — future subsystems (instance registries, signals) hook the same
-point. Logic-slot override failures are fail-open (reset to vanilla) but attributed: they are
-recorded into the mod's handler-error diagnostics with the owning mod id and slot name.
+Observability: quarantine entry raises the internal event `LuaCsModRuntime.ModQuarantined(modId,
+errorCount)`, and every teardown of a mod instance's side effects (unload, reload pre-swap, quarantine
+entry) raises the internal `ModTearingDown(modId, reason)`. Logic-slot override failures are fail-open
+(reset to vanilla) but attributed: they are recorded into the mod's handler-error diagnostics with the
+owning mod id and slot name.
 
 The streak is also what the host's auto-repair reads (`AddModHandlerErroredListener` reports it with
-every failure). `LuaModAutoRepairPolicy` still attempts its first repair at a streak of
-`DefaultMinConsecutiveErrors` (3; unchanged by the 2026-09-24 fix waves), but for scheduler threads the
-streak now counts faulting frames (M2-08): any number of faults in one frame count once, and a frame whose
-threads ran cleanly resets it, so a burst inside one frame no longer triggers a repair on its own while an
-error repeated every frame does. A successful hook or timer call in a frame whose scheduler fault was
-already charged no longer forgives that fault (A2-06), so a mod whose thread faults every frame while a
-timer succeeds every frame is still quarantined.
+every failure). `LuaModAutoRepairPolicy` attempts its first repair at a streak of
+`DefaultMinConsecutiveErrors` (3). For scheduler threads the streak counts faulting frames: any number
+of faults in one frame count once, and a frame whose threads ran cleanly resets it, so a burst inside
+one frame does not trigger a repair on its own while an error repeated every frame does. A successful
+hook or timer call in a frame whose scheduler fault was already charged does not forgive that fault,
+so a mod whose thread faults every frame while a timer succeeds every frame is still quarantined.
 
-## 5b. Multiplayer write policy (decision core implemented; not on the network yet)
+## 5b. Multiplayer write policy (decision core built; not on the network yet)
 
 CoreAI is a framework, not one game: what clients may change in a shared world is **per-world
 configuration**, not a hardcoded rule. The engine-free decision core ships in
@@ -295,8 +300,7 @@ configuration**, not a hardcoded rule. The engine-free decision core ships in
 `WriteGrantLedger`, `ClientWriteAuthority.Resolve` and `IntentGateway`. The OnlineAuthority demo runs
 it in one process; nothing routes client writes over a transport yet. The policy has exactly two modes;
 co-building is a host grant in `WriteGrantLedger` (a granted write is forwarded as an intent the server
-checks), not a third mode — there is no `Open` policy (owner decision 3,
-[`MVP25_BUILD_PLAN_2026-09-04.md`](../../dev-docs/MVP25_BUILD_PLAN_2026-09-04.md) §D):
+checks), not a third mode — there is no `Open` policy:
 
 - **`RobloxParity` (default):** a client write to a server-owned replicated instance applies
   locally, never replicates, and the server state overwrites it on the next sync. This mirrors
@@ -309,20 +313,10 @@ checks), not a third mode — there is no `Open` policy (owner decision 3,
   it, and the authoritative change replicates to everyone — creative / co-build worlds (the "friend's AI
   edits the host's world" scenario).
 
-Implementation seam (reserved now, implemented at MVP6, the replication rung; the old MVP12): every
-mutation is routed through a single authority resolver `(instance, property/action) → ApplyLocalOnly |
-Replicate | Reject`. The first implementation behind that seam is just the world-default policy above;
-**partial authority** — per-instance / per-property / per-player rules ("clients may move furniture but
-not delete walls") — is planned future functionality that becomes a new resolver implementation, not a
-replication rewrite. `NOT_AUTHORITY` always fires on explicit replication attempts regardless of policy.
-
-The AI-facing Lua skill deliberately does NOT document this yet: the skill only describes the
-implemented surface (a documented-but-missing feature is a bug magnet for LLM authors). The skill
-section for write policies ships together with MVP6. Details: `ROBLOX_API_ROADMAP.md` §MVP6.
+The AI-facing Lua skills do not describe write policies, because the policy is not wired to a
+transport. The replication plan is in [`ROBLOX_API_ROADMAP.md`](ROBLOX_API_ROADMAP.md) (MVP6).
 
 ## 5c. Reload modes: what a reload does with the previous run
-
-> **Status: implemented** (owner decision, 2026-09-24: support both modes, clean by default).
 
 A reload runs the new main chunk against a world the previous run already built into. Two modes
 (`ModReloadMode`, `Assets/CoreAIMods/Runtime/LuaExecution/LuaCsModRuntime.cs`):
@@ -337,50 +331,47 @@ A reload runs the new main chunk against a world the previous run already built 
   — a player's build, another mod's object — is moved out to the startup object's parent first, with
   everything inside it. When the new chunk fails, the objects it built are destroyed and the startup
   objects go back exactly where they were. A castle-building mod saved five times leaves one castle.
-- **`KeepObjects`:** every object stays and the new chunk builds next to them — the hot reload of every
-  earlier version. The kept startup objects stay tracked, so a later clean reload removes them too.
+- **`KeepObjects`:** every object stays and the new chunk builds next to them (a hot reload). The kept
+  startup objects stay tracked, so a later clean reload removes them too.
 
 `ILuaModRuntime.ReloadMod(caller, id, code, ModReloadMode)` answers a `ModReloadReport` (`CleanedObjects`,
 `KeptObjects`, `RescuedObjects`, `Describe()`). Its default interface body runs the mode-less reload and
 answers null, for a runtime that tracks no startup objects; every wrapper of an `ILuaModRuntime` (the
 world-session facade, an attribution facade) must forward it, or the mode is lost and the reload is a
-clean one (`TODO.md`). Rules and limits:
+clean one. Rules and limits:
 
 - Only what the main chunk builds before its first yield is tracked. Objects built after it — in a
-  `task.spawn` loop, a handler, a remote call — are never startup objects (telling a mod's threads apart
-  needs thread identity; `TODO.md`), and an object re-attributed to another actor is skipped.
+  `task.spawn` loop, a handler, a remote call — are never startup objects, and an object re-attributed
+  to another actor is skipped.
 - Until the new chunk finishes, both runs' startup objects exist, so a mod near its instance quota
   (2,048 per actor) can fail a clean reload that would fit afterwards.
 - Startup objects are tracked per process: after a restart or a world restore, the objects the
   restarted main chunk builds are the startup set.
 - `LuaCsModRuntimeFactory` wires the reload and unload teardown (threads, connections, tweens and the
-  mod's instances) by default; a host no longer wires it by hand.
+  mod's instances) by default; a host does not wire it by hand.
 - Tests: `Reload_*` and `Factory_*` in `Assets/CoreAIMods/Tests/EditMode/LuaCsModRuntimeEditModeTests.cs`.
 
 ## 6. Performance / optimization
 
 Mod UI never enumerates disk-backed stores from a draw or per-frame path. Mod lists are cached and
-recomputed only when the runtime reports a source load/unload or the user acts; the Hub Mods tab and
-the demo mod manager both follow this rule. `FileLuaScriptVersionStore` still reads and parses its
-whole file on every synchronous call, which is exactly why it must stay off per-frame paths. The
-original 6 FPS investigation that produced this rule is recorded in
-`dev-docs/MOD_SYSTEM_DESIGN_NOTES.md`.
+recomputed only when the runtime reports a source load/unload or the user acts; the Hub Mods tab
+follows this rule. `FileLuaScriptVersionStore` reads and parses its whole file on every synchronous
+call, which is exactly why it must stay off per-frame paths.
 
-## 7. Delivery status
+## 7. Not built yet
 
-Implemented: §1 header parser, §2 manifest fields, §3 Resources source + seeder + wiring, §4.2 the
-UI Toolkit Hub with the Mods tab, §5a quarantine and the budget-trip suspension, §5c reload modes.
-Planned: §3.1 StreamingAssets / Addressables /
-remote sources, the `category` argument of §4.1, an in-memory cache for `FileLuaScriptVersionStore`,
-§5 world event contract, and wiring the §5b write-policy core to a network transport.
+- Bundled sources other than `Resources` (StreamingAssets, Addressables, a remote download).
+- A `category` argument and a category column in `manage_mods`.
+- An in-memory cache for `FileLuaScriptVersionStore`.
+- Standard host world events for mods (§5).
+- Routing the §5b write-policy core over a network transport.
 
 ## 8. Platform / compatibility notes
 
-- WebGL: `Resources` works; `StreamingAssets` needs `UnityWebRequest`. File stores such as
-  `FileLuaModSourceStore` confirm durability through `CoreAiWebGlPersistence` (the engine's automatic
-  `persistentDataPath` persistence) instead of driving IDBFS by hand. Keep the seeder synchronous only
-  for the Resources source; async for the rest.
-- Default builds omit Lua; `COREAI_LUA` builds include the guarded Lua surfaces
-  (the Lua-CSharp runtime ships bundled as `Lua.dll`/`Lua.Annotations.dll`, so there is no
-  external package to omit).
+- WebGL: the `Resources` source works. File stores such as `FileLuaModSourceStore` confirm durability
+  through `CoreAiWebGlPersistence` (the engine's automatic `persistentDataPath` persistence) instead of
+  driving IDBFS by hand. The seeder is synchronous.
+- The `COREAI_LUA` define gates the Lua demos, benchmark scenarios and Lua-dependent tests; the
+  Lua-CSharp runtime ships bundled as `Lua.dll`/`Lua.Annotations.dll` in this package (see
+  [the package README](../../Assets/CoreAIMods/README.md)).
 - All seven `com.neoxider.coreai*` packages bump in lockstep at release time.

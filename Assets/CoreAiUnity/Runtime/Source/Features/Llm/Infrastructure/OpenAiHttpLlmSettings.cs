@@ -36,12 +36,18 @@ namespace CoreAI.Infrastructure.Llm
         private float temperature = 0.2f;
 
         [SerializeField]
+        private bool overrideTemperature = true;
+
+        [SerializeField]
         [Min(5)]
         private int requestTimeoutSeconds = 120;
 
         [SerializeField]
         [Min(64)]
         private int maxTokens = 128000;
+
+        [SerializeField]
+        private bool overrideMaxTokens = true;
 
         [Header("Provider-specific request body")]
         [Tooltip("Raw JSON object merged into each OpenAI-compatible request body. Leave empty for standard requests.")]
@@ -53,6 +59,12 @@ namespace CoreAI.Infrastructure.Llm
             "Provider Default leaves request bodies unchanged. Disabled/Enabled sends provider-specific thinking controls.")]
         [SerializeField]
         private LlmReasoningMode reasoningMode = LlmReasoningMode.ProviderDefault;
+
+        [SerializeField]
+        private LlmReasoningEffort reasoningEffort = LlmReasoningEffort.Default;
+
+        [SerializeField]
+        private LlmReasoningDialect reasoningDialect = LlmReasoningDialect.Auto;
 
         [Tooltip("Optional thinking budget for compatible providers. 0 = omit.")]
         [SerializeField]
@@ -107,11 +119,23 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Sampling temperature.</summary>
         public float Temperature => temperature;
 
+        /// <summary>Whether this profile overrides inherited sampling temperature.</summary>
+        public bool OverrideTemperature => overrideTemperature;
+
+        /// <summary>Endpoint sampling override; null inherits global settings.</summary>
+        public float? TemperatureOverride => overrideTemperature ? temperature : null;
+
         /// <summary>UnityWebRequest timeout in seconds.</summary>
         public int RequestTimeoutSeconds => requestTimeoutSeconds;
 
         /// <summary>Maximum response tokens.</summary>
         public int MaxTokens => maxTokens;
+
+        /// <summary>Whether this profile overrides inherited response limits.</summary>
+        public bool OverrideMaxTokens => overrideMaxTokens;
+
+        /// <summary>Endpoint response token cap; zero is unlimited and null inherits global settings.</summary>
+        public int? MaxTokensOverride => overrideMaxTokens ? maxTokens : null;
 
         /// <summary>Provider-specific extra request body JSON.</summary>
         public string ExtraBodyJson => extraBodyJson ?? "";
@@ -135,6 +159,12 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Provider-specific reasoning mode.</summary>
         public LlmReasoningMode ReasoningMode => reasoningMode;
+
+        /// <summary>Typed reasoning effort; Default inherits provider or legacy settings.</summary>
+        public LlmReasoningEffort ReasoningEffort => reasoningEffort;
+
+        /// <summary>Wire dialect used for provider reasoning controls.</summary>
+        public LlmReasoningDialect ReasoningDialect => reasoningDialect;
 
         /// <summary>Optional provider-side thinking budget in tokens.</summary>
         public int ThinkingBudgetTokens => thinkingBudgetTokens < 0 ? 0 : thinkingBudgetTokens;
@@ -170,10 +200,14 @@ namespace CoreAI.Infrastructure.Llm
                 AuthorizationHeader = AuthorizationHeader,
                 Model = Model,
                 Temperature = Temperature,
+                OverrideTemperature = OverrideTemperature,
                 RequestTimeoutSeconds = RequestTimeoutSeconds,
                 MaxTokens = MaxTokens,
+                OverrideMaxTokens = OverrideMaxTokens,
                 ExtraBodyJson = ExtraBodyJson,
                 ReasoningMode = ReasoningMode,
+                ReasoningEffort = ReasoningEffort,
+                ReasoningDialect = ReasoningDialect,
                 ThinkingBudgetTokens = ThinkingBudgetTokens,
                 MaxRequestsPerSession = MaxRequestsPerSession,
                 MaxPromptChars = MaxPromptChars,
@@ -202,16 +236,30 @@ namespace CoreAI.Infrastructure.Llm
             apiKey = options.ApiKey ?? "";
             model = options.Model ?? "";
             temperature = Mathf.Clamp(options.Temperature, 0f, 2f);
+            overrideTemperature = options.OverrideTemperature;
             requestTimeoutSeconds = options.RequestTimeoutSeconds < 5 ? 5 : options.RequestTimeoutSeconds;
-            maxTokens = options.MaxTokens < 64 ? 128000 : options.MaxTokens;
+            maxTokens = options.MaxTokens < 0 ? 128000 : options.MaxTokens;
+            overrideMaxTokens = options.OverrideMaxTokens;
             extraBodyJson = options.ExtraBodyJson ?? "";
             reasoningMode = options.ReasoningMode;
+            reasoningEffort = options.ReasoningEffort;
+            reasoningDialect = options.ReasoningDialect;
             thinkingBudgetTokens = options.ThinkingBudgetTokens < 0 ? 0 : options.ThinkingBudgetTokens;
             maxRequestsPerSession = options.MaxRequestsPerSession < 0 ? 0 : options.MaxRequestsPerSession;
             maxPromptChars = options.MaxPromptChars < 0 ? 0 : options.MaxPromptChars;
             logLlmInput = options.LogLlmInput;
             logLlmOutput = options.LogLlmOutput;
             enableHttpDebugLogging = options.EnableHttpDebugLogging;
+        }
+
+        /// <summary>Preserves the original full-parameter runtime configuration API.</summary>
+        public void SetRuntimeConfiguration(bool useOpenAiCompatibleHttp, string apiBaseUrl,
+            string apiKey, string model, float temperature, int requestTimeoutSeconds, int maxTokens,
+            LlmExecutionMode executionMode, int maxRequestsPerSession, int maxPromptChars)
+        {
+            SetRuntimeConfiguration(useOpenAiCompatibleHttp, apiBaseUrl, apiKey, model, temperature,
+                requestTimeoutSeconds, maxTokens, executionMode, maxRequestsPerSession, maxPromptChars,
+                LlmReasoningEffort.Default, LlmReasoningDialect.Auto, true, true);
         }
 
         /// <summary>
@@ -227,7 +275,11 @@ namespace CoreAI.Infrastructure.Llm
             int maxTokens = 128000,
             LlmExecutionMode executionMode = LlmExecutionMode.ClientOwnedApi,
             int maxRequestsPerSession = 0,
-            int maxPromptChars = 0)
+            int maxPromptChars = 0,
+            LlmReasoningEffort reasoningEffort = LlmReasoningEffort.Default,
+            LlmReasoningDialect reasoningDialect = LlmReasoningDialect.Auto,
+            bool overrideTemperature = true,
+            bool overrideMaxTokens = true)
         {
             this.useOpenAiCompatibleHttp = useOpenAiCompatibleHttp;
             this.executionMode = NormalizeHttpMode(executionMode);
@@ -237,8 +289,12 @@ namespace CoreAI.Infrastructure.Llm
             this.apiKey = apiKey ?? "";
             this.model = model ?? "";
             this.temperature = temperature;
+            this.overrideTemperature = overrideTemperature;
             this.requestTimeoutSeconds = requestTimeoutSeconds < 5 ? 5 : requestTimeoutSeconds;
-            this.maxTokens = maxTokens < 64 ? 128000 : maxTokens;
+            this.maxTokens = maxTokens < 0 ? 128000 : maxTokens;
+            this.overrideMaxTokens = overrideMaxTokens;
+            this.reasoningEffort = reasoningEffort;
+            this.reasoningDialect = reasoningDialect;
             this.maxRequestsPerSession = maxRequestsPerSession < 0 ? 0 : maxRequestsPerSession;
             this.maxPromptChars = maxPromptChars < 0 ? 0 : maxPromptChars;
         }

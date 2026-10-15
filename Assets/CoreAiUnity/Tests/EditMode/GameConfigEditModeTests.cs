@@ -64,6 +64,67 @@ namespace CoreAI.Tests.EditMode
         #region GameConfigTool Read Tests
 
         [Test]
+        public void ConfigTool_ReadOnlyRole_ReadsGrantedKeysAndCannotUpdate()
+        {
+            _store.TrySave("session", "{\"difficulty\":2}");
+            _store.TrySave("private", "{\"secret\":true}");
+            _policy.ConfigureRole("Reader", new[] { "session" }, System.Array.Empty<string>());
+            GameConfigTool tool = new(_store, _policy, "Reader");
+
+            GameConfigTool.GameConfigResult read = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(
+                tool.ExecuteAsync("read").Result);
+            GameConfigTool.GameConfigResult update = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(
+                tool.ExecuteAsync("update", "{\"difficulty\":9}").Result);
+
+            Assert.IsTrue(read.Success);
+            StringAssert.Contains("session", read.ConfigJson);
+            StringAssert.DoesNotContain("private", read.ConfigJson);
+            Assert.IsFalse(update.Success);
+            Assert.IsTrue(_store.TryLoad("session", out string unchanged));
+            Assert.AreEqual("{\"difficulty\":2}", unchanged);
+        }
+
+        [Test]
+        public void ConfigTool_ReadAllRole_ReadsKnownKeysWithoutWriteAccess()
+        {
+            _store.TrySave("session", "{}");
+            _store.TrySave("crafting", "{}");
+            _policy.SetKnownKeys(new[] { "session", "crafting" });
+            _policy.ConfigureRole("Reader", null, System.Array.Empty<string>());
+            GameConfigTool tool = new(_store, _policy, "Reader");
+
+            GameConfigTool.GameConfigResult read = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(
+                tool.ExecuteAsync("read").Result);
+
+            Assert.IsTrue(read.Success);
+            StringAssert.Contains("session", read.ConfigJson);
+            StringAssert.Contains("crafting", read.ConfigJson);
+        }
+
+        [Test]
+        public void ConfigTool_SeparateReadWriteKeys_ReadsOnlyReadKeysAndUpdatesOnlyWriteKeys()
+        {
+            _store.TrySave("public", "{\"visible\":true}");
+            _store.TrySave("private", "{\"secret\":true}");
+            _policy.ConfigureRole("Writer", new[] { "public" }, new[] { "private" });
+            GameConfigTool tool = new(_store, _policy, "Writer");
+
+            GameConfigTool.GameConfigResult read = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(
+                tool.ExecuteAsync("read").Result);
+            GameConfigTool.GameConfigResult update = JsonConvert.DeserializeObject<GameConfigTool.GameConfigResult>(
+                tool.ExecuteAsync("update", "{\"replacement\":true}").Result);
+
+            Assert.IsTrue(read.Success);
+            StringAssert.Contains("public", read.ConfigJson);
+            StringAssert.DoesNotContain("private", read.ConfigJson);
+            Assert.IsTrue(update.Success);
+            Assert.IsTrue(_store.TryLoad("private", out string updated));
+            Assert.AreEqual("{\"replacement\":true}", updated);
+            Assert.IsTrue(_store.TryLoad("public", out string unchanged));
+            Assert.AreEqual("{\"visible\":true}", unchanged);
+        }
+
+        [Test]
         public void ConfigTool_Read_ReturnsConfigJson()
         {
             _store.TrySave("session", "{\"difficulty\":2,\"enemy_hp_mult\":1.5}");

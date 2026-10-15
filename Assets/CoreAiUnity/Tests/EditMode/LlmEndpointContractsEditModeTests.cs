@@ -68,18 +68,35 @@ namespace CoreAI.Tests.EditMode
                 ParallelSlots = 0
             };
 
-            Assert.That(invalid.Validate(), Has.Count.EqualTo(4));
+            Assert.That(invalid.Validate(), Has.Count.EqualTo(5));
 
             LlmEndpointDescriptor valid = new()
             {
                 EndpointId = "cloud-main",
                 Kind = LlmEndpointKind.HttpOpenAi,
                 BaseUrl = "https://example.test/v1",
+                Model = "configured-model",
                 ContextWindowTokens = 8192,
                 ParallelSlots = 2
             };
 
             Assert.That(valid.Validate(), Is.Empty);
+        }
+
+        [TestCase(null)]
+        [TestCase("")]
+        [TestCase(" \t ")]
+        public void HttpDescriptor_RejectsMissingModel(string model)
+        {
+            LlmEndpointDescriptor descriptor = new()
+            {
+                EndpointId = "http",
+                BaseUrl = "https://example.test/v1",
+                Model = model
+            };
+            Assert.That(descriptor.Validate(), Is.EqualTo(new[] { "HTTP endpoint model is required." }));
+            descriptor.Kind = LlmEndpointKind.LlmUnity;
+            Assert.That(descriptor.Validate(), Is.Empty);
         }
 
         [Test]

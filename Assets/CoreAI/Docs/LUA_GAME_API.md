@@ -5,8 +5,10 @@ logic, and communicate with the game through events. The sandbox (`LuaCsSecureEn
 [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md)) is not weakened by this: only the binding surface
 grows, and every group is gated by a capability level.
 
-**Lua is an optional module:** define `COREAI_LUA` to compile it in. Without the define CoreAI
-builds without Lua (stub bindings in DI). See [LUA_SANDBOX_SECURITY.md § Optional Module](LUA_SANDBOX_SECURITY.md).
+**Lua is an optional module and is off by default:** it ships in the `com.neoxider.coreaimods` package
+and runs only in a scene that composes `CoreAiModsLifetimeScope`; the `COREAI_LUA` define (absent by
+default) compiles in the Lua demos and test fixtures. See
+[LUA_SANDBOX_SECURITY.md § Optional Module](LUA_SANDBOX_SECURITY.md#optional-module-coreai_lua).
 
 **New to mods?** Start with [FIRST_MOD.md](FIRST_MOD.md) — "Your first Lua mod in 5 minutes".
 **Best practices and anti-patterns:** [LUA_BEST_PRACTICES.md](LUA_BEST_PRACTICES.md).
@@ -27,7 +29,7 @@ with `Read` physically has no world-editing functions in globals. By default (DI
 
 Per-mod: `ILuaModRuntime.LoadMod(caller, id, code, caps)` scopes the mod to the intersection of its
 caps and the host grant; a restricted mod **cannot** expand the host tier, and requesting `Full` on a
-host without the Full grant yields no `unity_*` functions.
+host without the Full grant yields only `unity_*` stubs that raise an error naming the missing grant.
 
 Persistent mod `report()` output is muted by default. Hosts can expose
 `ILuaModRuntime.SetModReportLoggingEnabled(caller, id, true)` for per-mod diagnostics when console
@@ -35,13 +37,13 @@ output is needed.
 
 | Level | Opens |
 |---|---|
-| `Read` | `print`/`report`, version stores (`coreai_lua_*`/`coreai_data_*`), `coreai_world_exists/pos/find/list_prefabs/raycast` |
+| `Read` | `print`/`report`, the [Rbx API](RBX_API.md) globals (`game`, `workspace`, `Instance`, datatypes, `task`), version stores (`coreai_lua_*`/`coreai_data_*`), `coreai_world_exists/pos/find/list_prefabs/raycast` |
 | `Gameplay` | `time_*` (including `time_set_scale`), `input_*` (keyboard/mouse, read-only) |
-| `WorldEdit` | `Instance.new` and the rest of the [Rbx API](RBX_API.md); the classic `coreai_world_spawn`/`_change`/`_set_color`/`_destroy` build functions, scenes, batches and transactions **only where the host opts in** (see the note below) |
+| `WorldEdit` | `Instance.new` and every other [Rbx API](RBX_API.md) mutation; the classic `coreai_world_spawn`/`coreai_world_change`/`coreai_world_set_color`/`coreai_world_destroy` build functions, scenes, batches and transactions **only where the host opts in** (see the note below) |
 | `LogicOverride` | `logic_define/reset/list` |
 | `Full` | `unity_find`, `unity_get/set_member`, `unity_call`, ... (reflection, opt-in) |
 
-Mod APIs (`hooks_on`/`hooks_every`, `store_set`/`store_get`, `events_emit`, `mods_export`/`mods_get`/`mods_call`/`mods_list_exports`, `report`, `mod_id`) are **not gated by a capability tier** — every loaded mod gets them regardless of its `LuaCapabilities`, since they are the mod-runtime surface itself rather than a game binding. See [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md).
+Mod APIs (`hooks_on`/`hooks_every`, `store_set`/`store_get`, `events_emit`, `mods_export`/`mods_get`/`mods_call`/`mods_list_exports`, `print`/`report`, `mod_id`) are **not gated by a capability tier** — every loaded mod gets them regardless of its `LuaCapabilities`, since they are the mod-runtime surface itself rather than a game binding. See [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md).
 
 > ### The classic `coreai_world_*` build API is opt-in
 >
@@ -53,11 +55,12 @@ Mod APIs (`hooks_on`/`hooks_every`, `store_set`/`store_get`, `events_emit`, `mod
 > create world objects through the [Rbx API](RBX_API.md) — `Instance.new('Part')`.** The `WorldEdit`
 > capability itself is still granted, because `Instance.new` requires it.
 >
-> The read-only queries in Stage 1 (`coreai_world_exists` / `_pos` / `_find` / `_list_prefabs` /
-> `_raycast`) live at the `Read` tier and are **not** affected.
+> The read-only queries in Stage 1 (`coreai_world_exists`, `coreai_world_pos`, `coreai_world_find`,
+> `coreai_world_list_prefabs`, `coreai_world_raycast`) live at the `Read` tier and are **not** affected.
 >
-> Everything documented in Stage 4 below therefore applies only to a host that deliberately sets
-> `RegisterWorldEditBuildBindings = true` in its own `LuaCsModStackOptions`.
+> Everything documented in Stage 4 below therefore applies only to a host that composes its own stack
+> through `LuaCsModRuntimeFactory` with `LuaCsModStackOptions.RegisterWorldEditBuildBindings = true`
+> (that option's default; the shipped installer sets it to `false`).
 
 ## Stage 1 - Reading the World (Query API)
 
@@ -121,27 +124,32 @@ hooks_on("wave_started", function(evt, payload)
   enemy.Position = Vector3.new(0, 0, 10)
   enemy.Parent = workspace
 end)
-hooks_every(2.0, function() ... end)   -- interval >= 0.05 s
+hooks_every(2.0, function() ... end)   -- every 2 s; a timer fires at most once per frame
 hooks_on("tick", function() ... end)   -- alias for hooks_every(0.05, ...): per-frame-ish callback
 store_set("kills", "42")               -- persistent per-mod k/v (strings)
-local v = store_get("kills")
+local v = store_get("kills")           -- "" when the key was never set
 events_emit("director_ready", "")      -- to other mods and the game
 print(mod_id())
 ```
 
 `hooks_on("tick"/"update"/"frame", fn)` is not a real per-frame event — it is routed to a
 `hooks_every(0.05, fn)` timer (20 Hz), since nothing emits those names as events. Prefer
-`hooks_every` directly when you want an explicit interval.
+`hooks_every` directly when you want an explicit interval; `hooks_every(0, fn)` runs once every frame
+(a negative, NaN or infinite interval is treated as 0).
 
 A `report("spawn...")` call is only a log line — it creates nothing. Where the classic build API is
-enabled, `coreai_world_spawn` additionally creates visible objects only when the host prefab registry
-contains the prefab key/name, so check `coreai_world_list_prefabs()` first. `Instance.new("Part")`
+enabled, `coreai_world_spawn` creates a visible object only for a prefab key/name in the host prefab
+registry (check `coreai_world_list_prefabs()` first) or a built-in primitive key (`cube`, `sphere`,
+`cylinder`, `capsule`, `plane`, `empty`) while world primitives are allowed. `Instance.new("Part")`
 needs no prefab registry at all.
 
-Budgets: every handler call gets 10 s / 50M instructions; <= 64 handlers and <= 16 timers per
-mod; event queue <= 256 (oldest evicted); 8 consecutive errors quarantine the mod automatically
-(kept loaded with dispatch suspended; a reload clears the quarantine), and so do 2 budget trips in a row, which
-also suspend the stored package until the mod is loaded or reloaded by hand.
+Budgets: every `hooks_on`/`hooks_every` handler call and every resume of the mod's main chunk gets
+10 s / 50M instructions (Rbx signal handlers and `task` threads run under the per-resume budget
+instead, see [RBX_API.md § Execution budget](RBX_API.md#execution-budget-and-scriptcontext));
+<= 64 handlers and <= 16 timers per mod; event queue <= 256 (oldest evicted); 8 consecutive errors
+quarantine the mod automatically (kept loaded with dispatch suspended; a reload clears the quarantine),
+and so do 2 budget trips in a row, which also suspend the stored package until the mod is loaded or
+reloaded by hand.
 Storage: `FileLuaModStore` (`persistentDataPath/CoreAI/LuaMods`, <= 256 keys, value <= 64 KB).
 
 Persistence boundary: in the Unity composition (`CoreAiModsInstaller`) mod sources are
@@ -154,7 +162,8 @@ does for its own known slots.
 ## Stage 4 - Level Primitives and Transactions (opt-in hosts only)
 
 > Everything in this section is part of the classic build API, which the default composition does
-> **not** register. It applies only to a host that sets `RegisterWorldEditBuildBindings = true`.
+> **not** register. It applies only to a host whose own stack keeps
+> `LuaCsModStackOptions.RegisterWorldEditBuildBindings = true`.
 > On the default composition, build worlds with the [Rbx API](RBX_API.md) instead.
 
 Batches do not hit the `execute_lua` rate limit: one call publishes up to 100 commands:
@@ -194,7 +203,7 @@ scale is preferred when meters matter. `coreai_world_change(name, {...})` applie
 fields, so omitted axes and fields stay unchanged.
 
 One transaction per bindings instance; buffer overflow (256) triggers an automatic rollback with an error.
-There is no undo for already applied commands (see TODO).
+There is no undo for already applied commands.
 
 ## Stage 5 - Events
 
@@ -223,8 +232,10 @@ stack overflow. Exports are dropped on `ReloadMod`/`UnloadMod`; a reloaded mod m
 `mods_export` again.
 
 ```lua
--- name: economy
--- description: Owns the gold total and exports a reader plus an add function.
+--[[@coreai
+id: economy
+description: Owns the gold total and exports a reader plus an add function.
+]]
 local gold = tonumber(store_get("gold")) or 0
 mods_export("gold", function() return gold end)
 mods_export("add_gold", function(amount)
@@ -235,8 +246,10 @@ end)
 ```
 
 ```lua
--- name: shop
--- description: Reads and spends gold from the economy mod.
+--[[@coreai
+id: shop
+description: Reads and spends gold from the economy mod.
+]]
 hooks_on("item_bought", function(evt, price)
   local current = mods_call("economy", "gold")
   if current >= tonumber(price) then
@@ -267,9 +280,11 @@ Mods and scripts with the `Gameplay` capability can read the keyboard and mouse,
 
 Key names are `KeyCode` spellings, case-insensitive (`'a'`, `'space'`, `'return'`, `'leftarrow'`),
 plus aliases `'left'/'right'/'up'/'down'` (arrows) and `'0'..'9'` (top-row digits). Frame-edge
-checks are true for a single frame — a mod timer slower than the frame rate can miss them, so poll
-held state from `hooks_every` timers (20 Hz is plenty) and reserve `input_key_down` for
-`hooks_on('tick')` handlers:
+checks are true for a single frame — a mod timer slower than the frame rate (including the 20 Hz
+`hooks_on('tick')` alias) can miss them, so poll held state from `hooks_every` timers (20 Hz is plenty)
+and read `input_key_down` only from a per-frame handler: `hooks_every(0, fn)` (a timer fires at most
+once per frame) or a `RunService.Heartbeat` connection. `UserInputService.InputBegan` from the
+[Rbx API](RBX_API.md) delivers key presses as events instead:
 
 ```lua
 hooks_every(0.05, function()
@@ -291,7 +306,7 @@ itself.
 
 A file-backed implementation (`FileLuaModSourceStore`) lays each package out under
 `persistentDataPath/CoreAI/Mods/<id>/` as `manifest.json` + `main.lua`. When no store is wired the
-runtime uses `NullLuaModSourceStore` (in-memory only, exactly the historical behavior).
+runtime uses `NullLuaModSourceStore` (in-memory only).
 
 ```csharp
 // Custom host: auto-save on load/reload, mark dormant on unload, auto-load active mods on startup.
@@ -322,9 +337,10 @@ installer wires the host's existing store automatically) to record a **revision 
 colliding with a game-defined script slot. Each successful `LoadMod` / `ReloadMod` calls
 `SeedOriginal` (establishing revision `0`) then `RecordSuccessfulExecution`, which appends a new revision
 **only when the source actually changed** — a no-op reload does not grow the history. The persisted and
-exported `LuaModManifest.Version` is then **auto-derived** as the revision count (`"1"` for a freshly
-seeded mod, `"3"` after three distinct edits), so the host never manages it by hand. When no version
-store is wired the runtime uses `NullLuaScriptVersionStore` (no history — the prior behavior).
+exported `LuaModManifest.Version` is the header's `version:` value (`0.0.0` when the header has no
+`version:` line); only a header with an empty `version:` line gets the revision count instead (`"1"` for a
+freshly seeded mod, `"3"` after three distinct edits). When no version store is wired the runtime uses
+`NullLuaScriptVersionStore` (no history).
 
 ```csharp
 LuaCsModRuntime modRuntime = new(gameplayBindings, store, log,
@@ -341,9 +357,9 @@ untouched, exactly like `ReloadMod`.
 ### Runtime handler-error feedback
 
 Load/reload errors propagate synchronously to whoever triggered them, but a hook or timer that throws
-**later**, during `Tick`, only raises `ModHandlerErrored` (and counts toward the quarantine threshold —
-the mod stays loaded with dispatch suspended until a reload). The
-runtime now also buffers these Tick-time failures in a bounded ring (`MaxRetainedHandlerErrors`), readable
+**later**, during `Tick`, only notifies the `AddModHandlerErroredListener` listeners (and counts toward
+the quarantine threshold — the mod stays loaded with dispatch suspended until a reload). The
+runtime also buffers these Tick-time failures in a bounded ring (`MaxRetainedHandlerErrors`), readable
 via `GetRecentHandlerErrors(caller, modId = null)` and clearable via
 `ClearRecentHandlerErrors(caller, modId = null)` (host actor only), so
 the agent can learn of them on a later turn through `manage_mods diagnostics` and repair the mod.
@@ -358,6 +374,7 @@ The `manage_mods` tool exposes the same flow to the agent: `export`, `import`, `
 |---|---|
 | `execute_lua` | One-shot Lua in the sandbox (same bindings and limits as the envelope pipeline) |
 | `manage_mods` | `list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`, `versions`, `revert`, `diagnostics` for `LuaCsModRuntime` |
+| `get_mod_logs` | Read-only: a mod's captured `print`/`warn`/error log, filterable by `mod_id`, `level`, `since_sequence` |
 
 `manage_mods` does not let the model expand the capability tier; the host sets the tier when registering the tool.
 When Full access is enabled on the host (**Enable Full Lua Access** on `CoreAiModsLifetimeScope`), mods loaded through the
@@ -415,8 +432,8 @@ when object names and prefab keys are known. Full remains for diagnostics and re
 > that opt into them) is auto-saved to disk and
 > re-created on the next session entry — including transform, parent, active state, and any colour set via
 > `coreai_world_set_color`. Prefabs keep their original material when no explicit colour was set. The Hub
-> **World** tab exposes reset / save-now controls. Full format and behaviour: see
-> `CoreAiUnity/Docs/WORLD_COMMANDS.md` §7 (World State Persistence).
+> **World** tab exposes reset / save-now controls. Full format and behaviour:
+> [WORLD_COMMANDS.md](../../CoreAiUnity/Docs/WORLD_COMMANDS.md) §7 (World State Persistence).
 
 Demo: `Assets/CoreAI.Demos/FullAccess/`. For production, targeted bindings are preferable (see
 LUA_NATIVE_APIS.md).
@@ -431,8 +448,11 @@ The Lua grant lives on `CoreAiModsLifetimeScope` (the child scope that installs 
 | `enableFullLuaPrivateAccess` | Lets Full-tier reflection access non-public members (`FullLuaPrivateAccessEnabled`) |
 | `allowedLuaScenes` | Whitelist scene names for `coreai_world_load_scene` (empty = any scene from Build Settings; only relevant on hosts that opt into the classic build bindings) |
 | `blacklistPolicy` | Optional `IFullLuaAccessBlacklistPolicy` asset that denies Full-tier types/members |
+| `robloxWorldHost` | Optional scene `RbxWorldHost`: Rbx API parts materialize as GameObjects under it (empty = headless in-memory world) |
+| `characterMotorProvider` | Optional `RbxCharacterMotorProviderBehaviour` (an `IRbxCharacterMotorProvider`) that drives `Humanoid` characters with the game's own controller |
+| `networkBridgeProvider` | Optional `RbxNetworkBridgeProviderBehaviour` (for example the CoreAI Mirror package's `CoreAiMirrorNetworkBridgeProvider`); empty = offline in-process bridge |
 | `coroutineResumeBudget` | Per-resume instruction and wall-clock budget (see [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md)) |
-| `storeId` | Isolates this scope's persisted mods in their own store subfolder |
+| `storeId` | Isolates this scope's persisted mods in a `Stores/<storeId>/` subfolder |
 
 The optional `CoreAiLuaWorldModule` child of `CoreAILifetimeScope` (legacy flat fields serialized on
 `CoreAILifetimeScope` migrate into it) configures the native `world_command` executor, not the Lua

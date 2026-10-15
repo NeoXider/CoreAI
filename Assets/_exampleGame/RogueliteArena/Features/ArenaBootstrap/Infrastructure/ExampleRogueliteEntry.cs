@@ -12,11 +12,11 @@ namespace CoreAI.ExampleGame.ArenaBootstrap.Infrastructure
         [SerializeField]
         private bool logOnStart = true;
 
-        [Tooltip("Если задан — волны и игрок создаются этим компонентом на сцене (рекомендуется).")]
+        [Tooltip("When assigned, this scene component creates the waves and player (recommended).")]
         [SerializeField]
         private ArenaSurvivalProceduralSetup sceneArenaBootstrap;
 
-        [Tooltip("Если нет sceneArenaBootstrap — создать ArenaSurvivalRoot с процедурной ареной при старте.")]
+        [Tooltip("When sceneArenaBootstrap is missing, create ArenaSurvivalRoot with a procedural arena on startup.")]
         [SerializeField]
         private bool startWaveArenaPrototype = true;
 

@@ -73,6 +73,12 @@ namespace CoreAI.Infrastructure.Llm
             _log = log;
         }
 
+        /// <inheritdoc />
+        public void ResolveRequestSettings(LlmCompletionRequest request)
+        {
+            _inner.ResolveRequestSettings(request);
+        }
+
         public bool SupportsNativeToolCalling => _inner.SupportsNativeToolCalling;
 
         public bool SupportsNativeToolCallingForRole(string agentRoleId)

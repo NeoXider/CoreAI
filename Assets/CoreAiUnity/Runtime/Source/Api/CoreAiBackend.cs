@@ -196,7 +196,8 @@ namespace CoreAI
                 }
 
                 settings.ConfigureServerManagedApi(backendBaseUrl, model, backendAuthToken,
-                    settings.Temperature, settings.RequestTimeoutSeconds, settings.MaxTokens);
+                    settings.Temperature, settings.RequestTimeoutSeconds, settings.MaxTokens,
+                    settings.OverrideTemperature);
                 return RebuildAndNotify(settings);
             }
         }

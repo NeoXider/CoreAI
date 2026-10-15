@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using CoreAI.Infrastructure.Llm;
 using Newtonsoft.Json;
@@ -52,6 +53,18 @@ namespace CoreAI.Tests.PlayMode
         public const string EnvExtraBodyJson = "COREAI_TEST_EXTRA_BODY_JSON";
         public const string EnvPromptCacheProbe = "COREAI_TEST_PROMPT_CACHE";
 
+        /// <summary>
+        /// Benchmark-wide <c>reasoning_effort</c> default (same name as <c>BenchmarkTargetList.EnvReasoningEffort</c>).
+        /// When set, the env/file HTTP client sends it as the <see cref="ReasoningEffortBodyKey"/> body parameter.
+        /// </summary>
+        public const string EnvBenchmarkReasoningEffort = "COREAI_BENCHMARK_REASONING_EFFORT";
+
+        /// <summary>The provider body parameter a reasoning effort becomes.</summary>
+        public const string ReasoningEffortBodyKey = "reasoning_effort";
+
+        /// <summary>Accepted efforts (kept equal to <c>BenchmarkTargetList.ReasoningEfforts</c>).</summary>
+        public static readonly IReadOnlyList<string> ReasoningEfforts = new[] { "none", "low", "medium", "high", "xhigh" };
+
         // ----- Legacy env aliases (kept so existing setups keep working) -----
         private const string LegacyEnvBase = "COREAI_OPENAI_TEST_BASE";
         private const string LegacyEnvModel = "COREAI_OPENAI_TEST_MODEL";
@@ -98,6 +111,11 @@ namespace CoreAI.Tests.PlayMode
             /// <summary>Validated, compact provider-specific body JSON. Empty means no provider overrides.</summary>
             public string ExtraBodyJson { get; }
 
+            /// <summary>
+            /// The <c>reasoning_effort</c> string the body sends, or empty when it sends none (provider default).
+            /// </summary>
+            public string ReasoningEffort { get; }
+
             /// <summary>True when both base URL and model resolved to non-empty values.</summary>
             public bool IsComplete => !string.IsNullOrWhiteSpace(BaseUrl) && !string.IsNullOrWhiteSpace(Model);
 
@@ -115,6 +133,30 @@ namespace CoreAI.Tests.PlayMode
                 Streaming = streaming;
                 NativeTools = nativeTools;
                 ExtraBodyJson = extraBodyJson ?? "";
+                ReasoningEffort = ReadReasoningEffort(ExtraBodyJson);
+            }
+
+            internal ResolvedConfig WithExtraBody(string extraBodyJson)
+            {
+                return new ResolvedConfig(BaseUrl, ApiKey, Model, Streaming, NativeTools, extraBodyJson);
+            }
+
+            private static string ReadReasoningEffort(string extraBodyJson)
+            {
+                if (string.IsNullOrWhiteSpace(extraBodyJson))
+                {
+                    return "";
+                }
+
+                try
+                {
+                    JToken effort = JObject.Parse(extraBodyJson)[ReasoningEffortBodyKey];
+                    return effort != null && effort.Type == JTokenType.String ? effort.Value<string>() ?? "" : "";
+                }
+                catch (JsonException)
+                {
+                    return "";
+                }
             }
         }
 
@@ -157,6 +199,122 @@ namespace CoreAI.Tests.PlayMode
             extraBodyJson = NormalizeSafeExtraBodyJson(extraBodyJson);
 
             return new ResolvedConfig(baseUrl, apiKey, model, streaming, nativeTools, extraBodyJson);
+        }
+
+        /// <summary>
+        /// The configuration for one explicit endpoint, such as a target of a multi-target benchmark run.
+        /// <paramref name="baseUrl"/>, <paramref name="model"/> and <paramref name="apiKey"/> replace the resolved
+        /// values; streaming and native tools still follow env/file. The resolved API key and provider body are
+        /// kept only when the endpoint is the resolved base URL, so a key configured for one provider is never
+        /// sent to another. The provider body is then composed by <see cref="ComposeProviderBody"/> from that shared
+        /// body, <paramref name="defaultReasoningEffort"/>, <paramref name="extraBodyJson"/> and
+        /// <paramref name="reasoningEffort"/>.
+        /// </summary>
+        /// <exception cref="ArgumentException">The target body or an effort is invalid.</exception>
+        public static ResolvedConfig ResolveForEndpoint(string baseUrl, string model, string apiKey,
+            string extraBodyJson = null, string reasoningEffort = null, string defaultReasoningEffort = null)
+        {
+            ResolvedConfig shared = Resolve(model);
+            string normalized = NormalizeBaseUrl(baseUrl);
+            bool sameEndpoint = normalized != null &&
+                                string.Equals(normalized, shared.BaseUrl, StringComparison.OrdinalIgnoreCase);
+            string key = !string.IsNullOrWhiteSpace(apiKey)
+                ? apiKey.Trim()
+                : sameEndpoint
+                    ? shared.ApiKey
+                    : "";
+            return new ResolvedConfig(normalized, key, model?.Trim(), shared.Streaming, shared.NativeTools,
+                ComposeProviderBody(sameEndpoint ? shared.ExtraBodyJson : "", extraBodyJson, reasoningEffort,
+                    defaultReasoningEffort));
+        }
+
+        /// <summary>
+        /// Builds a provider body, later steps overriding earlier ones: <paramref name="sharedBody"/>, then
+        /// <paramref name="defaultEffort"/> as <c>reasoning_effort</c>, then the top-level fields of
+        /// <paramref name="targetBody"/>, then <paramref name="targetEffort"/>. So a target's own effort wins over its
+        /// body, its body over the suite default, and the default over the shared env/file body. Both bodies pass
+        /// the live-test safety rules (one JSON object, no CoreAI-owned field, opaque <c>session_id</c>). Returns
+        /// compact, key-sorted JSON, or empty when nothing is set.
+        /// </summary>
+        /// <exception cref="ArgumentException">A body is invalid or an effort is not one of <see cref="ReasoningEfforts"/>.</exception>
+        public static string ComposeProviderBody(string sharedBody, string targetBody, string targetEffort,
+            string defaultEffort)
+        {
+            string body = NormalizeSafeExtraBodyJson(sharedBody);
+            string fallback = NormalizeReasoningEffort(defaultEffort);
+            if (fallback.Length > 0)
+            {
+                body = OpenAiProviderBodyParameters.Set(body, ReasoningEffortBodyKey, fallback);
+            }
+
+            string own = NormalizeSafeExtraBodyJson(targetBody);
+            if (own.Length > 0)
+            {
+                foreach (JProperty property in JObject.Parse(own).Properties())
+                {
+                    body = OpenAiProviderBodyParameters.Set(body, property.Name, property.Value);
+                }
+            }
+
+            string effort = NormalizeReasoningEffort(targetEffort);
+            if (effort.Length > 0)
+            {
+                body = OpenAiProviderBodyParameters.Set(body, ReasoningEffortBodyKey, effort);
+            }
+
+            return body;
+        }
+
+        /// <summary>
+        /// Lower-cases and validates an effort; empty means "not set".
+        /// </summary>
+        /// <exception cref="ArgumentException">Not one of <see cref="ReasoningEfforts"/>.</exception>
+        public static string NormalizeReasoningEffort(string effort)
+        {
+            string trimmed = (effort ?? "").Trim().ToLowerInvariant();
+            if (trimmed.Length == 0)
+            {
+                return "";
+            }
+
+            foreach (string allowed in ReasoningEfforts)
+            {
+                if (trimmed == allowed)
+                {
+                    return trimmed;
+                }
+            }
+
+            throw new ArgumentException(
+                $"Reasoning effort '{effort.Trim()}' must be one of {string.Join(", ", ReasoningEfforts)}.");
+        }
+
+        /// <summary>The validated <see cref="EnvBenchmarkReasoningEffort"/> value, or empty when unset.</summary>
+        /// <exception cref="ArgumentException">The env value is not one of <see cref="ReasoningEfforts"/>.</exception>
+        public static string ResolveBenchmarkReasoningEffortDefault()
+        {
+            try
+            {
+                return NormalizeReasoningEffort(GetEnv(EnvBenchmarkReasoningEffort));
+            }
+            catch (ArgumentException ex)
+            {
+                throw new ArgumentException($"{EnvBenchmarkReasoningEffort}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// <paramref name="config"/> with <paramref name="defaultEffort"/> applied as <c>reasoning_effort</c> (it
+        /// overrides an effort in the env/file body, like it does for a benchmark target). Unchanged when empty.
+        /// </summary>
+        public static ResolvedConfig WithReasoningEffortDefault(ResolvedConfig config, string defaultEffort)
+        {
+            if (config == null || string.IsNullOrWhiteSpace(defaultEffort))
+            {
+                return config;
+            }
+
+            return config.WithExtraBody(ComposeProviderBody(config.ExtraBodyJson, null, null, defaultEffort));
         }
 
         /// <summary>

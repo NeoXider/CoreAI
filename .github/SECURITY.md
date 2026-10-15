@@ -34,3 +34,11 @@ CoreAI includes a Lua sandbox for AI-written gameplay scripts. Review the
 sandbox boundary, removed APIs, execution limits, and binding rules here:
 
 [Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md](../Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md)
+
+## In-game MCP server
+
+The optional `com.neoxider.coreaimcp` package opens a loopback HTTP port that gives full control of the
+running game (Lua execution, persistent mods, screenshots). It is off by default and protected by a
+bearer token. Read its security model before enabling it:
+
+[Assets/CoreAIMcp/README.md](../Assets/CoreAIMcp/README.md#security-model)

@@ -425,15 +425,8 @@ namespace CoreAI.Tests.EditMode
         }
 #endif
 
-        /// <summary>
-        /// A failover must not quietly change how the model answers. The asset has ONE
-        /// <c>extraBodyJson</c>, and it carries the provider fields that decide sampling, routing and
-        /// thinking; the secondary adapter forwards every other knob (temperature, max tokens,
-        /// reasoning, thinking budget) and used to drop this one alone. Only the endpoint identity —
-        /// URL, key, model — is secondary.
-        /// </summary>
         [Test]
-        public void SecondaryAdapter_ForwardsProviderBodyJson_AndKeepsOnlyTheEndpointIdentitySecondary()
+        public void SecondaryAdapter_UsesIndependentProviderControls()
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             try
@@ -441,14 +434,16 @@ namespace CoreAI.Tests.EditMode
                 settings.ConfigureFallbackBackend(true, "http://localhost:1235/v1", "fallback-model",
                     "fallback-key");
                 settings.SetProviderBodyParameter("top_k", new JValue(40));
-
+                settings.ConfigureReasoning(LlmReasoningEffort.High, LlmReasoningDialect.QwenTemplate);
+                settings.ConfigureFallbackReasoning(LlmReasoningEffort.Low, LlmReasoningDialect.OpenRouter,
+                    LlmReasoningMode.Disabled, 2048, "{\"top_p\":0.5}");
                 IOpenAiHttpSettings secondary = new LlmPipelineInstaller.SecondarySettingsAdapter(settings);
-
-                Assert.IsNotEmpty(settings.ExtraBodyJson,
-                    "guard the guard: an empty asset body would let this test pass against the defect");
-                Assert.AreEqual(settings.ExtraBodyJson, secondary.ExtraBodyJson,
-                    "the fallback endpoint must send the same provider body the operator configured — " +
-                    "otherwise a failover answers differently with nothing to see in the settings");
+                Assert.AreEqual(settings.SecondaryExtraBodyJson, secondary.ExtraBodyJson);
+                Assert.AreNotEqual(settings.ExtraBodyJson, secondary.ExtraBodyJson);
+                Assert.AreEqual(LlmReasoningEffort.Low, secondary.ReasoningEffort);
+                Assert.AreEqual(LlmReasoningDialect.OpenRouter, secondary.ReasoningDialect);
+                Assert.AreEqual(LlmReasoningMode.Disabled, secondary.ReasoningMode);
+                Assert.AreEqual(2048, secondary.ThinkingBudgetTokens);
                 Assert.AreEqual("http://localhost:1235/v1", secondary.ApiBaseUrl);
                 Assert.AreEqual("fallback-key", secondary.ApiKey);
                 Assert.AreEqual("fallback-model", secondary.Model);

@@ -15,9 +15,7 @@ The “UI vs code” table is in [COREAI_SINGLETON_API](../../../../Docs/COREAI_
 
 ![AI Chat next to Unity Console — streaming logs and the panel in Play Mode](./chat-readme-example.png)
 
-*English:* `CoreAiChatPanel` (right) during Play Mode, with Unity Console (left) showing `[CoreAI] [Llm]` stream traces and `[CoreAI] [MessagePipe]` `ApplyAiGameCommand` after the reply completes.
-
-*English:* chat panel in Play Mode and the console with LLM stream logs and command publication through MessagePipe.
+`CoreAiChatPanel` (right) during Play Mode, with Unity Console (left) showing `[CoreAI] [Llm]` stream traces and `[CoreAI] [MessagePipe]` `ApplyAiGameCommand` after the reply completes.
 
 ## Quick start (1 click)
 
@@ -32,17 +30,20 @@ Configure in the Inspector:
 - **Role ID** — agent role (`PlainChat`, `SmartChat`, `Teacher`, your custom one)
 - **Header Title** — chat header
 - **Welcome Message** — welcome message
-- **Session / history** (since 0.25.4) — see [session restore](#persisted-chat-session)
-- **Programmatic submit** (since 0.25.5) — see [`SubmitMessageFromExternalAsync`](#programmatic-chat-submit)
+- **Session / history** — see [session restore](#persisted-chat-session)
+- **Programmatic submit** — see [`SubmitMessageFromExternalAsync`](#programmatic-chat-submit)
 - **Enable Streaming** — streamed generation of replies
 - **Enable Stop Generation** — when off, the send button is disabled while the AI is replying and never switches to `X`; Esc does not stop the active request.
 - **Show Clear Button** — when off, the header clear button is hidden. `CoreAiChatPanel.ClearChat(...)` remains available from code.
 - **UI Text Overrides** — optional copy for panel controls: `SendButtonText` (default `>`), `StopButtonText`,
   send/stop tooltips, clear/collapse/open-chat labels and tooltips, and the FAB fallback text. Empty strings are
   respected; older runtime options that do not implement `ICoreAiChatTextOptions` use package defaults.
-- **Use fullscreen chat** (since **1.5.24**) — stretch the panel to nearly the full screen with margins; off by default (floating bottom-right window using **Chat Width** / **Chat Height**). **Default window size (package template + new `CoreAiChatConfig` assets):** **650×910** logical px (~**+30%** vs the legacy **500×700**). Existing `.asset` files keep their serialized width/height until you change them in the Inspector.
+- **Use fullscreen chat** — stretch the panel to nearly the full screen with margins; off by default (floating bottom-right window using **Chat Width** / **Chat Height**, default **650×910** logical px). Existing `.asset` files keep their serialized width/height until you change them in the Inspector.
 - **Send On Shift+Enter** — legacy mode. Off by default: Enter sends, Shift+Enter inserts a newline.
-- **Hotkeys** (since 0.25.3) — see [below](#chat-hotkeys)
+- **Max Message Length** — see [message length limit](#message-length-limit)
+- **Hotkeys** — see [below](#chat-hotkeys)
+- **Enable Camera Tool** (on by default) — gives every chat agent the runtime camera tool (`camera_capture` / `camera_look` / `camera_list`) so a vision-capable model can see its own work; silently skipped when the agent-vision service is unavailable.
+- **Errors** — `Error Message Prefix`, `Timeout Message`, `No Response Message` for the bubbles the panel adds itself.
 
 ### 2. Add to the scene
 
@@ -62,28 +63,36 @@ factories and traits), so the package baseline stays at Unity 6000.0+.
 
 ### WebGL (browser build)
 
-`UnityWebRequest` runs under the browser's same-origin / CORS / HTTPS rules. For **`CoreAiChatPanel`**, use **`com.neoxider.coreaiunity` ≥ **1.5.6** (minimum **1.5.4** for non-streaming bubbles; **1.5.6** also marshals **streaming** cleanup in `RunAgentTurnAsync` `finally`). After LLM completion, the panel **`await`s `UniTask.SwitchToMainThread`** before toggling the typing indicator, finishing streaming state, or adding assistant bubbles, so UI Toolkit is not updated from the wrong synchronization context. **1.5.5** adds PlayMode tests `CoreAiChatPanelNonStreamingPlayModeTests` for the non-streaming external-submit path.
+Browser requests run under the same-origin / CORS / HTTPS rules: streaming goes through the `fetch` bridge, buffered requests through `UnityWebRequest` (see [Streaming and LLM modes](#streaming-and-llm-modes)). After every awaited LLM step the panel returns to the Unity main thread before it touches UI Toolkit (typing indicator, streaming state, bubbles) — `CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional`, a no-op in the single-threaded WebGL player. `CoreAiChatPanelNonStreamingPlayModeTests` covers the non-streaming external-submit path.
 
-**Oversized-message render cap (since 4.11.4).** A model can occasionally emit a very long reply (a real incident leaked ~16 000 chars of internal reasoning). Drawing one such message into a single bubble overflows UI Toolkit's GPU vertex/index buffer in WebGL (`GfxDevice::CopyBufferRanges: range reads out of bounds` → `RuntimeError: memory access out of bounds` → the build crashes). `AddMessage` hard-caps assistant text to **`CoreAiChatPanel.MaxAssistantRenderChars`** (4000) before building the bubble — it truncates, closes a dangling ` ``` ` code fence, and appends an ellipsis. The cap is **render-only**: the full message still lives in chat memory/history and is sent to the backend; only the drawn text is bounded. Since 7.46.0 the cap applies to user bubbles too, because host-submitted text is no longer bounded by `MaxMessageLength` (below), and every clipped bubble logs a warning with the total, drawn and not-drawn counts, and a streamed reply logs once when it reaches the cap. A host that subclasses the panel may also cap earlier in its own bubble override; this is the package-level backstop for every consumer.
+**Oversized-message render cap.** A model can occasionally emit a very long reply (for example thousands of characters of leaked reasoning). Drawing one such message into a single bubble overflows UI Toolkit's GPU vertex/index buffer in WebGL (`GfxDevice::CopyBufferRanges: range reads out of bounds` → `RuntimeError: memory access out of bounds` → the build crashes). Every message bubble — assistant and user, live or restored — is capped at **4000 characters** (`MaxAssistantRenderChars`, internal) before it is built: the text is truncated, a dangling ` ``` ` code fence is closed, and an ellipsis is appended. The cap is **render-only**: the full message still lives in chat memory/history and is sent to the backend; only the drawn text is bounded. A clipped live bubble logs a warning with the total, drawn and not-drawn counts (a restored one logs at Info), and a streamed reply logs once when it reaches the cap. A host that subclasses the panel may also cap earlier in its own bubble override; this is the package-level backstop for every consumer.
 
-**Message length limit (since 7.46.0).** `ICoreAiChatOptions.MaxMessageLength` (`CoreAiChatConfig` → *Input*, default 2000, `0` = no limit) bounds only what the user **types**. Longer input is cut, logged as a warning with the typed length, the sent length and the dropped count, and reported through the public event **`CoreAiChatPanel.OnMessageTruncated(int originalLength, int maxLength)`** so the host can tell the user their message was shortened (a throwing handler is logged and does not stop the send). Host-submitted text — `SubmitMessageFromExternalAsync` / `SubmitMessageFromExternalResultAsync` (briefings, task statements, hint requests) — is **never** cut by this limit: before 7.46.0 it was, silently, and the end of service instructions never reached the model. Existing assets keep their serialized value; nothing needs migrating.
+<a id="message-length-limit"></a>
+
+**Message length limit.** `ICoreAiChatOptions.MaxMessageLength` (`CoreAiChatConfig` → *Input*, default 2000, `0` = no limit) bounds only what the user **types**. Longer input is cut, logged as a warning with the typed length, the sent length and the dropped count, and reported through the public event **`CoreAiChatPanel.OnMessageTruncated(int originalLength, int maxLength)`** so the host can tell the user their message was shortened (a throwing handler is logged and does not stop the send). Host-submitted text — `SubmitMessageFromExternalAsync` / `SubmitMessageFromExternalResultAsync` (briefings, task statements, hint requests) — is **never** cut by this limit (before 7.46.0 it was).
 
 ## Custom roles — not locked to “one persona” (`CoreAiChatConfig.RoleId`)
 
 The panel is **not** hardwired to a single teaching or player role. Routing uses the **`Role ID`** field on your **`CoreAiChatConfig`**: it must match a role you registered with **`AgentBuilder`** and **`ApplyToPolicy(AgentMemoryPolicy)`** during composition (typically in your **`LifetimeScope`** setup). Requests from the UI go through the **same orchestrator / MEAI pipeline** as `CoreAi.OrchestrateAsync` / `CoreAiChatService` with the same `roleId`.
 
-The stock request sets `CancellationScope = roleId`. When the scene supplies an
-`IAgentMemoryScopeProvider`, `QueuedAiOrchestrator` automatically combines that logical role scope with
-the current tenant/user/session/topic identity. A new Teacher turn for student B therefore does not stop
-student A's concurrent Teacher turn. `CoreAi.StopAgent(roleId)` uses the same scoped stock path. Custom
-domain cancellation scopes should use `IScopedAiTaskCancellation.CancelTasks(scope, roleId)` for an
-explicit identity-aware stop.
+<a id="chat-cancellation-scope"></a>
+
+The stock request (`BuildAiTaskRequest`, and the string overloads of `CoreAiChatService`) carries the
+actor context that the scene's `IActorIdentityProvider` returns for the role and sets
+`CancellationScope` to that actor's session id. `QueuedAiOrchestrator` keys queued and running work by
+session and role: a new turn replaces the same session's earlier turn for that role, and a Teacher turn
+for student B (another session) does not stop student A's concurrent Teacher turn. To stop one actor's
+turn from code, call `IScopedAiTaskCancellation.CancelTasks(sessionId, roleId)` on the orchestrator
+(`QueuedAiOrchestrator` implements it). `CoreAi.StopAgent(roleId)` and
+`CoreAiChatService.StopAgent(roleId)` cancel every queued or running turn for that role across sessions,
+using the optional `IRoleAiTaskCancellation` interface implemented by `QueuedAiOrchestrator`.
+The panel's own Stop cancels the token of the request it owns.
 
 **What you do as a host game**
 
 1. Register the role (prompt, tools, memory, chat history, etc.).
-2. Point the chat asset at that role id (e.g. `Merchant`, `NpcGuide`, `Teacher`, or your own string).
-3. Optionally **subclass `CoreAiChatPanel`** and override **`BuildAiTaskRequest`** to inject `AllowedToolNames`, `ForcedToolMode`, `RuntimeContext`, and other per-turn policy — see [Custom `AiTaskRequest` (tool policy)](#custom-aitaskrequest-tool-policy) below.
+2. Point the chat asset at that role id (e.g. `Merchant`, `Teacher`, or your own string).
+3. Optionally **subclass `CoreAiChatPanel`** and override **`BuildAiTaskRequest`** to inject `AllowedToolNames`, `ForcedToolMode`, `RequestSystemInstructions`, and other per-turn policy — see [Custom `AiTaskRequest` (tool policy)](#custom-aitaskrequest-tool-policy) below. Per-role runtime context (`## World State`) comes from an `IAgentRuntimeContextProvider` set with `AgentMemoryPolicy.SetRuntimeContextProvider(roleId, provider)`.
 
 **Game-specific panels** (e.g. a project that only adds lesson-slot policy for one role) apply those rules **only in their overrides**; other roles keep the default minimal `AiTaskRequest` unless you add logic for them.
 
@@ -130,18 +139,18 @@ Create two **`CoreAiChatConfig`** assets (or duplicate one) with **Role ID** = `
 The panel is **not bound** to a single role: **`CoreAiChatConfig`** sets **Role ID**, the same one you registered through **`AgentBuilder`**. The orchestrator and MEAI are the same for UI and programmatic calls. **`ToolsOnly`** is technically allowed for chat; the panel does not trim the agent mode. For UX, expect tools to dominate rather than conversation. Game code can add policy for its own mode in **`BuildAiTaskRequest`**.
 </details>
 
-**Tests:** In this repo, **`CoreAiChatPanelBuildRequestEditModeTests`** and **`CoreAiChatPanelBuildRequestPlayModeTests`** assert the default/minimal **`AiTaskRequest`** and **`BuildAiTaskRequest`** subclass injection (no LLM). **`CoreAiChatServiceIntegrationPlayModeTests`** exercises **`CoreAiChatService`** against a configured backend and multiple role modes (requires LLM Unity / ignores when unavailable). **`CoreAiChatServiceEditModeTests`** (no scene) cover **`TryGetPersistedChatHistory`**, and **`CoreAiChatPanelEditModeTests`** the **`FormatPersistedMessageForUi`** rules the panel uses when **`Load Persisted Chat On Startup`** is on. **`CoreAILifetimeScopeConversationStoreEditModeTests.RegisterAgentMemoryStore_ResolvesScopedMemory_AndKeepsFileTranscriptStore`** asserts that **`CoreAILifetimeScope.RegisterAgentMemoryStore`** exposes scoped decorators over the private **`FileAgentMemoryStore`** backing for **`IAgentMemoryStore`** and **`IConversationTranscriptStore`**. **`AiOrchestratorHistoryFileStoreEditModeTests.RunTaskAsync_WithFileStore_AndPersistChatHistory_WritesDiskReadableByNewStore`** asserts that after **`RunTaskAsync`** with **`PersistChatHistory`** the **`FileAgentMemoryStore`** JSON is readable by a **second** store instance (same as “restart” without Play Mode). **`ChatHistoryPlayModeTests.ChatHistory_PersistentBetweenSessions_Works`** (LLM) checks that a new orchestrator + store still receives prior chat context when the model is asked to recall an earlier secret (requires LLM / ignores when unavailable).
+**Tests:** In this repo, **`CoreAiChatPanelBuildRequestEditModeTests`** and **`CoreAiChatPanelBuildRequestPlayModeTests`** assert the default/minimal **`AiTaskRequest`** and **`BuildAiTaskRequest`** subclass injection (no LLM). **`CoreAiChatServiceIntegrationPlayModeTests`** exercises **`CoreAiChatService`** against a configured backend and multiple role modes (requires a live LLM backend, HTTP or LLMUnity; ignored when none is available). **`CoreAiChatServiceEditModeTests`** (no scene) cover **`TryGetPersistedChatHistory`**, and **`CoreAiChatPanelEditModeTests`** the **`FormatPersistedMessageForUi`** rules the panel uses when **`Load Persisted Chat On Startup`** is on. **`CoreAILifetimeScopeConversationStoreEditModeTests.RegisterAgentMemoryStore_ResolvesScopedMemory_AndKeepsFileTranscriptStore`** asserts that **`CoreAILifetimeScope.RegisterAgentMemoryStore`** exposes scoped decorators over the private **`FileAgentMemoryStore`** backing for **`IAgentMemoryStore`** and **`IConversationTranscriptStore`**. **`AiOrchestratorHistoryFileStoreEditModeTests.RunTaskAsync_WithFileStore_AndPersistChatHistory_WritesDiskReadableByNewStore`** asserts that after **`RunTaskAsync`** with **`PersistChatHistory`** the **`FileAgentMemoryStore`** JSON is readable by a **second** store instance (same as “restart” without Play Mode). **`ChatHistoryPlayModeTests.ChatHistory_PersistentBetweenSessions_Works`** (LLM) checks that a new orchestrator + store still receives prior chat context when the model is asked to recall an earlier secret (requires LLM / ignores when unavailable).
 
 <a id="persisted-chat-session"></a>
 
-## Session restore (history after restart) — since 0.25.4
+## Session restore (history after restart)
 
 By default **`CoreAiChatPanel`** on enable (`OnEnable`) loads saved chat history for the **`Role ID`** from the config into the message list.
 
 | Field in **Chat Config** | Purpose |
 |--------------------------|---------|
 | **Load Persisted Chat On Startup** | When enabled (default **yes**) — before the welcome message, history is read from **`IAgentMemoryStore`** (`FileAgentMemoryStore`, layout v2: `persistentDataPath/CoreAI/AgentMemory/<stem>.history.jsonl`, one JSON line per record next to the `<stem>.json` memory document; `<stem>` is the role id, or `scope-v1-<sha256>` with a memory scope provider). |
-| **Max Persisted Messages For Ui** | How many **last** messages to show on load; **0** = all saved. |
+| **Max Persisted Messages For Ui** | How many **last** messages to show on load (default **50** on the asset); **0** = all the store returns. |
 
 **Editor — wipe disk state:** **CoreAI → Delete All Persistent Saves...** removes **`persistentDataPath/CoreAI`** (exit Play Mode first). Helpful when debugging persisted chat or agent memory.
 
@@ -159,7 +168,7 @@ By default **`CoreAiChatPanel`** on enable (`OnEnable`) loads saved chat history
 
 **Custom persistence:** chat hydration reads whatever `IAgentMemoryStore.GetChatHistory` returns (default: `FileAgentMemoryStore`). To use **PlayerPrefs** or **cloud** for the same contract (session + MemoryTool), see [`Docs/MEMORY_STORE_CUSTOM_BACKENDS.md`](../../../../Docs/MEMORY_STORE_CUSTOM_BACKENDS.md).
 
-## Panel collapse (FAB) — since 0.21.7
+## Panel collapse (FAB)
 
 On narrow screens (width ≤ 720 or height ≤ 560) the chat **starts collapsed** by default: only the circular **`coreai-chat-fab`** button is visible in the bottom-right. The **`coreai-chat-collapse`** button (`—`) in the header collapses the panel back to the FAB.
 
@@ -167,6 +176,7 @@ On narrow screens (width ≤ 720 or height ≤ 560) the chat **starts collapsed*
 - **API from code:**
   - `bool IsCollapsed { get; }`
   - `void SetCollapsed(bool collapsed, bool persist = true)` — expand before a cutscene or collapse after; with `persist: false` the state is not written to `PlayerPrefs`.
+- **FAB icon:** the open-chat hotkey (default **C**); when the open shortcut is off, **FAB Fallback Text** (default `...`).
 - **UXML:** elements `coreai-chat-collapse` (in `coreai-chat-header`) and `coreai-chat-fab` (root, before `coreai-chat-root`). After `#coreai-typing-indicator`, the template includes optional **`coreai-long-request-hint`** (`Label`, `picking-mode="Ignore"`) — a **“still working”** line shown **≥ ~3 s after the LLM turn starts** while no streaming bubble is active, as in-flight feedback for long turns. **Stop** and **StartStreaming** clear it immediately. Text comes from **`CoreAiChatConfig.LongRequestHintFormat`** (default `Response is still being generated... ~{elapsed}s`); placeholder **`{elapsed}`** = whole seconds since the hint line became eligible (starts at the configured minimum, then counts up). Empty format string disables the line. If you fork UXML and omit this name, `CoreAiChatPanel` skips the feature (`Q` returns `null`).
 - **USS:** `.coreai-chat-header-btn`, `.coreai-collapsed` on the container, `.coreai-chat-fab` / `.coreai-chat-fab-icon`. **ScrollView:** default theme uses **no right padding** on `.coreai-chat-scroll` and zero horizontal **margin/padding** on `unity-scroll-view__content-and-vertical-scroll-container` and the vertical scroller so the **scrollbar track sits flush with the panel’s inner right edge** (no “floating” gap inside the bar).
 
@@ -174,7 +184,7 @@ Custom layout: if you **copy** UXML into your project, add the same element name
 
 <a id="chat-hotkeys"></a>
 
-## FAB / Esc hotkeys (configured in `CoreAiChatConfig`) — since 0.25.3
+## FAB / Esc hotkeys (configured in `CoreAiChatConfig`)
 
 All toggles are in the **CoreAI → Chat Config** asset on the panel (`CoreAiChatPanel.config`):
 
@@ -183,7 +193,7 @@ All toggles are in the **CoreAI → Chat Config** asset on the panel (`CoreAiCha
 | **Enable Open Chat Keyboard Shortcut** | When off — collapsed (FAB) chat opens **only by clicking** the FAB, no key. |
 | **Open Chat Hotkey** | `KeyCode` to open collapsed chat (default **C**). For **A–Z**, both key code and typed character are considered (without Ctrl / Cmd / Alt). |
 | **Enable Escape Chat Shortcuts** | When off — **Esc** is not handled by the panel (useful if Esc is fully reserved for FPS / pause). |
-| **Chat Requires Visible Cursor** (since 4.14) — see [cursor gating](#chat-cursor-gating) | When on (**default**) — the open hotkey and Esc only react while the mouse cursor is visible and unlocked. When off — hotkeys work regardless of cursor state (legacy behavior). |
+| **Chat Requires Visible Cursor** — see [cursor gating](#chat-cursor-gating) | When on (**default**) — the open hotkey and Esc only react while the mouse cursor is visible and unlocked. When off — hotkeys work regardless of cursor state. |
 
 ### From code (on top of config)
 
@@ -215,18 +225,18 @@ void OnWorldMapClosed()
 **Default behavior (both flags on):**
 
 - While chat is **collapsed** — the configured key opens the panel (handled in `OnRootKeyDown` at `TrickleDown` from the current UI Toolkit root).
-- While chat is **expanded** — **Esc** first stops active generation (if a request/stream is in progress), otherwise **collapses** the panel to the FAB.
+- While chat is **expanded** — **Esc** stops active generation if a request/stream is in progress (only when **Enable Stop Generation** is on; otherwise Esc does nothing during a turn), and otherwise **collapses** the panel to the FAB.
 - Additionally **`Update()`** polls **Legacy `Input.GetKeyDown`** only when the UITK root has **no** focused element (`Root.focusController.focusedElement == null`) — so it coexists with character control when focus is not in UI. On **WebGL**, the same `Update()` still resets `WebGLInput.captureAllKeyboardInput`.
 
 **Limitation:** if *Player Settings* use only the **New Input System** without Legacy, `Input.*` is unavailable — the `Update` branch is skipped silently; keys still work while keyboard focus is in the UITK tree (or add your own input layer / `Both` in Active Input Handling).
 
-**Gameplay integration:** after each `SetCollapsed`, `protected virtual void OnCollapsedStateChanged(bool collapsed)` is called — in a subclass you can hook pause, cursor, etc., without pulling game controllers into CoreAI.
+**Gameplay integration:** when `SetCollapsed` changes the state, `protected virtual void OnCollapsedStateChanged(bool collapsed)` is called — in a subclass you can hook pause, cursor, etc., without pulling game controllers into CoreAI.
 
 Subclasses that override **`Update()`** must call **`base.Update()` first** (otherwise you lose the WebGL fix, hotkey polling, and the **long-request hint** tick).
 
 <a id="chat-cursor-gating"></a>
 
-### Cursor gating (first-person / locked-cursor games) — since 4.14
+### Cursor gating (first-person / locked-cursor games)
 
 By default (**`ChatRequiresVisibleCursor` = true**), the open hotkey and Esc only react while
 **`UnityEngine.Cursor.visible`** is true and **`UnityEngine.Cursor.lockState`** is not **`Locked`**. This
@@ -242,8 +252,8 @@ gameplay key that happens to match the hotkey is not intercepted.
   chat hotkeys keep working under `CursorLockMode.Confined`.
 - **Runtime override:** `SetRuntimeChatRequiresVisibleCursor(bool?)` / `EffectiveChatRequiresVisibleCursor`,
   same precedence and `ClearRuntimeHotkeyOverrides()` participation as the other hotkey overrides above.
-- Set `ChatRequiresVisibleCursor = false` (asset or `CoreAiChatOptions`) to restore the pre-4.14 behavior
-  where chat hotkeys always react regardless of cursor state.
+- Set `ChatRequiresVisibleCursor = false` (asset or `CoreAiChatOptions`) to let chat hotkeys react
+  regardless of cursor state.
 
 **CoreAI Hub:** `CoreAiHubWindow` mirrors this with its own `requireVisibleCursor` field (default on),
 gating both Escape and its optional `toggleHotkey`. The Hub's chat tab additionally disables the embedded
@@ -257,10 +267,7 @@ parameter or property, also forwarded by `HubBuiltInPages.RegisterAll(..., chatS
 to opt into the first Escape stopping an in-flight turn instead (consuming that key-press; a second Escape
 then collapses the Hub).
 
-<a id="programmatic-chat-submit"></a>
-
-
-## Runtime options vs config asset (since 2.5.0)
+## Runtime options vs config asset
 
 `CoreAiChatConfig` is a Unity authoring asset, not the mutable runtime contract.
 It keeps private `[SerializeField]` fields, Inspector labels, avatar `Sprite`, hotkey `KeyCode`, layout and UI copy.
@@ -296,8 +303,8 @@ show a role dropdown in the chat header. The user can switch the responding agen
 history/memory on the service side. Prefer a light, tool-free role like `SmartChat` for plain chat (no tool
 schemas in the prompt → faster first token) and `Programmer` when the user asks for code/mechanics.
 
-It can also be turned on from code at runtime (the `FullAccess` demo does this via
-`FullAccessDemoController`):
+It can also be turned on from code at runtime (the FullAccess Hub demo's `FullAccessHubDemoController` and
+the Hub chat page do this):
 
 ```csharp
 chatPanel.EnableAgentSwitching();
@@ -310,8 +317,9 @@ The user message is composed by `AiPromptComposer.BuildUserPayload`. It is wrapp
 telemetry** for that turn. Autonomous agents (e.g. the RogueliteArena `Creator`/`Analyzer`) read the
 `telemetry` field to plan from live game-state. When there is no telemetry (plain chat, or any turn without
 game-state) the composer sends the **raw hint text** instead, so a conversational model is never handed a
-confusing JSON wrapper. Feed telemetry via `ISessionTelemetryProvider.Record(key, value)` (see the Arena
-example); roles with a custom user-template are unaffected (the template controls their shape).
+confusing JSON wrapper. Telemetry comes from the registered `ISessionTelemetryProvider`; the stock
+`SessionTelemetryCollector` takes values through `SetTelemetry(key, value)` (string, int, float or bool).
+Roles with a custom user-template are unaffected (the template controls their shape).
 
 **History stays clean, state stays fresh.** Only the raw user intent (`AiTaskRequest.Hint`) is persisted to
 an agent's chat history — never the composed envelope — so stale telemetry snapshots don't pile up across
@@ -322,7 +330,10 @@ role with `CoreAi.RegisterGameStateTool(roleId)`; it reads the live `ISessionTel
 every message.
 
 Rule for tests: create `CoreAiChatOptions` for mutable behavior. Use `ScriptableObject.CreateInstance<CoreAiChatConfig>()` only for asset defaults, Inspector serialization or `ToOptions()` / `ApplyOptions(...)` mapping tests. Do not write private config fields via reflection.
-## Programmatic submit from code (cutscene, quest, world button) — since 0.25.5
+
+<a id="programmatic-chat-submit"></a>
+
+## Programmatic submit from code (cutscene, quest, world button)
 
 Get a reference to the panel (`GetComponent<CoreAiChatPanel>()`, scene singleton, etc.) and call:
 
@@ -333,16 +344,16 @@ using System.Threading.Tasks;
 using CoreAI.Chat;
 
 // Normal path: user bubble in chat + LLM request (same as after typing in the field)
-string? reply = await chatPanel.SubmitMessageFromExternalAsync(
+string reply = await chatPanel.SubmitMessageFromExternalAsync(
     "Tell me about the quest",
     cancellationToken: CancellationToken.None);
 
 // Silent call: do not duplicate text in UI, orchestrator only
-var opt = new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false };
+CoreAiChatExternalSubmitOptions opt = new CoreAiChatExternalSubmitOptions { AppendUserMessageToChat = false };
 reply = await chatPanel.SubmitMessageFromExternalAsync("Secret context for the model", opt);
 
 // Narrative in UI only, no LLM (simulated assistant reply)
-var fake = new CoreAiChatExternalSubmitOptions
+CoreAiChatExternalSubmitOptions fake = new CoreAiChatExternalSubmitOptions
 {
     AppendUserMessageToChat = true,
     SimulatedAssistantReply = "Welcome to the city!"
@@ -354,30 +365,37 @@ reply = await chatPanel.SubmitMessageFromExternalAsync("…", fake);
 |---------------------------------------|---------|---------|
 | **`AppendUserMessageToChat`** | `true` | Add a **user** bubble with the request text before the turn. |
 | **`SimulatedAssistantReply`** | `null` | If set to a non-empty string — **LLM is not called**; an assistant bubble with this text is appended (after think strip and `FormatResponseText`). |
+| **`Attachments`** | `null` | `IReadOnlyList<AiAttachment>` sent with the message: images for a vision-capable model, text-like files inlined into the prompt. With at least one attachment the text may be blank; the user bubble then shows one `[attachment: name type size]` line per file and `OnMessageSending` is skipped. The list and bytes are not copied — keep them unchanged until the submit completes. |
 | **`DeadlineCancellationToken`** | `default` | The host's own deadline, kept apart from the caller token. When it fires while the caller token is alive the turn ends as `Timeout` (`ResolveTimeoutMessage`) and the metrics record `DeadlineCancellation`; the panel passes it to `CoreAiChatService` separately. A deadline armed on the caller token itself (`CancelAfter` on the token you pass) is reported as a cancellation. An already-elapsed deadline admits nothing (no user bubble, no `OnUserMessageSent`, no service call). The token's source must outlive the turn. |
 
 ```csharp
 // Host deadline: a timeout, not a cancellation
-using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+using CancellationTokenSource deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
 CancellationToken playerStopToken = CancellationToken.None; // or your own stop source
-var timed = new CoreAiChatExternalSubmitOptions { DeadlineCancellationToken = deadline.Token };
+CoreAiChatExternalSubmitOptions timed = new CoreAiChatExternalSubmitOptions { DeadlineCancellationToken = deadline.Token };
 reply = await chatPanel.SubmitMessageFromExternalAsync("Summarize the lesson", timed, playerStopToken);
 ```
 
-**Return value:** assistant reply string (including simulated), or `null` if the panel is inactive or busy with another request, the text is empty after `OnMessageSending`, or the turn was interrupted (timeout **or** cancellation — the string API returns `null` for both).
+**Return value:** assistant reply string (including simulated), or `null` if the panel is inactive or busy with another request, the input is empty (blank text without attachments, or text that `OnMessageSending` emptied), or the turn failed or was interrupted (timeout **or** cancellation — the string API returns `null` for both).
+
+**Typed result:** `SubmitMessageFromExternalResultAsync` takes the same arguments and returns a `CoreAiChatExternalSubmitResult` for this one call. It never retries an admitted turn (it may already have run tools); presenting the failure is up to the caller.
+
+| Member | Meaning |
+|--------|---------|
+| `Admitted` | `true` once this call owns a panel turn. Admission is not success. |
+| `TurnGeneration` | The panel turn generation this call owns; `0` when nothing was admitted. |
+| `Rejection` | Why nothing was admitted: `None` (admitted), `Busy`, `Inactive`, `EmptyInput`, `Filtered` (`OnMessageSending` emptied the text), `Cancelled` (caller token or deadline already fired), `ServiceUnavailable`, `TypedResultsUnavailable` (the orchestrator exposes no typed results). |
+| `Completion` | `LlmCompletionResult`: `Ok`, `ErrorCode` (`Timeout`, `Cancelled`, `EmptyResponse`, provider codes…), `Error`, final `Content`, token usage, executed tool calls and HTTP metadata. |
 
 **Interrupted turns:** a timeout (library timeout, the service idle deadline, or a fired `DeadlineCancellationToken`) goes to `ResolveTimeoutMessage(false)`; any cancellation (your caller token, the panel's stop source, `CoreAi.StopAgent` from elsewhere) goes to `ResolveCancelledMessage()`, whose default `null` adds nothing to the chat. A UI Stop reaches neither hook. An already-elapsed deadline shows `ResolveTimeoutMessage(false)` once and returns `null`; an already-cancelled caller token does nothing at all. To tell timeout and cancellation apart in code, use **`SubmitMessageFromExternalResultAsync`** and read `Completion.ErrorCode` (`Timeout` / `Cancelled`); it rejects an already-fired token or deadline before admission with the same codes. Details: [ARCHITECTURE — Timeout & Retry Rule](../../../../Docs/ARCHITECTURE.md#timeout--retry-rule-v151).
 
-**Hooks:** `OnMessageSending` is still invoked; for a real reply — `OnResponseReceived` / **`OnAiResponseCompleted`**.
+**Hooks:** `OnMessageSending` is still invoked for non-blank text; for a real reply — `OnResponseReceived` / **`OnAiResponseCompleted`**.
 
-## Stopping generation (Stop) — since 0.22.0
+## Stopping generation (Stop)
 
-`CoreAiChatConfig.EnableStopGeneration` controls whether the player can stop an active AI turn from this UI. It is **on by default** for backward compatibility. When disabled, the send button keeps the normal `>` label, stays disabled while the request is running, does not receive `.coreai-chat-send-button-stop`, and Esc does not cancel the active request. Code can still call lower-level cancellation APIs if the host game owns that flow.
+`CoreAiChatConfig.EnableStopGeneration` controls whether the player can stop an active AI turn from this UI. It is **on by default**. When disabled, the send button keeps the normal `>` label, stays disabled while the request is running, does not receive `.coreai-chat-send-button-stop`, and Esc does not cancel the active request. Code can still call lower-level cancellation APIs if the host game owns that flow.
 
-Since **0.25.5** there is no separate “stop” button in the **header** — stop only via the send button and Esc (below).
-Since **0.25.6** the stop path is hardened for streaming and fast backends/stub: the button stays enabled while it shows `X`, busy state is set until the first `await`, and the active request CTS is cancelled even if `CoreAi.StopAgent(roleId)` is unavailable.
-
-Since **0.25.14**:
+There is no separate “stop” button in the **header** — stop only via the send button and Esc (below). The send button stays enabled while it shows `X`, and the active request CTS is cancelled even if `CoreAi.StopAgent(roleId)` is unavailable.
 
 - **Send (Enter) vs stop:** While a turn is in progress, pressing **Enter** (or your configured send shortcut in the text field) does **not** stop generation — it is ignored until the turn completes. **Stop** is only the send button while it shows **`X`**, plus **Esc** when **Enable Escape Chat Shortcuts** is on. This prevents accidental cancellation during the orchestrator tail (e.g. chat history append + `ApplyAiGameCommand`) after the last streamed token.
 - **Busy until enumerator ends:** The panel treats the request as active until the streaming **enumerator** fully finishes (not merely when the model emits a terminal chunk). That keeps the UI and orchestrator in sync with `QueuedAiOrchestrator` / `AiOrchestrator` post-stream work.
@@ -393,7 +411,7 @@ Stop the current reply in two ways:
 - press the send button again (in `Stop` mode);
 - press `Esc` while the chat is generating (if **Enable Escape Chat Shortcuts** is on in `CoreAiChatConfig`).
 
-Under the hood this calls `CoreAi.StopAgent(roleId)` and cancels the active request `CancellationToken`, so both current generation and queued orchestrator tasks for that role stop.
+The public `StopAgent()` runs the same stop. Under the hood it advances `CurrentTurnGeneration`, calls `CoreAi.StopAgent(roleId)` (falling back to `CoreAiChatService.StopAgent`), cancels the token of the request the panel owns (this ends the turn, queued or running), and replaces the panel's root cancellation source. Text already streamed stays in the bubble; no extra cancellation message is added.
 After stop, `CoreAiChatPanel` immediately clears streaming UI (`FinishStreaming` / `HideTypingIndicator`) and resets `_isSending` / `_isStreaming`; covered by `CoreAiChatPanelEditModeTests` and `CoreAiChatPanelStopPlayModeTests`.
 
 Disabling the panel advances `CurrentTurnGeneration` before dropping the UI references (and cancels any
@@ -402,6 +420,12 @@ same GameObject is enabled again immediately: it cannot append a timeout/error/a
 tree, release a successor bubble, reset the successor's busy state, or steal focus. Lifecycle teardown
 itself resets the old busy state, so the re-enabled panel can start a new turn without waiting for the
 cancelled provider call to unwind.
+
+That is the default (`protected virtual bool CancelsActiveRequestOnDisable => true`). A host where disabling
+the panel only means "the person left focus" overrides it to `false`: then disable touches neither the
+generation, the request nor the busy flags, and the turn runs to the end — its answer reaches history, it calls
+`OnResponseReceived`, and once the tree is bound again the segment still streaming opens a new bubble. The UI
+tree is released on disable either way.
 
 Lifecycle and turn ownership are installed before public busy notifications. Consequently:
 
@@ -413,29 +437,63 @@ Lifecycle and turn ownership are installed before public busy notifications. Con
 - a `BusyStateChanged(false)` handler raised by `StopAgent()` may immediately submit a successor turn. Stop
   has no cleanup tail after that notification, so it cannot clear the successor's busy state, CTS, or bubble.
 
-Since **2.6.x**, the WebGL verification flow also covers the real browser player path:
+The real browser path (visible streaming, Stop on a long stream, a working turn after Stop) is verified by WebGL player tests on the `CoreAiChatDemo` scene: see [Verifying WebGL streaming](../../../../Docs/STREAMING_ARCHITECTURE.md#verifying-webgl-streaming).
 
-- first message: a real HTTP model response must become visible while streaming;
-- second message: `StopAgent()` must cancel an active long stream, preserve already-rendered text, unlock the panel, and avoid browser main-loop exceptions;
-- third message: submitting again after Stop must produce a non-empty assistant response.
-
-For very short real-model replies, the final response can arrive before a test observes the transient streaming label on a later frame. In that case the recovery check should assert the completed assistant response and unlocked panel state; visible incremental streaming is already covered by the first, longer-lived stream.
-
-### Persisted history + assistant display (since 0.25.14)
+### Persisted history + assistant display
 
 - **Hydrated user messages:** If the store contains the composer JSON shape (`{"telemetry":...,"hint":"...","ai_task_source":"..."}`), the UI shows only the **`hint`** string in the user bubble (same text the player typed conceptually).
 - **Assistant bubbles:** Leading spaces and newlines at the start of a reply are trimmed for display so the first line does not sit under a blank “gap”.
+
+<a id="chat-feed-scrolling"></a>
+
+## Message feed: scrolling, jump-to-latest button, unread badge
+
+The feed works like a messenger. By default an assistant message **never moves the view**: whatever the reader is looking at stays in place and new messages grow below. When an answer lands below the visible edge, a round **jump-to-latest** button (`↓`) over the bottom of the feed shows it, and its badge counts the assistant messages that arrived meanwhile.
+
+- **Your own actions go to the bottom** in every policy: a message you send, restored history (persisted or the per-role cache after an agent switch) and the jump-to-latest button. Standing at the bottom again hides the button and marks everything read.
+- **The button** is shown exactly while the feed is away from the bottom (8 px tolerance). Clicking it scrolls to the bottom and makes the feed follow again (`FollowFeedAfterLearnerAction`).
+- **The badge** counts assistant messages that were appended while the reader could not see them (up to `99`): message bubbles and each streamed reply bubble. Restored history, your own messages and tool-call rows never count. Under `KeepPosition` a message counts even when you stood at the bottom, because the feed does not move to show it; the count resets whenever the feed stands at the bottom after layout (for example when the new message still fits on screen).
+- **Your scroll is never undone.** The panel remembers every scroll value it sets itself; any other change is the reader's. Scrolling away from the bottom cancels pending snaps (for example the settle passes of a scroll to the bottom) and holds the view until your next own action — a sent message, the button, or returning to the bottom. In every policy except `Bottom` this hold also stops turn anchors and reveals.
+
+**Scroll policy** — the **Scroll Anchor** field on `CoreAiChatPanel` (serialized `scrollAnchor`), or override `protected virtual ChatScrollAnchor ScrollAnchor` (the inspector value is then ignored):
+
+| `ChatScrollAnchor` | What assistant content does to the view |
+|--------------------|------------------------------------------|
+| `KeepPosition` (**default**) | Never moves it; the button and badge announce new messages. |
+| `FollowIfAtBottom` | Follows new content (including the streamed tail) while the reader stands at the bottom; stops the moment they scroll up. |
+| `AssistantMessageStart` | Pins the top of the turn's first assistant row to the top of the viewport and does not chase the streamed tail. |
+| `Bottom` | Classic chat: every message and streamed chunk pins the view to the bottom. |
+
+`CoreAiChatPanel.MovesViewForAssistantContent(anchor, readerAtBottom)` states the rule as a pure function.
+
+**Markup.** The feature is opt-in by markup: the default `CoreAiChat.uxml` has a `Button` named `coreai-chat-scroll-to-latest` and a `Label` named `coreai-chat-unread-count` (inside `coreai-chat-scroll-to-latest-wrap`). A custom UXML without the button simply has none. With `KeepPosition` and no button there is no sign that an answer arrived below the edge, so the panel logs one warning at bind: add the button and badge, or choose `FollowIfAtBottom`. The default show/hide toggles the `coreai-chat-scroll-to-latest--visible` USS class (animated by USS transitions) and lets a hidden button ignore clicks.
+
+**Hooks for subclasses and hosts:**
+
+| Member | Purpose |
+|--------|---------|
+| `UnreadMessageCount` | Current badge value (`0` without a button). |
+| `ApplyScrollToLatestVisibility(VisualElement, bool)` | Override to show/hide the button and badge with your own animation. |
+| `OnScrollToLatestRequested()` | Override to react to the button; the default calls `FollowFeedAfterLearnerAction()`. |
+| `FollowFeedAfterLearnerAction()` | Public. Call it when the reader acts inside the feed without sending a message (answers an embedded card, presses a button in a message): the feed goes to the bottom and follows again. |
+| `NoteAssistantContentArrived()` | Call **before** adding your own assistant row (a card, an interactive block) so it counts as unread like a message. |
+| `IsRestoringHistory` | Override to return `true` while you re-render already delivered history through `AddMessage`, so it never becomes unread. |
+| `ScrollForNewAssistantRow`, `ScrollToRevealRow`, `ScrollToTurnAnchor` | Scroll helpers that follow the active policy and the reader's hold, for host-inserted rows and re-layout (a label replaced by rendered markdown). `ScrollToRevealRow` scrolls the minimum needed to show a whole row. |
+| `ScrollToBottom()` | Always goes to the bottom (coalesced, with settle passes for late layout). |
+
+The jump-to-latest button keeps working when a host takes the chat tree out of its panel and re-inserts the same tree without `BindUI` (a tab switch). `CoreAiChatFeedScrollBehaviourEditModeTests` and `ChatScrollAnchorEditModeTests` cover the behaviour.
 
 ## Clearing context from UI
 
 The **`C`** (Clear) button in the header (`coreai-chat-clear`) calls `ClearChat()`:
 
-- clears messages in the UI;
-- by default clears only chat history (`clearChatHistory: true`, `clearLongTermMemory: false`).
+- stops an active turn, then clears messages in the UI;
+- by default clears only chat history (`clearChatHistory: true`, `clearLongTermMemory: false`);
+- shows the **Welcome Message** again.
 
 `CoreAiChatConfig.ShowClearButton` controls only the visible header button. It is **on by default**. When disabled, the button is hidden from the panel, but the public `ClearChat(...)` methods below still work for code-driven resets, admin panels, scene transitions, or tests.
 
-The circular **FAB** also shows **C** as its icon when collapsed — that is the **open-chat** affordance (same letter, different control from the header clear button).
+The circular **FAB** shows the open-chat hotkey (default **C**) as its icon when collapsed — that is the **open-chat** affordance, a different control from the header clear button.
 
 For manual granular control, use the overload:
 
@@ -455,7 +513,7 @@ chatPanel.ClearChat(clearChatHistory: false, clearLongTermMemory: true);
 | Layer | Source | Example |
 |-------|--------|---------|
 | 1 | `ICoreAISettings.UniversalSystemPromptPrefix` (**General → Universal Prompt Prefix**) | "Keep answers short. Do not discuss forbidden topics." |
-| 2 | Role base prompt: `AgentPromptsManifest`, `Resources/AgentPrompts/System/<RoleId>.txt`, or the built-in fallback | `TeacherSystemPrompt.txt` |
+| 2 | Role base prompt: `AgentPromptsManifest`, `Resources/AgentPrompts/System/<RoleId>.txt`, or the built-in fallback | `Resources/AgentPrompts/System/Teacher.txt` |
 | 3 | `AgentBuilder.WithSystemPrompt()` | "You are teaching a student about: for loops" |
 | 4 | Full role tool contract (every tool registered for the role, canonical order) | `AgentBuilder.WithTool(...)`, skills, built-ins |
 
@@ -485,19 +543,21 @@ new AgentBuilder("JsonParser")
 | Mode | Mechanism | Real streaming? |
 |------|-----------|-----------------|
 | **LocalModel** | LLMUnity's built-in OpenAI-compatible server (`LlmUnityServerPort`) via `OpenAiChatLlmClient`, SSE (`stream: true`) | ✅ Yes (not available on WebGL) |
-| **ClientOwnedApi** | OpenAI-compatible SSE (`stream: true`) | ✅ Yes (Standalone / Editor); ⚠️ not on WebGL — see below |
-| **ClientLimited** | Local limits → OpenAI-compatible SSE | ✅ Yes (Standalone / Editor); ⚠️ not on WebGL — see below |
-| **ServerManagedApi** | Backend proxy using an OpenAI-compatible streaming endpoint | ✅ Yes when the backend streams SSE; ⚠️ WebGL caveat still applies |
+| **ClientOwnedApi** | OpenAI-compatible SSE (`stream: true`) | ✅ Yes; in the WebGL player only with `WebGlNativeStreaming` (see below) |
+| **ClientLimited** | Local limits → OpenAI-compatible SSE | ✅ Yes; in the WebGL player only with `WebGlNativeStreaming` |
+| **ServerManagedApi** | Backend proxy using an OpenAI-compatible streaming endpoint | ✅ Yes when the backend streams SSE; same WebGL rule |
 | **Offline** | Deterministic local response | Single final chunk |
 
 For one global mode use `CoreAISettingsAsset`. For mixed-role chat setups use `LlmRoutingManifest`, for example `SmartChat → ServerManagedApi` and `Analyzer → ClientLimited`.
 
-> ⚠️ **WebGL player.** `UnityWebRequest` does not deliver SSE incrementally. **`CoreAiChatService.IsStreamingEnabled`**
-> returns **`false`** in the WebGL player unless **`CoreAISettingsAsset.WebGlNativeStreaming`** is **enabled**
-> (native **fetch** + **ReadableStream** via `CoreAiSseFetch.jslib` → `FetchSseOpenAiTransport`). If that flag is off,
-> the chat uses **non-streaming** HTTP even when `CoreAiChatConfig.EnableStreaming` is on — logs show **`LLM <`**
-> **without** **`(stream)`**, and the full reply lands at once. **Fix:** ensure **`WebGlNativeStreaming`** is **on** on your CoreAI settings asset (default **on** for new assets since v1.6.13; older assets may still have it off) and satisfy browser **CORS** / same-origin rules for your LLM host. See
-> [`STREAMING_WEBGL_TODO.md`](../../../../Docs/STREAMING_WEBGL_TODO.md) and [`WEBGL_BUILD_TROUBLESHOOTING.md`](../../../../Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
+> ⚠️ **WebGL player.** `UnityWebRequest` does not deliver SSE incrementally, so streaming in the player goes through
+> the native **fetch** + **ReadableStream** bridge (`CoreAiSseFetch.jslib` → `FetchSseOpenAiTransport`), switched by
+> **`CoreAISettingsAsset.WebGlNativeStreaming`** (default **on**; assets created before v1.6.13 may still have it off).
+> With the flag off, **`CoreAiChatService.IsStreamingEnabled`** returns **`false`** in the player and the chat uses
+> **non-streaming** HTTP even when `CoreAiChatConfig.EnableStreaming` is on — logs show **`LLM <`** **without**
+> **`(stream)`**, and the full reply lands at once. Either way the browser's **CORS** / same-origin rules apply to your
+> LLM host. See [`STREAMING_ARCHITECTURE.md`](../../../../Docs/STREAMING_ARCHITECTURE.md#2-transport-details) and
+> [`WEBGL_BUILD_TROUBLESHOOTING.md`](../../../../Docs/WEBGL_BUILD_TROUBLESHOOTING.md).
 
 ### Streaming + Tool Calling (single-cycle)
 
@@ -530,21 +590,16 @@ IDisposable sub = CoreAi.SubscribeToolCalls(record =>
 
 `CoreAi.GetToolCallHistorySnapshot()` returns recent started/completed/failed records, and `CoreAi.ClearToolCallHistory()` clears that diagnostic buffer.
 
-This behavior is on by default for roles with tools:
-
-- `AgentMode.ToolsAndChat`
-- `AgentMode.ToolsOnly`
-
-For `AgentMode.ChatOnly` the usual streaming flag hierarchy applies (UI / per-agent / global).
+Tool rounds inside a streamed turn apply to roles with tools (`AgentMode.ToolsAndChat`, `AgentMode.ToolsOnly`). Whether a turn streams at all follows the hierarchy below for every `AgentMode`.
 
 ### Streaming settings hierarchy
 
 Priority order (highest to lowest):
 
 1. **UI flag** — `CoreAiChatConfig.EnableStreaming` (chat panel Inspector). If off → always non-streaming; other layers ignored.
-2. **Per-agent override** — `AgentBuilder.WithStreaming(true/false)` (registered in `AgentMemoryPolicy`).
-3. **Global** — `ICoreAISettings.EnableStreaming` — **`CoreAISettings` Inspector → Essentials → Global streaming** (default **on**; was easy to miss before because the custom inspector omitted the field).
-4. **WebGL player** (`UNITY_WEBGL && !UNITY_EDITOR`) — incremental SSE needs **`CoreAISettingsAsset.WebGlNativeStreaming`** (native fetch bridge, see `STREAMING_WEBGL_TODO.md`; Inspector: **Advanced Settings → WebGL** tab, **Native SSE (fetch)**). **`CoreAiChatService.IsStreamingEnabled`** applies this **once**; it reads the flag from the DI-registered **`CoreAISettingsAsset`** when present, otherwise from **`CoreAISettingsAsset.Instance`**, so streaming is not accidentally disabled when the scope asset and the Resources default differ.
+2. **Per-agent override** — `AgentBuilder.WithStreaming(true/false)` (registered in `AgentMemoryPolicy`). When set, it wins over the global flag in both directions.
+3. **Global** — `ICoreAISettings.EnableStreaming` — **`CoreAISettings` Inspector → Essentials → Global streaming** (default **on**).
+4. **WebGL player** (`UNITY_WEBGL && !UNITY_EDITOR`) — incremental SSE needs **`CoreAISettingsAsset.WebGlNativeStreaming`** (native fetch bridge; Inspector: **Advanced Settings → WebGL** tab, **Native SSE (fetch)**). **`CoreAiChatService.IsStreamingEnabled`** checks this first; it reads the flag from the DI-registered **`CoreAISettingsAsset`** when present, otherwise from **`CoreAISettingsAsset.Instance`**, so streaming is not accidentally disabled when the scope asset and the Resources default differ.
 
 ```csharp
 // Example: chat agent always streams regardless of global setting
@@ -564,7 +619,7 @@ new AgentBuilder("JsonParser")
 Programmatic check of effective value:
 
 ```csharp
-var chatService = CoreAiChatService.TryCreateFromScene();
+CoreAiChatService chatService = CoreAiChatService.TryCreateFromScene();
 bool useStream = chatService.IsStreamingEnabled("SmartChat", uiFallback: true);
 ```
 
@@ -572,18 +627,18 @@ bool useStream = chatService.IsStreamingEnabled("SmartChat", uiFallback: true);
 
 Reasoning models (DeepSeek, Qwen3) emit `<think>...</think>` blocks. CoreAI automatically:
 - **When streaming**: shared stateful filter `CoreAI.Ai.ThinkBlockStreamFilter` removes blocks **even if open/close tags are split across SSE chunks**. While the model “thinks”, the typing indicator is shown.
-- Some OpenAI-compatible reasoning models may stream hidden reasoning without the opening `<think>` tag and only emit `</think>` before the final answer. The shared filter treats the buffered prefix before that orphan closing tag as hidden reasoning and drops it.
+- Some OpenAI-compatible reasoning models may stream hidden reasoning without the opening `<think>` tag and only emit `</think>` before the final answer. Before any visible text has been shown, the shared filter treats the buffered prefix in front of that orphan closing tag as hidden reasoning and drops it; once text is on screen, a lone `</think>` hides nothing.
 - **Non-streaming**: regex strips `<think>` blocks from the final reply.
 - **Tool calls**: not shown in chat (handled inside the MEAI pipeline, including streaming single-cycle).
-- **Buffered / tool streaming markers:** `MeaiLlmClient` may emit **`LlmStreamChunk.BufferedStreamingNoToolBinding`** (no `Text`). With **`BufferedStreamingUseToolProgressHint`**, `CoreAiChatPanel` shows the short static line from **`CoreAiChatConfig.StreamingToolProgressHint`** (tool call or hybrid JSON hold). Without that flag (e.g. unbound iteration waiting for the model step), the panel keeps the default animated typing dots — including after a hint-only chunk when no assistant prose has appeared yet (since **`com.neoxider.coreaiunity` 1.7.1**).
+- **Buffered / tool streaming markers:** `MeaiLlmClient` may emit **`LlmStreamChunk.BufferedStreamingNoToolBinding`** (no `Text`). With **`BufferedStreamingUseToolProgressHint`**, `CoreAiChatPanel` shows the short static line from **`CoreAiChatConfig.StreamingToolProgressHint`** (tool call or hybrid JSON hold). Without that flag (e.g. unbound iteration waiting for the model step), the panel keeps the default animated typing dots — including after a hint-only chunk when no assistant prose has appeared yet.
 
-> Streaming must be invoked from the **Unity main thread** (from a coroutine, `async void`, `UniTask`, or a normal async method in UI). Wrapping `CompleteStreamingAsync` in `Task.Run` will throw `"Create can only be called from the main thread"` because `UnityWebRequest` is created off the main thread.
+> Call the chat and streaming APIs from the **Unity main thread** (a coroutine, `async void`, `UniTask`, or a normal async method started from UI code), not inside `Task.Run`. The WebGL transports and the endpoint readiness / tool-channel probes create `UnityWebRequest`s, and Unity allows that only on the main thread.
 
 ## Extension via inheritance
 
 ### Custom `AiTaskRequest` (tool policy)
 
-By default `CoreAiChatPanel` builds a **minimal** `AiTaskRequest` (`RoleId`, `Hint`, `SourceTag="Chat"`). If your game needs **the same tool policy on every chat path** (player input, `SubmitMessageFromExternalAsync`, tests that drive the panel), override **`BuildAiTaskRequest(string userText, string roleId)`** and copy in `AllowedToolNames`, `ForcedToolMode`, `RequiredToolName`, `RuntimeContext`, etc. — exactly as you would for `CoreAi.OrchestrateAsync` / `CoreAi.StreamChunksAsync(AiTaskRequest, …)`.
+By default `CoreAiChatPanel` builds a **minimal** `AiTaskRequest`: `RoleId`, `RoutingProfileId` (the API profile picked in the panel, if any), `Hint`, `SourceTag="Chat"`, the role's `ActorContext` and `CancellationScope` = the actor's session id. If your game needs **the same tool policy on every chat path** (player input, `SubmitMessageFromExternalAsync`, tests that drive the panel), override **`BuildAiTaskRequest(string userText, string roleId)`** and copy in `AllowedToolNames`, `ForcedToolMode`, `RequiredToolName`, `RequestSystemInstructions`, `MaxToolCallRoundtrips`, etc. — exactly as you would for `CoreAi.OrchestrateAsync` / `CoreAi.StreamChunksAsync(AiTaskRequest, …)`.
 
 `CoreAiChatExternalSubmitOptions` does **not** include a per-submit request mutator; use a subclass override or build the `AiTaskRequest` yourself and call `CoreAiChatService` / `CoreAi` directly when you must bypass the panel’s builder.
 
@@ -592,7 +647,7 @@ public class LessonChatPanel : CoreAiChatPanel
 {
     protected override AiTaskRequest BuildAiTaskRequest(string userText, string roleId)
     {
-        var req = base.BuildAiTaskRequest(userText, roleId);
+        AiTaskRequest req = base.BuildAiTaskRequest(userText, roleId);
         // e.g. copy AllowedToolNames / ForcedToolMode from your lesson/session layer
         // MyLessonPolicy.Apply(req);
         return req;
@@ -619,7 +674,7 @@ public class MyGameChatPanel : CoreAiChatPanel
     // Fully custom message layout
     protected override VisualElement CreateMessageBubble(string text, bool isUser)
     {
-        var bubble = base.CreateMessageBubble(text, isUser);
+        VisualElement bubble = base.CreateMessageBubble(text, isUser);
         // Add your classes, animations, icons...
         return bubble;
     }
@@ -647,7 +702,7 @@ string json = await CoreAi.OrchestrateAsync(
     new AiTaskRequest { RoleId = "Creator", Hint = "spawn JSON" });
 
 // Streaming orchestrator:
-await foreach (var chunk in CoreAi.OrchestrateStreamAsync(
+await foreach (LlmStreamChunk chunk in CoreAi.OrchestrateStreamAsync(
     new AiTaskRequest { RoleId = "Creator", Hint = "explain" }))
 {
     if (!string.IsNullOrEmpty(chunk.Text)) statusLabel.text += chunk.Text;
@@ -660,15 +715,15 @@ Details: [`COREAI_SINGLETON_API.md`](../../../../Docs/COREAI_SINGLETON_API.md).
 ### Option 2 — direct service access
 
 ```csharp
-var chatService = CoreAiChatService.TryCreateFromScene();
+CoreAiChatService chatService = CoreAiChatService.TryCreateFromScene();
 
 // Non-streaming
 string response = await chatService.SendMessageAsync("Hello!", "Teacher");
 
-// Streaming
-await foreach (var chunk in chatService.SendMessageStreamingAsync("Tell me about Python", "Teacher"))
+// Streaming: join with StreamedMessageJoiner so a reply after a tool round starts a new paragraph
+await foreach (LlmStreamChunk chunk in chatService.SendMessageStreamingAsync("Tell me about Python", "Teacher"))
 {
-    myTextLabel.text += chunk.Text;
+    myTextLabel.text = StreamedMessageJoiner.Append(myTextLabel.text, chunk.Text, chunk.StartsNewMessage);
 }
 ```
 
@@ -678,7 +733,7 @@ Every call runs under the service's idle deadline (**LLM Timeout (sec)**, re-arm
 // using System; using System.Threading; using CoreAI.Ai;
 AiTaskRequest request = new AiTaskRequest { RoleId = "Teacher", Hint = "Explain loops", SourceTag = "Chat" };
 CancellationToken stopToken = CancellationToken.None; // or your own stop source
-using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+using CancellationTokenSource deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
 string text = await chatService.SendMessageAsync(request, stopToken, deadline.Token);
 // Typed result: chatService.SendMessageResultAsync(request, stopToken, deadline.Token)
@@ -701,8 +756,10 @@ Recommended split for a Canvas implementation:
 - On Send, call `CoreAiChatService.TryCreateFromScene()` and then `SendMessageAsync(...)` or
   `SendMessageStreamingAsync(...)`, or use the static `CoreAi` facade directly.
 - For text output use TextMeshPro (`TMP_Text` / `TextMeshProUGUI`), not legacy `UnityEngine.UI.Text`.
-- For stop and reset flows call `CoreAi.StopAgent(roleId)`, `chatService.StopAgent(roleId)`, and
-  `CoreAi.ClearContext(roleId, clearChatHistory, clearLongTermMemory)` as appropriate.
+- For Stop, cancel the `CancellationToken` you passed to `SendMessageAsync` / `SendMessageStreamingAsync`
+  to stop that request, or call `StopAgent(roleId)` to stop all turns for the role, including actor-context
+  turns (see [cancellation scope](#chat-cancellation-scope)). For reset, call
+  `CoreAi.ClearContext(roleId, clearChatHistory, clearLongTermMemory)`.
 
 Minimal uGUI presenter shape:
 
@@ -746,15 +803,15 @@ public sealed class MyCanvasChatPresenter : MonoBehaviour
 ```
 
 For streaming, replace the final `SendMessageAsync` call with `await foreach` over
-`chatService.SendMessageStreamingAsync(text, roleId)` and append non-empty `chunk.Text` to the current assistant
-`TMP_Text`. If the game needs per-turn tool policy, build an `AiTaskRequest` and pass it to the service overload,
+`chatService.SendMessageStreamingAsync(text, roleId)` and add each `chunk.Text` to the current assistant
+`TMP_Text` with `StreamedMessageJoiner.Append(current, chunk.Text, chunk.StartsNewMessage)`. If the game needs per-turn tool policy, build an `AiTaskRequest` and pass it to the service overload,
 the same way `CoreAiChatPanel.BuildAiTaskRequest(...)` does for the UI Toolkit panel.
 
 ## Agent setup
 
 ```csharp
 // In your LifetimeScope:
-var config = new AgentBuilder("Teacher")
+AgentConfig config = new AgentBuilder("Teacher")
     .WithSystemPrompt("You are a Python teacher for school students.")  // Layer 3
     .WithChatHistory(4096, persistBetweenSessions: true)
     .WithMemory()
@@ -764,15 +821,16 @@ config.ApplyToPolicy(policy);
 
 ## VContainer / MessagePipe integration
 
-In VContainer projects the recommended architecture:
+In VContainer projects the recommended architecture (the presenter and use case are your own classes; CoreAI
+does not ship them):
 
 ```
-CoreAiChatPanel (UI) → events → ChatPresenter (VContainer)
-    → MessagePipe → SendMessageUseCase (Application)
+CoreAiChatPanel (UI) → events → your presenter (VContainer IStartable)
+    → MessagePipe → your application use case
 ```
 
-`CoreAiChatPanel` raises `OnUserMessageSent` and `OnAiResponseCompleted`.
-`ChatPresenter` (VContainer `IStartable`) subscribes and routes via `MessagePipe`.
+`CoreAiChatPanel` raises `OnUserMessageSent` and `OnAiResponseCompleted`; your presenter subscribes to them
+and routes via `MessagePipe`.
 
 ## Custom styles
 
@@ -784,7 +842,7 @@ All CSS classes use the `coreai-` prefix to avoid clashes:
 | `.coreai-chat-container` | Chat container |
 | `.coreai-chat-container.coreai-collapsed` | Container hidden (FAB mode) |
 | `.coreai-chat-header` | Header |
-| `.coreai-chat-header-btn` | Collapse button in header |
+| `.coreai-chat-header-btn` | Header buttons (clear, collapse) |
 | `.coreai-chat-fab` | Floating “open chat” button |
 | `.coreai-chat-fab-icon` | Icon inside FAB |
 | `.coreai-ai-message` | AI bubble |
@@ -793,17 +851,21 @@ All CSS classes use the `coreai-` prefix to avoid clashes:
 | `.coreai-chat-send-button` | Send button |
 | `.coreai-typing-message` | “Typing…” indicator |
 | `.coreai-long-request-hint` | Optional status line under the typing row (long in-flight turns; see collapse / UXML section) |
+| `.coreai-chat-scroll-to-latest` / `.coreai-chat-scroll-to-latest-wrap` | Jump-to-latest button and its wrapper (see [message feed](#chat-feed-scrolling)) |
+| `.coreai-chat-unread-count` | Unread badge on the jump-to-latest button |
+| `.coreai-chat-scroll-to-latest--visible` | Added to the button and badge while shown; `CoreAiChatScrollToLatest.VisibleClassName` |
 
 **Bubble width:** default **`.coreai-chat-message`** uses **`max-width: 494px`** in the stock USS (scaled with the larger window). Override in a custom `.uss` if your layout needs a different cap.
 
 ## Events
 
 ```csharp
-var chatPanel = GetComponent<CoreAiChatPanel>();
+CoreAiChatPanel chatPanel = GetComponent<CoreAiChatPanel>();
 chatPanel.OnUserMessageSent += (text) => Analytics.Track("chat_message", text);
 chatPanel.OnAiResponseCompleted += (response) => Analytics.Track("ai_response", response);
+chatPanel.OnMessageTruncated += (typed, max) => Debug.Log($"Message cut from {typed} to {max} chars");
 
-// Since 2.4.0 — public busy contract (replaces reflection on _isSending/_isStreaming/_isStopping/_isClearing).
+// Public busy contract.
 chatPanel.BusyStateChanged += isBusy => sendQueueGate.SetBusy(isBusy);
 chatPanel.ToolRoundStarted += (iter, lastTool) =>
     Debug.Log($"⌛ tool round #{iter}, last tool: {lastTool}");
@@ -821,13 +883,13 @@ chatPanel.ResetBusyStateWithoutCancellation();
 bool wasAbandoned = chatPanel.AbandonCurrentTurn();
 ```
 
-### Public busy API — quick reference (since 2.4.0)
+### Public busy API — quick reference
 
 | Member | Type | Purpose |
 | --- | --- | --- |
 | `IsBusy` | `bool` (get) | `true` while sending / streaming / stopping / clearing. |
 | `BusyStateChanged` | `event Action<bool>` | Fires on the UI thread on every `IsBusy` transition (not on every flag mutation). On `true`, generation + active CTS already belong to the new turn; on `false`, reentrant successor submission is supported while lifecycle is active. |
-| `CurrentTurnGeneration` | `int` (get) | Monotonic ownership counter, incremented on turn start, Stop/abandon, and panel disable. Compare across awaits to detect that ownership moved to a newer turn/lifecycle. |
+| `CurrentTurnGeneration` | `int` (get) | Monotonic ownership counter, incremented on turn start, Stop/abandon, and panel disable (when `CancelsActiveRequestOnDisable` is `true`, the default). Compare across awaits to detect that ownership moved to a newer turn/lifecycle. |
 | `ToolRoundStarted` | `event Action<int, string>` | Fires before each LLM iteration inside a turn (after a tool result). Args: 1-based iteration index, last executed tool name (or `null`). |
-| `ResetBusyStateWithoutCancellation()` | `void` | Clears all four busy flags **without** cancelling the active HTTP/streaming request and **without** moving the turn generation (in contrast to `StopActiveGeneration()` / `StopAgent()` / `AbandonCurrentTurn()`). The turn itself keeps running and still owns the transcript when it finishes. |
+| `ResetBusyStateWithoutCancellation()` | `void` | Clears all four busy flags **without** cancelling the active HTTP/streaming request and **without** moving the turn generation (in contrast to `StopAgent()` / `AbandonCurrentTurn()`). The turn itself keeps running and still owns the transcript when it finishes. |
 | `AbandonCurrentTurn()` | `bool` | For a host's own watchdog that gives up on the current turn independently of this panel's HTTP timeout. Bumps `CurrentTurnGeneration` (so the in-flight turn's own completion/error path recognises itself as stale and stops touching the transcript), cancels the active request the same way the Stop button does, and calls `ResetBusyStateWithoutCancellation()`. Returns `true` only if a turn was actually in flight — this is what stops a host's own "no answer" message from being followed by a second, redundant error bubble once the real request eventually fails. After the panel's `OnDestroy` it is a no-op that returns `false` (as is `StopAgent()`). |

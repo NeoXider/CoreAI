@@ -1,6 +1,13 @@
-# WebGL SSE Streaming Status
+# WebGL SSE streaming: history
 
-**See also:** [WebGL build troubleshooting](WEBGL_BUILD_TROUBLESHOOTING.md) (LLVM OOM, `IOException` under `ProjectSettings/Packages`, StreamingAssets guard log).
+> **Developer history, not user documentation.** Moved from `Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md`
+> on 2026-10-15. The blocker described here is closed: the current behaviour (the `WebGlNativeStreaming` fetch
+> bridge, the `UnityWebRequest` fallback, CORS) is documented in
+> [STREAMING_ARCHITECTURE.md](../Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) and
+> [HTTP_TRANSPORT_SPEC.md](../Assets/CoreAiUnity/Docs/HTTP_TRANSPORT_SPEC.md). The version numbers below are
+> the releases of that time.
+
+**See also:** [WebGL build troubleshooting](../Assets/CoreAiUnity/Docs/WEBGL_BUILD_TROUBLESHOOTING.md) (LLVM OOM, `IOException` under `ProjectSettings/Packages`, StreamingAssets guard log).
 
 > **Current status (2.6.0):** the original WebGL SSE blocker is closed. New `CoreAISettingsAsset` instances enable `WebGlNativeStreaming` by default, and WebGL player builds can use `CoreAiSseFetch.jslib` + `FetchSseOpenAiTransport` for incremental browser `fetch` streaming. The native bridge guards all C# callbacks (`open`, `chunk`, `done`, `error`), treats `data: [DONE]` as terminal, and allows abort with no active controller. Keep this file as historical context and a player verification checklist because existing links still point here.
 
@@ -119,7 +126,7 @@ Additionally adjust `CoreAiChatPanel.SendStreamingAsync` so that when `chunks=1 
 
 **Originally (CoreAI v1.5.21):** `CoreAiChatService.IsStreamingEnabled` could force **non-streaming** on the WebGL player when incremental SSE over **`UnityWebRequest`** was unsupported, avoiding a broken “typing forever” UI when the transport could not deliver chunks.
 
-**Current (v1.6.13+):** enable **`CoreAISettingsAsset.WebGlNativeStreaming`** (default **on** for new settings assets). **`MeaiLlmClient.CreateHttp`** then uses **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`** (`fetch` + **`ReadableStream`**), and **`CoreAiChatService.IsStreamingEnabled`** allows streaming when that flag is **on** (still subject to per-role / UI overrides). When the flag is **off**, **`UnityWebRequestOpenAiTransport`** is used — no real incremental SSE; the client may use **non-streaming** completion and **simulate** stream updates. See [`STREAMING_ARCHITECTURE.md`](STREAMING_ARCHITECTURE.md) and [`HTTP_TRANSPORT_SPEC.md`](HTTP_TRANSPORT_SPEC.md).
+**Current (v1.6.13+):** enable **`CoreAISettingsAsset.WebGlNativeStreaming`** (default **on** for new settings assets). **`MeaiLlmClient.CreateHttp`** then uses **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`** (`fetch` + **`ReadableStream`**), and **`CoreAiChatService.IsStreamingEnabled`** allows streaming when that flag is **on** (still subject to per-role / UI overrides). When the flag is **off**, **`UnityWebRequestOpenAiTransport`** is used — no real incremental SSE; the client may use **non-streaming** completion and **simulate** stream updates. See [`STREAMING_ARCHITECTURE.md`](../Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) and [`HTTP_TRANSPORT_SPEC.md`](../Assets/CoreAiUnity/Docs/HTTP_TRANSPORT_SPEC.md).
 
 **`CoreAiChatPanel.ShouldUseStreamingForRole`** defaults to the chat config’s streaming preference; WebGL transport gating lives in **`CoreAiChatService.IsStreamingEnabled`** (single source of truth).
 

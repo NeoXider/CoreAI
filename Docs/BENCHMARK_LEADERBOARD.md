@@ -11,13 +11,15 @@ Full methodology: [benchmark guide](../Assets/CoreAIBenchmark/README.md) · [ben
 
 Scores are only comparable **within the same suite version**. Scenario sets, checkpoint weights, penalties, and caps change between versions, so a v1.6 score and a hypothetical v1.7 score are different measurements even for the same model. The suite version is stamped into every report JSON (`suiteVersion`) and shown in the report header. When the suite version bumps, the leaderboard starts a new section; older sections are kept for history but never mixed into the current ranking.
 
-**Current suite version: v1.15** (G1-G8, 28 scenarios with camera-enabled G6). Results below use one repetition per scenario in the open Unity 6000.3.14f1 Editor. The v1.14 Bunny result is historical and cannot be ranked against v1.15.
+**Current suite version: v2.0** (G1-G8, 35 scenarios: 28 regular and 7 extreme, plus the optional G6 image-feedback twin). No v2.0 results are published yet. The v1.15 results below are historical and cannot be ranked against v2.0.
 
 ### Suite version history
 
 | Suite | Status | Notes |
 |---|---|---|
-| v1.15 | **Current** | Failed tools and invalid commands are charged once when a clean-tools checkpoint already covers them; G6 clean-tools is non-mandatory. Read-only benchmark Lua world queries use the virtual scene, camera history keeps the latest frame, provider transport timeouts remain environment failures after partial builds, and A/B report heroes prefer a captured vision run. |
+| v2.0 | **Current** | Adds an extreme tier: one extremely hard scenario per group except G6, reported as a separate extreme sub-score and still counted in the suite score. Regrades G6 on build geometry (enclosed courtyard, gate, towers, keep, roofs, objects inside and around the walls, spread, construction quality). Closes grader loopholes in G1-G5, G7 and G8, and the recorder reports real object positions and applies batch-level spawn defaults. Not comparable with any 1.x score. |
+| v1.16 | Unpublished | Each clean-tools checkpoint declares what it measures; G4 `clean_tool` also fails on a failed call that never ran Lua. A G6 turn cut by the deadline is counted in generation time. Castle pacing applies only to the default castle goal. No run was published. |
+| v1.15 | Historical | Failed tools and invalid commands are charged once when a clean-tools checkpoint already covers them; G6 clean-tools is non-mandatory. Read-only benchmark Lua world queries use the virtual scene, camera history keeps the latest frame, provider transport timeouts remain environment failures after partial builds, and A/B report heroes prefer a captured vision run. |
 | v1.14 | Historical | G8 explicitly identifies both removable objects; the recorder preserves full tool arguments and G6 Lua replay. CoreAI 7.47.2 forwards captured camera images as image content to the model after a truncation fix; the published Bunny run predates that fix. G6 has a ten-minute wall budget and reserves capture/export time. |
 | v1.9–v1.13 | Historical | Intermediate benchmark and recorder changes; compare reports only when their exact `suiteVersion` matches. |
 | v1.8 | Historical | G6 free-build runs on the Roblox API (`execute_lua`, `Instance.new('Part')` with `Enum.Material`/`Enum.PartType`) and is graded on parts, names, volume, material and shape variety; the G6 prompt now matches that runtime (section size, writable Part surface, how `Color` composes with a texture). **In every group** the recording executor now expands a `spawn_batch` into one `spawn` per item, named as the production executor names them (`item.name`, else `targetName_i`, else `prefab_i`); under v1.7 a batch was recorded as a single opaque non-spawn command. So batch-spawned objects now count toward the spawn totals G1, G7 and G8 grade, and a `spawn_batch` satisfies G5's spawn-only constraint instead of violating it. Prompts, weights and penalties of G1-G5, G7, G8 are otherwise unchanged from v1.7. |
@@ -25,7 +27,11 @@ Scores are only comparable **within the same suite version**. Scenario sets, che
 | v1.6 | Historical | G1-G7 scenario groups, six-dimension scoring, role fitness, mean-over-repetitions suite score. |
 | < v1.6 | Retired | Pre-leaderboard development iterations; results were not published and are not comparable. |
 
-## Leaderboard — Suite v1.15
+## Leaderboard — Suite v2.0
+
+Results pending. Rows are added here after the maintainer run of suite v2.0.
+
+## Historical Leaderboard — Suite v1.15
 
 Maintainer runs use the Neoxider Agents local API bridge: GPT-6 models through Codex CLI, and free Space Bunny through OpenCode. G6 is a separate image-feedback run with a maximum of 570 seconds for model work plus 30 seconds reserved for capture/export; its score replaces the G6 outcome of the other-groups run. The `Runs` column identifies raw JSON, Markdown transcript, executed-tool JSONL, screenshot, and complete Lua replay in the [run archive](BenchmarkRuns/2026-09-29/). Tool-error counts use executed calls in JSONL; the Markdown transcript also retains attempted calls that the tool orchestration deduplicated. The numeric G6 grader does not score visual composition, so inspect the screenshots as well as the score.
 
@@ -175,13 +181,13 @@ Add one row to the appropriate table (cloud or local) with your name/handle in *
 | Run id | The `yyyyMMdd_HHmmss` timestamp from the report filename — goes into the **Run** column. |
 | Model identity | Exact model id / file name and, for local models, the quantization (e.g. `Q4_K_M`, `imatrix`) and context length used. |
 | Hardware | For local runs: GPU/CPU, VRAM/RAM, and the runtime (LM Studio / llama.cpp / other) with version. Cloud runs: provider + endpoint type. |
-| Suite version | Must match the leaderboard section you are adding to (currently **v1.15**; check `suiteVersion` in your report JSON). |
+| Suite version | Must match the leaderboard section you are adding to (currently **v2.0**; check `suiteVersion` in your report JSON). |
 | Settings | Groups run (full current submissions must be G1-G8), repetitions, any timeout overrides, and any non-default endpoint settings. |
 
 ### 3. What reviewers check
 
 - The report JSON parses, its `suiteVersion` matches the section, and the table row matches the JSON's suite score, pass-rate, P/PA/F, dimension scores, tool-error rate, tokens, and run id.
-- All eight groups G1-G8 were run for a current v1.8 submission (partial-group runs are not rankable — dimensions the run did not measure cannot be compared).
+- All eight groups G1-G8 were run for a current v2.0 submission (partial-group runs are not rankable — dimensions the run did not measure cannot be compared).
 - The model id, quantization, and hardware declaration are plausible and complete.
 - No signs of harness modification (scenario prompts, weights, penalties, or caps changed locally).
 

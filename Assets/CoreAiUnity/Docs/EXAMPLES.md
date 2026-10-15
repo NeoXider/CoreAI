@@ -21,9 +21,11 @@ Practical CoreAI examples from simple to advanced scenarios.
 
 **Default path:** use **`AgentBuilder.WithAction`** (and **`WithEventTool`** when you want a decoupled `CoreAiEvents` bus). Behind the scenes, **Microsoft.Extensions.AI** derives the JSON parameter schema from your delegate signature, so you almost never write raw JSON Schema by hand.
 
-**Escape hatch:** implement **`ILlmTool`** / subclass **`LlmToolBase`** when you need bespoke schemas, shared tools across hosts, or logic that cannot be expressed as a single `Delegate`. That pattern is heavier — reach for it when MEAI cannot model your surface.
+**Escape hatch:** write a tool class (usually a `LlmToolBase` subclass) that **implements `IAIFunctionLlmTool`** (or `IAIFunctionsLlmTool` for several functions) when you need bespoke schemas, shared tools across hosts, or logic that cannot be expressed as a single `Delegate`. A class that implements only `ILlmTool` is skipped when the request is built and never reaches the model. Template and checklist: **[TOOL_AUTHORING_GUIDE.md](TOOL_AUTHORING_GUIDE.md)**.
 
 Example 7 below uses **`WithAction`** for synchronous game callbacks; **[AGENT_BUILDER.md](../../CoreAI/Docs/AGENT_BUILDER.md)** contrasts all three approaches in detail.
+
+The samples call the static `CoreAi` facade (namespace `CoreAI`), which finds the scene's `CoreAILifetimeScope`; a plain `MonoBehaviour` needs no dependency injection (an `[Inject]` field on a scene `MonoBehaviour` stays `null` unless its GameObject is in the scope's **Auto Inject Game Objects** list). Built agents need no `ApplyToPolicy` call: `Build()` registers the role when CoreAI is running and the first ask registers it otherwise.
 
 ---
 
@@ -40,15 +42,17 @@ Creator AI → World Command Tool → PrefabRegistry → GameObject.Instantiate
 ### Launch code
 
 ```csharp
+using CoreAI;
+using CoreAI.Ai;
+using UnityEngine;
+
 // Somewhere in your GameManager:
 public class WaveManager : MonoBehaviour
 {
-    [Inject] private IAiOrchestrationService _orchestrator;
-
     public async void OnWaveComplete(int waveNumber)
     {
-        // Ask Creator to build the next wave
-        await _orchestrator.RunTaskAsync(new AiTaskRequest
+        // Ask Creator to build the next wave (Creator has world_command by default)
+        await CoreAi.OrchestrateAsync(new AiTaskRequest
         {
             RoleId = "Creator",
             Hint = $"Wave {waveNumber} complete. Player HP: 80%, DPS: 150. " +
@@ -114,7 +118,7 @@ CoreAILifetimeScope → Add Lua / World Commands Module → CoreAiLuaWorldModule
 ## Example 2: Weapon crafting (CoreMechanicAI + Programmer)
 
 ### Scenario
-The player crafts a weapon from two ingredients. CoreMechanicAI decides the outcome; Programmer creates the item via Lua. `create_item` and `add_effect` are **your game's** Lua functions — register them through `ILuaCsGameRuntimeBindings` (see [DEVELOPER_GUIDE §6](DEVELOPER_GUIDE.md#6-lua-for-the-programmer-agent)); the built-in API only has `report`, `add` and `coreai_world_*`.
+The player crafts a weapon from two ingredients. CoreMechanicAI decides the outcome; Programmer creates the item via Lua. `create_item` and `add_effect` are **your game's** Lua functions, not built-ins: the default Programmer API is `report`, `add`, the read-only `coreai_world_find` / `coreai_world_pos` / `coreai_world_exists` queries and the Rbx API. Custom functions are registered on `LuaCsApiRegistry` through `ILuaCsGameRuntimeBindings` or `LuaCsModStackOptions.AdditionalGameplayBindings` (see [DEVELOPER_GUIDE §6](DEVELOPER_GUIDE.md#6-lua-for-the-programmer-agent)); the default `RegisterCoreAiMods` composition does not take custom bindings, so either build your own Lua stack or expose the two operations as C# tools with `AgentBuilder.WithAction` (Example 7).
 
 ### Flow
 ```
@@ -132,12 +136,10 @@ Player gets "Flame Sword" (damage 45, fire 15)
 ```csharp
 public class CraftingSystem : MonoBehaviour
 {
-    [Inject] private IAiOrchestrationService _orchestrator;
-
     public async void OnCraftRequest(string ingredient1, string ingredient2)
     {
         // Step 1: CoreMechanicAI decides craft outcome
-        var mechanicResult = await _orchestrator.RunTaskAsync(new AiTaskRequest
+        string mechanicResult = await CoreAi.OrchestrateAsync(new AiTaskRequest
         {
             RoleId = "CoreMechanicAI",
             Hint = $"Craft recipe: {ingredient1} + {ingredient2}. " +
@@ -147,7 +149,7 @@ public class CraftingSystem : MonoBehaviour
         });
 
         // Step 2: Programmer creates the item via Lua
-        await _orchestrator.RunTaskAsync(new AiTaskRequest
+        await CoreAi.OrchestrateAsync(new AiTaskRequest
         {
             RoleId = "Programmer",
             Hint = $"Create the crafted item based on the recipe: {ingredient1} + {ingredient2}. " +
@@ -235,7 +237,7 @@ LLM → execute_lua:
 Tool result: success ✅
 ```
 
-Keep the available Lua API in the Programmer prompt ("Available API: report(string), add(a,b), coreai_world_*") so the model does not invent functions.
+The built-in Programmer prompt lists the available globals (`report`, the `coreai_world_find` / `coreai_world_pos` / `coreai_world_exists` queries, the Rbx API via `read_skill('Rbx API')`). If your game adds Lua functions, list them in the prompt too so the model does not invent functions.
 
 ### Unity console logs (with **Log Tool Calls** / **Log Results** on)
 ```
@@ -248,13 +250,16 @@ LLM < traceId=xyz789 role=Programmer backend=… wallMs=… | …
 ```
 
 ### Configuration
-```csharp
-// Consecutive all-failed tool batches before the loop stops with a summary turn (default 3):
-CoreAISettings.MaxToolCallRetries = 3;
 
-// Only for the opt-in envelope path (LuaCsAiEnvelopeProcessor): repair generations (default 3):
-CoreAISettings.MaxLuaRepairRetries = 3;
-```
+On the `CoreAISettings` asset, **Advanced Settings → General → Retry limits**:
+
+| Field | Default | Meaning |
+|---|---|---|
+| **Tool Call Retries** (`maxToolCallRetries`) | 3 | Consecutive all-failed tool batches before the loop stops with a summary turn. |
+| **Lua Repair Retries** (`maxLuaRepairRetries`) | 3 | Repair generations on the opt-in envelope path (`LuaCsAiEnvelopeProcessor`) only. |
+
+Set `maxToolCallRetries` on the `CoreAISettingsAsset` in **Advanced Settings -> General -> Tool Call Retries**.
+For the global tool-roundtrip cap, set **Max Tool Call Roundtrips** or call `settings.SetMaxToolCallRoundtrips(value)`. Portable hosts configure the injected `ICoreAISettings`; these clients do not read static overrides.
 
 ---
 
@@ -289,13 +294,15 @@ public sealed class MyInventoryProvider : InventoryTool.IInventoryProvider
 
 public class MerchantSetup : MonoBehaviour
 {
+    private AgentConfig _merchant;
+
     void Start()
     {
         // Create inventory (or resolve via DI)
-        var inventory = new MyInventoryProvider();
+        MyInventoryProvider inventory = new MyInventoryProvider();
 
         // Merchant agent
-        var merchant = new AgentBuilder("Merchant")
+        _merchant = new AgentBuilder("Merchant")
             .WithSystemPrompt(
                 "You are Grok, a grumpy but lovable blacksmith. " +
                 "When a customer asks about weapons, ALWAYS call get_inventory first. " +
@@ -306,11 +313,18 @@ public class MerchantSetup : MonoBehaviour
             .WithChatHistory()
             .WithMode(AgentMode.ToolsAndChat)
             .Build();
+    }
 
-        merchant.ApplyToPolicy(CoreAIAgent.Policy);
+    // Wire to your dialogue UI:
+    public async void OnPlayerSays(string text)
+    {
+        string reply = await _merchant.AskAsync(text);
+        Debug.Log("Merchant: " + reply);
     }
 }
 ```
+
+`get_inventory` returns `{"Success":true,"Error":null,"Items":[{"Name":"Iron Sword","Type":"weapon","Quantity":3,"Price":50},…]}`.
 
 ### Dialogue
 
@@ -344,11 +358,17 @@ Analyzer studies player behavior and recommends Creator adjust difficulty.
 
 ### Code
 
+`game_config` is not attached to any role by default: give it to Creator with
+`GameConfigPolicy.CreateLlmTool(store, "Creator")` as shown in [GAME_CONFIG_GUIDE.md](GAME_CONFIG_GUIDE.md).
+
 ```csharp
+using CoreAI;
+using CoreAI.Ai;
+using Newtonsoft.Json;
+using UnityEngine;
+
 public class AdaptiveDifficultySystem : MonoBehaviour
 {
-    [Inject] private IAiOrchestrationService _orchestrator;
-
     // Called every 60 seconds
     public async void AnalyzeAndAdapt()
     {
@@ -364,7 +384,7 @@ public class AdaptiveDifficultySystem : MonoBehaviour
         };
 
         // Step 1: Analyzer runs
-        await _orchestrator.RunTaskAsync(new AiTaskRequest
+        await CoreAi.OrchestrateAsync(new AiTaskRequest
         {
             RoleId = "Analyzer",
             Hint = $"Analyze player: {JsonConvert.SerializeObject(metrics)}",
@@ -372,7 +392,7 @@ public class AdaptiveDifficultySystem : MonoBehaviour
         });
 
         // Step 2: Creator reacts to analysis
-        await _orchestrator.RunTaskAsync(new AiTaskRequest
+        await CoreAi.OrchestrateAsync(new AiTaskRequest
         {
             RoleId = "Creator",
             Hint = "The Analyzer detected the player is too dominant. " +
@@ -427,19 +447,16 @@ Build a storyteller agent that describes in-game events in fantasy chronicle sty
 ### Code
 
 ```csharp
-var storyteller = new AgentBuilder("Storyteller")
+AgentConfig storyteller = new AgentBuilder("Storyteller")
     .WithSystemPrompt(
         "You are an ancient chronicler narrating the hero's journey. " +
         "Describe events in epic fantasy prose. Use metaphors and vivid imagery. " +
         "Keep responses under 3 sentences. " +
-        "Reference previous events from your memory.")
-    .WithMemory()                    // Remembers key events
-    .WithChatHistory()               // Conversation context
+        "Reference earlier events from the conversation.")
+    .WithChatHistory()               // Conversation context: earlier events
     .WithMode(AgentMode.ChatOnly)    // Text only, no tools
-    .WithTemperature(0.7f)           // More creative
+    .WithTemperature(0.7f)           // More creative (sent only while temperature overriding is on)
     .Build();
-
-storyteller.ApplyToPolicy(CoreAIAgent.Policy);
 
 // Usage:
 storyteller.AskWithCallback("The player defeated the dragon boss",
@@ -471,18 +488,17 @@ using System;
 using CoreAI;
 using CoreAI.Ai;
 using UnityEngine;
-using VContainer;
 
 public class GuardSetup : MonoBehaviour
 {
     [SerializeField] private GameObject _gate;
     [SerializeField] private AudioSource _alarmAudio;
 
-    [Inject] private IObjectResolver _container;
+    private AgentConfig _guard;
 
     void Start()
     {
-        var guard = new AgentBuilder("CityGuard")
+        _guard = new AgentBuilder("CityGuard")
             .WithSystemPrompt(
                 "You are Captain Aldric, the head of the city guard. " +
                 "You are suspicious of strangers but respect warriors. " +
@@ -510,11 +526,17 @@ public class GuardSetup : MonoBehaviour
             .WithChatHistory()
             .WithMode(AgentMode.ToolsAndChat)
             .Build();
+    }
 
-        guard.ApplyToPolicy(CoreAIAgent.Policy);
+    // Wire to your dialogue UI:
+    public void OnPlayerSays(string text)
+    {
+        _guard.AskWithCallback(text, reply => Debug.Log("Guard: " + reply));
     }
 }
 ```
+
+`report_crime` publishes to the `CoreAiEvents` bus; subscribe there to react to it elsewhere in your game.
 
 ### Dialogues
 

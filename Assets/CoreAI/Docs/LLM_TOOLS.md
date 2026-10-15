@@ -9,14 +9,13 @@ context, so the host adds them explicitly (the same pattern as a game's own tool
 | Tool name | Class | Notes |
 |---|---|---|
 | `memory` | `MemoryLlmTool` | Agent memory (read/append/edit), added by `AgentBuilder` / per-role policy. |
-| `execute_lua` | `LuaLlmTool` / `LuaTool` | Sandboxed Lua, attached to the built-in Programmer role by `CoreAiModsInstaller.RegisterCoreAiMods`. |
-| `manage_mods` | `LuaModsLlmTool` | Persistent Lua mods (list/get_source/load/reload/unload/export/import/forget/versions/revert/diagnostics). `reload` cleans the previous run's startup objects unless `keep_objects: true`. |
+| `execute_lua` | `LuaLlmTool` / `LuaTool` | Sandboxed Lua. Auto-attached to the built-in **Programmer** role only, by `CoreAiModsInstaller.RegisterCoreAiMods`. |
+| `manage_mods` | `LuaModsLlmTool` | Persistent Lua mods (list/get_source/load/reload/unload/export/import/forget/versions/revert/diagnostics). `reload` cleans the previous run's startup objects unless `keep_objects: true`. Auto-attached to the built-in **Programmer** role only, by the same `CoreAiModsInstaller` callback as `execute_lua`. |
 | skills | `DelegateLlmTool` + `SkillSet` / `read_skill` / `call_skill_tool` | Self-service skills (meta-tools), progressive disclosure. `call_skill_tool` refuses a call with a missing required argument or a type-mismatched one (e.g. `"yes"` for a bool) before the tool runs; the refusal names the tool, the argument and the expected parameters, says the tool was not executed, and the model may retry. |
 | `manage_skills` | `ManageSkillsLlmTool` | Agent-authored skills (create/update/list/get/delete). Opt-in via `AgentBuilder.WithSkillAuthoring(...)`. |
 | `wait` | `WaitLlmTool` | Opt-in via `AgentBuilder.WithWaitTool()`. |
 | `world_command` | `WorldLlmTool` | Auto-attached to the built-in **Creator** and **Builder** roles by `WorldCommandsInstaller.RegisterWorldBuildingRolesTool` whenever `RegisterWorldCommands` runs on the container — not host-wired for those two roles. See the table below for other roles. |
-| `execute_lua` | `LuaLlmTool` | Auto-attached to the built-in **Programmer** role only, by `CoreAiModsInstaller.RegisterCoreAiMods`. |
-| `manage_mods` | `LuaModsLlmTool` | Auto-attached to the built-in **Programmer** role only, by the same `CoreAiModsInstaller` callback as `execute_lua`. |
+| `get_mod_logs`, `save_world`, `load_world`, `list_autosaves`, `load_autosave` | `GetModLogsLlmTool`, `SaveWorldLlmTool`, `LoadWorldLlmTool`, `ListAutoSavesLlmTool`, `LoadAutoSaveLlmTool` | Mod logs and world saves; auto-attached to the built-in **Programmer** role by the same `CoreAiModsInstaller` callback. |
 | `camera` (`camera_capture`/`screenshot`/`camera_look`/`camera_list`) | `CoreAI.Vision.CameraLlmTool` (`Assets/CoreAiUnity/Runtime/Source/Features/Vision/CameraLlmTool.cs`) | Auto-attached to the built-in **Programmer** role by `WorldCommandsInstaller.RegisterAgentVision`. The **chat panel** can also attach it to whichever role is the active chat role at runtime via `CoreAiChatService.TryEnsureCameraToolForRole` → `CoreAiChatCameraTools.TryAttachCameraTool`, gated on vision support. The model sees and calls the four function names; `camera` itself is only the registered wrapper. Do not confuse this with the older, differently-named `CameraLlmTool` in `Assets/CoreAiUnity/Runtime/Source/Features/World/Infrastructure/CameraLlmTool.cs` (tool name `camera_tool`, single function `capture_camera`) described further below — that one is the host-wired variant, not auto-registered anywhere. |
 
 ## Optional / host-wired (add via `AgentBuilder.WithTool(...)` when your game provides the context)
@@ -42,12 +41,13 @@ agent.WithTool(new ComponentLlmTool(componentExecutor, settings, logger));
 | Tool | Class | Requires | Notes |
 |---|---|---|---|
 | `get_inventory` | `InventoryLlmTool` | `InventoryTool.IInventoryProvider` | Read-only listing of an NPC's or merchant's inventory. |
+| `game_state` | `GameStateLlmTool` | `ISessionTelemetryProvider` | Lets the model pull current host telemetry on demand. Register with `CoreAi.RegisterGameStateTool(roleId)`. |
 | `check_compatibility` | `CompatibilityLlmTool` | `CompatibilityChecker` | Crafting compatibility. |
 | `game_config` | `GameConfigLlmTool` | `GameConfigPolicy.CreateLlmTool(store, roleId)` | Per-role config slots. |
 | `world_command` | `WorldLlmTool` | `ICoreAiWorldCommandExecutor` | Native world edits. `spawn` accepts registered prefab keys or built-in primitives (`cube`, `sphere`, `cylinder`, `capsule`, `plane`, `empty`) when `AllowWorldPrimitives` is on; spawn can set transform and parent in one call. Parented coordinates are local by default; `worldPositionStays=true` preserves world space. **Note:** for the built-in **Creator**/**Builder** roles this is registered automatically by `WorldCommandsInstaller` — see the built-in table above. Wire it manually with `AgentBuilder.WithTool(...)` only for a *custom* role. The Programmer role instead edits the world via the Lua Rbx surface (`Instance.new('Part')`, `instance:Destroy()`); the classic `coreai_world_*` build bindings are disabled in the default production composition. |
 | `component_command` | `ComponentLlmTool` | `ICoreAiComponentCommandExecutor` | Add/remove/configure supported Unity components through a curated catalog, no reflection. |
 | `scene_tool` (`find_objects` / `get_hierarchy` / `get_transform` / `set_transform`) | `SceneLlmTool` | scene | `unity_*`-style scene inspection as a native tool (alternative to Full-tier Lua). |
-| `capture_camera` | `CameraLlmTool` (`Assets/CoreAiUnity/Runtime/Source/Features/World/Infrastructure/CameraLlmTool.cs`, tool name `camera_tool`) | a `Camera` + a **vision-capable model** | Renders a camera to JPEG. Attach the captured `DataContent` (`CameraLlmTool.CaptureCameraImageContent`) to a user message; `MeaiOpenAiChatClient` serializes it to OpenAI `image_url`. This is a distinct, purely host-wired tool from the auto-registered `camera` tool (`camera_capture`/`screenshot`/`camera_look`/`camera_list`) described above — see **Vision / multimodal** below for the host send path and autonomous-tool wiring of this one. |
+| `capture_camera` | `CameraLlmTool` (`Assets/CoreAiUnity/Runtime/Source/Features/World/Infrastructure/CameraLlmTool.cs`, tool name `camera_tool`) | a `Camera` + a **vision-capable model** | Screenshots a named camera (or `main`) and returns an `LlmToolImageResult`; the tool loop delivers the frame to the model. Register with `CoreAi.RegisterCameraVisionTool(roleId)` (gated on vision). This is a distinct, host-wired tool from the auto-registered `camera` tool (`camera_capture`/`screenshot`/`camera_look`/`camera_list`) described above — see **Vision / multimodal** below. |
 
 ### World and component commands
 
@@ -88,7 +88,7 @@ disclosure.
 | Action | Args | Effect |
 |---|---|---|
 | `create` | `name`, `description`, `instructions`, `tool_names[]` | Validates the allowlist, adds the skill to the live catalog, persists it (revision 0). Fails if the name exists or a tool is unknown. |
-| `update` | `name`, optional `description`/`instructions`/`tool_names[]` | Revises the skill, **auto-increments the version**, records a new revision. Null args leave fields unchanged. |
+| `update` | `name`, optional `description`/`instructions`/`tool_names[]` | Revises the skill, **auto-increments the version**, records a new revision. Null args leave fields unchanged; `instructions` replaces only the main document and keeps the reference documents. |
 | `list` | — | All skills with `version` and `tool_names`. |
 | `get` | `name` | Full definition (`instructions`, `tool_names`, `version`, `revision_count`). |
 | `delete` | `name` | Removes from catalog and store. |
@@ -151,27 +151,29 @@ content part.
 
 ### Autonomous tool path (model asks for a screenshot)
 
-Register the tool on a vision role (gated): `CoreAi.RegisterCameraVisionTool("SmartChat")` — a no-op when
-vision is disabled. The model then calls `capture_camera`, which returns JSON carrying a
-`data:image/jpeg;base64,…` `dataUri`.
+Register the tool on a vision role (gated): `CoreAi.RegisterCameraVisionTool("SmartChat")` — it returns
+`false` and registers nothing when vision is disabled. The model then calls `capture_camera`.
 
-**OpenAI tool-result messages cannot carry images**, so after the tool runs the host must *lift* that image
-into a follow-up **user** `image_url` message before the next model call:
+`capture_camera` returns an `LlmToolImageResult`: the tool message carries only a JSON summary (`success`,
+`resolution`, `camera`, `format`, `sizeBytes`, `imageAttached`), and the tool loop lifts the JPEG into the
+model's image channel in the same turn, because OpenAI tool-result messages cannot carry images. No host
+follow-up is needed for the model to see the frame.
+
+To use the frame on the host side, read the typed result from `CoreAi.OnToolExecuted`:
 
 ```csharp
 CoreAi.RegisterCameraVisionTool("SmartChat");
-CoreAi.OnToolCallCompleted += async evt =>
+CoreAi.OnToolExecuted += (role, tool, args, result) =>
 {
-    if (evt.Info.ToolName == "capture_camera")
+    if (result is LlmToolImageResult shot && shot.Images.Count > 0)
     {
-        // Lifts evt.ResultJson's dataUri into a follow-up user image_url message:
-        string reply = await CoreAi.AskWithImageFollowUpAsync(
-            "Here is the screenshot you requested. Continue.", evt.ResultJson, "SmartChat");
+        _ = CoreAi.AskWithImageFollowUpAsync("Is the castle finished?", shot.Images[0], "SmartChat");
     }
 };
 ```
 
-`AskWithImageFollowUpAsync` extracts the image via `CameraLlmTool.TryExtractImageContentFromResult` and
-sends it through the same provider-safe user-message path; it returns `null` (no follow-up) when the result
-carries no usable image or vision is disabled. This keeps the lift entirely on the Unity side — the core
-orchestrator tool loop is unchanged.
+`AskWithImageFollowUpAsync(prompt, AiAttachment, roleId)` sends the image as a separate one-shot user message
+(no history, no tools) and returns `null` when vision is disabled. The string overload
+`AskWithImageFollowUpAsync(prompt, resultJson, roleId)` and `CameraLlmTool.TryExtractImageContentFromResult`
+handle only legacy result JSON that still carries a base64 `dataUri`; today's `capture_camera` result has
+none, so they return `null` / `false` for it.

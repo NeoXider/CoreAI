@@ -160,32 +160,14 @@ namespace CoreAI.Infrastructure.Llm
             };
         }
 
-        internal static LlmEndpointDescriptor CloneDescriptor(LlmEndpointDescriptor source)
+        /// <summary>Copies all serialized endpoint properties for isolated runtime editing.</summary>
+        public static LlmEndpointDescriptor CloneDescriptor(LlmEndpointDescriptor source)
         {
-            return new LlmEndpointDescriptor
-            {
-                EndpointId = source.EndpointId?.Trim() ?? "",
-                DisplayName = source.DisplayName ?? "",
-                Kind = source.Kind,
-                BaseUrl = source.BaseUrl ?? "",
-                Model = source.Model ?? "",
-                SecretReference = source.SecretReference ?? "",
-                Active = source.Active,
-                KeepWarm = source.KeepWarm,
-                ContextWindowTokens = source.ContextWindowTokens,
-                LocalModelPath = source.LocalModelPath ?? "",
-                UnityAgentName = source.UnityAgentName ?? "",
-                Port = source.Port,
-                GpuLayers = source.GpuLayers,
-                Remote = source.Remote,
-                FlashAttention = source.FlashAttention,
-                ParallelSlots = source.ParallelSlots,
-                MaxTokens = source.MaxTokens,
-                ReasoningMode = source.ReasoningMode,
-                ThinkingBudgetTokens = source.ThinkingBudgetTokens,
-                ExtraBodyJson = source.ExtraBodyJson ?? "",
-                ToolChannel = source.ToolChannel
-            };
+            // WHY: the runtime editor must preserve properties added after its UI was written.
+            LlmEndpointDescriptor copy = JsonConvert.DeserializeObject<LlmEndpointDescriptor>(
+                JsonConvert.SerializeObject(source));
+            copy.EndpointId = copy.EndpointId?.Trim() ?? "";
+            return copy;
         }
 
         internal static LlmRuntimeProfile CloneProfile(LlmRuntimeProfile source)

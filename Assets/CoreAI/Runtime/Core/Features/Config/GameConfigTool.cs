@@ -39,7 +39,8 @@ namespace CoreAI.Config
             {
                 Name = "game_config",
                 Description =
-                    "Read or modify game configuration. Use 'read' to get current config as JSON, or 'update' with modified JSON to apply changes. Available keys: " +
+                    "Read or modify game configuration. Use 'read' to get current config as JSON, or 'update' with modified JSON to apply changes. Readable keys: " +
+                    string.Join(", ", _policy.GetReadableKeys(_roleId)) + ". Writable keys: " +
                     string.Join(", ", _policy.GetAllowedKeys(_roleId))
             };
             return AIFunctionFactory.Create(func, options);
@@ -117,7 +118,7 @@ namespace CoreAI.Config
 
         private async Task<string> ExecuteReadAsync(CancellationToken cancellationToken)
         {
-            string[] keys = _policy.GetAllowedKeys(_roleId);
+            string[] keys = _policy.GetReadableKeys(_roleId);
             if (keys.Length == 0)
             {
                 return SerializeResult(new GameConfigResult

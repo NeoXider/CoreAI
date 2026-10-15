@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -47,6 +47,14 @@ namespace CoreAI.Infrastructure.Llm
                 request.AgentRoleId, request.RoutingProfileId);
             request.RoutingProfileId = route.ProfileId;
             request.ContextWindowTokens = route.ContextWindowTokens;
+            request.MaxOutputTokens ??= route.MaxOutputTokens;
+            route.Client?.ResolveRequestSettings(request);
+        }
+
+        /// <inheritdoc />
+        public void ResolveRequestSettings(LlmCompletionRequest request)
+        {
+            PreflightAnnotate(request);
         }
 
         IDisposable ILlmRequestHeaderScope.BeginRequestHeaders(LlmCompletionRequest request)
@@ -338,6 +346,8 @@ namespace CoreAI.Infrastructure.Llm
             ILlmClient inner = route.Client;
             request.RoutingProfileId = route.ProfileId;
             request.ContextWindowTokens = route.ContextWindowTokens;
+            request.MaxOutputTokens ??= route.MaxOutputTokens;
+            route.Client?.ResolveRequestSettings(request);
             capturedMode = route.Mode;
             capturedGeneration = route.Generation;
             _backendSelectedPublisher?.Publish(new LlmBackendSelected(
@@ -352,7 +362,11 @@ namespace CoreAI.Infrastructure.Llm
                 request.RoutingProfileId,
                 capturedMode,
                 streaming,
-                request.ActorId));
+                request.ActorId,
+                request.EffectiveReasoningEffort,
+                request.EffectiveReasoningDialect,
+                request.EffectiveTemperature,
+                request.EffectiveMaxOutputTokens));
             return inner;
         }
 
@@ -442,7 +456,8 @@ namespace CoreAI.Infrastructure.Llm
                 streaming,
                 result.Ok,
                 result.CacheReadTokens,
-                result.CacheWriteTokens));
+                result.CacheWriteTokens,
+                result.ReasoningTokens));
         }
 
         private void PublishUsage(
@@ -475,7 +490,8 @@ namespace CoreAI.Infrastructure.Llm
                     streaming,
                     success,
                     chunk.CacheReadTokens,
-                    chunk.CacheWriteTokens));
+                    chunk.CacheWriteTokens,
+                    chunk.ReasoningTokens));
                 return;
             }
 

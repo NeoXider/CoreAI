@@ -119,7 +119,7 @@ Skills add two meta-tools, regardless of the number of nested tools. Their schem
 
 ```csharp
 // name, description (catalog), instructions (loaded via read_skill), tools
-var crafting = new SkillSet("Crafting",
+SkillSet crafting = new SkillSet("Crafting",
     "Forge weapons and armor from raw materials",
     "1. Call get_recipes to see available recipes.\n" +
     "2. Check inventory via check_inventory.\n" +
@@ -128,7 +128,7 @@ var crafting = new SkillSet("Crafting",
     new DelegateLlmTool("craft_item", "Craft an item", new Func<string, float, string>((id, q) => ...)));
 
 // Without instructions — model relies on tool descriptions
-var combat = new SkillSet("Combat", "Fight enemies",
+SkillSet combat = new SkillSet("Combat", "Fight enemies",
     new DelegateLlmTool("attack", "Attack target", new Func<string, string>(target => ...)));
 ```
 
@@ -152,11 +152,11 @@ mutating call — the default `false` means "read-only, safe to overlap". See
 
 ```csharp
 // Instructions from a .txt file
-var quiz = SkillSet.FromFile("Quiz", "Quizzes and tests",
+SkillSet quiz = SkillSet.FromFile("Quiz", "Quizzes and tests",
     "Assets/Skills/quiz.txt", tool1, tool2);
 
 // From TextAsset (Resources, WebGL)
-var quiz = SkillSet.FromTextContent("Quiz", "Quizzes", textAsset.text, tool1, tool2);
+SkillSet quiz = SkillSet.FromTextContent("Quiz", "Quizzes", textAsset.text, tool1, tool2);
 ```
 
 A skill can be authored across several files. The first document is the complete main file, usually `SKILL.md`;
@@ -164,14 +164,14 @@ the rest are references, examples, and case-specific rules. Empty additional doc
 are skipped, but an empty main file is never replaced by a reference.
 
 ```csharp
-var quiz = SkillSet.FromFiles("Quiz", "Quizzes and tests",
+SkillSet quiz = SkillSet.FromFiles("Quiz", "Quizzes and tests",
     new[] { "Assets/Skills/quiz-overview.md",
             "Assets/Skills/quiz-scoring.md",
             "Assets/Skills/quiz-edge-cases.md" },
     tool1, tool2);
 
 // No file system (Unity TextAssets, WebGL): supply the parts by name
-var quiz = SkillSet.FromTextParts("Quiz", "Quizzes and tests",
+SkillSet quiz = SkillSet.FromTextParts("Quiz", "Quizzes and tests",
     new[]
     {
         new KeyValuePair<string, string>("overview.md", overviewAsset.text),
@@ -288,7 +288,7 @@ craftingAsset.ApplyDefinition(new SkillSetDefinition
 ### Registering skills
 
 ```csharp
-var gm = new AgentBuilder("GameMaster")
+AgentConfig gm = new AgentBuilder("GameMaster")
     .WithSystemPrompt("You are a Game Master. Read the relevant skill before using its tools.")
     .WithSkill(crafting)
     .WithSkill(combat)
@@ -460,7 +460,7 @@ lock on WebGL fails explicitly without blocking the thread.
 
 **Mixing both:**
 ```csharp
-var agent = new AgentBuilder("GameMaster")
+AgentConfig agent = new AgentBuilder("GameMaster")
     .WithTool(memoryTool)            // always needed → direct
     .WithSkill(craftingSkill)        // used sometimes → on-demand
     .WithSkill(combatSkill)          // used sometimes → on-demand
@@ -521,7 +521,7 @@ Model: "Your Iron Sword has been forged! ⚔️"
 ### 1. Create an agent
 
 ```csharp
-var merchant = new AgentBuilder("Blacksmith")
+AgentConfig merchant = new AgentBuilder("Blacksmith")
     .WithSystemPrompt("You are a blacksmith. When player asks to buy, call get_inventory first.")
     .WithTool(new InventoryLlmTool(myInventoryProvider))
     .WithMemory()  // Persistent memory
@@ -557,7 +557,7 @@ string response = await merchant.AskAsync("Show me your swords");
 Debug.Log(response);
 
 // With an explicit orchestrator (for tests / custom setups):
-var orch = container.Resolve<IAiOrchestrationService>();
+IAiOrchestrationService orch = container.Resolve<IAiOrchestrationService>();
 string response2 = await merchant.AskAsync(orch, "Show me your swords");
 ```
 
@@ -631,7 +631,7 @@ Debug.Log(result.ReasoningContent);
 
 ```csharp
 // 1. Create the agent
-var blacksmith = new AgentBuilder("Blacksmith")
+AgentConfig blacksmith = new AgentBuilder("Blacksmith")
     .WithSystemPrompt(@"You are a blacksmith NPC. When player asks to buy,
 FIRST call get_inventory tool. Then respond in-character with items and prices.
 Remember what the player bought using memory.")
@@ -653,7 +653,7 @@ blacksmith.AskWithCallback("What do you have?");
 ### Recipe 2: Storyteller (chat only, no tools)
 
 ```csharp
-var storyteller = new AgentBuilder("Storyteller")
+AgentConfig storyteller = new AgentBuilder("Storyteller")
     .WithSystemPrompt("You are a campfire storyteller. Share tales about the game world.")
     .WithChatHistory()           // Remembers the conversation
     .WithTemperature(0.7f)       // More creative replies
@@ -670,7 +670,7 @@ storyteller.AskWithCallback("Tell me a story", (s) => Debug.Log(s));
 ### Recipe 3: Guard (fires an action on trigger)
 
 ```csharp
-var guard = new AgentBuilder("Guard")
+AgentConfig guard = new AgentBuilder("Guard")
     .WithSystemPrompt(@"You are a city guard.
 If the player admits to a crime, you MUST call the 'alarm' tool immediately.")
     .WithEventTool("alarm", "Sound the alarm when player confesses a crime")
@@ -686,7 +686,7 @@ CoreAiEvents.Subscribe("alarm", () => audioSource.PlayOneShot(alarmSound));
 ### Recipe 4: Background analyzer (tool calls only, no text)
 
 ```csharp
-var analyzer = new AgentBuilder("SessionAnalyzer")
+AgentConfig analyzer = new AgentBuilder("SessionAnalyzer")
     .WithSystemPrompt("Analyze session telemetry. Save key observations to memory.")
     .WithMemory(MemoryToolAction.Append)
     .WithTemperature(0.0f)         // Strictly deterministic
@@ -698,7 +698,7 @@ analyzer.ApplyToPolicy(policy);
 
 ### Recipe 5: Game Master (generates game mechanics on the fly)
 
-Combining `AgentBuilder` and `LuaLlmTool` lets agents **write and change game rules at runtime.** If your game keeps some logic in a global `LuaCsSecureEnvironment` (e.g. damage calculation, spawn odds, or item prices), you can expose that environment to a Game Master agent.
+Combining `AgentBuilder` and `LuaLlmTool` lets agents **write and change game rules at runtime.** If your game keeps some logic in a global `LuaCsSecureEnvironment` (e.g. damage calculation, spawn odds, or item prices), you can expose that environment to a Game Master agent. `LuaLlmTool` and the sandbox ship in `com.neoxider.coreaimods`; `MySharedLuaExecutor` stands for your own `LuaTool.ILuaExecutor` over that sandbox.
 
 ```csharp
 // 1. You have a shared Lua sandbox the game uses for damage
@@ -707,7 +707,7 @@ LuaState state = sandbox.Create(new LuaCsApiRegistry());
 sandbox.RunChunk(state, "function calculate_damage() return 10 end");
 
 // 2. Create a tool for the agent with access to that sandbox
-var master = new AgentBuilder("GameMaster")
+AgentConfig master = new AgentBuilder("GameMaster")
     .WithSystemPrompt("You are the GameMaster. You manage game mechanics. Change lua functions on the fly based on player complaints.")
     // Pass our executor
     .WithTool(new LuaLlmTool(new MySharedLuaExecutor(sandbox), settings, logger))
@@ -736,7 +736,7 @@ The agent **does not use tools**. It only replies with text based on the system 
 **When to use:** `PlainChat`, `SmartChat`, storyteller, guide NPC
 
 ```csharp
-var storyteller = new AgentBuilder("Storyteller")
+AgentConfig storyteller = new AgentBuilder("Storyteller")
     .WithSystemPrompt("You are a campfire storyteller. Share tales about the game world.")
     .WithChatHistory()  // Remember prior lines
     .WithMode(AgentMode.ChatOnly)
@@ -757,7 +757,7 @@ The agent **calls tools** when it needs data, then **replies with text** based o
 **When to use:** merchant, crafter, advisor, quest giver
 
 ```csharp
-var merchant = new AgentBuilder("Merchant")
+AgentConfig merchant = new AgentBuilder("Merchant")
     .WithSystemPrompt("You are a shopkeeper. Check inventory before offering items.")
     .WithTool(new InventoryLlmTool(inventoryProvider))
     .WithMemory()  // Memory: what the player bought
@@ -792,7 +792,7 @@ The agent **only calls tools**. It does not reply with text to the player. Used 
 **When to use:** background analyzer, auto-crafter, telemetry collector
 
 ```csharp
-var analyzer = new AgentBuilder("BackgroundAnalyzer")
+AgentConfig analyzer = new AgentBuilder("BackgroundAnalyzer")
     .WithSystemPrompt("Analyze session telemetry and detect anomalies.")
     .WithTool(new TelemetryLlmTool(telemetryProvider))
     .WithMode(AgentMode.ToolsOnly)
@@ -835,9 +835,9 @@ var analyzer = new AgentBuilder("BackgroundAnalyzer")
 
 **Enable:**
 ```csharp
-var agent = new AgentBuilder("Merchant")
+AgentConfig agent = new AgentBuilder("Merchant")
     .WithMemory()  // Default: Append
-    .WithMemory(MemoryToolAction.Write)  // Or: Write (overwrite)
+    // .WithMemory(MemoryToolAction.Write)  // Or: Write (overwrite); call WithMemory once per agent
     .Build();
 ```
 
@@ -845,7 +845,7 @@ var agent = new AgentBuilder("Merchant")
 
 ### ChatHistory — conversation history
 
-**What it is:** Full dialogue context for a role. The framework **automatically** appends user and assistant turns to `IAgentMemoryStore` (same abstraction as MemoryTool). For **LLMUnity**, messages are also fed into `LLMAgent` during the play session so the model sees prior lines.
+**What it is:** Full dialogue context for a role. The framework **automatically** appends user and assistant turns to `IAgentMemoryStore` (same abstraction as MemoryTool). The stored history is sent with every request, the same way for every backend; LLMUnity is reached through its local HTTP endpoint like any other API.
 
 Assistant history is built only from visible `LlmCompletionResult.Content` / accumulated
 `LlmStreamChunk.Text`. Reasoning fields must not be copied into history, even when visible content is empty.
@@ -857,13 +857,13 @@ Assistant history is built only from visible `LlmCompletionResult.Content` / acc
 
 **Enable:**
 ```csharp
-var agent = new AgentBuilder("Storyteller")
+AgentConfig agent = new AgentBuilder("Storyteller")
     .WithChatHistory()  // In-memory for this process; not written to disk unless you opt in (see below)
     .Build();
 
-// Persist custom chat roles across app restarts (Unity: same JSON files as MemoryTool under persistentDataPath).
+// Persist custom chat roles across app restarts (Unity: FileAgentMemoryStore, next to the role's memory file under persistentDataPath).
 // Built-in PlainChat / SmartChat already have persistent ChatHistory enabled by AgentMemoryPolicy defaults.
-var agentPersistent = new AgentBuilder("Teacher")
+AgentConfig agentPersistent = new AgentBuilder("Teacher")
     .WithChatHistory(persistBetweenSessions: true)
     .Build();
 ```
@@ -871,7 +871,7 @@ var agentPersistent = new AgentBuilder("Teacher")
 **How it works:**
 ```
 Request 1: "Tell me about the forest"
-  → Saved in ChatHistory (store + LLMUnity agent history when applicable)
+  → Saved in ChatHistory (IAgentMemoryStore)
 
 Request 2: "What was the forest about?"
   → ChatHistory is injected into context
@@ -885,7 +885,7 @@ Request 2: "What was the forest about?"
 ### Both together
 
 ```csharp
-var merchant = new AgentBuilder("Merchant")
+AgentConfig merchant = new AgentBuilder("Merchant")
     .WithMemory()         // Long-term: what the player bought
     .WithChatHistory()    // Conversation context (enable persist if you need it after restart)
     .Build();
@@ -893,7 +893,7 @@ var merchant = new AgentBuilder("Merchant")
 
 | | Memory (MemoryTool) | ChatHistory |
 |--|---------------------|-------------|
-| **Backed by** | `IAgentMemoryStore` — default Unity: `FileAgentMemoryStore` JSON field `memory` | Same store — field `chatHistoryJson` (plus in-process history for LLMUnity) |
+| **Backed by** | `IAgentMemoryStore` — default Unity: `FileAgentMemoryStore`, field `memory` of the role's `<stem>.json` | Same store — the role's `<stem>.history.jsonl`, one JSON line per message |
 | **Across app restarts** | Yes, when using the default file store (or any persistent `IAgentMemoryStore`) | Yes for built-in **`PlainChat`** / **`SmartChat`** by default; for custom roles use **`WithChatHistory(..., persistBetweenSessions: true)`** (and UI loads history if you use `CoreAiChatPanel`; see README_CHAT) |
 | **Control** | Model via `memory` tool call | Automatic append of user/assistant messages |
 | **Use for** | Facts, purchases, quests | Conversation context |
@@ -909,7 +909,7 @@ var merchant = new AgentBuilder("Merchant")
 Passes any C# `Delegate` (`Action` or `Func`) into the agent pipeline. **Microsoft.Extensions.AI** builds the tool schema from the delegate parameters — no handwritten JSON Schema for normal cases.
 
 ```csharp
-var agent = new AgentBuilder("Helper")
+AgentConfig agent = new AgentBuilder("Helper")
     // Parameterless method
     .WithAction("heal_player", "Heals the player fully", new Action(() => player.Heal()))
 
@@ -930,7 +930,7 @@ Lets the agent raise a global `CoreAiEvents` event that any `MonoBehaviour` can 
 
 **Agent setup (one line):**
 ```csharp
-var agent = new AgentBuilder("Storyteller")
+AgentConfig agent = new AgentBuilder("Storyteller")
     .WithEventTool("trigger_scare", "Use this to scare the player suddenly") // No payload
     .WithEventTool("give_gold", "Give gold to player", hasStringPayload: true) // With payload
     .Build();
@@ -1014,10 +1014,11 @@ the warning *"does not implement a MEAI function binding interface"*. `ILlmTool`
 **Step 2: Add the tool to the agent**
 
 ```csharp
-var agent = new AgentBuilder("MyAgent")
+AgentConfig agent = new AgentBuilder("MyAgent")
     .WithSystemPrompt("You are an agent with custom tools.")
     .WithTool(new MyTool())  // ← add tool
     .WithMemory()
+    .Build();
 ```
 
 > 💡 **Tool design for token savings:**
@@ -1040,19 +1041,19 @@ There are **three** layers, evaluated from broadest to narrowest:
 |------|------|------|------|
 | Global | `CoreAISettings.AllowDuplicateToolCalls` | `false` (reject) | Baseline for every agent that does not override |
 | Per-role | `AgentBuilder.WithAllowDuplicateToolCalls(bool)` | unset → falls back to global | Wins over the global setting |
-| Per-tool | `ILlmTool.AllowDuplicates` | `false` | If `true`, that *specific* tool is exempt from the echo check — regardless of the role/global setting, and regardless of whether its name is one of the built-in mutating ones. Built-ins that set it: `game_state`, `manage_skills`, `read_skill`, `wait` |
+| Per-tool | `ILlmTool.AllowDuplicates` | `false` | If `true`, that *specific* tool is exempt from the echo check — regardless of the role/global setting, and regardless of whether its name is one of the built-in mutating ones. Built-ins that set it: `game_state`, `manage_skills`, `read_skill`, `wait`, and `get_mod_logs` (Mods package) |
 
 Examples:
 
 ```csharp
 // Strong model that polls a status tool — let it re-call.
-var watchdog = new AgentBuilder("Watchdog")
+AgentConfig watchdog = new AgentBuilder("Watchdog")
     .WithAllowDuplicateToolCalls(true)
     .Build();
 
 // Small model that occasionally loops — keep the guard on for this agent
 // even if the global default is true.
-var planner = new AgentBuilder("Programmer")
+AgentConfig planner = new AgentBuilder("Programmer")
     .WithAllowDuplicateToolCalls(false)
     .Build();
 ```
@@ -1093,34 +1094,40 @@ Per call you can override how the model picks tools via `AiTaskRequest.ForcedToo
 
 #### Generation temperature
 
-Temperature controls **creativity**. The global default is `CoreAISettings.Temperature` (default **0.1**), but you can override per agent.
+Temperature controls **creativity**. Resolution is per-call `AiTaskRequest.Temperature` → per-agent
+`WithTemperature(...)` → endpoint `LlmEndpointDescriptor.Temperature` → global temperature when
+`ICoreAISettings.OverrideTemperature` is enabled. A non-null call, agent, or endpoint value is sent even
+when the global override is off. A null endpoint value inherits. Direct client callers use
+`LlmCompletionRequest.TemperatureOverride`; the legacy `Temperature` / `SendTemperature` pair remains supported.
+With no resolved typed value, the provider uses its default or an explicit `ExtraBodyJson.temperature`.
 
 | Value | Behavior | When to use |
 |----------|-----------|-------------------|
 | `0.0` | Fully deterministic | Strict JSON, code, math |
-| `0.1` | Minimal variance | **Default** — tool calling, crafting |
+| `0.1` | Minimal variance | Tool calling, crafting (the global setting's default value) |
 | `0.3` | Light variance | NPC dialogue, analytics |
 | `0.7` | Creative | Storyteller, content generation |
 | `1.0+` | Maximum randomness | Rarely, creative tasks only |
 
 ```csharp
 // Low temperature (strict JSON)
-var mechanic = new AgentBuilder("CoreMechanic")
+AgentConfig mechanic = new AgentBuilder("CoreMechanic")
     .WithSystemPrompt("Calculate crafting stats. Output JSON only.")
     .WithTemperature(0.0f)  // Always deterministic
     .Build();
 
 // Typical NPC dialogue temperature
-var npc = new AgentBuilder("Guard")
+AgentConfig npc = new AgentBuilder("Guard")
     .WithSystemPrompt("You are a city guard. Greet players.")
     .WithTemperature(0.3f)  // Light variance
     .WithChatHistory()
     .Build();
 
-// No override — uses global temperature (0.1)
-var creator = new AgentBuilder("Creator")
+// No per-agent value — sends CoreAISettings.Temperature only when the override is enabled,
+// otherwise the provider's default applies
+AgentConfig creator = new AgentBuilder("Creator")
     .WithSystemPrompt("You are the Creator agent...")
-    .Build();  // Temperature = 0.1 from CoreAISettings
+    .Build();
 ```
 
 > 💡 **Tip:** for tool calling use `0.0–0.2`. Higher temperature makes the model more likely to “improvise” instead of following the format.
@@ -1130,36 +1137,70 @@ var creator = new AgentBuilder("Creator")
 Use `WithMaxOutputTokens(int? tokens)` when a role needs a stable response length without setting `AiTaskRequest.MaxOutputTokens` on every call.
 
 ```csharp
-var shortNpc = new AgentBuilder("Guard")
+AgentConfig shortNpc = new AgentBuilder("Guard")
     .WithSystemPrompt("You are a city guard. Reply in one or two short sentences.")
     .WithMaxOutputTokens(128)
     .Build();
 
-var planner = new AgentBuilder("QuestPlanner")
+AgentConfig planner = new AgentBuilder("QuestPlanner")
     .WithSystemPrompt("Plan quest beats with concise bullet points.")
     .WithMaxOutputTokens(1024)
     .Build();
 ```
 
-Priority through the orchestrator is: `AiTaskRequest.MaxOutputTokens` (per-call) → `AgentBuilder.WithMaxOutputTokens` (per-agent) → `CoreAISettings.MaxTokens` (global) → provider default. Direct `LlmCompletionRequest.MaxOutputTokens` still wins when you call an `ILlmClient` yourself.
+Priority through the orchestrator is: `AiTaskRequest.MaxOutputTokens` (per-call) → `AgentBuilder.WithMaxOutputTokens` (per-agent) → selected profile's `MaxOutputTokens` / endpoint override → `ICoreAISettings.MaxTokens` (global; on `CoreAISettingsAsset` it is non-zero only when the max-tokens override is enabled) → provider default. Direct `LlmCompletionRequest.MaxOutputTokens` wins when you call an `ILlmClient` yourself. Null inherits; an explicit zero stops inheritance and omits the cap. An endpoint's positive `MaxTokens` enables its cap; `OverrideMaxTokens = true` with zero explicitly removes inherited caps. The OpenAI reasoning dialect writes a positive cap as `max_completion_tokens`; other dialects use `max_tokens`.
+
+#### Reasoning and sampling
+
+```csharp
+AgentConfig planner = new AgentBuilder("QuestPlanner")
+    .WithSystemPrompt("Plan quest beats with concise bullet points.")
+    .WithReasoning(LlmReasoningEffort.High, budgetTokens: 8192)
+    .WithSampling(new LlmSamplingOptions
+    {
+        TopP = 0.9f,
+        Seed = 42,
+        Stop = new[] { "END" },
+        FrequencyPenalty = 0.1f,
+        PresencePenalty = 0.2f
+    })
+    .Build();
+
+AiTaskRequest task = new AiTaskRequest
+{
+    RoleId = planner.RoleId,
+    Hint = "Plan a short rescue quest.",
+    Reasoning = new LlmReasoningOptions(LlmReasoningEffort.None),
+    Sampling = new LlmSamplingOptions { TopP = 0.7f }
+};
+```
+
+`WithReasoning` sets the role default; `AiTaskRequest.Reasoning` overrides it for one call.
+Effort `Default` inherits, while `None` explicitly requests no thinking. Sampling fields merge
+individually: null call fields inherit the agent's values. Direct client requests expose the same
+`Reasoning` and `Sampling` properties. Endpoint `ReasoningEffort` and `ReasoningDialect` supply the
+provider defaults and wire format; [LLM_ROUTING.md](LLM_ROUTING.md#request-sampling-and-reasoning)
+lists the dialect mappings. Typed values override the corresponding `ExtraBodyJson` fields only when
+they write a value for that request. MEAI callers can also select `ChatOptions.ResponseFormat` for
+`response_format` (`text`, `json_object`, or `json_schema`).
 
 #### Per-agent tool-call roundtrip cap
 
 One **roundtrip** = one LLM call + one tool-execution batch. The cap stops runaway tool-calling loops. Use `WithMaxToolCallRoundtrips(int? roundtrips)` to tune it per role: `null` inherits the global default (20), `0` means **unlimited** (no cap), and a positive value caps the loop.
 
 ```csharp
-var quietNpc = new AgentBuilder("Guard")
+AgentConfig quietNpc = new AgentBuilder("Guard")
     .WithSystemPrompt("You are a city guard. Answer briefly.")
     .WithMaxToolCallRoundtrips(5)    // at most 5 tool roundtrips per turn
     .Build();
 
-var builder = new AgentBuilder("WorldBuilder")
+AgentConfig builder = new AgentBuilder("WorldBuilder")
     .WithSystemPrompt("Build whole scenes from primitives.")
     .WithMaxToolCallRoundtrips(0)    // unlimited: a big visual build can emit 24+ spawns
     .Build();
 ```
 
-Priority mirrors the token budget: `AiTaskRequest.MaxToolCallRoundtrips` (per-call) → `AgentBuilder.WithMaxToolCallRoundtrips` (per-agent) → per-role policy (`AgentMemoryPolicy`) → `CoreAISettings.MaxToolCallRoundtrips` (global, default 20). The built-in **Programmer** and **Creator** roles set the per-role step to `0` (unlimited) because they routinely need many tool rounds per turn. When the cap is hit, the agent stops and logs a warning that names the role, the cap, its source, and how to raise or disable it.
+Priority mirrors the token budget: `AiTaskRequest.MaxToolCallRoundtrips` (per-call) → `AgentBuilder.WithMaxToolCallRoundtrips` (per-agent) → per-role policy (`AgentMemoryPolicy`) → `ICoreAISettings.MaxToolCallRoundtrips` (global, default 20; on Unity, set the asset field or call `CoreAISettingsAsset.SetMaxToolCallRoundtrips`). The built-in **Programmer**, **Creator** and **Builder** roles set the per-role step to `0` (unlimited) because they routinely need many tool rounds per turn. When the cap is hit, the agent stops and logs a warning that names the role, the cap, its source, and how to raise or disable it.
 
 For free-build or visual agents that may emit 24+ spawns in one turn, set `.WithMaxToolCallRoundtrips(0)`.
 
@@ -1201,7 +1242,7 @@ public sealed class WeatherLlmTool : LlmToolBase, IAIFunctionLlmTool
 
     private async Task<string> GetWeatherAsync(CancellationToken ct)
     {
-        var weather = await _weather.GetCurrentAsync(ct);
+        WeatherInfo weather = await _weather.GetCurrentAsync(ct);
         return $"{weather.Condition}, {weather.Temperature} C, raining: {weather.IsRaining}";
     }
 }
@@ -1237,7 +1278,7 @@ public sealed class CraftItemTool : LlmToolBase, IAIFunctionLlmTool
     // Parameter names must match the schema property names above.
     private async Task<string> CraftAsync(string ingredient1, string ingredient2, CancellationToken ct)
     {
-        var result = await CraftingSystem.CraftAsync(ingredient1, ingredient2, ct);
+        CraftResult result = await CraftingSystem.CraftAsync(ingredient1, ingredient2, ct);
         return result.Success ? $"Crafted {result.ItemName} ({result.Quality})" : "Error: crafting failed";
     }
 }
@@ -1308,7 +1349,7 @@ Track completed quests in memory.")
 ```csharp
 void SetupAgents()
 {
-    var policy = new AgentMemoryPolicy();
+    AgentMemoryPolicy policy = new AgentMemoryPolicy();
 
     // Custom agents
     MyGameAgents.CreateMerchant(GameServices.Inventory).ApplyToPolicy(policy);
@@ -1326,7 +1367,7 @@ void SetupAgents()
 ```csharp
 async Task AskMerchant(string playerMessage)
 {
-    var orch = container.Resolve<AiOrchestrator>();
+    IAiOrchestrationService orch = container.Resolve<IAiOrchestrationService>();
     // Response comes directly from AskAsync:
     string response = await merchant.AskAsync(orch, playerMessage);
     Debug.Log(response);
@@ -1349,24 +1390,41 @@ async Task AskMerchant(string playerMessage)
 | `WithTools(IEnumerable<ILlmTool>)` | Add multiple tools | `.WithTools(tools)` |
 | `WithAction(string, string, Delegate)` | ADD tool from C# delegate | `.WithAction("heal", "desc", new Action(() => Heal()))` |
 | `WithEventTool(string, string, bool)` | ADD tool that publishes an event | `.WithEventTool("alarm", "desc")` |
+| `WithSkill(SkillSet)` / `WithSkills(params SkillSet[])` | Register skills (on-demand via `read_skill` / `call_skill_tool`) | `.WithSkill(crafting)` |
+| `WithSkillAuthoring(store, versionStore, requireKnownTools)` | Add `manage_skills` so the agent authors its own skills | `.WithSkillAuthoring(skillStore)` |
+| `WithAsyncMarshaler(ILlmAsyncMarshaler)` | Host callback marshaler for async skill hydration | `.WithAsyncMarshaler(hostMarshaler)` |
 | `WithMemory(MemoryToolAction)` | Enable memory | `.WithMemory()` or `.WithMemory(MemoryToolAction.Write)` |
-| `WithChatHistory()` | Enable chat history | `.WithChatHistory()` |
-| `WithTemperature(float)` | Override temperature | `.WithTemperature(0.0f)` |
+| `WithWaitTool(maxSeconds, asyncMarshaler)` | Add the `wait` tool | `.WithWaitTool(10)` |
+| `WithChatHistory(contextWindowTokens, persistBetweenSessions, maxChatHistoryMessages)` | Enable chat history (on by default) | `.WithChatHistory()` |
+| `WithoutChatHistory()` | Disable chat history | `.WithoutChatHistory()` |
+| `WithLlmProfile(string)` | Select the routing profile for this agent | `.WithLlmProfile("profile-id")` |
+| `WithTemperature(float)` | Per-agent temperature (always sent) | `.WithTemperature(0.0f)` |
+| `WithReasoning(LlmReasoningEffort, int? budgetTokens)` | Per-agent reasoning effort and optional budget | `.WithReasoning(LlmReasoningEffort.High, 8192)` |
+| `WithSampling(LlmSamplingOptions)` | Per-agent nucleus sampling, seed, stop sequences, and penalties | `.WithSampling(new LlmSamplingOptions { TopP = 0.9f })` |
 | `WithMaxOutputTokens(int?)` | Override response token budget | `.WithMaxOutputTokens(256)` |
 | `WithMaxToolCallRoundtrips(int?)` | Override tool-call roundtrip budget (`0` = unlimited) | `.WithMaxToolCallRoundtrips(0)` |
+| `WithToolResultMemoryPolicy(ToolResultMemoryPolicy)` | How tool results are kept in chat history | `.WithToolResultMemoryPolicy(ToolResultMemoryPolicy.ErrorsOnly)` |
+| `WithCompactionTriggerRatio(float?)` | Per-agent history compaction trigger | `.WithCompactionTriggerRatio(0.7f)` |
+| `WithLlmContextCompaction(bool)` | Allow LLM-assisted history folding (global gate still applies) | `.WithLlmContextCompaction(false)` |
+| `WithStreaming(bool)` | Per-agent streaming preference | `.WithStreaming(false)` |
+| `WithOverrideUniversalPrefix(bool)` | Skip the global universal prompt prefix | `.WithOverrideUniversalPrefix()` |
 | `WithMode(AgentMode)` | Set mode | `.WithMode(AgentMode.ToolsAndChat)` |
 | `WithAllowDuplicateToolCalls(bool)` | Allow repeated identical tool calls | `.WithAllowDuplicateToolCalls(true)` |
-| `Build()` | Build `AgentConfig` | `.Build()` |
+| `Build()` | Build `AgentConfig` and apply it to `CoreAIAgent.Policy` when one exists | `.Build()` |
+| `BuildAsync(CancellationToken)` | Same, hydrating persisted skills asynchronously | `await builder.BuildAsync(ct)` |
+| `BuildDetached()` | Build `AgentConfig` without touching any policy | `.BuildDetached()` |
 
 ### AgentConfig
 
 | Property | Type | Description |
 |----------|-----|----------|
 | `RoleId` | string | Unique agent ID |
-| `SystemPrompt` | string | System prompt (with Universal Prefix if configured) |
+| `SystemPrompt` | string | Builder-level prompt fragment (Layer 3); the universal prefix and the role's base prompt are added when the request is composed |
 | `Tools` | IReadOnlyList<ILlmTool> | Tool list |
 | `Mode` | AgentMode | Operating mode |
-| `Temperature` | float | Generation temperature |
+| `Temperature` | float? | Per-agent temperature; null = no per-agent value |
+| `Reasoning` | LlmReasoningOptions? | Per-agent reasoning defaults; null = inherit |
+| `Sampling` | LlmSamplingOptions | Per-agent sampling defaults; null fields inherit |
 | `MaxOutputTokens` | int? | Per-agent response token cap; null = fallback |
 | `MaxToolCallRoundtrips` | int? | Per-agent tool-call roundtrip cap; null = fallback, 0 = unlimited |
 
@@ -1385,8 +1443,8 @@ async Task AskMerchant(string playerMessage)
 Roles are plain strings under the hood, but instead of magic literals use the `RoleId` struct or `BuiltInAgentRoleIds` constants. `RoleId` converts implicitly to/from `string`, so it works everywhere a role string is expected:
 
 ```csharp
-var merchant = new AgentBuilder(RoleId.Merchant) ... ;   // built-in role
-var custom   = new AgentBuilder(new RoleId("Blacksmith")) ... ; // custom role
+AgentConfig merchant = new AgentBuilder(RoleId.Merchant) /* ... */ .Build();          // built-in role
+AgentConfig custom   = new AgentBuilder(new RoleId("Blacksmith")) /* ... */ .Build(); // custom role
 await CoreAi.AskAsync("Hi", roleId: RoleId.SmartChat);
 ```
 
@@ -1450,15 +1508,15 @@ The runtime `memory` tool also accepts `action = "read"` to return the current d
 ┌──────────────────────────────────────────────────────────────┐
 │               AgentConfig.ApplyToPolicy(policy)               │
 ├──────────────────────────────────────────────────────────────┤
-│  policy.SetToolsForRole("Merchant", [tools])                 │
-│  policy.EnableMemoryTool("Merchant")                         │
-│  policy.EnableChatHistory("Merchant")                        │
+│  policy.ApplyPreparedRole(...) publishes, atomically:        │
+│    tools [InventoryLlmTool, MemoryLlmTool]                   │
+│    memory, chat history, prompt fragment                     │
 └──────────────────────────────────────────────────────────────┘
                               ↓
 ┌──────────────────────────────────────────────────────────────┐
 │                    AiOrchestrator                              │
 ├──────────────────────────────────────────────────────────────┤
-│  RunTaskAsync("Merchant", "What do you have?")               │
+│  RunTaskAsync("What do you have?", roleId: "Merchant")       │
 │    ↓                                                          │
 │  → FunctionInvokingChatClient → tools=[inventory, memory]    │
 │    ↓                                                          │
@@ -1480,7 +1538,7 @@ The runtime `memory` tool also accepts `action = "read"` to return the current d
 [Test]
 public void AgentBuilder_CreatesAgent_WithAllSettings()
 {
-    var config = new AgentBuilder("TestAgent")
+    AgentConfig config = new AgentBuilder("TestAgent")
         .WithSystemPrompt("Test prompt")
         .WithTool(new MemoryLlmTool())
         .WithChatHistory()
@@ -1503,15 +1561,16 @@ public void AgentBuilder_CreatesAgent_WithAllSettings()
 ```csharp
 // Before system init:
 CoreAISettings.MaxLuaRepairRetries = 5;        // Max consecutive failed Lua repairs (default 3)
-CoreAISettings.MaxToolCallRetries = 5;      // Max consecutive failed tool calls (default 3)
+// WHY: Set Tool Call Retries to 5 on the CoreAISettingsAsset: Advanced Settings -> General -> Tool Call Retries.
 CoreAISettings.EnableMeaiDebugLogging = true; // MEAI debug logging
-CoreAISettings.LlmRequestTimeoutSeconds = 600; // LLM timeout (default 300)
+CoreAISettings.LlmRequestTimeoutSeconds = 600; // Chat/orchestrator idle timeout (CoreAISettingsAsset default 120)
 
 // Resilience settings:
 CoreAISettings.MaxToolResultChars = 4000;     // Truncate large tool results (default 8000)
 CoreAISettings.DefaultToolTimeoutMs = 15000;  // Per-tool timeout in ms (default 30000)
 CoreAISettings.MaxResponseChars = 50000;      // Max response chars (default 0 = disabled)
-CoreAISettings.MaxToolCallRoundtrips = 30;    // Max tool-call roundtrips (default 20; 0 = unlimited)
+CoreAISettingsAsset settings = CoreAISettingsAsset.Instance;
+settings.SetMaxToolCallRoundtrips(30); // WHY: Global tool-call cap; 0 = unlimited.
 ```
 
 ### 🛡️ Resilience & Safety
@@ -1520,13 +1579,14 @@ Production agents face three classes of risk: tool result overflow, tool hangs, 
 
 | Setting | Default | What it does |
 |---------|---------|-------------|
-| `MaxToolResultChars` | **8000** (~2000 tokens) | Soft-truncates tool results with `…[truncated: N chars → M shown]`. Prevents a single tool from overflowing the context window. |
+| `MaxToolResultChars` | **8000** (~2000 tokens) | Soft-truncates tool results with `...[truncated: N chars total -> M shown]`. Prevents a single tool from overflowing the context window. |
 | `DefaultToolTimeoutMs` | **30000** (30s) | Per-tool execution timeout. If a tool body hangs (e.g. HTTP to dead server), the call is cancelled and the model receives an error. A single tool can opt out of this value with `ILlmTool.ToolTimeoutMsOverride` (`null` = use this setting, `<= 0` = no deadline) — that is the lever for a tool that waits for a human, so raising this global one is not. |
 | `MaxResponseChars` | **0** (disabled) | Hard cap on total model response text. Set to e.g. `50000` for production NPC chat to prevent runaway generation. |
-| `MaxToolCallRoundtrips` | **20** | Maximum tool-call roundtrips per request. One roundtrip is one LLM call plus one tool-execution batch. Prevents infinite tool-calling loops. `0` = unlimited. Overridable per agent (`WithMaxToolCallRoundtrips`) and per call (`AiTaskRequest.MaxToolCallRoundtrips`); built-in Programmer/Creator roles default to unlimited. |
+| `MaxToolCallRoundtrips` | **20** | Maximum tool-call roundtrips per request. One roundtrip is one LLM call plus one tool-execution batch. Prevents infinite tool-calling loops. `0` = unlimited. Overridable per agent (`WithMaxToolCallRoundtrips`) and per call (`AiTaskRequest.MaxToolCallRoundtrips`); built-in Programmer/Creator/Builder roles default to unlimited. |
 | `MaxToolCallHistoryMessages` | **20** | Max tool call messages retained in the MEAI list during a single request's tool-calling loop. Prevents unbounded context growth. 0 = no limit. |
+| `MaxParallelToolCalls` | **4** | How many tool calls of one turn may run at once; `1` = strictly sequential. Mutating calls are always serialized against each other. |
 
-**All five** are configurable via:
+**All of these** are configurable via:
 - `CoreAISettings.X = value` (static C# override)
 - `CoreAISettingsAsset` in Unity Inspector (under 🛡️ **Resilience & Safety**)
 - `ICoreAISettings` interface (DI / custom settings)
@@ -1547,36 +1607,30 @@ CoreAISettings.MaxResponseChars = 2000;
 **What happens on truncation/timeout:**
 
 ```
-[ToolPolicy] ✂ Tool 'get_inventory' result truncated: 45230 → 4000 chars
-[ToolPolicy] ⏱ Error: Tool 'fetch_weather' timed out after 5000ms
-[SmartToolCall] Role 'Guard' hit the tool-call roundtrip cap (20, from global ICoreAISettings.MaxToolCallRoundtrips) and was stopped … set it to 0 (unlimited) via WithMaxToolCallRoundtrips(0).
-[SmartToolCall] ✂ Response truncated at 2000 chars
+[ToolPolicy] Tool 'get_inventory' result truncated: 45230 -> 4000 chars
+[ToolPolicy] Timeout: Error: Tool 'fetch_weather' timed out after 5000ms
+[SmartToolCall] Role 'Guard' hit the tool-call roundtrip cap (20, from global ICoreAISettings.MaxToolCallRoundtrips) and was stopped … set it to 0 (unlimited) via AgentBuilder.WithMaxToolCallRoundtrips(0), …
+[SmartToolCall] Response text truncated at 2000 chars: a 2350-char part -> 2000 kept, 350 dropped.
 [SmartToolCall] Trimmed 4 old tool call message(s), keeping 12 total.
 ```
 
 ### Tool call retry
 
-If the model fails to emit a tool call in the correct format, the system automatically retries **3 times** (by default):
+`MaxToolCallRetries` (default **3**) is the tool loop's consecutive-error budget. A failed call (unknown tool
+name, refused or unparseable arguments, an exception, a timeout) comes back to the model as an error result it
+can read and correct, and the model tries again in the next roundtrip. A roundtrip in which every call succeeds
+resets the counter. After `MaxToolCallRetries` roundtrips in a row with a failed call, the loop stops and makes
+one final request with tools disabled, asking the model for a plain-text status of what is done and what
+remains.
 
-```
-Attempt 1: Model returns wrong format
-  ↓
-System: "ERROR: Tool call not recognized. Use this format: {"name": "...", "arguments": {...}}"
-  ↓
-Attempt 2: Model retries
-  ↓
-(If still wrong)
-  ↓
-Attempt 3: Final attempt
-  ↓
-(If still wrong - accepts response as is)
-```
+The same number bounds two corrective nudges: when `ForcedToolMode` requires a tool and the model answers
+without one, and when the model returns an empty response after a successful tool call.
 
-This helps small models (e.g. Qwen3.5-2B) that sometimes forget the format.
+This helps small models (e.g. Qwen3.5-2B) that sometimes call a tool wrongly.
 
 ### 🔄 Dual-Backend with Auto-Fallback
 
-Configure a secondary HTTP backend in Inspector (**🔄 Fallback Backend** section). When the primary backend fails, requests are automatically retried on the secondary:
+Configure a secondary HTTP backend in Inspector (**Fallback Backend (secondary)** section). When the primary backend fails with a transient error, the request is retried on the secondary. Cancellation, permanent refusals (out of credit, bad credentials, malformed request) and a failed request that already executed a tool call stay on the primary:
 
 ```
 Primary: http://127.0.0.1:1234/v1 (local Qwen3.5-4B)
@@ -1598,13 +1652,11 @@ Request → Primary fails (timeout/503) → Retry on Secondary → Success
 **Setup via code:**
 
 ```csharp
-// In CoreAISettingsAsset Inspector:
-// enableFallbackBackend = true
-// secondaryApiBaseUrl = "https://api.openai.com/v1"
-// secondaryApiKey = "sk-..."
-// secondaryModelName = "gpt-4o-mini"
+// Call before the LLM pipeline is installed. Read the key at runtime; do not commit it on the asset.
+coreAiSettings.ConfigureFallbackBackend(true, "https://api.openai.com/v1", "gpt-4o-mini",
+    Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? "");
 
-// The pipeline auto-wraps: primary → FallbackLlmClientDecorator(primary, secondary)
+// LlmPipelineInstaller then wraps: primary → FallbackLlmClientDecorator(primary, secondary)
 ```
 
 **Use cases:**
@@ -1643,7 +1695,7 @@ Request → Primary fails (timeout/503) → Retry on Secondary → Success
 
 ### Chat history does not work
 - Ensure `.WithChatHistory()` is called on the role
-- For **LLMUnity**, history is mirrored into `LLMAgent` during the session — if the list is empty, confirm the client was created with chat history enabled for that role
+- History is sent with each request for every backend; if it is empty, confirm the role has chat history enabled (`WithChatHistory()` is the default; `WithoutChatHistory()` turns it off)
 - For **persistence after closing the game**, built-in **`PlainChat`** / **`SmartChat`** persist chat by default. For custom roles, use `.WithChatHistory(persistBetweenSessions: true)` and a persistent `IAgentMemoryStore` (default: `FileAgentMemoryStore`). Chat is **not** written to disk when `persistBetweenSessions` is false — only in-memory for that process
 - UI restore: see **[README_CHAT.md](../../CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md)** (`Load Persisted Chat On Startup`, role policy)
 

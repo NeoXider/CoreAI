@@ -56,9 +56,10 @@ namespace CoreAI.Infrastructure.Llm
             "spawn(prefabKey,targetName,x/y/z?,fx/fy/fz?,scale|scaleX/Y/Z?,stringValue=parent?,worldPositionStays=false?) -> ok, echoes applied transform. " +
             "prefabKey is a registered prefab key or a primitive (cube, sphere, cylinder, capsule, empty); " +
             "an unknown key's error lists available keys — call list_prefabs first if unsure.\n" +
-            "spawn_batch(prefabKey?,targetName=namePrefix?,x/y/z/fx/fy/fz/scale*/stringValue=parent as per-item " +
+            "spawn_batch(prefabKey?,targetName=namePrefix?,fx/fy/fz/scale*/stringValue=parent as per-item " +
             "defaults,itemsJson=JSON array of up to 100 {prefabKey?,name?,x,y,z,rx?,ry?,rz?,scale?|scaleX/Y/Z?," +
             "parent?,worldPositionStays?,color?}) -> ONE call spawns every item -> {ok,spawned,failed,names:[first few]}. " +
+            "Item x/y/z default to zero; call-level x/y/z are ignored. " +
             "With a parent, transform coordinates are LOCAL by default; set worldPositionStays=true to preserve world space. " +
             "Without a parent, local and world coordinates are identical. Create the parent before its children.\n" +
             "For compound objects and related spawned parts, prefer a meaningful hierarchy: create one named empty root " +
@@ -115,7 +116,10 @@ namespace CoreAI.Infrastructure.Llm
             ("itemsJson", "string", false,
                 "spawn_batch only: JSON array of up to 100 items, each " +
                 "{prefabKey?,name?,x,y,z,rx?,ry?,rz?,scale?|scaleX/Y/Z?,parent?,worldPositionStays?,color?}. " +
-                "Fields an item omits fall back to this call's prefabKey/x/y/z/fx/fy/fz/scale*/stringValue/worldPositionStays as defaults.")
+                "Item x/y/z default to zero; call-level x/y/z are ignored. Missing prefabKey and parent use call-level prefabKey and stringValue. " +
+                "Missing name uses targetName (or prefabKey) plus a 1-based suffix. All-zero item rx/ry/rz use call-level fx/fy/fz. " +
+                "Item scale > 0 overrides call-level scale; positive item scaleX/Y/Z use the item vector, otherwise the call-level vector. " +
+                "Omitted worldPositionStays uses the call-level value; color is item-only.")
         );
 
         public AIFunction CreateAIFunction()
@@ -440,8 +444,8 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Spawns every entry of <paramref name="itemsJson"/> in one dispatch. Missing per-item fields fall
-        /// back to this call's top-level prefabKey/x/y/z/fx/fy/fz/scale*/stringValue defaults. Result is a
+        /// Spawns every entry of <paramref name="itemsJson"/> in one dispatch. Item positions default to zero.
+        /// Prefab, name prefix, rotation, scale, parent, and parenting policy can use call-level defaults. Result is a
         /// compact summary, never a full echo of every spawned item — see TOOL_CALLING_BEST_PRACTICES.md.
         /// </summary>
         private async Task<string> ExecuteSpawnBatchAsync(

@@ -65,58 +65,39 @@ Cause: some files use nullable annotations while the assembly or file does not e
 
 Impact: warning debt only; not a runtime regression.
 
-Recommended follow-up:
+Fix: enable a nullable context in the affected files, or remove the nullable annotations.
 
-- Choose a nullable policy per asmdef or file.
-- Either enable nullable context or remove nullable annotations from affected files.
-- Do not mix this cleanup into unrelated feature changes.
+## `EnableLuaOnWebGl` has no effect
 
-## PathTracing render pipeline warning
+Symptom: setting `enableLuaOnWebGl` to `false` on `CoreAISettingsAsset` (the field is serialized but not
+shown in the settings inspector; code reads it as `ICoreAISettings.EnableLuaOnWebGl` /
+`CoreAISettings.EnableLuaOnWebGl`) does not stop Lua in a WebGL player.
 
-Symptom: Unity warning references UnityEngine.PathTracing.Core.WorldRenderPipelineResources or UniversalRenderPipelineGlobalSettings.
+Cause: no Lua runtime reads the setting. Lua runs through Lua-CSharp (`LuaCsSecureEnvironment`,
+`com.neoxider.coreaimods`), a managed AOT-safe runtime, in any scene that composes
+`CoreAiModsLifetimeScope` (or calls `CoreAiModsInstaller.RegisterCoreAiMods`), on WebGL as on every
+other player.
 
-Cause: Unity, URP, or PathTracing package settings mismatch in project render pipeline global settings.
-
-Impact: editor/package warning; does not affect CoreAI runtime directly. The stale reference present in this repository was removed in v2.6.0, but the warning can return after Unity/URP package changes if the editor rewrites global render pipeline settings.
-
-Recommended follow-up:
-
-- Check Unity and URP package versions.
-- Check project render pipeline global settings.
-- Remove or reassign obsolete render pipeline resource references if Unity created stale settings.
-
-## WebGL Lua execution (resolved)
-
-Symptom (historical): Lua tools or Lua envelope processing reported that Lua execution was unavailable in a WebGL player.
-
-Cause (historical): v2.6.0 explicitly disabled the then-current Lua sandbox (a different third-party interpreter, since replaced) in WebGL player builds. That path could initialize reflection-based loader code that aborts WebGL/IL2CPP before managed exception handling.
-
-Resolution: the Lua VM was replaced end-to-end by **Lua-CSharp**, a managed, AOT-safe runtime that works on IL2CPP and WebGL without reflection-based loading. WebGL Lua execution through `LuaCsSecureEnvironment` (`com.neoxider.coreaimods`) is supported on WebGL player builds whenever `COREAI_LUA` is compiled in. `CoreAISettingsAsset.EnableLuaOnWebGl` is serialized but not currently read by the Lua runtime. See ARCHITECTURE.md.
-
-Recommended follow-up:
-
-- Add or extend WebGL Player tests to keep covering the Lua-CSharp path on IL2CPP.
-- Lua remains compiled out unless the build defines `COREAI_LUA` (see DEVELOPER_GUIDE.md / LUA_SANDBOX_SECURITY.md); enable it explicitly for WebGL players that need scripting.
-
-## Warning handling policy
-
-- New compile errors block merges.
-- New warnings must not be hidden inside accepted warning debt.
-- If a warning is accepted debt, document the reason, owner, and follow-up plan here.
+Workaround: a WebGL scene that must not run Lua should not compose the mods scope (see
+[LUA_SANDBOX_SECURITY.md](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md), "Optional Module").
 
 ## CAIU001 ConfigureAwait warnings in CoreAiUnity
 
-Symptom: the bundled Roslyn analyzer reports `CAIU001: Do not use ConfigureAwait(false) in CoreAiUnity` for async file I/O in `FileAgentMemoryStore` and related stores.
+Symptom: the bundled Roslyn analyzer reports `CAIU001: Do not use ConfigureAwait(false) in CoreAiUnity`
+for the gate awaits in `FileAgentMemoryStore`.
 
-Cause: the async store paths intentionally run on the thread pool and never touch UnityEngine APIs after the await, so `ConfigureAwait(false)` is correct there; the analyzer flags it assembly-wide by design.
+Cause: every occurrence there awaits the acquisition or release of the store's file gate or a per-role
+mutation gate. Without `ConfigureAwait(false)` the continuation that releases the gate is posted to the
+caller's `SynchronizationContext` while a synchronous `Save`/`TryLoad` on that same thread blocks on the
+gate, a permanent deadlock that reproduces in the editor. On WebGL the work runs inline, so the awaits are
+already complete and schedule nothing. The analyzer flags the call regardless (it covers `CoreAiUnity`
+`Runtime/` and `Editor/` code).
 
 Impact: warning debt only; not a runtime regression.
-
-Recommended follow-up: suppress per-file/per-call with a justification comment, or teach the analyzer to allow thread-pool-only code paths.
 
 Scope note: the analyzer covers `CoreAiUnity` only. The engine-free tool path (`CoreAI.Core`,
 `CoreAI.Mods`) is guarded by `WebGlUnsafeAsyncPrimitivesEditModeTests`, which forbids
 `ConfigureAwait(false)` in every runtime root that ships to the WebGL player; a tool body that can
 suspend must additionally publish its result through `MeaiToolTaskBridge`
-(`Assets/CoreAI/Docs/MEAI_TOOL_CALLING.md` §3.2). The inherited stores above are frozen in that
-guard's allowlist with a reason.
+(`Assets/CoreAI/Docs/MEAI_TOOL_CALLING.md` §3.2). The existing exceptions, `FileAgentMemoryStore`
+among them, are listed in that guard's allowlist with their reasons.

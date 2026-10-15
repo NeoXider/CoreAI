@@ -140,7 +140,7 @@ namespace CoreAI.Infrastructure.Llm
         private float temperature = 0.1f;
 
         [Tooltip(
-            "When enabled, the Max Tokens value below caps completions (max_tokens on HTTP, numPredict on LLMUnity). " +
+            "When enabled, the Max Tokens value below caps completions (max_completion_tokens for the OpenAi dialect; max_tokens otherwise). " +
             "When disabled, no output cap is sent and the provider decides.")]
         [SerializeField]
         private bool enableMaxTokensOverriding;
@@ -184,6 +184,28 @@ namespace CoreAI.Infrastructure.Llm
         [Tooltip("Secondary backend model name (e.g., gpt-4o-mini).")]
         [SerializeField]
         private string secondaryModelName = "";
+
+        [Tooltip("Secondary provider reasoning effort. Default uses its own legacy mode or provider default.")]
+        [SerializeField]
+        private LlmReasoningEffort secondaryReasoningEffort = LlmReasoningEffort.Default;
+
+        [Tooltip("Secondary provider reasoning wire format. Auto resolves from the secondary endpoint.")]
+        [SerializeField]
+        private LlmReasoningDialect secondaryReasoningDialect = LlmReasoningDialect.Auto;
+
+        [Tooltip("Legacy reasoning controls for the secondary provider only.")]
+        [SerializeField]
+        private LlmReasoningMode secondaryReasoningMode = LlmReasoningMode.ProviderDefault;
+
+        [Tooltip("Optional secondary provider thinking budget. 0 = omit.")]
+        [SerializeField]
+        [Min(0)]
+        private int secondaryThinkingBudgetTokens;
+
+        [Tooltip("Optional JSON object merged into the secondary provider request body only.")]
+        [TextArea(2, 6)]
+        [SerializeField]
+        private string secondaryExtraBodyJson = "";
 
         [Header("LLMUnity (local model)")]
         [Tooltip("GameObject hosting LLMAgent; empty auto-detects.")]
@@ -229,13 +251,21 @@ namespace CoreAI.Infrastructure.Llm
         private bool llmUnityKeepAlive = false;
 
         [Tooltip(
-            "Provider Default leaves HTTP request bodies unchanged. Disabled/Enabled sends provider-specific thinking controls for compatible models.")]
+            "Legacy controls used when typed reasoning effort is Default. Provider Default omits legacy controls; Disabled/Enabled maps to the selected provider dialect.")]
         [SerializeField]
         private LlmReasoningMode reasoningMode = LlmReasoningMode.ProviderDefault;
 
+        [Tooltip("Typed reasoning effort. Default preserves legacy controls and provider defaults.")]
+        [SerializeField]
+        private LlmReasoningEffort reasoningEffort = LlmReasoningEffort.Default;
+
+        [Tooltip("Reasoning wire format. Auto resolves from the endpoint; LLMUnity uses Qwen Template.")]
+        [SerializeField]
+        private LlmReasoningDialect reasoningDialect = LlmReasoningDialect.Auto;
+
         [Tooltip(
             "Optional thinking budget for compatible OpenAI-style providers. 0 = omit. " +
-            "When set, CoreAI sends thinking_budget together with reasoning controls.")]
+            "When reasoning is enabled, the selected dialect maps this budget to its provider-specific field.")]
         [SerializeField]
         [Min(0)]
         private int thinkingBudgetTokens;
@@ -366,7 +396,8 @@ namespace CoreAI.Infrastructure.Llm
 
         [Tooltip(
             "Max tool calls within a single LLM turn (batch) that may execute concurrently. " +
-            "1 = strictly sequential (original behavior). State-mutating built-ins (memory, manage_mods, manage_skills) " +
+            "1 = strictly sequential (original behavior). State-mutating built-ins (memory, manage_mods, manage_skills, world_command, " +
+            "component_command, execute_lua, call_skill_tool) " +
             "are always serialized relative to each other; independent/read tools run in parallel. Result order is " +
             "always preserved. Default 4.")]
         [SerializeField]
@@ -766,6 +797,47 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Provider-specific HTTP reasoning mode.</summary>
         public LlmReasoningMode ReasoningMode => reasoningMode;
 
+        /// <summary>Primary reasoning effort; Default preserves legacy reasoning controls.</summary>
+        public LlmReasoningEffort ReasoningEffort => reasoningEffort;
+
+        /// <summary>Primary provider reasoning wire format.</summary>
+        public LlmReasoningDialect ReasoningDialect => reasoningDialect;
+
+        /// <summary>Secondary provider reasoning effort.</summary>
+        public LlmReasoningEffort SecondaryReasoningEffort => secondaryReasoningEffort;
+
+        /// <summary>Secondary provider reasoning wire format, resolved independently of the primary.</summary>
+        public LlmReasoningDialect SecondaryReasoningDialect => secondaryReasoningDialect;
+
+        /// <summary>Secondary legacy provider reasoning mode.</summary>
+        public LlmReasoningMode SecondaryReasoningMode => secondaryReasoningMode;
+
+        /// <summary>Secondary provider thinking budget; zero omits the budget.</summary>
+        public int SecondaryThinkingBudgetTokens => System.Math.Max(0, secondaryThinkingBudgetTokens);
+
+        /// <summary>Optional secondary provider request body JSON.</summary>
+        public string SecondaryExtraBodyJson => secondaryExtraBodyJson ?? "";
+
+        /// <summary>Configures typed reasoning controls for the primary endpoint.</summary>
+        public void ConfigureReasoning(LlmReasoningEffort effort, LlmReasoningDialect dialect = LlmReasoningDialect.Auto)
+        {
+            reasoningEffort = effort;
+            reasoningDialect = dialect;
+        }
+
+        /// <summary>Configures the fallback endpoint's independent provider reasoning and body controls.</summary>
+        public void ConfigureFallbackReasoning(LlmReasoningEffort effort,
+            LlmReasoningDialect dialect = LlmReasoningDialect.Auto,
+            LlmReasoningMode mode = LlmReasoningMode.ProviderDefault, int thinkingBudget = 0,
+            string extraBody = "")
+        {
+            secondaryReasoningEffort = effort;
+            secondaryReasoningDialect = dialect;
+            secondaryReasoningMode = mode;
+            secondaryThinkingBudgetTokens = System.Math.Max(0, thinkingBudget);
+            secondaryExtraBodyJson = extraBody ?? "";
+        }
+
         /// <summary>Optional provider-side thinking budget in tokens. 0 = omit.</summary>
         public int ThinkingBudgetTokens => thinkingBudgetTokens < 0 ? 0 : thinkingBudgetTokens;
 
@@ -790,7 +862,7 @@ namespace CoreAI.Infrastructure.Llm
             extraBodyJson = normalized;
         }
 
-        /// <summary>LLMUnity session concurrency clamp.</summary>
+        /// <summary>Maximum parallel prompts configured before the LLMUnity host starts.</summary>
         public int LlmUnityMaxConcurrentChats => llmUnityMaxConcurrentChats < 1 ? 1 : llmUnityMaxConcurrentChats;
 
         /// <summary>Exported GPU offload depth.</summary>
@@ -856,7 +928,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc cref="ICoreAISettings.EnableLuaOnWebGl"/>
         public bool EnableLuaOnWebGl => enableLuaOnWebGl;
 
-        /// <summary>WebGL-only: send cookies on cross-origin requests (fetch credentials='include').</summary>
+        /// <summary>WebGL-only: true sends same-origin credentials; false omits credentials.</summary>
         public bool SameOriginCredentials => sameOriginCredentials;
 
         /// <summary>Optional LLM-assisted memory compaction flag.</summary>
@@ -1015,6 +1087,10 @@ namespace CoreAI.Infrastructure.Llm
             toolContractAdditionalInstructions = options.ToolContractAdditionalInstructions ?? "";
             temperature = Mathf.Clamp(options.Temperature, 0f, 2f);
             enableTemperatureOverriding = options.OverrideTemperature;
+            reasoningEffort = options.ReasoningEffort;
+            reasoningDialect = options.ReasoningDialect;
+            secondaryReasoningEffort = options.SecondaryReasoningEffort;
+            secondaryReasoningDialect = options.SecondaryReasoningDialect;
             maxToolCallRetries = options.MaxToolCallRetries < 1 ? 3 : options.MaxToolCallRetries;
             logToolCalls = options.LogToolCalls;
             logToolCallArguments = options.LogToolCallArguments;
@@ -1050,11 +1126,20 @@ namespace CoreAI.Infrastructure.Llm
             maxToolCallHistoryMessages =
                 options.MaxToolCallHistoryMessages < 0 ? 20 : options.MaxToolCallHistoryMessages;
             maxParallelToolCalls = options.MaxParallelToolCalls < 1 ? 1 : options.MaxParallelToolCalls;
+            allowWorldPrimitives = options.AllowWorldPrimitives;
         }
 
         #endregion
 
         #region Runtime Configuration
+
+        /// <summary>Preserves the original full-parameter API and applies each explicit request setting.</summary>
+        public void ConfigureHttpApi(string baseUrl, string key, string model, float temperature,
+            int timeoutSeconds, int maxTokens, bool overrideTemperature)
+        {
+            ConfigureHttpApi(baseUrl, key, model, (float?)temperature, (int?)timeoutSeconds,
+                (int?)maxTokens, (bool?)overrideTemperature);
+        }
 
         /// <summary>
         /// Programmatic HTTP preset (tests / runtime bootstrap). An empty <paramref name="model"/> is stored
@@ -1066,24 +1151,47 @@ namespace CoreAI.Infrastructure.Llm
             string baseUrl,
             string key,
             string model,
-            float temperature = 0.2f,
-            int timeoutSeconds = 120,
-            int maxTokens = 128000,
-            bool overrideTemperature = true)
+            float? temperature = null,
+            int? timeoutSeconds = null,
+            int? maxTokens = null,
+            bool? overrideTemperature = null)
         {
             backendType = LlmBackendType.OpenAiHttp;
             executionMode = LlmExecutionMode.ClientOwnedApi;
             apiBaseUrl = string.IsNullOrWhiteSpace(baseUrl) ? "http://localhost:1234/v1" : baseUrl;
             apiKey = key ?? "";
             modelName = model ?? "";
-            this.temperature = Mathf.Clamp(temperature, 0f, 2f);
-            enableTemperatureOverriding = overrideTemperature;
-            requestTimeoutSeconds = timeoutSeconds <= 0 ? 120 : timeoutSeconds;
-            enableMaxTokensOverriding = maxTokens > 0;
-            if (maxTokens > 0)
+            if (temperature.HasValue)
             {
-                this.maxTokens = maxTokens;
+                this.temperature = Mathf.Clamp(temperature.Value, 0f, 2f);
             }
+
+            if (overrideTemperature.HasValue)
+            {
+                enableTemperatureOverriding = overrideTemperature.Value;
+            }
+
+            if (timeoutSeconds.HasValue)
+            {
+                requestTimeoutSeconds = timeoutSeconds.Value <= 0 ? 120 : timeoutSeconds.Value;
+            }
+
+            if (maxTokens.HasValue)
+            {
+                enableMaxTokensOverriding = maxTokens.Value > 0;
+                if (maxTokens.Value > 0)
+                {
+                    this.maxTokens = maxTokens.Value;
+                }
+            }
+        }
+
+        /// <summary>Preserves the original full-parameter API and applies each explicit request setting.</summary>
+        public void ConfigureClientOwnedApi(string baseUrl, string key, string model, float temperature,
+            int timeoutSeconds, int maxTokens, bool overrideTemperature)
+        {
+            ConfigureClientOwnedApi(baseUrl, key, model, (float?)temperature, (int?)timeoutSeconds,
+                (int?)maxTokens, (bool?)overrideTemperature);
         }
 
         /// <summary>
@@ -1093,13 +1201,21 @@ namespace CoreAI.Infrastructure.Llm
             string baseUrl,
             string key,
             string model,
-            float temperature = 0.2f,
-            int timeoutSeconds = 120,
-            int maxTokens = 128000,
-            bool overrideTemperature = true)
+            float? temperature = null,
+            int? timeoutSeconds = null,
+            int? maxTokens = null,
+            bool? overrideTemperature = null)
         {
             ConfigureHttpApi(baseUrl, key, model, temperature, timeoutSeconds, maxTokens, overrideTemperature);
             executionMode = LlmExecutionMode.ClientOwnedApi;
+        }
+
+        /// <summary>Preserves the original full-parameter API and applies each explicit request setting.</summary>
+        public void ConfigureClientLimited(string baseUrl, string key, string model, int maxRequestsPerSession,
+            int maxPromptChars, float temperature, int timeoutSeconds, int maxTokens, bool overrideTemperature)
+        {
+            ConfigureClientLimited(baseUrl, key, model, maxRequestsPerSession, maxPromptChars,
+                (float?)temperature, (int?)timeoutSeconds, (int?)maxTokens, (bool?)overrideTemperature);
         }
 
         /// <summary>
@@ -1111,15 +1227,23 @@ namespace CoreAI.Infrastructure.Llm
             string model,
             int maxRequestsPerSession,
             int maxPromptChars,
-            float temperature = 0.2f,
-            int timeoutSeconds = 120,
-            int maxTokens = 128000,
-            bool overrideTemperature = true)
+            float? temperature = null,
+            int? timeoutSeconds = null,
+            int? maxTokens = null,
+            bool? overrideTemperature = null)
         {
             ConfigureHttpApi(baseUrl, key, model, temperature, timeoutSeconds, maxTokens, overrideTemperature);
             executionMode = LlmExecutionMode.ClientLimited;
             maxClientLimitedRequestsPerSession = maxRequestsPerSession < 0 ? 0 : maxRequestsPerSession;
             maxClientLimitedPromptChars = maxPromptChars < 0 ? 0 : maxPromptChars;
+        }
+
+        /// <summary>Preserves the original full-parameter API and applies each explicit request setting.</summary>
+        public void ConfigureServerManagedApi(string backendBaseUrl, string model, string backendAuthToken, float temperature,
+            int timeoutSeconds, int maxTokens, bool overrideTemperature)
+        {
+            ConfigureServerManagedApi(backendBaseUrl, model, backendAuthToken, (float?)temperature,
+                (int?)timeoutSeconds, (int?)maxTokens, (bool?)overrideTemperature);
         }
 
         /// <summary>
@@ -1129,10 +1253,10 @@ namespace CoreAI.Infrastructure.Llm
             string backendBaseUrl,
             string model,
             string backendAuthToken = "",
-            float temperature = 0.2f,
-            int timeoutSeconds = 120,
-            int maxTokens = 128000,
-            bool overrideTemperature = true)
+            float? temperature = null,
+            int? timeoutSeconds = null,
+            int? maxTokens = null,
+            bool? overrideTemperature = null)
         {
             ConfigureHttpApi(backendBaseUrl, backendAuthToken, model, temperature, timeoutSeconds, maxTokens,
                 overrideTemperature);

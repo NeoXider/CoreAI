@@ -21,8 +21,9 @@ the project-local override catalog. Run `CoreAI/Materials/Download CC0 texture s
 (36 API-verified ambientCG ids at 1K/2K/4K, CC0, provenance written to
 `Assets/CoreAIRbxTexturesLocal/ambientCG/LICENSE.md`) or `CoreAI/Materials/Import Bridge-Megascans
 folder...` (your own Quixel Bridge / Fab export; DirectX normals are detected from the metadata), then
-enter Play Mode: every catalogued item switches from the procedural shader to `CoreAI/Rbx/Textured
-Surface`, and `DumpMaterialApiEvidence` reports the shader per slot. With the full ambientCG override
+enter Play Mode: every item in the override catalog (`Assets/CoreAIRbxTexturesLocal/Resources/CoreAIRbxTextureCatalogOverride.asset`) replaces
+the packaged texture set on `CoreAI/Rbx/Textured Surface`, and `DumpMaterialApiEvidence` reports the
+shader per slot. With the full ambientCG override
 the evidence line is still `MATERIAL_CATALOG complete slots=46 mapped=45 fallback=1 failures=0
 result=PASS` with 36 textured and 9 procedural slots; `Salt`, `Glacier`, `Air`, `Water`, `Glass`,
 `ForceField`, `Neon`, `Plastic` and `SmoothPlastic` stay procedural by design.
@@ -80,21 +81,26 @@ view 1 moves away. Increased visible noise is not a pass condition.
 
 ## Runtime projection contract
 
-Brick, Wood, WoodPlanks, Grass, Cobblestone, and Metal use object-aligned box projection with a narrow
-`0.10` normal-component blend band, retaining world-unit axis scale without paying for three planes over
-the whole surface. Their texture aspect ratio is preserved, and each tile width is authored in Roblox
-studs before conversion at the spatial boundary. Grass spans 7 studs (1.96 m at the default scale) so
-its blade detail remains visible at showcase distance. Nonmetal entries read Color, Roughness, and
-Normal once normally, twice inside the approximately 8.1-degree two-axis band, and three times only near
-triple-axis junctions; Metal adds Metalness. None uses parallax.
+The 36 textured materials (`CoreAI/Rbx/Textured Surface`) project in object-aligned, world-size
+coordinates. A flat face (block side, wedge slope, cylinder cap) reads exactly one map in its own upright
+frame: the four sides are unrolled round the part so a brick course or a plank continues across three
+vertical edges (the one wrap seam is on the +X/-Z edge), and top and bottom stay anchored at the part
+centre so neighbouring floor plates share one grid. Only curved surfaces blend the three axis
+projections, over about ±11 degrees around each 45-degree boundary; weights under 2.5% are dropped, so a
+ball samples one projection on about half of its surface, two on about 40%, and three only near the
+triple-axis points. The texture aspect ratio is preserved, and each tile width is authored in studs in
+`RbxMaterialTextureCatalog` (Grass: 4.5 studs, 1.26 m at the default 0.28 m per stud) and converted at
+the spatial boundary. Metalness and occlusion maps are read only where a set has them. None uses
+parallax.
 The host-authored showcase applies a per-renderer scale override so one displayed sample unit is treated
 as one stud; runtime-bound Parts continue to use `Size * MetersPerStud` without that override.
 The runtime textured handles re-derive `_TextureScale` whenever a world package replaces
 `RbxSpace.MetersPerStud`, so stud-authored tile widths survive a session-scale change; the showcase
 override multiplies by the current scale and stays consistent with it.
 
-Physical directionally projected procedural materials use object-aligned, world-size coordinates and the
-same narrow geometric-normal transition before analytical relief perturbs the lighting normal.
+Physical directionally projected procedural materials use object-aligned, world-size coordinates and a
+narrow geometric-normal transition (`RBX_AXIS_BLEND_WIDTH` = 0.10) before analytical relief perturbs the
+lighting normal.
 Three-dimensional procedural modes and the visible fallback remain projection-independent; ForceField
 keeps intentionally world-animated coordinates. Their identities, scale, and bump tuning remain entirely
 in the runtime shader/provider; the showcase adds no material behavior.

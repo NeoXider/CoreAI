@@ -39,7 +39,7 @@ The Rbx Lua bindings themselves live in `Assets/CoreAIMods/Runtime/Scripting/Lua
 
 ## Current shipped scheduler, signal, and service behavior
 
-The `task` scheduler and general `RbxScriptSignal` connections now run in the shipped runtime.
+The `task` scheduler and general `RbxScriptSignal` connections run in the shipped runtime.
 Every signal is deferred: firing queues handlers, and handlers run at the next script-resumption
 point rather than at the fire site. A handler may call `task.wait()` and resume later on its owning
 scheduler thread. Multiple connections to one signal have no documented invocation order; scripts
@@ -102,7 +102,7 @@ Keep these in step with the runtime when the skill text is edited:
   cap (`pcall` 128 deep, `table.sort`/`tostring` 63) before a catchable "C stack overflow", and that a
   yield (`task.wait`, `coroutine.yield`) inside a `__tostring`, a sort comparator, a `__pairs`/`__ipairs`
   metamethod, `__index` or a gsub function raises "attempt to yield across a C-call boundary" while one
-  inside `pcall` works (Luau parity, audit C3-06). It also
+  inside `pcall` works (Luau parity). It also
   states the reload rule: `manage_mods reload` and the Hub's Save & run remove the previous run's
   startup objects first, `keep_objects=true` keeps them, and two budget cuts in a row quarantine the
   mod and keep it from starting with the next game.

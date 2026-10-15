@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -553,6 +553,12 @@ namespace CoreAI.Infrastructure.Llm
                 timeoutSecondsProvider ?? throw new ArgumentNullException(nameof(timeoutSecondsProvider));
             _asyncMarshaler = asyncMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
             _onDeadlineTimerFault = onDeadlineTimerFault;
+        }
+
+        /// <inheritdoc />
+        public void ResolveRequestSettings(LlmCompletionRequest request)
+        {
+            _inner.ResolveRequestSettings(request);
         }
 
         /// <inheritdoc />

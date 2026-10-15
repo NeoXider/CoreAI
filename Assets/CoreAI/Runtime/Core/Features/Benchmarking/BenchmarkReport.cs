@@ -17,6 +17,13 @@ namespace CoreAI.Benchmarking
         public bool Streaming { get; set; }
         public int MaxParallelToolCalls { get; set; }
         public float Temperature { get; set; }
+
+        /// <summary>
+        /// The <c>reasoning_effort</c> sent to the provider (none, low, medium, high, xhigh); empty when the
+        /// run left it to the provider default.
+        /// </summary>
+        public string ReasoningEffort { get; set; } = string.Empty;
+
         public int Repetitions { get; set; } = 1;
         public string UnityVersion { get; set; } = string.Empty;
         public string SuiteVersion { get; set; } = string.Empty;
@@ -71,6 +78,7 @@ namespace CoreAI.Benchmarking
                     ScenarioId = group.Key,
                     Name = any.ScenarioName,
                     Group = any.Group,
+                    Extreme = group.Any(r => r.Extreme),
                     Repetitions = group.Count(),
                     MeanBase = meanBase,
                     MeanBonus = meanBonus,
@@ -102,6 +110,51 @@ namespace CoreAI.Benchmarking
                 IReadOnlyList<ScenarioSummary> s = Scenarios();
                 return s.Count == 0 ? 0 : s.Average(x => x.MeanBase);
             }
+        }
+
+        /// <summary>Number of distinct graded scenarios (both tiers) behind <see cref="SuiteBaseScore"/>.</summary>
+        public int ScenarioCount => Scenarios().Count;
+
+        /// <summary>
+        /// Regular-tier score: mean of the per-scenario mean base over the graded scenarios that are not
+        /// extreme. 0 when the run graded none.
+        /// </summary>
+        public double RegularBaseScore => MeanOf(Scenarios().Where(s => !s.Extreme));
+
+        /// <summary>Number of distinct graded regular-tier scenarios behind <see cref="RegularBaseScore"/>.</summary>
+        public int RegularScenarioCount => Scenarios().Count(s => !s.Extreme);
+
+        /// <summary>
+        /// Extreme-tier sub-score: mean of the per-scenario mean base over the graded extreme scenarios, with
+        /// the same repetition averaging and Environment/Framework/NotGraded exclusions as the suite score.
+        /// 0 when the run graded none; check <see cref="HasExtreme"/> before showing it.
+        /// </summary>
+        public double ExtremeBaseScore => MeanOf(Scenarios().Where(s => s.Extreme));
+
+        /// <summary>Number of distinct graded extreme scenarios behind <see cref="ExtremeBaseScore"/>.</summary>
+        public int ExtremeScenarioCount => Scenarios().Count(s => s.Extreme);
+
+        /// <summary>Graded extreme scenarios whose mean base reaches the PASS bar.</summary>
+        public int ExtremePassCount =>
+            Scenarios().Count(s => s.Extreme && s.Classification == BenchmarkClassification.Pass);
+
+        /// <summary>True when at least one extreme scenario produced a graded measurement.</summary>
+        public bool HasExtreme => ExtremeScenarioCount > 0;
+
+        /// <summary>The graded extreme scenarios, ordered by group then id.</summary>
+        public IReadOnlyList<ScenarioSummary> ExtremeScenarios()
+        {
+            return Scenarios()
+                .Where(s => s.Extreme)
+                .OrderBy(s => s.Group, StringComparer.Ordinal)
+                .ThenBy(s => s.ScenarioId, StringComparer.Ordinal)
+                .ToList();
+        }
+
+        private static double MeanOf(IEnumerable<ScenarioSummary> scenarios)
+        {
+            List<ScenarioSummary> list = scenarios.ToList();
+            return list.Count == 0 ? 0 : list.Average(s => s.MeanBase);
         }
 
         /// <summary>Mean of per-scenario mean bonus, reported separately from the suite base score.</summary>
@@ -270,7 +323,10 @@ namespace CoreAI.Benchmarking
         public ScenarioResult Worst =>
             GradedResults.OrderBy(r => r.Score.Base).FirstOrDefault();
 
-        /// <summary>Mean of per-scenario mean (average) base score per benchmark group (e.g. G1, G2).</summary>
+        /// <summary>
+        /// Mean of per-scenario mean (average) base score per benchmark group (e.g. G1, G2). The group mean
+        /// covers both tiers, like the suite score; the extreme and regular splits are reported beside it.
+        /// </summary>
         public IReadOnlyList<GroupScore> GroupBreakdown()
         {
             return Scenarios()
@@ -280,7 +336,12 @@ namespace CoreAI.Benchmarking
                     Group = g.Key,
                     MeanBase = g.Average(s => s.MeanBase),
                     PassCount = g.Count(s => s.Classification == BenchmarkClassification.Pass),
-                    Count = g.Count()
+                    Count = g.Count(),
+                    RegularCount = g.Count(s => !s.Extreme),
+                    RegularMeanBase = MeanOf(g.Where(s => !s.Extreme)),
+                    ExtremeCount = g.Count(s => s.Extreme),
+                    ExtremeMeanBase = MeanOf(g.Where(s => s.Extreme)),
+                    ExtremePassCount = g.Count(s => s.Extreme && s.Classification == BenchmarkClassification.Pass)
                 })
                 .OrderBy(g => g.Group, StringComparer.Ordinal)
                 .ToList();
@@ -303,9 +364,30 @@ namespace CoreAI.Benchmarking
     public sealed class GroupScore
     {
         public string Group { get; set; } = string.Empty;
+
+        /// <summary>Mean over every graded scenario of the group, both tiers.</summary>
         public double MeanBase { get; set; }
+
         public int PassCount { get; set; }
+
+        /// <summary>Graded scenarios of the group, both tiers.</summary>
         public int Count { get; set; }
+
+        /// <summary>Graded regular-tier scenarios of the group.</summary>
+        public int RegularCount { get; set; }
+
+        /// <summary>Mean over the group's graded regular-tier scenarios; 0 when it has none.</summary>
+        public double RegularMeanBase { get; set; }
+
+        /// <summary>Graded extreme scenarios of the group (one per group in suite 2.0, none for G6).</summary>
+        public int ExtremeCount { get; set; }
+
+        /// <summary>Mean over the group's graded extreme scenarios; 0 when it has none.</summary>
+        public double ExtremeMeanBase { get; set; }
+
+        public int ExtremePassCount { get; set; }
+
+        public bool HasExtreme => ExtremeCount > 0;
     }
 
     /// <summary>Suite score for one <see cref="BenchmarkDimension"/> (a summary axis).</summary>
@@ -322,6 +404,10 @@ namespace CoreAI.Benchmarking
         public string ScenarioId { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
         public string Group { get; set; } = string.Empty;
+
+        /// <summary>True when the scenario belongs to the extreme tier.</summary>
+        public bool Extreme { get; set; }
+
         public int Repetitions { get; set; }
         public double MeanBase { get; set; }
         public double MeanBonus { get; set; }

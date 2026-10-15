@@ -371,9 +371,8 @@ namespace CoreAI.Ai.Hub
             SaveOrReload(modId, match.Value.Source);
 
             // WHY: SaveOrReload's Persist() already clears UpdateAvailable, but it preserves the pre-update
-            // SeededVersion/SeededHash — re-stamp them to the applied bundle so a later seed pass compares
-            // against what is now actually on disk (otherwise the stale hash would look "user-edited" and
-            // immediately re-flag UpdateAvailable on the next seed).
+            // WHY: SeededVersion/SeededHash must match the applied bundle so a later seed pass compares
+            // WHY: against the source now on disk instead of treating it as a user edit.
             if (_store.TryLoad(modId, out string savedSource, out LuaModManifest saved) && saved != null)
             {
                 saved.SeededVersion =

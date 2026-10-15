@@ -1,25 +1,43 @@
 # CoreAI Mirror transport
 
 Puts a CoreAI Rbx world on a Mirror network transport, so `RemoteEvent` and `RemoteFunction` go
-through Mirror's real message handlers and batcher instead of looping back in one process. The tests
-drive that path over an in-memory transport; no two-process run over a real socket has been made yet
-(see `TODO.md`).
+through Mirror's real message handlers and batcher instead of looping back in one process. The
+package's tests drive that path through Mirror over an in-memory transport; it has not been run
+between two processes over a real socket.
 
-This package compiles only when [Mirror](https://github.com/MirrorNetworking/Mirror) is installed:
-its assembly is constrained to the `MIRROR` define, and Mirror itself is never vendored here. With
-no Mirror in the project the package is simply absent, which is intended.
+`com.neoxider.coreaimirror` depends on `com.neoxider.coreai` and `com.neoxider.coreaimods` of the same
+release; install steps are in [INSTALL.md](../../INSTALL.md). Mirror itself is not part of CoreAI or of
+this package: install it yourself, from the Unity Asset Store or from its
+[GitHub releases](https://github.com/MirrorNetworking/Mirror/releases). Importing Mirror adds the
+`MIRROR` scripting define. Both assemblies here, `CoreAI.Net.Mirror` and its EditMode tests
+`CoreAI.Net.Mirror.Tests`, list `MIRROR` in their `defineConstraints` (the tests also
+`UNITY_INCLUDE_TESTS`), so with no Mirror in the project Unity leaves them out of the build and the
+world stays on the in-process loopback bridge.
 
 ## What it is, and what it is not
 
 It is the transport and the admission half of multiplayer: connections, actor admission, request
 timeouts, packet and byte counters, a server clock offset, and the Roblox-facing remote surface a mod
 author actually calls. **World-state replication does not cross the wire.** The replication types
-exist and are tested, but nothing joins them to this transport yet, so remotes replicate and world
-state does not. Read the transport-gap section of `TODO.md` before planning around this.
+exist and are tested, but nothing joins them to this transport, so remotes replicate and world
+state does not. World-state replication is planned as MVP6 in
+[ROBLOX_API_ROADMAP.md](../../Docs/CoreAIMods/ROBLOX_API_ROADMAP.md).
+
+Only Mirror messages cross the wire; no `NetworkBehaviour` or `SyncVar` is exposed to mods. The
+messages are `CoreAiAdmissionRequestMessage` (the host-defined `Credential` bytes and nothing else),
+`CoreAiAdmissionResponseMessage` (`Admitted`, `Reason`, `ActorId`), `CoreAiRemoteEventMessage`,
+`CoreAiRemoteRequestMessage` and `CoreAiRemoteResponseMessage` (the remotes), and
+`CoreAiClientReadyMessage`, `CoreAiServerClockMessage` and `CoreAiDisconnectNoticeMessage` (see
+Sessions). No envelope carries a sender actor id: the server fills the sender from its own connection
+map, so a client cannot speak as another actor by editing a packet. A refusal's response carries only
+the reason `not admitted` and an empty `ActorId`; the detailed reason goes only to the host, through
+the `log` callback given to `CoreAiMirrorAuthenticator.Configure`.
 
 ## Setup
 
-1. Add a `CoreAiMirrorNetworkBridgeProvider` to a GameObject in the scene.
+1. Add a `CoreAiMirrorNetworkBridgeProvider` to a GameObject in the scene (**Add Component > CoreAI >
+   CoreAI Mirror Network Bridge Provider**), and a `CoreAiMirrorAuthenticator` (**CoreAI > CoreAI Mirror
+   Authenticator**) as the authenticator of your `NetworkManager`.
 2. Set **Role** to `Server` for a dedicated server or a host, `Client` for a joining client. This is
    an explicit choice rather than something read from Mirror, because the bridge is built while the
    mod scope is still in `Awake`, before Mirror has started and before there is any live state to
@@ -27,12 +45,17 @@ state does not. Read the transport-gap section of `TODO.md` before planning arou
    Mirror later starts as the other side the provider says so once instead of running as the wrong
    side.
 3. Assign the provider's **Authenticator** to the same `CoreAiMirrorAuthenticator` your
-   `NetworkManager` uses. On a server this is what turns a connection into an admitted actor. Its
-   **Admission Timeout Seconds** (default 10) is how long a new connection may stay silent before it
-   is dropped: Mirror has no authentication timeout of its own.
-4. Assign the provider to the **Network Bridge Provider** field (under the *Network transport* header) on your `CoreAiModsLifetimeScope`. Leaving
-   that field empty is the default and keeps the world on the in-process null bridge - no remote
-   peers, remotes loop back locally.
+   `NetworkManager` uses. On a server this is what turns a connection into an admitted actor; on a
+   client it tells the bridge which actor the server admitted, and without it every server-to-client
+   remote is dropped as unadmitted. Its **Admission Timeout Seconds** (default 10) is how long a new
+   connection may stay silent before it is dropped: Mirror has no authentication timeout of its own.
+   On a server, call `authenticator.Configure(admissionProvider, worldId, log)` with your
+   `IActorAdmissionProvider` before `StartServer` (`log` is optional and receives the refusal
+   reasons); with no provider every connection is refused, there is no anonymous path. On a client,
+   `ConfigureClientCredential` supplies the credential bytes the admission request sends.
+4. Assign the provider to the **Network Bridge Provider** field (under the *Network transport*
+   header) on your `CoreAiModsLifetimeScope`. Leaving that field empty is the default and keeps the
+   world on the in-process null bridge - no remote peers, remotes loop back locally.
 5. From your own composition, once the world exists, hand it to the provider. This stays the game's
    responsibility because the world does not exist when the bridge is built:
 
@@ -83,11 +106,11 @@ provider, with the world's exception in the log; nothing could ever admit that c
 must not stay connected as an authenticated nobody. The drop happens on the provider's next `Update`
 (or when the provider is disabled), after Mirror has finished accepting the connection; until then
 every packet from that connection is dropped as unadmitted. Keep the provider enabled: a disabled
-provider runs no `Update`, so a drop owed after it was disabled waits until it is enabled again. And `Player:Kick()` ends the kicked client's
-connection through the bridge: the client is sent the kick's message first, the session host releases
-the session at once, the socket closes on a later frame (see Sessions), and that client's next remote
-is dropped as unadmitted instead of re-creating the player. That is the Mirror
-bridge. On the in-process loopback (`NullNetworkBridge`, what an empty provider field gives you) a
+provider runs no `Update`, so a drop owed after it was disabled waits until it is enabled again. And
+`Player:Kick()` ends the kicked client's connection through the bridge: the client is sent the kick's
+message first, the session host releases the session at once, the socket closes on a later frame
+(see Sessions), and that client's next remote is dropped as unadmitted instead of re-creating the
+player. That is the Mirror bridge. On the in-process loopback (`NullNetworkBridge`, what an empty provider field gives you) a
 kick is the Player teardown only: there is no connection to end and the actor stays registered, so
 the actor's next use - a remote, a `Players.LocalPlayer` read, a new mod context - is a fresh join,
 and the Player is re-created with `PlayerAdded` firing again.
@@ -106,8 +129,8 @@ and the Player is re-created with `PlayerAdded` firing again.
   old connection's late disconnect cannot remove the new session.
 - **Actors local to the server are served in process.** A server never sends a client-bound or
   server-bound envelope to itself over the wire: a remote from or to an actor registered in this
-  process is delivered in process (`LocalDeliveries`), so `InvokeServer` from a host-local actor does
-  not wait 30 seconds and `FireClient`/`FireAllClients`/`InvokeClient` reach local actors.
+  process is delivered in process (`LocalDeliveries`), so `InvokeServer` from a host-local actor is
+  answered at once and `FireClient`/`FireAllClients`/`InvokeClient` reach local actors.
 - **Payload limits are per channel.** A reliable `RemoteEvent` and both `RemoteFunction` directions
   carry up to 64 KiB (`CodecPayloadCeilingBytes`, or less when the transport's reliable channel cannot
   carry that in one message); an `UnreliableRemoteEvent` carries up to 1,000 bytes, Roblox's own
@@ -119,10 +142,10 @@ and the Player is re-created with `PlayerAdded` firing again.
   stays; a server remote addressed to nobody is counted (`UnroutablePacketsDropped`); a `RemoteFunction`
   answer for a connection that is gone or now speaks for someone else is dropped
   (`StaleResponsesDropped`); a client's pending requests fail at once on a disconnect or `Dispose`
-  instead of waiting out their timeout. A client does not need Mirror authentication for its handlers, so a remote that overtakes
-  the admission response is dropped as unadmitted rather than disconnecting the joining client.
-  kcp2k's negative connection ids are real connections. A malformed client-to-server payload is
-  dropped and counted by the world too, never thrown into the transport.
+  instead of waiting out their timeout. A client's handlers do not require Mirror authentication, so
+  a remote that overtakes the admission response is dropped as unadmitted rather than disconnecting
+  the joining client. kcp2k's negative connection ids are real connections. A malformed
+  client-to-server payload is dropped and counted by the world too, never thrown into the transport.
 - **A client puts nothing on the wire before its admission.** The server's handlers require Mirror
   authentication, and an unreliable remote queued with the admission request would overtake it and
   make Mirror disconnect the joining client. So until the server has admitted it, a client drops every
@@ -131,7 +154,7 @@ and the Player is re-created with `PlayerAdded` firing again.
   `InvokeServer` requests are held in order instead — at most 256 messages and 256 KiB
   (`MaxHeldSendsUntilAdmitted`, `MaxHeldBytesUntilAdmitted`), charged to the budget when held and
   counted in `SendsHeldUntilAdmitted` — and sent right after the admission is bound, before the
-  readiness acknowledgement, so a script that fires a remote the moment it starts no longer loses it.
+  readiness acknowledgement, so a script that fires a remote the moment it starts does not lose it.
   One past the bound is dropped uncharged, counted in `AdmissionHoldOverflowDrops` and said once, and an
   `InvokeServer` among them fails at once. A held `InvokeServer`'s 30 s timeout runs while it is held.
   A connection that closes before its admission drops the hold (`UnsentPacketsDropped`) and fails every
@@ -173,13 +196,14 @@ and the Player is re-created with `PlayerAdded` firing again.
   `GetServerTimeNow` holds with the server's instead of running on at half speed. `ServerClockOffsetSeconds`
   is then "the server's Unix time now minus this machine's wall-clock Unix time now" — zero on a server, and
   zero on a client until the first anchor, which `IsServerClockSynchronized` tells apart from "the clocks
-  agree"; at the first anchor it steps to the whole skew between the two machines. It no longer reads
-  Mirror's `NetworkTime.offset`, which compares the two processes' uptimes rather than their clocks (a
-  client of a server that had run for a day read the server's time a day off). The wall clock is the
-  bridge's `wallClock` constructor argument: the scene provider uses the system clock, which is what a world
+  agree"; at the first anchor it steps to the whole skew between the two machines. It does not use
+  Mirror's `NetworkTime.offset`, which compares the two processes' uptimes rather than their wall
+  clocks. The wall clock is the bridge's `wallClock` constructor argument: the scene provider uses
+  the system clock, which is what a world
   composed without its own `IRbxClockSource` reads; a composition whose world reads another clock builds its
   bridge with that same clock. The world side re-bases `workspace:GetServerTimeNow()` at the first
-  synchronization and slews backward corrections afterwards (`Assets/CoreAI/Docs/RBX_API.md`, "Clocks").
+  synchronization and slews backward corrections afterwards ([RBX_API.md](../CoreAI/Docs/RBX_API.md),
+  "Clocks").
 - **A kicked or superseded client is told why.** Before the server closes a connection for a kick or
   for a newer session of the same player, it sends `CoreAiDisconnectNoticeMessage`
   (`CoreAiDisconnectNoticeKind.Kicked` with the kick's message — `Player:Kick(message)` passes its text
@@ -196,9 +220,7 @@ and the Player is re-created with `PlayerAdded` firing again.
 - **A world that ends a player itself ends the connection.** A host's own
   `DisconnectActor` — outside a kick or a transport drop — is treated like a kick: the client is sent
   a `Kicked` notice, the session is forgotten at once (its identity with the actor's last session),
-  and the transport drops the connection on a later frame's `Pump` (`WorldReleasedConnections`). Before, the connection stayed
-  authenticated to Mirror and bound to nobody, holding its slot while every packet from it was
-  dropped.
+  and the transport drops the connection on a later frame's `Pump` (`WorldReleasedConnections`).
 - **A client's own kick disconnects it.** `Players.LocalPlayer:Kick()` on a client makes the client
   bridge disconnect from the server, as Roblox does (`SelfKicks`); a client has no authority over any
   other actor's connection.
@@ -216,8 +238,8 @@ resolves its actor id from its `IActorIdentityProvider`; the server decides admi
 `IActorAdmissionProvider`. Nothing links the two. If they disagree, `FireClient` reaches a signal no
 local script is listening on. The bridge logs that mismatch once, naming both ids, rather than
 failing silently - but only once the local world has registered at least one actor of its own; before
-that there is nothing to compare against and the mismatch is silent. With no identity provider registered at all a client falls back to the local-host
-default, which will not match.
+that there is nothing to compare against and the mismatch is silent. With no identity provider
+registered at all a client falls back to the local-host default, which will not match.
 
 ## Known limits
 
@@ -227,7 +249,7 @@ default, which will not match.
   client connection is refused as a world player, loudly (a log line, counted in
   `CoreAiMirrorSessionHost.HostModeConnectionsRefused`), and left to Mirror. Actors registered in the
   server process are served in process (see Sessions), which is not the same as a local client. Host
-  mode is the MVP5 rung of the ladder (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §MVP5).
+  mode is planned as MVP5 in [ROBLOX_API_ROADMAP.md](../../Docs/CoreAIMods/ROBLOX_API_ROADMAP.md).
 - **A refused client never learns it was refused.** The refusal is queued and then the connection is
   dropped synchronously, which discards the unsent batch, so the client cannot tell "refused" from
   "server vanished". The refusal itself is sound: the connection is dropped and no actor is created.
@@ -238,23 +260,18 @@ default, which will not match.
   is dropped, counted and logged once per sender); what those handlers cause — `task.*` threads, the
   signal handlers their writes start — is held to a second budget of 128 threads per sender and 192
   for all senders, whose signal listeners wait in a bounded queue instead of being dropped
-  (`Assets/CoreAI/Docs/RBX_API.md`); and repeated receive warnings are logged once per sender and kind
-  every 10 s. Decoding and dispatch themselves are still unmetered.
-- **Server and client must run the same CoreAI version.** Adding a field to the admission response
-  already broke older peers; the readiness, clock and notice messages are new too, and the clock
-  anchor gained `HeldAheadOfWallSeconds`. A missing message fails loudly — provided Mirror's
-  `exceptionsDisconnect` is on, its default: an older server has no handler for
+  ([RBX_API.md](../CoreAI/Docs/RBX_API.md)); and repeated receive warnings are logged once per sender
+  and kind every 10 s. Decoding and dispatch themselves are unmetered.
+- **Server and client must run the same CoreAI version.** A missing message fails loudly — provided
+  Mirror's `exceptionsDisconnect` is on, its default: an older server has no handler for
   `CoreAiClientReadyMessage`, so Mirror disconnects a newer client right after admission with an error
   in the server log; an older client never acknowledges readiness, so a newer server drops it at the
   readiness deadline with a log line naming the cause. A field added to a message is not detected: the
   older reader throws inside Mirror's handler, which disconnects only with `exceptionsDisconnect` on
   and otherwise logs and keeps the connection, one message lost. Nothing on the wire negotiates the
   version, and there is no compatibility fallback.
-- **Live Mirror sessions cannot be handed to a world loaded at runtime (MVP5, the old MVP11).** Until
-  session handoff exists, `RbxWorldRuntimeSessionController` refuses a world load — at request, at
-  confirmation and on a raw host load — with status `network_sessions_active` while the bridge lists
-  registered actors, and the live world is left unchanged; disconnect the clients or stop the server
-  first. The check is conservative: an actor registered for a mod context whose socket is gone counts
-  too.
-
-Each of these is tracked in `TODO.md`.
+- **Live Mirror sessions cannot be handed to a world loaded at runtime.**
+  `RbxWorldRuntimeSessionController` refuses a world load — at request, at confirmation and on a raw
+  host load — with status `network_sessions_active` while the bridge lists registered actors, and the
+  live world is left unchanged; disconnect the clients or stop the server first. The check is
+  conservative: an actor registered for a mod context whose socket is gone counts too.

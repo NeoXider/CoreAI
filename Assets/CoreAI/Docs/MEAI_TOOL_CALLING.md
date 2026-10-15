@@ -164,8 +164,7 @@ public Task<string> ExecuteAsync([Description("...")] string code, CancellationT
 ```
 
 `LuaTool` (`execute_lua`) and `LuaModsLlmTool` (`manage_mods`) do this; a host async delegate given
-to `DelegateLlmTool` / `AgentBuilder.WithTool` must do the same. Reproduced and re-verified in the
-browser on 2026-09-02 (`dev-docs/G11_RUN_RECORD_2026-09-02.md`).
+to `DelegateLlmTool` / `AgentBuilder.WithTool` must do the same.
 
 ### 4. MEAI pipeline
 
@@ -226,8 +225,9 @@ models the same explicit behavioral guidance that production integrations expect
 | `CoreAISettingsAsset.cs` | Unity host settings |
 | `WorldLlmTool.cs` | `world_command` (binds its own AIFunction over `ICoreAiWorldCommandExecutor`) |
 
-`MeaiOpenAiChatClient.cs` lives in **CoreAI.Core**, not in the Unity layer. It implements
-`Microsoft.Extensions.AI.IChatClient` on top of `IOpenAiHttpTransport`; the core can be used outside Unity.
+`MeaiOpenAiChatClient.cs` lives in **CoreAI.Core**, not in the Unity layer, and compiles when `COREAI_LLM`
+is defined (the portable DLL defines it). It implements `Microsoft.Extensions.AI.IChatClient` on top of
+`IOpenAiHttpTransport`; the core can be used outside Unity.
 LLMUnity starts a local llama.cpp endpoint, which the factory reaches with the same HTTP client.
 
 ## Creating a client and invoking tools
@@ -281,7 +281,7 @@ but the outgoing HTTP contains no `tools`, `tool_choice`, `parallel_tool_calls`,
 
 ## 🎯 Forced Tool Mode
 
-Sometimes the model “forgets” to call a tool even when it clearly should (e.g. the user asked for a list quiz and the LLM replies in text that it ran the test). `AiTaskRequest` and `LlmCompletionRequest` include `ForcedToolMode` (enum `LlmToolChoiceMode`) for **deterministic** tool-choice behavior per request — default is `Auto` (same as before).
+Sometimes the model “forgets” to call a tool even when it clearly should (e.g. the user asked for a list quiz and the LLM replies in text that it ran the test). `AiTaskRequest` and `LlmCompletionRequest` include `ForcedToolMode` (enum `LlmToolChoiceMode`) for **deterministic** tool-choice behavior per request — default is `Auto`.
 
 ### API
 
@@ -333,11 +333,9 @@ If `RequireSpecific` has no `RequiredToolName`, or the named tool has no bound `
 
 In `MeaiLlmClient.CompleteStreamingAsync`, forced mode applies **only on the first iteration** of the tool loop. After we feed the model the tool result, options are cloned with `ChatToolMode.Auto` via `CloneOptionsWithAutoToolMode` — otherwise the model would stay locked in an infinite tool-call loop (each round would be forced again).
 
-This matches how multi-step tool chains work in Claude Code / Cursor: the first tool call can be forced (if the app layer decides), later steps are up to the model.
-
 ### When to use
 
-- **`Auto` (default).** 95% of cases. In `ToolsAndChat`, the model usually picks tools well on its own.
+- **`Auto` (default).** Most cases. In `ToolsAndChat`, the model usually picks tools well on its own.
 - **`RequireAny`.** When you know deterministically that a tool is needed but not which one. E.g. an intent classifier detected “wants to test knowledge” — some interactive evaluation tool must run, not plain text.
 - **`RequireSpecific`.** Narrow integrations: rerun fixes, Lua repair, forcing a specific workflow. Use sparingly — forcing tool choice too often hurts dialogue naturalness.
 - **`None`.** Tools are registered for the role, but for this turn they must not run (e.g. post-tool reflection / summarization).

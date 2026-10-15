@@ -5,7 +5,7 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
 
 ## Layer map
 
-- **Domain (this assembly)** — `noEngineReferences: true`, references: none. Identity
+- **Domain (this assembly)** — `noEngineReferences: true`, references only `CoreAI.RbxApi.Datatypes`. Identity
   (`InstanceId` with the authority-bit partition, `InstanceIdAllocator`, `InstanceRecord`,
   `InstanceRegistry`), the Roblox `Instance` member core (`RbxInstance`, `RbxDataModel`),
   data-driven class ancestry (`ClassCatalog`), tags (`InstanceTagStore` — CollectionService
@@ -28,14 +28,14 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
   subscriptions.
 - Character signals are deferred. `CharacterRemoving` permits the outgoing model's tombstone
   identity reads (for example `Name`); it does not preserve the destroyed descendant tree.
-- The Unity composition attaches motors after the root part exists and steps them at
-  the scheduler's PreSimulation boundary, once per `Scheduler.Advance` alongside the
-  PreSimulation/Stepped signals. Every scheduler phase boundary routes to its matching
-  pump — PreAnimation, PreSimulation, PostSimulation, Heartbeat, InputProcessing,
-  PreRender — in scheduler order, with the render pair withheld where the topology
-  draws no frames. Anchored roots remain anchored. Hosts can supply an
-  `IRbxCharacterMotor` factory; headless worlds retain character health and state
-  without requiring Unity physics.
+- The Unity composition attaches motors after the root part exists and steps them once per
+  fixed step (`LuaModRuntimeTickDriver.FixedUpdate`, alongside world gravity), never from the
+  render-frame pump. Every scheduler phase boundary routes to its matching pump —
+  PreAnimation, PreSimulation, PostSimulation, Heartbeat, InputProcessing, PreRender — in
+  scheduler order, with the render pair withheld where the topology draws no frames. Anchored
+  roots remain anchored. Hosts can supply their own motors through
+  `IRbxCharacterMotorProvider` (`Docs/CoreAIMods/CHARACTER_MOTOR_BRIDGE.md`); headless worlds
+  retain character health and state without requiring Unity physics.
 - A character whose `Humanoid` dies is reloaded `Players.RespawnTime` seconds later while
   `CharacterAutoLoads` is still true (scheduled by the Lua bindings layer, not by this assembly).
 - This character slice does not implement avatar rigs, animation, or appearance loading. The network
@@ -69,7 +69,7 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
   per-tag and per-attribute signal tables (`KeyedSignalTable`) hold a connected signal strongly and,
   past 64 keys, a signal without connections only weakly, so asking for many distinct keys leaves
   nothing behind while a signal a script still holds keeps firing (C# code that keeps neither the
-  signal nor its connection is the uncovered case, see `TODO.md`).
+  signal nor its connection is not covered).
 - Attribute names: `AttributeContract.ValidateNewName` (ASCII letters and digits plus `.`, `-`, `/`,
   `_`) guards a name a script creates; `ValidateName` (letters and digits of any script) guards
   restore, replication and reads, so a world saved with an older non-ASCII name still loads.
@@ -81,7 +81,6 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
   `cloning Part`, `TweenService:Create`, `restoring Part`, `creating Part`); any other text fails it
   with an `InvalidOperationException` carrying exactly that text. The mod runtime's per-actor
   instance quota is one such check and refuses with `BUDGET_EXCEEDED` and a `Destroy()` hint.
-- `RbxError` lives in this assembly for now; it moves to a shared RobloxApi contracts assembly
-  when the Datatypes slice needs it.
+- `RbxError` lives in this assembly.
 - Instances are created only through `InstanceRegistry` (no public `Register(instance)`)—
   identity can therefore never be missing or duplicated.

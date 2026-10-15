@@ -7,8 +7,8 @@ Open `MiniRpgModsDemo.unity`.
 
 ## What Is in the Scene
 
-- A compact first-person environment driven by `Neo.Tools.Move.PlayerController3DPhysics`
-  (`Horizontal`/`Vertical` axes and mouse look, `Jump`, **Left Shift** to run).
+- A compact first-person environment driven by `Neo.Tools.PlayerController3DPhysics` from the
+  `com.neoxider.tools` package (`Horizontal`/`Vertical` axes and mouse look, `Jump`, **Left Shift** to run).
 - The UI Toolkit **CoreAI Hub** (`CoreAiHubWindow` + `CoreAiHubDemo` + `CoreAiModsHubBinder`) with the
   built-in Chat, Settings, Statistics and live Mods pages.
 - The mod manager (**F9**, a uGUI `CoreAiDemoPanel` from `LiveMechanicsModsChatPersistenceController`)
@@ -31,4 +31,4 @@ Open `MiniRpgModsDemo.unity`.
 
 > Known gap: the scene still carries `ChatPromptButtonsController`, but nothing renders it any more —
 > prompt templates moved into the chat's own example menu (`CoreAiChatPanel.EnableExamplePrompts`), which
-> this scene does not enable. Type your requests into chat directly until the scene is rewired.
+> this scene does not enable. Type your requests into the chat directly.

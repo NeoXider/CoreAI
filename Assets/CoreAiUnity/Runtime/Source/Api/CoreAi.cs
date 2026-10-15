@@ -1,4 +1,4 @@
-﻿#nullable enable
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -823,14 +823,21 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Cancels queued/in-flight orchestrator work for <paramref name="cancellationScope"/> in the current
-        /// identity partition of every matching role. The scope may be a role id or a domain scope.
+        /// Cancels queued and running work for <paramref name="roleId"/> across actor sessions.
+        /// Orchestrators without role cancellation use their legacy scope cancellation capability.
         /// </summary>
-        public static void StopAgent(string cancellationScope)
+        public static void StopAgent(string roleId)
         {
             if (TryGetOrchestrator(out IAiOrchestrationService? orchestrator) && orchestrator != null)
             {
-                orchestrator.CancelTasks(cancellationScope);
+                if (orchestrator is IRoleAiTaskCancellation roleCancellation)
+                {
+                    roleCancellation.CancelRoleTasks(roleId);
+                }
+                else
+                {
+                    orchestrator.CancelTasks(roleId);
+                }
             }
         }
 

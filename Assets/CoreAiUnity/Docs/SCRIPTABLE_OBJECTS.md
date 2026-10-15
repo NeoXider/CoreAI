@@ -13,17 +13,18 @@ CoreAI uses **Options + ScriptableObject wrapper** for Unity-authored settings.
 
 ## Framework ScriptableObjects
 
-| Asset | Layer | Runtime contract | Notes |
-| --- | --- | --- | --- |
-| `CoreAiChatConfig` | CoreAiUnity | `ICoreAiChatOptions`, optional `ICoreAiChatTextOptions`, `CoreAiChatOptions`, `ToOptions()`, `ApplyOptions(...)` | Unity-only view fields such as `Sprite` and `KeyCode` stay on the asset. The text override block controls send/stop/clear/collapse/open labels and tooltips, including default `SendButtonText = ">"`. `CoreAiChatPanel.SetRuntimeOptions(...)` allows tests/bootstrap without SO mutation. |
-| `CoreAISettingsAsset` | CoreAiUnity | `ICoreAISettings`, `CoreAISettingsOptions`, `ToOptions()`, `ApplyOptions(...)` | Singleton/resource loading remains Unity-only. Portable host settings live in CoreAI. |
-| `OpenAiHttpLlmSettings` | CoreAiUnity | `IOpenAiHttpSettings`, `OpenAiHttpOptions`, `ToOptions()`, `ApplyOptions(...)` | HTTP clients consume `IOpenAiHttpSettings`; the asset is an Inspector profile. |
-| `GameLogSettingsAsset` | CoreAiUnity | `IGameLogSettings`, optional `IGameLogFormattingSettings`, `GameLogSettingsOptions`, `ToOptions()`, `ApplyOptions(...)` | `GameLogFeature`, `GameLogLevel`, and the two prefix toggles are portable. The asset is authoring-only: the container copies it into `GameLogFilter` while building, and the game filters/formats against that runtime copy — so play-mode changes never write back into the `.asset`. Existing `IGameLogSettings` implementations need no new members and retain both prefixes. |
-| `AiPermissionsAsset` | CoreAiUnity | `IAiPermissions`, `AiPermissionsOptions`, `ToOptions()`, `ApplyOptions(...)` | Dashboard/runtime code can use the interface/options. |
-| `LlmRoutingManifest` | CoreAiUnity | `LlmRouteTable`, `ToRouteTable()`, `ToOptions()` | Manifest stays Unity authoring storage. Runtime routing uses the portable route table. Backend construction may still use Unity profile entries in composition. |
-| `AgentPromptsManifest` | CoreAiUnity | `AgentPromptsDefinition`, `ToDefinition()` | Reads `TextAsset.text` into plain strings. Prompt providers consume the snapshot. |
-| `SkillSetAsset` | CoreAiUnity | `SkillSetDefinition`, `ToSkillDefinition()`, `ApplyDefinition(...)` | `TextAsset`/inline instructions become a portable skill definition; tools are supplied by code. Extra instruction files in `additionalInstructionAssets` are joined in order under `## filename` headings. `ApplyDefinition(...)` lets editor/bootstrap code create or update skill assets without private-field reflection. |
-| `CoreAiPrefabRegistryAsset` | CoreAiUnity | `ICoreAiPrefabRegistry` | Not portable because it stores `GameObject` prefab references. Consumers depend on the Unity-side interface. |
+| Asset | Create menu (`Assets → Create → …`) | Layer | Runtime contract | Notes |
+| --- | --- | --- | --- | --- |
+| `CoreAiChatConfig` | `CoreAI/Chat Config` | CoreAiUnity | `ICoreAiChatOptions`, optional `ICoreAiChatTextOptions`, `CoreAiChatOptions`, `ToOptions()`, `ApplyOptions(...)` | Unity-only view fields such as `Sprite` and `KeyCode` stay on the asset. The text override block controls send/stop/clear/collapse/open labels and tooltips, including default `SendButtonText = ">"`. `CoreAiChatPanel.SetRuntimeOptions(...)` allows tests/bootstrap without SO mutation. |
+| `CoreAISettingsAsset` | `CoreAI/CoreAI Settings` | CoreAiUnity | `ICoreAISettings`, `CoreAISettingsOptions`, `ToOptions()`, `ApplyOptions(...)` | Singleton/resource loading (`Resources/CoreAISettings`) remains Unity-only. Portable host settings live in CoreAI. |
+| `OpenAiHttpLlmSettings` | `CoreAI/LLM/OpenAI-compatible HTTP` | CoreAiUnity | `IOpenAiHttpSettings`, `OpenAiHttpOptions`, `ToOptions()`, `ApplyOptions(...)` | HTTP clients consume `IOpenAiHttpSettings`; the asset is an Inspector profile. |
+| `GameLogSettingsAsset` | `CoreAI/Logging/Game Log Settings` | CoreAiUnity | `IGameLogSettings`, optional `IGameLogFormattingSettings`, `GameLogSettingsOptions`, `ToOptions()`, `ApplyOptions(...)` | `GameLogFeature`, `GameLogLevel`, and the two prefix toggles are portable. The asset is authoring-only: the container copies it into `GameLogFilter` while building, and the game filters/formats against that runtime copy — so play-mode changes never write back into the `.asset`. Existing `IGameLogSettings` implementations need no new members and retain both prefixes. |
+| `AiPermissionsAsset` | `CoreAI/Ai Permissions` | CoreAiUnity | `IAiPermissions`, `AiPermissionsOptions`, `ToOptions()`, `ApplyOptions(...)` | Dashboard/runtime code can use the interface/options. |
+| `LlmRoutingManifest` | `CoreAI/LLM/Llm Routing Manifest` | CoreAiUnity | `LlmRouteTable`, `ToRouteTable()`, `ToOptions()` | Manifest stays Unity authoring storage. Runtime routing uses the portable route table. Backend construction may still use Unity profile entries in composition. |
+| `AgentPromptsManifest` | `CoreAI/Agent Prompts Manifest` | CoreAiUnity | `AgentPromptsDefinition`, `ToDefinition()` | Reads `TextAsset.text` into plain strings. Prompt providers consume the snapshot. |
+| `SkillSetAsset` | `CoreAI/Skill Set Asset` | CoreAiUnity | `SkillSetDefinition`, `ToSkillDefinition()`, `ApplyDefinition(...)` | `TextAsset`/inline instructions become a portable skill definition; tools are supplied by code. Extra instruction files in `additionalInstructionAssets` are joined in order under `## filename` headings. `ApplyDefinition(...)` lets editor/bootstrap code create or update skill assets without private-field reflection. |
+| `CoreAiPrefabRegistryAsset` | `CoreAI/World/Prefab Registry` | CoreAiUnity | `ICoreAiPrefabRegistry`, `ICoreAiPrefabCatalog` | Not portable because it stores `GameObject` prefab references. Consumers depend on the Unity-side interfaces. |
+| `RbxMaterialTextureCatalog` | `CoreAI/Rbx Material Texture Catalog` | CoreAIMods | `Entries`, `ReplaceEntries(...)` | Texture sets for Rbx material surfaces. Stores `Texture` references, so it stays Unity-only. `RbxTextureMaterialProvider` loads the packaged catalog from `Resources/CoreAIRbxTextures/RbxMaterialTextureCatalog` and an optional project override from `Resources/CoreAIRbxTextureCatalogOverride`. |
 
 ## How to use from runtime code
 
@@ -63,7 +64,7 @@ LlmRouteTable routes = routingManifest.ToRouteTable();
 Use plain options/classes for mutable test setup:
 
 ```csharp
-var options = new CoreAiChatOptions
+CoreAiChatOptions options = new CoreAiChatOptions
 {
     RoleId = "SmartChat",
     ShowToolCallsInChat = false
@@ -89,7 +90,7 @@ Game-specific SOs are still valid. Keep the same rule:
 - runtime options/snapshot for systems and tests;
 - adapter at composition boundary.
 
-Example: `ItemConfigAsset : ScriptableObject` can expose `ToItemConfig()` returning a plain `ItemConfig` used by game logic and tests.
+For example, a game's own `ItemConfigAsset : ScriptableObject` can expose `ToItemConfig()` returning a plain `ItemConfig` class that game logic and tests use (these are your types, not CoreAI types).
 
 ## Loading and bootstrap
 

@@ -82,7 +82,7 @@ script wrote:
 write `dropped_primary_part_id` as `"0"`. No `format_version` bump was needed: such entries only
 appear in worlds the old writer could not save at all. `Workspace.Gravity` assigned by a script is
 not captured: the package's gravity comes from the host's `RbxWorldSettings`, so a script's change
-is lost on the next save (tracked in `TODO.md`).
+is lost on the next save.
 
 `Player` nodes, BaseParts without readable property state, mod-owned nodes injected into a package,
 mods without source, non-finite or out-of-range values in a package being read, invalid origin tags,
@@ -113,9 +113,9 @@ its DataModel — and no host scope outlives the restore.
 
 **ACL floor.** A session composed with a world ACL version refuses a package that carries no
 `world_acl_version` (a legacy package) before any side effect: no safety autosave, no staging, and a
-`load_world`/`load_autosave` request is refused before the player is asked. Loading such a package
-used to switch off every cross-actor check and write the downgrade into every later save. A
-composition that must open legacy worlds is composed with `worldAclVersion: null`.
+`load_world`/`load_autosave` request is refused before the player is asked, because loading it would
+switch off every cross-actor check and write the downgrade into every later save. A composition that
+must open legacy worlds is composed with `worldAclVersion: null`.
 
 Version 1 limits compressed packages to 64 MiB, each expanded entry to 16 MiB, all expanded entries to
 128 MiB, ZIP entries to 2,048, mods to 256, instances to 100,000, hierarchy depth to 2,048, and
@@ -123,7 +123,7 @@ attributes/tags to 256 each per instance. The per-instance limits are also enfor
 script cannot build a world that cannot be saved: a `SetAttribute` that would add a 257th attribute,
 an `AddTag` that would add a 257th tag, and a `Parent` assignment that would put an instance deeper
 than 2,048 levels (`InstanceTreeSerializer.MaximumSnapshotDepth`) raise `BAD_ARGUMENT`. The byte
-limits are not enforced at the source (see `TODO.md`).
+limits are not enforced at the source.
 
 The mod limit holds at the source too. A live world stores at most 256 distinct mod sources — an
 unloaded mod keeps its source, `manage_mods` action `forget` removes it — so a load that would add a
@@ -131,16 +131,14 @@ unloaded mod keeps its source, `manage_mods` action `forget` removes it — so a
 whose source is already stored is never refused. `FileLuaModSourceStore` refuses a 257th stored id and
 an exact replacement set of more than 256 sources the same way: its `Save` throws the refusal. The
 session and the store count by one rule, `ILuaModSourceAdmission.CanAdmit` (public, implemented by the
-file store and the session store): the session used to count the manifests the store could list while the
-store counted folders holding a manifest file, so one unreadable manifest let the session admit a mod
-whose source the store then refused to keep. A load whose source the store did not keep anyway is undone
+file store and the session store), so an unreadable manifest cannot let the session admit a mod whose
+source the store then refuses to keep. A load whose source the store did not keep anyway is undone
 as a failed load — the formula it displaced is put back and no revision is written — and the tool result
 says why. A world that is already past the limit cannot be captured
 (`RbxWorldPackageFormatLimitException`), so `forget` — and only `forget`; an `unload` keeps the source
 and gains nothing — runs without its pre-mutation backup until the world is under the limit again,
 while every other gated mutation stays refused. A bare `LuaCsModRuntime` composition without the world
-session gets only the store's refusal, which is logged: its 257th mod runs without a persisted source
-(see `TODO.md`).
+session gets only the store's refusal, which is logged: its 257th mod runs without a persisted source.
 
 The writer never throws on a lone surrogate either: text that did not come through capture (mod
 manifests, settings, a hand-built payload) has it replaced with U+FFFD before the strict UTF-8 encode;
@@ -159,9 +157,8 @@ exact UTF-8 expanded size, so it cannot emit a package its reader rejects on agg
 DTO materialization still precedes the 100,000-instance semantic check; hostile 16 MiB `world.json`
 browser peak memory remains a residual risk.
 
-The current world-owned projection runs after the generic instance snapshot has materialized the live
-tree. A future ownership-aware capture traversal must skip mod-ephemeral roots before they consume
-snapshot depth, count, and allocation budgets.
+The world-owned projection runs after the generic instance snapshot has materialized the live tree,
+so mod-ephemeral subtrees still count toward the snapshot's depth, count and allocation budgets.
 
 Codec validation prevents corrupt input from reaching adapters, but arbitrary external binders and
 sinks are not transactional. Production restore must construct a disposable fresh world or provide
@@ -182,10 +179,10 @@ exactly those characters, and `load_autosave` answers `read_failed` for any fail
 `ArgumentException` for a name that breaks these rules. A store keeps at most 64 manual slots and
 256 MiB of manual-slot bytes (`DefaultMaximumManualSlots`, `DefaultMaximumManualSlotBytes`; the
 constructor parameters `maximumManualSlots` and `maximumManualSlotBytes` change them); a save past
-either limit writes nothing and `save_world` returns it as an ordinary failed result. No tool deletes
-a manual slot, so a store at its cap stays full until the player removes files under
-`persistentDataPath/CoreAI/Saves/Manual` by hand, which a WebGL player cannot do (a Hub delete surface
-is tracked in `TODO.md`). When a store opens it deletes the temporary files a crash left behind — only
+either limit writes nothing and `save_world` returns it as an ordinary failed result. No tool or Hub
+page deletes a manual slot, so a store at its cap stays full until the player removes files under
+`persistentDataPath/CoreAI/Saves/Manual` by hand, which a WebGL player cannot do. When a store opens it
+deletes the temporary files a crash left behind — only
 names of exactly the shape `<entry>.<32 lowercase hex>.tmp` in the manual, autosave and startup
 directories. Autosaves
 use timestamp/sequence/trigger names and rotate only after the new file's persistence callback
@@ -240,8 +237,7 @@ The text count covers every string the encoding writes: names, ledger metadata, 
 (`StringValue` text included), Humanoid state, attributes, tags, mod sources and manifests, and
 material names. A WebGL read checks only the 4 MiB byte size: the instance, item and text budget holds
 for writes, so a package another build wrote within the format limits can still cost a WebGL reader
-decode work beyond that budget. These are WebGL execution limits, not format limits. Browser timing
-for packages within that budget still needs the real build interaction gate. So that a script cannot
+decode work beyond that budget. These are WebGL execution limits, not format limits. So that a script cannot
 grow a world the pre-mutation autosave can no longer write, a WebGL player's Lua runtime refuses
 instance registrations past **4,032** charged instances
 (`LuaCsModRuntime.WebGlEmergencyMaxRegisteredInstances` = the 4,096 save budget minus a 64-instance
@@ -255,12 +251,10 @@ The byte and text budgets are not bounded at the source.
 The durability mechanics (the `false`-is-failure rule, rollback, and the startup selection below) are
 covered by deterministic reload-model tests, and
 `FileStores_WithoutInjectedHook_DefaultToCoreAiWebGlPersistenceSyncAsync` pins that both file stores
-default to `CoreAiWebGlPersistence.SyncAsync`. The real-browser smoke — a WebGL build that saves,
-reloads the page and proves the bytes and the startup selection survive — is still open (an MVP3
-follow-up in `TODO.md`). Production
-composition injects one shared W3.4 gate into both the initial/replacement `execute_lua` stacks and
-the production `manage_mods` tool. The declared mutating actions of both tool contracts are covered;
-the full Unity EditMode gate ran green on 2026-09-25 (see "Acceptance status (MVP3)").
+default to `CoreAiWebGlPersistence.SyncAsync`. No real-browser test yet saves, reloads the page and
+checks that the bytes and the startup selection survive. Production composition injects one shared
+gate into both the initial/replacement `execute_lua` stacks and the production `manage_mods` tool,
+and the declared mutating actions of both tool contracts are covered.
 
 ### Startup selection (the world that opens on the next start)
 
@@ -285,9 +279,8 @@ selection.
 
 While the selected world stays live, the selection follows it: the session records the world as it is
 now as a new create-once startup entry — tree and exact mod sources from one capture — so the changes
-made after the confirmation reopen too; before, the entry stayed the package confirmed at load time, and
-mods whose sources lived only in the session's source version were gone after a restart. What triggers
-a record (`RbxWorldRuntimeSessionController`, `Infrastructure/RbxWorldPackageContracts.cs`):
+made after the confirmation reopen too. What triggers a record (`RbxWorldRuntimeSessionController`,
+`Infrastructure/RbxWorldPackageContracts.cs`):
 
 - **A change to the mod sources is recorded at once**, whoever made it. A gated call (`execute_lua`, a
   mutating `manage_mods` action) records it while the gate is still held; a write to the session's
@@ -298,14 +291,12 @@ a record (`RbxWorldRuntimeSessionController`, `Infrastructure/RbxWorldPackageCon
   `StartupRefreshInterval` (5 s by default; `TimeSpan.Zero` records every change at once). The first
   change after a quiet interval is recorded at once; a change inside the interval is recorded by the
   frame pump once it has passed, together with every change made meanwhile. A change made within the
-  interval before the process ends is not recorded (`TODO.md`). Each record is a whole package written,
-  synced and pruned while the gate is held — on WebGL up to 4 MB handed to the browser — which is why
-  an AI building in many small calls no longer writes one per call.
+  interval before the process ends is not recorded. Each record is a whole package written, synced and
+  pruned while the gate is held — on WebGL up to 4 MB handed to the browser — which is why an AI
+  building in many small calls does not write one per call.
 - **Nothing else is.** A call that changed neither — a read-only call, one that only moved parts through
   physics or moved the camera, or one that changed only the mods' own instances, which no entry holds —
-  writes nothing, and an entry whose content equals the newest one is not written again. (Before, the
-  refresh compared a digest of a whole capture, camera and part poses included, so in a live world every
-  gated call wrote an entry.)
+  writes nothing, and an entry whose content equals the newest one is not written again.
 - **A world the startup restore would refuse is not recorded.** The refresh runs the restore's own checks
   first (an active `Full`-capability mod, an ACL downgrade): such a world keeps the previous entry, and
   the caller is told — a `manage_mods` result carries a `startup_warning` field, `execute_lua` appends
@@ -345,8 +336,8 @@ completion. No world scale or camera state changes before that
 durability result. `Stage -> Rbx/Lua construction -> active source start -> publication` has no
 await. Dormant sources are installed but do not execute. A failed stage shuts down its VM,
 connections, scheduler work, registry, binder, and source version while the outgoing facades remain
-usable. Top-level `store_set`/`store_clear` operations use a session overlay and reach the durable
-mod-data store only after publication. Script revision writes use the same deferred-publication
+usable. Mod-data writes made while the staged session starts (`store_set`, and clearing a mod's
+data) go to a session overlay and reach the durable mod-data store only after publication. Script revision writes use the same deferred-publication
 rule. Network subscription is established before publication and queued outbound work is released
 afterward. Replay failures after the non-throwing publication point cannot roll the world back; they
 are reported as degraded-activation diagnostics with the failed operation instead of being silently
@@ -388,16 +379,16 @@ an active `Full` mod or a staging failure keeps the default world live and is re
 `RbxWorldStartupRestoreOutcome.FellBack` with a diagnostic. It never clears the selection on its own and
 never falls back to an older entry. The player resets it from the Hub (below).
 
-**Live network sessions (the MVP5 entry guard; the old MVP11).** A world load is refused with status
+**Live network sessions.** A world load is refused with status
 `network_sessions_active`, and the live world is left unchanged, while the network bridge lists
 registered actors on a non-`Solo` topology — at request time, at confirmation and on a raw host load.
 The rule and the ACL floor are checked once more under the session lock right before publication, so a
 client that joins while the safety autosave is written makes the load fail and roll the staged world
 back instead of having its world replaced; `RbxWorldLoadResult.Status` then names the reason
 (`network_sessions_active`, `invalid_package`).
-Live Mirror sessions cannot be handed to a new world until session handoff exists (MVP5, host mode). The
-check is conservative (any registered actor counts), and loopback actors on the solo bridge never block a
-load.
+Live Mirror sessions cannot be handed to a new world: there is no session handoff yet (roadmap MVP5,
+host mode). The check is conservative (any registered actor counts), and loopback actors on the solo
+bridge never block a load.
 
 `PumpFrame` contains `Advance` and `Tick` separately: a throwing tick still lets the scheduler advance,
 a throwing advance still delivers the queued mod events, and each fault is reported once.
@@ -423,15 +414,14 @@ failure (including a disposed session) as `capture_failed` and writes nothing, a
 an existing slot is refused with the first bytes kept. `load_world` and `load_autosave` report
 `not_found` (a missing slot, or an autosave that rotated away), `invalid_package` (corrupt, truncated,
 over the read limit, or a legacy package refused by an ACL-composed session — the error carries the
-session's refusal text), `read_failed` (an I/O failure), `network_sessions_active` (the MVP5 entry guard
-above) and `session_unavailable` (the world session was already shut down because the game is closing
-or restarting it; it used to escape as an `ObjectDisposedException`); no request is created.
-`invalid_package` also covers a package the confirmation would refuse, now refused before the player
-is asked: an active `Full`-capability mod, or a source store that cannot atomically replace a source
-set. `list_autosaves` reports a store failure as `list_failed`. An `execute_lua` call whose world a
-confirmed load replaced while it waited or ran returns an error that says so ("execute_lua ran against
-the previous world: …"), because none of its changes reached the live world; it used to report
-`WORLD_DETACHED`/`INSTANCE_DESTROYED` and tell the model to reload mods that were already running.
+session's refusal text), `read_failed` (an I/O failure), `network_sessions_active` (the live-network
+guard above) and `session_unavailable` (the world session was already shut down because the game is
+closing or restarting it); no request is created. `invalid_package` also covers a package the
+confirmation would refuse, refused before the player is asked: an active `Full`-capability mod, or a
+source store that cannot atomically replace a source set. `list_autosaves` reports a store failure as
+`list_failed`. An `execute_lua` call whose world a confirmed load replaced while it waited or ran
+returns an error that says so ("execute_lua ran against the previous world: …"), because none of its
+changes reached the live world.
 
 Every one of these tools that takes a name validates it first, with the store's rules above. An invalid
 name — blank or whitespace-only, too long, a character outside the allowed set, a reserved device name,
@@ -465,23 +455,10 @@ through the Hub page.
 
 ## Acceptance status (MVP3)
 
-**Closed (2026-09-25), released in 7.47.0; the Unity verification gate is green.** Unity 6000.3.14f1,
-on the released tree: EditMode full 6550 total / 6539 passed / 0 failed / 11 skipped; the `core` leg
-5266 / 5254 passed / 0 failed / 12 skipped, `llm` 6234 / 6221 / 0 / 13, `lua` 5582 / 5572 / 0 / 10, the
-`MIRROR` leg 6550 / 6539 / 0 / 11; PlayMode `FastNoLlm` 95 total / 94 passed / 0 failed / 1 skipped (the
-batchmode `WaitForEndOfFrame` skip). The portable `dotnet test` suites report 2172 passed / 0 failed for
-the engine-free tests and 1848 total / 1846 passed / 0 failed / 2 not run for the Lua tier
-(`tools/portable/LuaTests`, which runs `Mvp3WorldPackageEditModeTests` and
-`Mvp3WorldPackageQaEditModeTests` against a UnityEngine shim; a case that reaches the engine, a
-file-store load included, is Inconclusive by design and counts as not executed). The live-model
-PlayMode suite is not part of this gate and is not green: its last run on this branch had 4 of 165
-failing, all live-model timeouts while the LM Studio server was unresponsive; it is to be re-run. The
-real-browser WebGL page-reload smoke and the IL2CPP/WebGL player checks are open follow-ups that gate
-the next networked rung, not MVP3's product scope (`TODO.md`).
-
-Each item of the roadmap's MVP3 Definition of Done is proven by a named test that fails on a wrong
-implementation (EditMode fixtures: `Mvp3WorldPackageEditModeTests`, `Mvp3WorldPackageFollowUpEditModeTests`,
-`Mvp3WorldPackageQaEditModeTests`, `RbxWorldHostDiWiringEditModeTests`):
+The world package (roadmap MVP3) closed in 7.47.0. Each item of its Definition of Done is proven by a
+named EditMode test that fails on a wrong implementation (fixtures `Mvp3WorldPackageEditModeTests`,
+`Mvp3WorldPackageFollowUpEditModeTests`, `Mvp3WorldPackageQaEditModeTests`,
+`RbxWorldHostDiWiringEditModeTests`):
 
 | DoD item | Proving tests |
 |---|---|
@@ -490,94 +467,9 @@ implementation (EditMode fixtures: `Mvp3WorldPackageEditModeTests`, `Mvp3WorldPa
 | (c) a manual slot is untouchable by AI tools; restore only with player confirmation | `SaveWorldTool_SecondSaveToSameSlot_IsRefusedAsResultAndKeepsFirstBytes` (the second save differs), `WorldPersistenceSurface_ExposesNoDeleteOverwriteRemoveOrReplacePath`, `ProgrammerRole_WorldTools_AreExactlySaveLoadListAndLoadAutosave`, positive confirm on the real controller in `StartupSelection_ConfirmedManualLoad_RestartRestoresSameTreeAndExactSources` |
 | (d) the autosave ring rotates and records triggers | `FileStore_DefaultAutosaveCapacity_IsTenAndRotatesOnlyTheOldest`, `ListAutoSaves_HyphenatedTriggers_RoundTripExactly`, `ListAutoSavesTool_ReturnsExactNameTriggerTimestampAndSize`, `ConfirmedBackup_GatedExecuteLua_WritesExactlyOneExecuteLuaAutosaveToFileStore` |
 | (e) WebGL persistence after save | `FileStores_WithoutInjectedHook_DefaultToCoreAiWebGlPersistenceSyncAsync`; the `false`-is-failure rule by the store durability tests; the real-browser reload smoke is an open follow-up |
-| (f) an invalid slot or autosave name is a JSON result (7.45.0) | `SaveWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService`, `LoadWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService`, `LoadAutoSave_InvalidName_IsRefusedAsResult_WithoutCallingService` (now including `null` and the echoed slot) |
+| (f) an invalid slot or autosave name is a JSON result | `SaveWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService`, `LoadWorld_InvalidSlot_IsRefusedAsResult_WithoutCallingService`, `LoadAutoSave_InvalidName_IsRefusedAsResult_WithoutCallingService` (including `null` and the echoed slot) |
 
-The residue closed alongside the DoD:
-
-- **Rung-zero restore envelope** — `RungZeroHostRestore_AclPackageLoad_RestoresTreeAsOneHostEnvelopedOperation`
-  and its headless twin (retained operation count 0 → 1 through production composition),
-  `RungZeroHostRestore_AclPackageLoad_LeaksNoHostScopeAndKeepsOwnership`, and the engine-free
-  `HostRestore_AclSnapshot_RetainsExactlyOneOperationForTheHostActor` / `HostRestore_KeepsEveryCapturedRevision`
-  (`RungZeroAclEngineFreeTests`).
-- **ACL floor** — `AclComposedSession_LegacyPackage_IsRefusedBeforeAnySideEffect`,
-  `HeadlessSessionController_AclComposed_RefusesLegacyPackageBeforeAnySideEffect`,
-  `WorldLoadRequest_AclComposedSession_RefusesLegacyPackageBeforeAskingThePlayer`, and the negative twin
-  `LegacyComposedSession_AcceptsLegacyPackageAndKeepsAPackagedAclVersion`.
-- **Restored trees charge the instance quota** —
-  `LuaCs_RegisteredInstanceQuota_ChargesInstancesRestoredBeforeTheRuntimeExisted` (`LuaCsModRuntimeEditModeTests`); a restored `Humanoid` in a headless world gets the scheduler —
-  `RestoredHumanoid_InAHeadlessWorld_IsDrivenByTheSchedulerFromTheStart` (`Mvp8HumanoidEditModeTests`).
-- **Startup selection (the W3.5 tail)** — store: `StartupStore_Select_NewStoreInstanceReadsExactConfirmedBytes`,
-  `StartupStore_SyncFalse_IsFailure_AndReloadKeepsPreviousSelection`, `StartupStore_StoreIdNamespaces_Isolate`;
-  controller (a restart is a second controller over the same directories):
-  `StartupSelection_ConfirmedManualLoad_RestartRestoresSameTreeAndExactSources`,
-  `StartupSelection_ConfirmedAutosaveLoad_SurvivesTheAutosaveRotatingAway`,
-  `StartupSelection_SaveWorldAndRawHostLoad_DoNotChangeStartup`,
-  `StartupSelection_DurabilityFalse_LoadStaysPublished_FlagFalse_RestartBootsPrevious`,
-  `StartupRestore_CorruptOversizedOrMissingEntry_KeepsDefaultWorld_NeverThrows`; composition:
-  `StartupSequence_RestoresFirst_AndRehydratesTheDefaultWorldUnlessRestored`,
-  `Composition_RegistersControllerAsStartupSelection_AndNamespacesTheDefaultStartupArea`,
-  `ComposedConfirmedLoad_ReopensInAFreshCompositionOverTheSameStore`; Hub:
-  `WorldLoadPage_StartupSection_ShowsSelectedWorldAndUtcTime_AndResetChoosesDefault`.
-- **Tool failures as JSON** — `SaveWorldTool_CaptureFailure_IsReturnedAsCaptureFailedResult`,
-  `LoadWorldTool_ReadPhaseFailuresAndRefusals_AreReturnedAsJsonResults`,
-  `LoadAutoSaveTool_RotatedAwayName_IsRefusedAsNotFoundResult`, `ListAutoSavesTool_StoreFailure_IsReturnedAsJsonFailure`;
-  the MVP5 entry guard: `WorldLoad_LiveNetworkSessions_AreRefusedAtRequestConfirmAndRawLoad` and its twin
-  `WorldLoad_LoopbackActors_DoNotBlockALoad`.
-- **Audit round 1 of the world package** — the mod-source limit:
-  `ModSourceLimit_DistinctModBeyondTheFormatLimit_IsRefusedWithTheWayOut_AndTheWorldStaysCapturable`,
-  `ConfirmedBackup_WorldPastTheModLimit_RunsOnlyForgetWithoutBackup_AndRefusesOtherMutations`,
-  `Save_DistinctIdBeyondTheWorldPackageModLimit_IsRefused_ExistingIdsStillUpdate`
-  (`FileLuaModSourceStoreEditModeTests`); the startup selection following the live world (`[UnityTest]`s,
-  Unity only): `StartupSelection_GatedAiChangesAfterAConfirmedLoad_ReopenAfterRestart`,
-  `StartupSelection_UnconfirmedRefresh_KeepsThePreviousEntryAndReportsIt`,
-  `StartupSelection_ChangesToANonStartupWorld_NeverSelectIt`; loads under the gate:
-  `WorldLoad_ClientJoiningDuringTheSafetyAutosave_IsRefusedBeforePublish_AndRollsBack`,
-  `WorldLoad_SafetyAutosaveWaitsForTheSharedGate_SoAnExecuteLuaInFlightIsInTheBackup`,
-  `WorldLoadRequest_PackageTheConfirmationWouldRefuse_IsRefusedBeforeThePlayerIsAsked`,
-  `ExecuteLua_WhoseWorldAConfirmedLoadReplacedWhileItWaited_ReportsTheLoad`,
-  `WorldLoadTools_SessionAlreadyShutDown_ReturnSessionUnavailable`; the store:
-  `PackageNames_AutoFileNameWithACharacterNoPlayerAccepts_IsRefusedWithoutThrowing`,
-  `WebGlWorkBudget_CountsValueStringsAndHumanoidState_ExactlyAtTheBoundary`,
-  `FileStore_ManualSlotCountAndByteCaps_RefuseAsResultsAndWriteNothing`,
-  `SaveWorldTool_ManualSlotLimitReached_IsAnOrdinaryFailedResultAndWritesNothing`,
-  `FileStore_Open_SweepsOnlyCrashLeftTemporaryFiles`.
-- **Load order (A1-02)** — `WorldPackage_ModsThatNeedEachOtherAtInit_ReloadTheirOwnSave_InLoadOrder`,
-  `WorldPackage_WrittenWithoutLoadOrder_StillRestores_ModsStartByOrdinalId`,
-  `WorldPackage_NegativeLoadOrder_IsNotRejected_AndCountsAsNoRecordedOrder`
-  (`Mvp3WorldPackageFollowUpEditModeTests`); the runtime restart paths:
-  `LuaCs_RehydrateFromStore_AfterRestart_StartsModsInTheirLoadOrder_NotInIdOrder`,
-  `LuaCs_RehydrateExactOrThrow_AfterRestart_StartsModsInTheirLoadOrder_NotInIdOrder`
-  (`LuaCsModRuntimePersistenceEditModeTests`).
-- **Audit rounds 2 and 3 of the world package (B2-01…B2-14, `3d5b62d0`, `23f63eaa`; C2-01…C2-09,
-  `d4d7f95b`)** — the startup selection (`[UnityTest]`s in `Mvp3WorldPackageFollowUpEditModeTests`, Unity
-  only): `StartupSelection_ChangeWithAnActiveFullCapabilityMod_KeepsThePreviousEntryAndSaysWhy`,
-  `StartupSelection_FullCapabilityModForgotten_ChangesAreRecordedAgain`,
-  `StartupSelection_GatedModLoad_IsRecordedOnce_NotAgainOnTheNextFrame`,
-  `StartupSelection_HubAndHostModChangesOnTheStartupWorld_ReopenAfterRestart`,
-  `StartupSelection_UnchangedWorldWritesNoEntry_AChangeWritesExactlyOne`,
-  `StartupSelection_ReadOnlyCallsWhilePartsAndTheCameraMove_WriteNoEntry`,
-  `StartupSelection_WorldChangesInsideTheInterval_AreRecordedOnceItHasPassed`,
-  `StartupSelection_ZeroInterval_RecordsEveryWorldChangeAtOnce`,
-  `StartupSelection_HubChangeTheRestoreWouldRefuse_LeavesANote`,
-  `StartupSelection_HubChangeWhileTheConfirmedLoadRecordsIt_ReopensAfterRestart`; the boot restore and
-  host gates (`Mvp3WorldPackageEditModeTests`, like the rest of this item unless named otherwise):
-  `StartupRestore_HoldsTheSharedGate_SoAModChangeArrivingDuringBootLandsOnTheRestoredWorld`,
-  `StartupRestore_ExecuteLuaArrivingDuringBoot_WaitsAndReportsTheReplacedWorld`,
-  `HostGateForwardingTheStartupFace_RecordsGatedChanges_AndSerializesTheBootRestore`,
-  `HostGateWithoutTheStartupFace_IsReportedOnce_AndSourceChangesAreStillRecordedFromThePump`,
-  `GatedMutationThatThrows_TheWorldChangeItMadeIsRecordedByTheNextFrame`; the mod limit and admission:
-  `ModSourceLimit_UnreadableManifest_TheSessionRefusesWithTheStoresOwnRefusal`,
-  `ModSourceLoad_StoreThatDoesNotKeepTheSource_UndoesTheLoadAndTheToolSaysWhy`,
-  `ModSourceLoad_StoreThatDoesNotKeepTheSource_PutsBackTheFormulaItDisplaced_AndRecordsNoRevision`,
-  `HostSourceStoreWithAdmission_RefusesANewModBeforeItRuns`,
-  `Admission_CountsAFolderWhoseManifestCannotBeRead_AndAgreesWithSave` (`FileLuaModSourceStoreEditModeTests`);
-  `ExecuteLua_QueuedBehindAConfirmedLoad_KeepsItsOwnErrorAndExplainsTheReplacedWorld`;
-  `PackageNames_AutoFileNamedAfterADevice_IsRefusedWithoutThrowing`; the same-id build refusal and the
-  load-order bounds in `LuaCsModRuntimeEditModeTests` and `LuaCsModRuntimePersistenceEditModeTests`
-  (`LuaCs_FirstLoadOfAnIdAnotherLoadIsBuilding_IsRefusedBeforeItsChunkRuns_TheFirstKeepsRunning`,
-  `LuaCs_ReloadOfAnIdAnotherReloadIsBuilding_IsRefusedBeforeAnythingRuns_TheFirstCompletes`,
-  `LuaCs_AStoredLoadOrderPastTheMaximum_ReadsAsUnordered_AndLaterFirstLoadsKeepTheirOrder`,
-  `LuaCs_FirstLoadWhileTheStoreCannotBeListed_StampsNoLoadOrder_AndLogsIt`).
+Open follow-ups: the real-browser WebGL page-reload smoke and the IL2CPP/WebGL player checks.
 
 ## Compatibility policy
 

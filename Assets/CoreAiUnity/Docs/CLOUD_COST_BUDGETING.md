@@ -85,7 +85,7 @@ and prints provider/model/prompt/completion/cache-read/cache-write. Setup and th
 [`RUNNING_LIVE_TESTS.md`](RUNNING_LIVE_TESTS.md). This proves one configured route; still measure real hit rates
 per endpoint/model, because byte-stability only proves eligibility.
 
-The prefix cache does not isolate student state. `CoreAILifetimeScope` itself now routes memory, flat chat,
+The prefix cache does not isolate student state. `CoreAILifetimeScope` itself routes memory, flat chat,
 structured transcript, and compacted conversation summary through scoped decorators with one canonical key.
 Before container build, the host must assign the inspector `AgentMemoryScopeProviderBehaviour` component or call
 `SetAgentMemoryScopeProvider(IAgentMemoryScopeProvider)` on the inactive scope GameObject. The provider returns
@@ -112,7 +112,7 @@ So a rule-of-thumb planning unit: **~1.5k input + ~200 output per conversational
 
 ### Skills keep tool overhead constant
 
-Without Self-Service Skills, every tool's full JSON schema rides in *every* request: the root `README.md` estimates **50 tools across 10 skills ≈ ~4,000 tokens** of definitions. With skills, the model sees a lightweight catalog plus **2 constant meta-tools** (`read_skill`, `call_skill_tool`) — **~360 tokens, a ~91% saving** — and loads full schemas only for the skill it actually uses. If your agents carry more than a few tools, attaching them as skills is the single biggest input-token lever you have. `call_skill_tool` checks the arguments before the skill tool runs: a missing, `null` or mistyped argument is refused with the expected parameter list and a retry instruction, so a malformed call costs one extra roundtrip instead of a failed side effect.
+Without Self-Service Skills, every tool's full JSON schema rides in *every* request: [AGENT_BUILDER](../../CoreAI/Docs/AGENT_BUILDER.md#context-optimization-tips) estimates **50 tools across 10 skills ≈ ~4,000 tokens** of definitions. With skills, the model sees a lightweight catalog plus **2 constant meta-tools** (`read_skill`, `call_skill_tool`) — **~360 tokens, a ~91% saving** — and loads full schemas only for the skill it actually uses. If your agents carry more than a few tools, attaching them as skills is the single biggest input-token lever you have. `call_skill_tool` checks the arguments before the skill tool runs: a missing, `null` or mistyped argument is refused with the expected parameter list and a retry instruction, so a malformed call costs one extra roundtrip instead of a failed side effect.
 
 ---
 
@@ -130,7 +130,7 @@ Note: when a backend returns no `usage` (common for streaming and for LLMUnity's
 ### Where usage lands
 
 - **`[Llm]` log lines** — `LoggingLlmClientDecorator` logs per-request tokens and tok/s for OpenAI-compatible HTTP when the response includes `usage`. Cheapest way to sample real turn sizes during a playtest.
-- **`LlmUsageRecord` / `ILlmUsageSink`** ([LLM_ROUTING](../../CoreAI/Docs/LLM_ROUTING.md)) — the portable accounting contract. Free CoreAI registers **no default sink**: implement a small adapter to write usage where you want it (analytics, CSV, backend), or run `ServerManagedApi` and record usage on your backend, which sees every provider response anyway. CoreAiPro ships a backend `BackendUsageSink` adapter. `LlmUsageReported` is also published on MessagePipe for in-game listeners.
+- **`LlmUsageRecord` / `ILlmUsageSink`** ([LLM_ROUTING](../../CoreAI/Docs/LLM_ROUTING.md)) — the portable accounting contract. Free CoreAI registers only a no-op `NullLlmUsageSink`: implement a small adapter to write usage where you want it (analytics, CSV, backend), or run `ServerManagedApi` and record usage on your backend, which sees every provider response anyway. CoreAiPro ships a backend `BackendUsageSink` adapter. `LlmUsageReported` is also published on MessagePipe for in-game listeners.
 - **F10 token-budget overlay** — `CoreAiTokenBudgetOverlay` (IMGUI drop-in, toggle **F10**) and `CoreAiTokenBudgetUiView` (for your own Canvas) show live token usage, request-load/rate-limiter saturation, and a **$/session estimate** driven by two fields on `CoreAISettingsAsset`: **Input $ / 1K Tokens** and **Output $ / 1K Tokens** (Advanced Settings → **Debug** tab; `0` = show tokens only). Type your provider's current prices into those two fields and the overlay does session cost math for you during playtests.
 
 ### Practical measuring loop

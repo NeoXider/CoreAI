@@ -19,15 +19,21 @@ the main chunk, before the first `task.wait`, so a reload can replace it (`mod-s
 Start with a `@coreai` block so the mod is discoverable/manageable:
 ```lua
 --[[@coreai
-id: my_mod              -- stable slug = identity (rename = new mod). [a-z0-9_]
-name: My Mod            -- display name (cosmetic)
-version: 1.0.0          -- semver
-active: false           -- seeded enabled/disabled
-capabilities: All       -- e.g. All  |  All, Full
+id: my_mod
+name: My Mod
+version: 1.0.0
+active: false
+capabilities: All
 author: CoreAI
 description: one line.
 ]]
 ```
+
+- `id` — stable slug and identity (a rename is a new mod); keep to lowercase letters, digits and `_`.
+- `name` — display name. `version` — semantic version. `active` — enabled state at the first seed.
+- `capabilities` — e.g. `All` or `All, Full`.
+- The block must start the file, and a value runs to the end of its line: do not add a comment after
+  it. Every key and default: `mod-system.md` §1.
 
 ## Always-available mod API (no capability tier needed)
 | Function | Meaning |
@@ -65,7 +71,7 @@ an argument (a table field, a returned value) and has the wrong type reads `bad 
 y)`. Both surfaces read arguments by one rule set (`LuaCsValueMarshaller`), the one Luau's `luaL_check*`
 functions use: a string parameter takes a number as `tostring` gives it (`store_set(7, 8)` stores `"7"` = `"8"`;
 a boolean or a table is refused), a number parameter takes a string `tonumber` accepts (`" 0x10 "`, `"1e3"`,
-`"inf"`), an integer parameter truncates toward zero (`4.6` -> `4`; the mod-core API used to round), and a
+`"inf"`), an integer parameter truncates toward zero (`4.6` -> `4`), and a
 boolean parameter takes only `true`/`false` (an omitted one is `false`). The Rbx surface converts the same way
 (`Part.Name = 5`, `player:Kick(42)`), and an Enum property or instance-method argument also takes the item's
 Name or Value (`part.Material = "Wood"`); the full table is in
@@ -152,8 +158,8 @@ member exists.
 
 A known catalog service without an implementation also resolves successfully. It returns a
 placeholder, and the first member read, write, or method lookup raises `NOT_IMPLEMENTED` with the
-delivery rung recorded by `ServiceCatalog`. The phase a stub names is the old ladder's number until the
-stubs are retagged (`TODO.md`); the rung that delivers it now is in the last column
+delivery rung recorded by `ServiceCatalog`. The phase a stub names is the roadmap's old number; the rung
+that delivers it now is in the last column
 ([ROBLOX_API_ROADMAP.md](ROBLOX_API_ROADMAP.md) §4.1 maps the two):
 
 | Service | Phase the stub names | Rung now |
@@ -193,7 +199,7 @@ An unknown, unregistered name still fails immediately at `GetService()` with `UN
 the per-resume budget). A coroutine lets a mod spread a sequence over time
 without blocking — it yields, the host advances the frame, and you resume it next tick. Under Lua-CSharp this
 is frame-pumped, so `coroutine.yield` works on WebGL too (a blocking wait would deadlock single-threaded WASM;
-this needs the bundled VM at v0.5.6 or newer — older builds froze the player on the first yield).
+the bundled VM is Lua-CSharp v0.5.6).
 See `coroutine_countdown.lua`. Do NOT busy-wait; yield and resume from a timer/handler.
 
 - `coroutine.resume` works only on a coroutine your code made with `coroutine.create`. Handed a task,
@@ -238,7 +244,7 @@ authoritative channel) over direct mutation — it stays deterministic and multi
   that exceeds it is cut with `BUDGET_EXCEEDED` / `EXCEEDED_MEMORY_BUDGET` and the fix hint "keep less
   memory alive between two yields" — build big data across several yields, or keep less of it.
 - **Library calls back into Lua share one cap of 128 levels along a chain of nested runs.** A `pcall` or
-  `xpcall` body opens one level; a `gsub` replacement function (two since 7.47.0), a `__tostring` run by
+  `xpcall` body opens one level; a `gsub` replacement function, a `__tostring` run by
   `tostring`, `print`, `warn` or `string.format` (your own `tostring` included, so `tostring = warn; warn(1)`
   raises the catchable error below instead of crashing the game), a `table.sort` comparator, a `gsub` `__index`, a
   `__pairs`/`__ipairs` metamethod, a coroutine run by `coroutine.resume`, a thread `task.spawn` runs at once
@@ -285,8 +291,7 @@ Lua-CSharp targets **Lua 5.2** semantics with **double-only numbers** — there 
 subtype and no native bitwise operators (`&`, `|`, `~`, `<<`, `>>` postdate 5.2). Luau sources are
 run through the downleveler (Luau → Lua 5.2) at ingestion. Source nested more than 200 levels deep
 (brackets, tables, functions, blocks, if-expressions, interpolations) is refused with a `syntax error:`
-line — the same limit the VM's parser has, for Luau and plain Lua alike — instead of overflowing the stack,
-which used to end the process on Save & run, `execute_lua` or a world restore
+line — the same limit the VM's parser has, for Luau and plain Lua alike — instead of overflowing the stack
 (`Assets/CoreAIMods/Runtime/LuauDownlevel/README.md`). Stdlib coverage is partial — a missing library
 function errors, so keep to common `string`/`table`/`math` calls.
 
@@ -298,15 +303,14 @@ Hub Mods tab). Five samples live in `Assets/CoreAIMods/Runtime/Resources/CoreAIM
 `sample_welcome.lua` (active) and the opt-in `sample_lane_racer.lua`, `sample_tetris3d.lua`,
 `sample_clicker.lua` and `sample_castle3d.lua`.
 
-Updates are version-driven and player-respectful:
-- Bump the header `version:` and re-ship → the seeder **updates** an unmodified copy, keeping the player's
-  enabled/disabled choice.
-- If the player edited the mod, it is **not** overwritten — the entry is flagged `UpdateAvailable` for a
-  manual update in the UI.
+Updates are version-driven:
+- Bump the header `version:` and re-ship → the seeder **updates** the installed copy at the next start,
+  keeping the player's enabled/disabled choice. A copy the player edited is updated too; an edit that ran
+  stays in the mod's revision history (`manage_mods versions` / `revert`).
 - A same-or-older version, or a mod the player authored under the same id, is left untouched.
 
-Hosts can add more `IBundledModSource`s (StreamingAssets, Addressables, remote) alongside the Resources
-one; see `Docs/CoreAIMods/mod-system.md` §3.
+CoreAI ships only the Resources source; a host can register more `IBundledModSource` implementations
+alongside it (`mod-system.md` §3).
 
 ## Example mods (`Assets/CoreAI.Demos/Mods/`)
 - `hello_world.lua` — minimal: one event hook, one timer, a persistent counter.

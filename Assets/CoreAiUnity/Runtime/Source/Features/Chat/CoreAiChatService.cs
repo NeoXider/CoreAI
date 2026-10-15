@@ -602,7 +602,14 @@ namespace CoreAI.Chat
         /// <summary>Requests cancellation of active work for the selected agent role.</summary>
         public void StopAgent(string roleId)
         {
-            CoreAi.StopAgent(roleId);
+            if (_orchestrator is IRoleAiTaskCancellation roleCancellation)
+            {
+                roleCancellation.CancelRoleTasks(roleId);
+            }
+            else
+            {
+                _orchestrator.CancelTasks(roleId);
+            }
         }
 
 #if UNITY_WEBGL && !UNITY_EDITOR
@@ -1055,20 +1062,9 @@ namespace CoreAI.Chat
         /// <see cref="Rearm"/> has arrived for a full <c>timeoutSec</c> window.
         /// </summary>
         /// <remarks>
-        /// WHY one watchdog instead of a timer per re-arm: the previous shape disposed the running
-        /// <c>CancelAfterSlim</c> and started a fresh one on EVERY re-arm, and streaming re-arms on every
-        /// chunk - a new <c>PlayerLoopTimer</c> plus a player-loop registration per token, on WebGL's
-        /// single thread, while the model is still speaking. Now <see cref="Rearm"/> is one timestamp
-        /// write and allocates nothing; a single realtime delay sleeps for the window and, on waking,
-        /// either cancels (idle for the whole window) or goes back to sleep for exactly the remaining
-        /// time. The cancellation moment is the same: the first instant the turn has been idle for
-        /// <c>timeoutSec</c>.
-        /// <para>
-        /// <see cref="Rearm"/> may run off the main thread (tool-call events and stream continuations can
-        /// arrive on a threadpool thread) - a volatile write is safe from anywhere, so the re-arm is no
-        /// longer best-effort. A re-arm after <see cref="Dispose"/> is a harmless write; the previous shape
-        /// would have started a timer against a source the caller was about to dispose.
-        /// </para>
+        /// Each <see cref="Rearm"/> disposes the previous timer and starts a fresh
+        /// <c>CancelAfterSlim</c> realtime player-loop timer for the full idle window. A lock serializes
+        /// timer replacement with disposal; a failed re-arm is ignored so it cannot break the turn.
         /// </remarks>
         internal sealed class IdleTimeoutDeadline : IDisposable
         {

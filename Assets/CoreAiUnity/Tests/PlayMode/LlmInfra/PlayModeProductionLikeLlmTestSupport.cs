@@ -434,6 +434,45 @@ namespace CoreAI.Tests.PlayMode
             }
         }
 
+        /// <summary>
+        /// Builds an HTTP client for one explicit OpenAI-compatible endpoint (a target of a multi-target
+        /// benchmark run) through the same construction as the env/file path. Streaming and native tools follow
+        /// the usual configuration; see <see cref="PlayModeOpenAiTestConfig.ResolveForEndpoint"/> for the key and
+        /// <see cref="PlayModeOpenAiTestConfig.ComposeProviderBody"/> for how <paramref name="extraBodyJson"/>,
+        /// <paramref name="reasoningEffort"/> and <paramref name="defaultReasoningEffort"/> form the request body.
+        /// </summary>
+        /// <exception cref="ArgumentException">The target body or an effort is invalid.</exception>
+        public static bool TryCreateForEndpoint(
+            string baseUrl,
+            string model,
+            string apiKey,
+            float temperature,
+            int timeoutSeconds,
+            out PlayModeProductionLikeLlmHandle handle,
+            out string ignoreReason,
+            string extraBodyJson = null,
+            string reasoningEffort = null,
+            string defaultReasoningEffort = null)
+        {
+            handle = null;
+#if !COREAI_LLM
+            ignoreReason = "COREAI_LLM is not set: HTTP LLM clients are excluded from the build.";
+            return false;
+#else
+            PlayModeOpenAiTestConfig.ResolvedConfig config = PlayModeOpenAiTestConfig.ResolveForEndpoint(baseUrl,
+                model, apiKey, extraBodyJson, reasoningEffort, defaultReasoningEffort);
+            if (!config.IsComplete)
+            {
+                ignoreReason = $"Endpoint target '{model}' needs both a base URL and a model id.";
+                return false;
+            }
+
+            handle = CreateOpenAiHandle(config, temperature, timeoutSeconds);
+            ignoreReason = null;
+            return true;
+#endif
+        }
+
         private static bool TryCreateOpenAi(
             CoreAISettingsAsset settings,
             float temperature,
@@ -451,10 +490,14 @@ namespace CoreAI.Tests.PlayMode
             // gitignored local file > project defaults (opt-in). The asset branch below only remains for
             // an asset that drives HTTP without a model of its own (server-managed choice).
             PlayModeOpenAiTestConfig.ResolvedConfig config = PlayModeOpenAiTestConfig.Resolve(modelOverride);
+            string benchmarkEffort = PlayModeOpenAiTestConfig.ResolveBenchmarkReasoningEffortDefault();
 
             // 1) Explicit env/file configuration wins (and is the only place streaming/native-tools toggles live).
             if (config.IsComplete)
             {
+                // WHY: the single-model benchmark builds its client here; the benchmark-wide effort applies to it
+                // exactly as to a multi-target run's targets.
+                config = PlayModeOpenAiTestConfig.WithReasoningEffortDefault(config, benchmarkEffort);
                 handle = CreateOpenAiHandle(config, temperature, timeoutSeconds);
                 ignoreReason = null;
                 return true;
@@ -464,6 +507,14 @@ namespace CoreAI.Tests.PlayMode
             if (settings != null && settings.UseHttpApi && !string.IsNullOrWhiteSpace(settings.ApiBaseUrl) &&
                 !string.IsNullOrWhiteSpace(settings.ModelName))
             {
+                if (benchmarkEffort.Length > 0)
+                {
+                    Debug.LogWarning(
+                        $"[PlayModeProductionLikeLlmFactory] {PlayModeOpenAiTestConfig.EnvBenchmarkReasoningEffort} " +
+                        "is not sent through the project CoreAISettingsAsset backend (that would mutate the shared " +
+                        "asset). Set COREAI_TEST_BASE_URL/MODEL or the local config file to apply it.");
+                }
+
                 ILlmClient client = new OpenAiChatLlmClient(settings, supportsNativeToolCalling: true);
                 if (modelOverride != null && !string.IsNullOrWhiteSpace(modelOverride))
                 {

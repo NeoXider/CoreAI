@@ -1,5 +1,57 @@
 # TODO
 
+- [x] Unity edit3/play3 failure fixes (2026-10-15): restore opt-in HTTP overrides; preserve JsonElement values in dedup signatures; extend clone probes; attach the Hub regression page to a panel; complete pipeline test registrations; correct the non-streaming assertion; await the pumped inventory continuation. Added wire and batch/stream dedup regressions.
+- [x] Unity edit3/play3 file-only validation: Core, Source, Tests and Benchmark.Tests compile with zero errors; portable Release suite passes 2453/2453, including legacy wire omission and batch/stream JsonElement dedup regressions.
+- [ ] Unity edit3/play3 verification gate: rerun EditMode and PlayMode over these fixes; Unity was deliberately not started during file-only verification.
+
+- [x] Inspector/documentation follow-up: expose the global tool-roundtrip cap and LLMUnity tool channel; replace stale static-limit guidance in the three requested docs; record the parallel code-fixes wave in both Unreleased changelogs. Added `SettingsInspector_ExposesSerializedToolControls` for both inspector bindings.
+
+- [x] Documentation-defect file-only compile gate (2026-10-15): Core, Source, Editor and Mods compile; the integration gate also compiled Tests after removing the unsupported NUnit attribute. Portable Release integration tests passed 2449/2449.
+- [ ] Documentation-defect verification gate (2026-10-15): run the new role-stop, audit-role persistence, config read permissions, Unity continuation, scene-validation, NuGet pin, and settings-reset EditMode regressions on the next Editor start. File-only verification does not execute Unity tests.
+- [x] Protected-file follow-up: `CoreAISettingsAsset.ApplyOptions` copies `AllowWorldPrimitives`; `LlmToolChannel.Auto` documents HTTP capability probing. Existing EditMode regressions cover the permission copy.
+
+> **Current release: 7.50.2 (2026-10-15)**, all seven packages in lockstep. This file tracks open work by priority.
+> Shipped work is in the two changelogs (`Assets/CoreAI/CHANGELOG.md`, `Assets/CoreAiUnity/CHANGELOG.md`); non-blocking
+> future work in `dev-docs/BACKLOG.md`; the current status in `PLAN.md`; the MVP ladder of record in
+> `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4.
+>
+> **State.** MVP3 closed 2026-09-25 and shipped in 7.47.0 on the Unity EditMode/PlayMode `FastNoLlm` gate; its
+> follow-ups (the IL2CPP/WebGL player checks, the WebGL page-reload smoke, spikes S1/S2, one full live-model PlayMode
+> run on a settled tree) gate the next networked rung. MVP4 (script contexts) is next and not started. The releases
+> since 7.47.0 sit outside the ladder; each has a note with its verification and open follow-ups under "Release
+> verification notes" below. Latest full EditMode run: 6753 total / 6736 passed / 0 failed / 17 skipped (7.50.2).
+> Unreleased, in progress: benchmark suite 2.0 (`[Unreleased]` in both changelogs).
+
+## Configuration defect verification
+
+- [x] F3/F4/F15/F18: align runtime transport timeout with the legacy cap, preserve all endpoint properties
+  through Hub edits and registry cloning/fingerprints, retain omitted backend options, and honour both
+  orchestration and LLMUnity native concurrency settings. EditMode regressions added.
+- [x] F19: reject missing HTTP models at the Hub, registry, and factory boundaries; remove the LLMUnity
+  adapter's silent `local` substitution.
+- [x] F19 contract validation: `LlmEndpointDescriptor.Validate()` rejects missing HTTP models with
+  `HTTP endpoint model is required.`; contract tests supply a configured model and cover null/empty/whitespace.
+- [x] D: suppressed duplicate tool payloads include the canonical tool and arguments, bounded to 2048
+  argument characters plus a truncation marker; batch and streaming regressions added.
+- [x] Compile gates: `CoreAI.Source.csproj` and `CoreAI.Tests.csproj` pass with zero errors. Portable
+  suite passes 2431/2431 (zero failed or skipped), including all four new duplicate-payload regressions.
+- [ ] Verification gate: run `LlmConfigurationDefectsEditModeTests`, `CoreAISettingsAssetEditModeTests`,
+  and `ToolExecutionPolicyEditModeTests` in the existing editor at its next permitted verification run.
+  Unity was not started for this fix wave.
+
+## Request shaping integration (2026-10-15)
+
+- [x] Preserve final-summary MEAI options; add portable reasoning efforts/dialects and per-call/agent sampling, temperature and endpoint overrides; map both HTTP bodies; cap streaming visible text; publish effective settings and reasoning-token usage.
+- [x] Portable verification: 2431 passed, 0 failed; request-body fixture 116 passed, including 12 full-body legacy golden cases. Core, Source and Tests compile without errors. Unity was not started.
+- [x] Integrate descriptor request settings into HTTP and LLMUnity clients; forward settings resolution through registry wrappers without activation; preserve selected manifest output caps. Primary/secondary asset controls, independent fallback body/reasoning, portable conversion, presets, inspector and Hub fields are wired. Original API preset, HTTP profile setter, MEAI client and telemetry/memory constructor CLR signatures remain available through forwarding overloads.
+- [x] Add EditMode regressions for descriptor-to-wire shaping in both HTTP paths, inherited/explicit-zero caps, pending activation diagnostics, route caps, asset defaults/presets/conversion, fallback dialect isolation, original preset signatures, and Hub edits. Update the five request-configuration guides and both Unreleased changelogs.
+- [x] Portable integration verification: 2449 passed, 0 failed, 0 skipped, including seven request-settings compatibility/conversion cases. Final Core, Source, Hub UI and Tests builds pass with zero errors; existing compiler/analyzer warnings remain. One initial concurrent-queue failure passed its four-case targeted rerun and the full rerun.
+- [ ] Unity verification gate: run `RuntimeEndpointRequestSettingsEditModeTests`, `LlmRoutingRegressionEditModeTests`, `LlmEndpointContractsEditModeTests`, `LlmConfigurationDefectsEditModeTests`, `CoreAISettingsAssetEditModeTests`, `CoreAiScriptableObjectOptionsEditModeTests`, `MeaiLlmClientEditModeTests`, `LlmPipelineInstallerEditModeTests`, and `HubSettingsRegressionEditModeTests`, plus the new final-summary, streaming-cap and server-managed cases on the next permitted editor run. Native LLMUnity activation, player/WebGL execution and inspector/Hub visual checks remain unverified; Unity was not started.
+
+## Release verification notes (newest first)
+
+> Updated 2026-10-15 (7.50.2): `AgentSessionInspector` and the structured retry carry the whole request. `AiTaskRequest.Clone()` / `CloneForRole(roleId)` copy every request-scoped field, and a reflection guard in `AgentSessionInspectorEditModeTests` fails when `AiTaskRequest` gains a public settable property the clone does not copy. The full EditMode suite passed 6736/6753 (17 skipped, 0 failed).
+
 > Updated 2026-10-14 (7.50.1): prompt wording now matches what tools really do. The tool contract tells the model to continue from a tool's real result instead of summarizing it. The memory hint names only `append`. The `MemoryTool` and `MemoryLlmTool` descriptions name only real actions: `store` was not one, and `write` was missing. `MemoryLlmTool` now fits the 500-character tool-contract limit (486, was 554). The two fallback prompts live once in `ToolLoopFallbackPrompts` and are used by all six sites in `SmartToolCallingChatClient` and `MeaiLlmClient`. The empty-response nudge asks for a brief reply without narrating tool output, and the budget-exhausted final turn asks for a status report from the real tool results. Both `## Memory (updates)` branches drop the cache jargon. `ToolContractPromisesEditModeTests` runs every advertised memory action through `MemoryTool`, and both client test classes pin the request each reachable fallback site sends. The full EditMode suite passed 6730/6747 (17 skipped, 0 failed) in batch mode with graphics. The WebGL-only nudge site in `SmartToolCallingChatClient` uses the same constant but is not exercised in EditMode. Open: live-model confirmation that hosts with engine-only tool results (RedoSchool's briefing) no longer narrate tool output.
 
 > Updated 2026-10-14 (7.50.0): messenger-style chat feed. `ChatScrollAnchor.KeepPosition` is the default, `CoreAiChatScrollToLatest` adds the jump-to-latest button and unread badge, and the reader's own scroll is told apart from the panel's snaps (`ClassifyFeedScroll`). The full EditMode suite passed 6720/6737 (17 skipped, 0 failed) with graphics; the Chat category passed with the final audit fixes. Three independent audit rounds closed. Open: the live feed tests (`CoreAiChatFeedScrollBehaviourEditModeTests`) need a graphics device and are ignored under `-nographics`, so a CI run without graphics does not cover them; native player/WebGL verification of the button remains with the host (RedoSchool).
@@ -27,15 +79,16 @@
 > 1846 passed / 0 failed / 2 not run. Not green: the live-model PlayMode suite (last run 165/156/4 failed, all four
 > live timeouts on an unresponsive LM Studio server; to be re-run). Decision (tech lead, 2026-09-25): MVP3 is closed
 > on the Unity EditMode/PlayMode `FastNoLlm` gate; spikes S1/S2 and the IL2CPP/WebGL player checks are open
-> follow-ups that gate the next networked rung, not MVP3's product scope. MVP4 (script contexts) next, not started. Tracks open work by priority. Shipped work is in `CHANGELOG.md` (both packages);
-> non-blocking future work in `Assets/CoreAiUnity/Docs/BACKLOG.md`; the current status in `PLAN.md`.
-> Previous release: 7.48.0 (2026-09-30, all seven packages in lockstep — attachments and camera images end to end, visible Rbx material relief, WebGL verification, 7.47.x audit fixes). Earlier: 7.47.4 (2026-09-30, castle quest parity fixture and visual comparison). Earlier: 7.47.3 (2026-09-30, live-test isolation and benchmark timing report). Earlier: 7.47.0 (2026-09-25, MVP3 and the audit fix waves, merged with
+> follow-ups that gate the next networked rung, not MVP3's product scope. MVP4 (script contexts) next, not started.
+
+> Release history: 7.50.2 (2026-10-15); 7.50.1 and 7.50.0 (2026-10-14); 7.49.0 (2026-10-02); 7.48.0 (2026-09-30, all seven packages in lockstep — attachments and camera images end to end, visible Rbx material relief, WebGL verification, 7.47.x audit fixes). Earlier: 7.47.4 (2026-09-30, castle quest parity fixture and visual comparison). Earlier: 7.47.3 (2026-09-30, live-test isolation and benchmark timing report). Earlier: 7.47.2 and 7.47.1 (2026-09-29, benchmark G6 budget, camera image transport, suite 1.15 grading and live-test fixes). Earlier: 7.47.0 (2026-09-25, MVP3 and the audit fix waves, merged with
 > 7.46.0). Earlier: 7.46.0 and 7.45.0 (2026-09-24, lockstep); 7.3.1 (2026-09-02, the six
 > packages of that time in lockstep — WebGL tool-turn fix); 7.3.0 (2026-09-02, lockstep — MVP2.5 persistence
 > release); 7.2.0 (2026-09-02, `com.neoxider.coreai` + `.coreaiunity` only); 7.1.1 (2026-08-31,
 > `com.neoxider.coreai` + `.coreaiunity`); 7.1.0 (2026-08-30, all six packages in lockstep); 7.0.7 (2026-08-27);
 > 7.0.0 (2026-08-01) added `McpServerInfo.Version`; every release is in the changelogs. The browser gate passed on
 > 2026-09-02; see the section below.
+
 > Full positive-module matrix verified 2026-08-01 in Unity 6000.3.14f1: `core` 2056 passed / 0 failed /
 > 10 skipped; `llm` 2604 / 0 / 9; `lua` 2068 / 0 / 10; `full` 2616 / 0 / 9. Non-live PlayMode
 > `FastNoLlm` with `COREAI_LLM`: 78 passed / 0 failed / 1 platform skip. Live Qwen3.5-0.8B LLMUnity smokes from the
@@ -3101,7 +3154,7 @@ Open:
 
 ### [R9 — lowest priority] Multi-agent / sub-agent orchestration
 
-> Design in `TODO/MultiAgent_Orchestration_v2.0.md`. The decisive parity gap vs Claude Code Task tool /
+> Design in `dev-docs/MULTI_AGENT_ORCHESTRATION_V2_PLAN.md`. The decisive parity gap vs Claude Code Task tool /
 > Cursor background agents / Cline subtasks — but explicitly LAST per maintainer.
 - [ ] `SubAgentDefinition` (roleId, description, prompt, tools w/o Task tool, model, maxTokens, maxTurns).
 - [ ] `IAgentRegistry` + `AgentOrchestrator.ExecuteSubAgentAsync` (clean context isolation) + bounded `ExecuteSubAgentsParallelAsync`.

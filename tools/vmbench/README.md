@@ -9,18 +9,27 @@ converting raw figures into guarded ones — the hook is the dominant cost, so t
 
 ## Running
 
+From `tools/vmbench`:
+
 ```
-dotnet run -c Release --project vmbench.csproj        # CoreCLR
-dotnet run -c Release --project vmbench-mono.csproj   # Mono, the runtime Unity actually uses
+dotnet run -c Release --project vmbench.csproj        # CoreCLR (net8.0)
+dotnet build -c Release vmbench-mono.csproj           # Mono flavour (netstandard2.1)
 ```
 
+`dotnet run` cannot start the `netstandard2.1` Mono flavour. Run the built `vmbench-mono.dll` with the
+Mono CLI bundled with Unity (`<Unity 6000.3.14f1>/Editor/Data/MonoBleedingEdge/bin/mono.exe`), the runtime
+Unity actually uses; that is how the recorded run was made.
+
 It links `Assets/CoreAIMods/Plugins/Lua.dll` directly, so it measures the SHIPPED VM rather than a
-NuGet copy that might drift from it.
+NuGet copy that might drift from it. Both project files and `Program.cs` hard-code the
+`D:\Git\CoreAI\...` checkout path (and the Unity 6000.3.14f1 install path); adjust them for another
+checkout.
 
 ## What it measures
 
 - raw throughput with no hook, as a control that must reproduce the historical range;
-- throughput with the hook at the production batch size (read from `LuaCsExecutionGuard`, not assumed);
+- throughput with the hook at the production batch size (`ProductionBatch = 4` in `Program.cs`, the value of
+  `LuaCsExecutionGuard.HookInstructionBatch`; keep them equal);
 - the same across several batch sizes, so the hook's cost curve is visible;
 - fixed per-resume cost, by resuming a coroutine that immediately yields.
 

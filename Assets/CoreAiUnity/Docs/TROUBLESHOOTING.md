@@ -27,7 +27,7 @@ A guide to resolving typical issues when working with CoreAI.
 - Request timeout
 - `StubLlmClient` instead of a real model
 - No `LLM >` / `LLM <` lines in the console
-- In **Offline** or **stub** fallback, the chat shows huge JSON or echoes the full system-style payload — expected from **`1.5.18`**: conversational roles (chat, `Teacher`-style ids, etc.) get a **single line** from **Offline Custom Response** (or `[stub] Offline…`); **Chat** requests with `SourceTag = Chat` receive a **trimmed error message** from the orchestrator when the model returns `Ok: false`, instead of an empty string.
+- The chat answers with one canned line. That is the **Offline** backend or the stub fallback: conversational roles (chat, `Teacher`-style ids, etc.) get the single line from **Advanced Settings → Offline → Response Text** (`OfflineLlmClient`), and `StubLlmClient` answers `[stub] Offline - LLM unavailable (stub).` When a model request fails, **Chat** requests (`SourceTag = Chat`) show a trimmed error message instead of an empty bubble.
 
 ### Diagnostics
 
@@ -56,20 +56,20 @@ Every request also logs `LLM > traceId=… role=… backend=…` when it is sent
 | LLMAgent on scene? | Hierarchy → look for an object with `LLMAgent` | Create an `LLMAgent` on the scene |
 | LLM component present? | Inspector LLMAgent → is there an `LLM`? | Add the `LLM` component |
 | GGUF file exists? | Inspector LLM → Model Path | Download the model via LLMUnity or LM Studio |
-| Service running? | `LLM.started` is `true` (see the snippet below) | Increase **Startup Timeout (sec)** in CoreAISettings → LLMUnity |
+| Service running? | `LLM.started` is `true` (see the snippet below) | Increase **Startup Timeout (sec)** in CoreAISettings → Advanced Settings → LLMUnity |
 | Enough VRAM? | Task Manager → GPU Memory | Use a smaller model (4B instead of 9B) or lower **GPU Layers** |
 
 ```csharp
 // Programmatic check:
-var agent = Object.FindFirstObjectByType<LLMAgent>();
+LLMAgent agent = Object.FindFirstObjectByType<LLMAgent>();
 Debug.Log($"LLMAgent found: {agent != null}");
 Debug.Log($"LLM started: {agent?.llm?.started}");
 ```
 
 **Typical fix:**
 ```
-CoreAISettings → LLMUnity → ✅ Keep Alive = true
-CoreAISettings → LLMUnity → Startup Timeout = 120
+CoreAISettings → Advanced Settings → LLMUnity → ✅ Keep Alive = true
+CoreAISettings → Advanced Settings → LLMUnity → Startup Timeout (sec) = 120
 ```
 
 ---
@@ -218,7 +218,7 @@ sandbox: Lua exceeded <N> ms.
 sandbox: EXCEEDED_MEMORY_BUDGET (<budget> bytes)
 ```
 
-A raw `coroutine.create` coroutine cut at its own per-resume limit reports `sandbox: Lua coroutine resume exceeded <N> ms.` to the code that resumed it; a mod's scheduler thread reports the same kind of trip as `BUDGET_EXCEEDED` with the bound and the author's line. None of these can be caught by `pcall`/`xpcall` inside the run that tripped. Before the 2026-09-24 audit fixes the step line started `LuaCsSecureEnvironment:` and the time line had no prefix; host code classifies a trip by type (`LuaCsExecutionGuard.IsStepBudgetTrip`, `IsMemoryBudgetTrip`), never by this text.
+A raw `coroutine.create` coroutine cut at its own per-resume limit reports `sandbox: Lua coroutine resume exceeded <N> ms.` to the code that resumed it; a mod's scheduler thread reports the same kind of trip as `BUDGET_EXCEEDED` with the bound and the author's line. None of these can be caught by `pcall`/`xpcall` inside the run that tripped. Host code classifies a trip by type (`LuaCsExecutionGuard.IsStepBudgetTrip`, `IsMemoryBudgetTrip`), never by this text.
 
 **Cause:** Lua contains an infinite loop or a very heavy operation.
 
@@ -237,7 +237,7 @@ A raw `coroutine.create` coroutine cut at its own per-resume limit reports `sand
 1. Improve the Programmer system prompt (add examples)
 2. Use a stronger model
 3. Verify the whitelist API is correct
-4. Raise `CoreAISettings.MaxToolCallRetries` (or `MaxLuaRepairRetries` for the envelope path) only after the above
+4. Raise **Tool Call Retries** (or **Lua Repair Retries** for the envelope path) on the settings asset (Advanced Settings → General → Retry limits) only after the above
 
 ---
 
@@ -257,7 +257,7 @@ A raw `coroutine.create` coroutine cut at its own per-resume limit reports `sand
 // (Creator, Builder, Analyzer, Programmer, AINpc, CoreMechanicAI, SmartChat, Merchant)
 // and OFF for PlainChat. Custom roles get it through AgentBuilder.WithMemory().
 
-var policy = container.Resolve<AgentMemoryPolicy>();
+AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
 Debug.Log($"Memory enabled for Creator: {policy.IsMemoryEnabled("Creator")}");
 ```
 
@@ -282,8 +282,8 @@ You MUST save important information using the memory tool:
 **Step 3: Check storage**
 
 ```csharp
-var store = container.Resolve<IAgentMemoryStore>();
-if (store.TryLoad("Creator", out var state))
+IAgentMemoryStore store = container.Resolve<IAgentMemoryStore>();
+if (store.TryLoad("Creator", out AgentMemoryState state))
 {
     Debug.Log($"Creator memory: {state.Memory}");
 }
@@ -316,7 +316,7 @@ Debug.Log($"Memory path: {Application.persistentDataPath}/CoreAI/AgentMemory/");
 | File not created | Check permissions on `persistentDataPath` |
 | ChatHistory not working | Chat history works on every backend. Check `AgentMemoryPolicy` for the role (`WithChatHistory`, default on except for Programmer) and, for restore after restart, `PersistChatHistory` (`AgentBuilder.WithChatHistory(..., persistBetweenSessions: true)`) |
 | WebGL: nothing survives a page reload, or the console shows `[CoreAiWebGlPersistence] This page did not enable automatic persistentDataPath synchronization` | The web template does not pass **`config.autoSyncPersistentDataPath = true`** to `createUnityInstance()`. Unity's stock templates ship that line **commented out**, and since Unity 6.3 it is the only channel that persists `persistentDataPath` — CoreAI no longer drives the deprecated manual `FS.syncfs`. Add the line to your own template or run **`CoreAI/Setup/Install WebGL Template`** (copies the template shipped in the package into `Assets/WebGLTemplates/CoreAI` and selects it); `CoreAIWebGlPersistentDataSyncBuildGuard` fails the build when it is missing, unless the project defines **`COREAI_WEBGL_NO_PERSISTENCE`** for the Web platform. |
-| WebGL: `memory action=write` fails after ~30 s while the data is actually saved | Fixed. CoreAI used to await an `FS.syncfs` completion callback that Unity 6.3 never delivers, so every durability wait ran into the caller's timeout. Durability is now answered immediately; rebuild the player after upgrading **`com.neoxider.coreaiunity`**. |
+| WebGL: `memory action=write` fails after ~30 s while the data is actually saved | The player was built with an older **`com.neoxider.coreaiunity`** that waited for an `FS.syncfs` completion Unity 6.3 never delivers. The current package answers durability immediately (`CoreAiWebGlPersistence.Sync()` / `SyncAsync()`); rebuild the player. |
 
 ### Clearing all CoreAI file persistence (Editor)
 
@@ -330,8 +330,6 @@ To reset **everything** CoreAI stores under `persistentDataPath` (memory, persis
 - Model returns text instead of a tool call
 - `[ToolCall] … status=FAIL` lines in the log
 - The turn ends with a tools-disabled summary after repeated failures
-- **`SmartToolCallingChatClientEditModeTests`** (or runtime) stops after **3 LLM rounds** despite successful tools — fixed in **`com.neoxider.coreai` 1.5.15**: MEAI **`ChatMessage.Contents`** is a non-generic **`IList`**; enumerating native **`FunctionCallContent`** must not rely on **`SelectMany` + `Enumerable.Empty<AIContent>()`** over that property.
-- Edit Mode logs show tools **`status=FAIL`** with **`get_isPlaying can only be called from the main thread`** (execution count stays **0**) — fixed from **`com.neoxider.coreaiunity` 1.5.16** onward; current hardening uses the **`UnityMainThreadLlmAsyncMarshaler`** Editor play-state mirror (`RuntimeInitializeOnLoadMethod`, **`Application.onBeforeRender`**, and **`EditorApplication.update`**) plus **`ManagedThreadId`** gate so worker threads never call **`Application.isPlaying`** directly.
 
 ### Diagnostics
 
@@ -351,7 +349,7 @@ Error: Unknown tool 'my_custom_tool'. Available tools: [memory, world_command, .
 
 **Fix:** Ensure the tool is added to the agent:
 ```csharp
-var agent = new AgentBuilder("MyAgent")
+AgentConfig agent = new AgentBuilder("MyAgent")
     .WithTool(new MyCustomTool())  // ← add tool
     .Build();
 ```
@@ -383,7 +381,7 @@ Agent stopped: exceeded maximum of 20 tool-call roundtrips
 **Fix:** raise or remove the cap at the right scope:
 - Per agent: `new AgentBuilder("Builder").WithMaxToolCallRoundtrips(0)`; `0` = unlimited.
 - Per call: `new AiTaskRequest { MaxToolCallRoundtrips = 0 }`.
-- Global: `CoreAISettings.MaxToolCallRoundtrips = 40;` or raise it in the CoreAI settings asset.
+- Global: `coreAiSettingsAsset.SetMaxToolCallRoundtrips(40)` on the `CoreAISettingsAsset` the scope uses (serialized `maxToolCallRoundtrips`, default 20; the CoreAI settings inspector does not show this field).
 
 Priority is per-call → per-agent → per-role policy (`AgentMemoryPolicy`) → global. The built-in **Programmer**, **Creator** and **Builder** roles set the per-role step to `0` = unlimited, so they are uncapped by default.
 
@@ -429,34 +427,33 @@ Priority is per-call → per-agent → per-role policy (`AgentMemoryPolicy`) →
 ## ⏳ Problem: Tests hang
 
 ### EditMode tests
-```
-Test hangs on "Waiting for LLM..."
-```
+
+**Symptom:** an EditMode test waits on a model call and never finishes.
 
 **Cause:** EditMode tests must not call a real LLM.
 
 **Fix:**
-- Use `StubLlmClient` for EditMode
-- PlayMode tests = real LLM
+- Use `StubLlmClient` (or a scripted fake client) in EditMode
+- Real-model checks belong in the PlayMode `LlmVerification` / `Scenarios` assemblies ([Tests/README.md](../Tests/README.md))
 
 ### PlayMode tests
 
 **Hang on "stopping server":**
 ```
-CoreAISettings → LLMUnity → Keep Alive = ✅ true
+CoreAISettings → Advanced Settings → LLMUnity → Keep Alive = ✅ true
 ```
 
 **Hang on "waiting for model":**
-1. Increase `Startup Timeout` to 120–300 sec
+1. Increase **Startup Timeout (sec)** to 120–300 sec
 2. Verify the model is downloaded and the GGUF path is correct
 3. Use a smaller model for tests (2B instead of 9B)
 
 **HTTP tests do not connect:**
 1. Start LM Studio **before** tests
-2. Set env vars:
+2. Set env vars in the process that starts the Unity Editor (or use the local config file, see [RUNNING_LIVE_TESTS.md](RUNNING_LIVE_TESTS.md)):
 ```powershell
-$env:COREAI_OPENAI_TEST_BASE = "http://localhost:1234/v1"
-$env:COREAI_OPENAI_TEST_MODEL = "your-model-id"
+$env:COREAI_TEST_BASE_URL = "http://localhost:1234/v1"
+$env:COREAI_TEST_MODEL = "your-model-id"
 ```
 
 ### ⏳ PlayMode: HTTP 500 from LM Studio / local API
@@ -467,10 +464,10 @@ $env:COREAI_OPENAI_TEST_MODEL = "your-model-id"
 
 **What to check:**
 1. LM Studio (or equivalent) is running and the model is **loaded** before the test starts.
-2. In `CoreAISettings.asset`, **Api Base URL** is correct with the **`/v1`** suffix.
+2. In `CoreAISettings.asset`, **Essentials → Base URL** is correct with the **`/v1`** suffix.
 3. No context / VRAM overload — often causes 500 on the second long request.
 
-When the real-model tests hit a persistent recall failure they end with **`Assert.Ignore`** and an explanation so CI does not fail due to infrastructure.
+When the real-model memory tests hit such an infrastructure failure they end with **`Assert.Ignore`** (`AgentMemoryWithRealModelPlayModeTests`, empty recall response) or **`Assert.Inconclusive`** (`AgentMemoryOpenAiApiPlayModeTests`) and an explanation, so CI does not fail due to infrastructure.
 
 ---
 
@@ -483,14 +480,14 @@ When the real-model tests hit a persistent recall failure they end with **`Asser
 
 ### Cause
 
-Unity WebGL uses the browser **Fetch** stack ([Unity Manual — Web networking](https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-networking.html)). Cross-origin responses must include **`Access-Control-Allow-Origin`** (and usually **`Access-Control-Allow-Headers`** for `Authorization`, `Content-Type`, etc.). When **`WebGlNativeStreaming`** is on (default), streaming uses **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`**; otherwise **`UnityWebRequestOpenAiTransport`**.
+Unity WebGL uses the browser **Fetch** stack ([Unity Manual — Web networking](https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-networking.html)). Cross-origin responses must include **`Access-Control-Allow-Origin`** (and usually **`Access-Control-Allow-Headers`** for `Authorization`, `Content-Type`, etc.). When **Native SSE (fetch)** (`webGlNativeStreaming`, Advanced Settings → WebGL) is on (default), streaming uses **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`**; otherwise **`UnityWebRequestOpenAiTransport`**.
 
 ### Fix
 
 1. Host the LLM API with CORS enabled for your game’s origin, **or** put a **same-origin** reverse proxy in front of the model (e.g. `https://yourgame.com/api/v1` → LM Studio).
 2. For local dev, browser extensions or a tiny proxy that adds CORS headers are common; shipping builds need a real server config.
-3. See **`HTTP_TRANSPORT_SPEC.md`** for transport selection.
-4. **Preflight + wildcard ACAO:** if the console reports *`credentials mode is 'include'` … `Access-Control-Allow-Origin` must not be the wildcard `*`* — keep **`SameOriginCredentials`** **off** on **`CoreAISettingsAsset`** (default **`fetch` `credentials: 'omit'`** since **`com.neoxider.coreaiunity` 1.6.16**; **`Authorization: Bearer …`** is still sent). Turn **`SameOriginCredentials`** **on** only when you intentionally need **`same-origin`** cookie behaviour.
+3. See [HTTP_TRANSPORT_SPEC.md](HTTP_TRANSPORT_SPEC.md) for transport selection.
+4. **Preflight + wildcard ACAO:** if the console reports *`credentials mode is 'include'` … `Access-Control-Allow-Origin` must not be the wildcard `*`* — keep **Fetch credentials (same-origin)** (`sameOriginCredentials`, Advanced Settings → WebGL) **off**. Off is the default and sends `fetch` with **`credentials: 'omit'`**; **`Authorization: Bearer …`** is still sent. Turn it **on** only when you intentionally need **`same-origin`** cookie behaviour.
 
 ---
 
@@ -498,10 +495,10 @@ Unity WebGL uses the browser **Fetch** stack ([Unity Manual — Web networking](
 
 The player build stops before compilation with a `BuildFailedException`. This is deliberate: CoreAI refuses to ship a provider key inside the player.
 
-- **Any platform** — a `CoreAISettings` asset under a `Resources/` folder (default `Assets/Resources/CoreAISettings.asset`) has a non-empty `apiKey` or `secondaryApiKey`. Even a local placeholder such as `lm-studio` fails.
-- **WebGL only** — a non-empty `ApiKey` combined with `ClientOwnedApi`, `ClientLimited`, or `ServerManagedApi`.
+- **Any platform** — a `CoreAISettings` asset under a `Resources/` folder (default `Assets/Resources/CoreAISettings.asset`) has a non-empty `apiKey` or `secondaryApiKey` (`CoreAIResourcesApiKeyBuildGuard`, message `[CoreAI] Build aborted: …`). Even a local placeholder such as `lm-studio` fails.
+- **WebGL only** — any `CoreAISettings` asset has a non-empty `ApiKey` combined with `ClientOwnedApi`, `ClientLimited`, or `ServerManagedApi` (`CoreAIProductionSettingsValidator`, message `[CoreAI] WebGL build is configured with … and a non-empty API key` or `[CoreAI] WebGL build with ServerManagedApi has a non-empty ApiKey`).
 
-**Fix:** clear the key on the asset named in the message and supply it at runtime (`CoreAiBackend.SetApiKey`, an environment variable, secure storage), or move the settings asset out of `Resources/` and assign it on `CoreAILifetimeScope`. Run `CoreAI/Validate Production Settings` to see the findings without starting a build. Full detail: [WEBGL_BUILD_TROUBLESHOOTING.md](WEBGL_BUILD_TROUBLESHOOTING.md).
+**Fix:** clear the key on the asset named in the message and supply it at runtime (`CoreAiBackend.SetApiKey`, an environment variable, secure storage), or move the settings asset out of `Resources/` and assign it on `CoreAILifetimeScope`. With WebGL as the active build target, `CoreAI/Validate Production Settings` lists the WebGL key findings without starting a build. Full detail: [WEBGL_BUILD_TROUBLESHOOTING.md](WEBGL_BUILD_TROUBLESHOOTING.md).
 
 ---
 
@@ -509,7 +506,7 @@ The player build stops before compilation with a `BuildFailedException`. This is
 
 ### Symptoms
 ```
-VContainerException: Type 'ILlmClient' is not registered
+VContainerException: No such registration of type: CoreAI.Ai.ILlmClient
 ```
 
 ### Fix
@@ -612,7 +609,7 @@ ApplyAiGameCommand traceId=abc123 type=AiEnvelope role=Programmer …
 ❓ Tests hanging?
   → Keep Alive = true
   → Startup Timeout = 120
-  → For CI: use Stub backend
+  → For CI without a model: LLM Backend = Offline
 ```
 
 ---
@@ -633,7 +630,7 @@ Some Qwen/DeepSeek-style thinking models can spend the whole output budget on re
 
 1. In `CoreAISettings.asset`, leave **Reasoning Mode** as **Provider Default** unless the provider needs an explicit override.
 2. For Qwen OpenAI-compatible endpoints that support it, set **Reasoning Mode** to **Disabled**. CoreAI sends `enable_thinking=false` and `chat_template_kwargs.enable_thinking=false`.
-3. Keep **Max Output Tokens** high enough for the scenario (or leave **Override Max Output Tokens** off). The local 27B Qwen test profile uses `20000` output tokens and a `128000` context-window hint.
+3. Keep **Max Output Tokens** high enough for the scenario (or leave **Override Max Output Tokens** off).
 4. If the provider supports it, use **Thinking Budget Tokens** to cap reasoning. `0` omits the field.
 
 ---

@@ -28,13 +28,14 @@ Full access is split by member visibility:
 
 (The split is implemented in `LuaCsFullUnityRuntimeBindings`; the flag is the scope's
 `enableFullLuaPrivateAccess`, passed to `CoreAiModsInstaller.RegisterCoreAiMods` and readable through
-`CoreAiModsLifetimeScope.FullLuaPrivateAccessEnabled`. The scene's `CoreAiLuaWorldModule` no longer
-shows Full-access checkboxes; its legacy serialized values have no effect.)
+`CoreAiModsLifetimeScope.FullLuaPrivateAccessEnabled`. `CoreAiLuaWorldModule` grants no Lua tier: its
+hidden legacy Full-access fields are obsolete and have no effect.)
 
 ## Requirements
 
-- `COREAI_LUA` defined.
-- LM Studio / OpenAI-compatible endpoint in `Resources/CoreAISettings`.
+- `COREAI_LUA` defined (the demo controllers compile only with it).
+- `COREAI_LLM` defined and an LM Studio / OpenAI-compatible endpoint in `Resources/CoreAISettings` for the
+  chat part; the Lua Platform tab runs without a model.
 - On the scene's `CoreAiModsLifetimeScope`: **Enable Full Lua Access = true** (already set in the
   demo scene).
 
@@ -77,10 +78,11 @@ return '{"found":true,"path":"' .. desc.path .. '","children":' .. desc.child_co
 
 `LuaPlatformExampleController` (also on the `FullAccessDemo` scene) is a no-LLM reference for what a
 Lua mod can do on its own: it writes and loads its Lua sources itself, no chat/model involved. The
-controller is GUI-less; its UI is the **Lua Platform** tab registered by `FullAccessHubDemoController`
-into the scene's `CoreAiHubWindow` (`LuaPlatformHubPage`, which replaced the old `F6` IMGUI window).
-The same host also registers the **Full Access** info tab and a **Token Budget** tab, alongside the
-built-in Chat / Settings / Statistics and the live Mods page.
+controller is GUI-less; its UI is the **Lua Platform** tab (`LuaPlatformHubPage`) registered by
+`FullAccessHubDemoController` into the scene's `CoreAiHubWindow`. The same host registers the
+**Full Access** info tab, an **AI Settings** tab with Settings / Token Budget / Statistics sub-tabs, and
+the live **Mods** tab; the scene's `WorldStateHubBinder` adds **World**. There is no Chat tab: the scene
+keeps its own `CoreAiChatPanel`.
 
 - **Run self-test** — loads a two-mod pair that checks timers, the `hooks_on('tick')` alias,
   variables/closures, varargs, coroutines, the `store_*` roundtrip, cross-mod events, and the
@@ -114,4 +116,4 @@ default member surface (see above). The Lua-CSharp sandbox (no `io`/`load`, and 
 `os.time`/`os.clock`),
 instruction and time limits, and the quarantine-on-repeated-errors policy still apply.
 A type/member blacklist is available through `IFullLuaAccessBlacklistPolicy`; see
-`Assets/CoreAI/Docs/LUA_ACCESS_MODES.md`.
+[LUA_ACCESS_MODES.md](../../CoreAI/Docs/LUA_ACCESS_MODES.md).

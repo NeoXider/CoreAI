@@ -8,8 +8,8 @@ Scene: `Assets/CoreAI.Demos/MultiplayerFoundation/MultiplayerFoundationDemo.unit
 
 ## What It Shows
 
-The MVP2 multiplayer foundation running through the **production** composition path — not a test
-harness. `MultiplayerFoundationDemoController` resolves the scene's real `CoreAILifetimeScope` and
+The multiplayer foundation (actor ownership, world ACLs, chat privacy, per-actor quotas) running
+through the **production** composition path — not a test harness. `MultiplayerFoundationDemoController` resolves the scene's real `CoreAILifetimeScope` and
 `CoreAiModsLifetimeScope`, then `MultiplayerFoundationDemoScenario` simulates N durable actors and
 attempts a series of cross-actor operations that must be refused.
 
@@ -38,7 +38,7 @@ mutated state cannot read as a pass.
 
 UI Toolkit only — the scene hosts the packaged `CoreAiHub` prefab and the controller registers a
 **Multiplayer Proof** page (`coreai.demo.multiplayer.foundation`) alongside the built-in Chat,
-Settings and Statistics tabs, the live Mods page (`CoreAiModsHubBinder` in the scene) and the World
+AI Settings and Statistics tabs, the live Mods page (`CoreAiModsHubBinder` in the scene) and the World
 State page (`WorldStateHubBinder`, which ships inside the prefab). The Multiplayer Proof page shows the
 per-actor cards, the proof board, and a chat box with an actor dropdown so you can send a message *as* a
 chosen actor and watch the transcript stay private to them.
@@ -51,8 +51,9 @@ Actor count is adjustable live: the `+` / `-` buttons re-run the whole proof, cl
 - `COREAI_LUA` defined. Without it the controller compiles to an empty shell and the scene shows
   nothing.
 - **No LLM is required for the proof itself** — ownership, ACL, quota and privacy enforcement all run
-  through local production services. A configured LLM backend in `Resources/CoreAISettings` is only
-  needed if you want the per-actor chat box to produce model replies.
+  through local production services. `COREAI_LLM` and a configured LLM backend in
+  `Resources/CoreAISettings` are only needed if you want the per-actor chat box to produce model replies.
+- `COREAI_HAS_HUB` for the Mods tab (`CoreAI.Mods.Hub` compiles only with it).
 
 ## How to Use It
 

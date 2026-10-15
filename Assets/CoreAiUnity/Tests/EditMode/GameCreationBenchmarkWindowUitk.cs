@@ -74,6 +74,26 @@ namespace CoreAI.Tests.EditMode
         private int _retries = 1;
         private int _timeoutSeconds;
 
+        private readonly List<GameCreationBenchmarkLauncher.BenchmarkTargetRow> _targetRows = new();
+        private readonly Dictionary<string, TargetProgressRow> _targetProgressRows = new();
+        private int _parallel;
+        private string _reasoningEffort = "";
+        private VisualElement _targetRowsContainer;
+        private Label _targetWarning;
+
+        /// <summary>Choice shown for "no effort set": the suite default in a target row, the provider default for the suite.</summary>
+        private const string DefaultEffortChoice = "default";
+        private VisualElement _targetProgress;
+
+        /// <summary>Live widgets of one target's progress row, updated in place so its Stop button stays clickable.</summary>
+        private sealed class TargetProgressRow
+        {
+            public VisualElement Root;
+            public VisualElement Fill;
+            public Label Info;
+            public Button Stop;
+        }
+
         [MenuItem("CoreAI/Benchmarks/Benchmark Window…", priority = 101)]
         public static void OpenWindow()
         {
@@ -219,6 +239,7 @@ namespace CoreAI.Tests.EditMode
             scroll.Add(BuildGroupsSection());
             scroll.Add(BuildRunOptionsSection());
             scroll.Add(BuildConnectionSection());
+            scroll.Add(BuildTargetsSection());
             scroll.Add(BuildRunButtonSection());
             scroll.Add(BuildStatusSection());
             return scroll;
@@ -430,7 +451,29 @@ namespace CoreAI.Tests.EditMode
                 _timeoutSeconds = Mathf.Max(0, v);
                 EditorPrefs.SetInt(GameCreationBenchmarkLauncher.PrefTimeout, _timeoutSeconds);
             }));
+
+            DropdownField effort = EffortDropdown("Reasoning effort", _reasoningEffort, v =>
+            {
+                _reasoningEffort = v;
+                EditorPrefs.SetString(GameCreationBenchmarkLauncher.PrefReasoningEffort, _reasoningEffort);
+            });
+            effort.tooltip = "Sent as reasoning_effort to the single model and to every target without its own " +
+                             "effort. default = the provider's own default (nothing is sent).";
+            section.Add(effort);
             return section;
+        }
+
+        /// <summary>A dropdown over <see cref="BenchmarkTargetList.ReasoningEfforts"/> plus "default" (empty).</summary>
+        private static DropdownField EffortDropdown(string label, string value, Action<string> changed)
+        {
+            List<string> choices = new() { DefaultEffortChoice };
+            choices.AddRange(BenchmarkTargetList.ReasoningEfforts);
+            BenchmarkTargetList.TryNormalizeReasoningEffort(value, out string normalized);
+            DropdownField field = new(label, choices,
+                normalized.Length == 0 ? 0 : Mathf.Max(0, choices.IndexOf(normalized)));
+            field.RegisterValueChangedCallback(evt =>
+                changed(evt.newValue == DefaultEffortChoice ? "" : evt.newValue ?? ""));
+            return field;
         }
 
         private VisualElement BuildConnectionSection()
@@ -493,6 +536,273 @@ namespace CoreAI.Tests.EditMode
             return foldout;
         }
 
+        private VisualElement BuildTargetsSection()
+        {
+            Foldout foldout = new()
+            {
+                text = "Parallel targets (multi-model run)",
+                value = _targetRows.Count > 0
+            };
+            StyleSection(foldout);
+            Label help = Muted(
+                "Each enabled row is one model behind an OpenAI-compatible endpoint. With at least one enabled row, " +
+                "Run benchmarks every row at the same time, each with its own report; the connection override then " +
+                "only supplies the streaming/native-tool defaults. Keys typed here stay in this editor session; " +
+                "write env:VAR to read a key from an environment variable (that reference is saved).");
+            help.style.whiteSpace = WhiteSpace.Normal;
+            foldout.Add(help);
+
+            _targetRowsContainer = new VisualElement();
+            _targetRowsContainer.style.marginTop = 6;
+            foldout.Add(_targetRowsContainer);
+
+            VisualElement buttons = Row();
+            Button add = new(() =>
+            {
+                _targetRows.Add(new GameCreationBenchmarkLauncher.BenchmarkTargetRow());
+                PersistTargets();
+                RebuildTargetRows();
+            })
+            {
+                text = "Add target"
+            };
+            Button clear = new(() =>
+            {
+                if (_targetRows.Count == 0 || EditorUtility.DisplayDialog("CoreAI Benchmark",
+                        "Remove every target row?", "Remove", "Cancel"))
+                {
+                    _targetRows.Clear();
+                    PersistTargets();
+                    RebuildTargetRows();
+                }
+            })
+            {
+                text = "Clear"
+            };
+            clear.style.marginLeft = 4;
+            buttons.Add(add);
+            buttons.Add(clear);
+            foldout.Add(buttons);
+
+            TextField import = new("Import list")
+            {
+                multiline = true,
+                tooltip = "Paste label|model|baseUrl|apiKey entries (one per line or separated by ';', label and " +
+                          "key optional) or a JSON array, then press Import. Rows are appended."
+            };
+            import.style.minHeight = 40;
+            import.style.whiteSpace = WhiteSpace.Normal;
+            foldout.Add(import);
+            Button importButton = new(() => ImportTargets(import)) { text = "Import" };
+            importButton.style.alignSelf = Align.FlexStart;
+            foldout.Add(importButton);
+
+            foldout.Add(IntField("Parallel (0 = all)", _parallel, 0, 64, v =>
+            {
+                _parallel = Mathf.Max(0, v);
+                EditorPrefs.SetInt(GameCreationBenchmarkLauncher.PrefParallel, _parallel);
+                UpdateTargetWarning();
+            }));
+
+            _targetWarning = Muted("");
+            _targetWarning.style.whiteSpace = WhiteSpace.Normal;
+            foldout.Add(_targetWarning);
+            RebuildTargetRows();
+            return foldout;
+        }
+
+        private void RebuildTargetRows()
+        {
+            if (_targetRowsContainer == null)
+            {
+                return;
+            }
+
+            _targetRowsContainer.Clear();
+            if (_targetRows.Count == 0)
+            {
+                _targetRowsContainer.Add(Muted("No targets: Run benchmarks the single configured model."));
+                UpdateTargetWarning();
+                return;
+            }
+
+            VisualElement header = Row();
+            header.Add(FixedLabel("On", 26));
+            header.Add(FixedLabel("Label", 96));
+            Label modelHead = Muted("Model");
+            modelHead.style.flexGrow = 1;
+            modelHead.style.flexBasis = 0;
+            header.Add(modelHead);
+            Label urlHead = Muted("Base URL");
+            urlHead.style.flexGrow = 1.4f;
+            urlHead.style.flexBasis = 0;
+            header.Add(urlHead);
+            header.Add(FixedLabel("API key", 116));
+            header.Add(FixedLabel("Effort", 84));
+            header.Add(FixedLabel("Extra body", 110));
+            header.Add(FixedLabel("", 26));
+            _targetRowsContainer.Add(header);
+
+            for (int i = 0; i < _targetRows.Count; i++)
+            {
+                _targetRowsContainer.Add(TargetRowEditor(_targetRows[i]));
+            }
+
+            UpdateTargetWarning();
+        }
+
+        private VisualElement TargetRowEditor(GameCreationBenchmarkLauncher.BenchmarkTargetRow row)
+        {
+            VisualElement line = Row();
+            Toggle on = new() { value = row.enabled, tooltip = "Include this target in the next run" };
+            on.style.width = 26;
+            on.RegisterValueChangedCallback(evt =>
+            {
+                row.enabled = evt.newValue;
+                PersistTargets();
+                UpdateTargetWarning();
+            });
+            line.Add(on);
+
+            line.Add(TargetText(row.label, 96, 0f, false, "Optional display name for reports and progress",
+                v => row.label = v));
+            line.Add(TargetText(row.model, 0f, 1f, false, "Model id the endpoint serves", v => row.model = v));
+            line.Add(TargetText(row.baseUrl, 0f, 1.4f, false, "OpenAI-compatible base URL, e.g. http://127.0.0.1:8831/v1",
+                v => row.baseUrl = v));
+            line.Add(TargetText(row.apiKey, 116, 0f, true, "API key, or env:VAR to read it from the environment",
+                v => row.apiKey = v));
+
+            DropdownField effort = EffortDropdown(null, row.reasoningEffort, v =>
+            {
+                row.reasoningEffort = v;
+                PersistTargets();
+                UpdateTargetWarning();
+            });
+            effort.tooltip = "reasoning_effort for this target; default = the suite-wide Reasoning effort.";
+            effort.style.width = 84;
+            line.Add(effort);
+            line.Add(TargetText(row.extraBody, 110, 0f, false,
+                "Optional provider body fields for this target as one JSON object, e.g. {\"top_k\":20}. " +
+                "CoreAI-owned fields (messages, model, tools, …) are rejected; the effort overrides reasoning_effort.",
+                v => row.extraBody = v));
+
+            Button remove = new(() =>
+            {
+                _targetRows.Remove(row);
+                PersistTargets();
+                RebuildTargetRows();
+            })
+            {
+                text = "✕",
+                tooltip = "Remove this target"
+            };
+            remove.style.width = 26;
+            line.Add(remove);
+            return line;
+        }
+
+        private TextField TargetText(string value, float width, float grow, bool password, string tooltip,
+            Action<string> assign)
+        {
+            TextField field = new()
+            {
+                value = value ?? "",
+                tooltip = tooltip,
+                isPasswordField = password,
+                maskChar = '*'
+            };
+            if (width > 0f)
+            {
+                field.style.width = width;
+            }
+            else
+            {
+                field.style.flexGrow = grow;
+                field.style.flexBasis = 0;
+                field.style.minWidth = 60;
+            }
+
+            field.RegisterValueChangedCallback(evt =>
+            {
+                assign((evt.newValue ?? "").Trim());
+                PersistTargets();
+                UpdateTargetWarning();
+            });
+            return field;
+        }
+
+        private void ImportTargets(TextField source)
+        {
+            if (!BenchmarkTargetList.TryParse(source.value, out List<BenchmarkTarget> parsed, out string error))
+            {
+                EditorUtility.DisplayDialog("CoreAI Benchmark", error, "OK");
+                return;
+            }
+
+            foreach (BenchmarkTarget target in parsed)
+            {
+                _targetRows.Add(new GameCreationBenchmarkLauncher.BenchmarkTargetRow
+                {
+                    enabled = true,
+                    label = target.Label,
+                    model = target.Model,
+                    baseUrl = target.BaseUrl,
+                    apiKey = target.ApiKey,
+                    reasoningEffort = target.ReasoningEffort,
+                    extraBody = target.ExtraBodyJson
+                });
+            }
+
+            source.SetValueWithoutNotify("");
+            PersistTargets();
+            RebuildTargetRows();
+        }
+
+        private void UpdateTargetWarning()
+        {
+            if (_targetWarning == null)
+            {
+                return;
+            }
+
+            if (!GameCreationBenchmarkLauncher.TryBuildTargetSpec(_targetRows, out string spec, out string error))
+            {
+                _targetWarning.text = $"Fix the target list before running: {error}";
+                _targetWarning.style.color = new Color(0.95f, 0.68f, 0.32f);
+                return;
+            }
+
+            _targetWarning.style.color = new Color(0.62f, 0.66f, 0.72f);
+            if (string.IsNullOrEmpty(spec))
+            {
+                _targetWarning.text = "";
+                return;
+            }
+
+            int count = BenchmarkTargetList.Parse(spec).Count;
+            int parallel = BenchmarkTargetList.ResolveParallelism(_parallel.ToString(CultureInfo.InvariantCulture),
+                count);
+            _targetWarning.text = $"{count} target(s) will run, up to {parallel} at a time. Scene-building " +
+                                  "scenarios (G6) take turns; everything else runs in parallel.";
+        }
+
+        /// <summary>Saves rows without literal keys to EditorPrefs and with them to SessionState (survives domain reloads).</summary>
+        private void PersistTargets()
+        {
+            GameCreationBenchmarkLauncher.SaveTargetRows(_targetRows);
+            GameCreationBenchmarkLauncher.SaveSessionTargetRows(_targetRows);
+        }
+
+        private void LoadTargets()
+        {
+            _targetRows.Clear();
+            _targetRows.AddRange(GameCreationBenchmarkLauncher.LoadSessionTargetRows() ??
+                                 GameCreationBenchmarkLauncher.LoadSavedTargetRows());
+            _parallel = Mathf.Max(0, EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefParallel, 0));
+            BenchmarkTargetList.TryNormalizeReasoningEffort(
+                EditorPrefs.GetString(GameCreationBenchmarkLauncher.PrefReasoningEffort, ""), out _reasoningEffort);
+        }
+
         private VisualElement BuildRunButtonSection()
         {
             VisualElement section = Section(null);
@@ -530,10 +840,13 @@ namespace CoreAI.Tests.EditMode
             bar.Add(_progressFill);
             _progressText = Muted("");
             _progressText.style.marginTop = 3;
+            _targetProgress = new VisualElement();
+            _targetProgress.style.marginTop = 5;
             _progressLines = new VisualElement();
             _progressLines.style.marginTop = 5;
             section.Add(bar);
             section.Add(_progressText);
+            section.Add(_targetProgress);
             section.Add(_progressLines);
             return section;
         }
@@ -650,8 +963,18 @@ namespace CoreAI.Tests.EditMode
                 return;
             }
 
+            if (!GameCreationBenchmarkLauncher.TryBuildTargetSpec(_targetRows, out string targetSpec,
+                    out string targetError))
+            {
+                EditorUtility.DisplayDialog("CoreAI Benchmark", $"Fix the target list first: {targetError}", "OK");
+                return;
+            }
+
             Persist();
             GameCreationBenchmarkLauncher.ApplySavedConfig();
+            // WHY: after ApplySavedConfig, which only knows the saved rows; these rows carry this session's keys.
+            GameCreationBenchmarkLauncher.ConfigureTargets(targetSpec, _parallel);
+            GameCreationBenchmarkLauncher.ConfigureReasoningEffort(_reasoningEffort);
             if (_overrideConnection)
             {
                 GameCreationBenchmarkLauncher.Configure(
@@ -711,6 +1034,7 @@ namespace CoreAI.Tests.EditMode
                       $"{FormatDuration(BenchmarkProgress.ScenarioRemainingSeconds * 1000.0)} left"
                     : BenchmarkProgress.CurrentLabel
                 : "";
+            UpdateTargetProgress(active);
             _progressLines.Clear();
             if (!active)
             {
@@ -728,6 +1052,85 @@ namespace CoreAI.Tests.EditMode
                 }
 
                 _progressLines.Add(row);
+            }
+        }
+
+        /// <summary>One line per target of a multi-target run: bar, count, current scenario and a per-target Stop.</summary>
+        private void UpdateTargetProgress(bool active)
+        {
+            if (_targetProgress == null)
+            {
+                return;
+            }
+
+            IReadOnlyList<BenchmarkRunSnapshot> runs = active ? BenchmarkProgress.Runs() : Array.Empty<BenchmarkRunSnapshot>();
+            if (runs.Count < 2)
+            {
+                if (_targetProgressRows.Count > 0)
+                {
+                    _targetProgress.Clear();
+                    _targetProgressRows.Clear();
+                }
+
+                return;
+            }
+
+            bool sameRows = runs.Count == _targetProgressRows.Count &&
+                            runs.All(r => _targetProgressRows.ContainsKey(r.DisplayName));
+            if (!sameRows)
+            {
+                _targetProgress.Clear();
+                _targetProgressRows.Clear();
+                foreach (BenchmarkRunSnapshot run in runs)
+                {
+                    string name = run.DisplayName;
+                    TargetProgressRow widgets = new() { Root = Row() };
+                    Label label = Ellipsis(FixedLabel(name, 150, true));
+                    label.tooltip = name;
+                    widgets.Root.Add(label);
+
+                    VisualElement bar = new();
+                    bar.style.width = 90;
+                    bar.style.height = 10;
+                    bar.style.marginRight = 6;
+                    bar.style.flexShrink = 0;
+                    bar.style.backgroundColor = new Color(0f, 0f, 0f, 0.25f);
+                    widgets.Fill = new VisualElement();
+                    widgets.Fill.style.height = Length.Percent(100);
+                    widgets.Fill.style.backgroundColor = new Color(0.30f, 0.72f, 0.40f);
+                    bar.Add(widgets.Fill);
+                    widgets.Root.Add(bar);
+
+                    widgets.Info = Ellipsis(Muted(""));
+                    widgets.Info.style.flexGrow = 1;
+                    widgets.Info.style.flexShrink = 1;
+                    widgets.Root.Add(widgets.Info);
+
+                    widgets.Stop = new Button(() => BenchmarkProgress.RequestStop(name))
+                    {
+                        text = "Stop",
+                        tooltip = "Stop only this target (its partial report is still saved)"
+                    };
+                    widgets.Root.Add(widgets.Stop);
+                    _targetProgressRows[name] = widgets;
+                    _targetProgress.Add(widgets.Root);
+                }
+            }
+
+            foreach (BenchmarkRunSnapshot run in runs)
+            {
+                TargetProgressRow widgets = _targetProgressRows[run.DisplayName];
+                widgets.Fill.style.width = Length.Percent(run.Fraction * 100f);
+                string state = !run.IsActive
+                    ? "done"
+                    : run.StopRequested
+                        ? "stopping…"
+                        : run.HasScenarioClock
+                            ? $"{run.CurrentLabel} — {FormatDuration(run.ScenarioRemainingSeconds * 1000.0)} left"
+                            : run.CurrentLabel;
+                widgets.Info.text = $"{run.Completed}/{run.Total}  {state}";
+                widgets.Info.tooltip = string.IsNullOrEmpty(run.LastLine) ? state : $"last: {run.LastLine}";
+                widgets.Stop.SetEnabled(run.IsActive && !run.StopRequested && !BenchmarkProgress.StopRequested);
             }
         }
 
@@ -888,7 +1291,8 @@ namespace CoreAI.Tests.EditMode
             row.Add(bar);
             string speed = s.TotalCompletionTokens > 0 ? $"{Inv(s.TokensPerSecond)} tok/s" : "tok/s n/a";
             Label stats = Ellipsis(Muted(
-                $"reps {s.Repetitions}  ·  P{s.Pass}/PA{s.Partial}/F{s.Fail}  ·  {FormatTokens(s.TotalTokens)}  ·  {speed}"));
+                $"reps {s.Repetitions}  ·  P{s.Pass}/PA{s.Partial}/F{s.Fail}  ·  {FormatTokens(s.TotalTokens)}  ·  {speed}" +
+                (string.IsNullOrEmpty(s.ReasoningEffort) ? "" : $"  ·  effort {s.ReasoningEffort}")));
             stats.style.flexGrow = 1;
             stats.style.marginLeft = 6;
             row.Add(stats);
@@ -986,7 +1390,11 @@ namespace CoreAI.Tests.EditMode
             string[] pngs;
             try
             {
-                pngs = Directory.GetFiles(dir, stem + "_*.png");
+                // WHY: targets of one multi-target run share the run id, so a raw "<stem>_*.png" would also pick
+                // up the images of a sibling whose stem extends this one.
+                pngs = GameCreationBenchmarkLauncher.RunCompanionFiles(dir, stem)
+                    .Where(f => f.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
             }
             catch
             {
@@ -1279,6 +1687,7 @@ namespace CoreAI.Tests.EditMode
             _reps = Mathf.Clamp(EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefReps, 1), 1, 5);
             _retries = Mathf.Clamp(EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefRetries, 1), 0, 3);
             _timeoutSeconds = Mathf.Max(0, EditorPrefs.GetInt(GameCreationBenchmarkLauncher.PrefTimeout, 0));
+            LoadTargets();
         }
 
         private void Persist()
@@ -1299,6 +1708,9 @@ namespace CoreAI.Tests.EditMode
             EditorPrefs.SetInt(GameCreationBenchmarkLauncher.PrefReps, _reps);
             EditorPrefs.SetInt(GameCreationBenchmarkLauncher.PrefRetries, _retries);
             EditorPrefs.SetInt(GameCreationBenchmarkLauncher.PrefTimeout, _timeoutSeconds);
+            EditorPrefs.SetInt(GameCreationBenchmarkLauncher.PrefParallel, _parallel);
+            EditorPrefs.SetString(GameCreationBenchmarkLauncher.PrefReasoningEffort, _reasoningEffort ?? "");
+            PersistTargets();
         }
 
         private void UpdateGroupWarning()

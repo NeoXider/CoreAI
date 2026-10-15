@@ -3294,7 +3294,7 @@ namespace CoreAI.Mods.WorldPackages
             {
                 return "The network bridge could not report its sessions (" + ex.Message + "), so the "
                        + "world load was refused and the live world was not changed. Live network "
-                       + "sessions cannot be handed to a new world until MVP11 session handoff exists; "
+                       + "sessions cannot be handed to a new world because session handoff is unavailable; "
                        + "disconnect clients or stop the server first.";
             }
 
@@ -3305,7 +3305,7 @@ namespace CoreAI.Mods.WorldPackages
 
             return "The live world has " + actorCount.ToString(CultureInfo.InvariantCulture)
                    + " connected network actor(s) on its " + topology + " bridge. Live network sessions "
-                   + "cannot be handed to a new world until MVP11 session handoff exists, so the world "
+                   + "cannot be handed to a new world because session handoff is unavailable, so the world "
                    + "load was refused and the live world was not changed; disconnect clients or stop "
                    + "the server first.";
         }

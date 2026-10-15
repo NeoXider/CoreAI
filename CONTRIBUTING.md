@@ -18,21 +18,33 @@ If the hook blocks your commit, unstage the listed files with `git restore --sta
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push/PR to `main`:
+`.github/workflows/ci.yml` runs on pushes to `main`, on every pull request, on the merge queue and on
+manual dispatch. Jobs:
 
-- **EditMode tests, four compile configurations** — `core` (no optional symbols), `llm`
-  (`COREAI_LLM`), `lua` (`COREAI_LUA`), and `full` (both symbols). All four must stay green;
-  define injection is verified for Standalone and WebGL rows.
-- **Module coverage gates** — the `lua` and `full` jobs fail if the `LuaCsSecureSandboxEditModeTests`
-  escape-test fixture did not actually execute, so Lua isolation coverage cannot silently drop out.
-  The `llm` and `full` jobs similarly require the LLM installer fixture to execute.
-- **Standalone core tests** — a package-local `CoreAI.Core.Tests` EditMode assembly proves the
-  `com.neoxider.coreai` package compiles and tests on its own, without the Unity layer.
-- **`package-graph` job** — fork-safe (no Unity licence needed): checks that all seven packages carry
-  the same lockstep version and that their internal dependency pins agree.
-- **`merge-queue-gate` job** — on the `merge_group` trigger the workflow **fails** (does not skip)
-  when `UNITY_LICENSE` is absent, so a PR can never be merged through the queue without the licensed
-  test run having actually executed.
+- **`portable-core`** — `dotnet test tools/portable/Tests/CoreAI.Portable.Tests.csproj`: the engine-free
+  core and its EditMode fixtures against the real `netstandard2.1` DLL, no Unity licence needed.
+- **`portable-lua`** — `dotnet test tools/portable/LuaTests/CoreAI.Portable.LuaTests.csproj`: the Lua-tier
+  fixtures on Linux against a UnityEngine shim. The job fails below 1400 passed cases or above 42
+  not-executed ones (see [tools/portable/LuaTests/README.md](tools/portable/LuaTests/README.md)).
+- **`package-graph`** — fork-safe: runs `tools/check_positive_module_opt_in.py`, then checks that all seven
+  packages carry the same lockstep version and that their internal dependency pins agree.
+- **`analyzer`** — builds and tests `tools/CoreAI.Tools.sln`, proving the committed
+  `CoreAI.UnityAsyncAnalyzers.dll` still reports rule `CAIU001`.
+- **`editmode-tests`** — EditMode tests in four compile configurations: `core` (no optional symbols), `llm`
+  (`COREAI_LLM`), `lua` (`COREAI_LUA`) and `full` (both). All four must stay green; define injection is
+  verified for the Standalone and WebGL rows. The run includes the package-local `CoreAI.Core.Tests`
+  assembly, which proves `com.neoxider.coreai` compiles and tests without the Unity layer.
+- **Module coverage gates** inside `editmode-tests` — the `lua` and `full` legs fail if the
+  `LuaCsSecureSandboxEditModeTests` escape-test fixture did not actually execute, so Lua isolation coverage
+  cannot silently drop out. The `llm` and `full` legs similarly require `LlmPipelineInstallerEditModeTests`.
+- **`playmode-fastnollm`** — the deterministic, no-model PlayMode assembly
+  (`CoreAI.Tests.PlayMode.FastNoLlm`) with `COREAI_LLM` defined.
+- **`merge-queue-gate`** — on the `merge_group` trigger the workflow **fails** (does not skip) when
+  `UNITY_LICENSE` is absent, so a PR can never be merged through the queue without the licensed test run
+  having actually executed.
+
+The Unity jobs skip with a warning when `UNITY_LICENSE` is unavailable (forked pull requests) and fail in
+`NeoXider/CoreAI` itself.
 
 The workflow requires the standard [GameCI](https://game.ci/docs/github/getting-started) repository
 secrets: `UNITY_LICENSE`, `UNITY_EMAIL`, `UNITY_PASSWORD`.
@@ -83,3 +95,7 @@ New public symbols follow `CoreAI…`; only the top-level facade keeps `CoreAi`.
    Never hand-edit one manifest — the MCP server's advertised version is the piece that silently drifts.
 5. **Docs** — update every doc the change makes stale, in the same commit. Ask which README, guide or
    checklist described the old behaviour; a change is not done while a doc still describes what it replaced.
+   User docs live in `Docs/` and the package `Docs/` folders; plans, audits and process notes go in
+   `dev-docs/`.
+
+The full maintainer checklist for a release is [dev-docs/RELEASE_CHECKLIST.md](dev-docs/RELEASE_CHECKLIST.md).

@@ -29,6 +29,8 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 - MEAI_AS_PRIMARY_PATH_PLAN.md — MEAI as the primary LLM path: current boundaries and the historical plan (Russian)
 - CONTEXT_MANAGEMENT_ROADMAP.md — planned context management design: token budget, rolling summaries, compaction (moved here from the Unity package docs)
 - TOKENS_PER_SEC_FIX_PLAN.md — tokens-per-second measurement fix plan; implemented 2026-07-01, retained as the reference for what was and was not adopted (moved here from `Docs/`)
+- WEBGL_SSE_STREAMING_HISTORY.md — the WebGL SSE streaming investigation and how the `fetch` bridge replaced it; history (moved here from `Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md` on 2026-10-15). The current behaviour is documented in `Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md`
+- MULTI_AGENT_ORCHESTRATION_V2_PLAN.md — sub-agent orchestration plan; not implemented, tracked as R9 in `TODO.md` (moved here from `TODO/MultiAgent_Orchestration_v2.0.md` on 2026-10-15)
 
 ## Materials and graphics
 
@@ -42,6 +44,13 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 - MATERIAL_VARIANT_2026-09-04.md — custom materials and runtime swapping through `MaterialVariant`
 - FORWARD_PLUS_LIGHTING_FIX_2026-09-04.md — Rbx parts received no direct light: the Forward+ keyword was missing from the shaders
 
+## Process and backlog
+
+- RELEASE_CHECKLIST.md — maintainer checklist for a commit or release across the seven packages (moved here from `Assets/CoreAiUnity/Docs/` on 2026-10-15)
+- BACKLOG.md — non-blocking future work and feature ideas; open work by priority is in `TODO.md` (moved here from `Assets/CoreAiUnity/Docs/` on 2026-10-15)
+- DEMO_RECORDING_GUIDE.md — how to record demo videos and GIFs of CoreAI (moved here from `Assets/CoreAiUnity/Docs/` on 2026-10-15)
+
 ## Housekeeping
 
 - MOVED_FROM_USER_DOCS.md — internal notes and TODOs moved out of the user documentation, each with the document it came from
+- COREAIUNITY_DOCS_MOVED_NOTES.md — internal details removed from `Assets/CoreAiUnity/Docs` on 2026-09-17, each with the document it came from

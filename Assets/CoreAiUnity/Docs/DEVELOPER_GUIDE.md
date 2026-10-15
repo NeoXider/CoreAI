@@ -1,4 +1,4 @@
-﻿# CoreAI Developer Guide
+# CoreAI Developer Guide
 
 **What this is.** A practical map of the codebase for people who wire CoreAI into their own game or
 change this repository: which assembly owns what, how a request flows from UI to model to tool to
@@ -51,9 +51,9 @@ named `LLMAgent` objects and unique ports for parallel local endpoints; same-hos
 rejected so an active generation is never torn down beneath in-flight requests.
 
 The HTTP readiness boundary is portable. `CoreAI.Core` defines `ILlmEndpointReadinessProbe`, its request,
-result, and status policy, and provides `HttpClientOpenAiReadinessProbe` for ordinary .NET hosts.
-CoreAiUnity registers `UnityWebRequestOpenAiReadinessProbe` for players and WebGL and injects it into both
-runtime endpoint activation and normal LLMUnity autostart. Native `LLMAgent` lookup, `LLM.WaitUntilReady()`,
+result, and status policy, and (with `COREAI_LLM`) provides `HttpClientOpenAiReadinessProbe` for ordinary .NET
+hosts. With `COREAI_LLM`, CoreAiUnity registers `UnityWebRequestOpenAiReadinessProbe` for players and WebGL and
+injects it into both runtime endpoint activation and normal LLMUnity autostart. Native `LLMAgent` lookup, `LLM.WaitUntilReady()`,
 ownership leases, and llama.cpp unload remain Unity-only.
 
 ---
@@ -82,11 +82,19 @@ ownership leases, and llama.cpp unload remain Unity-only.
 |--------|-------|-------------|
 | **CoreAI.Core** | `Assets/CoreAI/Runtime/Core/` | **No Unity** (`noEngineReferences`). AI contracts, orchestrator, queue, session snapshot, LLM policy, memory, tools, and portable extension points. Lua VM/sandbox implementations live in **CoreAI.Mods**, not Core. |
 | **CoreAI.Source** | `Assets/CoreAiUnity/Runtime/Source/` | Unity: VContainer, MessagePipe, LLM routing (**`RoutingLlmClient`**, **`LlmRoutingManifest`**), LLMUnity/OpenAI HTTP, logging, command router, world commands. Unity-side adapters: **`MessagePipeToolCallEventPublisher`**, **`CoreAiToolExecutionNotifier`**. Package **`com.neoxider.coreaiunity`**. The Lua sandbox and its bindings (`report` / `add` from **`LuaCsLoggingRuntimeBindings`**) live in **CoreAI.Mods** (`com.neoxider.coreaimods`). |
-| **CoreAI.Tests** | `Assets/CoreAiUnity/Tests/EditMode/` | Edit Mode NUnit (**includes `UnityMainThreadLlmAsyncMarshalerEditModeTests`**, **v1.5.14** — Edit Mode deadlock regression). |
+| **CoreAI.Benchmarking** | `Assets/CoreAI/Runtime/Core/Features/Benchmarking/` | Engine-free benchmark report/scoring helpers (`noEngineReferences`, no references). |
+| **CoreAI.Editor** | `Assets/CoreAiUnity/Editor/` | Editor only: `CoreAI/...` menus, inspectors, setup wizards, module manager, WebGL build guards. |
+| **CoreAI.Mods** | `Assets/CoreAIMods/Runtime/` | Package **`com.neoxider.coreaimods`**: Lua-CSharp sandbox, `execute_lua` / `manage_mods`, mod runtime, `CoreAiModsLifetimeScope`. Engine-free satellites **`CoreAI.RbxApi.Datatypes`**, **`CoreAI.RbxApi.Instances`**, **`CoreAI.LuauDownlevel`**; Unity-side **`CoreAI.RbxApi.Binding`**, **`CoreAI.RbxApi.Unity`**; **`CoreAI.Mods.Hub`** compiles only when the Hub package is installed (automatic `COREAI_HAS_HUB`). |
+| **CoreAI.Hub.UI** | `Assets/CoreAIHub/Runtime/` | Package **`com.neoxider.coreaihub`**: runtime UI Toolkit Hub window with registered pages (editor part: **`CoreAI.Hub.UI.Editor`**). |
+| **CoreAI.Mcp** | `Assets/CoreAIMcp/Runtime/` | Package **`com.neoxider.coreaimcp`**: in-game MCP server (references Core, Source, Mods). |
+| **CoreAI.Net.Mirror** | `Assets/CoreAIMirror/Runtime/` | Package **`com.neoxider.coreaimirror`**: Mirror transport behind `INetworkBridge`; compiles only with `MIRROR`. |
+| **CoreAI.Core.Tests** | `Assets/CoreAI/Tests/EditMode/` | Edit Mode tests of the portable core that reference only `CoreAI.Core`. |
+| **CoreAI.Tests** | `Assets/CoreAiUnity/Tests/` (Edit Mode tests in `EditMode/`) | Edit Mode NUnit for the Unity host (includes `UnityMainThreadLlmAsyncMarshalerEditModeTests`, the Edit Mode deadlock regression). |
 | **CoreAI.Tests.PlayMode.FastNoLlm** | `Assets/CoreAiUnity/Tests/PlayMode/FastNoLlm/` | Fast Play Mode: stubs, orchestrator smoke, UITK/chat panel, Lua (**no loaded model / no HTTP LLM dependency** where avoidable). |
 | **CoreAI.Tests.PlayMode.LlmVerification** | `Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/` | Live-model probes (**Ignore** without backend/env). |
 | **CoreAI.Tests.PlayMode.Scenarios** | `Assets/CoreAiUnity/Tests/PlayMode/Scenarios/` | Long multi-step game scenarios (crafting workflows, merchants). Supports DLLs **`CoreAI.Tests.PlayMode.Shared`** + **`CoreAI.Tests.PlayMode.LlmInfra`**. |
-| **CoreAI.ExampleGame** | `Assets/_exampleGame/` | Demo arena; depends on Source. |
+| **CoreAI.Demos** | `Assets/CoreAI.Demos/` | First-party demo scenes and scripts (Core, Source, Mods, Hub). |
+| **CoreAI.ExampleGame** | `Assets/_exampleGame/RogueliteArena/` | Demo arena; depends on Core, Source and Mods. |
 
 **Verification:** compile with `dotnet build` on generated `*.csproj` (Unity/Rider) or build from the IDE; **NUnit Edit Mode / Play Mode** — in **Unity Test Runner** (`Window → General → Test Runner`). The source of truth for scenarios involving `UnityEngine` and test assets is Test Runner, not bare `dotnet test` without Unity.
 
@@ -108,14 +116,17 @@ The template is meant to **work sensibly by default**, while still allowing targ
 - **Prompts:** system/user chain from manifest → Resources → built-in fallback.
 - **Programmer versions (Lua + data overlays):** in the Unity layer they are persisted to disk by default (File* store).
 - **World Commands:** Lua API `coreai_world_*` publishes world commands to the bus; execution runs on the main thread (see [WORLD_COMMANDS.md](WORLD_COMMANDS.md)).
-- **WebGL / IL2CPP:** `CoreServicesInstaller` registers **`IAiGameCommandSink`** with an explicit factory (`MessagePipeAiCommandSink`), not `Register<MessagePipeAiCommandSink>().As<…>()`, so VContainer does not depend on constructor metadata analysis (avoids `Type does not found injectable constructor` in player builds). The Unity package includes **`link.xml`** preserving `MessagePipeAiCommandSink`. EditMode coverage: **`CoreServicesInstallerEditModeTests`**.
+- **WebGL / IL2CPP:** `CoreServicesInstaller` registers **`IAiGameCommandSink`** with an explicit factory (`MessagePipeAiCommandSink`), not `Register<MessagePipeAiCommandSink>().As<…>()`, so VContainer does not depend on constructor metadata analysis (avoids `Type does not found injectable constructor` in player builds). The Unity package includes **`link.xml`**, which preserves the whole `CoreAI.Source` assembly (`MessagePipeAiCommandSink` included) and `VContainer`. EditMode coverage: **`CoreServicesInstallerEditModeTests`**.
 
 ### What you configure on `CoreAILifetimeScope`
 
-- **LLM backend:** `Core AI Settings` (`CoreAISettingsAsset`: backend, HTTP connection, timeouts) and `Llm Routing Manifest` (per-role routing; a profile's `httpSettings` can reference an `OpenAiHttpLlmSettings` asset).
+- **LLM backend:** `Core AI Settings` (`CoreAISettingsAsset`: backend, HTTP connection, timeouts; when empty, `Resources/CoreAISettings` is used and the scope fails fast if neither exists) and `Llm Routing Manifest` (per-role routing; a profile's `httpSettings` can reference an `OpenAiHttpLlmSettings` asset).
 - **Prompts:** `Agent Prompts Manifest` (system/user overrides and custom roles).
 - **Logs:** `Game Log Settings` (`GameLogSettingsAsset`, feature and level filter).
 - **World Commands:** Inspector button **Add Lua / World Commands Module**, then assign the prefab registry (spawn prefab whitelist) on the child `CoreAiLuaWorldModule` — see [WORLD_COMMANDS.md](WORLD_COMMANDS.md).
+- **Skills:** `Role Skills` binds `SkillSetAsset`s to a role id for on-demand `read_skill`.
+- **Network / AI authority:** `Ai Network Execution Policy` and an optional `CoreAiNetworkPeerBehaviour` (empty = standalone host).
+- **Memory isolation:** `Agent Memory Persistence Mode` (`Persistent` / `SessionOnly`), an optional `AgentMemoryScopeProviderBehaviour`, and per-key chat/transcript caps — see [ARCHITECTURE §Runtime Context And Memory Scope](ARCHITECTURE.md#runtime-context-and-memory-scope).
 
 Recommendation for a title: keep settings in one or two ScriptableObject assets and version them in git (no secrets).
 
@@ -162,8 +173,8 @@ flowchart LR
 ```
 
 1. The **game** calls **`IAiOrchestrationService.RunTaskAsync(AiTaskRequest)`** (role, hint, **`Priority`**, **`CancellationScope`**, optional Lua repair fields, **`TraceId`**).
-2. The default implementation is **`QueuedAiOrchestrator`** (concurrency limit, priority, canceling the previous task with the same **`CancellationScope` within the current `AgentMemoryScope`**) around **`AiOrchestrator`**. **`AiOrchestrator`** assigns **`TraceId`**, assembles prompts, asks **`IConversationContextManager`** to prepare long chat history, then obtains a completion — **streaming by default** (drives **`ILlmClient.CompleteStreamingAsync`** and collapses the stream to a result when **`ICoreAISettings.EnableStreaming`** is on, the same execute-as-you-stream tool path as chat), falling back to **`ILlmClient.CompleteAsync`** only when streaming is off; with **`IRoleStructuredResponsePolicy`** for a role, **one** retry is allowed with a **`structured_retry:`** hint in user/hint. Then **`ApplyAiGameCommand`** is published (**`AiEnvelope`**, **`TraceId`**, …). Metrics — **`IAiOrchestrationMetrics`** (log under **`GameLogFeature.Metrics`**).
-3. In DI (composed by **`LlmPipelineInstaller`** as `Timeout( Logging( RetryingStreaming( routed ) ) )`), **`ILlmClient`** is **`TimeoutLlmClientDecorator`** → **`LoggingLlmClientDecorator`** → **`RetryingStreamingLlmClientDecorator`** around **`RoutingLlmClient`** (or a legacy single client): inside — **`OpenAiChatLlmClient`** (HTTP APIs, and LLMUnity through its local OpenAI-compatible server) / **`StubLlmClient`** per **`LlmRoutingManifest`** and role (the optional secondary backend adds **`FallbackLlmClientDecorator`** around the primary). Log **`GameLogFeature.Llm`**: `LLM >` request sent, `LLM <` response, `LLM x` failure (including transport timeouts), `LLM ~` retry or cancelled stream, with a `(stream)` marker on the streaming path; `backend=` names the client type the logging decorator wraps (plus `->profileId` when a routing profile applied). For “is this stub?” — read **`CoreAiBackend.Status`** or subscribe to **`LlmBackendSelected`** (`ClientType`, `ExecutionMode`). Tools the model calls (`execute_lua`, `world_command`, `memory`, …) run inside this step through **`ToolExecutionPolicy`**.
+2. The default implementation is **`QueuedAiOrchestrator`** (concurrency limit, priority, canceling the previous task with the same **`CancellationScope` within the current `AgentMemoryScope`**) around **`AiOrchestrator`**. **`AiOrchestrator`** assigns **`TraceId`**, assembles prompts, asks **`IConversationContextManager`** to prepare long chat history, then obtains a completion — **streaming by default** (drives **`ILlmClient.CompleteStreamingAsync`** and collapses the stream to a result when **`ICoreAISettings.EnableStreaming`** is on, the same execute-as-you-stream tool path as chat), falling back to **`ILlmClient.CompleteAsync`** only when streaming is off; with **`IRoleStructuredResponsePolicy`** for a role, **one** retry is allowed with a **`structured_retry:`** hint in user/hint. Then **`ApplyAiGameCommand`** is published (**`AiEnvelope`**, **`TraceId`**, …). Metrics — **`IAiOrchestrationMetrics`**: **`LoggingAiOrchestrationMetrics`** (log under **`GameLogFeature.Metrics`**) when **`CoreAISettingsAsset.LogOrchestrationMetrics`** is on, otherwise in-memory **`InMemoryAiOrchestrationMetrics`** (read by the Hub statistics page).
+3. In DI (composed by **`LlmPipelineInstaller`** as `Timeout( Logging( RetryingStreaming( routed ) ) )` with `COREAI_LLM`, or `Logging( routed )` without it), **`ILlmClient`** is **`TimeoutLlmClientDecorator`** → **`LoggingLlmClientDecorator`** → **`RetryingStreamingLlmClientDecorator`** around **`RoutingLlmClient`**: inside — **`OpenAiChatLlmClient`** (HTTP APIs, and LLMUnity through its local OpenAI-compatible server), **`ServerManagedLlmClient`** (backend proxy), **`OfflineLlmClient`** / **`StubLlmClient`** per **`LlmRoutingManifest`** and role, or the legacy primary client (the optional secondary backend adds **`FallbackLlmClientDecorator`** around the primary). Log **`GameLogFeature.Llm`**: `LLM >` request sent, `LLM <` response, `LLM x` failure (including transport timeouts), `LLM ~` retry or cancelled stream, with a `(stream)` marker on the streaming path; `backend=` names the client type the logging decorator wraps (plus `->profileId` when a routing profile applied). For “is this stub?” — read **`CoreAiBackend.Status`** or subscribe to **`LlmBackendSelected`** (`ClientType`, `ExecutionMode`). Tools the model calls (`execute_lua`, `world_command`, `memory`, …) run inside this step through **`ToolExecutionPolicy`**.
 4. Subscriber **`AiGameCommandRouter`** receives **`ApplyAiGameCommand`** from MessagePipe and **marshals handling to the Unity main thread** (`UniTask.SwitchToMainThread`), then calls **`ICoreAiWorldCommandExecutor.TryExecute`** and raises the static **`CommandReceived`** event; **`[MessagePipe]`** logs include the same task **`traceId`**. The router does not execute Lua from the envelope.
 5. Lua from the envelope with automatic **Programmer** repair is opt-in: **`LuaCsAiEnvelopeProcessor`** (`com.neoxider.coreaimods`) publishes **`LuaExecutionSucceeded`** / **`LuaExecutionFailed`** (**`TraceId`** preserved) and, on error, re-runs the Programmer with repair context and the same **`TraceId`** (bounded by **`CoreAISettings.MaxLuaRepairRetries`**, default **3**). It is not registered by default — construct it and call `Process` from your own `ApplyAiGameCommand` subscriber if you need that path.
 
@@ -177,7 +188,7 @@ flowchart LR
 
 `QueuedAiOrchestrator` is the default `IAiOrchestrationService` wrapper. It provides:
 
-- **Concurrency cap:** `AiOrchestrationQueueOptions.MaxConcurrent` limits total in-flight work across non-streaming and streaming tasks.
+- **Concurrency cap:** `AiOrchestrationQueueOptions.MaxConcurrent` limits total in-flight work across non-streaming and streaming tasks. The Unity pipeline sets it from `CoreAISettingsAsset.MaxConcurrentOrchestrations`, but never below 4.
 - **Priority:** higher `AiTaskRequest.Priority` runs first. Equal priority is FIFO.
 - **Shared sync/stream priority:** `RunTaskAsync` and `RunStreamingAsync` use one effective priority order; a high-priority stream is not blocked behind a lower-priority non-stream task.
 - **Latest-wins scopes:** when a new task has the same non-empty `CancellationScope` and the same current `AgentMemoryScope`, older active and pending work for that identity partition is cancelled immediately. Two students using the same role do not cross-cancel.
@@ -193,7 +204,7 @@ for predictable gameplay scheduling.
 
 Chat history is not sent blindly forever. When `AgentMemoryPolicy.RoleMemoryConfig.WithChatHistory` is enabled, `AiOrchestrator` loads recent stored chat and passes it to `IConversationContextManager`.
 
-The default `DeterministicConversationContextManager` uses the role `ContextTokens` budget (and the portable token budget when enabled). Fresh turns remain in `LlmCompletionRequest.ChatHistory`; older turns are compacted into a `## Conversation Summary` system-role tail message in that history, never into the cacheable first system prompt. Summaries are stored in `IConversationSummaryStore`: **`RegisterCorePortable`** wires **`InMemoryConversationSummaryStore`** by default (accumulation for the process); Unity’s **`CoreAILifetimeScope`** overrides with **`FileConversationSummaryStore`** for disk persistence. This compaction is deterministic and does not spend another LLM request.
+The default `DeterministicConversationContextManager` uses the role `ContextTokens` budget (and the portable token budget when enabled). Fresh turns remain in `LlmCompletionRequest.ChatHistory`; older turns are compacted into a `## Conversation Summary` system-role tail message in that history, never into the cacheable first system prompt. Summaries are stored in `IConversationSummaryStore`: **`RegisterCorePortable`** wires **`InMemoryConversationSummaryStore`** by default (accumulation for the process); Unity’s **`CoreAILifetimeScope`** replaces it with a scoped **`FileConversationSummaryStore`** on every player in `Persistent` mode, and with a scoped in-memory store in `SessionOnly` mode. This compaction is deterministic and does not spend another LLM request.
 
 Production projects can replace `IConversationContextManager` with an implementation that calls a backend summarizer, stores summaries per user/session/topic, or applies stricter privacy rules. Keep the output short and factual because it becomes part of every later request.
 
@@ -211,11 +222,11 @@ In Unity, `MessagePipeToolCallEventPublisher` bridges these calls to `GlobalMess
 
 Additionally, `IToolExecutionNotifier.NotifyToolExecuted` fires after each successful tool execution — in Unity this delegates to `CoreAi.NotifyToolExecuted` via `CoreAiToolExecutionNotifier`.
 
-Both streaming and non-streaming paths in `MeaiLlmClient` create `ToolExecutionPolicy` with the same adapters, ensuring **identical event sequences** regardless of execution path. Within one LLM turn, tool calls run in **bounded parallel** on both paths, capped by `ICoreAISettings.MaxParallelToolCalls` (default 4; `1` = strictly sequential). Mutating built-ins (`memory`, `manage_mods`, `manage_skills`, `world_command`, `component_command`, `execute_lua`, `call_skill_tool`) are serialized relative to each other; streamed mutations wait until turn completion so replay can be rejected before side effects; result order is preserved.
+Both streaming and non-streaming paths in `MeaiLlmClient` create `ToolExecutionPolicy` with the same adapters, ensuring **identical event sequences** regardless of execution path. Within one LLM turn, tool calls run in **bounded parallel** on both paths, capped by `ICoreAISettings.MaxParallelToolCalls` (default 4; `1` = strictly sequential). Mutating tools (the built-ins `memory`, `manage_mods`, `manage_skills`, `world_command`, `component_command`, `execute_lua`, `call_skill_tool`, and any tool that sets `ILlmTool.IsMutating`) are serialized relative to each other; streamed mutations wait until turn completion so replay can be rejected before side effects; result order is preserved.
 
 Each event exposes `Info: LlmToolCallInfo` with `TraceId`, `RoleId`, provider `CallId`, `ToolName`, and sanitized `ArgumentsJson`. Use `Info.CallId` when correlating start/completed/failed logs, especially when providers issue several tool calls in one response.
 
-**History trimming.** The shared **`ToolCallHistoryTrimmer`** drops the oldest resolved Assistant+Tool exchanges once tool-related messages exceed **`ICoreAISettings.MaxToolCallHistoryMessages`** (default **20**, **0** = unlimited). System and the original user message are always kept, and a unit is never split, so a surviving `tool`-role message is never orphaned from its `tool_calls` message. Since **4.19.0** this trimming applies to the **streaming** tool loop in `MeaiLlmClient` too, not just the non-streaming `SmartToolCallingChatClient` path — both loops now grow history identically.
+**History trimming.** The shared **`ToolCallHistoryTrimmer`** drops the oldest resolved Assistant+Tool exchanges once tool-related messages exceed **`ICoreAISettings.MaxToolCallHistoryMessages`** (default **20**, **0** = unlimited). System and the original user message are always kept, and a unit is never split, so a surviving `tool`-role message is never orphaned from its `tool_calls` message. The trimming applies to both the **streaming** tool loop in `MeaiLlmClient` and the non-streaming `SmartToolCallingChatClient` path, so both loops grow history identically.
 
 **Final no-tools summary turn.** When a turn stops because the roundtrip cap or the max-consecutive-tool-errors guard was hit, both loops give the model **one** final tools-disabled roundtrip ("Tool budget exhausted. Do not call any more tools. Reply in plain text from the real tool results …") instead of returning empty or canned text. This runs at most once per turn.
 
@@ -245,9 +256,9 @@ For single-event hooks, subscribe to `CoreAi.OnToolCallStarted`, `CoreAi.OnToolC
 
 Custom `ILlmTool` implementations that should be exposed to MEAI must implement `IAIFunctionLlmTool` for a single `AIFunction`, or `IAIFunctionsLlmTool` for multiple functions. `MeaiLlmClient` intentionally does not use reflection duck typing for `CreateAIFunction()`; unknown `ILlmTool` implementations are skipped with a warning so binding behavior stays explicit and testable. The functions of an `IAIFunctionsLlmTool` wrapper (for example `camera` → `camera_capture` / `screenshot` / `camera_look` / `camera_list`) are called by their function names: the policy resolves them to the wrapper, runs them under the wrapper's timeout / `EndsTurn` / mutating / duplicate settings, validates arguments against each function's own schema, and lists the function names (not the wrapper name) under "Available tools".
 
-### 3.4 Logging Architecture (v1.5.0)
+### 3.4 Logging Architecture
 
-Since v1.5.0, CoreAI uses **two logging interfaces**:
+CoreAI uses **two logging interfaces**:
 
 | Interface | Package | Used by | Static access |
 |-----------|---------|---------|---------------|
@@ -265,7 +276,7 @@ private sealed class SpyLogger : IGameLogger, ILog { ... }
 [TearDown] public void TearDown() => Log.Instance = NullLog.Instance;
 
 // In test body:
-var spy = new SpyLogger();
+SpyLogger spy = new SpyLogger();
 Log.Instance = spy;
 ```
 
@@ -387,10 +398,11 @@ reuse for everyone else.
 
 | Mode | Runtime client path | When to use |
 |--------|-------------------|-------------|
+| **Auto** (asset default) | Legacy selection: LLMUnity first or HTTP first per `AutoPriority` (default `LlmUnityFirst`), then `OfflineLlmClient`; WebGL players try HTTP, then Offline | Existing scenes and assets |
 | **LocalModel** | `OpenAiChatLlmClient` over `LlmUnityServerHttpSettings` (LLMUnity's built-in OpenAI-compatible server behind the scene `LLMAgent`) | Local/offline prototyping and shipped local models |
 | **ClientOwnedApi** | `OpenAiChatLlmClient` | User/developer owns the provider key |
 | **ClientLimited** | `ClientLimitedLlmClientDecorator` → `OpenAiChatLlmClient` | Local caps for demos or prototypes |
-| **ServerManagedApi** | `ServerManagedLlmClient` pointed at a backend proxy | Production WebGL/multiplayer/school/SaaS deployment |
+| **ServerManagedApi** | `RefreshOnUnauthorizedDecorator` → `ServerManagedLlmClient` pointed at a backend proxy | Production WebGL/multiplayer/school/SaaS deployment |
 | **Offline** | `OfflineLlmClient` or `StubLlmClient` | Tests and builds without live model access. **Conversational** roles (chat, `Teacher`-style ids, NPC dialog) receive a single **Offline Custom Response** line from settings — never the full serialized `UserPayload`. **`SourceTag == "Chat"`** failures return a trimmed error string to the orchestrator caller instead of `null`. See **COREAI_SETTINGS.md** (Offline). |
 
 **Runtime backend switching:** the static facade **`CoreAiBackend`** (`ApplyHttpApi` / `ApplyLlmUnity` / `ApplyOffline` / `ApplyAuto`, hot `SetModel` / `SetApiKey` / `SetApiBaseUrl`, `VerifyAsync` health probe, `OnBackendChanged`) switches the primary backend at runtime without restarting the scene; the Hub **AI Settings** page (`com.neoxider.coreaihub`) edits the same settings through `CoreAiBackend` (the uGUI `CoreAiBackendPanel` was removed in 6.0.0). See **[RUNTIME_BACKEND_SWITCHING.md](RUNTIME_BACKEND_SWITCHING.md)** — including the caveat that only the legacy-fallback primary client is swapped; explicit `LlmRoutingManifest` profiles are not touched.
@@ -419,6 +431,22 @@ if the host reuses the same `LlmCompletionRequest` object. A custom hook cannot 
 
 Provider failures use `LlmErrorCode` on `LlmCompletionResult`, `LlmStreamChunk`, and `LlmRequestCompleted`, so callers can handle `QuotaExceeded`, `AuthExpired`, `RateLimited`, `BackendUnavailable`, and other stable categories without parsing error text.
 
+For mixed routing, create profiles such as `player_server`, `analyzer_limited`, and `creator_local`, then map role ids to those profiles. A single request always resolves to one concrete backend, but the scene can keep multiple profiles active.
+
+Symbol **`COREAI_LLM`** (manual positive opt-in, since v7.0.0): compiles provider-backed HTTP/MEAI and available LLMUnity client implementations, provider transports, and their focused tests. Portable orchestration/queueing, scripted and stub clients, chat contracts/UI, tool contracts, and the required Microsoft.Extensions.AI assemblies remain in Core without the symbol. Add or remove it via **CoreAI → Setup → Modules → LLM Providers** or **Project Settings → Player → Scripting Define Symbols**.
+
+Symbol **`COREAI_HAS_LLMUNITY`** (automatic): defined via `versionDefines` in the `CoreAI.Source` asmdef when the `ai.undream.llm` package is installed. Code that depends on LLMUnity types (`LLM`, `LLMAgent`, `LLMManager`) — `ConfigurableLlmAgentProvider`, `LlmUnityAutostartEntryPoint`, `LlmUnityHostConfigurator`, `LlmUnityModelBootstrap` — compiles **only** with this symbol and never on WebGL. The LLMUnity client path in `LlmPipelineInstaller` (`OpenAiChatLlmClient` over `LlmUnityServerHttpSettings`) additionally needs `COREAI_LLM`. Users do not set `COREAI_HAS_LLMUNITY` manually.
+
+Symbol **`COREAI_LUA`** (manual positive opt-in, since v7.0.0): compiles the Lua (Lua-CSharp) runtime surfaces and Lua-dependent tests in. It is independent of `COREAI_LLM`: either module can compile alone, while both symbols enable the full runtime. Lua-CSharp ships bundled inside the CoreAI Mods package (`Assets/CoreAIMods/Plugins/Lua.dll` + `Lua.Annotations.dll`), so enabling Lua requires only the define, not another package install. Add or remove the define via **CoreAI → Setup → Modules → Lua (Lua-CSharp)** or **Project Settings → Player → Scripting Define Symbols**.
+
+**LLMUnity defaults (Editor / desktop player):** when **`LocalModel`** / **`UseLlmUnity`** is on, **`ConfigurableLlmAgentProvider`** can **auto-create** a runtime **`LLM` + `LLMAgent`** from **`CoreAISettingsAsset`** if the scene has none (**`LlmUnityAutoCreateRuntimeHost`**, default **on**). **`GgufModelPath`** on the asset is applied to **`LLM.model`** before Model Manager fallback. **`LlmUnityAutostartLocalServer`** (default **on**) triggers a post-DI warm-up via **`LlmUnityAutostartEntryPoint`** (timeout: **`LlmUnityStartupTimeoutSeconds`**). On WebGL and other unsupported players `LocalModel` resolves to `UnsupportedLocalModelLlmClient` (see [ARCHITECTURE §WebGL Rule](ARCHITECTURE.md#webgl-rule)); without a usable `LLMAgent`, without LLMUnity installed, or without `COREAI_LLM` it resolves to `StubLlmClient`. See [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md). **Editor-time creation:** both `CoreAI/Setup/Create Chat Demo Scene` and `CoreAI/Setup/Create Bare Scene (advanced)` call the shared `CoreAIBuildMenu.NeedsLlmUnity` / `TryCreateLlmUnityObjects` and add `LLM` + `LLMAgent` to the generated scene up front when the settings need them, so the components are visible and configurable before the runtime fallback would ever kick in. **Standalone menu:** `CoreAI/Setup/Create LLMUnity Objects (LLM + LLMAgent)` calls the same `TryCreateLlmUnityObjects` directly on the current scene regardless of settings, for adding the host to an existing scene without recreating it. **Native tool-calling via local OpenAI server:** the LLMUnity backend runs the model as its **built-in OpenAI-compatible server** (`llm.remote = true` + **`LlmUnityServerPort`**, default 13333, set **before** the service initializes) and CoreAI talks to it through the **native HTTP client** (`OpenAiChatLlmClient` over `LlmUnityServerHttpSettings`, `POST /v1/chat/completions`) — so LLMUnity gets real structured `tool_calls` + SSE streaming, exactly like LM Studio, with **no** external server to install. The native tool channel follows `CoreAISettingsAsset.LlmUnityToolChannel` (`Auto` = native). `LlmUnityAutostartEntryPoint` polls the endpoint until it accepts requests before declaring ready. The server exposes only `/v1/chat/completions` (no `/v1/models`), so the model name is passed explicitly.
+
+**Observability:** **`GameLogFeature.Llm`** (LLM requests); **`GameLogFeature.Metrics`** (orchestrator metrics; part of **`AllBuiltIn`** / **`All`**). A `GameLogSettingsAsset` serialized before its settings-version field existed has its "everything" preset widened to **`AllBuiltIn`** once, keyed on that field, so a deliberate partial selection is never overwritten. Filtering by **`traceId`** links **`LLM >`** / **`LLM <`** / **`LLM x`** and **`ApplyAiGameCommand`**.
+
+For streaming with tool-calling, `MeaiLlmClient.CompleteStreamingAsync` uses one cycle per MEAI step. When — and only when — the client actually interprets prose as tool calls (`interpretProseAsToolCalls`: no native tool channel, or tools declared with nothing bound, or the explicit `AllowTextShapedToolCallsOnNativeEndpoint` opt-in), it applies a **hybrid JSON hold**: only the prefix that cannot be part of an incomplete text-shaped tool JSON is streamed live; the rest is held until extraction runs, so tool JSON does not leak into the chat. Native **`delta.tool_calls`** (Path 2) and text-shaped JSON (Path 1) both reconcile any held prefix with the cleaned assistant string and emit a **suffix** as **`LlmStreamChunk.Text`** when needed. There is no full-iteration buffering switch.
+By default, per-role streaming override is enabled for roles with tools (`AgentMode.ToolsAndChat` and `AgentMode.ToolsOnly`); for `AgentMode.ChatOnly` the standard fallback from settings remains.
+`CoreAIGameEntryPoint` in the Unity layer is idempotent: a repeated `Start()` is ignored, and a second entry point in the same process does not reinitialize the global `CoreAIAgent` — it registers as a standby owner (Debug line on `LogTag.Composition`) and takes over if the owning scope is disposed.
+
 ### 4.1 Assistant text and reasoning contract (7.0.7+)
 
 The public LLM result has two deliberately separate channels:
@@ -438,22 +466,6 @@ any other automatic assistant record. Those paths consume only `Content` / accum
 show reasoning in an explicitly diagnostic UI, but any durable diagnostic capture must be separate,
 opt-in, redacted, and governed by its own retention policy.
 
-For mixed routing, create profiles such as `player_server`, `analyzer_limited`, and `creator_local`, then map role ids to those profiles. A single request always resolves to one concrete backend, but the scene can keep multiple profiles active.
-
-Symbol **`COREAI_LLM`** (manual positive opt-in, since v7.0.0): compiles provider-backed HTTP/MEAI and available LLMUnity client implementations, provider transports, and their focused tests. Portable orchestration/queueing, scripted and stub clients, chat contracts/UI, tool contracts, and the required Microsoft.Extensions.AI assemblies remain in Core without the symbol. Add or remove it via **CoreAI → Setup → Modules → LLM Providers** or **Project Settings → Player → Scripting Define Symbols**.
-
-Symbol **`COREAI_HAS_LLMUNITY`** (automatic): defined via `versionDefines` in the asmdef when the `ai.undream.llm` package is installed. Code that depends on LLMUnity types (`LLM`, `LLMAgent`, `LLMManager`, the LLMUnity client wiring in `LlmPipelineInstaller`) compiles **only** with this symbol. Users do not set it manually.
-
-Symbol **`COREAI_LUA`** (manual positive opt-in, since v7.0.0): compiles the Lua (Lua-CSharp) runtime surfaces and Lua-dependent tests in. It is independent of `COREAI_LLM`: either module can compile alone, while both symbols enable the full runtime. Lua-CSharp ships bundled inside the CoreAI Mods package (`Assets/CoreAIMods/Plugins/Lua.dll` + `Lua.Annotations.dll`), so enabling Lua requires only the define, not another package install. Add or remove the define via **CoreAI → Setup → Modules → Lua (Lua-CSharp)** or **Project Settings → Player → Scripting Define Symbols**.
-
-**LLMUnity defaults (Editor / desktop player, since v1.7.4):** when **`LocalModel`** / **`UseLlmUnity`** is on, **`ConfigurableLlmAgentProvider`** can **auto-create** a runtime **`LLM` + `LLMAgent`** from **`CoreAISettingsAsset`** if the scene has none (**`LlmUnityAutoCreateRuntimeHost`**, default **on**). **`GgufModelPath`** on the asset is applied to **`LLM.model`** before Model Manager fallback. **`LlmUnityAutostartLocalServer`** (default **on**) triggers a post-DI warm-up via **`LlmUnityAutostartEntryPoint`** (timeout: **`LlmUnityStartupTimeoutSeconds`**). WebGL and builds without LLMUnity keep the previous scene-based / stub paths. See [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md). **Editor-time creation (since v5.0.3):** both `CoreAI/Setup/Create Chat Demo Scene` and `CoreAI/Setup/Create Bare Scene (advanced)` call the shared `CoreAIBuildMenu.NeedsLlmUnity` / `TryCreateLlmUnityObjects` and add `LLM` + `LLMAgent` to the generated scene up front when the settings need them, so the components are visible and configurable before the runtime fallback would ever kick in. **Standalone menu (since v5.0.4):** `CoreAI/Setup/Create LLMUnity Objects (LLM + LLMAgent)` calls the same `TryCreateLlmUnityObjects` directly on the current scene regardless of settings, for adding the host to an existing scene without recreating it. **Native tool-calling via local OpenAI server (since v5.0.8):** the LLMUnity backend now runs the model as its **built-in OpenAI-compatible server** (`llm.remote = true` + **`LlmUnityServerPort`**, default 13333, set **before** the service initializes) and CoreAI talks to it through the **native HTTP client** (`OpenAiChatLlmClient` over `LlmUnityServerHttpSettings`, `POST /v1/chat/completions`) — so LLMUnity gets real structured `tool_calls` + SSE streaming, exactly like LM Studio, with **no** external server to install. `LlmUnityAutostartEntryPoint` polls the endpoint until it accepts requests before declaring ready. The old prompt-injected text-parse client (`LlmUnityMeaiChatClient` / `MeaiLlmUnityClient`) was removed. The server exposes only `/v1/chat/completions` (no `/v1/models`), so the model name is passed explicitly.
-
-**Observability:** **`GameLogFeature.Llm`** (LLM requests); **`GameLogFeature.Metrics`** (orchestrator metrics; part of **`AllBuiltIn`** / **`All`** since the logging fix — "all categories" really means all). Assets serialized before that fix are widened to the new **`AllBuiltIn`** once, keyed on the asset's version field, so a deliberate partial selection is never overwritten again. Filtering by **`traceId`** links **`LLM >`** / **`LLM <`** / **`LLM x`** and **`ApplyAiGameCommand`**.
-
-For streaming with tool-calling, `MeaiLlmClient.CompleteStreamingAsync` uses one cycle per MEAI step. When — and only when — the client actually interprets prose as tool calls (`interpretProseAsToolCalls`: no native tool channel, or tools declared with nothing bound, or the explicit `AllowTextShapedToolCallsOnNativeEndpoint` opt-in), it applies a **hybrid JSON hold**: only the prefix that cannot be part of an incomplete text-shaped tool JSON is streamed live; the rest is held until extraction runs, so tool JSON does not leak into the chat. Native **`delta.tool_calls`** (Path 2) and text-shaped JSON (Path 1) both reconcile any held prefix with the cleaned assistant string and emit a **suffix** as **`LlmStreamChunk.Text`** when needed. There is no full-iteration buffering switch — **`BufferFullStreamingIterationWhenToolsDeclared`** was removed in **7.35.0** (never set by any caller).
-By default, per-role streaming override is enabled for roles with tools (`AgentMode.ToolsAndChat` and `AgentMode.ToolsOnly`); for `AgentMode.ChatOnly` the standard fallback from settings remains.
-`CoreAIGameEntryPoint` in the Unity layer is idempotent: repeated `Start()` does not reinitialize global `CoreAIAgent` and logs a warning on `LogTag.Composition`, guarding against accidental double composition of the scene container.
-
 ---
 
 ## 5. Prompts and roles
@@ -471,7 +483,7 @@ By default, per-role streaming override is enabled for roles with tools (`AgentM
 
   By default (`AgentMemoryPolicy`) every built-in role has the memory tool enabled with default action `append`, except **PlainChat** (no memory tool). Chat history is on for every built-in role except **Programmer**; **PlainChat** / **SmartChat** also persist it. **Programmer**, **Creator** and **Builder** default to unlimited tool-call roundtrips. `CoreAILifetimeScope` uses `AgentMemoryPersistenceMode.Persistent` by default; `FileAgentMemoryStore` (layout v2) writes two files per key under `Application.persistentDataPath/CoreAI/AgentMemory/`: `<stem>.json` (memory document, versions, system-prompt snapshot) and `<stem>.history.jsonl` (one JSON line per chat/transcript record), where `<stem>` is the role id for unscoped legacy data. A host that must leave no student conversation files calls `SetAgentMemoryPersistenceMode(AgentMemoryPersistenceMode.SessionOnly)` on the inactive scope before VContainer build; memory, flat chat, structured transcript and compacted summary then use process-only backing. For multi-user or session-scoped products, also supply an `IAgentMemoryScopeProvider` that returns tenant/user/session/topic for the current request. Every non-empty scope is persisted under the stem `scope-v1-<full SHA-256>`; the same opaque key partitions file mutation locks, transcripts, summaries, chat history, and queue cancellation without placing raw ids in filenames/logs. The default provider returns `AgentMemoryScope.Empty`, preserving one role-only memory **and chat-history** key; that is safe only for a one-user process, disabled memory/history, or intentionally shared state. Scoped stores never auto-claim that shared legacy file: migrate a bare role explicitly into one chosen scope, then clear/archive the old role key. A multi-tenant server must never keep the empty default.
 
-- **MEAI tools on Unity (`ToolInvocationMarshaler`):** since **v1.5.12**, `ToolExecutionPolicy` wraps MEAI **`AIFunction.InvokeAsync`** in **`ICoreAISettings.ToolInvocationMarshaler`**. The default **`CoreAISettingsAsset`** uses **`UnityMainThreadLlmAsyncMarshaler`** (**`UniTask.SwitchToMainThread`** in Player / packaged builds **only** — since **v1.5.14**, **Edit Mode `!Application.isPlaying`** skips the hop to avoid deadlock with **`Task.Wait`/`Result`** on the editor managed main thread) because **`SmartToolCallingChatClient`** still uses **`ConfigureAwait(false)`** for WebGL. With **`COREAI_LLM`** enabled, HTTP OpenAI traffic is handled by portable **`MeaiOpenAiChatClient`** (**`System.Net.Http.HttpClient`**) in **`CoreAI.Core`**.
+- **MEAI tools on Unity (`ToolInvocationMarshaler`):** `ToolExecutionPolicy` wraps MEAI **`AIFunction.InvokeAsync`** in **`ICoreAISettings.ToolInvocationMarshaler`**. **`CoreAISettingsAsset`** supplies **`UnityMainThreadLlmAsyncMarshaler`**: **`UniTask.SwitchToMainThread`** in Play Mode and players, and an inline call in **Edit Mode** (`!Application.isPlaying`) to avoid deadlock with **`Task.Wait`/`Result`** on the editor managed main thread. The hop is needed because, outside WebGL, **`SmartToolCallingChatClient`** and **`QueuedAiOrchestrator`** resume with **`ConfigureAwait(false)`** (see [ARCHITECTURE §WebGL Rule](ARCHITECTURE.md#webgl-rule)). With **`COREAI_LLM`** enabled, HTTP OpenAI traffic is handled by portable **`MeaiOpenAiChatClient`** in **`CoreAI.Core`** through an **`IOpenAiHttpTransport`**: **`HttpClientOpenAiTransport`** (`System.Net.Http.HttpClient`) in the Editor and native players, the fetch / `UnityWebRequest` transports in WebGL players.
 
 ---
 
@@ -558,7 +570,7 @@ This is **separate** CoreAI file storage under `Application.persistentDataPath` 
 
 - **After restarting the game**, when the container starts the store reads JSON again: **current** text (`current`) and **revision history** are restored; orchestrator/Lua use the loaded state.
 - **Android / iOS / Desktop** — normal writes to the app directory; data persists across sessions until the user uninstalls the app or clears “app data”.
-- **WebGL** — in `AgentMemoryPersistenceMode.Persistent` mode `persistentDataPath` maps to browser storage (IndexedDB / IDBFS): agent memory and chat JSON use **`FileAgentMemoryStore`** under **`CoreAILifetimeScope`** on the **player** too (**v1.6.19+**). **The web template must pass `config.autoSyncPersistentDataPath = true` to `createUnityInstance()`** — that is what makes the engine flush every `persistentDataPath` write to IndexedDB by itself. Unity's stock templates ship the line commented out, so add it to your own template or run **`CoreAI/Setup/Install WebGL Template`**, which copies the template shipped inside the package into `Assets/WebGLTemplates/CoreAI` and selects it. `CoreAIWebGlPersistentDataSyncBuildGuard` fails the build without it (opt out for a player that ships without CoreAI storage with the scripting define symbol **`COREAI_WEBGL_NO_PERSISTENCE`**, which is logged on every build) and `CoreAiWebGlPersistence` reports a visible error at runtime. CoreAI no longer drives `FS.syncfs` by hand: Unity 6.3 deprecated that path and its completion callback never fires, so awaiting it only produced false failures. Conversation **summaries** for compaction stay **in-memory** on WebGL. `SessionOnly` keeps memory, chat, transcript and summary in memory and does not call file persistence. Users can clear site data; quota limits may apply — see [Unity documentation](https://docs.unity3d.com/) for your version under WebGL.
+- **WebGL** — in `AgentMemoryPersistenceMode.Persistent` mode `persistentDataPath` maps to browser storage (IndexedDB / IDBFS): agent memory and chat use **`FileAgentMemoryStore`** and conversation summaries use **`FileConversationSummaryStore`** under **`CoreAILifetimeScope`** on the **player** too. **The web template must pass `config.autoSyncPersistentDataPath = true` to `createUnityInstance()`** — that is what makes the engine flush every `persistentDataPath` write to IndexedDB by itself. Unity's stock templates ship the line commented out, so add it to your own template or run **`CoreAI/Setup/Install WebGL Template`**, which copies the template shipped inside the package into `Assets/WebGLTemplates/CoreAI` and selects it. `CoreAIWebGlPersistentDataSyncBuildGuard` fails the build without it (opt out for a player that ships without CoreAI storage with the scripting define symbol **`COREAI_WEBGL_NO_PERSISTENCE`**, which is logged on every build) and `CoreAiWebGlPersistence` reports a visible error at runtime. CoreAI does not drive `FS.syncfs` by hand: Unity 6.3 deprecated that path and its completion callback never fires. `SessionOnly` keeps memory, chat, transcript and summary in memory and does not call file persistence. Users can clear site data; quota limits may apply — see [Unity documentation](https://docs.unity3d.com/) for your version under WebGL.
 - **Sync with cloud / a single game save** needs a separate integration (copy files, custom provider, or mirroring after `RecordSuccessfulExecution`).
 
 ---
@@ -567,6 +579,7 @@ This is **separate** CoreAI file storage under `Application.persistentDataPath` 
 
 | Assembly | How to run | What it covers |
 |--------|--------|----------------|
+| **CoreAI.Core.Tests** | Test Runner → Edit Mode | Portable-core fixtures that reference only `CoreAI.Core` (for example `LlmErrorPresentationEditModeTests`); they prove `com.neoxider.coreai` compiles and tests without the Unity layer. |
 | **CoreAI.Tests** | Test Runner → Edit Mode | Prompts, stub LLM, orchestrator, tool policy, chat service, Lua repair prompt composer. The Lua sandbox and payload-parser suites (`LuaCsSecureSandboxEditModeTests`, `AiLuaPayloadParserEditModeTests`) live in **`CoreAI.Mods.Tests`** (`com.neoxider.coreaimods`). |
 | **PlayMode assemblies** (`CoreAI.Tests.PlayMode.*`) | Test Runner → Play Mode (**filter by assembly**) | **`FastNoLlm`** — quick stub coverage; **`LlmVerification`** — streaming/HTTP/tool/memory probes (env **`COREAI_OPENAI_TEST_*`** / LLMUNITY — see LLMUNITY doc); **`Scenarios`** — crafting / merchant narratives. Shared helpers: **`Shared`**, **`LlmInfra`**. |
 
@@ -624,8 +637,8 @@ prove the deadline is real time, not game time).
 ## 8. Example game (`_exampleGame`)
 
 - Scene **`RogueliteArena`** (see Build Settings): **`CompositionRoot`** with **`CoreAILifetimeScope`**, **`ExampleRogueliteEntry`** (arena + hotkeys).
-- **F9** — **Programmer** task (demo Lua + `report`), **`CoreAiLuaHotkey`** component.
-- Child **`LifetimeScope`** in the sample: **`RogueliteArenaLifetimeScope`** — stub for game features with **Parent** = core.
+- **F9** — **Programmer** task (demo Lua + `report`), **`CoreAiLuaHotkey`** component (added at runtime by `ExampleRogueliteEntry`).
+- Child **`LifetimeScope`** for game features: **`RogueliteArenaLifetimeScope`** is an empty stub that is not placed in the scene; add it on a child object with **Parent** = the `CoreAILifetimeScope` object if you move feature wiring to VContainer.
 
 Details: [../../_exampleGame/README.md](../../_exampleGame/README.md).
 
@@ -660,7 +673,7 @@ CoreAi.StopAgent("Teacher");
 
 ### Stopping from built-in Chat UI (`CoreAiChatPanel`)
 
-While a reply is generating, the send button `coreai-chat-send` in `CoreAiChatPanel` automatically switches to **Stop** mode:
+While a reply is generating and `CoreAiChatConfig.EnableStopGeneration` is on (the default), the send button `coreai-chat-send` in `CoreAiChatPanel` switches to **Stop** mode:
 
 - visually turns red (`.coreai-chat-send-button-stop`);
 - button label changes from `>` to `X`;
@@ -672,9 +685,9 @@ The user can interrupt generation:
 - with the `Esc` key while the chat is focused.
 
 In both cases the UI calls `CoreAi.StopAgent(roleId)` and cancels the active request token, which safely stops the current reply and related role tasks in `QueuedAiOrchestrator`.
-Starting with `com.neoxider.coreaiunity` **0.25.6**, the button stays enabled during generation (stop control), busy state is set until the first `await`, and the UI reliably clears streaming/sending state after cancel.
+The button stays enabled during generation (stop control), busy state is set before the first `await`, and the UI clears streaming/sending state after cancel. With `EnableStopGeneration` off, the button keeps its `>` label and stays disabled while the request runs, and Esc does not cancel.
 
-#### Public busy contract — since 2.4.0
+#### Public busy contract
 
 External code that gates work on chat-busy state (for example a production host's own submit-unlock logic) should subscribe to `CoreAiChatPanel.BusyStateChanged` and read `CoreAiChatPanel.IsBusy` instead of reflecting on the private `_isSending` / `_isStreaming` / `_isStopping` / `_isClearing` flags. The contract:
 
@@ -693,7 +706,7 @@ public bool AbandonCurrentTurn();                            // honestly gives u
 
 **Stock chat template:** default floating size **~650×910** (see `CoreAiChatConfig` / `CoreAiChat.uss`), **vertical scrollbar flush** to the panel’s inner right edge, and optional **`coreai-long-request-hint`** (status under the typing row on long turns) — details in [README_CHAT.md](../Runtime/Source/Features/Chat/README_CHAT.md).
 
-**Default assets are never created implicitly.** `CoreAIBuildMenu` no longer runs an `[InitializeOnLoadMethod]` bootstrap on editor load, so importing the package never writes into your `Assets/` — least of all a `Resources/CoreAISettings.asset` that would then ship inside your player. Create them explicitly with **`CoreAI/Settings`** (settings asset only) or **`CoreAI/Setup/Create Default Assets`** (settings + prompts + logging + permissions + routing + prefab registry); the scene wizards (`Create Chat Demo Scene`, `Create Bare Scene (advanced)`) call the same code path.
+**Default assets are never created implicitly.** `CoreAIBuildMenu` runs no `[InitializeOnLoadMethod]` bootstrap on editor load, so importing the package never writes into your `Assets/` — least of all a `Resources/CoreAISettings.asset` that would then ship inside your player. Create them explicitly with **`CoreAI/Settings`** (settings asset only) or **`CoreAI/Setup/Create Default Assets`** (settings + prompts + logging + permissions + routing + prefab registry); the scene wizards (`Create Chat Demo Scene`, `Create Bare Scene (advanced)`) call the same code path.
 
 ### Clearing context
 
@@ -734,7 +747,7 @@ private void HandleToolExecuted(string roleId, string toolName, IDictionary<stri
     Debug.Log($"Agent {roleId} used tool {toolName}!");
     
     // Example: react to a specific tool
-    if (toolName == "spawn_item" && args != null && args.TryGetValue("item_id", out var itemId))
+    if (toolName == "spawn_item" && args != null && args.TryGetValue("item_id", out object? itemId))
     {
         AudioSystem.PlaySound($"spawn_{itemId}");
     }
@@ -807,7 +820,7 @@ Practical integration pain points and ways to keep CoreAI automatic but configur
 **Simplify:**
 - **CoreAI → Setup → Create Default Assets** creates the settings asset, prompts manifest, log settings, permissions, routing manifest and an empty prefab registry in one step.
 - **CoreAI → Setup → Validate Scene** checks that `CoreAILifetimeScope` is present and its references are valid, and logs warnings.
-- Use **CoreAI → Delete All Persistent Saves...** (Editor only, **not** in Play Mode) to wipe **`Application.persistentDataPath/CoreAI`** — agent memory + persisted chat JSON, conversation summaries (desktop), Lua script versions, data overlays. Does **not** delete assets under `Assets/`.
+- Use **CoreAI → Delete All Persistent Saves...** (Editor only, **not** in Play Mode) to wipe the whole **`Application.persistentDataPath/CoreAI`** folder — agent memory and persisted chat, conversation summaries, Lua script versions, data overlays and any other CoreAI data stored there. Does **not** delete assets under `Assets/`.
 
 ### 2) Default LLM backend choice and stub fallback
 
@@ -823,7 +836,7 @@ Practical integration pain points and ways to keep CoreAI automatic but configur
 
 **Simplify:**
 - Canonize one “apply to Unity” entry point (as with `AiGameCommandRouter`) and forbid handling directly from `ISubscriber<T>` without marshaling.
-- Add a small util/template `MainThreadCommandQueue` for projects without UniTask.
+- Without UniTask, enqueue commands into a `ConcurrentQueue<ApplyAiGameCommand>` and drain it in `Update` / `LateUpdate` ([DGF_SPEC](DGF_SPEC.md) ADR-9.4).
 
 ### 4) Lua safety and predictability
 
@@ -866,11 +879,14 @@ Practical integration pain points and ways to keep CoreAI automatic but configur
 
 ## 10. PR checklist
 
-- **Edit Mode:** `CoreAI.Tests` green (prompts, orchestration, tool policy, chat); `CoreAI.Mods.Tests` when Lua or mods change.
-- **Play Mode:** when changing `CoreAILifetimeScope`, scenes, `OpenAiChatLlmClient`, or Play Mode tests — run **`CoreAI.Tests.PlayMode.FastNoLlm`** (always quick), then selectively **`CoreAI.Tests.PlayMode.LlmVerification`** / **`Scenarios`** where your change touches live LLMs or workflows.
+The canonical commit checklist and the CI job list are in [CONTRIBUTING.md](../../../CONTRIBUTING.md); this is the short form for CoreAI code.
+
+- **Edit Mode:** `CoreAI.Core.Tests` and `CoreAI.Tests` green (prompts, orchestration, tool policy, chat); `CoreAI.Mods.Tests` when Lua or mods change. CI runs the Edit Mode suite in four compile configurations — `core` (no optional symbols), `llm` (`COREAI_LLM`), `lua` (`COREAI_LUA`) and `full` (both) — so new LLM-dependent test files go under `#if COREAI_LLM` and Lua-dependent ones under `#if COREAI_LUA`.
+- **Play Mode:** when changing `CoreAILifetimeScope`, scenes, `OpenAiChatLlmClient`, or Play Mode tests — run **`CoreAI.Tests.PlayMode.FastNoLlm`** (always quick; CI runs it with `COREAI_LLM`), then selectively **`CoreAI.Tests.PlayMode.LlmVerification`** / **`Scenarios`** where your change touches live LLMs or workflows.
 - **Secrets:** do not commit API keys, `.env` with keys, or local model paths with personal data; for CI use environment variables (see [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md)).
-- **Documentation:** if contracts or flow change (DGF §3 / DI), update **DGF_SPEC** and this guide in the same PR if needed.
-- **UPM release (any change under `Assets/CoreAI` or `Assets/CoreAiUnity`):** run `python tools/bump_version.py <version>` — it bumps all seven packages in lockstep, their internal dependency pins and `McpServerInfo.Version` (see [RELEASE_CHECKLIST](RELEASE_CHECKLIST.md)); add entries in **[../../CoreAI/CHANGELOG.md](../../CoreAI/CHANGELOG.md)** and **[../CHANGELOG.md](../CHANGELOG.md)**; update docs for the affected feature (root **README.md**, [DOCS_INDEX](DOCS_INDEX.md), [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md), [QUICK_START](QUICK_START.md), etc.); if public API changes, add tests as needed.
+- **Changelog:** add an entry under `[Unreleased]` (or the release section) in **[../../CoreAI/CHANGELOG.md](../../CoreAI/CHANGELOG.md)** (core and mods) or **[../CHANGELOG.md](../CHANGELOG.md)** (Unity host).
+- **Documentation:** update every doc the change makes stale in the same PR — if contracts or flow change (DGF §3 / DI), **DGF_SPEC** and this guide; otherwise the feature docs (root **README.md**, [DOCS_INDEX](DOCS_INDEX.md), [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md), [QUICK_START](QUICK_START.md), etc.).
+- **Release:** run `python tools/bump_version.py <version>` — it sets all seven `package.json` files and their internal `com.neoxider.*` pins, `McpServerInfo.Version`, the package-map line in `Docs/ROADMAP.md` and the footer of this guide in lockstep; `python tools/bump_version.py --check` verifies without writing. Never hand-edit one manifest. Full maintainer list: [RELEASE_CHECKLIST](../../../dev-docs/RELEASE_CHECKLIST.md).
 
 ---
 
@@ -878,4 +894,4 @@ Practical integration pain points and ways to keep CoreAI automatic but configur
 
 Record major contract changes in **DGF_SPEC** (version in the header). **DEVELOPER_GUIDE** describes the current code map; if it diverges from code, the repository wins — update the guide in the same PR.
 
-**Version of this guide:** 7.50.2 (2026-10-15) — seven-package topology; independent library/feature log-prefix controls; UI Toolkit UXML serialization via `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+, required by Unity 6.6); independent positive `COREAI_LLM` / `COREAI_LUA` opt-ins; provider-only meaning of `COREAI_LLM`; opaque multi-user persistence keys and enqueue-time scope snapshots for queue execution/cancellation; session-only persistence and current chat lifecycle contracts. Historical feature notes remain in both package changelogs.
+**Version of this guide:** 7.51.0 (2026-10-15) — seven-package topology; independent library/feature log-prefix controls; UI Toolkit UXML serialization via `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+, required by Unity 6.6); independent positive `COREAI_LLM` / `COREAI_LUA` opt-ins; provider-only meaning of `COREAI_LLM`; opaque multi-user persistence keys and enqueue-time scope snapshots for queue execution/cancellation; session-only persistence and current chat lifecycle contracts. Historical feature notes remain in both package changelogs.

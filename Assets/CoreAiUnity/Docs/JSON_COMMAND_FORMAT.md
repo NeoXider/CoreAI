@@ -26,7 +26,7 @@ When the model decides to invoke a tool, a structure equivalent to the following
 
 ## 1. Memory Tool (all roles with memory)
 
-**Roles:** Creator, Analyzer, Programmer, CoreMechanicAI, custom agents with `.WithMemory()`
+**Roles:** every built-in role except PlainChat; custom agents with `.WithMemory()`
 
 ### Write (overwrite)
 ```json
@@ -68,13 +68,14 @@ When the model decides to invoke a tool, a structure equivalent to the following
 | `content` | string | For `write` / `append` (and `insert`) | Text to store |
 | `old_text` / `new_text` / `anchor` / `line` / `replace_all` | various | For the granular edits | See [MemorySystem.md](MemorySystem.md) |
 
-**Result:** a JSON `MemoryResult` (`Success`, `Message` such as `"Memory saved"` / `"Memory cleared"`, `Error`, `Version`, `MemoryLength`).
+**Result:** a JSON `MemoryResult` (`Success`, `Message` such as `"DONE: Memory saved for Creator."`, `Error`,
+`Version`, `MemoryLength`, and `Memory` with the document text for `read`).
 
 ---
 
 ## 2. Execute Lua Tool (Programmer)
 
-**Roles:** Programmer (primary), Creator (when needed)
+**Roles:** Programmer (attached automatically by the Mods package); custom agents with `LuaLlmTool`
 
 > [!NOTE]
 > `execute_lua` ships in the optional `com.neoxider.coreaimods` package (requires `COREAI_LUA`).
@@ -97,12 +98,23 @@ When the model decides to invoke a tool, a structure equivalent to the following
 |-----------|------|:--------:|-------------|
 | `code` | string | Yes | Lua code to run in the sandbox |
 
-**Available Lua API:**
+**Available Lua API** (default Programmer composition):
 
 | Function | Description |
 |----------|-------------|
 | `report(string)` | Send result back |
 | `add(a, b)` | Add two numbers |
+| `coreai_world_find(pattern)` / `coreai_world_pos(name)` / `coreai_world_exists(name)` | Read-only scene queries |
+| `coreai_world_list_prefabs()` / `coreai_world_raycast(...)` | Read-only prefab list and raycast |
+| Rbx API: `Instance.new('Part')`, `game`, `workspace`, `Vector3`, `CFrame`, `Color3`, … | Create and edit world objects; see [RBX_API.md](../../CoreAI/Docs/RBX_API.md) |
+
+The build functions below publish world and component commands. The default `RegisterCoreAiMods`
+composition withholds them (`LuaCsModStackOptions.RegisterWorldEditBuildBindings = false`): a call raises an
+error that points to the Rbx API. A Lua stack you build yourself with `LuaCsModRuntimeFactory` keeps them
+(the option defaults to `true`).
+
+| Function | Description |
+|----------|-------------|
 | `coreai_world_spawn({prefab=..., name=..., x?, y?, z?, rx?, ry?, rz?, scale?, scaleX?, scaleY?, scaleZ?, parent?})` | Spawn object; `prefab` and `name` required, transform and parent optional |
 | `coreai_world_change(name, {x?, y?, z?, rx?, ry?, rz?, scale?, scaleX?, scaleY?, scaleZ?, parent?})` | Apply only supplied transform or parent fields |
 | `coreai_world_set_color(name, htmlColor)` | Set renderer colour |
@@ -133,16 +145,16 @@ reads the error and may retry in the same turn.
 {
   "name": "execute_lua",
   "arguments": {
-    "code": "-- Ambush spawn script\ncoreai_world_spawn({prefab='Enemy', name='ambush_1', x=10, y=0, z=5})\ncoreai_world_spawn({prefab='Enemy', name='ambush_2', x=-10, y=0, z=5})\ncoreai_world_spawn({prefab='EliteBoss', name='ambush_boss', x=0, y=0, z=15, scaleX=2, scaleY=2, scaleZ=2})\nreport('Ambush setup: 2 enemies + 1 boss')"
+    "code": "-- Ambush markers\nfor i = 1, 2 do\n  local p = Instance.new('Part')\n  p.Name = 'ambush_' .. i\n  p.Anchored = true\n  p.Position = Vector3.new(i * 20 - 30, 1, 5)\n  p.Parent = workspace\nend\nreport('Ambush setup: 2 markers')"
   }
 }
 ```
 
 ---
 
-## 3. World Command Tool (Creator / Designer)
+## 3. World Command Tool (Creator / Builder)
 
-**Roles:** Creator, Designer AI, custom agents with WorldTool
+**Roles:** Creator and Builder (attached automatically); custom agents with `WorldLlmTool`
 
 ### Spawn - create object
 ```json
@@ -282,9 +294,15 @@ leaving every piece at scene root.
 | `scale` | float | Uniform scale fallback. |
 | `scaleX`, `scaleY`, `scaleZ` | float | Per-axis scale values. |
 | `stringValue` | string | Scene name, search query, parent object name, HTML colour, or sound key depending on action. |
+| `worldPositionStays` | bool | Parenting policy for `spawn`/`change` (default `false`: coordinates local to the parent). |
 | `animationName` | string | Animation name. |
 | `textToDisplay` | string | Text to display. |
-| `volume` | float | Audio volume. |
+| `volume` | float | Audio volume, 0–1 (default 1). |
+| `itemsJson` | string | `spawn_batch` only: JSON array of up to 100 items (see [WORLD_COMMANDS.md](WORLD_COMMANDS.md)). |
+
+**Result:** `{"Success":true,"Message":"World command 'destroy' executed successfully","Action":"destroy"}`, or
+`Success: false` with the reason (for example `Missing required parameters for action 'play_sound': targetName
+and stringValue are required.`).
 
 **All public `world_command` action values:**
 
@@ -295,27 +313,28 @@ leaving every piece at scene root.
 | `set_color` | Set renderer colour | `targetName`, `stringValue` |
 | `destroy` | Remove | `targetName` |
 | `list_objects` | List objects | optional `stringValue` |
-| `spawn_batch` | Spawn several prefabs/primitives in one call | see [WORLD_COMMANDS.md](WORLD_COMMANDS.md) |
+| `spawn_batch` | Spawn up to 100 prefabs/primitives in one call | `itemsJson` |
 | `list_prefabs` | List registered prefab keys | none |
 | `load_scene` | Load scene | `stringValue` |
 | `reload_scene` | Reload | none |
-| `set_active` | Enable (show) an object — always activates; disable through Lua/WorldEdit | `targetName` |
-| `play_animation` | Animation | `targetName`, `animationName` |
+| `set_active` | Enable (show) an object; always activates | `targetName` |
+| `play_animation` | Animation | `targetName`, `animationName` (or `stringValue`) |
 | `stop_animation` | Stop animation | `targetName` |
 | `list_animations` | List animations | `targetName` |
-| `play_sound` | Play audio | `targetName`, optional `stringValue`, `volume` |
+| `play_sound` | Play audio | `targetName`, `stringValue` (clip), optional `volume` |
 | `set_volume` | Set audio volume | `targetName`, `volume` |
-| `show_text` | Show text | `targetName`, `textToDisplay` |
+| `show_text` | Show text | `targetName`, `textToDisplay` (or `stringValue`) |
 | `hide_panel` | Hide UI panel/object | `targetName` |
-| `apply_force` | Apply force | `targetName`, `fx`, `fy`, `fz` |
-| `set_velocity` | Set Rigidbody velocity | `targetName`, `fx`, `fy`, `fz` |
+| `apply_force` | Apply force | `targetName`, at least one of `fx`, `fy`, `fz` |
+| `set_velocity` | Set Rigidbody velocity | `targetName`, at least one of `fx`, `fy`, `fz` |
 
 Removed public world actions: `move`, `rotate`, `set_scale`, `parent`, `set_transform`, `update_score`, and `spawn_particles`.
 
 ---
-## 4. Component Command Tool (Creator / Designer / Programmer via Lua)
+## 4. Component Command Tool (host-wired)
 
-**Roles:** Custom agents with `ComponentLlmTool`; Programmer through Lua `coreai_component_*` bindings.
+**Roles:** custom agents with `ComponentLlmTool` (not attached to any built-in role). The Lua
+`coreai_component_*` bindings publish the same envelope where the build bindings are registered (see §2).
 
 ### Add component
 ```json
@@ -398,9 +417,15 @@ Removed public world actions: `move`, `rotate`, `set_scale`, `parent`, `set_tran
 
 Supported `componentType` values: `rigidbody`, `rigidbody2d`, `boxcollider`, `spherecollider`, `capsulecollider`, `meshcollider`, `light`, `audiosource`, `camera`, `linerenderer`, `trailrenderer`, `textmesh`, `meshrenderer`, `particlesystem`.
 
-`set` auto-adds the component if it is missing. Example properties include `rigidbody.mass`, `rigidbody.useGravity`, `rigidbody.isKinematic`, `rigidbody.drag`, `rigidbody.angularDrag`; `light.type`, `light.intensity`, `light.range`, `light.color`, `light.spotAngle`; `boxcollider.isTrigger`, `boxcollider.size`, `boxcollider.center`; and `audiosource.volume`, `audiosource.pitch`, `audiosource.loop`.
+`set` auto-adds the component if it is missing. Property names are case-insensitive; the full list per
+component is in [TOOL_CALL_SPEC.md §5](TOOL_CALL_SPEC.md#5-component-command-tool). Examples: `rigidbody`
+`mass`, `useGravity`, `isKinematic`, `linearDamping` (alias `drag`), `angularDamping` (alias `angularDrag`);
+`light` `type`, `intensity`, `range`, `color`, `spotAngle`; `boxcollider` `isTrigger`, `size`, `center`;
+`audiosource` `volume`, `pitch`, `loop`.
 
-Lua bindings publish the same envelope shape:
+**Result:** `{"Success":true,"Message":"…","Action":"set"}`.
+
+Lua bindings (where registered) publish the same envelope shape:
 
 ```lua
 coreai_component_add("Cube", "rigidbody")
@@ -415,7 +440,7 @@ coreai_component_set_vector("Trigger", "boxcollider", "size", 2, 3, 2)
 
 ## 5. Get Inventory Tool (Merchant / Shopkeeper)
 
-**Roles:** Merchant NPC, any agent with InventoryTool
+**Roles:** any agent or role the host gives `InventoryLlmTool` (host-wired)
 
 ### Request inventory
 ```json
@@ -427,19 +452,24 @@ coreai_component_set_vector("Trigger", "boxcollider", "size", 2, 3, 2)
 
 **Result (example):**
 ```json
-[
-  {"name": "Iron Sword", "type": "weapon", "quantity": 3, "price": 50},
-  {"name": "Steel Axe", "type": "weapon", "quantity": 1, "price": 100},
-  {"name": "Health Potion", "type": "consumable", "quantity": 10, "price": 25},
-  {"name": "Flame Blade", "type": "weapon", "quantity": 1, "price": 250}
-]
+{
+  "Success": true,
+  "Error": null,
+  "Items": [
+    {"Name": "Iron Sword", "Type": "weapon", "Quantity": 3, "Price": 50},
+    {"Name": "Steel Axe", "Type": "weapon", "Quantity": 1, "Price": 100},
+    {"Name": "Health Potion", "Type": "consumable", "Quantity": 10, "Price": 25},
+    {"Name": "Flame Blade", "Type": "weapon", "Quantity": 1, "Price": 250}
+  ]
+}
 ```
 
 ---
 
-## 6. Game Config Tool (Creator / Designer)
+## 6. Game Config Tool (host-wired)
 
-**Roles:** Creator, Designer AI
+**Roles:** any role the host gives the tool through `GameConfigPolicy.CreateLlmTool(store, roleId)`; see
+[GAME_CONFIG_GUIDE.md](GAME_CONFIG_GUIDE.md).
 
 ### Read configuration
 ```json
@@ -457,7 +487,7 @@ coreai_component_set_vector("Trigger", "boxcollider", "size", 2, 3, 2)
   "name": "game_config",
   "arguments": {
     "action": "update",
-    "content": "{\"wave_difficulty\": 1.5, \"spawn_rate\": 2.0, \"boss_hp_multiplier\": 1.3}"
+    "content": "{\"Difficulty\": 2, \"EnemyHealthMultiplier\": 1.5}"
   }
 }
 ```
@@ -467,68 +497,72 @@ coreai_component_set_vector("Trigger", "boxcollider", "size", 2, 3, 2)
 | Parameter | Type | Required | Description |
 |-----------|------|:--------:|-------------|
 | `action` | string | Yes | `read` / `update` |
-| `content` | string | Yes (for `update`) | JSON with new values |
+| `content` | string | Yes (for `update`) | JSON object with the new values; with `UnityGameConfigStore` the keys are the ScriptableObject's field names |
+
+**Result:** `{"Success":true,"Message":"Config updated for key: session","Error":null,"ConfigJson":"…"}`;
+`read` returns `ConfigJson` as `{"<key>": {...}, ...}` for the role's allowed keys.
 
 ---
 
-## 7. Scene Tool (all agents)
+## 7. Scene Tool (host-wired)
 
-**Roles:** All agents (available in Play Mode)
+**Roles:** any agent the host gives `SceneLlmTool` (`WithTool(new SceneLlmTool())`); no built-in role has it.
+
+`scene_tool` is a multi-function wrapper: the model calls its four functions by name. Objects are addressed by
+`instanceId` (returned by `find_objects` / `get_hierarchy`), not by name.
 
 ### Find objects
 ```json
 {
-  "name": "scene_tool",
-  "arguments": {
-    "action": "find_objects",
-    "pattern": "Enemy*"
-  }
+  "name": "find_objects",
+  "arguments": {"searchTerm": "Enemy", "searchMethod": "name", "includeInactive": false}
 }
 ```
+
+`searchMethod` is `name` (substring of the object name, default) or `tag`.
 
 ### Get hierarchy
 ```json
 {
-  "name": "scene_tool",
-  "arguments": {
-    "action": "get_hierarchy"
-  }
+  "name": "get_hierarchy",
+  "arguments": {}
 }
 ```
+
+Pass `rootInstanceId` to list one object's children; omit it (or pass `0`) for the scene roots.
 
 ### Get transform
 ```json
 {
-  "name": "scene_tool",
-  "arguments": {
-    "action": "get_transform",
-    "targetName": "Player"
-  }
+  "name": "get_transform",
+  "arguments": {"instanceId": 12345}
 }
 ```
 
-### Set transform (scene tool only)
+### Set transform
 ```json
 {
-  "name": "scene_tool",
-  "arguments": {
-    "action": "set_transform",
-    "targetName": "Player",
-    "position": {"x": 10, "y": 0, "z": 5}
-  }
+  "name": "set_transform",
+  "arguments": {"instanceId": 12345, "px": 10, "py": 0, "pz": 5, "ry": 90}
 }
 ```
 
-`scene_tool.set_transform` is separate from `world_command`; use `world_command.change` for public name-based world edits.
+`px/py/pz` are world position, `rx/ry/rz` Euler rotation in degrees, `sx/sy/sz` local scale; omitted values
+stay unchanged.
+
+**Result:** `{"success":true,"data":…}` or `{"success":false,"error":"…"}`.
+
+`set_transform` is separate from `world_command`; use `world_command` `change` for name-based world edits.
 
 ---
 
-## 8. Camera Tool (all agents)
+## 8. Camera Tool
 
-**Roles:** All agents (available in Play Mode)
+**Roles:** Programmer (attached automatically). The chat panel can also attach it to the active chat role when
+the model has vision. Hosts add it elsewhere with `AgentMemoryPolicy.AddToolForRole`.
 
-The `camera` tool (`CameraLlmTool`) is a multi-function wrapper; the model calls its functions by name:
-`camera_capture` (alias `screenshot`), `camera_look`, `camera_list`.
+The `camera` tool (`CoreAI.Vision.CameraLlmTool`) is a multi-function wrapper; the model calls its functions by
+name: `camera_capture` (alias `screenshot`), `camera_look`, `camera_list`.
 
 ### Capture screenshot
 ```json
@@ -538,8 +572,11 @@ The `camera` tool (`CameraLlmTool`) is a multi-function wrapper; the model calls
 }
 ```
 
-**Result:** compact JSON with a text summary and a base64 image data URL (for vision-capable models).
-`camera_look` moves only a camera marked agent-controllable (`CoreAiAgentCamera`); `camera_list` lists scene cameras.
+**Result:** a compact JSON summary (`ok`, `summary`, `camera`, `isMain`, `width`, `height`, `format`,
+`sizeBytes`, `pose`, `imageAttached`). The image itself is not in the JSON: it reaches a vision-capable model as
+an image part of a follow-up user message (see [TOOL_AUTHORING_GUIDE.md](TOOL_AUTHORING_GUIDE.md#returning-images-from-a-tool)).
+`camera_look` (`cameraName`, `posX`/`posY`/`posZ`, `rotX`/`rotY`/`rotZ`, `lookAt`) moves only a camera marked
+agent-controllable (`CoreAiAgentCamera`); `camera_list` lists scene cameras.
 
 ---
 
@@ -582,22 +619,26 @@ The `camera` tool (`CameraLlmTool`) is a multi-function wrapper; the model calls
 
 ## 10. Matrix: tools available per role
 
-`component_command` is optional for host-wired agents through `ComponentLlmTool`. The Programmer role can publish the same component command envelope through the Lua `coreai_component_*` bindings when Lua is available.
+Default wiring with the Mods package and `COREAI_LUA` present:
 
-| Role | memory | execute_lua | world_command | get_inventory | game_config | scene_tool | camera | custom |
-|------|:------:|:-------------:|:-------------:|:-------------:|:-----------:|:----------:|:------:|:------:|
-| **Creator** | ✅ append | optional | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
-| **Builder** | ✅ append | optional | ✅ | ❌ | optional | optional | optional | ✅ |
-| **Programmer** | ✅ append | ✅ | ✅ (via Lua) | ❌ | ❌ | ✅ | ✅ | ✅ |
-| **Analyzer** | ✅ append | ❌ | ❌ | ❌ | ✅ read | ✅ | ✅ | ✅ |
-| **CoreMechanicAI** | ✅ append | ❌ | ❌ | ❌ | ✅ read | ❌ | ❌ | ✅ |
-| **AINpc** | ✅ append | ❌ | ❌ | optional | ❌ | ❌ | ❌ | ✅ |
-| **PlainChat** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| **SmartChat** | ✅ append | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| **Merchant** | ✅ append | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ |
-| **Custom** | optional | optional | optional | optional | optional | optional | optional | optional |
+| Role | memory | world_command | execute_lua, manage_mods, get_mod_logs, world-package tools | camera | read_skill / call_skill_tool |
+|------|:------:|:-------------:|:-------------:|:------:|:------:|
+| **Creator** | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Builder** | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Programmer** | ✅ | ❌ (builds through Lua) | ✅ | ✅ | ✅ (Lua Modding, Rbx API, Full Lua skills) |
+| **Analyzer** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **CoreMechanicAI** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **AINpc** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **PlainChat** | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **SmartChat** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Merchant** | ✅ | ❌ | ❌ | ❌ | ❌ |
 
-**Legend:** ✅ default | ❌ disabled | optional — may be added via AgentBuilder. The memory column follows `AgentMemoryPolicy` (every built-in role except PlainChat has the memory tool, default action `append`); the other columns describe typical wiring.
+**Legend:** ✅ attached by default | ❌ not attached. The memory column follows `AgentMemoryPolicy` (default
+action `append`). `get_inventory`, `game_config`, `component_command`, `scene_tool`, `game_state`
+(`CoreAi.RegisterGameStateTool`), `wait` (`WithWaitTool`) and your own tools are host-wired: add them to any role
+with `AgentMemoryPolicy.AddToolForRole` / `SetToolsForRole` or to a custom agent with `AgentBuilder`. The chat
+panel can add `camera` to the active chat role when vision is on. Wiring details:
+[LLM_TOOLS.md](../../CoreAI/Docs/LLM_TOOLS.md).
 
 ---
 

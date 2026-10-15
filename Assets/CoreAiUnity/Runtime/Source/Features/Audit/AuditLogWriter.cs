@@ -506,7 +506,8 @@ namespace CoreAI.Features.Audit
                     entry.RollbackHandle,
                     sourceTag: entry.SourceTag,
                     prevHash: localPrevHash,
-                    hash: "");
+                    hash: "",
+                    role: entry.Role);
 
                 string preimage = JsonConvert.SerializeObject(finalEntry, _jsonSettings);
                 string hash = AuditHash.Chain(localPrevHash, preimage);

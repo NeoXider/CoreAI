@@ -25,12 +25,12 @@ All interpreter access in `Assets/CoreAIMods/Runtime` goes through engine-neutra
 |---|---|
 | `LuaCsScriptEngine` | `IScriptEngine` over `LuaCsSecureEnvironment` (owns all `LuaState` creation). |
 | `LuaCsScriptState` | `IScriptState` over `LuaState`. |
-| `LuaCsValueMarshaller` | `IValueMarshaller`; consolidates the former registry/runtime/logic-slots conversions. |
+| `LuaCsValueMarshaller` | `IValueMarshaller`; the one conversion path for the registry, the runtime and logic slots. |
 | `LuaCsApiRegistry` | `IScriptFunctionRegistry` (kept name; Lua-typed `RegisterCallback` overloads remain the engine-specific escape hatch). |
 | `LuaCsScriptTable` / `LuaCsScriptCallContext` | `IScriptTable` / `ScriptCallContext` over `LuaTable` / `LuaFunctionExecutionContext`. |
 | `LuaCsScriptExecutionGuard` | `IScriptExecutionGuard` over `LuaCsExecutionGuard` (per-instruction hook). |
 | `LuaCsScriptCoroutine` | `IScriptCoroutine` over `LuaCsCoroutineHandle`. |
-| `LuaCsSecureEnvironment`, `LuaCsExecutionGuard`, `LuaCsCoroutineHandle`, `LuaCsCoroutineRunner` | Concrete sandbox/hardening (moved from `Runtime/Sandbox`, namespaces unchanged). |
+| `LuaCsSecureEnvironment`, `LuaCsExecutionGuard`, `LuaCsCoroutineHandle`, `LuaCsCoroutineRunner` | Concrete sandbox/hardening (namespace `CoreAI.Sandbox.LuaCs`). |
 | `LuaCsCoroutineBudgetSettings` | The per-resume budget (instruction steps + wall-clock) as one serialized, game-owned object: registered by `CoreAiModsLifetimeScope`, resolved by every coroutine construction site, re-read on every resume; `ScriptContext:SetTimeout` mutates its wall-clock half. |
 | `LuaCsFullUnityRuntimeBindings.Marshalling.cs` | VM-specific partial of the Full-tier reflection binder (Unity math/color table coercions). |
 

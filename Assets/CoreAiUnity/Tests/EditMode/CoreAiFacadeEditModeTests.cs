@@ -389,6 +389,54 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void StopAgent_PrefersRoleCancellationAcrossFacadeAndInjectedChatService(bool throughChatService)
+        {
+            RoleCancellationOrchestrator orchestrator = new();
+            if (throughChatService)
+            {
+                CoreAI.Chat.CoreAiChatService service = new(orchestrator);
+                service.StopAgent("Teacher");
+            }
+            else
+            {
+                CoreAi.SetResolver(() => orchestrator);
+                try
+                {
+                    CoreAi.StopAgent("Teacher");
+                }
+                finally
+                {
+                    CoreAi.Invalidate();
+                }
+            }
+
+            Assert.AreEqual("Teacher", orchestrator.StoppedRole);
+            Assert.IsNull(orchestrator.StoppedScope, "Role stop must use the role capability when available.");
+        }
+
+        private sealed class RoleCancellationOrchestrator : IAiOrchestrationService, IRoleAiTaskCancellation
+        {
+            public string StoppedRole;
+            public string StoppedScope;
+
+            public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult("");
+            }
+
+            public void CancelRoleTasks(string roleId)
+            {
+                StoppedRole = roleId;
+            }
+
+            public void CancelTasks(string cancellationScope)
+            {
+                StoppedScope = cancellationScope;
+            }
+        }
+
         private sealed class TestStubOrchestrator : IAiOrchestrationService
         {
             public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)

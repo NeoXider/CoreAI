@@ -52,11 +52,23 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Sampling temperature requested from the LLM backend.</summary>
         float Temperature { get; }
 
+        /// <summary>Explicit endpoint temperature override; legacy numeric settings do not opt in. Null inherits global settings.</summary>
+        float? TemperatureOverride => null;
+
         /// <summary>Per-request timeout in seconds.</summary>
         int RequestTimeoutSeconds { get; }
 
         /// <summary>Maximum number of output tokens requested from the backend.</summary>
         int MaxTokens { get; }
+
+        /// <summary>Explicit endpoint token cap override; legacy numeric settings do not opt in. Null inherits global settings and zero is unlimited.</summary>
+        int? MaxTokensOverride => null;
+
+        /// <summary>Typed reasoning effort; Default inherits the provider or legacy settings.</summary>
+        LlmReasoningEffort ReasoningEffort => LlmReasoningEffort.Default;
+
+        /// <summary>Provider reasoning wire format; Auto selects from the endpoint URL.</summary>
+        LlmReasoningDialect ReasoningDialect => LlmReasoningDialect.Auto;
 
         /// <summary>
         /// Optional raw JSON object merged into OpenAI-compatible request bodies.

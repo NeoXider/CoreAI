@@ -10,6 +10,9 @@ namespace CoreAI.Ai
         public ILlmClient Client { get; set; }
         public string ProfileId { get; set; } = "";
         public int ContextWindowTokens { get; set; }
+
+        /// <summary>Optional output token cap from the selected route profile.</summary>
+        public int? MaxOutputTokens { get; set; }
         public LlmExecutionMode Mode { get; set; }
 
         /// <summary>

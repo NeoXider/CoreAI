@@ -252,6 +252,42 @@ namespace CoreAI.Benchmarking
             };
         }
 
+        /// <summary>Compact role label for charts and cards ("Scene / Tool Operator" becomes "Tool operator").</summary>
+        public static string ShortName(string role)
+        {
+            if (string.IsNullOrEmpty(role))
+            {
+                return string.Empty;
+            }
+
+            if (role.StartsWith("NPC", StringComparison.Ordinal))
+            {
+                return "NPC / dialogue";
+            }
+
+            if (role.StartsWith("Mechanic", StringComparison.Ordinal))
+            {
+                return "Game master";
+            }
+
+            if (role.StartsWith("Scene", StringComparison.Ordinal))
+            {
+                return "Tool operator";
+            }
+
+            if (role.StartsWith("Programmer", StringComparison.Ordinal))
+            {
+                return "Programmer";
+            }
+
+            if (role.StartsWith("Orchestrator", StringComparison.Ordinal))
+            {
+                return "Director";
+            }
+
+            return role.StartsWith("QA", StringComparison.Ordinal) ? "QA judge" : role;
+        }
+
         private static string Verdict(double rating)
         {
             if (rating >= 8.0)

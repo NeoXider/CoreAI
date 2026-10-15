@@ -4,7 +4,7 @@ Package graph: `com.neoxider.coreaibenchmark` depends on `com.neoxider.coreai`,
 `com.neoxider.coreaiunity`, and `com.neoxider.coreaimods` at the same version. The Mods dependency is
 required because the scenarios instantiate and execute the real Lua tool/runtime.
 
-The CoreAI Game-Creation Benchmark measures how well an LLM can build a game inside CoreAI, not how well it can describe one. Each scenario drives the real `execute_lua` and `world_command` tools, then grades the resulting world commands, Lua logic slots, simulated playthroughs, screenshots, and tool-call trace.
+The CoreAI Game-Creation Benchmark measures how well an LLM can build a game inside CoreAI, not how well it can describe one. Each scenario drives the real `execute_lua` and `world_command` tools, then grades the resulting world state, Lua logic slots, simulated playthroughs, the G6 build geometry, and the tool-call trace.
 
 The benchmark answers the practical production question: is this model usable for my game, and for which role? A model can be fast and conversational but still fail as a scene builder, mechanic author, tool operator, programmer, orchestrator, or QA agent if it cannot call tools correctly, obey constraints, or reason through game rules.
 
@@ -17,11 +17,45 @@ The benchmark answers the practical production question: is this model usable fo
 | G3 - Reasoning/design | 4-5/5 | Derived game-rule reasoning, not code transcription | Work out tiered prices, Fibonacci rewards, clamps, boolean dungeon logic, or balanced enemy HP. |
 | G4 - Playthrough | 5/5 | Multi-slot rule systems that survive simulation | Combat, shop, and crafting-chain playthroughs checked step by step. |
 | G5 - Strict instruction-following | 3/5 | Subtractive compliance under explicit constraints | Never touch a protected object, use spawn only, obey exact counts/order, avoid forbidden tools, and stay within a tool budget. |
-| G6 - Free-build castle hero | 5/5 | Open-ended visual building with real scene output | Build a castle through the Roblox API (`execute_lua`, `Instance.new('Part')` with `Enum.Material`/`Enum.PartType`) from the model's own positions; graded on 40+ named parts inside the build volume, 12+ distinct materials and all five shapes (composition and colour are not scored), kept as the report hero image. |
+| G6 - Free-build castle hero | 5/5 | Open-ended visual building with real scene output | Build a castle through the Roblox API (`execute_lua`, `Instance.new('Part')` with `Enum.Material`/`Enum.PartType`) from the model's own positions. Graded on the measured geometry: an enclosed courtyard, a gate, towers, a keep, roofs, objects inside and around the walls, spread and construction quality, plus part count, materials and shapes. Colour is not scored. The screenshot is the report hero image. |
 | G7 - Comprehensive integration | 5/5 (hardest) | World-building and Lua logic staying cross-consistent in one session | A key-and-gate puzzle: spawn Player/Gate/Key to an exact plan, install a `key_found` proximity slot, and keep the spawned world and the logic describing it in agreement end to end. |
 | G8 - Described-state selection | 4/5 | Reasoning over a given textual world state | The prompt describes an already-populated scene; the benchmark recorder seeds the named objects so `list_objects` agrees with that description. The model selects named objects, clears only junk, raises only undersized towers, and encodes the described wave-scaling rule as Lua. |
 
-Groups are implemented as real PlayMode benchmark scenarios under `Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks`. Only G6 (the free-build castle) captures a hero scene screenshot, because the built scene is itself the result; all other groups — including G7 — are graded purely through world state, logic execution and tool-call traces, so no screenshot is taken for them.
+Groups are implemented as real PlayMode benchmark scenarios under `Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks`. Only G6 (the free-build castle) captures a hero scene screenshot, because the built scene is itself the result; all other groups — including G7 and the extreme scenarios — are graded purely through world state, logic execution and tool-call traces, so no screenshot is taken for them.
+
+Suite v2.0 has 35 scenarios (36 with the G6 image-feedback twin): 28 regular scenarios and 7 extreme ones.
+
+### Extreme Tier
+
+Every group except G6 has one extreme scenario (`IsExtreme`, difficulty 5/5, 480-second timeout). Each states every rule exactly; the difficulty comes from the number of interacting rules. Checkpoints are split by rule family, so a partly correct run keeps partial credit.
+
+| Group | Scenario | Task and grading |
+|---|---|---|
+| G1 | `g1_extreme_fortress` | Build a 27-object octagonal fortress whose positions, lengths and yaws follow from a coordinate spec (tower ring, walls, gate cuts, braziers mirrored across an oblique axis), and install two slots. `wall_for_bearing` is checked on hidden bearings. `nearest_tower` must read the live world: the grader loads a reference copy of the fortress, moves and removes towers, and calls it again. |
+| G2 | `g2_extreme_damage_pipeline` | One `resolve_attack` slot resolves a multi-hit attack in nine steps (level scaling, deterministic crits, armor penetration, element matrix with immunity, resist clamp, guard, minimum, shield shatter, overkill) and returns a result table. Graded on 69 hidden attacks in rule families, against an independent C# reference. |
+| G3 | `g3_extreme_dungeon_route` | A `route` slot finds the cheapest path through a grid with swamps, key/door pairs, one-way cells and one-way teleporters, breaking cost ties by fewest actions. Graded on 46 hidden grids in rule families, plus a fewest-actions checkpoint. |
+| G4 | `g4_extreme_auto_battler` | Four slots run a stateful team auto-battler (initiative, targeting ties, poison, stun, cooldowns, shields, heal, cleave, round-20 draw). The harness plays 22 hidden battles and compares every unit's state after every turn with a reference. |
+| G5 | `g5_extreme_work_order` | A work order of ten interacting rules on a seeded scene: observe first, derive the tower count from the listed objects, conditional naming, placement and final action, exact call count and order. One seeded object name carries a prompt injection that the model must ignore. Each rule is its own checkpoint; repeated violations cost per occurrence. |
+| G7 | `g7_extreme_dungeon` | Build a 25-object 3x3 locked-door dungeon whose key rooms follow from reachability rules, and install five world-reading slots (room lookup, lock rule, reachability, next step, key-collecting shortest escape). The slots are graded on the model's dungeon, on a reference copy, and again after the grader moves keys, the Exit and the Player and removes a door. |
+| G8 | `g8_extreme_siege_director` | A 48-object described scene, seeded with positions. Three rules (a faction hp average, inclusive distance thresholds, nearest-two walls with a tie-break) and two tags select exactly ten mutations. Every other mutation, and every polluted field on a selected one, is a violation. |
+
+The extreme scenarios count in the suite score like any other scenario. Reports also show them as a separate extreme sub-score (see [Scoring](#scoring)).
+
+### G6 Grading
+
+G6 reads every built part back through the world's Lua surface, so it grades what was actually built. Besides tool hygiene it checks part count (40+, and 60+ for depth), distinct names, the build volume (x and z within -64..64 studs, y within 0..96), at least 12 materials and all five shapes. The default castle is also graded on its measured structure:
+
+- curtain walls (at least 5 studs tall and 1.5 studs thick, base within 3 studs of the ground) that enclose at least 400 square studs of open courtyard;
+- a gate: an opening through the curtain at ground level, 3 to 16 studs wide;
+- towers touching the curtain, each at least 6 by 6 studs and rising at least 4 studs above the wall crest (two towers pass one checkpoint, four pass another);
+- a keep standing free in the courtyard, at least 8 studs in from the outer wall face, with a footprint of at least 36 square studs and at least as tall as the walls;
+- at least 3 towers or buildings roofed with Wedge, CornerWedge or Ball parts;
+- at least 5 separate objects inside the walls and at least 4 beyond them;
+- parts standing 2 or more studs above the ground covering at least 1500 square studs and spanning at least 48 studs in x and z.
+
+Construction quality applies to every build: at least 95% of parts rest on the ground or on a part that does, no part repeats another's shape, size and placement, at most 10% of parts have z-fighting faces, at most 5% are hidden inside an opaque block or thinner than 0.05 studs, and at most 5% are squashed round shapes. The prompt's WHAT IS MEASURED and CONSTRUCTION paragraphs state these thresholds to the model.
+
+A `COREAI_BENCHMARK_FREEBUILD_SUBJECT` build skips the castle checks. Besides the shared checks above, it is graded on spread, height (at least 16 studs) and at least 6 separate objects. Colour is not scored. The suite 1.x checkpoint for 20+ materials is gone. G6 is still one scenario plus its image-feedback twin, with no extreme tier. G6 scores from suite 2.0 are not comparable with 1.x.
 
 ## Scoring
 
@@ -40,13 +74,34 @@ The six benchmark dimensions are:
 
 Penalties subtract from the base score for failed tool calls, invalid world commands, over-building, disallowed actions, forbidden tools, repeated violations, and scenario-specific mistakes. Hard caps prevent misleading scores: an incomplete timeout/fault or final-state failure can cap at 60, and a prose-only run that never fires a tool can cap at 40.
 
+The suite score is the mean of the per-scenario mean base scores over both tiers. Each report also shows:
+
+- the regular-tier score: the same mean over the non-extreme scenarios;
+- the extreme sub-score: the same mean over the extreme scenarios, with their pass count;
+- per group, the mean over both tiers, plus the regular and extreme means.
+
+The extreme sub-score keeps separating strong models once the regular tier is near 100. Model comparisons rank by suite score and break ties by the extreme sub-score.
+
 World commands are graded from the recorded command stream. Since suite v1.8 a `spawn_batch` is expanded there into one `spawn` per item, named as the production executor names them (`item.name`, else `targetName_i`, else `prefab_i`), so batch-spawned objects count toward spawn totals in every group and a batch satisfies G5's spawn-only constraint; under v1.7 a batch was one opaque non-spawn command, invisible to the spawn graders and a violation in the spawn-only scenario.
 
 Suite v1.12 also returns the recorded per-item batch outcome to the model. Earlier runs could report zero batch spawns despite recording all items, causing the model to repeat those spawns and the grader to count duplicates. The recorder now answers `list_objects` from its seeded/spawned inventory, including G8's described scene. Compare scores only within the same suite version.
 
 Suite v1.14 names the two removable G8 objects explicitly, avoids a collateral-damage penalty when an agent only inspects the scene, and preserves complete tool arguments and result previews in a `.tools.jsonl` file next to each run. It writes the G6 model-authored `execute_lua` calls in order to a `_g6_replay.lua` file, even for the image-feedback variant. Camera result bytes are excluded from the JSONL trace; the runtime forwards captured bytes as a real image part with a text prompt to a vision-capable provider on the next request. A post-run regression found that generic text-result truncation removed the camera base64 before this handoff. Version 7.47.2 fixes that path and the separate streaming tool loop; the published Bunny v1.14 run predates the fix and does not establish that the model saw its camera frames. The G6 goal and system prompt are recorded in the Markdown report. Compare scores only within the same suite version.
 
-Suite v1.15 removes duplicate error deductions: if a scenario's `clean_tool` or `clean_tools` checkpoint already measures failed calls or invalid commands, the harness does not charge the same error again. Each such checkpoint declares what its predicate measures (failed tool calls, invalid world commands); the harness no longer infers it from the checkpoint id or wording. G4's `clean_tool` fails on any failed tool call as well as a failed Lua execution, so a failed call that never ran Lua (unknown tool, unparsable arguments, policy rejection, tool timeout) is still charged there. G6's clean-tools checkpoint is non-mandatory, so recoverable tool errors lower its score without automatically disqualifying a completed build. The benchmark Lua runtime now implements its advertised read-only world queries (`coreai_world_find`, `coreai_world_pos`, `coreai_world_exists`) against the virtual scene. The camera image history keeps only the latest frame. A provider transport timeout remains an environment failure even after some construction; only cancellation from the benchmark's own time budget can end a built G6 cleanly. In `both` mode the report chooses the vision build as its hero when that run has a screenshot. A G6 run with a recorded failure or an Environment/Framework attribution is never the hero; its screenshot stays in the regular scene-screenshot section. The v1.14 Bunny result remains historical; v1.15 run artifacts and current scores are indexed in the [leaderboard](../../Docs/BENCHMARK_LEADERBOARD.md).
+Suite v1.15 removes duplicate error deductions: if a scenario's `clean_tool` or `clean_tools` checkpoint already measures failed calls or invalid commands, the harness does not charge the same error again. G6's clean-tools checkpoint is non-mandatory, so recoverable tool errors lower its score without automatically disqualifying a completed build. The benchmark Lua runtime now implements its advertised read-only world queries (`coreai_world_find`, `coreai_world_pos`, `coreai_world_exists`) against the virtual scene. The camera image history keeps only the latest frame. A provider transport timeout remains an environment failure even after some construction; only cancellation from the benchmark's own time budget can end a built G6 cleanly. In `both` mode the report chooses the vision build as its hero when that run has a screenshot. The v1.14 Bunny result remains historical; v1.15 run artifacts and scores are indexed in the [leaderboard](../../Docs/BENCHMARK_LEADERBOARD.md).
+
+Suite v1.16 makes each clean-tools checkpoint declare what its predicate measures (failed tool calls, invalid world commands); the harness no longer infers it from the checkpoint id or wording. G4's `clean_tool` fails on any failed tool call as well as a failed Lua execution, so a failed call that never ran Lua (unknown tool, unparsable arguments, policy rejection, tool timeout) is charged there. A G6 turn cut by the deadline counts toward generation time, and its tokens are reported as a partial estimate. Castle pacing is appended only to the default castle goal. A G6 run with a recorded failure or an Environment/Framework attribution is never the hero; its screenshot stays in the regular scene-screenshot section. No v1.16 run was published.
+
+Suite v2.0 adds the [extreme tier](#extreme-tier), regrades G6 on build geometry (see [G6 grading](#g6-grading)), and closes grader loopholes in the regular scenarios. A model that passed a v1.x scenario through one of these loopholes can score lower now. No 2.0 score is comparable with a 1.x score.
+
+- **G1.** Objects are graded on the final scene, so a destroyed object no longer counts. The goals state the spread rule (centres at least 1 m apart in x/z) and every pair is checked, instead of counting occupied grid cells. `g1_coin_collector` adds hidden samples (`score_formula` 17 and 100, `win_condition` 50). `g1_constraint_budget` adds a `prefab_keys` checkpoint: Tree is a capsule, Rock and Bush are spheres.
+- **G2.** `g2_win_condition` adds 99.5, 100.5 and -5. `g2_multi_arg_damage` adds hidden samples and clamp cases with a positive base and level outweighed by armor. `g2_crafting_rules` adds reject cases (plank + wood, steel + coal, iron + iron).
+- **G3.** Tiered pricing adds 21 and 100. Clamped regen uses other `max_hp` values (40, 120, 200, 250). Fibonacci rewards add 15 and 18. The boolean dungeon checks all seven non-winning combinations.
+- **G4.** `g4_combat` adds a `hidden_fights` checkpoint (three more fights) and edge cases (`attack_damage(10,10)`, `is_dead(-3)`). `g4_shop` adds `can_buy(75,75)` and a `hidden_session` checkpoint that spends the last coin. `g4_crafting_chain` adds reject cases. Combat and shop checkpoint weights now sum to 120 and are normalised to 100.
+- **G5.** The Chest in `g5_protected_chest` is seeded, so `list_objects` shows it, and using it as a parent counts as touching it. `g5_spawn_only` also counts non-spawn actions the executor refused. `g5_exactly_three` counts every attempt of a tool other than `world_command`. `g5_no_lua` charges per `execute_lua` call instead of per turn.
+- **G7.** `g7_key_puzzle` checks y = 1 for all three objects and samples `key_found` along z and diagonals, so a slot that compares only x, or uses a Manhattan or Chebyshev distance, fails.
+- **G8.** A scale-only change that also sets a single position or rotation axis is rejected. `list_animations` counts as observation. Extra or wrong mutations are charged per occurrence instead of once.
+- **Recorder.** `list_objects` reports each object's real position (seeded or last recorded) instead of the origin, and seeded described scenes carry positions. A `spawn_batch` item inherits the batch-level rotation, scale, parent and `worldPositionStays` when it sets none, as the production executor does.
 
 Bonus is separate from the comparable base score. A scenario can earn up to 20 bonus points only when its base score is at least 90, and the bonus rewards **correctness only** — being more right than the pass bar. Speed/efficiency (tokens and time) is **reported as a tok/s metric, never scored**, so a merely-faster model (e.g. a "spark" tier) cannot look smarter than an equally-correct but slower one. Reports show `Total = Base + Bonus`, but suite rankings compare base score.
 
@@ -96,20 +151,29 @@ The window has four tabs, plus toolbar **Open folder** / **Open report** shortcu
 
 | Tab | Purpose |
 |---|---|
-| Run | Choose model/base URL overrides, scenario groups (G1-G8), repetitions, retries, timeout override, and start a run. While a run is active a **Stop (save partial)** button appears: it takes effect at retry boundaries (no waiting out every timeout attempt), saves a partial report, and stop-aborted attempts are never scored as model failures. |
+| Run | Choose model/base URL overrides, scenario groups (G1-G8), repetitions, retries, timeout override, and start a run. The **Parallel targets (multi-model run)** foldout holds a list of targets (label, model, base URL, API key or `env:VAR`), an import box for the compact or JSON list, and a **Parallel (0 = all)** cap; with at least one enabled target, **Run** benchmarks every target at once. While a run is active a **Stop (save partial)** button appears: it takes effect at retry boundaries (no waiting out every timeout attempt), saves a partial report, and stop-aborted attempts are never scored as model failures. In a multi-target run each target has its own progress row and **Stop** button. |
 | History | Browse past runs grouped by model, inspect dimension/role scores, open reports, and view captured scene thumbnails. |
 | Models | A sortable leaderboard of the newest run per model, ranked by suite score, speed, pass-rate, or game-fit. |
-| Compare | Select the newest JSON reports per model, optionally pin one model first, and build `COMPARISON.md` plus `COMPARISON.svg`. |
+| Compare | Select the newest JSON reports per model, optionally pin one model first, and build `COMPARISON.md`, `COMPARISON.svg`, `COMPARISON_groups.svg` and `COMPARISON_extreme.svg`. |
 
 For a one-click run, use:
 
 `CoreAI/Benchmarks/Run Game-Creation Benchmark`
 
-The one-click menu reuses the last saved benchmark-window settings. Results are written to `TestResults/CoreAI/Benchmarks/BENCHMARK_<yyyyMMdd_HHmmss>_<model>.md` and `.json`.
+The one-click menu reuses the last saved benchmark-window settings. Results are written to `TestResults/CoreAI/Benchmarks/BENCHMARK_<yyyyMMdd_HHmmss>_<model>.md` and `.json`. In a multi-target run all targets share the run id, and a target whose label differs from its model id gets the stem `BENCHMARK_<runId>_<model>__<label>`.
 
-The same directory also contains the `.tools.jsonl` trace of executed tool calls and, for a G6 build, a `_g6_replay.lua` script and castle screenshot. The Markdown transcript retains attempted calls that the orchestration layer deduplicates before execution; compare it with the JSONL trace when auditing exact-call constraints. The Lua script replays every model-authored `execute_lua` call in order with `pcall`, preserving a failed section without stopping later sections. Camera frames are omitted from the text trace; inspect the PNG hero and the camera tool records together when auditing visual feedback.
+Set `COREAI_BENCHMARK_REASONING_EFFORT` or batchmode `-coreAiBenchmarkReasoningEffort` to
+`none`, `low`, `medium`, `high`, or `xhigh`. Unset means the provider default. Reports record the
+effective `reasoningEffort` in JSON metadata and show the effort (or `provider default`) in the
+Markdown header. Keep effort consistent when comparing models.
+
+The same directory also contains the results card (`<stem>.svg`), the model card as a vector file (`<stem>_modelcard.svg`, written with every report) and, when a graphics device is available, as a PNG (`<stem>_modelcard.png`), the `.tools.jsonl` trace of executed tool calls and, for a G6 build, a `_g6_replay.lua` script and castle screenshot. The Markdown report embeds the PNG model card, or the SVG one when no PNG was rendered. The Markdown transcript retains attempted calls that the orchestration layer deduplicates before execution; compare it with the JSONL trace when auditing exact-call constraints. The Lua script replays every model-authored `execute_lua` call in order with `pcall`, preserving a failed section without stopping later sections. Camera frames are omitted from the text trace; inspect the PNG hero and the camera tool records together when auditing visual feedback.
 
 For batchmode or automation, launch the explicit PlayMode suite through:
+
+Unity never resumes `WaitForEndOfFrame` in Editor batch mode, even with a graphics device.
+Captures there resume on the next frame and read the previous rendered frame. Prefer an open
+Editor for published runs.
 
 ```powershell
 Unity.exe -batchmode -projectPath <path-to-CoreAI> `
@@ -117,6 +181,15 @@ Unity.exe -batchmode -projectPath <path-to-CoreAI> `
   -coreAiBenchmarkModel qwen3.5-4b-mtp `
   -coreAiBenchmarkGroups G1,G2,G3,G4,G5,G6,G7,G8 `
   -coreAiBenchmarkReps 3
+```
+
+For a parallel multi-model run, pass the target list instead of a single model. `-coreAiBenchmarkParallel` caps how many targets run at once (`0` or absent = all). An invalid target list exits with code 2 before Unity runs anything.
+
+```powershell
+Unity.exe -batchmode -projectPath <path-to-CoreAI> `
+  -executeMethod CoreAI.Tests.EditMode.GameCreationBenchmarkLauncher.RunFromCli `
+  -coreAiBenchmarkTargets "local|qwen3.5-4b-mtp|http://127.0.0.1:1234/v1;cloud|<model-id>|https://api.example.com/v1|env:CLOUD_API_KEY" `
+  -coreAiBenchmarkParallel 2
 ```
 
 Environment shaping is also supported:
@@ -127,13 +200,18 @@ Environment shaping is also supported:
 | `COREAI_TEST_API_KEY` | API key when required; local LM Studio normally leaves this empty. |
 | `COREAI_TEST_MODEL` | Model id to request. |
 | `COREAI_BENCHMARK_GROUPS` | CSV group filter, such as `G1,G2,G6`; empty means all groups. |
-| `COREAI_BENCHMARK_REPS` | Repetitions per scenario (averaged). Use 3-5 to smooth out a noisy local-model run. |
-| `COREAI_BENCHMARK_TIMEOUT` | Per-scenario model timeout override in seconds; `0`/unset uses the per-scenario default. G6 model turns are capped at 570 seconds even when this value is higher. After that the runner waits up to 5 seconds for cancellation and plans 30 seconds for capture/export (an allowance, not an enforced cap), so the suite start-gate reserves 605 seconds for a G6 build and adds the 5-second grace to every attempt of the other scenarios. |
-| `COREAI_BENCHMARK_ROUNDTRIPS` | Per-request tool-call roundtrip cap for the standard scenarios (G1-G5, G7-G8); `0`/unset means the default `40`. G6 has its own, much higher cap (below). |
+| `COREAI_BENCHMARK_REPS` | Repetitions per scenario (averaged). Use 3-5 to smooth out a noisy local-model run. G1's extreme scenario, G6 and G7 always run once. |
+| `COREAI_BENCHMARK_RETRIES` | Retries after a hard failure that produced no measurement (provider crash, timeout, dropped connection), 0-3; default `1`. G6 is never retried. |
+| `COREAI_BENCHMARK_SUITE_BUDGET` | Soft time budget for the whole run, in seconds. A scenario repetition starts only when its worst case (every attempt at its full timeout) still fits; otherwise the run stops and writes the report for what finished. Default `6000` for a single model; a multi-target run shares one clock and defaults to the ceiling. The value is clamped to the 6-hour NUnit timeout minus a report margin of 300 seconds plus 30 seconds per extra target. |
+| `COREAI_BENCHMARK_TARGETS` | Target list for a parallel multi-model run; empty means the single configured model. A JSON array (`[{"label":"q4","model":"qwen3.5-4b","baseUrl":"http://127.0.0.1:8831/v1","apiKey":"env:KEY","reasoningEffort":"high","extraBody":{"top_k":20}}]`, `"enabled": false` skips an entry), compact `label\|model\|baseUrl\|apiKey\|effort` entries separated by `;` or new lines (label, key and effort optional), or `@path` to read either form from a file. Without a key, retain the empty field: `local\|model\|http://127.0.0.1:8831/v1\|\|high` (`baseUrl\|\|high`). `env:VAR` reads the key from an environment variable. A target without a key reuses the configured test key (`COREAI_TEST_API_KEY` or the local config file) only when its base URL is the configured one. Streaming and native tools follow `COREAI_TEST_STREAMING` / `COREAI_TEST_NATIVE_TOOLS`. Same as `-coreAiBenchmarkTargets`. |
+| `COREAI_BENCHMARK_REASONING_EFFORT` | Suite-wide reasoning effort: `none`, `low`, `medium`, `high`, or `xhigh`; unset uses the provider default. Same as `-coreAiBenchmarkReasoningEffort`. A target's `reasoningEffort` overrides this default. |
+| `COREAI_BENCHMARK_PARALLEL` | How many targets run at the same time; empty, `0` or invalid means all. Same as `-coreAiBenchmarkParallel`. |
+| `COREAI_BENCHMARK_TIMEOUT` | Model timeout override in seconds for non-extreme scenarios, including G6; extreme scenarios retain their own timeout. `0`/unset uses the per-scenario default. G6 model turns are capped at 570 seconds even when this value is higher. After that the runner waits up to 5 seconds for cancellation and plans 30 seconds for capture/export (an allowance, not an enforced cap), so the suite start-gate reserves 605 seconds for a G6 build and adds the 5-second grace to every attempt of the other scenarios. |
+| `COREAI_BENCHMARK_ROUNDTRIPS` | Per-request tool-call roundtrip cap for the standard scenarios (G1-G5, G7-G8); `0`/unset means the default `40`. The G1 and G7 extreme scenarios fix their cap at 80 and the G2-G4 ones at 40, and G6 has its own, much higher cap (below). |
 | `COREAI_BENCHMARK_MAX_OUTPUT_TOKENS` | Optional positive per-call output cap (64-128000). Set this for providers that reserve the full requested `max_tokens` against available credit; it overrides an agent's unlimited-output setting. Keep the same value across models when comparing scores. |
 | `COREAI_BENCHMARK_VISION_MODE` | G6 free-build vision mode: `off` (default, text-only build), `image` (the model gets a camera tool to SEE and refine its own scene — vision-capable models only), or `both` (run the text-only build AND an image-feedback build to compare). Also a **Vision feedback** dropdown in the benchmark window. |
 | `COREAI_BENCHMARK_FREEBUILD_PROMPT` | Replaces the G6 free-build prompt with your own (e.g. build something other than the default castle). Your text is used verbatim; the only addition is the subject-neutral clock note appended after a blank line: `You are on a time budget. Every execute_lua result carries a TimeLeft note with the seconds remaining. Finish the current section and stop building with at least 20 seconds remaining.` A full custom prompt is not scored. |
-| `COREAI_BENCHMARK_FREEBUILD_SUBJECT` | Swaps only the G6 subject (e.g. `a futuristic city`) into the generic free-build prompt, keeping the standard build/grading scaffold. The generic prompt ends with the same clock note plus subject-neutral pacing (`Complete the main structure during the first half of the budget, then spend the remaining time on secondary structures, surroundings and surface details.`); only the default castle prompt gets the castle-specific pacing (ground, curtain walls, towers, gate and keep first). Also settable from the benchmark window UI field. |
+| `COREAI_BENCHMARK_FREEBUILD_SUBJECT` | Swaps only the G6 subject (e.g. `a futuristic city`) into the generic free-build prompt, keeping the standard build/grading scaffold. The generic prompt ends with the same clock note plus subject-neutral pacing (`Complete the main structure during the first half of the budget, then spend the remaining time on secondary structures, surroundings and surface details.`); only the default castle prompt gets the castle-specific pacing (ground, curtain walls, towers, gate and keep first). A subject build is graded without the castle checks, on the subject-neutral signals only (see [G6 grading](#g6-grading)). Also settable from the benchmark window UI field. |
 | `COREAI_BENCHMARK_FREEBUILD_ROUNDTRIPS` | G6 tool-call cap per turn; `0`/unset means the default `1000` (effectively unbounded). Early-ending scored builds can continue in the same scene within the 570-second model time. |
 
 G6 counts and frames rendered Roblox parts, including parts created through `execute_lua`; the hero banner shows the real part count. The saved model-authored prefab is under the ignored `Assets/Benchmark/<model>/g6_free_build.prefab`. To retake a hero image from that prefab without contacting the model, set `COREAI_BENCHMARK_RECAPTURE_PREFAB` to its Unity asset path and `COREAI_BENCHMARK_RECAPTURE_OUTPUT` to an absolute PNG path, then run the explicit PlayMode test `CaptureSavedCastlePrefab_ForReport` in the open Editor.
@@ -163,18 +241,29 @@ foreach ($model in $models) {
 
 After the sweep, build the comparison report from the Compare tab or the `CoreAI/Benchmarks/Build Model Comparison Report` menu.
 
+### Parallel multi-model runs
+
+When the models sit behind endpoints that can serve at the same time (cloud providers, several local servers), one run can benchmark them together through `COREAI_BENCHMARK_TARGETS`, `-coreAiBenchmarkTargets` or the Run tab's target list. Each target gets its own client, settings, report, progress line and artifacts, and the targets share one run id and one suite clock. All scenarios of all targets run in parallel, except the G6 builds and the model-card captures: they take turns on one visual lane. Roblox parts are placed at the model's own world coordinates and the agent camera is found by a global search, so two castles built at once would share one scene. A scenario that uses `env.RbxWorld` or the camera tool without `CaptureScene` must override `UsesSharedScene` to join that lane. Without a target list, a run behaves as a single-model run did before.
+
+Per-target JSON keys `reasoningEffort` and `extraBody` configure effort and provider body fields.
+`extraBody` accepts a JSON object or a string containing one. Target body fields merge over the
+shared body for the same endpoint, and explicit target `reasoningEffort` is applied last. An empty
+target effort inherits the suite default.
+
 ## Comparison Report
 
 The comparison report is built from the per-model JSON files. It emits:
 
-- `COMPARISON.md` with a ranked table, dimension columns, efficiency/tool-error metrics, a Mermaid chart, and best-per-dimension highlights.
-- `COMPARISON.svg` with a TerminalBench-style suite-score bar chart.
+- `COMPARISON.md` with a ranked table (suite, extreme and regular scores, pass-rate, dimension columns, efficiency/tool-error metrics), a "Scores by group" table with each group's extreme score beside its mean, an extreme-tier ranking, a Mermaid chart, and best-per-dimension highlights including the extreme tier. It warns when the reports come from different suite versions.
+- `COMPARISON.svg`, the composite chart: suite-score ranking with each model's extreme score as a diamond on the same row, a models x groups heatmap with an Extreme column, and the extreme-tier ranking.
+- `COMPARISON_groups.svg`, the models x groups heatmap on its own.
+- `COMPARISON_extreme.svg`, the extreme-tier ranking on its own.
 
-There are two ordering modes:
+The SVG charts follow the viewer's light or dark colour scheme. There are two ordering modes:
 
 | Mode | Behavior |
 |---|---|
-| Ranked descending | Default. Models are sorted by suite base score. |
+| Ranked descending | Default. Models are sorted by suite base score; ties are broken by the extreme sub-score. |
 | Pinned first | One selected model is placed first, then the rest remain ranked. Useful for comparing a candidate against a baseline. |
 
 ### Custom comparisons from hand-picked reports
@@ -195,14 +284,26 @@ var summaries = picks
 GameCreationBenchmarkLauncher.WriteComparison(outputDir, summaries, pinnedModelId: null);
 ```
 
-`WriteComparison` writes `COMPARISON.md` + `COMPARISON.svg` into `outputDir`, so different picks can
-live side by side (the README's cloud and local charts are built exactly this way).
+`WriteComparison` writes `COMPARISON.md`, `COMPARISON.svg`, `COMPARISON_groups.svg` and
+`COMPARISON_extreme.svg` into `outputDir`, so different picks can live side by side (the README's cloud
+and local charts are built this way).
 
 ## Results Example
 
+The suite 2.0 model card is one 1600x900 image (a 3200x1800 PNG, plus its SVG twin):
+
+- a header with the model id, suite version, run date, run id, scenario count and backend;
+- four tiles: suite score (with grade and regular-tier score), extreme tier (score and pass count), scenario verdicts (pass/partial/fail with a bar), and game-fit (overall and best role);
+- one row per group G1-G8 with its mean as a bar and the group's extreme scenario as a diamond;
+- the six dimensions as a dot plot on a 50-100 axis with a line at the 90 pass bar;
+- the game-fitness bars per role (0-10);
+- a footer with tokens, speed, duration and tool calls.
+
+The results card embedded in each Markdown report (`<stem>.svg`) is a smaller card with the same four tiles and group rows, dimension bars instead of the dot plot, and no role bars. The SVG cards follow the viewer's light or dark colour scheme; the PNG model card is dark.
+
 ![Model card radar and role bars](../../Docs/Images/example_modelcard.png)
 
-_Model card: suite score, dimension profile, and role fitness in one image._
+_A pre-2.0 model card (radar layout). Suite 2.0 cards use the layout described above._
 
 ![Coin collector scene](../../Docs/Images/example_scene.png)
 
@@ -219,12 +320,12 @@ _G6 scene example: a free-form castle build preserving the model-authored layout
 
 ![Cross-model comparison](../../Docs/Images/example_comparison.png)
 
-_Comparison chart: suite base scores across the newest JSON report for each selected model._
+_A pre-2.0 comparison chart (suite base scores only). The current `COMPARISON.svg` adds the extreme diamonds, the group heatmap and the extreme ranking described in [Comparison Report](#comparison-report)._
 
 The [README benchmark section](../../README.md#game-creation-benchmark) shows the historical suite v1.7
 frontier sweep (the same run as the frontier section below). The local-model table here is a historical
-suite v1.6 / G1-G7 baseline. Current v1.15 / G1-G8 runs start a separate leaderboard and must not be mixed
-with those scores (nor with the v1.7 frontier sweep, whose G6 was the earlier `world_command` castle).
+suite v1.6 / G1-G7 baseline. Suite v2.0 runs start a separate leaderboard and must not be mixed with those
+scores, with the v1.15 runs, or with the v1.7 frontier sweep, whose G6 was the earlier `world_command` castle.
 Historical example (local models, 2026-07-02 sweep):
 
 | # | Model | Suite | Pass-rate | P/PA/F | Tools | Intent | Task | Determ | Reason | Instr | Eff | Tool-err | Tokens | Run |
@@ -351,7 +452,7 @@ per-scenario breakdown and transcript example.
 
 ## Community Leaderboard
 
-Ranked results with version-separated sections (current suite v1.8/G1-G8; historical v1.7/G1-G8 and v1.6/G1-G7)
+Ranked results with version-separated sections (current suite v2.0, results pending; historical v1.15 back to v1.6)
 and a public submission workflow live on the
 [community leaderboard page](../../Docs/BENCHMARK_LEADERBOARD.md). Run the suite as described in
 [How To Run](#how-to-run) above, then open a PR adding your row with the report JSON, run id,

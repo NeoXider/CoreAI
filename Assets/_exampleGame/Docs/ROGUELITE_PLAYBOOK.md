@@ -1,4 +1,4 @@
-﻿# Example: Roguelite Arena (CoreAI `_exampleGame`)
+# Example: Roguelite Arena (CoreAI `_exampleGame`)
 
 ## Session Concept
 
@@ -27,10 +27,11 @@ For a **lightweight** roguelite example in CoreAI, pulling in the whole stack is
 This example is already wired up in the monorepo. The pieces below are in place today:
 
 1. **CoreAI** is available via UPM **`com.neoxider.coreai`** (`Assets/CoreAI` in the monorepo; external project - Git URL **`?path=Assets/CoreAI`**) for AI orchestration and events; the **`CoreAiUnity`** host (`com.neoxider.coreaiunity`) provides the Unity composition, tests, prompts in **Resources**, and the **`_mainCoreAI`** scene; the Lua sandbox and mod runtime are the optional **`com.neoxider.coreaimods`** package (`Assets/CoreAIMods`).
-2. **VContainer + MessagePipe + R3** are already dependencies in **`Packages/manifest.json`** (a minimal set compared to Last-War). Composition uses `RogueliteArenaLifetimeScope`.
+2. **VContainer + MessagePipe + R3** are already dependencies in **`Packages/manifest.json`** (a minimal set compared to Last-War). Composition is the scene's `CoreAILifetimeScope`; `RogueliteArenaLifetimeScope` is an optional child scope for example-only registrations that registers nothing yet.
 3. Playable scenes live in **`Assets/_exampleGame/Scenes/`**: **`RogueliteArena.unity`** (main arena, entry via `ExampleRogueliteEntry`), **`SymbiosisArena.unity`** (symbiosis mode), and **`New Scene.unity`** (scratch). See [UNITY_SETUP.md](UNITY_SETUP.md) for how the `RogueliteArena` hierarchy and `CoreAILifetimeScope` are set up.
-4. The prototype loop (spawn wave -> damage -> run loot/currency -> death screen -> hub with unlocks) runs locally without networking. Progression/meta details: [ARENA_PROGRESSION.md](ARENA_PROGRESSION.md).
+4. The prototype loop (waves -> melee combat with a companion bot -> a win/lose label with **R** to restart) runs locally without networking. With the progression assets assigned it adds session XP, level-up card drafts and meta XP saved through `SaveProvider` ([ARENA_PROGRESSION.md](ARENA_PROGRESSION.md)).
 
 ### Not Yet Implemented
 
-- **Co-op / networking:** the architecture separates an **AuthoritativeHost** role from a **ClientPresentationOnly** role (see [ARENA_ARCHITECTURE_AND_AI.md](ARENA_ARCHITECTURE_AND_AI.md)), but a concrete stack (**Netcode for GameObjects** or another option) is not yet integrated. Rule-change authority is designed to move to the host when it is.
+- **Run loot, currency, results screen and hub with unlocks.** The meta save keeps a list of unlocked ids, but nothing unlocks anything yet.
+- **Co-op / networking in `RogueliteArena`:** the architecture separates an **AuthoritativeHost** role from a **ClientPresentationOnly** role (see [ARENA_ARCHITECTURE_AND_AI.md](ARENA_ARCHITECTURE_AND_AI.md)), but the arena has no network stack; only the enemy count scales with connected **Netcode for GameObjects** clients. The separate `SymbiosisArena` scene uses Netcode for GameObjects. Rule-change authority is designed to move to the host.

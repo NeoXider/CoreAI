@@ -19,6 +19,35 @@ namespace CoreAI.Tests.EditMode
     {
         private SynchronizationContext _previousSynchronizationContext;
 
+        [Test]
+        public void OriginalConstructorSignature_InfersEndpointRequestSettings()
+        {
+            System.Reflection.ConstructorInfo constructor = typeof(MeaiLlmClient).GetConstructor(new[]
+            {
+                typeof(MEAI.IChatClient), typeof(IGameLogger), typeof(ICoreAISettings),
+                typeof(bool), typeof(IAgentMemoryStore)
+            });
+            Assert.IsNotNull(constructor, "Existing compiled callers require the original constructor signature.");
+            using MeaiOpenAiChatClient inner = new(new OpenAiHttpOptions
+            {
+                Model = "configured",
+                Temperature = 0.4f,
+                MaxTokens = 123,
+                ReasoningEffort = LlmReasoningEffort.High,
+                ReasoningDialect = LlmReasoningDialect.OpenRouter
+            });
+            MeaiLlmClient client = (MeaiLlmClient)constructor.Invoke(new object[]
+            {
+                inner, GameLoggerUnscopedFallback.Instance, new StubCoreSettings(), true, null
+            });
+            LlmCompletionRequest request = new();
+            client.ResolveRequestSettings(request);
+            Assert.AreEqual(0.4f, request.EffectiveTemperature);
+            Assert.AreEqual(123, request.EffectiveMaxOutputTokens);
+            Assert.AreEqual(LlmReasoningEffort.High, request.EffectiveReasoningEffort);
+            Assert.AreEqual(LlmReasoningDialect.OpenRouter, request.EffectiveReasoningDialect);
+        }
+
         /// <summary>
         /// WHY: <see cref="CompleteAsync_ProviderCancellation_PropagatesOperationCanceledException"/> below
         /// is a synchronous [Test] that blocks on Assert.CatchAsync; detaching the context sends the
@@ -595,6 +624,292 @@ namespace CoreAI.Tests.EditMode
                 {
                     Content = new System.Net.Http.StringContent(streaming ? "data: " + json.Replace("\r", "").Replace("\n", "") +
                         "\n\ndata: [DONE]\n\n" : json, System.Text.Encoding.UTF8, streaming ? "text/event-stream" : "application/json")
+                };
+            }
+        }
+
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task ToolBudgetFinalSummary_PreservesTypedRequestSettingsOnWire(bool streaming)
+        {
+            RequestShapingHandler handler = new(toolFirst: true);
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new System.Net.Http.HttpClient(handler);
+            try
+            {
+                OpenAiHttpOptions endpoint = new()
+                {
+                    ApiBaseUrl = "http://127.0.0.1:9/v1", Model = "test",
+                    ReasoningDialect = LlmReasoningDialect.PassthroughEffort
+                };
+                MeaiLlmClient client = MeaiLlmClient.CreateHttp(endpoint, new CoreAISettingsOptions(),
+                    GameLoggerUnscopedFallback.Instance, supportsNativeToolCalling: true);
+                LlmCompletionRequest request = new()
+                {
+                    UserPayload = "Save once, then summarize.", MaxToolCallRoundtrips = 1,
+                    MaxOutputTokens = 37, TemperatureOverride = 0.31f,
+                    Reasoning = new LlmReasoningOptions(LlmReasoningEffort.High, 2048),
+                    Sampling = new LlmSamplingOptions { TopP = 0.77f, Seed = 17, Stop = new[] { "END" },
+                        FrequencyPenalty = 0.2f, PresencePenalty = 0.3f },
+                    Tools = new ILlmTool[] { new DelegateLlmTool("save", "Save progress", (Func<string>)(() => "saved")) }
+                };
+                if (streaming)
+                {
+                    await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request))
+                        Assert.IsTrue(string.IsNullOrEmpty(chunk.Error), chunk.Error);
+                }
+                else
+                {
+                    LlmCompletionResult result = await client.CompleteAsync(request);
+                    Assert.IsTrue(result.Ok, result.Error);
+                }
+
+                Assert.AreEqual(2, handler.Bodies.Count, "The final summary must use one extra request.");
+                foreach (JObject body in handler.Bodies)
+                {
+                    Assert.AreEqual("high", (string)body["reasoning_effort"]);
+                    Assert.AreEqual(0.31f, (float)body["temperature"], 0.0001f);
+                    Assert.AreEqual(37, (int)body["max_tokens"]);
+                    Assert.AreEqual(0.77f, (float)body["top_p"], 0.0001f);
+                    Assert.AreEqual(17, (long)body["seed"]);
+                    Assert.AreEqual("END", (string)body["stop"][0]);
+                    Assert.AreEqual(0.2f, (float)body["frequency_penalty"], 0.0001f);
+                    Assert.AreEqual(0.3f, (float)body["presence_penalty"], 0.0001f);
+                }
+                Assert.IsNull(handler.Bodies[1]["tools"]);
+                Assert.AreEqual("none", (string)handler.Bodies[1]["tool_choice"]);
+            }
+            finally { MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null; }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task MaxResponseChars_CapsVisibleTextAndPreservesTerminalUsage(bool streaming)
+        {
+            RequestShapingHandler handler = new();
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new System.Net.Http.HttpClient(handler);
+            try
+            {
+                MeaiLlmClient client = MeaiLlmClient.CreateHttp(new OpenAiHttpOptions
+                    { ApiBaseUrl = "http://127.0.0.1:9/v1", Model = "test" },
+                    new CoreAISettingsOptions { MaxResponseChars = 5 }, GameLoggerUnscopedFallback.Instance,
+                    supportsNativeToolCalling: true);
+                LlmCompletionRequest request = new() { UserPayload = "Answer." };
+                string visible;
+                int? reasoningTokens;
+                if (streaming)
+                {
+                    List<string> parts = new();
+                    LlmStreamChunk terminal = null;
+                    await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request))
+                    {
+                        parts.Add(chunk.Text ?? "");
+                        terminal = chunk;
+                    }
+                    Assert.IsNotNull(terminal);
+                    Assert.IsTrue(terminal.IsDone);
+                    Assert.AreEqual(13, terminal.TotalTokens);
+                    Assert.IsTrue(string.IsNullOrEmpty(terminal.Error), terminal.Error);
+                    visible = string.Concat(parts);
+                    reasoningTokens = terminal.ReasoningTokens;
+                }
+                else
+                {
+                    LlmCompletionResult result = await client.CompleteAsync(request);
+                    Assert.IsTrue(result.Ok, result.Error);
+                    visible = result.Content;
+                    reasoningTokens = result.ReasoningTokens;
+                }
+                Assert.AreEqual("abcde\n\u2026[response truncated at 5 chars: +6 chars]", visible);
+                Assert.AreEqual(3, reasoningTokens);
+                JToken stream = handler.Bodies.Single()["stream"];
+                if (streaming)
+                {
+                    Assert.AreEqual(true, stream?.Value<bool>());
+                }
+                else
+                {
+                    Assert.IsNull(stream, "Non-streaming requests omit the stream field.");
+                }
+            }
+            finally { MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null; }
+        }
+
+        [Test]
+        public async Task MaxResponseChars_SplitSurrogateKeepsOnlyAValidTextPrefix()
+        {
+            StreamingScriptedChatClient inner = new(new[] { "ab\uD83D", "\uDE00xx" });
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance,
+                new CoreAISettingsOptions { MaxResponseChars = 3 }, supportsNativeToolCalling: true);
+            List<string> parts = new();
+            LlmStreamChunk terminal = null;
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest { UserPayload = "Answer." }))
+            {
+                parts.Add(chunk.Text ?? "");
+                terminal = chunk;
+            }
+            Assert.IsTrue(terminal.IsDone);
+            string visible = string.Concat(parts);
+            Assert.AreEqual("ab\n\u2026[response truncated at 3 chars: +4 chars]", visible);
+            Assert.IsFalse(visible.Any(char.IsSurrogate));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task RuntimeHttpEndpoint_DisabledTemperatureOverrideOmitsStoredAssetValue(bool streaming)
+        {
+            OpenAiHttpLlmSettings endpoint = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+            endpoint.SetRuntimeConfiguration(true, "http://127.0.0.1:9/v1", "", "test",
+                temperature: 0.7f, overrideTemperature: false);
+            RequestShapingHandler handler = new();
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new System.Net.Http.HttpClient(handler);
+            try
+            {
+                MeaiLlmClient client = MeaiLlmClient.CreateHttp(endpoint,
+                    new CoreAISettingsOptions { OverrideTemperature = false },
+                    GameLoggerUnscopedFallback.Instance, supportsNativeToolCalling: true);
+                LlmCompletionRequest request = new() { UserPayload = "Answer." };
+                if (streaming)
+                {
+                    await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request))
+                    {
+                        Assert.IsTrue(string.IsNullOrEmpty(chunk.Error), chunk.Error);
+                    }
+                }
+                else
+                {
+                    LlmCompletionResult result = await client.CompleteAsync(request);
+                    Assert.IsTrue(result.Ok, result.Error);
+                }
+
+                Assert.AreEqual(0.7f, endpoint.Temperature);
+                Assert.IsFalse(endpoint.OverrideTemperature);
+                Assert.IsNull(request.EffectiveTemperature);
+                Assert.IsNull(handler.Bodies.Single()["temperature"]);
+            }
+            finally
+            {
+                MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null;
+                UnityEngine.Object.DestroyImmediate(endpoint);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task RuntimeHttpEndpoint_BenchmarkTemperaturePointOneReachesWire(bool streaming)
+        {
+            OpenAiHttpLlmSettings endpoint = ScriptableObject.CreateInstance<OpenAiHttpLlmSettings>();
+            endpoint.SetRuntimeConfiguration(true, "http://127.0.0.1:9/v1", "", "benchmark", temperature: 0.1f, maxTokens: 42);
+            RequestShapingHandler handler = new();
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new System.Net.Http.HttpClient(handler);
+            try
+            {
+                MeaiLlmClient client = MeaiLlmClient.CreateHttp(endpoint,
+                    new CoreAISettingsOptions { Temperature = 0.9f, OverrideTemperature = true, MaxTokens = 99 },
+                    GameLoggerUnscopedFallback.Instance, supportsNativeToolCalling: true);
+                LlmCompletionRequest request = new() { UserPayload = "Answer." };
+                if (streaming)
+                {
+                    await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request)) { }
+                }
+                else
+                {
+                    LlmCompletionResult result = await client.CompleteAsync(request);
+                    Assert.IsTrue(result.Ok, result.Error);
+                }
+                JObject body = handler.Bodies.Single();
+                Assert.AreEqual(0.1f, (float)body["temperature"], 0.0001f);
+                Assert.AreEqual(42, (int)body["max_tokens"]);
+                Assert.AreEqual(0.1f, request.EffectiveTemperature);
+                Assert.AreEqual(42, request.EffectiveMaxOutputTokens);
+            }
+            finally
+            {
+                MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null;
+                UnityEngine.Object.DestroyImmediate(endpoint);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task ServerManagedEndpoint_PreservesReasoningAndUnsetSamplingOverridesOnWire(bool streaming)
+        {
+            OpenAiHttpOptions endpoint = new()
+            {
+                ApiBaseUrl = "http://127.0.0.1:9/v1", Model = "managed",
+                Temperature = 0.8f, OverrideTemperature = false,
+                MaxTokens = 44, OverrideMaxTokens = false,
+                ReasoningEffort = LlmReasoningEffort.High,
+                ReasoningDialect = LlmReasoningDialect.OpenRouter
+            };
+            RequestShapingHandler handler = new();
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new System.Net.Http.HttpClient(handler);
+            try
+            {
+                ServerManagedLlmClient client = new(endpoint,
+                    new CoreAISettingsOptions { OverrideTemperature = false, MaxTokens = 0 },
+                    GameLoggerUnscopedFallback.Instance);
+                LlmCompletionRequest request = new() { UserPayload = "Answer." };
+                client.ResolveRequestSettings(request);
+                Assert.AreEqual(LlmReasoningEffort.High, request.EffectiveReasoningEffort);
+                Assert.AreEqual(LlmReasoningDialect.OpenRouter, request.EffectiveReasoningDialect);
+                Assert.IsNull(request.EffectiveTemperature);
+                Assert.IsNull(request.EffectiveMaxOutputTokens);
+                if (streaming)
+                {
+                    await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request)) { }
+                }
+                else
+                {
+                    LlmCompletionResult result = await client.CompleteAsync(request);
+                    Assert.IsTrue(result.Ok, result.Error);
+                }
+
+                JObject body = handler.Bodies.Single();
+                Assert.AreEqual("high", (string)body["reasoning"]?["effort"]);
+                Assert.IsNull(body["temperature"]);
+                Assert.IsNull(body["max_tokens"]);
+            }
+            finally
+            {
+                MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = null;
+            }
+        }
+
+        private sealed class RequestShapingHandler : System.Net.Http.HttpMessageHandler
+        {
+            private readonly bool _toolFirst;
+            public List<JObject> Bodies { get; } = new();
+            public RequestShapingHandler(bool toolFirst = false) { _toolFirst = toolFirst; }
+            protected override async Task<System.Net.Http.HttpResponseMessage> SendAsync(
+                System.Net.Http.HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                JObject body = JObject.Parse(await request.Content.ReadAsStringAsync());
+                Bodies.Add(body);
+                bool streaming = body["stream"]?.Value<bool>() == true;
+                bool call = _toolFirst && Bodies.Count == 1;
+                JObject message = new() { ["role"] = "assistant", ["content"] = call ? "" : "abcdefghijk" };
+                if (call)
+                {
+                    message["tool_calls"] = new JArray(new JObject
+                    {
+                        ["index"] = 0, ["id"] = "call_save", ["type"] = "function",
+                        ["function"] = new JObject { ["name"] = "save", ["arguments"] = "{}" }
+                    });
+                }
+                JObject response = new()
+                {
+                    ["model"] = "test",
+                    ["choices"] = new JArray(new JObject { ["index"] = 0,
+                        [streaming ? "delta" : "message"] = message, ["finish_reason"] = call ? "tool_calls" : "stop" }),
+                    ["usage"] = new JObject { ["prompt_tokens"] = 5, ["completion_tokens"] = 8, ["total_tokens"] = 13,
+                        ["completion_tokens_details"] = new JObject { ["reasoning_tokens"] = 3 } }
+                };
+                string json = response.ToString(Newtonsoft.Json.Formatting.None);
+                return new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new System.Net.Http.StringContent(streaming ? "data: " + json + "\n\ndata: [DONE]\n\n" : json,
+                        System.Text.Encoding.UTF8, streaming ? "text/event-stream" : "application/json")
                 };
             }
         }

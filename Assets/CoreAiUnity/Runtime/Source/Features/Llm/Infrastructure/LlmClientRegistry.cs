@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using Cysharp.Threading.Tasks;
 using CoreAI.Infrastructure.Logging;
+using Newtonsoft.Json;
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && COREAI_LLM
 using LLMUnity;
 #endif
@@ -42,6 +43,7 @@ namespace CoreAI.Infrastructure.Llm
         private LlmExecutionMode _legacyFallbackMode = LlmExecutionMode.Auto;
         private Dictionary<string, ILlmClient> _byProfileId = new(StringComparer.Ordinal);
         private Dictionary<string, int> _contextByProfileId = new(StringComparer.Ordinal);
+        private Dictionary<string, int?> _maxOutputTokensByProfileId = new(StringComparer.Ordinal);
         private Dictionary<string, LlmExecutionMode> _modeByProfileId = new(StringComparer.Ordinal);
         private ILlmRouteResolver _routeResolver = new LlmRouteResolver(new LlmRouteTable());
         private bool _useManifestRouting;
@@ -106,6 +108,7 @@ namespace CoreAI.Infrastructure.Llm
 
         private sealed class ActivatingEndpointClient : ILlmClient
         {
+            private readonly RuntimeEndpoint _endpoint;
             private readonly LlmClientRegistry _registry;
             private readonly string _roleId;
             private readonly string _profileId;
@@ -119,6 +122,7 @@ namespace CoreAI.Infrastructure.Llm
                 RuntimeEndpoint endpoint)
             {
                 _registry = registry;
+                _endpoint = endpoint;
                 _roleId = roleId;
                 _profileId = profileId;
                 _activation = endpoint.ActivationTask;
@@ -128,6 +132,12 @@ namespace CoreAI.Infrastructure.Llm
             public bool SupportsNativeToolCallingForRole(string agentRoleId)
             {
                 return _supportsNativeTools;
+            }
+
+            public void ResolveRequestSettings(LlmCompletionRequest request)
+            {
+                // WHY: diagnostics may inspect a pending route without waiting for or restarting activation.
+                _endpoint.Client?.ResolveRequestSettings(request);
             }
 
             public async Task<LlmCompletionResult> CompleteAsync(
@@ -209,6 +219,11 @@ namespace CoreAI.Infrastructure.Llm
             public bool SupportsNativeToolCallingForRole(string agentRoleId)
             {
                 return _endpoint.Client.SupportsNativeToolCallingForRole(agentRoleId);
+            }
+
+            public void ResolveRequestSettings(LlmCompletionRequest request)
+            {
+                _endpoint.Client.ResolveRequestSettings(request);
             }
 
             public async Task<LlmCompletionResult> CompleteAsync(
@@ -358,6 +373,7 @@ namespace CoreAI.Infrastructure.Llm
                     _useManifestRouting = false;
                     _byProfileId.Clear();
                     _contextByProfileId.Clear();
+                    _maxOutputTokensByProfileId.Clear();
                     _modeByProfileId.Clear();
                     _routeResolver = new LlmRouteResolver(new LlmRouteTable());
                     return;
@@ -371,6 +387,8 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 _routeResolver = new LlmRouteResolver(routeTable);
+                _maxOutputTokensByProfileId = routeTable.ProfilesById().ToDictionary(
+                    pair => pair.Key, pair => pair.Value.MaxOutputTokens, StringComparer.Ordinal);
                 Dictionary<string, ILlmClient> newClients = new(StringComparer.Ordinal);
                 Dictionary<string, int> newContexts = new(StringComparer.Ordinal);
                 Dictionary<string, LlmExecutionMode> newModes = new(StringComparer.Ordinal);
@@ -567,6 +585,10 @@ namespace CoreAI.Infrastructure.Llm
                     Client = ResolveClientForRole(roleId, explicitProfileId),
                     ProfileId = profileId,
                     ContextWindowTokens = ResolveContextWindowForRole(roleId, explicitProfileId),
+                    MaxOutputTokens = generation == 0 && _byProfileId.ContainsKey(profileId) &&
+                                      _maxOutputTokensByProfileId.TryGetValue(profileId, out int? cap)
+                        ? cap
+                        : null,
                     Mode = ResolveExecutionModeForRole(roleId, explicitProfileId),
                     IsRouted = !string.IsNullOrEmpty(profileId) &&
                                (_runtimeProfiles.ContainsKey(profileId) ||
@@ -695,6 +717,11 @@ namespace CoreAI.Infrastructure.Llm
                 throw new ArgumentException(descriptor == null
                     ? "Endpoint descriptor is null."
                     : string.Join(" ", descriptor.Validate()));
+            }
+
+            if (descriptor.Kind == LlmEndpointKind.HttpOpenAi && string.IsNullOrWhiteSpace(descriptor.Model))
+            {
+                throw new ArgumentException("HTTP endpoint model is required.", nameof(descriptor));
             }
 
             string id = descriptor.EndpointId.Trim();
@@ -1420,27 +1447,7 @@ namespace CoreAI.Infrastructure.Llm
 
         private static string DescriptorFingerprint(LlmEndpointDescriptor descriptor)
         {
-            return string.Join("|",
-                descriptor.EndpointId,
-                descriptor.Kind,
-                descriptor.BaseUrl,
-                descriptor.Model,
-                descriptor.SecretReference,
-                descriptor.LocalModelPath,
-                descriptor.UnityAgentName,
-                descriptor.Port,
-                descriptor.GpuLayers,
-                descriptor.Remote,
-                descriptor.FlashAttention,
-                descriptor.ParallelSlots,
-                descriptor.ContextWindowTokens,
-                descriptor.Active,
-                descriptor.KeepWarm,
-                descriptor.MaxTokens,
-                descriptor.ReasoningMode,
-                descriptor.ThinkingBudgetTokens,
-                descriptor.ExtraBodyJson,
-                descriptor.ToolChannel);
+            return JsonConvert.SerializeObject(descriptor, Formatting.None);
         }
 
         private async Task<LlmEndpointClientActivation> BuildRuntimeClientAsync(

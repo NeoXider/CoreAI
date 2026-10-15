@@ -112,20 +112,26 @@ Always present in this assembly:
 
 - **Agents** — `AgentBuilder` (fluent, ~26 options) → `AgentConfig` → `AgentMemoryPolicy`.
 - **Tools** — `ILlmTool` with the binding interfaces `IAIFunctionLlmTool` / `IAIFunctionsLlmTool`,
-  `DelegateLlmTool`, `MemoryTool`, `WaitLlmTool`, `ToolExecutionPolicy` (timeouts, duplicate detection,
-  required-argument and argument-type checks before the body runs, retry-with-feedback, tool-name repair,
-  bounded parallelism).
+  `DelegateLlmTool`, `MemoryLlmTool` (backed by `MemoryTool`), `WaitLlmTool`.
 - **Skills** — `SkillSet`, `SkillSection`, `read_skill`, `call_skill_tool`, `manage_skills`.
 - **Memory and context** — `AgentMemoryScope`, the `Scoped*StoreDecorator` family,
   `DeterministicConversationContextManager`, `LlmAssistedConversationContextManager`,
   `IContextBudgetPolicy`, `IConversationSummaryStore`.
 - **Orchestration** — `IAiOrchestrationService`, `AiOrchestrator`, `QueuedAiOrchestrator`.
-- **LLM plumbing** — `MeaiOpenAiChatClient` (OpenAI-compatible HTTP + SSE),
-  `SmartToolCallingChatClient`, routing/timeout/retry decorators, an opt-in circuit-breaker decorator
-  (not composed by the Unity pipeline; hosts add it), `LlmCancellation` (the one rule that keeps a
-  caller's cancellation from being reported, retried or counted as a timeout or an outage),
-  `ILlmEndpointRegistry`.
+- **LLM plumbing** — routing contracts and `LlmRouteResolver`, `ILlmEndpointRegistry`, the timeout,
+  logging and client-limited decorators, `LlmCancellation` (the one rule that keeps a caller's
+  cancellation from being reported, retried or counted as a timeout or an outage).
 - **Audit contracts** — `IAuditLog`, `AuditEntry`, `AuditHash`.
+
+Compiled only when `COREAI_LLM` is defined (the portable DLL defines it; in Unity it is a project
+scripting define):
+
+- `ToolExecutionPolicy` (timeouts, duplicate detection, required-argument and argument-type checks
+  before the body runs, retry-with-feedback, tool-name repair, bounded parallelism).
+- `MeaiOpenAiChatClient` (OpenAI-compatible HTTP + SSE) over `HttpClientOpenAiTransport`, and
+  `SmartToolCallingChatClient`.
+- The retrying streaming decorator and an opt-in circuit-breaker decorator (not composed by the Unity
+  pipeline; hosts add it).
 
 Deliberately **not** here: Unity UI and DI, file-backed Unity stores, LLMUnity, the Lua sandbox, the
 MCP server, the Mirror transport. Those ship as separate packages so the core stays engine-free.

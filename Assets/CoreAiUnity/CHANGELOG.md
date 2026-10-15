@@ -4,6 +4,90 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.51.0] - 2026-10-15
+
+Benchmark suite 2.0 (extreme tier, G6 geometry grading, hardened graders, parallel multi-model runs) is described
+in the `com.neoxider.coreai` changelog; the Unity layer adds the launcher, window and test-endpoint support below.
+
+### Added
+
+- **Primary and fallback reasoning settings.** `CoreAISettingsAsset` serializes independent typed
+  reasoning effort/dialect fields for both endpoints, exposes them in the settings inspector, and
+  preserves them through presets and conversion. Default/Auto keep existing assets' reasoning bytes.
+  The Hub endpoint editor exposes reasoning effort/dialect, nullable temperature, and output-cap controls.
+- **Runtime endpoint request shaping.** `LlmEndpointClientFactory` transfers descriptor temperature,
+  max-token override, reasoning effort/dialect, legacy thinking controls, and provider body JSON to
+  HTTP options. LLMUnity uses its own descriptor values, with Auto resolving to QwenTemplate.
+  Route snapshots include the selected profile's `MaxOutputTokens`; tracked and activating clients
+  forward effective-settings resolution without starting activation for a settings query.
+- **Parallel targets in the benchmark window.** The Run tab has a **Parallel targets (multi-model run)** foldout:
+  rows of label, model, base URL and API key (or `env:VAR`), an import box for the compact or JSON list, and a
+  **Parallel (0 = all)** cap. With at least one enabled row, **Run** benchmarks every target at once; each target
+  gets its own progress row and **Stop** button, and its partial report is still saved. Literal keys stay in the
+  editor session (`SessionState`); saved rows keep only `env:` references. The Compare tab also writes
+  `COMPARISON_groups.svg` and `COMPARISON_extreme.svg`.
+- **Multi-target batchmode.** `GameCreationBenchmarkLauncher.RunFromCli` reads `-coreAiBenchmarkTargets` and
+  `-coreAiBenchmarkParallel` (or `COREAI_BENCHMARK_TARGETS` / `COREAI_BENCHMARK_PARALLEL`), validates the list
+  first and exits with code 2 when it is invalid. Deleting a run removes only its own files, even when several
+  targets share the run id. The launcher watchdog is 6 h 10 min, above the suite's new 6-hour NUnit timeout.
+- **Explicit test endpoints.** `PlayModeProductionLikeLlmFactory.TryCreateForEndpoint` and
+  `PlayModeOpenAiTestConfig.ResolveForEndpoint` build a client for one base URL, model and key. The configured test
+  key and provider body are reused only when the endpoint is the configured base URL.
+- **`tools/benchmark_chart.py` charts suite 2.0.** Leaderboard SVG and Markdown rows show the extreme score (a diamond
+  on the suite bar, an Extreme column in the group heatmap, Extreme and Regular table columns) when the reports carry
+  the `extreme` flag; suite 1.15 charts reproduce the published numbers.
+
+### Changed
+
+- **Presets preserve request configuration.** `ConfigureHttpApi`, `ConfigureClientOwnedApi`,
+  `ConfigureClientLimited`, and `ConfigureServerManagedApi` keep current temperature, timeout, output
+  cap, and temperature override when nullable arguments are omitted. Positive explicit max tokens
+  enable the cap; zero disables it. `ApplyServerManagedApi` retains the temperature override flag.
+  `CoreAiBackend` and `LlmPipelineInstaller` forward primary/secondary reasoning and nullable overrides.
+- **Concurrency follows configuration.** `MaxConcurrentOrchestrations` is honoured, including 1 and 2,
+  without a minimum of 4. Legacy LLMUnity native prompt concurrency uses `LlmUnityMaxConcurrentChats`;
+  named local endpoints retain their own `ParallelSlots`.
+
+### Fixed
+
+- **Stopping an agent includes actor-context chat turns.** `CoreAi.StopAgent(roleId)` and
+  `CoreAiChatService.StopAgent(roleId)` cancel the role's queued and running chat turns across actor scopes.
+- **Audit log persistence retains the role.** Written entries preserve `Role` for later filtering and review.
+- **Scene validation reads the actual settings reference.** `CoreAIBuildMenu.ValidateScene` checks the
+  real settings field and accepts the supported assigned-asset or Resources configuration.
+- **NuGet bootstrap installs the compatible MEAI version.** `Microsoft.Extensions.AI` is pinned to
+  `9.10.2`, matching the Unity package configuration.
+- **Settings reset restores fresh-asset defaults.** The custom inspector resets serialized settings
+  from a fresh asset rather than retaining stale backend and request configuration.
+- **World primitive permissions survive options application.** `CoreAISettingsAsset.ApplyOptions`
+  copies `CoreAISettingsOptions.AllowWorldPrimitives` into the asset's world options.
+- **Tool settings are exposed and documented correctly.** The custom inspector exposes the global
+  tool-roundtrip cap beside tool retry limits and the LLMUnity tool channel beside chat settings.
+  Retry documentation points to injected settings and `SetMaxToolCallRoundtrips`; tool descriptions and
+  tooltips reflect the runtime behavior, including capability probing for HTTP tool channels.
+- **Fallback requests use their own provider controls.** The secondary adapter uses its own reasoning
+  effort, dialect, mode, thinking budget, and `ExtraBodyJson` instead of inheriting primary-provider fields.
+- **Runtime endpoint timeout zero preserves the HTTP budget.** A non-positive orchestration timeout
+  no longer becomes a one-second HTTP timeout; named endpoints use the configured HTTP timeout,
+  capped only by a positive rounded-up orchestration ceiling.
+- **Hub edits preserve hidden endpoint fields.** Editing clones and merges the existing descriptor
+  instead of rebuilding it from only visible inputs, preserving provider body, tool channel, and other
+  endpoint configuration. Empty HTTP models fail validation instead of becoming `default` or `local`.
+- **Streaming honours response limits and request settings.** `MaxResponseChars` caps visible output
+  on the streaming path as well as completion calls. Both paths carry per-call/per-agent reasoning,
+  temperature, output caps, and sampling settings; telemetry reports effective settings and reasoning tokens.
+- **Settings guidance matches runtime behavior.** Tool concurrency lists all seven serialized mutating
+  built-ins, same-origin credentials documentation reflects the browser transport, rolled-summary zero
+  means no explicit cap within the request budget, and unlimited built-in tool-loop roles include Builder.
+
+### Docs
+
+- The benchmark README, `BENCHMARK_DESIGN.md` and the leaderboard describe suite 2.0: the extreme tier and its
+  scenarios, G6 geometry grading, the per-group loophole fixes, tier scores in reports, the new model card and
+  comparison charts, parallel runs and their environment variables. The leaderboard lists v2.0 as current (results
+  pending), v1.16 as unpublished and v1.15 as historical. The v1.16 changes, previously folded into the v1.15 note,
+  have their own note.
+
 ## [7.50.2] - 2026-10-15
 
 Version aligned with `com.neoxider.coreai` 7.50.2 (`AgentSessionInspector` and structured retry carry the whole
@@ -5997,7 +6081,7 @@ Unifies the tool-calling cycle so providers emitting tool calls as **JSON-in-tex
 - 🐛 **`Runtime/Source/Features/Chat/UI/CoreAiChat.uxml`** — `coreai-chat-stop` now renders as `■` (Geometric Shapes U+25A0, present in LiberationSans / default TMP fallback) instead of `⏹` (Misc Technical U+23F9, missing from default WebGL fonts and drew as an empty rectangle).
 - **Context:** shipped WebGL players do not load emoji fallbacks (Noto Color Emoji, etc.), so emoji-plane symbols (U+1F300–U+1FAFF, parts of U+2600–U+27BF, U+23F0–U+23FF) render as `□` or disappear inside round buttons. ASCII / Latin-1 / Geometric Shapes (U+2580–U+25FF) are present in the default font asset — hence the move to `■`.
 - **Compatibility:** cosmetic only, no API changes. Projects overriding button text in custom UXML are unaffected. Tooltip unchanged (“Stop agent and generation”), so UX stays clear.
-- **Known TODO (out of scope for 0.25.2):** on WebGL, `UnityWebRequest` does not deliver SSE incrementally, so `OpenAiChatLlmClient.CompleteStreamingAsync` can deliver one terminal chunk instead of a stream — streaming UI appears stuck (“no typed reply + endless typing animation”). Details and fix plan: [`Docs/STREAMING_WEBGL_TODO.md`](Docs/STREAMING_WEBGL_TODO.md). *Update (v1.6.0+ / v1.6.13):* use **`WebGlNativeStreaming`** + fetch jslib (default **on** for new settings assets). Legacy app workaround (force `CoreAiChatConfig.EnableStreaming = false` under `#if UNITY_WEBGL && !UNITY_EDITOR`, e.g. `RedoSchool/...`) only if you intentionally avoid the fetch bridge.
+- **Known TODO (out of scope for 0.25.2):** on WebGL, `UnityWebRequest` does not deliver SSE incrementally, so `OpenAiChatLlmClient.CompleteStreamingAsync` can deliver one terminal chunk instead of a stream — streaming UI appears stuck (“no typed reply + endless typing animation”). Details and fix plan: [`Docs/STREAMING_WEBGL_TODO.md`](../../dev-docs/WEBGL_SSE_STREAMING_HISTORY.md) (now `dev-docs/WEBGL_SSE_STREAMING_HISTORY.md`). *Update (v1.6.0+ / v1.6.13):* use **`WebGlNativeStreaming`** + fetch jslib (default **on** for new settings assets). Legacy app workaround (force `CoreAiChatConfig.EnableStreaming = false` under `#if UNITY_WEBGL && !UNITY_EDITOR`, e.g. `RedoSchool/...`) only if you intentionally avoid the fetch bridge.
 
 ## [0.25.1] - 2026-04-26
 

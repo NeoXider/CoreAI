@@ -7,9 +7,9 @@
 > work items live in [`TODO.md`](../TODO.md), the current status in [`PLAN.md`](../PLAN.md), shipped
 > work in the package changelogs (e.g. [`Assets/CoreAI/CHANGELOG.md`](../Assets/CoreAI/CHANGELOG.md)).
 
-Last updated: 2026-09-24 (the ladder was renumbered that day; the plan decisions below are decided by
-the tech lead, and the owner may override any of them). All seven package manifests carry the same
-release version (see §2).
+Last updated: 2026-10-15 (release 7.50.2). The ladder was renumbered on 2026-09-24; the plan decisions
+below are decided by the tech lead, and the owner may override any of them. All seven package manifests
+carry the same release version (see §2).
 
 ---
 
@@ -77,7 +77,7 @@ shareable.
 
 ## 2. Package map
 
-Seven UPM packages, released in lockstep (all currently 7.50.2):
+Seven UPM packages, released in lockstep (all currently 7.51.0):
 
 | Package | What it is |
 |---|---|
@@ -124,7 +124,9 @@ Both script surfaces now convert arguments and property writes by one Luau/Roblo
 numeric strings, integer truncation, strict booleans, Enum Name/Value on instance members; round-trip
 gap RT4 closed, the `tostring` text residue is DEV-17), and a reload cleans the previous run's startup
 objects by default, with a keep mode for the old hot reload
-([`mod-system.md`](CoreAIMods/mod-system.md) §5c).
+([`mod-system.md`](CoreAIMods/mod-system.md) §5c). Two Lua fixtures run unchanged in Roblox Studio and
+CoreAI with identical output (the parity slice of 7.47.2 and the castle quest of 7.47.4,
+[`CASTLE_QUEST_PARITY.md`](CoreAIMods/CASTLE_QUEST_PARITY.md)).
 
 **Next.** MVP4 (script contexts, `require`, and `Script`/`LocalScript`/`ModuleScript` instances per
 plan decision D1) is the next rung. API breadth then follows the multiplayer and Studio rungs: MVP13
@@ -187,11 +189,11 @@ on-ramp and an export target.
 6000.3.14f1, 2026-09-25): EditMode full 6550 total / 6539 passed / 0 failed / 11 skipped, the `core`,
 `llm` and `lua` legs 0 failed (5266, 6234 and 5582 total), the Mirror leg 6550 / 0 failed; PlayMode
 `FastNoLlm` 95 total / 94 passed / 0 failed / 1 skipped; the engine-free portable suite 2172 passed /
-0 failed, the Lua tier 1846 of 1848 passed / 0 failed / 2 not run. The live-model PlayMode suite is
-not green: the last run of this branch had 4 of 165 failing, all live-model timeouts while the LM
-Studio server was unresponsive (the same four passed on 7.45.0), and it is to be re-run. The
-IL2CPP/WebGL player checks, the WebGL page-reload smoke and spikes S1/S2 are open follow-ups that gate
-the next networked rung, not MVP3's product scope. Built: the `.world` ZIP place package,
+0 failed, the Lua tier 1846 of 1848 passed / 0 failed / 2 not run. The live-model PlayMode suite was
+not part of the gate (4 of 165 failed on that branch, all live-model timeouts while the LM Studio
+server was unresponsive); the runs on 7.47.1–7.47.3 were partial, and one full run on a settled tree
+is still open. The IL2CPP/WebGL player checks, the WebGL page-reload smoke and spikes S1/S2 are open
+follow-ups that gate the next networked rung, not MVP3's product scope. Built: the `.world` ZIP place package,
 `FileRbxWorldPackageStore` with create-once manual slots (capped at 64 / 256 MiB) and a
 two-phase-durable autosave ring, `ConfirmedWorldMutationGate` in front of every `execute_lua` and
 mutating `manage_mods` action, `RbxWorldRuntimeSessionController` for transactional session
@@ -207,7 +209,7 @@ page-reload smoke is an open follow-up. Model packages, templates and the Roblox
 self-contained mod bundle (`ExportMod`) is.
 
 **Next.** The open MVP3 follow-ups (the IL2CPP/WebGL player checks, the WebGL page-reload smoke,
-spikes S1/S2, the live PlayMode re-run) before the next networked rung; MVP13 (`.model` packages, the template
+spikes S1/S2, one full live PlayMode run) before the next networked rung; MVP13 (`.model` packages, the template
 library, place templates); MVP14 (rbxl/rbxlx/rbxm/rbxmx both ways, the round-trip parity gate);
 MVP16 (DataStoreService on the shared JSON contract).
 
@@ -228,16 +230,17 @@ runtime multi-endpoint LLM routing (dynamic endpoint/profile CRUD, per-role/per-
 profiles, secret hygiene via `SecretReference`), streaming that survives small-model reality,
 resilience decorators, and the quarantine-not-unload mod error policy with auto-repair prompts for
 load errors. The Lua log service is wired end to end and the `get_mod_logs` tool is registered for the
-Programmer role. Background generation landed (Esc collapses the Hub, generation continues). The
-per-player chat is server-side only (`ActorKeyedInGameLlmChatServiceFactory`); there is no network chat
+Programmer role. Since 7.48.0 a prompt carries images and text files end to end, and any tool can
+return images to a vision model (`LlmToolImageResult`; the camera tools use it). Background generation
+landed (Esc collapses the Hub, generation continues). The per-player chat is server-side only (`ActorKeyedInGameLlmChatServiceFactory`); there is no network chat
 channel. The G10 real-provider capacity gate FAILED (17.4–38.5 s p95 on one lane) — a model and
 hardware question (risk R7).
 
 **Next.** MVP11 (player roles gating the human-facing tools, a network chat channel, `AIService` for
 mods, the task queue and HUD status of the async agent workflow); MVP12 (a selection-aware copilot in
 the Studio); MVP13 (AI tools that start from templates); MVP18 (the generated skill manifest,
-`watch_mod_logs`, the in-game console and runtime self-repair). The runtime UI tools of
-[`TODO.md`](../TODO.md) [R4] (`ui_command`/`ui_query`) share their element factory with MVP15;
+a `watch_mod_logs` tool, the in-game console and runtime self-repair). The planned runtime UI tools of
+[`TODO.md`](../TODO.md) [R4] (`ui_command`/`ui_query`, not built) share their element factory with MVP15;
 sub-agent orchestration (R9) stays last.
 
 **Detail:** [`TODO.md`](../TODO.md) (R4–R9) · [`Docs/CoreAI/agent-vision.md`](CoreAI/agent-vision.md) ·
@@ -323,7 +326,9 @@ synchronization, and `CoreAiWebGlPersistence` reports immediately whether it is 
 instead of awaiting an `FS.syncfs` callback Unity 6.3 no longer delivers
 (`CoreAIWebGlPersistentDataSyncBuildGuard` fails a build whose web template does not arm it); local
 GGUF models are unavailable in a browser player and return a documented limitation message
-([KNOWN_ISSUES.md](../Assets/CoreAiUnity/Docs/KNOWN_ISSUES.md)); the benchmark package (G1–G8,
+([KNOWN_ISSUES.md](../Assets/CoreAiUnity/Docs/KNOWN_ISSUES.md)); a WebGL player was checked in real
+Chrome for 7.48.0 (chat, image and text attachments, the camera tool, model-written `execute_lua`,
+refused outbound HTTP, persistence across a page reload); the benchmark package (G1–G8,
 six-dimension scoring, role fitness, model leaderboard) is the standing quality instrument. Scale so
 far is measured in process only: `tools/ScaleHarness` drives 20/50/100/200 actors over the loopback on
 CoreCLR ([`dev-docs/SCALE_CHARACTERIZATION.md`](../dev-docs/SCALE_CHARACTERIZATION.md)); the guarded VM
@@ -352,14 +357,14 @@ release: it ships as a 7.x minor after its gate — its DoD met, EditMode and Pl
 together (`python tools/bump_version.py <version>`). Patch releases carry fixes only. The one-screen
 ladder (detail: [`ROBLOX_API_ROADMAP.md` §4](CoreAIMods/ROBLOX_API_ROADMAP.md#4-mvp-ladder-the-ladder-of-record)):
 
-| # | Rung | Status (2026-09-25) | Size | Test |
+| # | Rung | Status (7.50.2, 2026-10-15) | Size | Test |
 |---|---|---|---|---|
 | MVP0 | Engine abstraction seam | landed | M | EM |
 | MVP1 | Instance/DataModel core | landed (6.3.0) | L | EM, PT |
 | MVP2 | Scheduler, signals, clocks, services | surface landed; G10 and `BindToRenderStep` open | L | EM, PL |
 | MVP2.5 | Online foundation + persistence release | landed 7.3.0–7.43.0 (history) | — | EM |
 | — | Gameplay services I (the old MVP8) | landed slice | L | EM, PM, PL |
-| **MVP3** | World/place package + backups (+ spikes S1/S2) | **closed 2026-09-25 (7.47.0)**: Unity gate EditMode and PlayMode `FastNoLlm` 0 failed, audits 1–3 done; S1/S2, IL2CPP/WebGL player checks and the live PlayMode re-run are open follow-ups | S | EM, PM, WebGL |
+| **MVP3** | World/place package + backups (+ spikes S1/S2) | **closed 2026-09-25 (7.47.0)**: Unity gate EditMode and PlayMode `FastNoLlm` 0 failed, audits 1–3 done; S1/S2, IL2CPP/WebGL player checks and one full live PlayMode run are open follow-ups | S | EM, PM, WebGL |
 | **MVP4** | Script contexts & client runtime | **next**, not started | M | PL, EM, PT |
 | MVP5 | Host mode over a real socket + join snapshot | planned | L | EM, MP, MS |
 | MVP6 | World-state replication + write authority | planned | L | PT, EM, MP |
@@ -402,6 +407,11 @@ Lua-CSharp with a cheaper guard first, native Luau on the server only as the fal
 - **Current release.** The version in §2 is the latest release. Every release is described in the
   package changelogs ([core](../Assets/CoreAI/CHANGELOG.md),
   [Unity host](../Assets/CoreAiUnity/CHANGELOG.md)); the milestones below are kept as history.
+- **7.48.0–7.50.2 (2026-09-30 to 2026-10-15).** Releases outside the ladder: attachments and camera
+  images end to end and visible Rbx material relief (7.48.0); safe generation progress and an explicit
+  failure for an interrupted SSE stream (7.49.0); a messenger-style chat feed (7.50.0); tool-contract and
+  memory prompts that name only real behaviour (7.50.1); `AgentSessionInspector` and the structured retry
+  carry the whole request (7.50.2).
 - **7.42.0–7.43.0 (2026-09-16).** Mirror multiplayer can be switched on from a scene; remotes run
   through Mirror (proven over an in-memory transport, not yet across a real socket); a kick closes the
   connection.
@@ -471,7 +481,7 @@ into measured numbers early ([`ROBLOX_API_ROADMAP.md` §4.3](CoreAIMods/ROBLOX_A
 | R5 | Instance ceilings vs Roblox-scale places | 16,384 per desktop world / 2,048 per actor; WebGL 4,032; `ProcessPreSimulation` visits every instance | Dirty-only processing, ceilings raised with measurement (MVP9) |
 | R6 | A single-threaded world with one mutation gate held across operations | `InstanceRegistry`'s gate (`TODO.md`) | One room per process; per-tick batching; contention measured with the publisher (MVP6) |
 | R7 | LLM capacity for per-player AI | G10 FAILED: 17.4–38.5 s p95 on one lane; 12–25 lanes needed for 40 requests per 60 s | Role-gate the human AI to Creators, a queue and HUD, `AIService` quotas (MVP11); small local models for routine work |
-| R8 | A large unverified surface | Before the MVP3 gate: Mirror fixtures compile-only, no Unity run of the wave. The 2026-09-25 gate ran every leg in Unity (EditMode 0 failed, Mirror leg included; PlayMode `FastNoLlm` 0 failed); still unverified: IL2CPP/WebGL players, the live-model PlayMode suite (4 live timeouts to re-run), 2 Lua-tier cases not run on Linux | The MVP3 player-build follow-ups; a licensed CI runner (F-12) |
+| R8 | A large unverified surface | Before the MVP3 gate: Mirror fixtures compile-only, no Unity run of the wave. The 2026-09-25 gate ran every leg in Unity (EditMode 0 failed, Mirror leg included; PlayMode `FastNoLlm` 0 failed); 7.48.0 checked a WebGL player in real Chrome (chat, attachments, `execute_lua`); still unverified: IL2CPP players, the MVP3 stack and budget checks in IL2CPP/WebGL players, one full live-model PlayMode run, 2 Lua-tier cases not run on Linux | The MVP3 player-build follow-ups; a licensed CI runner (F-12) |
 | R9 | Protocol security and compatibility | No inbound rate limit on decode/dispatch; no version negotiation | Both in MVP5 |
 | R10 | Studio scope creep (XL) | Absent today; many UI panels | Mechanisms in the packages, UX in the flagship (plan decision D7); Explorer, Properties, gizmos, undo and Play/Stop first (MVP12) |
 | R11 | Plan drift across ROADMAP, ROBLOX_API_ROADMAP, TODO, PLAN and dev-docs | 28 stale or contradictory statements found on 2026-09-24 (fixed the same day) | One ladder of record, one status table here; dev-docs plans marked as history |

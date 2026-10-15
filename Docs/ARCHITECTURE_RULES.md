@@ -27,13 +27,17 @@ Every substantial feature ships as up to three assemblies with references pointi
   signal semantics = **Domain** (pure Roblox math, deterministic). `RbxSpace` and
   component bridges = the **Unity adapter** and the single conversion boundary (locked in
   the roadmap). The Lua VM stays behind `Runtime/Scripting` seams (`IScriptEngine` et al.);
-  `Scripting/LuaCs` is the only assembly folder allowed to `using Lua;`.
+  `Scripting/LuaCs` is the only folder that imports the VM (`using Lua;`), and
+  `ScriptingSeamHonestyEditModeTests` fails on a VM import anywhere in `CoreAIMods/Runtime` outside
+  `Runtime/Scripting`.
 - A feature may skip a layer only with a recorded justification in its README.
 
 ## 2. Composition & dependency injection
 
 - Every service is consumed through an **interface**; registration happens in a
-  `static <Feature>Installer.Install(...)` (pattern already present: `CoreAiModsInstaller`).
+  `static class <Feature>Installer` whose `Register<Feature>(this IContainerBuilder builder, ...)`
+  extension the lifetime scope calls (pattern already present: `CoreAiModsInstaller.RegisterCoreAiMods`,
+  `CoreServicesInstaller.RegisterCore`).
   VContainer (`jp.hadashikick.vcontainer`) is the container for new composition roots;
   MessagePipe for cross-feature events where the existing CoreAI event seams don't already
   cover the need.
@@ -42,7 +46,9 @@ Every substantial feature ships as up to three assemblies with references pointi
 - **Forbidden**: `static Instance` singletons in feature code; static service locators
   (the benchmark's static scope resolver is explicitly NOT imported as a pattern); reflection
   scene wiring (`FindObjectsByType` inside installers) — use explicit registration or
-  entry-point components.
+  entry-point components. The existing violations (the static `CoreAi` facade,
+  `CoreAISettings.Instance`, the process-wide `RbxSpace` scale) are listed in `Docs/ROADMAP.md` §3,
+  Track E; MVP10 removes them from the main paths or documents the ones that stay.
 - Cross-feature coupling: features never reference sibling feature internals. Shared
   contracts live in a contracts assembly; cross-feature events are immutable
   `readonly struct`s with null-coalesced constructor fields.
@@ -71,6 +77,9 @@ CoreAI is a framework for many AI-driven games, not one game (`AGENTS.md`). Norm
 - Every async method takes and propagates a `CancellationToken`.
   `OperationCanceledException` is caught and rethrown separately from failure handling —
   never swallowed, never logged as an error.
+- No `ConfigureAwait(false)` in `CoreAiUnity` code: it leaves the Unity main thread and is unsafe on
+  WebGL. The Roslyn analyzer rule `CAIU001` (`Assets/CoreAiUnity/RoslynAnalyzers/CoreAI.UnityAsyncAnalyzers.dll`,
+  source in `tools/CoreAI.UnityAsyncAnalyzers`) reports it.
 - Randomness, time and IO go behind interfaces (deterministic RNG, clock, storage) so
   Domain logic is reproducible and fake-testable. The Roblox scheduler and RNG-dependent
   APIs (`math.random` seeding, `Random.new`) must be deterministic under test.
@@ -94,19 +103,22 @@ CoreAI is a framework for many AI-driven games, not one game (`AGENTS.md`). Norm
 - Each module ships an **architecture-fitness test** asserting its dependency direction
   (no engine/VM/framework types outside the adapter — grep- or reflection-based, like the
   existing seam-honesty test).
-- Roblox-API conformance tests follow the roadmap layout
-  (`Tests/EditMode/RbxApi/{Datatypes,Instances,Scheduler,Services,Networking,Corpus}` +
-  `PlayMode/RbxApi`) and are **named by normative rule ID** (`R4_2_...`, `M3_8_...`,
-  `S1_7_...`) so a failing test names the violated Roblox rule.
+- Roblox-API conformance tests follow the layout of `ROBLOX_API_ROADMAP.md` §6.6
+  (`Tests/EditMode/RbxApi/<area>/`, e.g. `Datatypes`, `Instances`, `Scheduling`, `Networking`,
+  `CompatibilityCorpus`, + `PlayMode/RbxApi`) and are **named by normative rule ID** (`R4_2_...`,
+  `M3_8_...`, `S1_7_...`) so a failing test names the violated Roblox rule.
 - PlayMode tests that need editor focus/environment must self-skip (`Assert.Ignore`),
   never flake.
 
 ## 6. Conventions
 
-- Naming enforced via `.editorconfig` analyzers: `I`-prefix on interfaces at
-  `severity = error`; PascalCase public members; `_camelCase` private fields.
-- Comments: XML `<summary>` on public types/members; `TODO:`/`HACK:` tags; all English; no
-  restating-the-code comments.
+- Naming: `I`-prefix on interfaces; PascalCase public members; `_camelCase` private fields. This is
+  a review convention: the repository `.editorconfig` sets formatting only (indentation, attributes on
+  their own line), not naming severities.
+- Explicit types: no `var` for locals, fields or return values; the only exception is an anonymous
+  type (`AGENTS.md`).
+- Comments: only XML `<summary>` docs on public types/members and `WHY:`/`TODO:`/`HACK:` comments; no
+  narrative, change-description or restating-the-code comments.
   - **`WHY:` is the rare exception, not the default.** Most changes need NO inline comment — clear
     names and small methods carry the intent. Add a `WHY:` only when a reader would otherwise be
     misled or "fix" the code back to a subtly-wrong version: a non-obvious ordering constraint, a
@@ -114,6 +126,9 @@ CoreAI is a framework for many AI-driven games, not one game (`AGENTS.md`). Norm
     add a `WHY:` for every edit, and never write one that just restates what the code, the method
     signature, or an adjacent doc already says (e.g. "// set X to 10 for Roblox parity" next to a
     constant already XML-documented as Roblox parity) — delete it instead. If in doubt, leave it out.
+- English only for prose in shipped packages (comments, test names, assertion messages, exception and
+  log text); `EnglishOnlyProseEditModeTests` fails on Cyrillic with the file and line (`AGENTS.md`
+  lists the quoted-text exception).
 
 - Folder-per-feature, layer-per-subfolder. One README per feature explaining purpose,
   layer map, and any recorded deviations.
@@ -125,7 +140,8 @@ CoreAI is a framework for many AI-driven games, not one game (`AGENTS.md`). Norm
 Already in `Packages/manifest.json` — use these, do not hand-roll equivalents:
 `jp.hadashikick.vcontainer` 1.17.0 (DI), `com.cysharp.unitask` (async),
 `com.cysharp.messagepipe` + `.vcontainer` (events), `com.cysharp.r3` (reactive),
-`com.neoxider.tools` (gameplay modules), `com.unity.dedicated-server`,
+`com.neoxider.tools` (gameplay modules for the example game and demo scenes; the framework packages
+take no dependency on it — owner decision 2, `Docs/ROADMAP.md` §3, Track E), `com.unity.dedicated-server`,
 `com.unity.multiplayer.*` (Multiplayer Play Mode is the MP test method from MVP5 on). Mirror is
 deliberately not a manifest dependency: the optional `com.neoxider.coreaimirror` package compiles only in
 a project that installs Mirror itself (`MIRROR` define). New third-party dependencies require an explicit

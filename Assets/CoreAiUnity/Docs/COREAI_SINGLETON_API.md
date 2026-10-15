@@ -46,9 +46,9 @@ Done. The `"SmartChat"` role must match `AgentBuilder` / chat config if you conf
 | **Chat window** (`CoreAiChatPanel`) | Send button or **Enter** (default; **Shift+Enter** inserts a newline). With `CoreAiChatConfig.SendOnShiftEnter` on, **Shift+Enter** sends instead | `CoreAiChatService` → same `ILlmClient` as `CoreAi` |
 | **Script** (NPC, quest, “Ask” button) | `CoreAi.AskAsync("text")` or `CoreAi.StreamAsync` — that is how a user request is sent to the LLM | Same `CoreAiChatService` inside `CoreAi` |
 
-Both paths use **one** `CoreAILifetimeScope` registered on the scene and **one** backend configuration. The only difference is UX: in the panel you type in a field; in code you pass a string to a method. Brushes/streaming/roles — see [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) and [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md).
+Both paths use **one** `CoreAILifetimeScope` registered on the scene and **one** backend configuration. The only difference is UX: in the panel you type in a field; in code you pass a string to a method. Styles/streaming/roles — see [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) and [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md).
 
-**Summary:** for the player in chat — built-in panel; for game logic without a widget — `CoreAi`. Together **CoreAI + CoreAiUnity** cover “convenient everywhere”: demo scene in one click, hotkeys in the Inspector, and one line of `CoreAi` on any `MonoBehaviour`.
+**Summary:** for the player in chat — built-in panel; for game logic without a widget — `CoreAi`.
 
 ---
 
@@ -58,18 +58,28 @@ Both paths use **one** `CoreAILifetimeScope` registered on the scene and **one**
 |-------|------------|-------------------|
 | `AskAsync` | `Task<string?>` | You need the **full answer as one string** (logic, save, simple NPC). |
 | `StreamAsync` | `IAsyncEnumerable<string>` | **Live text** in UI (label, TMP, UI Toolkit). |
-| `StreamChunksAsync` | `IAsyncEnumerable<LlmStreamChunk>` | You need **IsDone, Error, usage** per chunk. |
+| `StreamChunksAsync` | `IAsyncEnumerable<LlmStreamChunk>` | You need **IsDone, Error, usage** per chunk. The `StreamChunksAsync(AiTaskRequest)` overload streams a chat turn with per-call fields such as `AllowedToolNames` / `ForcedToolMode`. |
 | `SmartAskAsync` | `Task<string?>` | Both **stream to UI** and **full string** at the end (analytics, quests). Stream mode follows the settings hierarchy. |
 | `OrchestrateAsync` | `Task<string?>` | Full **game pipeline**: session snapshot, authority, queue, validation, **publishing a command** to the bus. |
 | `OrchestrateStreamAsync` | `IAsyncEnumerable<LlmStreamChunk>` | Same, but **tokens as they generate** + final publish after the stream. |
 | `OrchestrateStreamCollectAsync` | `Task<string>` | Stream + **assemble full text** + `onChunk` for UI. |
 | `AskAsync` / `StreamAsync` / `StreamChunksAsync` / `SmartAskAsync` **+ attachments** | same as above | Send **images and files** with the prompt (one `AiAttachment` or a list) — see [3.7](#37-send-prompts-images-and-files). |
-| `StopAgent` | `void` | **Cancel generation** and running agent tasks. |
+| `IsVisionEnabled()` | `bool` | Whether the configured model accepts images. |
+| `AskWithCameraAsync` | `Task<string>` | Capture a camera (by name or a `Camera`) and ask a vision model about the frame. |
+| `AskWithImageFollowUpAsync` | `Task<string>` | One-shot question about one image (no history, no tools), e.g. a frame a tool returned. |
+| `StopAgent` | `void` | **Cancel generation** and running agent tasks for a cancellation scope (role id or domain scope). |
 | `ClearContext` | `void` | **Clear memory** (chat + long-term). |
+| `RegisterCameraVisionTool` / `RegisterGameStateTool` | `bool` | Add the `capture_camera` (vision models only) or `game_state` tool to a role at runtime. |
+| `AddSkillForRole` / `InjectSkillIntoHistory` | `bool` | Add an on-demand skill to a role; preload a skill into a role's history without a model turn. |
+| `OnToolExecuted`, `OnToolCallStarted` / `OnToolCallCompleted` / `OnToolCallFailed` | events | React to tool calls (VFX, audio, analytics). |
+| `SubscribeToolCalls` / `GetToolCallHistorySnapshot` / `ClearToolCallHistory` | `IDisposable` / list / `void` | Disposable subscription to tool-call records and the bounded recent history. |
 | `IsReady` | `bool` | Whether the API can be called (scope + services). |
 | `Invalidate()` | `void` | After **scene change** or in tests — clear cache. |
 | `TryGetChatService` / `TryGetOrchestrator` | `bool` | **No exceptions**: check before a UI button or optional AI. |
 | `GetChatService` / `GetOrchestrator` / `GetSettings` | services | Direct access when you need full control. |
+| `SetResolver` | `void` | Tests/CI: override how the orchestrator is resolved. |
+
+Backend switching (HTTP / LLMUnity / Offline, model, key, health probe) is a separate facade, `CoreAiBackend` — see [RUNTIME_BACKEND_SWITCHING](RUNTIME_BACKEND_SWITCHING.md).
 
 Detailed scenarios — section [When to use what](#2-when-to-use-what-in-detail) below.
 
@@ -84,7 +94,7 @@ Ensure the **active** scene has a GameObject with **`CoreAILifetimeScope`**. Aft
 - `AskAsync` — **chat**: prompt + role history, text answer.  
 - `OrchestrateAsync` — **game task**: session snapshot, roles like Creator, publishing a **JSON command** to the game bus. For “talk to NPC” you usually use `AskAsync` / `Stream`.
 
-**Never on the Unity main thread:** `CoreAi.AskAsync(...).Result`, `.GetAwaiter().GetResult()`, or `.Wait()` — the LLM stack uses **player loop** / **`ToolInvocationMarshaler`** / **HTTP** paths that can deadlock if the managed main thread blocks while a thread-pool continuation waits for **main** (**v1.5.14:** tool marshaling skips **`SwitchToMainThread`** in **Edit Mode !isPlaying** specifically to keep **Test Runner / tooling** safe — still avoid blocking **main** in gameplay). Use **`await`** (e.g. **`async void`** / **UniTask** on UI events).
+**Never on the Unity main thread:** `CoreAi.AskAsync(...).Result`, `.GetAwaiter().GetResult()`, or `.Wait()` — the LLM stack uses **player loop** / **`ToolInvocationMarshaler`** / **HTTP** paths that can deadlock if the managed main thread blocks while a thread-pool continuation waits for **main**. (In Edit Mode with `!isPlaying`, tool marshaling skips **`SwitchToMainThread`** so the Test Runner and tooling stay safe; that does not apply in Play Mode or players.) Use **`await`** (e.g. **`async void`** / **UniTask** on UI events).
 
 **Can I call outside `async void`?**  
 You can from `Start` with `StartCoroutine` + wrapper, but simpler — **`async void` on the Unity main thread** or **UniTask**. Do not use `Task.Run` — LLM calls must stay on the **main thread** (see [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md)).
@@ -125,6 +135,8 @@ await foreach (string chunk in CoreAi.StreamAsync("Tell a joke", "SmartChat"))
     label.text += chunk;
 ```
 
+`StreamAsync` throws `InvalidOperationException` when the stream reports an error; use `StreamChunksAsync` to read `Error` yourself.
+
 ### 3.3. Smart: chunks in UI and full text in a variable
 
 ```csharp
@@ -141,7 +153,7 @@ Override streaming: `uiStreamingOverride: false` — force full response in one 
 ### 3.4. Safe call (no try when AI is absent)
 
 ```csharp
-if (CoreAi.TryGetChatService(out var chat))
+if (CoreAi.TryGetChatService(out CoreAiChatService chat))
 {
     string reply = await chat.SendMessageAsync("Hi", "SmartChat", ct);
 }
@@ -167,7 +179,7 @@ CoreAi.ClearContext("SmartChat", clearChatHistory: true, clearLongTermMemory: tr
 ### 3.5. Orchestrator: command into the game
 
 ```csharp
-var task = new AiTaskRequest
+AiTaskRequest task = new AiTaskRequest
 {
     RoleId = "Creator",
     Hint = "Generate JSON spawn command",
@@ -181,7 +193,7 @@ string json = await CoreAi.OrchestrateAsync(task);
 ### 3.6. Orchestrator with stream to a status line
 
 ```csharp
-var task = new AiTaskRequest { RoleId = "Creator", Hint = "Explain the step" };
+AiTaskRequest task = new AiTaskRequest { RoleId = "Creator", Hint = "Explain the step" };
 
 string full = await CoreAi.OrchestrateStreamCollectAsync(task,
     onChunk: c => statusLine.text += c);
@@ -290,7 +302,7 @@ one-element array (32 bytes); pass your own list to reuse it.
 // Registration (in your LifetimeScope)
 builder.Register<QuestAiController>(Lifetime.Transient)
     .WithParameter<Func<CoreAiChatService?>>(() => {
-        if (CoreAi.TryGetChatService(out var s)) return s;
+        if (CoreAi.TryGetChatService(out CoreAiChatService? s)) return s;
         return null;
     });
 // or
@@ -309,7 +321,7 @@ builder.Register<QuestAiController>(Lifetime.Transient)
 ```csharp
 // OK — from MonoBehaviour, main thread
 async void OnEnable() {
-  await foreach (var c in CoreAi.StreamAsync("Hi")) t.text += c;
+  await foreach (string c in CoreAi.StreamAsync("Hi")) t.text += c;
 }
 
 // DO NOT — worker thread + UnityWebRequest
@@ -327,4 +339,4 @@ _ = Task.Run(() => _ = CoreAi.AskAsync("x"));
 | [STREAMING_ARCHITECTURE](STREAMING_ARCHITECTURE.md) | SSE, LLMUnity, orchestrator stream, limits |
 | [DOCS_INDEX](DOCS_INDEX.md) | Full documentation map |
 
-**Version:** see `Assets/CoreAiUnity/package.json` — in release changelogs for `CoreAi`, see *Singleton API* / *Orchestrator streaming*.
+**Version:** see `Assets/CoreAiUnity/package.json`; release notes are in [CHANGELOG.md](../CHANGELOG.md).

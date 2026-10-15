@@ -1,8 +1,9 @@
 # CoreAI Portable Documentation
 
 This folder documents the host-agnostic CoreAI layer: agents, prompts, tools,
-LLM routing, MEAI integration, memory, Lua safety, and runtime contracts that do
-not depend on Unity scene objects.
+LLM routing, MEAI integration, memory, and runtime contracts that do not depend
+on Unity scene objects. It also holds the Lua and Rbx API guides for the Mods
+package (`com.neoxider.coreaimods`).
 
 Canonical language is English because this package ships as `com.neoxider.coreai`.
 Unity-specific setup lives under [`Assets/CoreAiUnity/Docs/`](../../CoreAiUnity/Docs/).
@@ -60,7 +61,7 @@ the `roleId`, attachment and list overloads: omit the argument or cast the null.
 | [ENGINE_AGNOSTIC_TOOLS.md](ENGINE_AGNOSTIC_TOOLS.md) | Tools and prompts without Unity APIs |
 | [LESSON_ORCHESTRATION.md](LESSON_ORCHESTRATION.md) | Lesson/practice hooks: runtime context, tool policy, tests |
 | [LLM_ROUTING.md](LLM_ROUTING.md) | Execution modes, portable routing contracts, usage sinks, timeouts |
-| [LLM_TOOLS.md](LLM_TOOLS.md) | Built-in vs host-wired `ILlmTool` implementations and how a host adds the latter |
+| [LLM_TOOLS.md](LLM_TOOLS.md) | Built-in vs host-wired `ILlmTool` implementations, agent-authored skills (`manage_skills`), and the camera/vision tools |
 | [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, removed APIs, execution limits, binding rules, and escape-test checklist |
 | [RBX_API.md](RBX_API.md) | Roblox-style API a mod builds with: `Instance.new`, datatypes, services, `BasePart.Material` / `MaterialVariant` / `Part.Color`, the execution budget and `ScriptContext`, saving and loading a world, samples |
 | [FIRST_MOD.md](FIRST_MOD.md) | Your first Lua mod in 5 minutes: writing, loading, persisting, and sharing it |
@@ -80,14 +81,6 @@ the `roleId`, attachment and list overloads: omit the argument or cast the null.
 | [Docs/CoreAIMods/WORLD_PACKAGE.md](../../../Docs/CoreAIMods/WORLD_PACKAGE.md) | The `.world` package format, validation limits, manual slots vs. the autosave ring, the confirm/reject load flow, runtime session replacement |
 | [PROCEDURAL_MATERIALS.md](../../CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md) | Procedural shader catalog behind `Enum.Material` (all 45 items + the magenta diagnostic fallback) |
 | [TEXTURE_MATERIALS.md](../../CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md) | The thirty-six CC0 texture-backed materials and their projection/tint rules |
-
-## Maintenance Notes
-
-- Keep this index updated whenever a stable CoreAI guide is added.
-- Put short decision rules near the top of each guide; detailed reference material
-  should follow after the reader knows when it matters.
-- Keep XML documentation concise and contract-oriented. Explain behavior,
-  ownership, inputs, outputs, and failure modes; avoid repeating method names.
 
 Related entry points: root [README.md](../../../README.md)
 and [CoreAiUnity DOCS_INDEX.md](../../CoreAiUnity/Docs/DOCS_INDEX.md).

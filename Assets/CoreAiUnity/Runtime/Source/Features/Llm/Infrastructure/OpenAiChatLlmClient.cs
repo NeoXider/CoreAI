@@ -1,4 +1,4 @@
-﻿#if COREAI_LLM
+#if COREAI_LLM
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -64,6 +64,12 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public bool SupportsNativeToolCalling => _client.SupportsNativeToolCalling;
 
+        /// <inheritdoc />
+        public void ResolveRequestSettings(LlmCompletionRequest request)
+        {
+            _client.ResolveRequestSettings(request);
+        }
+
         public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
             CancellationToken cancellationToken = default)
         {
@@ -95,10 +101,14 @@ namespace CoreAI.Infrastructure.Llm
             public string Model => _s.ModelName;
             public LlmExecutionMode ExecutionMode => _s.ExecutionMode;
             public float Temperature => _s.Temperature;
+            public float? TemperatureOverride => _s.OverrideTemperature ? _s.Temperature : null;
             public int RequestTimeoutSeconds => _s.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _s.MaxTokens;
+            public int? MaxTokensOverride => _s.OverrideMaxTokens ? _s.MaxTokens : null;
             public string ExtraBodyJson => _s.ExtraBodyJson;
             public LlmReasoningMode ReasoningMode => _s.ReasoningMode;
+            public LlmReasoningEffort ReasoningEffort => _s.ReasoningEffort;
+            public LlmReasoningDialect ReasoningDialect => _s.ReasoningDialect;
             public int ThinkingBudgetTokens => _s.ThinkingBudgetTokens;
             public bool LogLlmInput => _s.LogLlmInput;
             public bool LogLlmOutput => _s.LogLlmOutput;

@@ -96,6 +96,8 @@ namespace CoreAI.Tests.EditMode
 
             Assert.NotNull(capturedJson);
             Assert.That(capturedJson, Does.Not.Contain("\"temperature\""));
+            Assert.That(capturedJson, Does.Not.Contain("\"max_tokens\""),
+                "Legacy numeric settings alone did not opt into a wire override.");
         }
 
         [Test]
@@ -243,11 +245,6 @@ namespace CoreAI.Tests.EditMode
         [TestCase("MESSAGES")]
         [TestCase("stream")]
         [TestCase("stream_options")]
-        [TestCase("temperature")]
-        [TestCase("max_tokens")]
-        [TestCase("enable_thinking")]
-        [TestCase("thinking_budget")]
-        [TestCase("chat_template_kwargs")]
         [TestCase("tools")]
         [TestCase("tool_choice")]
         public void ProviderBodyParameters_ReservedKey_IsRejectedAtomically(string key)
@@ -262,6 +259,33 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("{\"safe\":1}", options.ExtraBodyJson);
             StringAssert.Contains(key, ex.Message);
             StringAssert.DoesNotContain(secret, ex.ToString());
+        }
+
+        [TestCase("temperature")]
+        [TestCase("max_tokens")]
+        [TestCase("max_completion_tokens")]
+        [TestCase("enable_thinking")]
+        [TestCase("thinking_budget")]
+        [TestCase("chat_template_kwargs")]
+        [TestCase("reasoning_effort")]
+        [TestCase("reasoning")]
+        [TestCase("thinking")]
+        [TestCase("top_p")]
+        [TestCase("seed")]
+        [TestCase("stop")]
+        [TestCase("response_format")]
+        [TestCase("frequency_penalty")]
+        [TestCase("presence_penalty")]
+        public void ProviderBodyParameters_RequestOptionKeysRemainWritableForDynamicResolution(string key)
+        {
+            OpenAiHttpOptions options = OpenAiHttpOptions.From(TestHttpSettings.Instance);
+
+            options.SetProviderBodyParameter(key, new JValue(7));
+
+            Assert.That(OpenAiProviderBodyParameters.IsReserved(key), Is.False);
+            Assert.That(JObject.Parse(options.ExtraBodyJson)[key].Value<int>(), Is.EqualTo(7));
+            options.RemoveProviderBodyParameter(key);
+            Assert.That(JObject.Parse(options.ExtraBodyJson)[key], Is.Null);
         }
 
         [Test]

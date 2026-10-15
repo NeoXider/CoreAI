@@ -4,7 +4,8 @@
 > your existing CoreAI scenes using the setup steps below.
 
 A **configured LLM backend** is required in `CoreAISettings` (LLMUnity model or HTTP API:
-LM Studio, OpenAI, etc.).
+LM Studio, OpenAI, etc.), and `COREAI_LLM` must be defined: without it the controller compiles to a stub
+that logs a warning and disables itself.
 
 ## What It Shows
 
@@ -68,4 +69,5 @@ Keep it to one short line: the director runs forever, so per-observation token c
 budgeting. Give the agent more levers by adding tools in `Start()` (`.WithTool(...)` on the
 `AgentBuilder`), and tune the persona in the system prompt (pacing rules, "never touch X", theme).
 
-Details: `Assets/CoreAI/Docs/AGENT_BUILDER.md`, `Assets/CoreAiUnity/Docs/WORLD_COMMANDS.md`.
+Details: [AGENT_BUILDER.md](../../CoreAI/Docs/AGENT_BUILDER.md),
+[WORLD_COMMANDS.md](../../CoreAiUnity/Docs/WORLD_COMMANDS.md).

@@ -1,22 +1,25 @@
 # Roblox-style Lua API (Rbx API)
 
 **This is the API a mod uses to create and control world objects.** It mirrors Roblox 1:1, so a
-script written here imports and exports without a rewrite. C# identifiers use the `Rbx` prefix
-(`CoreAI.RbxApi.*`); the Lua-facing surface keeps the Roblox spelling exactly.
+script written here imports and exports without a rewrite. C# types use the `Rbx` prefix (assemblies
+`CoreAI.RbxApi.*`, namespaces `CoreAI.Mods.Rbx.*`); the Lua-facing surface keeps the Roblox spelling
+exactly.
 
-> The older low-level `coreai_world_spawn` / `coreai_world_change` / `coreai_world_destroy` build
+> The classic low-level `coreai_world_spawn` / `coreai_world_change` / `coreai_world_destroy` build
 > functions are **not registered in the default shipping composition** — `CoreAiModsInstaller` sets
 > `RegisterWorldEditBuildBindings = false`, and calling one raises an actionable
 > `LuaApiWithheldException` instead of silently doing nothing. Use this API instead. The read-only
-> queries (`coreai_world_find` / `_pos` / `_exists`) are unaffected and stay available at the `Read`
-> tier. See [LUA_GAME_API.md](LUA_GAME_API.md) for that legacy surface and the hosts that still opt in.
+> queries (`coreai_world_find`, `coreai_world_pos`, `coreai_world_exists`, ...) are unaffected and stay
+> available at the `Read` tier. See [LUA_GAME_API.md](LUA_GAME_API.md) for that classic surface and the
+> hosts that opt in.
 
 ## Capability
 
-Every global below is available at `Read`. Creating and mutating needs the **`WorldEdit`**
-capability: `Instance` exists on every tier, but `Instance.new` without `WorldEdit` raises the
-capability error before it reads or creates anything, and `camera_set_cframe` / `camera_follow` do
-the same, so a mod never sees "attempt to call a nil value".
+Every global below is available at `Read`; a capability set without `Read` gets none of them.
+Creating and mutating needs the **`WorldEdit`** capability: `Instance` exists on every tier that
+includes `Read`, but `Instance.new` without `WorldEdit` raises the capability error before it reads or
+creates anything, and `camera_set_cframe` / `camera_follow` refuse such a caller too, so a mod never
+sees "attempt to call a nil value".
 
 ## Globals
 
@@ -33,7 +36,7 @@ the same, so a mod never sees "attempt to call a nil value".
 | `Random` | Seedable RNG |
 | `Enum` | `Enum.CameraType.Scriptable`, `Enum.KeyCode.A`, … |
 | `TweenInfo`, `RaycastParams` | `.new(...)` for `TweenService:Create` and `workspace:Raycast` |
-| `task` | `task.wait`, `task.spawn`, `task.defer`, `task.delay`, `task.cancel` (`spawn`/`defer`/`delay` also take a task handle back — see "Tasks and coroutines") |
+| `task` | `task.wait`, `task.spawn`, `task.defer`, `task.delay`, `task.cancel` (`spawn`/`defer`/`delay` also take a task handle back — see "Tasks and coroutines"); `task.synchronize`/`task.desynchronize` are no-ops |
 | `wait`, `spawn`, `delay` | Roblox's legacy scheduler globals |
 | `time`, `tick` | `time()` is scaled game time; `tick()` is deprecated (logs once per mod) |
 | `os` | Only `os.time([dateTable])` and `os.clock()` — the stock `os` library stays removed by the sandbox |
@@ -54,8 +57,8 @@ instead of "attempt to index a nil value".
 returned to the same mod, and `task.spawn(t) == t`. A parked task resumes, a deferred or delayed one
 is rescheduled (its old slot never fires), and the running task may re-queue itself only through
 `task.defer`/`task.delay`; a finished task, a task inside a scheduler wait, another mod's task and a
-`coroutine.create` thread are refused with `BAD_ARGUMENT` (native threads stay outside the scheduler,
-roadmap R4.10). A native `coroutine.yield()` inside a task parks it until `task.spawn(t, ...)`, and
+`coroutine.create` thread are refused with `BAD_ARGUMENT` (native threads stay outside the scheduler).
+A native `coroutine.yield()` inside a task parks it until `task.spawn(t, ...)`, and
 `coroutine.yield` returns those arguments; inside a signal handler, a `RemoteFunction` callback, a
 legacy `spawn`/`delay` function or the main chunk it stops that thread with `CONTEXT_VIOLATION`,
 because nothing could resume it. `task.wait`, `signal:Wait`, `WaitForChild` and a `RemoteFunction`
@@ -85,8 +88,8 @@ run (a `mods_call` export included) open two. So `pcall` nests 128 deep and `tab
 and a resumed thread continues its resumer's count. The call past the cap raises `C stack overflow
 (<function>: more than 128 levels of nested calls from library functions back into Lua)`, an ordinary
 error: `pcall` returns it and `xpcall` hands it to its handler. Plain Lua recursion is not limited. The
-cap keeps any mix of these calls at most 428 KB of native stack on CoreCLR (about 1.38 MB on Mono, whose
-frames are larger), which an IL2CPP or WebGL player cannot otherwise bound (`TODO.md`, "Check the tests").
+cap keeps any mix of these calls under 512 KB of native stack on CoreCLR (about 1.35 MB on Mono, whose
+frames are larger), which an IL2CPP or WebGL player cannot otherwise bound.
 
 ### How arguments and property writes convert
 
@@ -121,10 +124,10 @@ functions and Roblox's property setters use, so a Roblox script runs here unchan
 The rule table is pinned on both surfaces by `RuleTable_*` in
 `Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp8ValueObjectsEditModeTests.cs`; the Full-tier
 `unity_*` reflection surface converts by the same rules (`RuleTable_FullTierReflectedMembers_ConvertByTheSameRules`).
-Known differences from Luau (`TODO.md`): the text a number becomes is this VM's `tostring`
-(`1E+21`, `Infinity`, `NaN`, and 15 significant digits on Mono) where Luau prints `1e+21`, `inf`, `nan`
-and the shortest round-trip digits (DEV-17 in the roadmap), and the sandbox's own `tonumber("inf")` is
-still `nil`.
+Known differences from Luau: the text a number becomes is this VM's `tostring` (`1E+21`, `Infinity`,
+`NaN`, and 15 significant digits on Mono) where Luau prints `1e+21`, `inf`, `nan` and the shortest
+round-trip digits, and the sandbox's own `tonumber` returns `nil` for `"inf"`, `"nan"` and hex floats,
+which the argument conversion above accepts.
 
 ### Clocks
 
@@ -155,14 +158,15 @@ The class ancestry (`Object` → `Instance` → `PVInstance` → `BasePart` → 
 `Camera` is a `PVInstance`, so `GetPivot`/`PivotTo` work on it) is data-driven through `ClassCatalog`,
 so `IsA` works the way it does in Roblox.
 
-Services reachable via `game:GetService`: `RunService`, `UserInputService`, `Players`,
-`CollectionService`, `TweenService`, `SoundService`, `Lighting`, `Debris`, `HttpService`,
-`ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `ContextActionService`,
-`PathfindingService`, `MarketplaceService`, `DataStoreService`, `MaterialService`, `ScriptContext`, and CoreAI's own `AIService`.
-Twenty-eight more real Roblox services (`StarterGui`, `Teams`, `PhysicsService`, `ReplicatedFirst`,
-`TeleportService`, `BadgeService`, …) resolve to loud placeholders whose first member access raises
-`NOT_IMPLEMENTED` with a workaround, instead of the false `X is not a valid Service name`;
-`GetService("")` is `UNKNOWN_SERVICE`.
+Services `game:GetService` returns as working instances: `Workspace`, `RunService`,
+`UserInputService`, `Players`, `CollectionService`, `TweenService`, `Lighting`, `Debris`,
+`HttpService`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`,
+`MaterialService` and `ScriptContext`. `DataStoreService`, `ContextActionService`, `SoundService` and
+CoreAI's reserved `AIService` are planned; `PathfindingService` and `MarketplaceService` are not
+planned. They and twenty-eight more real Roblox services (`StarterGui`, `Teams`, `PhysicsService`,
+`ReplicatedFirst`, `TeleportService`, `BadgeService`, …) resolve to loud placeholders whose first
+member access raises `NOT_IMPLEMENTED` with a workaround, instead of the false `X is not a valid
+Service name`; `GetService("")` is `UNKNOWN_SERVICE`.
 
 ### Change notifications
 
@@ -207,7 +211,7 @@ or the only connected player, is the clicker.
 holder in the tree) and when it leaves use (its last holder in the tree loses the tag, leaves the tree
 or is destroyed); a tagged instance parented to `nil` — a pooled coin — counts for neither, and
 `GetAllTags` lists only tags in use. The per-tag `GetInstanceAddedSignal`/`GetInstanceRemovedSignal`
-fire per instance, as before. When a tagged instance is destroyed, the removed-signal handlers — like
+fire per instance. When a tagged instance is destroyed, the removed-signal handlers — like
 `ChildRemoved` and `DescendantRemoving` handlers — can still read it, as a `Destroying` handler can.
 A new tag is at most 100 characters (`AddTag`, and the per-tag signal getters for a tag no instance
 holds; OURS — Roblox states no limit, and 100 is its limit for `Name` and attribute names); a longer
@@ -261,8 +265,8 @@ different argument positions, exactly as in Roblox.
 Solo and host both render, so both keep firing: the gate is "does anything get drawn here", not
 `IsClient` — CoreAI's solo process is the server *and* the renderer.
 
-`RunService:BindToRenderStep`/`UnbindFromRenderStep` are still loud stubs; connect `PreRender`
-instead until named render-step binding lands.
+`RunService:BindToRenderStep`/`UnbindFromRenderStep` are loud stubs; connect `RenderStepped` (or
+`PreRender`) instead.
 
 ### `Players`
 
@@ -293,13 +297,14 @@ Roblox, so `character:Clone()` returns `nil` until a script sets `Archivable = t
 host C# code runs the same leave teardown as a disconnect, once: the actor's slot is freed, `PlayerRemoving`
 fires once (with a `nil` reason) and the character is unloaded. On a `Host` or `DedicatedServer` topology, an
 actor the transport admitted before its `Player` existed is refused with `NOT_AUTHORITY` when the world has no
-`Players.IdentitySource`, instead of being handed a session-counter `UserId` that another account could receive
+`Players.IdentitySource` or that source has no durable identity for the actor, instead of being handed a
+session-counter `UserId` that another account could receive
 later; local actors, solo and client worlds are unaffected. The Mirror provider sets the identity source for you
 (`Assets/CoreAIMirror/README.md`).
 
 `BasePart`'s network-ownership family (`SetNetworkOwner`, `GetNetworkOwner`,
 `SetNetworkOwnershipAuto`, `GetNetworkOwnershipAuto`, `CanSetNetworkOwnership`) is a loud stub too:
-the server simulates every part, and ownership is deferred to the replication rung.
+the server simulates every part, and network ownership is not modelled.
 
 ### `Humanoid`
 
@@ -324,7 +329,7 @@ after entering. `JumpPower` is clamped to [0, 1000]. `MaxHealth = math.huge` is 
 the largest finite number (so the world stays savable) — `Health == math.huge` is then false, compare
 with `MaxHealth` — `TakeDamage(math.huge)` kills, and NaN is refused. Property writes fire `Changed` and
 `GetPropertyChangedSignal`. `TakeDamage`, `MoveTo` and `ChangeState` need `WorldEdit`, write authority
-over that humanoid and a mutation envelope, exactly like `Health =`: one actor's mod can no longer kill
+over that humanoid and a mutation envelope, exactly like `Health =`: one actor's mod cannot kill
 or steer another actor's character, so player-versus-player damage has to go through server-side code.
 
 Movement is done by a motor behind `IRbxCharacterMotor`: CoreAI ships `UnityRbxCharacterMotor`, and
@@ -373,10 +378,12 @@ means everything, `{}` means nothing), and `AddToFilter` accepts one instance or
 texture-backed surfaces at 1K, so every material the catalog describes renders from the package alone
 with nothing imported. A project-local override catalog (`Assets/CoreAIRbxTexturesLocal/Resources/CoreAIRbxTextureCatalogOverride`,
 written by the Editor menus `CoreAI/Materials/Download CC0 texture sets (ambientCG)...` and
-`CoreAI/Materials/Import Bridge-Megascans folder...`) can give **any** of the 45 items a 2K–4K PBR set
-with normal, roughness, optional AO and metalness maps; the override wins per material. Items without
-a catalog entry are procedural surfaces from `RbxProceduralMaterialProvider` (opaque, metallic,
-organic, transparent, neon, and force-field shader paths). A catalog entry with a missing texture falls
+`CoreAI/Materials/Import Bridge-Megascans folder...`) can give **any** of the 45 items a PBR set (the
+ambientCG download offers 1K, 2K or 4K, default 2K) with normal, roughness, optional AO and metalness
+maps; the override wins per material. Items without a catalog entry are procedural surfaces from
+`RbxProceduralMaterialProvider`: a surface shader (opaque, metallic and organic modes), a neon shader
+and a transparent shader (`Glass`, `Ice`, `Water`, `ForceField`, …). A catalog entry with a missing
+texture falls
 back to the procedural surface with one logged error, never to Unity's pink error shader, and a
 material id that is not in the catalog resolves to an opaque **magenta diagnostic material** instead of
 failing quietly, so a wrong value is visible on the first frame. Quixel Bridge / Fab (Megascans) sets
@@ -435,9 +442,10 @@ place rather than reallocated, so no part has to be touched. Naming a variant th
 renders the plain `Material` instead; it is not an error, and nothing goes magenta. Variants and the
 parts referencing them both survive a world save and load.
 
-Supported today: `BaseMaterial`, `ColorMap`, `NormalMap`, `RoughnessMap`, `MetalnessMap`,
-`StudsPerTile`. Roblox's `AlphaMode`, `MaterialPattern`, `CustomPhysicalProperties`, the emissive
-properties and the `*Content` accessors are not implemented yet.
+Supported: `BaseMaterial`, `ColorMap`, `NormalMap`, `RoughnessMap`, `MetalnessMap`, `StudsPerTile`.
+Roblox's other `MaterialVariant` members (`AlphaMode`, `MaterialPattern`, `CustomPhysicalProperties`,
+the emissive properties and the `*Content` accessors) are not implemented; using one raises
+`... is not a valid member of MaterialVariant`.
 
 ## A working mod
 
@@ -495,25 +503,29 @@ six. Objects the mod's handlers, tasks or remote calls created later, and object
 own, are kept; one of those sitting inside a removed startup object is moved out to its parent first. A
 reload that fails puts the previous run's objects back exactly where they were and destroys what the
 failed chunk built. `ModReloadMode.KeepObjects` (the Hub's **Keep objects on Save & run** toggle,
-`manage_mods` `keep_objects: true`) is the old hot reload: everything stays and the new chunk builds next
-to it. Details: [`mod-system.md`](../../../Docs/CoreAIMods/mod-system.md) §5c.
+`manage_mods` `keep_objects: true`) keeps everything: the new chunk builds next to it. Details:
+[`mod-system.md`](../../../Docs/CoreAIMods/mod-system.md) §5c.
 
 ## Execution budget and `ScriptContext`
 
-Every resume of mod code — the main chunk, a signal handler, a `task.*` resume, a raw
-`coroutine.resume`, a one-off `execute_lua` chunk — runs under a per-resume budget with two halves:
-an instruction-step cap and a wall-clock cap. CoreAI's defaults are 10,000 steps and 500 ms
-(`LuaCsCoroutineHandle.DefaultBudgetPerResume` / `DefaultResumeTimeoutMs`). A handler that never
-yields (`while true do end`) is cut when either half runs out, and the failure is reported as a budget
-kill — `BUDGET_EXCEEDED`, with the bound and the author's line — not as a Lua error. Two budget trips
+Every resume of mod code runs under a budget with two halves: an instruction-step cap and a
+wall-clock cap. A signal handler (`Heartbeat`, `Touched`, `Changed`, …) and a `task.*` thread get
+the **per-resume budget**: CoreAI's defaults are 10,000 steps and 500 ms
+(`LuaCsCoroutineHandle.DefaultBudgetPerResume` / `DefaultResumeTimeoutMs`). A raw `coroutine.resume`
+gets 50 times the steps and twice the time of that budget (500,000 steps and 1 s at the defaults), held
+to what the run that resumes it has left. A mod's main chunk (each resume of it), its
+`hooks_on`/`hooks_every` handlers and a one-off `execute_lua` chunk run under the larger handler budget:
+10 s and 50,000,000 steps. A handler that never yields (`while true do end`) is cut when either half
+runs out, and the failure is reported as a budget kill — `BUDGET_EXCEEDED`, with the bound and the
+author's line — not as a Lua error. Two budget trips
 in a row (no clean call or frame between them) quarantine the mod and suspend its stored package, so a
 mod stuck in a loop does not freeze the next start too (`LuaCsModRuntime.MaxBudgetTripsBeforeQuarantine`,
 default 2; ordinary errors still quarantine at 8).
 
 A budget trip (steps, time or memory) ends the run it tripped in, and nothing inside that run can
 catch it: `pcall` and `xpcall` let it through and `xpcall`'s handler does not run, so a runaway
-cannot survive its own budget, and the next run on the same Lua state is guarded exactly as the first
-(before, one trip switched the guard off for that state for good). Only the host, or the code that
+cannot survive its own budget, and the next run on the same Lua state is guarded exactly as the first.
+Only the host, or the code that
 called `coroutine.resume` on a raw coroutine that tripped, sees the trip: `coroutine.resume` returns
 `false` and the trip line, and that coroutine is dead. A sandbox cap (`string.rep`, `table.concat`,
 `string.format`, a `gsub` result) and the per-call string-pattern step cap stay ordinary errors that
@@ -528,17 +540,21 @@ scheduler thread is reported (to the mod's diagnostics and the auto-repair path)
 under one prefix — an uncaught `UNKNOWN_SERVICE` stays `UNKNOWN_SERVICE`; a budget kill is `BUDGET_EXCEEDED`,
 and only a plain Lua error is reported as `BAD_ARGUMENT`.
 
-The budget belongs to the game, not to CoreAI. Both halves are the **Lua coroutine resume budget**
-field on `CoreAiModsLifetimeScope` (`LuaCsCoroutineBudgetSettings`); a value `<= 0` falls back to the
-default rather than reading as "no limit". Every coroutine site in the composition resolves the same
-instance and every resume re-reads it, so a change reaches a signal runner that was created long
-before — on its next resume.
+The per-resume budget belongs to the game, not to CoreAI. Both halves are the **Lua coroutine resume
+budget** field on `CoreAiModsLifetimeScope` (`LuaCsCoroutineBudgetSettings`); a value `<= 0` falls back
+to the default rather than reading as "no limit". Every signal handler and `task.*` thread in the
+composition reads the same instance on every resume, so a change reaches a signal runner that was
+created long before — on its next resume — and the raw-coroutine budget scales with it. The main-chunk
+and handler budget is a composition setting (`LuaCsModStackOptions.HandlerTimeoutMs` /
+`HandlerMaxSteps`) and does not follow it.
 
-`game:GetService("ScriptContext"):SetTimeout(seconds)` changes the wall-clock half at runtime, live,
-for every subsequent resume. Roblox marks the member `PluginSecurity`; CoreAI has no Studio, so the
+`game:GetService("ScriptContext"):SetTimeout(seconds)` changes the wall-clock half of the per-resume
+budget at runtime, live, for every subsequent signal-handler and `task.*` resume. Roblox marks the
+member `PluginSecurity`; CoreAI has no Studio, so the
 member is gated to the host actor instead: host-composed code may call it, an ordinary mod is refused
-with `NOT_AUTHORITY` (the same refusal as any other privileged member). A non-finite argument is
-`BAD_ARGUMENT`; a value that rounds to zero milliseconds or below falls back to the default. There is
+with `NOT_AUTHORITY` (the same refusal as any other privileged member). A non-finite argument, or one
+above about 24.8 days (`int.MaxValue` milliseconds), is `BAD_ARGUMENT`; a value that rounds to zero
+milliseconds or below falls back to the default. There is
 no readable `Timeout` property and no Lua-facing setter for the instruction half — Roblox has neither.
 
 Instances are budgeted too: one actor may own at most 2,048 registered instances
@@ -576,7 +592,7 @@ actor). The AI never supplies an operation id, target instance id or expected re
 schemas expose only `code`. In an ACL-versioned world a caller that reaches the instance registry with
 no envelope at all is refused with `BAD_ARGUMENT`, a duplicate operation id applies once, and the
 engine-free `WorldAclAuthorizer` inside `CoreAI.RbxApi.Instances` refuses `SetAccessControl`, parent,
-property and `Destroy` mutations by actor identity — the Lua bindings are no longer the only guard.
+property and `Destroy` mutations by actor identity, so the Lua bindings are not the only guard.
 
 Inbound network input never creates identity: a `RemoteEvent`/`RemoteFunction` message from a sender
 that the bridge has not admitted is refused with a structured error before any lookup, decoding or
@@ -590,10 +606,10 @@ the in-process loopback refuses a larger one with `PAYLOAD_TOO_LARGE` exactly as
 does, so a script that works in solo does not break online.
 
 What a remote sender's calls start on the server is charged to that sender, never to the handler's
-owner, in two budgets that never share threads (`ModScheduler`,
-`Assets/CoreAIMods/Runtime/RbxApi/Instances/Scheduling/ModScheduler.cs`):
+owner, in two budgets that never share threads, both enforced by `ModScheduler`
+(`Assets/CoreAIMods/Runtime/RbxApi/Instances/Scheduling/ModScheduler.cs`):
 
-- **Remote admission (32 per sender).** Only the `OnServerEvent` handlers and `OnServerInvoke` callbacks
+- **Remote admission (32 per sender, fixed).** Only the `OnServerEvent` handlers and `OnServerInvoke` callbacks
   the sender's own remote calls start count here; at most 32 may be alive (suspended) at once. A
   `RemoteFunction` call over that is answered `the RemoteFunction call was refused: threads this
   caller's earlier calls started are still running on the server`; an `OnServerEvent` invocation over it
@@ -607,11 +623,10 @@ owner, in two budgets that never share threads (`ModScheduler`,
   handler; a handler that ends on that refusal is not charged to its owner's error streak. A signal
   handler invocation that finds the budget full is **deferred**, not dropped: it waits in a queue (256
   per sender, 4,096 in all) and starts, in the order the sender's fires happened, once the sender's
-  induced threads end; only past the queue is it dropped, counted (`InducedListenerDrops`) and logged
-  once per sender. A `Once` connection is used up only when its handler actually starts. The host's own
-  fires never wait. A composition changes all four numbers with
-  `ModScheduler.ConfigureInducedThreadBudget` (`TODO.md`: not yet exposed through
-  `LuaCsModStackOptions`).
+  induced threads end; only past the queue is it dropped, counted and logged once per sender. A `Once`
+  connection is used up only when its handler actually starts. The host's own fires never wait. A
+  composition changes all four induced-work numbers with `ModScheduler.ConfigureInducedThreadBudget`
+  (not exposed through `LuaCsModStackOptions`).
 
 A flooding client exhausts its own budgets, not the host's thread quota, and an honest player's next
 remote is never refused because the host's own listeners are parked on its earlier ones. Two things a
@@ -628,7 +643,7 @@ was stopped: the world serving it was shut down`; and `the RemoteFunction callba
 of these names a host mod — on a server the caller is a remote client; the host log keeps the details. An
 error the callback raises reaches the caller as its error value (`error("boom")` arrives as `boom`,
 without the engine's name or the internal chunk name); a host function's error still carries its
-`[mod:<id> …]` prefix (`TODO.md`).
+`[mod:<id> …]` prefix.
 
 What a client sends cannot flood the server's log either. A malformed client payload is dropped and
 counted instead of throwing inside the transport, and a failure text in a network warning is cut to
@@ -642,7 +657,7 @@ reported at the same powers of two.
 A mod whose first load fails leaves no `OnServerInvoke` callback, tween or pending wait behind. A load
 or reload that fails puts back any `OnServerInvoke` or `OnClientInvoke` callback its chunk replaced or
 cleared — another mod's included — as long as the slot is still empty and the callback's owner is still
-live; a successful reload replaces the callbacks as before.
+live; a successful reload replaces the callbacks.
 
 Disconnecting an actor is one production seam: it unregisters the actor from the bridge, fires
 `Players.PlayerRemoving` **exactly once** (with the documented `PlayerExitReason`), releases the actor's
@@ -731,7 +746,11 @@ same slot replaces the older one, and expired, unknown, rejected, or reused ids 
 refused with `Lua code is required` before any capture) and every *mutating* `manage_mods` action — `load`,
 `reload`, `unload`, `import`, `forget`, `revert` (trigger `manage_mods-<action>`). It captures the
 world and writes an autosave *before* the mutation runs; if the capture or the write fails, the
-mutation does not happen and the tool returns a structured failure. A confirmed load takes the same
+mutation does not happen and the tool returns a structured failure. The one exception is a world that
+cannot be encoded as a package at all (past a format limit or a platform budget): `manage_mods forget`
+and a confirmed load (`load_world-pre`) still run, because they are the ways back under the limit, and
+the `manage_mods` result carries a `backup_warning` field saying the backup was skipped and why. A
+confirmed load takes the same
 gate, so its `load_world-pre` safety autosave includes an `execute_lua` that was in flight. Read-only
 `manage_mods` actions
 (`list`, `get_source`, `export`, `versions`, `diagnostics`) bypass the gate entirely. Autosaves
@@ -747,10 +766,10 @@ because arbitrary Unity reflection cannot be transactionally isolated.
 
 On WebGL the durability boundary is `CoreAiWebGlPersistence.SyncAsync()`, which returns immediately
 and reports whether the engine's automatic `persistentDataPath` persistence is armed for this page.
-It waits for nothing: Unity 6.3 deprecated the manual `FS.syncfs` channel and its completion callback
-never fired, so awaiting it parked every save until the caller's own timeout. The browser player also refuses to write packages above 4 MiB, more than 4,096
-instances, more than 32,768 collection items, or more than 2 MiB of text before entering unbounded
-work, and to read one above 4 MiB — those are WebGL execution limits, not format limits.
+It waits for nothing: Unity 6.3 deprecated the manual `FS.syncfs` channel, whose completion callback
+never fires. The browser player also refuses to write packages above 4 MiB, more than 4,096
+instances, more than 32,768 collection items, or more than 2 Mi characters of text before entering
+unbounded work, and to read one above 4 MiB — those are WebGL execution limits, not format limits.
 
 Format, validation limits, capture/ownership rules, and the compatibility policy are specified in
 [`Docs/CoreAIMods/WORLD_PACKAGE.md`](../../../Docs/CoreAIMods/WORLD_PACKAGE.md).

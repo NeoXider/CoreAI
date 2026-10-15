@@ -1,3 +1,5 @@
+using CoreAI.Ai;
+
 namespace CoreAI
 {
     /// <summary>
@@ -27,6 +29,10 @@ namespace CoreAI
         public string ToolContractAdditionalInstructions { get; set; } = "";
         public float Temperature { get; set; } = 0.1f;
         public bool OverrideTemperature { get; set; }
+        public LlmReasoningEffort ReasoningEffort { get; set; } = LlmReasoningEffort.Default;
+        public LlmReasoningDialect ReasoningDialect { get; set; } = LlmReasoningDialect.Auto;
+        public LlmReasoningEffort SecondaryReasoningEffort { get; set; } = LlmReasoningEffort.Default;
+        public LlmReasoningDialect SecondaryReasoningDialect { get; set; } = LlmReasoningDialect.Auto;
         public int MaxToolCallRetries { get; set; } = 3;
         public bool LogToolCalls { get; set; } = true;
         public bool LogToolCallArguments { get; set; } = true;
@@ -94,6 +100,10 @@ namespace CoreAI
                 ToolContractAdditionalInstructions = source.ToolContractAdditionalInstructions,
                 Temperature = source.Temperature,
                 OverrideTemperature = source.OverrideTemperature,
+                ReasoningEffort = source.ReasoningEffort,
+                ReasoningDialect = source.ReasoningDialect,
+                SecondaryReasoningEffort = source.SecondaryReasoningEffort,
+                SecondaryReasoningDialect = source.SecondaryReasoningDialect,
                 MaxToolCallRetries = source.MaxToolCallRetries,
                 LogToolCalls = source.LogToolCalls,
                 LogToolCallArguments = source.LogToolCallArguments,

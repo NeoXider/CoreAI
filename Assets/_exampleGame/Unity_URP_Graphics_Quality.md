@@ -1,4 +1,4 @@
-﻿# Graphics in Unity (URP): Brief and Practical
+# Graphics in Unity (URP): Brief and Practical
 
 A guide for **Universal Render Pipeline (URP)** - how settings and presets work, and why objects can "disappear" at distance.
 

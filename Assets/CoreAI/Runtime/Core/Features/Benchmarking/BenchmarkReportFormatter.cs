@@ -21,9 +21,17 @@ namespace CoreAI.Benchmarking
             sb.AppendLine();
             sb.AppendLine($"> **{Grade(report.SuiteBaseScore)}** · " +
                           $"PASS {report.PassCount} / PARTIAL {report.PartialCount} / FAIL {report.FailCount} " +
+                          $"of {report.ScenarioCount} graded scenarios " +
                           $"· pass-rate {F(report.PassRate * 100)}% · mean bonus {F(report.MeanBonus)} " +
                           $"· reps {m.Repetitions} · {BenchmarkInfo.SuiteName} {BenchmarkInfo.Version}");
             sb.AppendLine();
+
+            sb.AppendLine($"- **Scores:** suite **{F(report.SuiteBaseScore)}**/100 · regular tier " +
+                          $"{F(report.RegularBaseScore)}/100 ({report.RegularScenarioCount} scenarios) · " +
+                          (report.HasExtreme
+                              ? $"extreme tier **{F(report.ExtremeBaseScore)}**/100 " +
+                                $"({report.ExtremePassCount}/{report.ExtremeScenarioCount} pass)"
+                              : "extreme tier n/a (no extreme scenario graded)"));
 
             sb.Append("- **By group:** ");
             IReadOnlyList<GroupScore> groups = report.GroupBreakdown();
@@ -59,7 +67,9 @@ namespace CoreAI.Benchmarking
             // WHY: Speed is a REPORTED metric (see provider-call/effective tok/s above), never a score — a faster
             // model must not look "smarter". The bonus rewards correctness only.
             sb.AppendLine($"- **Model setup:** backend `{m.Backend}` · native-tools {m.NativeToolCalling} · " +
-                          $"streaming {m.Streaming} · temp {F(m.Temperature)} · reps {m.Repetitions} · " +
+                          $"streaming {m.Streaming} · temp {F(m.Temperature)} · " +
+                          $"reasoning {(string.IsNullOrEmpty(m.ReasoningEffort) ? "provider default" : m.ReasoningEffort)} · " +
+                          $"reps {m.Repetitions} · " +
                           $"parallel-tools {m.MaxParallelToolCalls}");
             sb.AppendLine($"- **Run:** `{m.RunId}` ({m.TimestampUtc})" +
                           (string.IsNullOrEmpty(m.UnityVersion)
@@ -73,6 +83,9 @@ namespace CoreAI.Benchmarking
                     $"> ⚠ **Not a clean model measurement:** {report.FrameworkFailures} framework-failure(s), " +
                     $"{report.EnvironmentFailures} environment-failure(s) — see details below.");
             }
+
+            AppendGroupTable(sb, groups);
+            AppendExtremeSection(sb, report);
 
             IReadOnlyList<DimensionScore> dims = report.DimensionBreakdown();
             sb.AppendLine();
@@ -249,120 +262,568 @@ namespace CoreAI.Benchmarking
         }
 
         /// <summary>
-        /// Renders a self-contained SVG "results card" for embedding in the report (a visual of the suite
-        /// score, the dimension bars, and the verdict counts). Dependency-free; renders in any SVG viewer
-        /// and in Markdown previews that follow image links.
+        /// Renders the compact SVG results card embedded at the top of the report: model, suite score and
+        /// grade, extreme-tier score, verdicts, speed, per-group bars G1–G8 with extreme markers, dimension
+        /// mini-bars, suite version and date. One file carries the light and the dark theme
+        /// (<c>prefers-color-scheme</c>), so it reads correctly in either GitHub theme. Dependency-free.
         /// </summary>
         public static string ToSvg(BenchmarkReport report)
         {
-            IReadOnlyList<DimensionScore> dims = report.DimensionBreakdown();
-            const int width = 560;
-            int rows = dims.Count;
-            int height = 150 + rows * 26 + 40;
+            return ResultsCardScene(report).ToSvg();
+        }
 
-            StringBuilder sb = new();
-            sb.Append($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" ")
-                .Append($"viewBox=\"0 0 {width} {height}\" font-family=\"Segoe UI, Arial, sans-serif\">");
-            sb.Append($"<rect width=\"{width}\" height=\"{height}\" rx=\"10\" fill=\"#1e1f24\"/>");
+        /// <summary>The compact results card of <see cref="ToSvg"/> as a display list.</summary>
+        public static BenchmarkCardScene ResultsCardScene(BenchmarkReport report)
+        {
+            BenchmarkRunMetadata m = report.Metadata;
+            const double w = 720;
+            const double pad = 20;
+            BenchmarkCardScene sc = new(w, 400, $"{BenchmarkInfo.SuiteName} results: {m.ModelId}", Describe(report));
 
-            sb.Append($"<text x=\"20\" y=\"34\" fill=\"#e8e8ea\" font-size=\"18\" font-weight=\"bold\">")
-                .Append(Xml(report.Metadata.ModelId)).Append("</text>");
-            string scoreColor = HexColor(report.SuiteBaseScore);
-            sb.Append($"<text x=\"{width - 20}\" y=\"44\" fill=\"{scoreColor}\" font-size=\"40\" ")
-                .Append($"font-weight=\"bold\" text-anchor=\"end\">{F(report.SuiteBaseScore)}</text>");
-            sb.Append($"<text x=\"{width - 20}\" y=\"62\" fill=\"#9aa0a6\" font-size=\"11\" ")
-                .Append("text-anchor=\"end\">/ 100</text>");
-            sb.Append($"<text x=\"20\" y=\"58\" fill=\"#9aa0a6\" font-size=\"12\">")
-                .Append($"PASS {report.PassCount} · PARTIAL {report.PartialCount} · FAIL {report.FailCount} · ")
-                .Append($"{F(report.PassRate * 100)}% pass-rate</text>");
+            string meta = SuiteAndDate(m);
+            double metaW = BenchmarkCardScene.TextWidth(meta, 12);
+            sc.Text(w - pad, 34, meta, 12, CardInk.Muted, CardAnchor.End);
+            sc.Text(pad, 34, m.ModelId, 18, CardInk.Ink, CardAnchor.Start, true, w - 2 * pad - metaW - 16);
+            string subtitle = string.IsNullOrEmpty(m.RunId)
+                ? BenchmarkInfo.SuiteName
+                : $"{BenchmarkInfo.SuiteName} · run {m.RunId}";
+            sc.Text(pad, 54, subtitle, 12, CardInk.Ink2, CardAnchor.Start, false, w - 2 * pad);
+            sc.Line(pad, 68, w - pad, 68, CardInk.Grid);
 
-            const int barX = 150;
-            const int barW = 320;
-            int y = 96;
-            foreach (DimensionScore d in dims)
+            double tileW = (w - 2 * pad) / 4;
+            KpiTiles(sc, report, pad, 76, tileW, 11.5, 28, 12, 11.5, 2);
+            sc.Line(pad, 154, w - pad, 154, CardInk.Grid);
+
+            const double leftW = 384;
+            const double rightX = pad + leftW + 28;
+            const double rightW = w - pad - rightX;
+            const double titleY = 178;
+            sc.Text(pad, titleY, "Score by group", 13, CardInk.Ink, CardAnchor.Start, true);
+            if (report.HasExtreme)
             {
-                double pct = Clamp(d.Score, 0, 100);
-                sb.Append($"<text x=\"20\" y=\"{y + 11}\" fill=\"#c8ccd0\" font-size=\"12\">")
-                    .Append(Xml(DimName(d.Dimension))).Append("</text>");
-                sb.Append($"<rect x=\"{barX}\" y=\"{y}\" width=\"{barW}\" height=\"14\" rx=\"3\" fill=\"#33353b\"/>");
-                int fill = (int)System.Math.Round(barW * pct / 100.0);
-                sb.Append(
-                    $"<rect x=\"{barX}\" y=\"{y}\" width=\"{fill}\" height=\"14\" rx=\"3\" fill=\"{HexColor(d.Score)}\"/>");
-                sb.Append($"<text x=\"{barX + barW + 10}\" y=\"{y + 11}\" fill=\"#e8e8ea\" font-size=\"12\">")
-                    .Append(F(d.Score)).Append("</text>");
-                y += 26;
+                GroupLegend(sc, pad + leftW, titleY, 11);
             }
 
-            sb.Append($"<text x=\"20\" y=\"{y + 20}\" fill=\"#9aa0a6\" font-size=\"11\">")
-                .Append($"{report.TotalCompletionTokens} gen tokens · {F(report.GenerationTokensPerSecond)} tok/s · ")
-                .Append($"{F(report.TotalLatencyMs / 1000.0)} s (speed reported, not scored)</text>");
+            double groupsBottom = GroupRows(sc, report.GroupBreakdown(), pad, titleY + 10, leftW, 22, 11.5, 2);
 
-            sb.Append("</svg>");
+            sc.Text(rightX, titleY, "Dimensions", 13, CardInk.Ink, CardAnchor.Start, true);
+            double dimsBottom = DimensionBars(sc, report.DimensionBreakdown(), rightX, titleY + 10, rightW, 22, 11.5);
+
+            double bottom = System.Math.Max(groupsBottom, dimsBottom) + 14;
+            sc.Line(pad, bottom, w - pad, bottom, CardInk.Grid);
+            sc.Text(pad, bottom + 20, SpeedFooter(report), 11, CardInk.Muted, CardAnchor.Start, false, w - 2 * pad);
+            sc.Height = bottom + 34;
+            return sc;
+        }
+
+        /// <summary>
+        /// The 16:9 model card (1600x900 scene units) a Unity host rasterizes into <c>_modelcard.png</c> and
+        /// <see cref="ToModelCardSvg"/> writes as vector: headline tiles (suite, extreme tier, verdicts,
+        /// game-fit), per-group bars with the extreme overlay, a dimension dot plot on a 50–100 axis (so 90 and
+        /// 100 sit a fifth of the axis apart), role-fitness bars, and a tokens/speed footer.
+        /// </summary>
+        public static BenchmarkCardScene ModelCardScene(BenchmarkReport report)
+        {
+            BenchmarkRunMetadata m = report.Metadata;
+            const double w = 1600;
+            const double h = 900;
+            const double pad = 48;
+            BenchmarkCardScene sc = new(w, h, $"{BenchmarkInfo.SuiteName} model card: {m.ModelId}", Describe(report));
+
+            string brand = BenchmarkInfo.SuiteName;
+            double brandW = BenchmarkCardScene.TextWidth(brand, 24);
+            sc.Text(w - pad, 80, brand, 24, CardInk.Muted, CardAnchor.End);
+            sc.Text(pad, 84, m.ModelId, 46, CardInk.Ink, CardAnchor.Start, true, w - 2 * pad - brandW - 40);
+            sc.Text(pad, 124, ModelCardMetaLine(report), 24, CardInk.Ink2, CardAnchor.Start, false, w - 2 * pad);
+            sc.Line(pad, 150, w - pad, 150, CardInk.Grid, 2);
+
+            KpiTiles(sc, report, pad, 172, (w - 2 * pad) / 4, 24, 84, 30, 24, 4);
+            sc.Line(pad, 360, w - pad, 360, CardInk.Grid, 2);
+
+            const double titleY = 404;
+            const double captionY = 436;
+            const double rowsTop = 452;
+            const double groupsX = pad;
+            const double groupsW = 560;
+            const double dimsX = groupsX + groupsW + 48;
+            const double dimsW = 504;
+            const double rolesX = dimsX + dimsW + 48;
+            const double rolesW = w - pad - rolesX;
+
+            sc.Text(groupsX, titleY, "Score by group", 28, CardInk.Ink, CardAnchor.Start, true);
+            if (report.HasExtreme)
+            {
+                GroupLegend(sc, groupsX + groupsW, captionY, 22);
+            }
+            else
+            {
+                sc.Text(groupsX, captionY, "mean base per group, 0–100", 22, CardInk.Muted);
+            }
+
+            GroupRows(sc, report.GroupBreakdown(), groupsX, rowsTop, groupsW, 42, 24, 4);
+
+            sc.Text(dimsX, titleY, "Dimensions", 28, CardInk.Ink, CardAnchor.Start, true);
+            sc.Text(dimsX, captionY, "dot plot, axis 50–100, line at 90 = pass", 22, CardInk.Muted,
+                CardAnchor.Start, false, dimsW);
+            DimensionDots(sc, report.DimensionBreakdown(), dimsX, rowsTop, dimsW, 56, 24);
+
+            RoleFitness.Result fit = RoleFitness.Evaluate(report);
+            sc.Text(rolesX, titleY, "Game-fitness by role", 28, CardInk.Ink, CardAnchor.Start, true);
+            sc.Text(rolesX, captionY, "rating 0–10 per game-dev role", 22, CardInk.Muted, CardAnchor.Start, false,
+                rolesW);
+            RoleRows(sc, fit, rolesX, rowsTop, rolesW, 56, 24);
+
+            sc.Line(pad, 846, w - pad, 846, CardInk.Grid, 2);
+            sc.Text(pad, 880, SpeedFooter(report), 22, CardInk.Muted, CardAnchor.Start, false, w - 2 * pad);
+            return sc;
+        }
+
+        /// <summary>The model card as a vector SVG — the headless twin of the Unity-rendered PNG.</summary>
+        public static string ToModelCardSvg(BenchmarkReport report, CardTheme theme = CardTheme.Auto)
+        {
+            return ModelCardScene(report).ToSvg(theme);
+        }
+
+        /// <summary>Four headline tiles: suite score, extreme tier, scenario verdicts, and game-fit.</summary>
+        private static void KpiTiles(BenchmarkCardScene sc, BenchmarkReport report, double x, double y, double tileW,
+            double labelSize, double valueSize, double unitSize, double subSize, double scale)
+        {
+            RoleFitness.Result fit = RoleFitness.Evaluate(report);
+            bool anyAssessed = fit.Roles.Any(r => r.Assessed);
+            double labelY = y + labelSize;
+            double valueY = labelY + valueSize * 0.98;
+            double subY = valueY + subSize * 2.1;
+            double inner = 12 * scale / 2;
+
+            for (int i = 1; i < 4; i++)
+            {
+                double dx = x + i * tileW;
+                sc.Line(dx, y + 2, dx, subY + subSize * 0.3, CardInk.Grid, scale / 2);
+            }
+
+            Tile(sc, x, labelY, valueY, subY, tileW - inner, "Suite score", F1(report.SuiteBaseScore), "/100",
+                $"{Grade(report.SuiteBaseScore)} · regular tier {F1(report.RegularBaseScore)}",
+                labelSize, valueSize, unitSize, subSize);
+
+            double tx = x + tileW + inner;
+            if (report.HasExtreme)
+            {
+                Tile(sc, tx, labelY, valueY, subY, tileW - 2 * inner, "Extreme tier", F1(report.ExtremeBaseScore),
+                    "/100", $"{report.ExtremePassCount} of {report.ExtremeScenarioCount} scenarios pass",
+                    labelSize, valueSize, unitSize, subSize);
+                double labelW = BenchmarkCardScene.TextWidth("Extreme tier", labelSize);
+                sc.Diamond(tx + labelW + labelSize * 0.75, labelY - labelSize * 0.33, labelSize * 0.36,
+                    CardInk.Extreme);
+            }
+            else
+            {
+                Tile(sc, tx, labelY, valueY, subY, tileW - 2 * inner, "Extreme tier", "–", string.Empty,
+                    "not in this run", labelSize, valueSize, unitSize, subSize);
+            }
+
+            tx = x + 2 * tileW + inner;
+            int total = report.PassCount + report.PartialCount + report.FailCount;
+            Tile(sc, tx, labelY, valueY, subY, tileW - 2 * inner, "Scenario verdicts",
+                $"{report.PassCount}/{total}", "pass",
+                $"{report.PartialCount} partial · {report.FailCount} fail", labelSize, valueSize, unitSize, subSize);
+            double vbY = valueY + subSize * 0.55;
+            VerdictBar(sc, tx, vbY, (tileW - 2 * inner) * 0.8, 3 * scale, report.PassCount, report.PartialCount,
+                report.FailCount);
+
+            tx = x + 3 * tileW + inner;
+            Tile(sc, tx, labelY, valueY, subY, tileW - inner, "Game-fit",
+                anyAssessed ? F1(fit.Overall) : "–", anyAssessed ? "/10" : string.Empty,
+                anyAssessed ? $"best: {RoleFitness.ShortName(fit.BestRole)}" : "partial run, roles not rated",
+                labelSize, valueSize, unitSize, subSize);
+        }
+
+        private static void Tile(BenchmarkCardScene sc, double x, double labelY, double valueY, double subY,
+            double width, string label, string value, string unit, string sub, double labelSize, double valueSize,
+            double unitSize, double subSize)
+        {
+            sc.Text(x, labelY, label, labelSize, CardInk.Muted, CardAnchor.Start, false, width);
+            sc.TextWithSuffix(x, valueY, value, valueSize, CardInk.Ink, true, unit, unitSize, CardInk.Ink2, false,
+                unitSize * 0.3);
+            sc.Text(x, subY, sub, subSize, CardInk.Ink2, CardAnchor.Start, false, width);
+        }
+
+        /// <summary>Part-to-whole bar of PASS / PARTIAL / FAIL in status colours, with surface gaps between segments.</summary>
+        private static void VerdictBar(BenchmarkCardScene sc, double x, double y, double width, double height, int pass,
+            int partial, int fail)
+        {
+            int total = pass + partial + fail;
+            if (total <= 0)
+            {
+                sc.Rect(x, y, width, height, CardInk.Track, height / 2);
+                return;
+            }
+
+            int[] counts = { pass, partial, fail };
+            CardInk[] inks = { CardInk.Good, CardInk.Warning, CardInk.Critical };
+            string[] names = { "pass", "partial", "fail" };
+            int segments = counts.Count(c => c > 0);
+            double gap = height >= 6 ? 4 : 2;
+            double usable = width - gap * (segments - 1);
+            double cx = x;
+            for (int i = 0; i < 3; i++)
+            {
+                if (counts[i] <= 0)
+                {
+                    continue;
+                }
+
+                double sw = usable * counts[i] / total;
+                sc.Rect(cx, y, sw, height, inks[i], height / 2).Tooltip = $"{counts[i]} {names[i]}";
+                cx += sw + gap;
+            }
+        }
+
+        /// <summary>
+        /// Legend for group rows (bar = group mean, diamond = extreme scenario), right-aligned at
+        /// <paramref name="right"/>. Only drawn when a run has the second series; one series needs no legend.
+        /// </summary>
+        private static void GroupLegend(BenchmarkCardScene sc, double right, double baseline, double size)
+        {
+            const string mean = "group mean";
+            const string extreme = "extreme scenario";
+            double extremeW = BenchmarkCardScene.TextWidth(extreme, size);
+            double meanW = BenchmarkCardScene.TextWidth(mean, size);
+            double swatch = size * 0.9;
+            double cy = baseline - size * 0.35;
+            double ex = right - extremeW;
+            sc.Text(ex, baseline, extreme, size, CardInk.Ink2);
+            sc.Diamond(ex - size * 0.65, cy, size * 0.42, CardInk.Extreme);
+            double mx = ex - size * 1.2 - size * 1.2 - meanW;
+            sc.Text(mx, baseline, mean, size, CardInk.Ink2);
+            sc.Rect(mx - swatch - size * 0.4, cy - swatch * 0.35, swatch, swatch * 0.7, CardInk.Series, 2);
+        }
+
+        /// <summary>
+        /// One row per group G1–G8 (plus any unknown group the run reported): a 0–100 meter for the group mean
+        /// with surface notches at 50 and 90, an extreme-scenario diamond on the same scale, and fixed value
+        /// columns so the two numbers never collide. Returns the y below the axis labels.
+        /// </summary>
+        private static double GroupRows(BenchmarkCardScene sc, IReadOnlyList<GroupScore> groups, double x, double y,
+            double width, double rowH, double font, double scale)
+        {
+            Dictionary<string, GroupScore> byId = new();
+            foreach (GroupScore g in groups)
+            {
+                byId[g.Group ?? string.Empty] = g;
+            }
+
+            List<string> ids = BenchmarkInfo.Groups.ToList();
+            foreach (GroupScore g in groups)
+            {
+                if (!ids.Contains(g.Group ?? string.Empty))
+                {
+                    ids.Add(g.Group ?? string.Empty);
+                }
+            }
+
+            double labelW = 0;
+            foreach (string id in ids)
+            {
+                double lw = BenchmarkCardScene.TextWidth(id + " ", font, true) +
+                            BenchmarkCardScene.TextWidth(BenchmarkInfo.TitleFor(id), font);
+                labelW = System.Math.Max(labelW, lw);
+            }
+
+            labelW = System.Math.Min(labelW + font * 0.6, width * 0.42);
+            double meanW = BenchmarkCardScene.TextWidth("100.0", font, true) + font * 0.7;
+            double extW = font * 1.1 + BenchmarkCardScene.TextWidth("100.0", font) + font * 0.3;
+            double barX = x + labelW;
+            double barW = width - labelW - meanW - extW;
+            double barH = System.Math.Max(6, System.Math.Round(rowH * 0.34));
+            double dr = barH * 0.62;
+
+            for (int i = 0; i < ids.Count; i++)
+            {
+                string id = ids[i];
+                double cy = y + i * rowH + rowH / 2;
+                double baseline = cy + font * 0.35;
+                sc.TextWithSuffix(x, baseline, id, font, CardInk.Ink, true, BenchmarkInfo.TitleFor(id), font,
+                    CardInk.Ink2, false, font * 0.4, CardAnchor.Start, labelW - font * 0.4);
+
+                if (!byId.TryGetValue(id, out GroupScore g))
+                {
+                    sc.Text(barX, baseline, "not run", font * 0.92, CardInk.Muted);
+                    continue;
+                }
+
+                double top = cy - barH / 2;
+                sc.Rect(barX, top, barW, barH, CardInk.SeriesTrack, barH / 2);
+                sc.Rect(barX + barW * 0.5 - scale / 2, top, scale, barH, CardInk.Surface);
+                sc.Rect(barX + barW * 0.9 - scale / 2, top, scale, barH, CardInk.Surface);
+                double mean = Clamp(g.MeanBase, 0, 100);
+                sc.Bar(barX, top, System.Math.Max(barW * mean / 100.0, scale), barH, CardInk.Series,
+                        System.Math.Min(2 * scale, barH / 2)).Tooltip =
+                    $"{id} {BenchmarkInfo.TitleFor(id)}: mean {F1(g.MeanBase)} over {g.Count} scenario(s), {g.PassCount} pass";
+                sc.Text(barX + barW + meanW, baseline, F1(g.MeanBase), font, CardInk.Ink, CardAnchor.End, true)
+                    .Tabular = true;
+
+                if (g.HasExtreme)
+                {
+                    double ext = Clamp(g.ExtremeMeanBase, 0, 100);
+                    sc.Diamond(barX + barW * ext / 100.0, cy, dr, CardInk.Extreme, scale).Tooltip =
+                        $"{id} extreme scenario: {F1(g.ExtremeMeanBase)}";
+                    sc.Diamond(barX + barW + meanW + font * 0.75, cy, font * 0.3, CardInk.Extreme);
+                    sc.Text(x + width, baseline, F1(g.ExtremeMeanBase), font, CardInk.Ink2, CardAnchor.End)
+                        .Tabular = true;
+                }
+                else
+                {
+                    sc.Text(x + width, baseline, "–", font, CardInk.Muted, CardAnchor.End);
+                }
+            }
+
+            double axisY = y + ids.Count * rowH + font * 0.95;
+            double tick = font * 0.85;
+            sc.Text(barX, axisY, "0", tick, CardInk.Muted);
+            sc.Text(barX + barW * 0.5, axisY, "50", tick, CardInk.Muted, CardAnchor.Middle);
+            sc.Text(barX + barW * 0.9, axisY, "90 pass", tick, CardInk.Muted, CardAnchor.Middle);
+            return axisY + tick * 0.4;
+        }
+
+        /// <summary>Dimension mini-bars (0–100 meters with value column) for the compact results card.</summary>
+        private static double DimensionBars(BenchmarkCardScene sc, IReadOnlyList<DimensionScore> dims, double x,
+            double y, double width, double rowH, double font)
+        {
+            double labelW = BenchmarkCardScene.TextWidth("Instruction adherence", font) + font * 0.6;
+            double valueW = BenchmarkCardScene.TextWidth("100.0", font, true) + font * 0.5;
+            double barX = x + labelW;
+            double barW = width - labelW - valueW;
+            double barH = System.Math.Max(6, System.Math.Round(rowH * 0.3));
+            int i = 0;
+            foreach (BenchmarkDimension d in AllDimensions)
+            {
+                double cy = y + i * rowH + rowH / 2;
+                double baseline = cy + font * 0.35;
+                sc.Text(x, baseline, DimName(d), font, CardInk.Ink2, CardAnchor.Start, false, labelW - font * 0.3);
+                DimensionScore score = dims.FirstOrDefault(s => s.Dimension == d);
+                if (score == null)
+                {
+                    sc.Text(barX, baseline, "not measured", font * 0.92, CardInk.Muted);
+                }
+                else
+                {
+                    sc.Rect(barX, cy - barH / 2, barW, barH, CardInk.SeriesTrack, barH / 2);
+                    sc.Bar(barX, cy - barH / 2, System.Math.Max(barW * Clamp(score.Score, 0, 100) / 100.0, 2), barH,
+                        CardInk.Series, System.Math.Min(4, barH / 2)).Tooltip = $"{DimName(d)}: {F1(score.Score)}";
+                    sc.Text(x + width, baseline, F1(score.Score), font, CardInk.Ink, CardAnchor.End, true).Tabular =
+                        true;
+                }
+
+                i++;
+            }
+
+            return y + i * rowH;
+        }
+
+        /// <summary>
+        /// Dimension dot plot on a 50–100 axis: dots encode position, not length, so starting the axis at 50
+        /// is honest and gives 90 vs 100 a fifth of the axis. Scores under 50 sit on the left edge; the value
+        /// column always prints the true number.
+        /// </summary>
+        private static void DimensionDots(BenchmarkCardScene sc, IReadOnlyList<DimensionScore> dims, double x,
+            double y, double width, double rowH, double font)
+        {
+            const double axisMin = 50;
+            double labelW = BenchmarkCardScene.TextWidth("Task completion", font) + font * 0.8;
+            double valueW = BenchmarkCardScene.TextWidth("100.0", font, true) + font * 0.6;
+            double r = font * 0.38;
+            double ax0 = x + labelW + r;
+            double ax1 = x + width - valueW - r;
+            double rows = AllDimensions.Length;
+            double bottom = y + rows * rowH;
+
+            for (int t = 50; t <= 100; t += 10)
+            {
+                double gx = ax0 + (ax1 - ax0) * (t - axisMin) / (100 - axisMin);
+                bool pass = t == 90;
+                sc.Line(gx, y + 4, gx, bottom - 4, pass ? CardInk.Muted : CardInk.Grid, 2);
+                sc.Text(gx, bottom + font * 0.95, t.ToString(CultureInfo.InvariantCulture), font * 0.85,
+                    CardInk.Muted, CardAnchor.Middle);
+            }
+
+            bool anyBelow = false;
+            int i = 0;
+            foreach (BenchmarkDimension d in AllDimensions)
+            {
+                double cy = y + i * rowH + rowH / 2;
+                double baseline = cy + font * 0.35;
+                sc.Text(x, baseline, DimShortName(d), font, CardInk.Ink2, CardAnchor.Start, false, labelW - font * 0.4);
+                DimensionScore score = dims.FirstOrDefault(s => s.Dimension == d);
+                if (score == null)
+                {
+                    sc.Text(x + width, baseline, "n/a", font, CardInk.Muted, CardAnchor.End);
+                    i++;
+                    continue;
+                }
+
+                double v = Clamp(score.Score, 0, 100);
+                anyBelow |= v < axisMin;
+                double px = ax0 + (ax1 - ax0) * (System.Math.Max(v, axisMin) - axisMin) / (100 - axisMin);
+                sc.Circle(px, cy, r, CardInk.Series, 4).Tooltip = $"{DimName(d)}: {F1(score.Score)}";
+                sc.Text(x + width, baseline, F1(score.Score), font, CardInk.Ink, CardAnchor.End, true).Tabular = true;
+                i++;
+            }
+
+            if (anyBelow)
+            {
+                sc.Text(x, bottom + font * 0.95, "<50 on edge", font * 0.85, CardInk.Muted);
+            }
+        }
+
+        /// <summary>Role-fitness rows: name, verdict and rating on one line, a 0–10 meter below it.</summary>
+        private static void RoleRows(BenchmarkCardScene sc, RoleFitness.Result fit, double x, double y, double width,
+            double rowH, double font)
+        {
+            double barH = System.Math.Max(6, System.Math.Round(rowH * 0.2));
+            double valueW = BenchmarkCardScene.TextWidth("10.0", font, true);
+            for (int i = 0; i < fit.Roles.Count; i++)
+            {
+                RoleFitness.RoleScore role = fit.Roles[i];
+                double top = y + i * rowH;
+                double baseline = top + font * 0.95;
+                string verdict = role.Assessed ? role.Verdict.ToLowerInvariant() : "not assessed";
+                double verdictW = BenchmarkCardScene.TextWidth(verdict, font * 0.85);
+                sc.Text(x, baseline, RoleFitness.ShortName(role.Role), font, CardInk.Ink2, CardAnchor.Start, false,
+                    width - valueW - verdictW - font * 1.4);
+                sc.Text(x + width - valueW - font * 0.6, baseline, verdict, font * 0.85, CardInk.Muted, CardAnchor.End);
+                double barY = baseline + font * 0.45;
+                sc.Rect(x, barY, width, barH, CardInk.SeriesTrack, barH / 2);
+                if (role.Assessed)
+                {
+                    double frac = Clamp(role.Rating, 0, 10) / 10.0;
+                    sc.Bar(x, barY, System.Math.Max(width * frac, 2), barH, CardInk.Series, barH / 2).Tooltip =
+                        $"{role.Role}: {F1(role.Rating)}/10, {role.Verdict}";
+                    sc.Text(x + width, baseline, F1(role.Rating), font, CardInk.Ink, CardAnchor.End, true).Tabular =
+                        true;
+                }
+                else
+                {
+                    sc.Text(x + width, baseline, "–", font, CardInk.Muted, CardAnchor.End);
+                }
+            }
+        }
+
+        private static readonly BenchmarkDimension[] AllDimensions =
+        {
+            BenchmarkDimension.ToolCorrectness, BenchmarkDimension.IntentSequence,
+            BenchmarkDimension.TaskCompletion, BenchmarkDimension.Determinism,
+            BenchmarkDimension.Reasoning, BenchmarkDimension.InstructionAdherence
+        };
+
+        private static string SuiteAndDate(BenchmarkRunMetadata m)
+        {
+            string suite = string.IsNullOrEmpty(m.SuiteVersion) ? BenchmarkInfo.Version : "suite v" + m.SuiteVersion;
+            string date = RunDate(m);
+            return string.IsNullOrEmpty(date) ? suite : suite + " · " + date;
+        }
+
+        private static string ModelCardMetaLine(BenchmarkReport report)
+        {
+            BenchmarkRunMetadata m = report.Metadata;
+            List<string> parts = new() { SuiteAndDate(m) };
+            if (!string.IsNullOrEmpty(m.RunId))
+            {
+                parts.Add("run " + m.RunId);
+            }
+
+            parts.Add($"{report.ScenarioCount} scenarios × {System.Math.Max(1, m.Repetitions)} rep");
+            if (!string.IsNullOrEmpty(m.Backend))
+            {
+                parts.Add(m.Backend);
+            }
+
+            return string.Join(" · ", parts);
+        }
+
+        /// <summary>The run date as yyyy-MM-dd, from the timestamp or else the run id; empty when neither parses.</summary>
+        private static string RunDate(BenchmarkRunMetadata m)
+        {
+            if (!string.IsNullOrEmpty(m.TimestampUtc) && m.TimestampUtc.Length >= 10 && m.TimestampUtc[4] == '-')
+            {
+                return m.TimestampUtc.Substring(0, 10);
+            }
+
+            string id = m.RunId ?? string.Empty;
+            if (id.Length >= 8 && id.Take(8).All(char.IsDigit))
+            {
+                return $"{id.Substring(0, 4)}-{id.Substring(4, 2)}-{id.Substring(6, 2)}";
+            }
+
+            return string.Empty;
+        }
+
+        private static string SpeedFooter(BenchmarkReport report)
+        {
+            return $"{N0(report.TotalTokens)} tokens ({N0(report.TotalCompletionTokens)} generated) · " +
+                   $"{F1(report.GenerationTokensPerSecond)} tok/s · {Duration(report.TotalLatencyMs)} · " +
+                   $"{report.TotalToolCalls} tool calls, {report.TotalFailedToolCalls} failed · " +
+                   "speed is reported, never scored";
+        }
+
+        /// <summary>Plain-text summary of the card for screen readers (SVG <c>&lt;desc&gt;</c>).</summary>
+        private static string Describe(BenchmarkReport report)
+        {
+            StringBuilder sb = new();
+            sb.Append($"Suite score {F1(report.SuiteBaseScore)} of 100 ({Grade(report.SuiteBaseScore)}), regular tier ")
+                .Append(F1(report.RegularBaseScore));
+            sb.Append(report.HasExtreme
+                ? $", extreme tier {F1(report.ExtremeBaseScore)} with {report.ExtremePassCount} of {report.ExtremeScenarioCount} passing"
+                : ", no extreme tier");
+            sb.Append($"; {report.PassCount} pass, {report.PartialCount} partial, {report.FailCount} fail.");
+            foreach (GroupScore g in report.GroupBreakdown())
+            {
+                sb.Append($" {g.Group} {F1(g.MeanBase)}");
+                if (g.HasExtreme)
+                {
+                    sb.Append($" (extreme {F1(g.ExtremeMeanBase)})");
+                }
+
+                sb.Append('.');
+            }
+
             return sb.ToString();
         }
 
+        private static string Duration(double ms)
+        {
+            if (!double.IsFinite(ms) || ms <= 0)
+            {
+                return "0 s";
+            }
+
+            double s = ms / 1000.0;
+            return s < 120 ? $"{F1(s)} s" : $"{F1(s / 60.0)} min";
+        }
+
+        /// <summary>
+        /// Inline dimension chart for the Markdown body: 0–100 meters plus the efficiency-bonus row. Styles are
+        /// scoped with their own class prefix because inline SVG shares the page's stylesheet.
+        /// </summary>
         private static string DimensionSummarySvg(IReadOnlyList<DimensionScore> dims, double meanEfficiencyBonus)
         {
-            const int width = 640;
-            const int left = 174;
-            const int barW = 340;
-            const int rowH = 28;
-            const int top = 24;
-            int rows = dims.Count + 1;
-            int height = top * 2 + rows * rowH;
-            int valueX = left + barW + 14;
-
-            StringBuilder sb = new();
-            sb.Append($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" ")
-                .Append($"viewBox=\"0 0 {width} {height}\" font-family=\"Segoe UI, Arial, sans-serif\">");
-            sb.Append($"<rect width=\"{width}\" height=\"{height}\" rx=\"10\" fill=\"#1e1f24\"/>");
-
-            int y = top;
-            foreach (DimensionScore d in dims)
-            {
-                AppendDimensionBar(sb, y, left, barW, valueX, DimName(d.Dimension), d.Score, d.Score, F(d.Score),
-                    "/100");
-                y += rowH;
-            }
-
-            double efficiencyPct = GoalScore.MaxBonus <= 0 ? 0 : meanEfficiencyBonus / GoalScore.MaxBonus * 100.0;
-            AppendDimensionBar(
-                sb,
-                y,
-                left,
-                barW,
-                valueX,
-                "Efficiency bonus",
-                efficiencyPct,
-                efficiencyPct,
-                F(meanEfficiencyBonus),
-                "/" + F(GoalScore.MaxBonus));
-
-            sb.Append("</svg>");
-            return sb.ToString();
-        }
-
-        private static void AppendDimensionBar(
-            StringBuilder sb,
-            int y,
-            int left,
-            int barW,
-            int valueX,
-            string label,
-            double fillPct,
-            double colorScore,
-            string value,
-            string suffix)
-        {
-            double pct = Clamp(fillPct, 0, 100);
-            int fill = (int)System.Math.Round(barW * pct / 100.0);
-            sb.Append($"<text x=\"20\" y=\"{y + 15}\" fill=\"#c8ccd0\" font-size=\"12\">")
-                .Append(Xml(label)).Append("</text>");
-            sb.Append($"<rect x=\"{left}\" y=\"{y}\" width=\"{barW}\" height=\"16\" rx=\"4\" fill=\"#33353b\"/>");
-            sb.Append(
-                $"<rect x=\"{left}\" y=\"{y}\" width=\"{fill}\" height=\"16\" rx=\"4\" fill=\"{HexColor(colorScore)}\"/>");
-            sb.Append($"<text x=\"{valueX}\" y=\"{y + 13}\" fill=\"#e8e8ea\" font-size=\"12\">")
-                .Append(value).Append(Xml(suffix)).Append("</text>");
+            const double w = 640;
+            const double pad = 20;
+            const double rowH = 26;
+            const double font = 12;
+            BenchmarkCardScene sc = new(w, 0, "Scores by dimension");
+            double bottom = DimensionBars(sc, dims, pad, 12, w - 2 * pad, rowH, font);
+            double cy = bottom + rowH / 2;
+            double labelW = BenchmarkCardScene.TextWidth("Instruction adherence", font) + font * 0.6;
+            double valueW = BenchmarkCardScene.TextWidth("100.0", font, true) + font * 0.5;
+            double barW = w - 2 * pad - labelW - valueW;
+            double pct = GoalScore.MaxBonus <= 0 ? 0 : Clamp(meanEfficiencyBonus / GoalScore.MaxBonus * 100.0, 0, 100);
+            sc.Text(pad, cy + font * 0.35, "Efficiency bonus", font, CardInk.Ink2);
+            sc.Rect(pad + labelW, cy - 4, barW, 8, CardInk.SeriesTrack, 4);
+            sc.Bar(pad + labelW, cy - 4, System.Math.Max(barW * pct / 100.0, 2), 8, CardInk.Series);
+            sc.Text(w - pad, cy + font * 0.35, $"{F(meanEfficiencyBonus)}/{F(GoalScore.MaxBonus)}", font, CardInk.Ink,
+                CardAnchor.End, true);
+            sc.Height = bottom + rowH + 12;
+            return sc.ToSvg(CardTheme.Auto, "bcdim");
         }
 
         private static double Clamp(double value, double min, double max)
@@ -375,25 +836,19 @@ namespace CoreAI.Benchmarking
             return value < min ? min : value > max ? max : value;
         }
 
-        private static string HexColor(double score)
+        private static string F1(double v)
         {
-            if (!double.IsFinite(score))
+            if (!double.IsFinite(v))
             {
-                score = 0;
+                v = 0;
             }
 
-            if (score >= 75)
-            {
-                return "#4cb863";
-            }
-
-            return score >= 50 ? "#e8bd44" : "#dc5c57";
+            return v.ToString("0.0", CultureInfo.InvariantCulture);
         }
 
-        private static string Xml(string s)
+        private static string N0(long v)
         {
-            return (s ?? string.Empty)
-                .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
+            return v.ToString("#,0", CultureInfo.InvariantCulture);
         }
 
         /// <summary>Header for the rolling <c>INDEX.md</c> that lists every run (written once, when missing).</summary>
@@ -424,7 +879,10 @@ namespace CoreAI.Benchmarking
                 }
             }
 
-            return $"| {m.TimestampUtc} | `{m.ModelId}` | **{F(report.SuiteBaseScore)}** | " +
+            // WHY: INDEX.md keeps its header from the first run, so the extreme sub-score rides inside the
+            // existing Score cell instead of adding a column that older rows would not have.
+            string extreme = report.HasExtreme ? $" (ext {F(report.ExtremeBaseScore)})" : string.Empty;
+            return $"| {m.TimestampUtc} | `{m.ModelId}` | **{F(report.SuiteBaseScore)}**{extreme} | " +
                    $"{report.PassCount}/{report.PartialCount}/{report.FailCount} | {F(report.PassRate * 100)}% | " +
                    $"{groups} | {report.TotalTokens} | [{reportFileName}]({reportFileName}) |";
         }
@@ -443,6 +901,7 @@ namespace CoreAI.Benchmarking
             sb.Append(Bool("streaming", m.Streaming)).Append(',');
             sb.Append(Num("maxParallelToolCalls", m.MaxParallelToolCalls)).Append(',');
             sb.Append(Num("temperature", m.Temperature)).Append(',');
+            sb.Append(Str("reasoningEffort", m.ReasoningEffort ?? "")).Append(',');
             sb.Append(Num("repetitions", m.Repetitions)).Append(',');
             sb.Append(Str("unityVersion", m.UnityVersion)).Append(',');
             sb.Append(Str("suiteVersion", m.SuiteVersion));
@@ -470,6 +929,36 @@ namespace CoreAI.Benchmarking
             sb.Append(Num("totalToolCalls", report.TotalToolCalls)).Append(',');
             sb.Append(Num("failedToolCalls", report.TotalFailedToolCalls)).Append(',');
             sb.Append(Num("invalidCommands", report.TotalInvalidCommands)).Append(',');
+            sb.Append(Num("effectiveTokensPerSecond", report.EffectiveTokensPerSecond)).Append(',');
+            sb.Append(Num("scenarios", report.ScenarioCount)).Append(',');
+            sb.Append(Num("regularBaseScore", report.RegularBaseScore)).Append(',');
+            sb.Append(Num("regularScenarios", report.RegularScenarioCount)).Append(',');
+            sb.Append(Num("extremeBaseScore", report.ExtremeBaseScore)).Append(',');
+            sb.Append(Num("extremeScenarios", report.ExtremeScenarioCount)).Append(',');
+            sb.Append(Num("extremePass", report.ExtremePassCount)).Append(',');
+            sb.Append("\"groups\":{");
+            IReadOnlyList<GroupScore> gjson = report.GroupBreakdown();
+            for (int i = 0; i < gjson.Count; i++)
+            {
+                GroupScore g = gjson[i];
+                if (i > 0)
+                {
+                    sb.Append(',');
+                }
+
+                sb.Append('"').Append(Escape(g.Group ?? string.Empty)).Append("\":{");
+                sb.Append(Num("meanBase", g.MeanBase)).Append(',');
+                sb.Append(Num("scenarios", g.Count)).Append(',');
+                sb.Append(Num("pass", g.PassCount)).Append(',');
+                sb.Append(Num("regularBase", g.RegularMeanBase)).Append(',');
+                sb.Append(Num("regularScenarios", g.RegularCount)).Append(',');
+                sb.Append(Num("extremeBase", g.ExtremeMeanBase)).Append(',');
+                sb.Append(Num("extremeScenarios", g.ExtremeCount)).Append(',');
+                sb.Append(Num("extremePass", g.ExtremePassCount));
+                sb.Append('}');
+            }
+
+            sb.Append("},");
             sb.Append("\"dimensions\":{");
             IReadOnlyList<DimensionScore> djson = report.DimensionBreakdown();
             for (int i = 0; i < djson.Count; i++)
@@ -521,6 +1010,7 @@ namespace CoreAI.Benchmarking
                 sb.Append(Str("scenarioId", r.ScenarioId)).Append(',');
                 sb.Append(Str("scenarioName", r.ScenarioName)).Append(',');
                 sb.Append(Str("group", r.Group)).Append(',');
+                sb.Append(Bool("extreme", r.Extreme)).Append(',');
                 sb.Append(Str("modelId", r.ModelId)).Append(',');
                 sb.Append(Num("repetition", r.Repetition)).Append(',');
                 sb.Append(Str("classification", r.Classification.ToString())).Append(',');
@@ -641,6 +1131,86 @@ namespace CoreAI.Benchmarking
                 BenchmarkDimension.InstructionAdherence => "Instruction adherence",
                 _ => d.ToString()
             };
+        }
+
+        /// <summary>Card label of a dimension, short enough for the model card's dot-plot column.</summary>
+        private static string DimShortName(BenchmarkDimension d)
+        {
+            return d switch
+            {
+                BenchmarkDimension.ToolCorrectness => "Tool use",
+                BenchmarkDimension.IntentSequence => "Intent & order",
+                BenchmarkDimension.TaskCompletion => "Task completion",
+                BenchmarkDimension.Determinism => "Determinism",
+                BenchmarkDimension.Reasoning => "Reasoning",
+                BenchmarkDimension.InstructionAdherence => "Instructions",
+                _ => d.ToString()
+            };
+        }
+
+        /// <summary>The per-group scorecard table: scenarios, mean base, pass count and the extreme result.</summary>
+        private static void AppendGroupTable(StringBuilder sb, IReadOnlyList<GroupScore> groups)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## 🧩 Scores by group");
+            sb.AppendLine();
+            if (groups.Count == 0)
+            {
+                sb.AppendLine("_No graded groups._");
+                return;
+            }
+
+            sb.AppendLine("| Group | Focus | Scenarios | Mean base | Pass | Extreme |");
+            sb.AppendLine("|---|---|---:|---:|---:|---|");
+            foreach (GroupScore g in groups)
+            {
+                string extreme = g.HasExtreme
+                    ? $"{F(g.ExtremeMeanBase)} · {VerdictText(ClassifyMean(g.ExtremeMeanBase))}" +
+                      (g.ExtremeCount > 1 ? $" ({g.ExtremePassCount}/{g.ExtremeCount} pass)" : string.Empty)
+                    : "—";
+                sb.AppendLine($"| {g.Group} | {BenchmarkInfo.TitleFor(g.Group)} | {g.Count} | {F(g.MeanBase)} | " +
+                              $"{g.PassCount}/{g.Count} | {extreme} |");
+            }
+        }
+
+        /// <summary>The extreme-tier section: sub-score headline plus one row per extreme scenario.</summary>
+        private static void AppendExtremeSection(StringBuilder sb, BenchmarkReport report)
+        {
+            sb.AppendLine();
+            if (!report.HasExtreme)
+            {
+                sb.AppendLine("## 🔥 Extreme tier");
+                sb.AppendLine();
+                sb.AppendLine("_No extreme-tier scenario was graded in this run._");
+                return;
+            }
+
+            sb.AppendLine($"## 🔥 Extreme tier — {F(report.ExtremeBaseScore)}/100 " +
+                          $"({report.ExtremePassCount}/{report.ExtremeScenarioCount} pass)");
+            sb.AppendLine();
+            sb.AppendLine("_One deliberately hard scenario per group (G6 has none). The regular tier saturates near " +
+                          "100 for frontier models; this sub-score keeps separating them. It also counts in the " +
+                          "suite score._");
+            sb.AppendLine();
+            sb.AppendLine("| Group | Scenario | Mean base | Verdict | Reps | Spread |");
+            sb.AppendLine("|---|---|---:|---|---:|---:|");
+            foreach (ScenarioSummary s in report.ExtremeScenarios())
+            {
+                sb.AppendLine($"| {s.Group} | {s.Name} | {F(s.MeanBase)} | {VerdictText(s.Classification)} | " +
+                              $"{s.Repetitions} | {F(s.Spread)} |");
+            }
+        }
+
+        private static BenchmarkClassification ClassifyMean(double meanBase)
+        {
+            if (meanBase >= GoalScore.PassBase)
+            {
+                return BenchmarkClassification.Pass;
+            }
+
+            return meanBase >= GoalScore.PartialBase
+                ? BenchmarkClassification.Partial
+                : BenchmarkClassification.Fail;
         }
 
         private static string DimShort(BenchmarkDimension d)

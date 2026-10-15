@@ -2,8 +2,9 @@
 
 An **optional** runtime UI Toolkit window for CoreAI: a tabbed Hub that renders pages registered
 into CoreAI's `HubPageRegistry` (Chat, Settings, Statistics, an optional About page, World state, and
-any C#/Lua-authored page). Content is built lazily per tab, the tab bar rebuilds live as pages
-register/unregister, and the panel is a semi-transparent runtime overlay.
+any page your C# code registers). Content is built lazily per tab, the tab bar rebuilds live as pages
+register/unregister, and the panel is a semi-transparent runtime overlay. There is no Lua API for
+registering Hub pages; Lua mods appear in the Hub through the Mods tab of `com.neoxider.coreaimods`.
 
 | Package | Depends on | Status |
 |---------|-----------|--------|
@@ -44,9 +45,9 @@ bool TryGet(string pageId, out Func<IHubPage> factory);
 IReadOnlyList<(string pageId, int order)> List();                    // sorted by order, then id
 ```
 
-Pages are registered as **lazy factories**: the window peeks a factory to read metadata
-(`DisplayName`) and only builds content when the tab is first activated. A page implements
-`IHubPage`:
+Pages are registered as **lazy factories**: the window calls a factory once to read the tab label
+(`DisplayName`), keeps that page instance, and only builds its content when the tab is first activated.
+A page implements `IHubPage`:
 
 ```csharp
 public interface IHubPage
@@ -60,6 +61,27 @@ public interface IHubPage
     void OnDestroyed();
 }
 ```
+
+`HubPageBase` (also in `CoreAI.Hub`) stores the id, label and order from its constructor and gives
+no-op lifecycle hooks, so a page only overrides what it needs:
+
+```csharp
+using System;
+using CoreAI.Hub;
+using UnityEngine.UIElements;
+
+public sealed class ScorePage : HubPageBase
+{
+    public ScorePage() : base("mygame.score", "Score", 50) { }
+
+    public override Func<object> CreatePageContent => () => new Label("Score: 0");
+}
+
+// registry.Register("mygame.score", () => new ScorePage(), 50);
+```
+
+To group several pages under one tab, register one `HubSubTabPage(pageId, displayName, order, children...)`
+from this package; the Mods tab uses it for its Mods / Logs sub-tabs.
 
 Two optional markers refine behavior:
 
@@ -78,20 +100,30 @@ of throwing.
 | Page | Id | Display | Order | Notes |
 |---|---|---|---:|---|
 | Chat | `coreai.hub.chat` | `Chat` | 0 | Hosts the real `CoreAiChatPanel` via `CreateEmbedded` — streaming, tools, history, and hotkeys behave exactly like the standalone chat. Full-bleed; implements `IHubEscapeHandler`. |
-| Settings | `coreai.hub.settings` | `AI Settings` | 100 | Runtime backend switching (Auto / LLMUnity / HTTP API / Offline) with the same surface as `CoreAiBackend`, endpoint/profile management, and an inline health probe. **Fetch models** lists a server's advertised model ids in a dropdown, a **Vision** override (Auto / On / Off) forces the multimodal gate, and the endpoint editor has a mode-aware form with an Advanced foldout and a per-row Remove — see [Runtime Backend Switching §3](../CoreAiUnity/Docs/RUNTIME_BACKEND_SWITCHING.md). API keys are write-only in the UI. |
+| Settings | `coreai.hub.settings` | `AI Settings` | 100 | Runtime backend switching (Auto / LLMUnity / HTTP API / Offline) with the same surface as `CoreAiBackend`, endpoint/profile management, and an inline health probe. **Fetch models** lists a server's advertised model ids in a dropdown, a **Vision** override (Auto / On / Off) forces the multimodal gate, and the endpoint editor has a mode-aware form with an Advanced foldout and a per-row Remove — see [Runtime Backend Switching §2](../CoreAiUnity/Docs/RUNTIME_BACKEND_SWITCHING.md#2-hub-ai-settings-editor). API keys are write-only in the UI. |
 | Statistics | `coreai.hub.statistics` | `Statistics` | 200 | Orchestration metrics (completions, tool calls, …) from an optional `InMemoryAiOrchestrationMetrics`. |
 | About | `coreai.hub.about` | `About` | 1000 | Opt-in (off by default in `CoreAiHubDemo`) so the tab bar stays focused on functional pages. |
-| World state | `coreai.hub.worldstate` | `World` | — | Saved-state status plus Reset World / Save Now controls (see [WORLD_COMMANDS.md](../CoreAiUnity/Docs/WORLD_COMMANDS.md) §7). The page class ships here, but it is registered on demand by `WorldStateHubBinder` in the optional mods package, not by `RegisterAll`. |
-| World Loads | `coreai.hub.world-loads` | `World Loads` | 250 | Player confirmation surface for AI-requested world restores. `load_world` never applies a package: it returns `player_confirmation_required` plus a one-use request id, and this page renders the pending request metadata and calls `ConfirmManualLoadAsync(requestId, true|false)`. It never receives package bytes and exposes no direct-load action. A blank or malformed slot or autosave name never reaches this page: `load_world` / `load_autosave` refuse it themselves with a JSON result (`success: false`, `status: "invalid_argument"`) and create no request. Registered by the mods package when `IRbxWorldRuntimeService` is available — see [WORLD_PACKAGE.md](../../Docs/CoreAIMods/WORLD_PACKAGE.md). The page also lists the autosave ring (file name, trigger such as `execute_lua` or `manage_mods-load`, local time, size) and its `Load...` action enters the same confirmation pool as manual slots; the runtime writes a `load_world-pre` safety autosave before any confirmed load. The load tools return every other failure as a JSON status too (`not_found`, `invalid_package`, `read_failed`, `network_sessions_active`) and create no request for it. A world the player confirms here also reopens on the next start: when the service implements `IRbxWorldStartupSelection` (the production controller does) the page opens with a **Next start** section — `Opens on start: <world>` (or `default world`) and a **Start with the default world next time** button, which calls `ClearStartupSelectionAsync` and leaves the live world and the saves alone — and the Confirm tooltip and the outcome line say whether the confirmed world will reopen (the tooltip adds "together with the changes the AI makes to it afterwards": while that world is live, every gated AI change records it again as the startup selection). The load tools also refuse a package the confirmation would refuse (`invalid_package`) and answer `session_unavailable` once the world session is shut down. |
+| World state | `coreai.hub.worldstate` | `World` | 300 | Saved-state status plus Reset World / Save Now controls (see [WORLD_COMMANDS.md](../CoreAiUnity/Docs/WORLD_COMMANDS.md) §7). The page class ships here, but it is registered on demand by `WorldStateHubBinder` in the optional mods package, not by `RegisterAll`. |
+| World Loads | `coreai.hub.world-loads` | `World Loads` | 250 | Player confirmation surface for AI-requested world restores. `load_world` never applies a package: it returns `player_confirmation_required` plus a one-use request id, and this page renders the pending request metadata and calls `ConfirmManualLoadAsync(requestId, true|false)`. It never receives package bytes and exposes no direct-load action. A blank or malformed slot or autosave name never reaches this page: `load_world` / `load_autosave` refuse it themselves with a JSON result (`success: false`, `status: "invalid_argument"`) and create no request. Registered by the mods package when `IRbxWorldRuntimeService` is available — see [WORLD_PACKAGE.md](../../Docs/CoreAIMods/WORLD_PACKAGE.md). The page also lists the autosave ring (file name, trigger such as `execute_lua` or `manage_mods-load`, local time, size) and its `Load...` action enters the same confirmation pool as manual slots; the runtime writes a `load_world-pre` safety autosave before any confirmed load. The load tools return every other failure as a JSON status too (`not_found`, `invalid_package`, `read_failed`, `network_sessions_active`) and create no request for it. A world the player confirms here also reopens on the next start: when the service implements `IRbxWorldStartupSelection` (the production controller does) the page opens with a **Next start** section — `Opens on start: <world>` (or `default world`) and a **Start with the default world next time** button, which calls `ClearStartupSelectionAsync` and leaves the live world and the saves alone — and the **Confirm load** tooltip and the outcome line say whether the confirmed world will reopen, together with later changes made to it by the AI or on the Mods page, unless it holds an active Full-capability mod. The load tools also refuse a package the confirmation would refuse (`invalid_package`) and answer `session_unavailable` once the world session is shut down. |
 
 The **Chat / Settings / Statistics** trio comes from `HubBuiltInPages.RegisterAll`; **About** is
 opt-in via `CoreAiHubDemo`. The **Mods** and **World** tabs are not registered by this package: when
 `com.neoxider.coreaimods` is installed, the setup menu adds its `CoreAiModsHubBinder` (resolved by name
-from the `CoreAI.Mods.Hub` assembly) and its binders register the Mods, World state, and World Loads pages into the same
-registry — features light up when their packages appear. On the Mods tab, the editor's **Save & run** reloads a
+from the `CoreAI.Mods.Hub` assembly), and the mods package's binders (`CoreAiModsHubBinder`,
+`WorldStateHubBinder`) register the Mods (order 300, with Mods / Logs sub-tabs), World state, and World Loads
+pages into the same registry — features light up when their packages appear. `CoreAiModsHubBinder` also
+re-registers Settings and Statistics with the live `ICoreAISettings` and `InMemoryAiOrchestrationMetrics`
+from the container, replacing the source-less pages `CoreAiHubDemo` registered.
+
+The `CoreAI.Mods.Hub` assembly compiles only when `COREAI_HAS_HUB` is defined (`defineConstraints`). Its
+version define sets `COREAI_HAS_HUB` when `com.neoxider.coreaihub` is installed as a package; this
+repository keeps the packages under `Assets/`, so it sets the symbol in Player Settings (Standalone,
+Android, WebGL). Without the define the Mods tab is silently absent.
+
+On the Mods tab, the editor's **Save & run** reloads a
 loaded mod and first removes what its previous run built at startup, unless **Keep objects on Save & run** is on
 (one Hub-wide setting, PlayerPrefs key `CoreAI.Hub.Mods.KeepObjectsOnSave`); the status line says what was cleaned,
-**Add mod** opens a template that matches the composition (`RunService.Heartbeat` and `task.wait` with the Rbx API),
+**Add** opens a template that matches the composition (`RunService.Heartbeat` and `task.wait` with the Rbx API),
 a mod suspended after repeated budget trips is marked on its row, and the Mods and Logs tabs rebuild at most once
 per panel update, on the main thread — see [mod-system.md](../../Docs/CoreAIMods/mod-system.md) §4.2 and §5c.
 
@@ -120,5 +152,8 @@ The window can collapse to just its toggle button:
 Menu: **CoreAI ▸ Setup ▸ Add Hub**. On first use it authors the reusable module prefab at
 `Assets/CoreAIHub/Runtime/CoreAiHub.prefab` (its own `PanelSettings` so it never contends with the
 embedded chat's `UIDocument`) and instances it into the open scene; later invocations just instance
-it. If `com.neoxider.coreaimods` is present, the Mods tab is lit up automatically. The scene needs a
-`CoreAILifetimeScope` (and, for the Mods tab, a `CoreAiModsLifetimeScope` child).
+it. If `com.neoxider.coreaimods` is present, the Mods tab is lit up automatically. The shipped prefab
+also carries the mods package's `WorldStateHubBinder` and `WorldStateAutoSaveHook`. The scene needs a
+`CoreAILifetimeScope` (and, for the Mods tab, a `CoreAiModsLifetimeScope` child). Without the menu, add
+`CoreAiHubWindow` (it requires a `UIDocument`) and assign `CoreAiHubWindow.Registry` from your own code, or
+add `CoreAiHubDemo` next to it.

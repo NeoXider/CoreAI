@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Messaging;
@@ -11,7 +11,7 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.Messaging
 {
     /// <summary>
-    /// Subscribes to AI command messages and routes them to Lua/world command processors on startup.
+    /// Subscribes to AI command messages on startup and routes them to the world command processor.
     /// </summary>
     public sealed class AiGameCommandRouter : IStartable, IDisposable
     {
@@ -36,7 +36,7 @@ namespace CoreAI.Infrastructure.Messaging
         private IDisposable _subscription;
         private int _disposeState;
 
-        /// <summary>Creates a router bound to MessagePipe, logging, Lua, and world-command services.</summary>
+        /// <summary>Creates a router bound to MessagePipe, logging, and world-command services.</summary>
         public AiGameCommandRouter(
             ISubscriber<ApplyAiGameCommand> subscriber,
             IGameLogger logger,

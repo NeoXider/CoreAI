@@ -1,7 +1,4 @@
-# Mod Sharing Format And Community Gallery
-
-Status: format sections (1–3, 5) describe the **shipped implementation** as of 2026-07-10.
-Section 4 (community gallery) is a **process proposal** — nothing in it exists yet.
+# Mod Sharing Format
 
 ## 1. Why share mods
 
@@ -12,17 +9,16 @@ can travel: between play sessions (the source store), between projects, and betw
 That is the UGC loop: content produced *inside* one game strengthens the ecosystem for
 everyone else — the shared-mod format is what lets that content travel.
 
-The runtime side of this loop already ships: every mod runtime can serialize a mod into a
-single self-contained JSON bundle and load such a bundle back with safe capability masking.
-What is missing is the social side — a public place to put bundles and a review process.
-That is section 4.
+The runtime can serialize a mod into a single self-contained JSON bundle and load such a bundle
+back with safe capability masking. There is no public gallery for bundles: they travel as text
+(§3).
 
 ## 2. The shareable mod format
 
 ### 2.1 Bundle shape
 
-`ExportMod(caller, id)` (on `ILuaModRuntime`, implemented by `LuaCsModRuntime`) produces one JSON
-object with exactly two keys:
+`ExportMod(caller, id)` (on `ILuaModRuntime`, implemented by `LuaCsModRuntime`) produces, for a
+loaded or a stored mod, one JSON object with exactly two keys:
 
 ```json
 { "manifest": { ... }, "source": "..." }
@@ -49,21 +45,24 @@ Implementation: `Assets/CoreAIMods/Runtime/LuaExecution/LuaCsModRuntime.cs`
 | `Category` | string | `/`-separated category path used for tree grouping in the Hub. |
 | `Tags` | string | Comma-separated tags for search/filtering. |
 | `Author` | string | Attribution. |
-| `Capabilities` | string | Requested `LuaCapabilities` flag set rendered as a string (e.g. `"Read, Gameplay, WorldEdit"`). **A request only** — never trusted on import (see §5). |
+| `OwnerActorId` | string | The actor that owns the mod on the exporting host; empty = host. Ignored on import: the importing actor becomes the owner. |
+| `Capabilities` | string | Requested `LuaCapabilities` flag set rendered as a string (e.g. `"Read, Gameplay, WorldEdit"`). **A request only** — never trusted on import (see §4). |
 | `Active` | bool | Whether the mod auto-loads on rehydrate. |
-| `Origin` | string | Host-local bundled-mod marker (`resources`, `streamingassets`, ...). Empty for user-authored mods. |
+| `Origin` | string | Host-local bundled-mod marker (e.g. `resources`). Empty for user-authored mods. |
 | `SeededVersion` / `SeededHash` | string | Host-local seed markers (bundled-mod update detection; the hash is FNV-1a 32-bit of the source). Meaningless on a foreign host. |
 | `UpdateAvailable` | bool | Host-local "bundled update pending" flag. Meaningless on a foreign host. |
 | `Entry` | string | Entry file name, defaults to `main.lua`. |
+| `LoadOrder`, `SuspendedAfterBudgetTrips` | long, bool | Host-local; written only when set, so they appear only in the export of a mod that is stored but not loaded ([mod-system.md](mod-system.md) §2). |
 
 Missing manifest fields deserialize to their defaults; unknown keys are ignored.
 
-Note an asymmetry worth knowing: when you export a **currently loaded** mod, the runtime
-builds a minimal manifest (`Name` = id, capabilities = the mod's live tier, `Version` = the
-revision count) rather than copying the stored one. The rich metadata still travels, because
-it lives in the Lua source itself as the `@coreai` header (§2.3) and the receiving host
-re-parses that header when it persists the import. **The header, not the manifest, is the
-durable metadata carrier** — always fill it in.
+What export writes depends on the mod's state. For a **loaded** mod the runtime builds the
+manifest from the source's `@coreai` header (name, description, category, tags, author, and
+`version`, or the revision count when the header has none), with the mod's live tier and
+`Active = true`; the seed markers stay empty. For a mod that is only **stored**, it copies the
+stored manifest. On import the runtime reads only `Id` and `Capabilities` from the manifest and
+rebuilds the rest from the header (§2.3) when it persists the mod. **The header, not the
+manifest, is the durable metadata carrier** — always fill it in.
 
 ### 2.3 The `@coreai` header
 
@@ -90,14 +89,14 @@ Recognized keys: `id`, `name`, `version`, `capabilities`, `category`, `author`,
 
 ### 2.4 Versioning semantics
 
-`Version` is a free-form string with two conventions in play:
+`Version` is a free-form string:
 
-- When the host wires a version store (the Unity installer does), the runtime **auto-derives**
-  the persisted/exported version as the mod's revision count — `"1"` for a freshly loaded
-  mod, `"3"` after three distinct edits. Every successful load/reload of *changed* source
-  appends a revision; a no-op reload does not.
-- The `version:` key in the `@coreai` header is author-declared (semver recommended) and is
-  what the Hub's save path writes into the stored manifest.
+- The `version:` key in the `@coreai` header is author-declared (semver recommended). When the
+  header has one, the runtime writes it into the persisted and exported manifest.
+- When the header has none and the host wires a version store (the Unity installer does), the
+  runtime uses the mod's revision count instead — `"1"` for a freshly loaded mod, `"3"` after
+  three distinct edits. Every successful load/reload of *changed* source appends a revision; a
+  no-op reload does not.
 
 For sharing, treat the header `version:` as the authoritative, human-meaningful version and
 bump it per published change; the numeric revision count is a per-host edit counter, not a
@@ -118,6 +117,7 @@ release number.
     "SeededVersion": "",
     "SeededHash": "",
     "Author": "yourname",
+    "OwnerActorId": "",
     "Capabilities": "Read, Gameplay",
     "Active": true,
     "UpdateAvailable": false,
@@ -134,7 +134,7 @@ release number.
   on the receiving host (write mods accordingly: `tonumber(store_get(k)) or default`).
 - **Revision history** — the version store stays local; the importer starts a fresh history.
 - **The granted capability tier** — only the *requested* set is carried, and it is re-masked
-  on import (§5).
+  on import (§4).
 - **Assets** — no prefabs, audio clips, textures, or extra files. A bundle is Lua + metadata
   only; anything the mod references must already exist in the receiving game.
 - **Host configuration** — error budgets, allowed scenes, rate limits, `allowFull` are all
@@ -160,8 +160,10 @@ Both directions go through the system clipboard via the Hub's Mods page
 1. Copy the entire bundle JSON to the clipboard.
 2. Hub → **Mods** tab → toolbar **Import** button.
 3. On success the mod loads immediately, is persisted to the local store, and appears in the
-   list. On failure the status line explains why (empty clipboard, malformed JSON, missing
-   `source`, missing `manifest.Id`, or a Lua load error).
+   list. On failure the status line says so: an empty clipboard has its own message, and a
+   refused bundle (malformed JSON, missing `source`, missing `manifest.Id`, a Lua load error)
+   reads `Import failed: the clipboard does not contain a valid mod bundle.`; the runtime log
+   names the reason.
 
 Notes:
 
@@ -169,73 +171,12 @@ Notes:
   and opens it in the mod editor for review before saving. Use Paste when someone shares
   bare Lua; use Import for exported bundles.
 - If a mod with the same id is already loaded, Import **reloads it in place** with the new
-  source — convenient for updates, and a reason to review ids from strangers (§5).
+  source and keeps that mod's current capability tier — convenient for updates, and a reason
+  to review ids from strangers (§4).
 - The AI can perform the same round trip through the `manage_mods` tool (`export` /
   `import` actions), so "share the mod you just wrote" works as a chat instruction.
 
-## 4. Community gallery process (PROPOSAL)
-
-> Everything in this section is a proposal for a process that does not exist yet. It needs a
-> repository, an owner, and at least one reviewer before it is real.
-
-### 4.1 Repository layout
-
-A public GitHub repository, working name `coreai-mods`, one folder per mod:
-
-```
-coreai-mods/
-  README.md                     # what this is, how to import, safety notice
-  mods/
-    yourname.night-ambience/
-      mod.json                  # the exact export bundle, unmodified
-      README.md                 # what it does, which game APIs/tiers it needs, changelog
-      screenshot.png            # one image or short gif of the mod in action
-  .github/
-    PULL_REQUEST_TEMPLATE.md    # the submission checklist below
-```
-
-Conventions:
-
-- Folder name = `<author>.<mod-id-kebab>`; the `Id` inside `mod.json` should be namespaced
-  the same way (e.g. `yourname.night_ambience`) so two authors' mods cannot collide or
-  silently replace each other on import.
-- `mod.json` is the untouched output of Hub Export — reviewers diff it against the source
-  embedded in it; no hand-edited divergence between manifest and header.
-- One mod per PR; updates bump `version:` in the header and describe changes in the mod's
-  README changelog.
-
-### 4.2 Submission checklist (PR template)
-
-- [ ] `mod.json` is a verbatim Hub Export bundle (valid JSON, `manifest` + `source` keys).
-- [ ] `@coreai` header is complete: `id`, `name`, `version`, `capabilities`, `author`,
-      `description` (and `category`/`tags` where sensible).
-- [ ] `Id` is namespaced with your author name and matches the folder name.
-- [ ] `capabilities:` requests the **minimum** tiers the mod needs — and never `Full`.
-- [ ] README states which game bindings the mod calls (e.g. `Instance.new`, `time_*`) so
-      hosts know whether their game exposes them.
-- [ ] Mod was tested via Hub Import on a clean project/profile (fresh store, no leftover
-      `store_*` state) and loads without errors.
-- [ ] Screenshot or gif included.
-- [ ] No obfuscated, minified, or generated-then-unreadable Lua; the source is reviewable.
-
-### 4.3 Review checklist (maintainer)
-
-- [ ] Import the bundle in a sandboxed project with the default grant (no `allowFull`);
-      confirm it loads, runs, and unloads cleanly.
-- [ ] Read every line of `source`. Reject anything the reviewer cannot follow.
-- [ ] Capabilities audit: header request matches what the code actually calls; flag any
-      `unity_*` usage (requires `Full` — dev-only, should not appear in gallery mods).
-- [ ] Hostility audit per §5: unbounded loops/recursion, string/table amplification, timer
-      floods (`hooks_every` with tiny intervals), store spam, misleading `report` output.
-- [ ] Id/namespace check: no collision with an existing gallery mod, no impersonation of
-      bundled mod ids (`sample_*`).
-- [ ] Metadata sanity: description matches behavior; screenshot plausibly from this mod.
-- [ ] License/attribution: the PR author has the right to publish the code.
-
-Two approvals to merge while the process is young; automation (JSON schema check, header/
-manifest consistency, Lua parse smoke test in CI) can replace one of them later.
-
-## 5. Safety when importing third-party mods
+## 4. Safety when importing third-party mods
 
 Importing a mod means running someone else's code. The sandbox makes that survivable; the
 tier system makes it granular. Full details:
@@ -268,10 +209,9 @@ unless the host installs an `HttpService` request policy and transport
 security doc, the environment removes `io`, `debug`, `package`, `require`, `load`, `loadfile`,
 `dofile`, the stock `os` library (the Rbx API provides only `os.time`/`os.clock`), and all arbitrary
 CLR/Unity reflection entry points; hosts only ever add narrow, validated C# bindings. Runaway
-code is bounded by instruction budgets, wall-clock timeouts, a per-execution total-allocation
-budget (default 256 MB), `string.rep`/`table.concat` output caps, coroutine lifetime budgets,
-and a mod error budget with quarantine (a repeatedly failing mod stays loaded but stops dispatching
-until it is reloaded).
+code is bounded by per-resume instruction, wall-clock and memory budgets (live-heap growth,
+256 MB by default), `string.rep`/`table.concat` output caps, and a mod error budget with
+quarantine (a repeatedly failing mod stays loaded but stops dispatching until it is reloaded).
 
 ### What to actually look for when reviewing untrusted Lua
 
@@ -296,11 +236,10 @@ restored)` — a non-destructive revert that reloads an older revision as the ne
 **Delete** to remove the
 package entirely. A failed revert/reload leaves the running mod untouched.
 
-## 6. Related documents
+## 5. Related documents
 
 - [LUA_SANDBOX_SECURITY.md](../../Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md) — the security boundary: removed APIs, budgets, attack vectors to test.
 - [LUA_ACCESS_MODES.md](../../Assets/CoreAI/Docs/LUA_ACCESS_MODES.md) — capability tiers, Full mode, `manage_mods` tool surface.
 - [LUA_GAME_API.md § Persistence & Sharing](../../Assets/CoreAI/Docs/LUA_GAME_API.md) — source store, export/import API contract, revision history and rollback.
 - [FIRST_MOD.md](../../Assets/CoreAI/Docs/FIRST_MOD.md) — writing your first mod.
 - [mod-system.md](mod-system.md) / [mod-authoring.md](mod-authoring.md) — mod runtime internals and authoring notes.
-- [BACKLOG.md](../../Assets/CoreAiUnity/Docs/BACKLOG.md) — future ideas for the mod-sharing / UGC loop.

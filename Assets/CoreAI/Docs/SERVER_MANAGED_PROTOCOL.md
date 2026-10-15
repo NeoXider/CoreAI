@@ -66,9 +66,25 @@ Standard OpenAI-compatible payload:
 }
 ```
 
-> Since 5.9.0, `temperature` and `max_tokens` are only present when their respective overrides are enabled
-> on `CoreAISettingsAsset` (both OFF by default). When an override is off the key is omitted entirely and the
-> provider chooses its own value — the server must not assume either field is always sent.
+`temperature`, output-token caps, and reasoning fields are optional. Resolve typed settings in this order:
+per-call → per-agent → selected endpoint/profile → global default. A null value inherits; an explicit
+zero output cap stops inheritance and omits both token-cap keys. Global temperature and output-token
+overrides are off by default. A non-null per-call, per-agent, or endpoint temperature is still sent.
+
+A positive resolved output cap normally uses `max_tokens`. When reasoning controls use the `OpenAi`
+dialect, it uses `max_completion_tokens` instead. Typed reasoning effort `Default` inherits; `None`
+explicitly requests no thinking. Depending on the endpoint's `ReasoningDialect`, the body can contain
+`reasoning_effort`, OpenRouter's `reasoning`, Qwen's `enable_thinking` /
+`chat_template_kwargs.enable_thinking` / `thinking_budget`, or Anthropic-compatible `thinking`.
+`Off` emits no typed reasoning controls. Legacy `ReasoningMode` with an Auto dialect keeps the Qwen
+format. See the [dialect table](LLM_ROUTING.md#request-sampling-and-reasoning) for exact mappings.
+
+`top_p`, `seed`, `stop`, `frequency_penalty`, `presence_penalty`, and `response_format` are emitted
+when supplied through sampling options or MEAI `ChatOptions`. `ExtraBodyJson` can supply fields without
+a typed value; typed values win for the fields they write on that request. The backend must accept
+omitted controls and must not assume a fixed set of reasoning or sampling keys. A server-managed
+legacy route may omit `model` so the backend chooses it; a named `HttpOpenAi` endpoint descriptor
+requires an explicit model.
 
 ## 4. Response
 
@@ -95,10 +111,14 @@ data: [DONE]\n\n
 
 | HTTP Status | `LlmErrorCode` (Client) | Description |
 |---|---|---|
+| 400 / 422 | `InvalidRequest` | Malformed request. Not retried. |
 | 401 / 403 | `AuthExpired` | JWT invalid/expired. Client triggers `RefreshOnUnauthorizedDecorator`. |
 | 402 | `PaymentRequired` | Account out of credit. Never retried; degrades the endpoint's health. |
-| 409 | `QuotaExceeded` | `quota_exceeded` in body. User quota reached. |
+| 408 | `Timeout` | Retryable. |
+| 409, or a body that mentions `quota` | `QuotaExceeded` | User quota reached. |
+| 413, or a context-length message in the body | `ContextLengthExceeded` | Prompt too large for the model. |
 | 429 | `RateLimited` | Rate limit hit. Check `Retry-After` header. |
+| Other 4xx | `PermanentProviderError` | Permanent refusal (missing route or model). Not retried. |
 | 500+ | `BackendUnavailable` | Server error. Client may retry if idempotency is guaranteed. |
 
 Error Body Example:
@@ -119,7 +139,9 @@ When the client sends `Idempotency-Key: <key>` (desktop and Editor clients; a We
 If `ApiBaseUrl` starts with `/` (e.g., `/api/llm/v1`):
 - The client resolves it against `Application.absoluteURL` (e.g., `https://game.example.com/api/llm/v1`).
 - CORS is not required if the backend is on the same host.
-- Use `credentials: 'same-origin'` in fetch if using session cookies.
+- If the backend uses session cookies, enable `SameOriginCredentials` on `CoreAISettingsAsset`: the WebGL
+  fetch streaming transport (`WebGlNativeStreaming`) then sends `credentials: 'same-origin'` (the default
+  is `'omit'`).
 
 ## 7. Minimal Backend Checklist (for Free users)
 

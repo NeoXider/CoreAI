@@ -41,5 +41,27 @@ namespace CoreAI.Benchmarking
         {
             return group != null && GroupDifficulty10.TryGetValue(group, out int d) ? d : 5;
         }
+
+        /// <summary>Every scenario group in display order, so charts keep one column per group even when a run skipped some.</summary>
+        public static readonly IReadOnlyList<string> Groups = new[] { "G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8" };
+
+        /// <summary>Short title per group, printed beside the group id on cards and tables.</summary>
+        public static readonly IReadOnlyDictionary<string, string> GroupTitles = new Dictionary<string, string>
+        {
+            { "G1", "Build" },
+            { "G2", "Mechanics" },
+            { "G3", "Reasoning" },
+            { "G4", "Playthrough" },
+            { "G5", "Instructions" },
+            { "G6", "Free build" },
+            { "G7", "Integration" },
+            { "G8", "Observe & act" }
+        };
+
+        /// <summary>Short title for a group id; the id itself when the group is unknown.</summary>
+        public static string TitleFor(string group)
+        {
+            return group != null && GroupTitles.TryGetValue(group, out string title) ? title : group ?? string.Empty;
+        }
     }
 }

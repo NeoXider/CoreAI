@@ -5,9 +5,10 @@ where CoreAI lives, which package owns a feature, or which document answers a
 specific integration question.
 
 The short version: CoreAI is split into a portable AI/runtime layer, a Unity-facing
-package, an example game, and planning material. Each package keeps its own deep
-index; this page points you to the right one before you spend time reading the
-wrong folder.
+package, optional packages (Mods, Hub, MCP, Mirror, Benchmark), and an example game.
+Each package keeps its own deep index; this page points you to the right one before
+you spend time reading the wrong folder. Developer material (plans, backlog, release
+process, research notes) is kept apart in [`dev-docs/`](../dev-docs/README.md).
 
 ## Start Here
 
@@ -15,11 +16,14 @@ wrong folder.
 |---|---|---|
 | CoreAI Unity package | [Assets/CoreAiUnity/Docs/DOCS_INDEX.md](../Assets/CoreAiUnity/Docs/DOCS_INDEX.md) | You need setup, chat UI, streaming, settings, architecture, tests, or Unity integration docs. |
 | Portable CoreAI package | [Assets/CoreAI/Docs/README.md](../Assets/CoreAI/Docs/README.md) | You need host-agnostic contracts: agents, tools, routing, MEAI, Lua sandbox, and tool-calling rules. |
-| CoreAI Mods (Lua, optional) | [INSTALL.md §3](../INSTALL.md#3-mods-module-lua) · [LUA_SANDBOX_SECURITY.md](../Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md) | You need the `com.neoxider.coreaimods` package: Lua sandbox, `execute_lua`/`manage_mods` tools, mod runtime. |
-| CoreAI Hub (UI Toolkit, optional) | [INSTALL.md §4](../INSTALL.md#4-hub-module-ui-toolkit) | You need the `com.neoxider.coreaihub` tabbed Hub window and its page registry. |
+| CoreAI Mods (Lua, optional) | [Assets/CoreAIMods/README.md](../Assets/CoreAIMods/README.md) · [INSTALL.md §3](../INSTALL.md#3-mods-module-lua) | You need the `com.neoxider.coreaimods` package: Lua sandbox, `execute_lua`/`manage_mods` tools, mod runtime, Roblox-style world API. |
+| CoreAI Hub (UI Toolkit, optional) | [Assets/CoreAIHub/README.md](../Assets/CoreAIHub/README.md) · [INSTALL.md §4](../INSTALL.md#4-hub-module-ui-toolkit) | You need the `com.neoxider.coreaihub` tabbed Hub window and its page registry. |
+| CoreAI MCP (optional) | [Assets/CoreAIMcp/README.md](../Assets/CoreAIMcp/README.md) | You need the `com.neoxider.coreaimcp` in-game MCP server so an external agent can drive a running game. |
+| CoreAI Mirror (optional) | [Assets/CoreAIMirror/README.md](../Assets/CoreAIMirror/README.md) | You need the `com.neoxider.coreaimirror` Mirror transport for online worlds. |
 | CoreAI Benchmark (dev-only) | [Assets/CoreAIBenchmark/README.md](../Assets/CoreAIBenchmark/README.md) | You need the `com.neoxider.coreaibenchmark` LLM game-creation benchmark harness. |
 | Example game | [Assets/_exampleGame/README.md](../Assets/_exampleGame/README.md) | You need the RogueliteArena sample, scene setup, progression, or AI wave planning notes. |
-| NeoxiderTools | [Assets/NeoxiderTools/Docs/README.md](../Assets/NeoxiderTools/Docs/README.md) | You need shared utility/toolkit documentation used by this Unity project. |
+| Demo scenes | [Assets/CoreAI.Demos/README.md](../Assets/CoreAI.Demos/README.md) | You want a runnable scene for one feature (chat, skills, Lua mods, world commands, multiplayer, materials). |
+| NeoxiderTools | [NeoxiderTools repository](https://github.com/NeoXider/NeoxiderTools) | You need the shared utility toolkit (`com.neoxider.tools`, a Git dependency in `Packages/manifest.json`, used by the example game). `Assets/NeoxiderTools/Docs/` is an old vendored snapshot (v7.13.19) of its docs; the installed package is authoritative. |
 
 The full seven-package dependency graph and install profiles (Base / +Mods / +Hub / Full) live in
 [INSTALL.md](../INSTALL.md).
@@ -34,7 +38,7 @@ Use these paths when you have a concrete task:
 | Debug LLM requests, streaming, or WebGL SSE | CoreAiUnity streaming docs -> CoreAI routing docs -> transport-specific source comments |
 | Add a new LLM tool | Tool-calling best practices -> AgentBuilder -> relevant tests |
 | Expose Lua or AI-authored scripts | Lua sandbox security -> runtime binding code -> sandbox tests |
-| Decide what to build next | Roadmap (§4 ladder) -> PLAN.md (current status) -> TODO (open work by rung) |
+| Decide what to build next | [Roadmap](ROADMAP.md) (§4 ladder) -> [PLAN.md](../PLAN.md) (current status) -> [TODO.md](../TODO.md) (open work by rung) |
 
 ## Roblox-style mod API (Rbx)
 
@@ -65,12 +69,21 @@ The Lua surface a mod builds worlds with, and the artifacts it produces:
 
 | Document | Purpose |
 |---|---|
-| [TODO.md](../TODO.md) | Live backlog, completed archive, and remaining feature-level debt. Open audit findings (CI, package isolation, durability, full-tier query) live here. |
-| [BACKLOG.md](../Assets/CoreAiUnity/Docs/BACKLOG.md) | Non-blocking future work and feature ideas (director-AI scene, replay, mod gallery, and more). |
-| [TODO/MultiAgent_Orchestration_v2.0.md](../TODO/MultiAgent_Orchestration_v2.0.md) | Multi-agent orchestration plan. |
+| [ROADMAP.md](ROADMAP.md) | Where CoreAI is going: the MVP ladder, what has shipped, what is next. |
 | [BENCHMARK_LEADERBOARD.md](BENCHMARK_LEADERBOARD.md) | Public community leaderboard for the Game-Creation Benchmark: ranked results, suite versioning, and the score-submission workflow. |
 | [CoreAIMods/MOD_SHARING.md](CoreAIMods/MOD_SHARING.md) | Shareable mod bundle format, Hub export/import flow, import safety, and the proposed community mod gallery process. |
 | [ARCHITECTURE_RULES.md](ARCHITECTURE_RULES.md) | Normative architecture rules for the Roblox-API track and every new CoreAI module. |
+
+## Developer Documents
+
+Not user documentation; listed so maintainers can find them.
+
+| Document | Purpose |
+|---|---|
+| [TODO.md](../TODO.md) | Live priority tracker: open work by rung, verification gates, completed archive. |
+| [PLAN.md](../PLAN.md) | Current status and the next steps. |
+| [dev-docs/README.md](../dev-docs/README.md) | Index of design notes, plans, research, the non-blocking backlog and the release checklist. |
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | Git hooks, CI jobs, code style, the pre-commit checklist. |
 
 ## Private planning material
 
@@ -83,6 +96,8 @@ technical decision into a public package document instead.
 
 - Write all documentation in English; quoted model inputs may stay verbatim and are marked as quoted.
 - Keep changelogs historical; move current user guidance into stable docs.
+- Plans, audits, backlogs, research and process notes go in `dev-docs/`, never in `Docs/` or a package
+  `Docs/` folder.
 - Link every new stable guide from the nearest package index and, when it is
   repository-wide, from this file.
 - Keep XML documentation in source concise and contract-focused; avoid mechanical

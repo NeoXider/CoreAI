@@ -1,76 +1,68 @@
 # Determinism, Replay, and the Multiplayer Contract
 
-Status: **contract + design proposal** (2026-07-10). The audit log described here ships today;
-the replayer does not yet. This page states the guarantees CoreAI can honestly make now, the
-guarantees a replayer would add, and what a host-authoritative game should implement on top.
+This page states the guarantees CoreAI makes about recording what AI agents did, and what a
+host-authoritative game should implement on top. The audit log described here ships today; CoreAI has
+no replayer: the log is for inspection and verification.
 
 ## Why this page exists
 
-"AI logic on host, clients receive agreed outcomes" (README) is a claim that needs a contract:
-LLM output is nondeterministic, so determinism in CoreAI is **not** "the model will say the same
-thing twice" — it is "every effect the model had on the game is recorded, ordered, and
-reproducible from the record."
+"AI logic on the host, clients receive agreed outcomes" needs a contract: LLM output is
+nondeterministic, so determinism in CoreAI is **not** "the model will say the same thing twice" — it is
+"every effect the model had on the game that went through a recorded boundary is recorded, in order."
 
 ## What is guaranteed today
 
-The immutable audit log (see `AuditLogWriter`, `persistentDataPath/CoreAI/Audit/audit.jsonl`)
-records a SHA-256-chained, append-only stream of:
+The immutable audit log (see [AUDIT_LOG.md](AUDIT_LOG.md); `AuditLogWriter`,
+`persistentDataPath/CoreAI/Audit/audit.jsonl`) records a SHA-256-chained, append-only stream of:
 
 | Entry kind | What it captures |
 |---|---|
 | `LlmRequest` / `LlmResponse` | Every model call and its outcome |
-| `ToolCall` | Every executed tool invocation (name, args digest, result status) |
-| `WorldMutation` | Every world-affecting effect that went through the command boundary |
-| `PolicyDecision` | Reserved for duplicate-suppression / serialization decisions — the entry kind exists, but nothing writes it yet |
-| `ChainReset`, `RotationMarker`, `RotationAnchor` | Chain integrity and log rotation bookkeeping |
+| `ToolCall` | Every executed tool invocation (name, arguments JSON, result or error, duration) |
+| `WorldMutation` | Every command that went through `ICoreAiWorldCommandExecutor`: the `world_command` tool and every `ApplyAiGameCommand` routed by `AiGameCommandRouter` (for example the Lua `coreai_world_*` bindings) |
+| `PolicyDecision` | Reserved — the entry kind exists, but nothing writes it yet |
+| `ChainReset`, `RotationMarker`, `RotationAnchor`, `QueueDropped` | Chain integrity, log rotation and backpressure bookkeeping |
 
-Combined with the serialized mutation chain (mutating tools execute strictly one at a time, in
-order — see `TOOL_CALLING_BEST_PRACTICES.md`, "Policy-Enforced Mutation Ordering"), this yields
-the property that matters for multiplayer:
+Combined with the serialized mutation chain (mutating tools of one turn execute strictly one at a time,
+in call order — see [TOOL_CALLING_BEST_PRACTICES.md](../../CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md#policy-enforced-mutation-ordering)),
+this yields the property that matters for multiplayer:
 
-> **Effect determinism:** the sequence of world mutations is totally ordered and recorded in a
-> hash-chained log that detects accidental corruption and reordering. Two observers replaying the
-> same mutation sequence reach the same world state, regardless of what the model "said".
-> (The default chain is an unkeyed integrity checksum, not tamper-proof against the party that owns
-> the file — see `AUDIT_LOG.md`, "Threat model".)
+> **Effect ordering:** the recorded world mutations and tool calls are totally ordered in a
+> hash-chained log that detects accidental corruption and reordering, regardless of what the model
+> "said". (The default chain is an unkeyed integrity checksum, not tamper-proof against the party that
+> owns the file — see [AUDIT_LOG.md, "Threat model"](AUDIT_LOG.md#threat-model-what-the-chain-does-and-does-not-prove).)
 
-What is **not** guaranteed: token-level reproducibility of model output (temperature, provider
-drift, GPU nondeterminism), and mutations that bypass the command boundary (direct C# your own
-tools perform outside `world_command`/`execute_lua` — keep side effects inside tools if you want
-them recorded).
+What is **not** guaranteed:
+
+- Token-level reproducibility of model output (temperature, provider drift, GPU nondeterminism).
+- Effects that bypass the command boundary. Rbx API changes made from Lua (`Instance.new`, property
+  writes) are not `WorldMutation` entries; only the `execute_lua` / `manage_mods` call that ran the
+  code is recorded, as a `ToolCall` with its arguments. The same holds for direct C# your own tools
+  perform: keep side effects inside tools if you want them recorded.
+- Entries dropped under sustained backpressure: the writer's queue is bounded (10,000 entries) and
+  records each drop as a `QueueDropped` entry.
 
 ## The host-authoritative pattern (what your game implements)
 
-1. **Only the host runs agents.** Clients never call the LLM.
+1. **Only the host runs agents.** Set **Ai Network Execution Policy** to `HostOnly` on
+   `CoreAILifetimeScope` and supply a `CoreAiNetworkPeerBehaviour`; clients then never call the LLM
+   ([MULTIPLAYER_AI.md](MULTIPLAYER_AI.md)).
 2. **Outcomes travel, prompts do not.** Replicate the *effects* (spawn, stat change, item grant) —
    the same payloads that appear as `WorldMutation`/`ToolCall` entries — through your existing
    netcode, exactly as you would replicate any server-side game logic.
 3. **Seed what you randomize.** If a tool rolls dice, roll them from your game's seeded RNG and
    include the result in the tool payload, so the recorded effect is self-contained.
-4. **On desync, the log wins.** The audit chain is the authority for "what actually happened";
-   a client that disagrees re-syncs from replicated state as usual.
+4. **On desync, the host wins.** The host's state and its audit chain are the record of "what actually
+   happened"; a client that disagrees re-syncs from replicated state as usual.
+5. **Evidence against a client** only holds to the extent the client cannot rewrite it: keep the
+   authoritative log host-side, and/or use a **keyed HMAC chain** (`AuditHash.HmacChain` +
+   `AuditLogVerifier.Verify(path, hmacKey)`) with a host-held key the client never sees.
 
-## Proposed next step: the replayer (not yet built)
-
-A `CoreAI Audit Replayer` that consumes a verified `audit.jsonl` and re-applies the
-`WorldMutation`/`ToolCall` stream against a scene, skipping `LlmRequest/Response` entries,
-would unlock, in order of value:
-
-1. **Bug reproduction** — attach a log to an issue; maintainer replays the exact session.
-2. **Determinism tests** — CI replays a recorded session twice and asserts identical world hashes.
-3. **Anti-cheat evidence** — the host's log records the sequence of AI-driven effects. This is only
-   evidence against a client to the extent the client cannot rewrite it: keep the authoritative log
-   host-side, and/or use a **keyed HMAC chain** (`AuditHash.HmacChain` +
-   `AuditLogVerifier.Verify(path, hmacKey)`) with a host-held key the client never sees. The default
-   unkeyed chain is an integrity checksum, not proof against the party that owns the file.
-4. **Spectator/kill-cam style features** — replay as content, if a game wants it.
-
-Prerequisites already in place: chain verification (`AuditLogVerifier`, `VerifyChainedSet`),
-stable entry ordering, serialized mutations. Missing pieces: an idempotent apply-adapter per
-mutation type, a world-state hash for assertions, and a CLI/editor entry point.
+Tools for checking a log: `AuditLogVerifier.Verify` (one file), `AuditLogVerifier.VerifyChainedSet`
+(a rotated set), `AuditLogVerifier.ReadAll` (parsed entries without verification).
 
 ## Related docs
 
-- `TOOL_CALLING_BEST_PRACTICES.md` — mutation ordering and duplicate suppression.
-- `Assets/CoreAiUnity/Docs/AUDIT_LOG.md` — writer durability, rotation, verification.
-- Root `README.md` — Multiplayer and Singleplayer section.
+- [TOOL_CALLING_BEST_PRACTICES.md](../../CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md) — mutation ordering and duplicate suppression.
+- [AUDIT_LOG.md](AUDIT_LOG.md) — writer durability, rotation, verification.
+- [MULTIPLAYER_AI.md](MULTIPLAYER_AI.md) — where AI runs in a networked game.

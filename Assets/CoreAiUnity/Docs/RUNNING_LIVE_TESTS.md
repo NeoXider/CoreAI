@@ -7,6 +7,9 @@ single configuration surface.
 
 When the suite is not configured, the live tests `Assert.Ignore(...)` with a message that tells you
 exactly which environment variable or file to set, so unconfigured runs stay green and skip cleanly.
+The LLM clients are compiled only with the `COREAI_LLM` scripting define ([OPTIONAL_MODULES.md](OPTIONAL_MODULES.md)).
+Without it many live fixtures are not compiled at all, and the HTTP path of
+`PlayModeProductionLikeLlmFactory` reports `COREAI_LLM is not set: HTTP LLM clients are excluded from the build.`
 
 Long-running CLI bridges can serialize requests and delay HTTP response headers. If a live run is
 aborted, clear or restart that bridge before repeating a test; otherwise an earlier provider turn can
@@ -40,7 +43,8 @@ are resolved by `PlayModeOpenAiTestConfig` and consumed by
 3. **Gitignored local config file** — `coreai-live-tests.local.json` at the project root: the API key,
    streaming / native-tools toggles and provider body fields, plus base URL and model when the asset
    does not provide them (offline or local-model asset).
-4. Hard-coded LM Studio fallbacks, only with the explicit legacy opt-in.
+4. Hard-coded LM Studio fallbacks, only with the explicit legacy opt-in
+   `COREAI_OPENAI_TEST_USE_PROJECT_DEFAULTS=true`.
 
 So **env overrides the asset, and the asset overrides the local file for base URL and model.** Each field
 is resolved independently. Keep the key in the local file. To run a live sweep against a different
@@ -118,8 +122,11 @@ This path is already in `.gitignore`, so a real API key never gets committed.
 }
 ```
 
-Keys are case-insensitive and accept `snake_case` aliases (`base_url`, `api_key`, `native_tools`).
-You can also point at a file in a custom location with `COREAI_TEST_CONFIG=/abs/path/to/config.json`.
+Keys are matched exactly; each field accepts a camelCase, PascalCase and (where it has one) snake_case
+spelling: `baseUrl` / `BaseUrl` / `base_url`, `apiKey` / `ApiKey` / `api_key`, `model` / `Model`,
+`streaming` / `Streaming`, `nativeTools` / `NativeTools` / `native_tools`, `extraBody` / `ExtraBody` /
+`extra_body`. JSON comments are allowed. You can also point at a file in a custom location with
+`COREAI_TEST_CONFIG=/abs/path/to/config.json`.
 
 `extraBody` goes through the same safe API as production code: the root must be an object; duplicate properties and
 CoreAI-owned keys (`messages`, `model`, `stream`, `tools`, …) are rejected before the request. Values and the API key are not
@@ -175,12 +182,16 @@ and `COREAI_TEST_MODEL` for a different provider.
 Live tests skip with a clear, actionable reason:
 
 > LIVE PlayMode suite is not configured (missing base URL and model). Point it at an
-> OpenAI-compatible provider by setting env vars `COREAI_TEST_BASE_URL` + `COREAI_TEST_MODEL`
-> (and `COREAI_TEST_API_KEY` if the provider needs a key), or create a gitignored
-> `coreai-live-tests.local.json` at the project root (see
-> `Assets/CoreAiUnity/Docs/RUNNING_LIVE_TESTS.md`). Optional toggles: `COREAI_TEST_STREAMING`,
-> `COREAI_TEST_NATIVE_TOOLS`, `COREAI_TEST_EXTRA_BODY_JSON`. A fully configured CoreAISettingsAsset (HTTP backend) is also honored
-> automatically.
+> OpenAI-compatible provider by setting env vars COREAI_TEST_BASE_URL + COREAI_TEST_MODEL
+> (and COREAI_TEST_API_KEY if the provider needs a key), or create a gitignored
+> 'coreai-live-tests.local.json' at the project root (see
+> Assets/CoreAiUnity/Docs/RUNNING_LIVE_TESTS.md). Optional fields: COREAI_TEST_STREAMING,
+> COREAI_TEST_NATIVE_TOOLS, COREAI_TEST_EXTRA_BODY_JSON. Or select an HTTP backend with a model in the
+> project's CoreAISettings asset (Resources/CoreAISettings): the live suite follows that asset's base URL
+> and model.
+
+Under an **Auto** backend with neither HTTP nor LLMUnity available the reason reads
+`No live LLM backend resolved for Auto/FromSettings (HTTP and LLMUnity both unavailable). …` instead.
 
 ---
 
@@ -205,9 +216,13 @@ Live tests skip with a clear, actionable reason:
   the legacy `coreai_world_spawn` binding. It uses `prefab` and `name` as required by that API;
   the separate Roblox castle showcase covers the default `Instance.new('Part')` path.
 - The orchestration role sweep is `Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto`.
-- The game-creation benchmark accepts `COREAI_BENCHMARK_MAX_OUTPUT_TOKENS` as a per-call cap. Use it when an OpenRouter route reserves a large default output budget and returns `402`; keep the cap equal across models for score comparisons. G6 has one 600-second build attempt and saves its model-authored scene even if the provider stops later.
-- `COREAI_TEST_NATIVE_TOOLS=false` wraps the client so the orchestrator uses the text/prompt tool
-  contract instead of native function calling — handy for local models with flaky native tool support.
+- The game-creation benchmark accepts `COREAI_BENCHMARK_MAX_OUTPUT_TOKENS` as a per-call cap. Use it when an OpenRouter route reserves a large default output budget and returns `402`; keep the cap equal across models for score comparisons. G6 has one build attempt inside a 600-second budget (570 s of model time plus a 30 s capture/export reserve) and saves its model-authored scene even if the provider stops later.
+- `COREAI_BENCHMARK_REASONING_EFFORT` (`none` / `low` / `medium` / `high` / `xhigh`) adds `reasoning_effort` to
+  the body of the env/file HTTP client, so it affects every live test that resolves through this surface. It
+  is not applied when the project settings asset drives the HTTP backend (a warning is logged instead).
+- `COREAI_TEST_NATIVE_TOOLS=false` builds the HTTP client without native function calling: requests carry no
+  `tools` / `tool_choice`, and the orchestrator uses the text/prompt tool contract instead — handy for local
+  models with flaky native tool support.
 - Backend selection (HTTP vs LLMUnity vs offline) is separate from this surface, which configures only
   the OpenAI-compatible HTTP path. `PlayModeProductionLikeLlmFactory` uses an explicit test preference
   first, then the `CoreAISettingsAsset` backend type, and reads `COREAI_PLAYMODE_LLM_BACKEND` only when no

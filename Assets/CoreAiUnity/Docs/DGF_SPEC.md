@@ -2,7 +2,7 @@
 
 **Document version:** 0.24
 **Repository:** CoreAI · **Author:** Neoxider (handle neoxider) — [github.com/NeoXider](https://github.com/NeoXider)
-**UPM:** **`com.neoxider.coreai`** (`Assets/CoreAI`) — portable **`CoreAI.Core`** only: pure **C# without an engine** (`noEngineReferences`). **`com.neoxider.coreaiunity`** (`Assets/CoreAiUnity`) — **`CoreAI.Source`** (implementation for **Unity**), plus `Docs/`, `Tests/`, `Editor/`, `Resources/`, scene **`_mainCoreAI`**.
+**UPM:** **`com.neoxider.coreai`** (`Assets/CoreAI`) — portable **`CoreAI.Core`** (plus the engine-free **`CoreAI.Benchmarking`** helper assembly): pure **C# without an engine** (`noEngineReferences`). **`com.neoxider.coreaiunity`** (`Assets/CoreAiUnity`) — **`CoreAI.Source`** (implementation for **Unity**), plus `Docs/`, `Tests/`, `Editor/`, `Resources/`, scene **`_mainCoreAI`**.
 **Sample game:** `Assets/_exampleGame` (see also `Docs/ROGUELITE_PLAYBOOK.md` in the sample)
 **Reference architecture (do not copy wholesale):** the author's earlier project "Last War" (Lua + MessagePipe bridge; see §8.3)
 **AI role catalog (orchestration, placement, models):** [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md)
@@ -20,7 +20,7 @@
 - **Orchestration** of multiple model requests and scenarios: queue, priorities, timeouts, budget.
 - **Safe execution** of optional code (Lua / Lua-CSharp) in a **sandbox** with whitelist and limits.
 - **Application of AI decisions** only via explicit **commands and typed events** (primarily **MessagePipe**), without direct “text parsing” in gameplay systems.
-- **Default “out of the box” pipeline:** a minimal scene and `CoreAILifetimeScope` shall bring up a working path (LLM/stub → orchestrator → MessagePipe → Lua sandbox → commands); the game may override specific points as needed (prompts, LLM routing, whitelist API, policies).
+- **Default “out of the box” pipeline:** a minimal scene and `CoreAILifetimeScope` shall bring up a working path (LLM or stub → orchestrator → tools → `ApplyAiGameCommand` on MessagePipe → `AiGameCommandRouter` on the main thread); the Lua sandbox joins through the optional `com.neoxider.coreaimods` package (`COREAI_LUA`). The game may override specific points as needed (prompts, LLM routing, whitelist API, policies).
 
 ### 1.2 Non-goals (v1)
 
@@ -64,15 +64,15 @@
 | **Engine-agnostic core** | **`com.neoxider.coreai`** → **`CoreAI.Core`** (`Assets/CoreAI/Runtime/Core/`) | Pure **C#**: contracts (`ILlmClient`, orchestrator, task queue), typed commands and extension points. **No** `UnityEngine` and no Lua VM implementation; game and Lua bindings are supplied by host/module packages. |
 | **Unity implementation** | **`com.neoxider.coreaiunity`** → **`CoreAI.Source`** (`Assets/CoreAiUnity/Runtime/Source/`) | Concrete **Unity** implementation: VContainer, MessagePipe, LLMUnity / OpenAI HTTP, `MonoBehaviour` (`CoreAILifetimeScope`, entry points), Unity console logging, file stores, main-thread marshaling, UI wiring. Depends on **`com.neoxider.coreai`**. |
 
-**Invariant:** all code referencing **`UnityEngine`** and Unity scenario integration resides in **`CoreAI.Source`** / package **`coreaiunity`**; Lua VM/sandbox implementations reside in **`CoreAI.Mods`** / package **`coreaimods`**; **`CoreAI.Core`** remains portable .NET/C#. **`RegisterCorePortable`** registers default **`InMemoryConversationSummaryStore`** and **`NullAgentMemoryStore`** unless the host suppresses them. **`CoreAILifetimeScope`** always calls **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)`**, then publishes exactly one scoped summary and memory/transcript facade over the backing selected before build: `Persistent` uses **`FileAgentMemoryStore`** on every Unity player (including WebGL, where the engine's automatic **`persistentDataPath`** persistence flushes the file and **`CoreAiWebGlPersistence`** reports whether it is armed) and a desktop file/WebGL in-memory summary; `SessionOnly` uses process-only memory and summary stores. VContainer therefore never sees competing implementations, and SessionOnly creates no memory/summary files.
+**Invariant:** all code referencing **`UnityEngine`** and Unity scenario integration resides in **`CoreAI.Source`** / package **`coreaiunity`** and in the optional module packages (`coreaimods`, `coreaihub`, `coreaimcp`, `coreaimirror`); Lua VM/sandbox implementations reside in **`CoreAI.Mods`** / package **`coreaimods`**; **`CoreAI.Core`** remains portable .NET/C#. **`RegisterCorePortable`** registers default **`InMemoryConversationSummaryStore`** and **`NullAgentMemoryStore`** unless the host suppresses them. **`CoreAILifetimeScope`** always calls **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)`**, then publishes exactly one scoped summary and memory/transcript facade over the backing selected before build: `Persistent` uses **`FileAgentMemoryStore`** and **`FileConversationSummaryStore`** on every Unity player (including WebGL, where the engine's automatic **`persistentDataPath`** persistence flushes the files and **`CoreAiWebGlPersistence`** reports whether it is armed); `SessionOnly` uses process-only memory and summary stores. VContainer therefore never sees competing implementations, and SessionOnly creates no memory/summary files.
 
 ### 3.1 Packages (`Packages/manifest.json`)
 
 - **VContainer**, **MessagePipe** + **MessagePipe.VContainer**
 - **R3**, **UniTask**
 - **Lua-CSharp** (bundled `Lua.dll` + `Lua.Annotations.dll` under `Assets/CoreAIMods/Plugins/`) is an implementation dependency of `com.neoxider.coreaimods`, not Core.
-- **MCPForUnity** (`com.coplaydev.unity-mcp`) — editor automation; **mandatory** test execution path for agent/CI with Cursor — see **§11–12**.
-- **LLM for Unity** ([LLMUnity](https://github.com/undreamai/LLMUnity), package `ai.undream.llm` in manifest) — local/remote inference (llama.cpp), `LLM` / `LLMAgent`, grammar/RAG per package documentation. The core still introduces **`ILlmClient`**; the **reference** implementation is a thin adapter over LLMUnity + **stub** mode (§5.2).
+- **MCPForUnity** (`com.coplaydev.unity-mcp`) — editor automation used in this repository's project (§11); not a dependency of any CoreAI package.
+- **LLM for Unity** ([LLMUnity](https://github.com/undreamai/LLMUnity), package `ai.undream.llm` in manifest) — local/remote inference (llama.cpp), `LLM` / `LLMAgent`, grammar/RAG per package documentation. It is optional. CoreAI runs the model as LLMUnity's built-in OpenAI-compatible server and calls it through **`OpenAiChatLlmClient`** (over `LlmUnityServerHttpSettings`) behind the core **`ILlmClient`**; **stub** mode is described in §5.2.
 
 ### 3.2 Assembly `CoreAI.Core` (`Assets/CoreAI/Runtime/Core/CoreAI.Core.asmdef`)
 
@@ -83,42 +83,48 @@
 
 ### 3.3 Assembly `CoreAI.Source` (`Assets/CoreAiUnity/Runtime/Source/CoreAI.Source.asmdef`)
 
-- References: **CoreAI.Core**, **VContainer**, **MessagePipe**, **MessagePipe.VContainer**; LLMUnity types
-  compile only when the package-generated `COREAI_HAS_LLMUNITY` and manual `COREAI_LLM` symbols are both active.
-- **R3**, **UniTask** — present in manifest; add to asmdef as code adopts them.
+- References: **CoreAI.Core**, **VContainer**, **MessagePipe**, **MessagePipe.VContainer**, **UniTask**,
+  **Unity.TextMeshPro**, **UnityEngine.UI**, **Unity.InputSystem**, **undream.llmunity.Runtime**. LLMUnity host code
+  (agent provider, autostart, model bootstrap) compiles only with the package-generated `COREAI_HAS_LLMUNITY` and never
+  on WebGL; the LLMUnity client path additionally needs the manual `COREAI_LLM` symbol.
+- **R3** is in the project manifest but referenced only by the sample game (`CoreAI.ExampleGame`), not by CoreAI packages.
 
 ### 3.4 Composition and scene
 
-- **`CoreAILifetimeScope`**: `RegisterCore()` — logger, MessagePipe, **`ApplyAiGameCommand`** broker, `IAiGameCommandSink`; portable routing contracts, chat/orchestration, queueing and scripted/stub clients are always registered. With **`COREAI_LLM`**, concrete provider-backed **OpenAI HTTP / MEAI / LLMUnity** clients, transports, readiness probes and resilience decorators compile and can be selected by **`LlmRoutingManifest`** + **`LlmClientRegistry`**. Before **`RegisterCorePortable(...)`**: **`AiOrchestrationQueueOptions`**, **`IAiOrchestrationMetrics`** (Null or **`LoggingAiOrchestrationMetrics`** when **`GameLogFeature.Metrics`**); the summary and memory backings are registered on the builder, then **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)`** — portable orchestration remains active in every configuration, while the Lua sandbox (`com.neoxider.coreaimods`, including the opt-in **`LuaCsAiEnvelopeProcessor`**) requires **`COREAI_LUA`**. The same `IAgentMemoryScopeProvider` partitions persistence and queue cancellation. **`ApplyAiGameCommand`** carries **`TraceId`**. Entry points: first **`AiGameCommandRouter`**, then **`CoreAIGameEntryPoint`**. Game feature scopes use **Parent** to this root.
-- **v1.5.x additions to composition:** **`IContextBudgetPolicy`** (`DefaultContextBudgetPolicy`) + **`ITokenEstimator`** (`HeuristicTokenEstimator`) allocate **`HistoryTokenBudget`** per role. **`ICoreAISettings.EnableLlmContextCompaction`** (default false) gates optional **`LlmAssistedConversationContextManager`** — auxiliary LLM call to fold evicted history into a rolling summary (per-role toggle via **`AgentMemoryPolicy.RoleMemoryConfig.UseLlmContextCompaction`**; **`Programmer`** defaults off). **`ConversationContextManagerFactories.Create(...)`** wires **`SelectingConversationContextManager`** when enabled. Timeout in WebGL: **`CancelAfterSlim`** (UniTask PlayerLoop) replaces `CancelAfter` (non-functional in Emscripten). Network retries: exclusively in **`LoggingLlmClientDecorator`** (no orchestrator-level retry multiplier).
-- **`CoreAIGameEntryPoint`**: start + test orchestrator invocation (bootstrap).
+- **`CoreAILifetimeScope`**: `RegisterCore()` — logger, MessagePipe, **`ApplyAiGameCommand`** and LLM/tool-event brokers, `IAiGameCommandSink`, audit log; portable routing contracts, chat/orchestration, queueing and scripted/stub clients are always registered. With **`COREAI_LLM`**, concrete provider-backed **OpenAI HTTP / MEAI / LLMUnity** clients, transports, readiness probes and resilience decorators compile and can be selected by **`LlmRoutingManifest`** + **`LlmClientRegistry`**. `RegisterLlmPipeline` adds **`AiOrchestrationQueueOptions`** (`MaxConcurrent` from `CoreAISettingsAsset.MaxConcurrentOrchestrations`, never below 4) and **`IAiOrchestrationMetrics`** (**`LoggingAiOrchestrationMetrics`** when `CoreAISettingsAsset.LogOrchestrationMetrics` is on, otherwise **`InMemoryAiOrchestrationMetrics`**). The scope registers the summary backing, then calls **`RegisterCorePortable(suppressDefaultConversationSummaryStore: true, suppressDefaultAgentMemoryStore: true)`**, then registers the memory backing — portable orchestration remains active in every configuration, while the Lua sandbox (`com.neoxider.coreaimods`, including the opt-in **`LuaCsAiEnvelopeProcessor`**) requires **`COREAI_LUA`**. The same `IAgentMemoryScopeProvider` partitions persistence and queue cancellation. **`ApplyAiGameCommand`** carries **`TraceId`**. Entry points, in order: **`AiGameCommandRouter`**, **`CoreAIGameEntryPoint`**, **`WorldStateEntryPoint`**, and **`LlmUnityAutostartEntryPoint`** when LLMUnity is installed and the platform supports a local model. Game feature scopes use **Parent** to this root.
+- **Context budget and compaction:** **`IContextBudgetPolicy`** (`DefaultContextBudgetPolicy`) + **`ITokenEstimator`** (`CalibratingTokenEstimator`) allocate **`HistoryTokenBudget`** per role. **`ICoreAISettings.EnableLlmContextCompaction`** (default false) gates optional **`LlmAssistedConversationContextManager`** — auxiliary LLM call to fold evicted history into a rolling summary (per-role toggle via **`AgentMemoryPolicy.RoleMemoryConfig.UseLlmContextCompaction`**; **`Programmer`** defaults off). **`ConversationContextManagerFactories.Create(...)`** wires **`SelectingConversationContextManager`** when enabled. Timeout in WebGL: **`CancelAfterSlim`** (UniTask PlayerLoop) replaces `CancelAfter` (non-functional in Emscripten). Transport retries live in the HTTP adapter and the LLM decorators (`MeaiOpenAiChatClient`, `LoggingLlmClientDecorator`, `RetryingStreamingLlmClientDecorator`); the orchestrator adds no retry multiplier of its own (see [ARCHITECTURE](ARCHITECTURE.md) §Timeout & Retry Rule).
+- **`CoreAIGameEntryPoint`**: initializes the global `CoreAIAgent` facade; with `CoreAIGameEntryPoint.AutoBootstrap` (default off) it also fires a bootstrap orchestrator task.
 - Core scene: **`Assets/CoreAiUnity/Scenes/_mainCoreAI.unity`** (editor display name may be `_mainCoreAI`; add to Build Settings as **startup** for template development if needed).
-- **Game Log Settings** (optional): `Resources/GameLogSettings.asset` or a custom asset on scope.
+- **Game Log Settings** (optional): assign a `GameLogSettingsAsset` on the scope (**CoreAI → Setup → Create Default Assets** creates one); without it the scope warns once and logs every category from level Info.
 
 ---
 
 ## 4. Target module architecture (`Assets/CoreAI/Runtime/Core`, `Assets/CoreAiUnity/Runtime/Source`)
 
-**Portable core (`Runtime/Core/`, assembly `CoreAI.Core`):** `Composition/`, `Authority/`, `Session/`, `Messaging/`, `Sandbox/`, and slices **`Features/<name>/`** — agent memory, prompts, orchestration/LLM contracts, Lua pipeline, script versioning and data overlay.
+**Portable core (`Runtime/Core/`, assembly `CoreAI.Core`):** `Audit/`, `Authority/`, `Config/`, `Messaging/`, `Session/`, and slices **`Features/<name>/`** — agent memory, prompts, orchestration/LLM contracts, LLM routing, chat, logging, permissions, Lua execution contracts, script versioning and data overlay.
 
-**Unity layer (`Assets/CoreAiUnity/Runtime/Source/`, assembly `CoreAI.Source`):** `Composition/` (DI, entry points) and **`Features/<name>/(Infrastructure|Presentation)/`** — log, LLM adapters, Lua/MessagePipe, manifest/Resources prompts, file stores, UI (dashboard, chat, scheduler).
+**Unity layer (`Assets/CoreAiUnity/Runtime/Source/`, assembly `CoreAI.Source`):** `Api/` (static facades), `Composition/` (DI, entry points), `Infrastructure/` (persistent paths, WebGL persistence) and **`Features/<name>/`** (often split into `Infrastructure/` and `Presentation/`) — log, LLM adapters, MessagePipe, manifest/Resources prompts, file stores, world commands, UI (dashboard, chat, scheduler).
 
 | Area (example) | Responsibility |
 |----------------|----------------|
+| `Source/Api/` | `CoreAi` and `CoreAiBackend` static facades |
 | `Source/Composition/` | `CoreAILifetimeScope`, installers, subsystem registration |
 | `Source/Features/Logging/Infrastructure/` | `IGameLogger`, sink, log settings |
 | `Source/Features/Llm/Infrastructure/` | OpenAI HTTP, LLMUnity, routing, decorators |
-| `Source/Features/Lua/Infrastructure/` | File-backed Lua/data overlay versions, aggregate bindings |
-| `Source/Features/Messaging/Infrastructure/` | `ApplyAiGameCommand` → MessagePipe bridge, see §8 |
+| `Source/Features/AgentMemory/Infrastructure/` | `FileAgentMemoryStore` |
+| `Source/Features/Lua/Infrastructure/` | File-backed Lua script and data overlay version stores |
+| `Source/Features/Messaging/Infrastructure/` | `MessagePipeAiCommandSink`, `AiGameCommandRouter` (`ApplyAiGameCommand` → main thread), see §9.4 |
 | `Source/Features/Prompts/Infrastructure/` | Manifest and Resources prompt providers |
 | `Source/Features/Dashboard/Presentation/` | IMGUI dashboard, permissions asset |
-| `Source/Features/PlayerChat/Presentation/` | In-game chat UI (`CoreAiChatPanel` / legacy folder name; built-in roles **`PlainChat`** / **`SmartChat`**) |
+| `Source/Features/Chat/` | UI Toolkit chat: `CoreAiChatPanel`, `CoreAiChatService`, `CoreAiChatConfig` (built-in roles **`PlainChat`** / **`SmartChat`**) |
+| `Source/Features/PlayerChat/Presentation/` | `InGameChatPanel` (uGUI/TextMeshPro chat panel) |
 | `Source/Features/Scheduling/Presentation/` | Scheduled task triggers |
+| `Source/Features/World/` | World commands and the `world_command` / `component_command` / scene tools |
 
 ### 4.1 “Default behavior”
 
 The template sets defaults:
-- **LLM backend:** if HTTP is off and `LLMAgent` is missing — safe `StubLlmClient`.
+- **LLM backend:** in `Auto` mode (the asset default) without a usable LLMUnity host or HTTP endpoint — `OfflineLlmClient`; `LocalModel` without a usable `LLMAgent`, and builds without `COREAI_LLM` — `StubLlmClient`.
 - **Unity marshaling:** bus command handling is moved to the main thread in `AiGameCommandRouter`.
 - **Lua sandbox:** whitelist API only, dangerous globals disabled, execution limits.
 - **Persistence:** Programmer Lua versions and data overlay persist to disk in the Unity layer by default.
@@ -133,8 +139,8 @@ The game may, as needed:
 1. The game publishes **facts** on the bus and/or updates the snapshot service.
 2. **Only the authority** enqueues a task for the orchestrator (solo = local always yes).
 3. The orchestrator calls the LLM when budget allows → receives a **structured** response.
-4. Validation → conversion to **commands** → `IPublisher<T>.Publish` (or a specialized command service).
-5. Optionally: a Lua use case runs in the sandbox; from Lua, **only** delegates leading to permitted commands/events are available.
+4. Validation → conversion to **commands** → `IAiGameCommandSink.Publish` (`IPublisher<ApplyAiGameCommand>` in Unity) or a specialized command service.
+5. Optionally: Lua runs in the sandbox through the `execute_lua` / `manage_mods` tools (`com.neoxider.coreaimods`); from Lua, **only** delegates leading to permitted commands/events are available.
 
 ```mermaid
 flowchart LR
@@ -157,39 +163,46 @@ flowchart LR
   Lua --> Bus
 ```
 
-### 4.1 Portable C# core without Unity (DLL / other engines)
+### 4.2 Portable C# core without Unity (DLL / other engines)
 
-**Permitted and useful as a roadmap** if scope is not inflated on early iterations. Idea: isolate **engine-agnostic** logic in a separate assembly (e.g. `CoreAI.Core` / `CoreAI.Portable`), target **.NET Standard 2.1** or **.NET 8** class library — no references to `UnityEngine`, no UPM-specific asmdef where an SDK-style `.csproj` is preferable.
+`CoreAI.Core` is engine-agnostic: `CoreAI.Core.asmdef` sets `noEngineReferences: true` and references no other assembly
+(only precompiled DLLs such as Microsoft.Extensions.AI, Newtonsoft.Json and System.Text.Json). `tools/portable/CoreAI.Core.csproj`
+builds the same sources into a `netstandard2.1` `CoreAI.Core.dll` without Unity, and the CI job `portable-core` runs the
+portable NUnit suite against it — see [tools/portable/README.md](../../../tools/portable/README.md).
 
-**Suitable for the portable assembly (as refactoring proceeds):**
+**In the portable assembly:**
 
 - Contracts and DTOs: session snapshot, commands, agent roles, validation results.
-- **AI orchestrator** (queue, priorities, timeouts) — on abstractions only: `ILlmClient`, `IClock`, `ILog` (project interfaces, not `UnityEngine.Debug`).
-- **Lua sandbox** — interpreter implementations, capability bindings, and globals policy live in **`CoreAI.Mods`**; Core exposes portable seams only.
-- **`ILlmClient`** implementations: HTTP to Ollama/OpenAI, stub (§5.2) — without Unity.
-- A simplified **command bus** (`ICommandBus` / light pub-sub) if full **MessagePipe** is undesirable outside Unity; or a thin wrapper over the same pattern without Unity dependencies.
+- **AI orchestrator** (queue, priorities, timeouts) on abstractions only: `ILlmClient`, `ILog` (project interfaces, not
+  `UnityEngine.Debug`) and `ILlmAsyncMarshaler` for host-driven delays.
+- **`ILlmClient`** implementations without Unity: `StubLlmClient`, and with `COREAI_LLM` the OpenAI-compatible
+  `MeaiOpenAiChatClient` over `HttpClientOpenAiTransport`.
+- Command and event publishing through host-implemented seams (`IAiGameCommandSink`, `IToolCallEventPublisher`)
+  instead of MessagePipe.
+- **Lua sandbox** — interpreter implementations, capability bindings, and globals policy live in **`CoreAI.Mods`**; Core
+  exposes portable seams only.
 
-**What remains in the Unity layer (`CoreAI.Unity` / current `CoreAI.Source` + separate asmdef):**
-
-- `LifetimeScope`, MonoBehaviour, scenes, `GameObject`, NGO, **LLMUnity** ([LLMUnity](https://github.com/undreamai/LLMUnity)), `StreamingAssets`, MCP editor integration.
-- Adapters: `ILog` → `UnityGameLogSink`, MessagePipe ↔ portable event bridge as needed.
+**What remains in the Unity layer (`CoreAI.Source` and the module assemblies):** `LifetimeScope`, MonoBehaviour,
+scenes, `GameObject`, **LLMUnity** ([LLMUnity](https://github.com/undreamai/LLMUnity)), `StreamingAssets`, the
+in-game MCP server, and the adapters to the Core seams: `ILog` → `UnityLog`, `IAiGameCommandSink` →
+`MessagePipeAiCommandSink`, `IToolCallEventPublisher` → `MessagePipeToolCallEventPublisher`.
 
 **Consumers of the portable DLL:** authority server without a Unity client, **Godot 4 (.NET)**, console tests, CI tools, another engine with hosted CLR. **Do not** expect “one DLL for all engines without recompilation” for native C++ — only where a compatible .NET runtime exists.
 
-**Deferring on phase one is acceptable:** current `CoreAI.Source` may live in Unity until headless/another engine is required; then extract a folder/project and move types without `UnityEngine` in batches.
+### 4.3 Portable assembly (`CoreAI.Core`) dependencies: minimum vs “same stack”
 
-### 4.2 Portable assembly (`CoreAI.Core`) dependencies: minimum vs “same stack”
-
-**Template recommendation:** in **`CoreAI.Core`**, **few** external packages where possible, but **VContainer is permitted deliberately** (consistent DI style with `CoreAI.Source`). The rest of the “Unity stack” (**MessagePipe**, **R3**, **UniTask**) defaults to **`CoreAI.Source`** + adapters to Core.
+**Rule:** **`CoreAI.Core`** references no other assembly (empty `references` in `CoreAI.Core.asmdef`). The “Unity stack”
+(**VContainer**, **MessagePipe**, **R3**, **UniTask**) stays in **`CoreAI.Source`** and the module assemblies, which adapt it to
+Core seams.
 
 | Package | In `CoreAI.Core` | Comment |
 |---------|------------------|---------|
-| **VContainer** | **Yes (template decision)** | Convenience and uniform service registration. Add **`VContainer`** reference to `CoreAI.Core.asmdef` **if** the assembly compiles with **`noEngineReferences: true`** (API only, no `UnityEngine`). If the UPM VContainer package pulls Unity — do not falsely disable `noEngineReferences`: either move DI to Source only, or record in an ADR the variant with `Microsoft.Extensions.DependencyInjection` for headless. |
-| **MessagePipe** (+ VContainer) | Default **no** | UPM layer pulls Unity; in Core — own **`ICommandBus`** / delegates / internal subscriber list; in Source — wrapper publishing to MessagePipe. |
-| **R3** | Default **no** | UI/client reactivity closer to Unity; in Core — `event`, `IObservable` from Rx (if truly needed) or simple callbacks. Exception: if you choose **one** netstandard-compatible package for all hosts — record in an ADR. |
-| **UniTask** | Default **no** | In Core — `Task` / `ValueTask`; in Unity layer — UniTask for PlayerLoop integration. |
+| **VContainer** | **No** | DI composition lives in `CoreAI.Source` (`CoreServicesInstaller`, `CorePortableInstaller`, `LlmPipelineInstaller`) and module installers. Core types carry no DI attributes, so a registration that needs a specific constructor uses an explicit factory. |
+| **MessagePipe** (+ VContainer) | **No** | Core defines the message contracts and the publishing seams (`IAiGameCommandSink`, `IToolCallEventPublisher`); Source implements them over MessagePipe. |
+| **R3** | **No** | Core uses plain `event`s and callbacks. No CoreAI package assembly references R3 (only the sample game does). |
+| **UniTask** | **No** | In Core — `Task` / `ValueTask`; the Unity layer uses UniTask for PlayerLoop integration and injects it into Core through `ILlmAsyncMarshaler`. |
 | **Lua-CSharp** | **No (moved to `CoreAI.Mods`)** | Runs **without Unity** on .NET; sandbox and globals/whitelist policy now live in **`CoreAI.Mods`** (`com.neoxider.coreaimods`), not `CoreAI.Core`. Ships bundled as `Lua.dll` + `Lua.Annotations.dll` under `Assets/CoreAIMods/Plugins/` — no separate UPM package to install. |
-| **System.Text.Json** / **HttpClient** | Permitted | For `ILlmClient` HTTP and JSON parsing on BCL. |
+| **Microsoft.Extensions.AI**, **System.Text.Json**, **Newtonsoft.Json** / **HttpClient** | **Yes** (precompiled references / BCL) | MEAI contracts are part of the public API; JSON parsing and the `ILlmClient` HTTP transport. |
 
 **Why not pull everything into the portable assembly immediately:** each dependency implies versions, compatibility with **Godot / console / Linux server**, licenses, and size. A thinner Core simplifies **DLL extraction** and testing without the editor.
 
@@ -219,29 +232,35 @@ flowchart LR
 
 **Original conclusion (superseded by the Mirror decision above):** for **free**, **capable within Unity**, and aligned with “**host authority for AI**” — **NGO**. **Mirror** is a reasonable alternative if you deliberately avoid the Unity Multiplayer ecosystem. **Photon** makes sense when you need **managed relay/matchmaking** and accept limits/pricing, not as a “simple free NGO replacement.”
 
-Core interfaces (`INetworkAuthority` / `IsServer` / `IsHost`) shall allow **substituting** transport if strictly necessary (e.g. tests or another networking stack). **Networking today:** Mirror via `com.neoxider.coreaimirror` (`MirrorNetworkBridge`, `CoreAiMirrorNetworkBridgeProvider`) behind `INetworkBridge`; `NullNetworkBridge` is the solo loopback.
+Core interfaces allow **substituting** the transport (e.g. tests or another networking stack): `IAiNetworkPeer` (`IsHostAuthority`, `IsPureClient`; a scene supplies it through a `CoreAiNetworkPeerBehaviour`, default `DefaultSoloNetworkPeer`) and `IAuthorityHost` (`CanRunAiTasks`, composed by `NetworkedAuthorityHost` from the peer and the `AiNetworkExecutionPolicy` set on `CoreAILifetimeScope`). `AiOrchestrator` refuses a task when `CanRunAiTasks` is false. **Networking today:** Mirror via `com.neoxider.coreaimirror` (`MirrorNetworkBridge`, `CoreAiMirrorNetworkBridgeProvider`) behind `INetworkBridge`; `NullNetworkBridge` is the solo loopback.
 
-### 5.2 Builds without AI models (roadmap, HostAuthoritative)
+### 5.2 Builds without AI models (HostAuthoritative)
 
-When **all** LLM roles are concentrated on the **host**, the template shall eventually allow **a build variant without embedded models and without a mandatory LLM runtime** on the player machine:
+When **all** LLM roles are concentrated on the **host**, a client build needs neither embedded models nor a mandatory LLM
+runtime. Goals: demo and test builds, CI without a model, smaller distribution, “host without GPU / without downloaded
+weights,” store policies “no network calls to LLM.” The template supports this:
 
-- **Goals:** demo and test builds, CI without Ollama, smaller distribution, “host without GPU / without downloaded weights,” store policies “no network calls to LLM.”
-- **Implementation direction (not a commitment of current code):**
-  - DI registration of **`ILlmClient`** as a **stub** (the shipped `StubLlmClient`, or a custom heuristic client) yielding **deterministic** or **tabular** responses per role (fallback from ScriptableObject / seed).
-  - Optional compile symbol (**Scripting Define**) **`COREAI_LLM`** — manual positive opt-in only for provider-backed HTTP/MEAI and optional LLMUnity implementations. Without it, portable orchestration/chat, scripted/stub clients and MEAI public contracts remain. Symbol **`COREAI_HAS_LLMUNITY`** is set **automatically** via `versionDefines` in asmdef when package `ai.undream.llm` is present — code depending on LLMUnity types compiles only when both symbols are present.
-  - Orchestrator in “no LLM” mode **shall not fail:** tasks map to heuristics or are marked “skipped” with logging; **MessagePipe** and game logic remain operational.
-  - Network clients still receive **replicated state**; the only difference is that the **source** of decisions on the host is not a neural net but a stub/designer data.
-- Fallback contract details shall follow `ILlmClient` in code; this subclause records a **template design requirement**.
+- Without the manual compile symbol (**Scripting Define**) **`COREAI_LLM`** no provider-backed HTTP/MEAI or LLMUnity client
+  code compiles; portable orchestration/chat, scripted/stub clients and MEAI public contracts remain, and routing resolves
+  to **`StubLlmClient`** / **`OfflineLlmClient`**. Symbol **`COREAI_HAS_LLMUNITY`** is set **automatically** via
+  `versionDefines` in asmdef when package `ai.undream.llm` is present; the LLMUnity client path compiles only when both
+  symbols are present.
+- **`Offline`** mode (`OfflineLlmClient`) yields **deterministic** responses per role; a custom heuristic `ILlmClient` can be
+  registered instead.
+- Requirement: the orchestrator in “no LLM” mode **shall not fail** — tasks complete with the stub/offline answer or a
+  logged failure result; **MessagePipe** and game logic remain operational.
+- Network clients still receive **replicated state**; the only difference is that the **source** of decisions on the host is
+  not a neural net but a stub/designer data.
 
 ---
 
 ## 6. AI orchestrator (requirements)
 
-- Register **only roles enabled in the game** from the catalog [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md); each task has `AgentRoleId` + **placement** + priority.
-- **Task queue** with **priority** (configurable): e.g. CoreMechanicAI (craft moment) > Creator (rule change) > AINpc (replica) > Analyzer (batch).
-- **Timeout** per task and per LLM call; cancellation on session phase change (round end, pause, return to hub).
-- **Parallelism cap** (e.g. at most N concurrent LLM calls).
-- **Deduplication:** similar requests in one frame — merge or drop per policy.
+- Register **only roles enabled in the game** from the catalog [AI_AGENT_ROLES.md](AI_AGENT_ROLES.md); each task (`AiTaskRequest`) carries `RoleId` and `Priority`; placement is the host's decision, enforced through `IAuthorityHost` (§5.1).
+- **Task queue** with **priority** (`QueuedAiOrchestrator`: higher `Priority` first, FIFO within one priority): e.g. CoreMechanicAI (craft moment) > Creator (rule change) > AINpc (replica) > Analyzer (batch).
+- **Timeout** per task and per LLM call (the chat-service idle deadline, `TimeoutLlmClientDecorator`); cancellation on session phase change (round end, pause, return to hub) through `CancellationScope`, `CoreAi.StopAgent` or the caller's token.
+- **Parallelism cap:** `AiOrchestrationQueueOptions.MaxConcurrent` concurrent tasks.
+- **Latest wins:** a new task with the same non-empty `CancellationScope` (in the same memory scope) cancels older active and pending work; there is no merge of similar requests.
 - **Do not block** the main thread: asynchrony via **UniTask** (or equivalent) with explicit return to the main thread before applying to Unity API.
 
 ---
@@ -266,11 +285,11 @@ When **all** LLM roles are concentrated on the **host**, the template shall even
 ### 8.2 Limits
 
 - **MaxInstructions** (or equivalent in the Lua-CSharp version used). In the template this is implemented by an instruction-count hook in `LuaCsExecutionGuard` (step limit, executed wall-clock time and an allocation budget).
-- **Timeout** policy for Lua chunk execution aligned with §10 (main thread).
+- **Timeout** policy for Lua chunk execution aligned with §9 (main thread).
 
 ### 8.3 Bridge to MessagePipe (Last-War motivation)
 
-In Last-War (`Assets/Scripts/LuaBehaviour/`, including the **`LuaMessagePipeAdapter`** idea) Lua publishes/subscribes to events by type name. For CoreAI:
+In the Last-War project (its `Assets/Scripts/LuaBehaviour/` folder, including the **`LuaMessagePipeAdapter`** idea; not part of this repository) Lua publishes/subscribes to events by type name. For CoreAI:
 
 - Allow only an **explicit list** of command / DTO types (registry of names or ids).
 - Publication from Lua → **one** C# delegate that maps to `IPublisher<T>` with type checking.
@@ -306,7 +325,7 @@ Assembly **`CoreAI.Core`** does not reference Unity; main-thread marshaling is p
 **Purpose of this subclause:** the async chain after the orchestrator **does not guarantee** execution on the Unity main thread; without explicit marshaling, subscribers may silently fail to apply effects (or behave nondeterministically).
 
 1. **Where the background thread comes from**
-   The default **`IAiOrchestrationService`** implementation is **`QueuedAiOrchestrator`** around **`AiOrchestrator`**. Inside the queue, continuation after `await _inner.RunTaskAsync(...)` uses **`ConfigureAwait(false)`**, so after **`ILlmClient.CompleteAsync`** the **`AiOrchestrator`** code (validation, memory, **`IAiGameCommandSink.Publish`**) often runs on the **thread pool**, not the main thread.
+   The default **`IAiOrchestrationService`** implementation is **`QueuedAiOrchestrator`** around **`AiOrchestrator`**. Outside WebGL, the continuation after `await _inner.RunTaskAsync(...)` inside the queue uses **`ConfigureAwait(false)`**, so after the LLM call (**`ILlmClient.CompleteStreamingAsync`** by default, **`CompleteAsync`** when streaming is off) the **`AiOrchestrator`** code (validation, memory, **`IAiGameCommandSink.Publish`**) often runs on the **thread pool**, not the main thread. WebGL players keep the Unity context on that await.
 
 2. **What counts as “Unity code”**
    Any **`UnityEngine.*`** calls, work with **`GameObject` / `Component` / `Transform`**, **`Object.FindObjectsByType`**, **`Instantiate`**, scene state changes, and typical game structures (`Dictionary` + scene objects in one scenario) **shall** run on the **main** editor/player thread.
@@ -337,91 +356,53 @@ This simplifies onboarding and reduces accidental main-thread/safety violations.
 
 - Minimal run: arena, wave, score/health UI (see sample playbook).
 - One **procedural hook** through the core: e.g. wave affix or enemy composition — only via bus commands after authority.
-- Sample dependency: separate asmdef, reference only the core **public API** (when extracted).
+- Sample dependency: separate asmdef (`CoreAI.ExampleGame`) that uses the public API of `CoreAI.Core`, `CoreAI.Source` and `CoreAI.Mods`.
 
 ---
 
 ## 11. MCPForUnity
 
+MCPForUnity (`com.coplaydev.unity-mcp`, [CoplayDev/unity-mcp](https://github.com/CoplayDev/unity-mcp)) is in this
+repository's project manifest for editor automation; no CoreAI package depends on it.
+
 ### 11.1 Editor and scenes
 
 - Inspect objects on `_mainCoreAI`, prefabs, composition regression after changes.
 
-### 11.2 Mandatory test execution via MCP (repository policy)
+### 11.2 Test execution via MCP
 
-- New and changed core logic shall be accompanied by **Unity Test Framework** tests (prefer **EditMode** for sandbox, DI, parsers; **PlayMode** for integrations as needed).
-- After material edits the agent **shall** run tests via **MCPForUnity**, not rely on “mental compilation” only:
-  1. Invoke **`run_tests`** (mode `EditMode` and/or `PlayMode`, filter `assembly_names` / `test_names` if needed).
-  2. Await result via **`get_test_job`** with `job_id` (parameter **`wait_timeout`** 30–120 s reduces manual polling).
-  3. On failure — **`include_failed_tests` / `include_details`**, fix code, repeat cycle.
-- Unity Editor with the CoreAI project open shall be **reachable** by the MCP server (see [CoplayDev/unity-mcp](https://github.com/CoplayDev/unity-mcp)); without this, the test step is marked blocked and run manually in Test Runner.
-- MCP **does not replace** batchmode CI (`Unity -batchmode -runTests`) when a pipeline exists — both channels complement each other.
+- With the Unity Editor reachable by the MCP server, an agent session can run Unity Test Framework suites through the
+  MCPForUnity tools: **`run_tests`** (mode `EditMode` and/or `PlayMode`, optional assembly / test-name filters), then
+  **`get_test_job`** with the returned `job_id` (failed-test and detail flags on request).
+- MCP **does not replace** the CI gate; the contributor test gate is defined in [CONTRIBUTING.md](../../../CONTRIBUTING.md).
 
 ---
 
 ## 12. Quality and CI
 
 - The project **compiles** without duplicate VContainer packages (single source — UPM).
-- **Tests:** see §11.2; each phase B–C feature shall have at least one **regression** test before merge to the main branch (criterion for humans and agents).
-- Local / CI: `Unity -batchmode -quit` and where possible **`-runTests`** with the same assemblies as in Editor.
+- **Tests:** new and changed core logic ships with **Unity Test Framework** tests (prefer **EditMode** for sandbox, DI,
+  parsers; **PlayMode** for integrations as needed); every bug fix ships with a regression test.
+- CI (see [CONTRIBUTING.md](../../../CONTRIBUTING.md#ci)): the engine-free `portable-core` / `portable-lua` jobs, the
+  package-graph gate, the analyzer build, the EditMode suite in four compile configurations (`core`, `llm`, `lua`, `full`)
+  and the `CoreAI.Tests.PlayMode.FastNoLlm` assembly.
 - Global analyzers — do not break the template build without an explicit decision.
 
 ---
 
-## 13. Roadmap in phases (synchronized with repository plan)
+## 13. Package layout and distribution
 
-### Phase A — Scene baseline and build
-
-| Id | Acceptance criterion |
-|----|----------------------|
-| A1 | On `_mainCoreAI`: object with `CoreAILifetimeScope`, Game Log Settings if needed |
-| A2 | `CoreAIGameEntryPoint` runs on start (Auto Run) |
-| A3 | Scene in Build Settings as startup for template development (team decision) |
-| A4 | Build without conflicting VContainer copies and critical compile errors |
-
-### Phase B — **CoreAiUnity** host (docs, tests, assets)
-
-| Id | Criterion |
-|----|-----------|
-| B1 | `Session Snapshot` contract + telemetry builder |
-| B2 | Orchestrator: queue, priorities, timeouts, authority check |
-| B3 | `ILlmClient` + adapter for **LLMUnity** and/or **mock/stub** (§5.2) |
-| B4 | Application only via MessagePipe / explicit commands |
-| B5 | Update this SPEC when contracts change |
-
-### Phase C — Lua sandbox
-
-| Id | Criterion |
-|----|-----------|
-| C1 | Whitelist API |
-| C2 | Instruction / time limits |
-| C3 | MessagePipe bridge (restricted type registry) |
-| C4 | EditMode security tests |
-
-### Phase D — `_exampleGame` sample
-
-| Id | Criterion |
-|----|-----------|
-| D1 | Minimal run (arena, wave, UI) |
-| D2 | One procedural hook through the core |
-| D3 | Link to `ROGUELITE_PLAYBOOK.md` iteratively |
-
-### Phase E — Load and multiplayer
-
-| Id | Criterion |
-|----|-----------|
-| E1 | Orchestrator load scenarios (avoid unnecessary main-thread blocking) |
-| E2 | Host/client model for AI and rules |
-| E3 | Extend MCPForUnity scenarios for regression |
-
-### Phase F — UPM package `com.neoxider.coreai`
-
-| Id | Criterion |
-|----|-----------|
-| **F0** | **Done:** **`Assets/CoreAI/package.json`** — **`com.neoxider.coreai`**, no required package dependencies (Lua moved to `com.neoxider.coreaimods`, bundled as `Lua.dll`); **`Assets/CoreAiUnity/package.json`** — **`com.neoxider.coreaiunity`**, dependencies: **`com.neoxider.coreai`** only; VContainer / MessagePipe / UniTask via **CoreAI → Setup → Install Git Dependencies**; LLMUnity (`ai.undream.llm`) is optional (**CoreAI → Setup → Modules**). |
-| **F1** | **Done:** monorepo — sources in **`Assets/CoreAI`** and **`Assets/CoreAiUnity`**; **do not** register them in **`manifest.json`** via **`file:`** to a path inside **`Assets/`** (Unity UPM rejects). External project: Git UPM **`?path=Assets/CoreAI`** / **`?path=Assets/CoreAiUnity`**. |
-| **F2** | **Done:** **`CoreAI.Core`** in **`Assets/CoreAI/Runtime/Core/`**; **`CoreAI.Source`** in **`Assets/CoreAiUnity/Runtime/Source/`**; tests, **`Assets/CoreAiUnity/Resources`**, **Editor**, **Docs** — in package **`CoreAiUnity`**. |
-| F3 | Publish: git URL with **`?path=Assets/CoreAI`**, tags per `version`, optional OpenUPM; sync `package.json` version with releases. |
+- **`Assets/CoreAI/package.json`** — **`com.neoxider.coreai`**, no package dependencies (Lua lives in
+  `com.neoxider.coreaimods`, bundled as `Lua.dll`). **`Assets/CoreAiUnity/package.json`** — **`com.neoxider.coreaiunity`**,
+  depends only on **`com.neoxider.coreai`**; VContainer / MessagePipe / UniTask come from **CoreAI → Setup → Install Git
+  Dependencies**; LLMUnity (`ai.undream.llm`) is optional (**CoreAI → Setup → Modules**).
+- Monorepo: package sources live in the `Assets/CoreAI*` folders (**`CoreAI.Core`** in **`Assets/CoreAI/Runtime/Core/`**,
+  **`CoreAI.Source`** in **`Assets/CoreAiUnity/Runtime/Source/`**; tests, **`Assets/CoreAiUnity/Resources`**, **Editor** and
+  **Docs** in package **`CoreAiUnity`**). **Do not** register them in **`manifest.json`** via **`file:`** to a path inside
+  **`Assets/`** (Unity UPM rejects it).
+- External projects install by Git URL with **`?path=Assets/<package folder>`** (for example `?path=Assets/CoreAI`,
+  `?path=Assets/CoreAiUnity`), optionally pinned to a `v<version>` tag — see [INSTALL.md](../../../INSTALL.md). All seven
+  packages share one version (`tools/bump_version.py`).
 
 ---
 

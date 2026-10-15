@@ -57,6 +57,12 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <inheritdoc />
+        public void ResolveRequestSettings(LlmCompletionRequest request)
+        {
+            _client.ResolveRequestSettings(request);
+        }
+
+        /// <inheritdoc />
         public bool SupportsNativeToolCalling => _client.SupportsNativeToolCalling;
 
         /// <inheritdoc />
@@ -127,6 +133,14 @@ namespace CoreAI.Infrastructure.Llm
             public LlmExecutionMode ExecutionMode => _inner.ExecutionMode;
 
             public float Temperature => _inner.Temperature;
+
+            public float? TemperatureOverride => _inner.TemperatureOverride;
+
+            public int? MaxTokensOverride => _inner.MaxTokensOverride;
+
+            public LlmReasoningEffort ReasoningEffort => _inner.ReasoningEffort;
+
+            public LlmReasoningDialect ReasoningDialect => _inner.ReasoningDialect;
 
             public string ExtraBodyJson => _inner.ExtraBodyJson;
 

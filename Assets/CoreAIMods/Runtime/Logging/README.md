@@ -28,13 +28,12 @@ console, so it can be read back through a plain C# API and surfaced to an in-gam
 
 ## Recorded deviations / notes
 
-- TODO (intended split): move the engine-free core (`ILuaLogService`, `LuaLogService`,
-  `LuaLogFormatter`, `LuaLogEntry`, `LuaLogLevel`, `LuaLogQuery`) into a `CoreAI.LuaLogging`
-  assembly with `noEngineReferences: true`, leaving the adapters in `CoreAI.Mods`. Blocked on a
-  cheap-split boundary: `LuaLogService`'s constructor takes an `IGameLogger` (which is
-  `UnityEngine`-coupled) for the console mirror, so a true split first requires extracting that mirror
-  into an `EntryAppended` subscriber adapter (like `LuaLogFileSink`), which changes the public
-  constructor and its installer wiring. Deferred until that refactor is scheduled.
-- `GetModLogsLlmTool` uses `System.Threading.Tasks.Task` (banned by §3) only at the MEAI
+- The engine-free core shares the `CoreAI.Mods` assembly with the adapters; it is engine-free at
+  source level only. `LuaLogService`'s constructor takes an `IGameLogger` (from `CoreAI.Source`,
+  which is `UnityEngine`-coupled) for the console mirror, so the core cannot move into its own
+  `noEngineReferences` assembly until that mirror becomes an `EntryAppended` subscriber adapter
+  (like `LuaLogFileSink`), which would change the public constructor and its installer wiring.
+- `GetModLogsLlmTool` uses `System.Threading.Tasks.Task` (banned by §3 of
+  `Docs/ARCHITECTURE_RULES.md`) only at the MEAI
   `AIFunctionFactory` boundary, which requires a `Task`-returning delegate; the work underneath is
   synchronous.

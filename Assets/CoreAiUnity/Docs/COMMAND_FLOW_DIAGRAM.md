@@ -34,7 +34,7 @@ flowchart TB
         Routing["RoutingLlmClient<br/>(routing by role / profile)"]
 
         subgraph BACKENDS ["Backends"]
-            OpenAI["OpenAiChatLlmClient<br/>MeaiLlmClient + MeaiOpenAiChatClient<br/>(HTTP API, or LLMUnity's local server)"]
+            OpenAI["OpenAiChatLlmClient / ServerManagedLlmClient<br/>MeaiLlmClient + MeaiOpenAiChatClient<br/>(HTTP API, backend proxy, or LLMUnity's local server)"]
             Stub["StubLlmClient / OfflineLlmClient"]
         end
     end
@@ -168,8 +168,8 @@ Concurrency limit: AiOrchestrationQueueOptions.MaxConcurrent
   CACHEABLE SYSTEM PREFIX (byte-stable per role)
 ═══════════════════════════════════════════════════
 
-📌 Layer 1 — Universal Prefix (shared by all):
-"You are an AI agent in a game. Always stay in character."
+📌 Layer 1 — Universal Prefix (shared by all; asset default):
+"Respond concisely and to the point. Avoid unnecessary verbosity."
 
 📌 Layer 2 — Role prompt (CoreMechanicAI):
 "You are the CoreMechanicAI. Evaluate crafting recipes..."
@@ -180,6 +180,7 @@ Concurrency limit: AiOrchestrationQueueOptions.MaxConcurrent
   ORDERED TAIL (LlmCompletionRequest.ChatHistory)
 ═══════════════════════════════════════════════════
 recent history / ## Conversation Summary
+## Request System Instructions (only when the request sets them)
 ## Memory: "Craft#1: Iron Blade damage:45 fire:0"
 ## Tool Availability (current request)
 ## World State (IAiPromptContextProvider)
@@ -218,6 +219,9 @@ Memory and history are read once per request; they never enter the cacheable pre
 │  └─────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────┘
 ```
+
+This chain and the provider-backed clients compile only with `COREAI_LLM`. Without it the chain is
+`LoggingLlmClientDecorator` → `RoutingLlmClient`, and routing resolves to `StubLlmClient` / `OfflineLlmClient`.
 
 ### Step 5: Model response (with tool call)
 

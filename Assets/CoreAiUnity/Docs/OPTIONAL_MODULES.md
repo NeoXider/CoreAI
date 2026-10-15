@@ -9,7 +9,7 @@ Mirror networking and the benchmark are separate packages so a consumer installs
 |---|---|---|---|
 | Lua mods | `com.neoxider.coreaimods` (Lua-CSharp bundled) | — | `COREAI_LUA` (positive enable; absent by default) |
 | Hub UI | `com.neoxider.coreaihub` | `COREAI_HAS_HUB` in Mods/Hub integration | remove Hub package |
-| LLM pipeline | NuGet `Microsoft.Extensions.AI` | — | `COREAI_LLM` (positive enable; absent by default) |
+| LLM providers (HTTP/MEAI/LLMUnity clients) | inside `com.neoxider.coreaiunity`; the NuGet `Microsoft.Extensions.AI` DLLs are required in every configuration | — | `COREAI_LLM` (positive enable; absent by default) |
 | Local inference | `ai.undream.llm` | `COREAI_HAS_LLMUNITY` | also requires `COREAI_LLM` |
 | Benchmark | `com.neoxider.coreaibenchmark` | none | do not install in players |
 | In-game MCP server | `com.neoxider.coreaimcp` (depends on Unity + Mods) | none | remove the package |
@@ -21,17 +21,30 @@ adapter. The benchmark depends on Core, Unity, and Mods because G1-G8 execute re
 
 ## Editor module tool
 
-Use **CoreAI > Setup > Modules** to report module state, add/remove the LLM and Lua opt-in defines, or install/remove backend
-dependencies. Package operations trigger a domain reload; wait for compilation before editing scenes
-or running tests. **Install Git Dependencies** adds missing project dependencies, but production
-projects should pin every Git URL to a reviewed tag or commit.
+**CoreAI > Setup > Modules** contains:
+
+| Menu item | What it does |
+|---|---|
+| **LLM Providers > Enable Providers** / **Disable Providers** | Adds / removes the `COREAI_LLM` scripting define. |
+| **Lua (Lua-CSharp) > Enable Lua** / **Disable Lua** | Adds / removes the `COREAI_LUA` scripting define. The Lua-CSharp runtime ships inside `com.neoxider.coreaimods`; nothing extra is installed. |
+| **LLMUnity > Enable + Update to latest** | Adds `ai.undream.llm` from its Git URL through the Package Manager, or re-resolves it to the latest commit when it is already installed. |
+| **LLMUnity > Remove package** | Removes `ai.undream.llm` after a confirmation; `COREAI_HAS_LLMUNITY` unsets. |
+| **Report module status** | Shows whether `COREAI_LLM` and `COREAI_LUA` are set and which LLMUnity version is installed. |
+
+The define items change the scripting defines of the **currently selected build target** only; repeat them
+after switching to another platform you ship. Package operations trigger a domain reload; wait for
+compilation before editing scenes or running tests.
+
+**CoreAI > Setup > Install Git Dependencies** (outside the Modules submenu) adds the missing VContainer,
+MessagePipe, UniTask and LLMUnity entries to `Packages/manifest.json` and leaves existing entries unchanged.
+Production projects should pin every Git URL to a reviewed tag or commit.
 
 ## Verification boundary
 
-The monorepo verifies `core`, `llm`, `lua`, and `full` compile configurations. Full package-removal consumers
-(Base, +Mods, +Hub, Full/Benchmark, no-Lua, and no-Hub) remain a release-engineering item under
-R0.6/F-22 in the root `TODO.md`. Until that matrix is automated, do not claim that physical removal
-of every optional package is continuously proven.
+CI compiles the project and runs the EditMode suite in the `core`, `llm`, `lua`, and `full` define
+configurations. Physically removing each
+optional package from a consumer project (Base, +Mods, +Hub, Full/Benchmark, no-Lua, no-Hub) is not covered
+by CI, so check your own package set in your project.
 
 ## Scene ownership
 

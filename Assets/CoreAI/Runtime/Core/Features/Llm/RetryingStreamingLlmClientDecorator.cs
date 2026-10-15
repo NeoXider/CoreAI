@@ -60,6 +60,12 @@ namespace CoreAI.Infrastructure.Llm
         public int RetryCount { get; private set; }
 
         /// <inheritdoc />
+        public void ResolveRequestSettings(LlmCompletionRequest request)
+        {
+            _inner.ResolveRequestSettings(request);
+        }
+
+        /// <inheritdoc />
         public bool SupportsNativeToolCalling => _inner.SupportsNativeToolCalling;
 
         /// <inheritdoc />

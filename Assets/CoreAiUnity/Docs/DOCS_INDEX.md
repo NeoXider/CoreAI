@@ -18,19 +18,18 @@ Package manifests:
 | Configure or switch LLM endpoints | [RUNTIME_BACKEND_SWITCHING.md](RUNTIME_BACKEND_SWITCHING.md) | [LLM_ROUTING](../../CoreAI/Docs/LLM_ROUTING.md), [COREAI_SETTINGS.md](COREAI_SETTINGS.md) |
 | Use CoreAI from code | [COREAI_SINGLETON_API.md](COREAI_SINGLETON_API.md) | [AGENT_BUILDER](../../CoreAI/Docs/AGENT_BUILDER.md) |
 | Add tools or agents | [TOOL_CALL_SPEC.md](TOOL_CALL_SPEC.md) | [TOOL_CALLING_BEST_PRACTICES](../../CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md), [MEAI_TOOL_CALLING](../../CoreAI/Docs/MEAI_TOOL_CALLING.md) |
-| Debug streaming or WebGL | [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) | [HTTP_TRANSPORT_SPEC.md](HTTP_TRANSPORT_SPEC.md), [STREAMING_WEBGL_TODO.md](STREAMING_WEBGL_TODO.md) |
+| Debug streaming or WebGL | [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) | [HTTP_TRANSPORT_SPEC.md](HTTP_TRANSPORT_SPEC.md), [WEBGL_BUILD_TROUBLESHOOTING.md](WEBGL_BUILD_TROUBLESHOOTING.md) |
 | Understand architecture | [ARCHITECTURE.md](ARCHITECTURE.md) | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md), [DGF_SPEC.md](DGF_SPEC.md) |
 | Work with memory | [MemorySystem.md](MemorySystem.md) | [MEMORY_STORE_CUSTOM_BACKENDS.md](MEMORY_STORE_CUSTOM_BACKENDS.md) |
 | Expose Lua or world commands | [WORLD_COMMANDS.md](WORLD_COMMANDS.md) | [FIRST_MOD](../../CoreAI/Docs/FIRST_MOD.md), [LUA_GAME_API](../../CoreAI/Docs/LUA_GAME_API.md), [LUA_BEST_PRACTICES](../../CoreAI/Docs/LUA_BEST_PRACTICES.md), [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) |
 | Run or extend tests | [../Tests/README.md](../Tests/README.md) | Test-specific docs listed below |
-| Ship to players / budget costs | [SHIPPING_PLAYER_MACHINES.md](SHIPPING_PLAYER_MACHINES.md) | [CLOUD_COST_BUDGETING.md](CLOUD_COST_BUDGETING.md), [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) |
+| Ship to players / budget costs | [SHIPPING_PLAYER_MACHINES.md](SHIPPING_PLAYER_MACHINES.md) | [CLOUD_COST_BUDGETING.md](CLOUD_COST_BUDGETING.md), [WEBGL_BUILD_TROUBLESHOOTING.md](WEBGL_BUILD_TROUBLESHOOTING.md) |
 
 ## First Run
 
 | Document | Purpose |
 |---|---|
 | [QUICK_START.md](QUICK_START.md) | Minimal path from install to Play Mode chat. |
-| [QUICK_START_EN.md](QUICK_START_EN.md) | Compact English quick start (agent in 10 minutes). |
 | [QUICK_START_FULL.md](QUICK_START_FULL.md) | Longer walkthrough with LM Studio and first command. |
 | [EXAMPLES.md](EXAMPLES.md) | Copy-paste gameplay examples: NPCs, quests, narration, tools. |
 | [COREAI_SETTINGS.md](COREAI_SETTINGS.md) | Inspector settings, routing modes, models, timeouts, streaming. |
@@ -47,7 +46,6 @@ Package manifests:
 | [COREAI_SINGLETON_API.md](COREAI_SINGLETON_API.md) | `CoreAi.AskAsync`, streaming, orchestration, and helper access. |
 | [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | Drop-in chat panel, config assets, hotkeys, stop path, persisted session. |
 | [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) | SSE, LLMUnity streaming, think-block filtering, cancellation, UI flow. |
-| [STREAMING_WEBGL_TODO.md](STREAMING_WEBGL_TODO.md) | Current WebGL SSE status, fetch bridge, fallback behavior, verification checklist. |
 | [HTTP_TRANSPORT_SPEC.md](HTTP_TRANSPORT_SPEC.md) | OpenAI-compatible transport contracts: `HttpClient`, `UnityWebRequest`, WebGL fetch. |
 | [WEBGL_BUILD_TROUBLESHOOTING.md](WEBGL_BUILD_TROUBLESHOOTING.md) | WebGL player build issues, IL2CPP memory, package/settings file problems. |
 
@@ -96,13 +94,11 @@ Package manifests:
 | [SCRIPTABLE_OBJECTS.md](SCRIPTABLE_OBJECTS.md) | ScriptableObject assets used by the package and their roles. |
 | [GAME_CONFIG_GUIDE.md](GAME_CONFIG_GUIDE.md) | Letting AI change game parameters through GameConfig assets. |
 | [KNOWN_ISSUES.md](KNOWN_ISSUES.md) | Accepted warning debt and known project-level issues. |
-| [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Pre-commit and pre-release checklist for the seven-package graph. |
 | [SHIPPING_PLAYER_MACHINES.md](SHIPPING_PLAYER_MACHINES.md) | What the player's machine needs per deployment mode: local GGUF, cloud, proxy, hybrid fallback. |
 | [CLOUD_COST_BUDGETING.md](CLOUD_COST_BUDGETING.md) | Token anatomy of a turn, measuring real usage, spend caps, and a designer budget worksheet. |
 | [AUDIT_LOG.md](AUDIT_LOG.md) | Immutable append-only audit log for tool calls, LLM requests, world mutations. |
 | [DETERMINISM_AND_REPLAY.md](DETERMINISM_AND_REPLAY.md) | Effect-determinism contract, host-authoritative pattern, and the proposed audit-log replayer. |
 | [AGENT_SESSION_INSPECTOR.md](AGENT_SESSION_INSPECTOR.md) | Inspecting a live agent session: turns, tool calls, memory reads. |
-| [BACKLOG.md](BACKLOG.md) | Future work that does not block the current MVP gate. |
 | [GameTemplateGuides/INDEX.md](GameTemplateGuides/INDEX.md) | Per-title guide index. |
 
 ## Tests
@@ -121,7 +117,7 @@ Package manifests:
 | `LuaToolEditModeTests` (`CoreAI.Mods.Tests`) | `execute_lua` tool contract and results. |
 | `LuaModAutoRepairPolicyEditModeTests` | Mod auto-repair thresholds and cooldown. |
 
-## Example Game And Media
+## Example Game
 
 | Document | Purpose |
 |---|---|
@@ -129,8 +125,8 @@ Package manifests:
 | [UNITY_SETUP.md](../../_exampleGame/Docs/UNITY_SETUP.md) | Step-by-step example scene setup. |
 | [ARENA_ARCHITECTURE_AND_AI.md](../../_exampleGame/Docs/ARENA_ARCHITECTURE_AND_AI.md) | Arena architecture for multiplayer and AI roles. |
 | [ROGUELITE_PLAYBOOK.md](../../_exampleGame/Docs/ROGUELITE_PLAYBOOK.md) | Run loop, progression, and gameplay notes. |
-| [DEMO_RECORDING_GUIDE.md](DEMO_RECORDING_GUIDE.md) | Video/GIF capture scenarios and demo runner notes. |
 
 ## Roadmap
 
-Current closure log: [../../../TODO.md](../../../TODO.md). Future non-blocking work: [BACKLOG.md](BACKLOG.md).
+Where the project is going: [Docs/ROADMAP.md](../../../Docs/ROADMAP.md). Plans, backlog and release process
+are developer documents and live in [`dev-docs/`](../../../dev-docs/README.md).

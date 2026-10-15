@@ -25,10 +25,16 @@ namespace CoreAI.Infrastructure.Llm
         public string Model { get; set; } = "";
 
         public float Temperature { get; set; } = 0.2f;
+        public bool OverrideTemperature { get; set; } = true;
+        public float? TemperatureOverride => OverrideTemperature ? Temperature : (float?)null;
         public int RequestTimeoutSeconds { get; set; } = 120;
         public int MaxTokens { get; set; } = 128000;
+        public bool OverrideMaxTokens { get; set; } = true;
+        public int? MaxTokensOverride => OverrideMaxTokens ? MaxTokens : (int?)null;
         public string ExtraBodyJson { get; set; } = "";
         public LlmReasoningMode ReasoningMode { get; set; } = LlmReasoningMode.ProviderDefault;
+        public LlmReasoningEffort ReasoningEffort { get; set; } = LlmReasoningEffort.Default;
+        public LlmReasoningDialect ReasoningDialect { get; set; } = LlmReasoningDialect.Auto;
         public int ThinkingBudgetTokens { get; set; }
         public int MaxRequestsPerSession { get; set; }
         public int MaxPromptChars { get; set; }
@@ -89,11 +95,15 @@ namespace CoreAI.Infrastructure.Llm
                 ApiKey = source.ApiKey,
                 AuthorizationHeader = source.AuthorizationHeader,
                 Model = source.Model,
-                Temperature = source.Temperature,
+                Temperature = source.TemperatureOverride ?? source.Temperature,
+                OverrideTemperature = source.TemperatureOverride.HasValue,
                 RequestTimeoutSeconds = source.RequestTimeoutSeconds,
-                MaxTokens = source.MaxTokens,
+                MaxTokens = source.MaxTokensOverride ?? source.MaxTokens,
+                OverrideMaxTokens = source.MaxTokensOverride.HasValue,
                 ExtraBodyJson = source.ExtraBodyJson,
                 ReasoningMode = source.ReasoningMode,
+                ReasoningEffort = source.ReasoningEffort,
+                ReasoningDialect = source.ReasoningDialect,
                 ThinkingBudgetTokens = source.ThinkingBudgetTokens,
                 MaxRequestsPerSession = maxRequests,
                 MaxPromptChars = maxPromptChars,
@@ -110,8 +120,8 @@ namespace CoreAI.Infrastructure.Llm
     /// </summary>
     /// <remarks>
     /// Values use <see cref="JToken"/> so nested objects and arrays work without reflection or <c>dynamic</c>.
-    /// CoreAI-owned structural fields are rejected. Raw <see cref="IOpenAiHttpSettings.ExtraBodyJson"/> remains
-    /// an advanced, backwards-compatible escape hatch that can override those fields.
+    /// CoreAI-owned structural fields are rejected. Typed request settings take precedence over raw
+    /// values only for the fields emitted by that request.
     /// </remarks>
     public static class OpenAiProviderBodyParameters
     {
@@ -121,11 +131,6 @@ namespace CoreAI.Infrastructure.Llm
             "model",
             "stream",
             "stream_options",
-            "temperature",
-            "max_tokens",
-            "enable_thinking",
-            "thinking_budget",
-            "chat_template_kwargs",
             "tools",
             "tool_choice"
         };

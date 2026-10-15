@@ -440,6 +440,30 @@ namespace CoreAI.Ai
         /// </summary>
         public bool SendTemperature { get; set; }
 
+        /// <summary>Explicit per-call or per-agent temperature, before endpoint defaults.</summary>
+        public float? TemperatureOverride { get; set; }
+
+        /// <summary>Whether the legacy Temperature value is a global fallback below endpoint defaults.</summary>
+        public bool TemperatureIsFallback { get; set; }
+
+        /// <summary>Reasoning controls inherited from the call or agent.</summary>
+        public LlmReasoningOptions? Reasoning { get; set; }
+
+        /// <summary>Sampling controls inherited from the call or agent.</summary>
+        public LlmSamplingOptions Sampling { get; set; }
+
+        /// <summary>Effective request effort resolved by the selected endpoint.</summary>
+        public LlmReasoningEffort EffectiveReasoningEffort { get; set; }
+
+        /// <summary>Effective reasoning wire format resolved by the selected endpoint.</summary>
+        public LlmReasoningDialect EffectiveReasoningDialect { get; set; }
+
+        /// <summary>Effective temperature sent to the selected endpoint.</summary>
+        public float? EffectiveTemperature { get; set; }
+
+        /// <summary>Effective output token cap; null means no cap is sent.</summary>
+        public int? EffectiveMaxOutputTokens { get; set; }
+
         /// <summary>Tools exposed to the model for this request.</summary>
         public IReadOnlyList<ILlmTool> Tools { get; set; }
 
@@ -577,6 +601,9 @@ namespace CoreAI.Ai
         /// <summary>Total tokens from usage (HTTP).</summary>
         public int? TotalTokens { get; set; }
 
+        /// <summary>Provider-reported tokens spent on reasoning.</summary>
+        public int? ReasoningTokens { get; set; }
+
         /// <summary>Provider-reported prompt/input tokens read from cache.</summary>
         public int CacheReadTokens { get; set; }
 
@@ -612,6 +639,7 @@ namespace CoreAI.Ai
                 LastRoundtripPromptTokens = LastRoundtripPromptTokens,
                 CompletionTokens = CompletionTokens,
                 TotalTokens = TotalTokens,
+                ReasoningTokens = ReasoningTokens,
                 CacheReadTokens = CacheReadTokens,
                 CacheWriteTokens = CacheWriteTokens,
                 ExecutedToolCalls = ExecutedToolCalls
@@ -688,6 +716,9 @@ namespace CoreAI.Ai
         public int? CompletionTokens { get; set; }
         public int? TotalTokens { get; set; }
 
+        /// <summary>Provider-reported tokens spent on reasoning.</summary>
+        public int? ReasoningTokens { get; set; }
+
         /// <summary>Provider-reported prompt/input tokens read from cache.</summary>
         public int CacheReadTokens { get; set; }
 
@@ -743,6 +774,7 @@ namespace CoreAI.Ai
                 LastRoundtripPromptTokens = LastRoundtripPromptTokens,
                 CompletionTokens = CompletionTokens,
                 TotalTokens = TotalTokens,
+                ReasoningTokens = ReasoningTokens,
                 CacheReadTokens = CacheReadTokens,
                 CacheWriteTokens = CacheWriteTokens,
                 ExecutedToolCalls = ExecutedToolCalls,
@@ -758,6 +790,11 @@ namespace CoreAI.Ai
     /// </summary>
     public interface ILlmClient
     {
+        /// <summary>Resolves request defaults for diagnostics before sending the request.</summary>
+        virtual void ResolveRequestSettings(LlmCompletionRequest request)
+        {
+        }
+
         /// <summary>
         /// True when this backend receives tool definitions through a native tool/function channel.
         /// Defaults to false so text-shaped/local backends keep the full prompt contract unless they opt in.
@@ -849,6 +886,7 @@ namespace CoreAI.Ai
                 LastRoundtripPromptTokens = result.LastRoundtripPromptTokens,
                 CompletionTokens = result.CompletionTokens,
                 TotalTokens = result.TotalTokens,
+                ReasoningTokens = result.ReasoningTokens,
                 CacheReadTokens = result.CacheReadTokens,
                 CacheWriteTokens = result.CacheWriteTokens,
                 Model = result.Model,

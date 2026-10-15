@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using UnityEditor;
 using UnityEditor.Build;
@@ -79,10 +79,9 @@ namespace CoreAI.Editor
             if (!EditorUtility.DisplayDialog(
                     "CoreAI - Delete Persistent Saves",
                     "Delete all CoreAI files in persistentDataPath?\n\n" +
-                    "- AgentMemory: agent memory and chat history\n" +
-                    "- ConversationSummaries: compacted conversation summaries\n" +
-                    "- LuaScriptVersions: Lua Programmer versions\n" +
-                    "- DataOverlayVersions: data overlay versions\n\n" +
+                    "The entire CoreAI directory and every file and subdirectory inside it will be deleted, " +
+                    "including agent memory, chat history, conversation summaries, Lua and data overlay versions, " +
+                    "llm-endpoints.json, mods, skills, and audit logs.\n\n" +
                     root,
                     "Delete",
                     "Cancel"))
@@ -182,13 +181,11 @@ namespace CoreAI.Editor
                 CoreAIEditorLog.LogWarning("Validate Scene: World Prefab Registry not assigned.");
             }
 
-            SerializedProperty openAiRef = so.FindProperty("openAiHttpLlmSettings");
-            bool hasLlmUnityAgent = TryFindMonoBehaviourByTypeName("LLMAgent") != null;
-            if ((openAiRef == null || openAiRef.objectReferenceValue == null) && !hasLlmUnityAgent)
+            if (!HasLlmSettings(scope))
             {
                 issues++;
                 CoreAIEditorLog.LogWarning(
-                    "Validate Scene: neither OpenAI HTTP settings nor LLMAgent found (will fallback to StubLlmClient).");
+                    "Validate Scene: CoreAI settings are missing. Assign the scope settings or add Resources/CoreAISettings.");
             }
 
             if (issues == 0)
@@ -200,6 +197,12 @@ namespace CoreAI.Editor
                 CoreAIEditorLog.LogWarning(
                     $"Validate Scene: found {issues} issue(s). Use CoreAI/Setup/Create Default Assets.");
             }
+        }
+
+        /// <summary>Checks the same assigned-or-Resources settings source used by the runtime scope.</summary>
+        internal static bool HasLlmSettings(CoreAILifetimeScope scope)
+        {
+            return scope != null && scope.Settings != null;
         }
 
         /// <summary>Creates a minimal CoreAI lifetime-scope scene setup without the demo chat UI.</summary>
@@ -587,7 +590,7 @@ namespace CoreAI.Editor
         };
 
         /// <summary>
-        /// Builds the frozen 15-scene G11 demo set into <c>artifacts/G11-WebGL</c> without prompts.
+        /// Builds the frozen 17-scene G11 demo set into <c>artifacts/G11-WebGL</c> without prompts.
         /// Launch Unity with <c>-buildTarget WebGL</c> because batch mode cannot switch targets while
         /// an execute method is running.
         /// </summary>

@@ -128,9 +128,9 @@ curl -s -X POST http://127.0.0.1:8811/control/block -H "Content-Type: applicatio
 curl -s -X POST http://127.0.0.1:8811/control/hang -H "Content-Type: application/json" -d "{\"seconds\": 130}"
 ```
 
-One-shot: the next `/v1` request is held that long and then answered `503`. Use a value above
-`requestTimeoutSeconds` (120) to exercise the player's own outer timeout rather than the proxy's
-error path. `seconds` defaults to `5`.
+One-shot: the next `/v1` request is held that long and then answered with `status` (default `503`). Use a
+value above `requestTimeoutSeconds` (120) to exercise the player's own outer timeout rather than the
+proxy's error path. `seconds` defaults to `5`.
 
 ### `POST /control/reset` — clear every injection
 
@@ -139,8 +139,8 @@ curl -s -X POST http://127.0.0.1:8811/control/reset
 curl -s -X POST http://127.0.0.1:8811/control/reset -H "Content-Type: application/json" -d "{\"counters\": true}"
 ```
 
-Injections are always cleared. Counters are **kept** so the run record survives, unless you pass
-`{"counters": true}`.
+Injections and the reply script are always cleared. Counters are **kept** so the run record survives,
+unless you pass `{"counters": true}`.
 
 ### `GET /control/state` — counters and current settings
 
@@ -155,6 +155,7 @@ curl -s http://127.0.0.1:8811/control/state
     "total_requests": 4,
     "total_proxied": 2,
     "injected_failures": 2,
+    "scripted_replies": 0,
     "upstream_errors": 0,
     "in_flight": 0
   },
@@ -166,13 +167,14 @@ curl -s http://127.0.0.1:8811/control/state
     "fail_path": "/v1",
     "blocked": false,
     "block_status": 503,
-    "hang_seconds": 0.0
+    "hang_seconds": 0.0,
+    "script_remaining": 0
   }
 }
 ```
 
 `total_requests` counts every `/v1` request the proxy handled; `total_proxied` counts only the ones
-actually forwarded upstream. The difference is `injected_failures`.
+actually forwarded upstream. The difference is `injected_failures` plus `scripted_replies`.
 
 > PowerShell note: the `^` line continuations and `\"` escaping above are for `cmd.exe`. In
 > PowerShell use backticks and `'{"count": 1}'` single-quoted JSON, or just call `curl.exe`.
@@ -190,7 +192,7 @@ One line per request on stdout, and appended to `--log-file` when given:
 2026-09-02T00:37:14.850Z POST /v1/chat/completions status=200 injected=no bytes=6433 dur_ms=7892.2 streamed=yes
 ```
 
-`injected` is `no` for a real forward, or `fail-next` / `block` / `hang` / `upstream-error` /
+`injected` is `no` for a real forward, or `fail-next` / `block` / `hang` / `script` / `upstream-error` /
 `preflight` / `control`. `streamed=yes` means the body was relayed frame by frame (SSE); attach this
 log to the G11 run record next to the browser console and Network trace.
 
@@ -279,8 +281,8 @@ injected errors, the counters, and the log-line format.
   `Access-Control-Allow-Origin` (LM Studio does send one).
 - **Trailers on a chunked request body are parsed and discarded.**
 - **`OPTIONS` is answered locally** with `204` and never forwarded upstream.
-- **Injection precedence is `hang` → `block` → `fail-next`**, and `hang`/`fail-next` are consumed
-  per request. Concurrent in-flight requests therefore race for a `fail-next` credit; drive §6.5
+- **Injection precedence is `hang` → `block` → `fail-next` → scripted reply**, and `hang`, `fail-next`
+  and scripted replies are consumed per request. Concurrent in-flight requests therefore race for a `fail-next` credit; drive §6.5
   one turn at a time.
 - **No auth.** Any `Authorization` header the player sends is forwarded verbatim; the proxy adds
   none. §6.5 requires no provider key in the player, so the header is normally absent.

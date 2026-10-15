@@ -109,9 +109,13 @@ Invoke-RestMethod -Uri "http://localhost:1234/v1/chat/completions" `
 
 ### 4.1 Open the project
 
-1. **Unity Hub** → **Add** → select the `CoreAI` folder
+1. **Unity Hub** → **Add** → select your project with CoreAI installed (see
+   [QUICK_START.md §2](QUICK_START.md#2-install-the-packages)), or the cloned `CoreAI` repository
 2. Open the project (Unity **6000.0+**; custom UI Toolkit elements use `[UxmlElement]` / `[UxmlAttribute]`,
    the only UXML path left in Unity 6.6+)
+3. In your own project, enable the provider clients: **CoreAI → Setup → Modules → LLM Providers → Enable
+   Providers** (adds `COREAI_LLM`). Without it Play Mode gets offline/stub replies even when the
+   connection test below succeeds. The CoreAI repository already has `COREAI_LLM` and `COREAI_LUA` set.
 
 ### 4.2 Open a scene
 
@@ -123,7 +127,8 @@ Menu: CoreAI → Setup → Create Chat Demo Scene
 
 It creates `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity` with `CoreAILifetimeScope` and the chat panel.
 
-For the F9 Programmer hotkey used in §5.2 Option B, open the example game instead:
+For the F9 Programmer hotkey used in §5.2 Option B, open the example game instead (it exists only in the
+cloned CoreAI repository, under `Assets/_exampleGame`):
 
 ```
 Menu: CoreAI → Development → Example Game → Open RogueliteArena scene
@@ -144,7 +149,8 @@ Menu: CoreAI → Development → Example Game → Open RogueliteArena scene
 │  CoreAI Settings                             │
 │                                              │
 │  Essentials                                  │
-│     LLM Backend: [OpenAiHttp]         ▼     │
+│     LLM Backend: [Auto]               ▼     │
+│     LLM Mode:    [ClientOwnedApi]     ▼     │
 │     Base URL:    http://localhost:1234/v1     │
 │     API Key:     (empty)                     │
 │     Model:       qwen3.5-4b  (required)      │
@@ -160,6 +166,9 @@ Menu: CoreAI → Development → Example Game → Open RogueliteArena scene
 │                                              │
 └─────────────────────────────────────────────┘
 ```
+
+`LLM Mode` picks the backend. `LLM Backend` is the older selector and applies only while `LLM Mode` is
+`Auto` (`LLM Backend = OpenAiHttp` with `LLM Mode = Auto` also gives `ClientOwnedApi`).
 
 ### 4.4 Test the connection
 
@@ -195,28 +204,34 @@ VContainer + MessagePipe (GlobalMessagePipe) + filtered ILog are registered.
 
 **Option A: From your own script**
 
+The static `CoreAi` facade finds the scene's `CoreAILifetimeScope`, so a plain `MonoBehaviour` needs no
+dependency injection. The Programmer role runs Lua, so this sample needs the Mods package and `COREAI_LUA`.
+
 ```csharp
+using CoreAI;
 using CoreAI.Ai;
 using UnityEngine;
-using VContainer;
 
 public class MyGameController : MonoBehaviour
 {
-    [Inject] private IAiOrchestrationService _orchestrator;
-
-    async void Start()
+    private async void Start()
     {
-        // Ask the Programmer agent to generate Lua
-        await _orchestrator.RunTaskAsync(new AiTaskRequest
+        // Ask the Programmer agent to generate and run Lua.
+        string result = await CoreAi.OrchestrateAsync(new AiTaskRequest
         {
-            RoleId = "Programmer",
+            RoleId = BuiltInAgentRoleIds.Programmer,
             Hint = "Write a Lua script that reports 'Hello from AI!'"
         });
-        
-        Debug.Log("✅ AI task completed!");
+
+        Debug.Log("✅ AI task completed: " + result);
     }
 }
 ```
+
+> Advanced DI: `CoreAILifetimeScope` injects `[Inject]` fields only into scene objects it knows about.
+> To use `[Inject] private IAiOrchestrationService _orchestrator;` instead, add your GameObject to the
+> scope's **Auto Inject Game Objects** list; otherwise the field stays `null`. `CoreAi.GetOrchestrator()`
+> returns the same service without DI.
 
 **Option B: Via hotkey (RogueliteArena example scene)**
 
@@ -235,17 +250,16 @@ LLM < traceId=abc123 role=Programmer backend=… wallMs=… | …
 **Option C: Create a custom agent**
 
 ```csharp
-// Create a merchant — three lines!
-var merchant = new AgentBuilder("Merchant")
+// myInventory implements InventoryTool.IInventoryProvider (see EXAMPLES.md, Example 4).
+AgentConfig merchant = new AgentBuilder("Merchant")
     .WithSystemPrompt("You are a friendly weapon merchant. Greet customers warmly.")
     .WithTool(new InventoryLlmTool(myInventory))
     .WithMemory()
     .Build();
 
-merchant.ApplyToPolicy(CoreAIAgent.Policy);
-
-// Send a message:
-merchant.AskWithCallback("Show me swords", (response) => {
+// Send a message (the first ask registers the role if Build() ran before CoreAI started):
+merchant.AskWithCallback("Show me swords", response =>
+{
     Debug.Log($"Merchant: {response}");
 });
 ```
@@ -262,10 +276,11 @@ merchant.AskWithCallback("Show me swords", (response) => {
 ┌─ Unity Console ──────────────────────────────────────────────┐
 │                                                               │
 │ LLM > traceId=abc123 role=Programmer backend=…                │
-│ [ToolCall] traceId=abc123 tool=execute_lua status=OK          │
+│ [ToolCall] traceId=abc123 role=Programmer tool=execute_lua    │
+│            status=OK dur=…ms                                  │
 │ [Lua report] Hello from AI!                                   │
-│ LLM < traceId=abc123 role=Programmer wallMs=1200 | …          │
-│ ✅ AI task completed!                                         │
+│ LLM < traceId=abc123 role=Programmer backend=… wallMs=1200 |… │
+│ ✅ AI task completed: …                                       │
 │                                                               │
 └───────────────────────────────────────────────────────────────┘
 ```
@@ -274,7 +289,7 @@ merchant.AskWithCallback("Show me swords", (response) => {
 
 | Issue | Quick fix |
 |----------|----------------|
-| No `LLM >` line / stub replies | Confirm LM Studio is running and LLM Backend + Model are set; run **CoreAI → Setup → Validate Scene** |
+| No `LLM >` line / stub replies | Confirm LM Studio is running, `COREAI_LLM` is defined, and LLM Mode + Model are set; run **CoreAI → Setup → Validate Scene** |
 | `Connection refused` | Check port 1234 in LM Studio |
 | `Empty response` / timeout | Raise **LLM Timeout (sec)** (default 120) |
 | `[ToolCall] … status=FAIL` repeatedly | Model too small; use 4B+ |
@@ -302,7 +317,7 @@ merchant.AskWithCallback("Show me swords", (response) => {
 1. **Build an NPC merchant** with inventory → [CHAT_TOOL_CALLING.md](CHAT_TOOL_CALLING.md)
 2. **Craft weapons** via CoreMechanicAI → [EXAMPLES.md](EXAMPLES.md)
 3. **Spawn enemies** via World Commands → [WORLD_COMMANDS.md](WORLD_COMMANDS.md)
-4. **Run tests** → Window → Test Runner → EditMode → Run All
+4. **Run tests** → Window → General → Test Runner → EditMode → Run All
 
 ---
 
@@ -314,7 +329,7 @@ merchant.AskWithCallback("Show me swords", (response) => {
 ✅ Server running on port 1234
 ✅ Unity project open
 ✅ Chat demo scene (or RogueliteArena) loaded
-✅ CoreAISettings → LLM Backend = OpenAiHttp
+✅ CoreAISettings → LLM Mode = ClientOwnedApi
 ✅ CoreAISettings → Base URL = http://localhost:1234/v1, Model set
 ✅ Test Connection = "Connection succeeded."
 ✅ Play → send a chat message (or F9 in RogueliteArena) → LLM > / LLM < in the logs
@@ -331,7 +346,7 @@ merchant.AskWithCallback("Show me swords", (response) => {
 To run a model **inside Unity** (no external server):
 
 1. Install LLMUnity: **CoreAI → Setup → Modules → LLMUnity → Enable + Update to latest** (it is not installed with CoreAI)
-2. CoreAISettings → LLM Backend = **LlmUnity** (or **Auto**)
+2. CoreAISettings → LLM Mode = **LocalModel** (or **Auto**)
 3. Pick a model in **GGUF Model**, or add a host with **CoreAI → Setup → Create LLMUnity Objects (LLM + LLMAgent)** and download a model in the **LLM** Inspector
 4. Press Play
 
@@ -340,7 +355,7 @@ To run a model **inside Unity** (no external server):
 ### Option C: Cloud API (OpenAI, Qwen API)
 
 ```
-CoreAISettings → LLM Backend = OpenAiHttp
+CoreAISettings → LLM Mode = ClientOwnedApi
    Base URL: https://api.openai.com/v1
    API Key: sk-xxxxxxxxxxxxx
    Model: gpt-4o-mini
@@ -349,7 +364,7 @@ CoreAISettings → LLM Backend = OpenAiHttp
 or
 
 ```
-CoreAISettings → LLM Backend = OpenAiHttp
+CoreAISettings → LLM Mode = ClientOwnedApi
    Base URL: https://dashscope.aliyuncs.com/compatible-mode/v1
    API Key: sk-xxxxxxxxxxxxx
    Model: qwen-max
@@ -361,6 +376,3 @@ CoreAISettings → LLM Backend = OpenAiHttp
 > inject the key at runtime (`CoreAiBackend.SetApiKey`, environment variable, secure storage), or use
 > `ServerManagedApi` so the key never leaves your backend.
 
----
-
-> 🚀 **CoreAI** — make your game smarter. One agent at a time.

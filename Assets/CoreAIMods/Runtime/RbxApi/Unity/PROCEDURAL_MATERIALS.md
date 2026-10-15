@@ -43,10 +43,10 @@ highlight-only sheen on SmoothPlastic. The grain is scaled by the per-material `
 (1 for Plastic and SmoothPlastic, 0.5 for Salt, whose larger bump strength made the full grain read
 as stucco, 0 for every other entry): shader modes are shared, and Rubber (SmoothPlastic's
 mode) and Snow (Salt's mode) keep their own look. The screen-space height gradient divides by the squared pixel
-footprint with a guard that only protects degenerate pixels, so bumps no longer weaken as the camera
-comes closer. With that guard gone, the pixel-scale stipples of Plastic and SmoothPlastic, which render procedurally
-even with the packaged textures present, were halved,
-so they stay a fine texture at arm's length instead of reading as sandpaper.
+footprint with a guard that only protects degenerate pixels, so bumps keep their strength as the camera
+comes closer. The pixel-scale stipples of Plastic and SmoothPlastic, which render procedurally even with
+the packaged textures present, are kept low so they stay a fine texture at arm's length instead of
+reading as sandpaper.
 Organic low-frequency relief uses NoiseShader's analytical 3D simplex derivatives; authored masks such
 as planks, mortar, blades, cracks, and pebbles use one center-height fragment derivative. The normal path
 does not resample the complete material. Neon is HDR emissive and independent of scene lighting.

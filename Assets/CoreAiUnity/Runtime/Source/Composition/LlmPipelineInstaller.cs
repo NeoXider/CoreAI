@@ -151,10 +151,10 @@ namespace CoreAI.Composition
                     asyncMarshaler), Lifetime.Singleton);
 #endif
 
-            int maxConcurrent = settings != null ? settings.MaxConcurrentOrchestrations : 4;
+            int maxConcurrent = settings != null ? settings.MaxConcurrentOrchestrations : 2;
             builder.RegisterInstance(new AiOrchestrationQueueOptions
             {
-                MaxConcurrent = maxConcurrent < 4 ? 4 : maxConcurrent
+                MaxConcurrent = maxConcurrent
             });
 
             bool logMetrics = settings != null && settings.LogOrchestrationMetrics;
@@ -421,11 +421,7 @@ namespace CoreAI.Composition
         }
 
 #if COREAI_LLM
-        /// <summary>
-        /// Adapts secondary backend fields to <see cref="IOpenAiHttpSettings"/>. Only the endpoint
-        /// identity (URL, key, model) is secondary; every provider knob is the one the operator
-        /// configured for this game, because a failover must not quietly change how the model answers.
-        /// </summary>
+        /// <summary>Adapts the fallback endpoint with its own provider reasoning and body controls.</summary>
         internal sealed class SecondarySettingsAdapter : IOpenAiHttpSettings
         {
             private readonly CoreAISettingsAsset _s;
@@ -440,21 +436,16 @@ namespace CoreAI.Composition
             public string AuthorizationHeader => "";
             public string Model => _s.SecondaryModelName;
             public float Temperature => _s.Temperature;
+            public float? TemperatureOverride => _s.OverrideTemperature ? _s.Temperature : null;
             public int RequestTimeoutSeconds => _s.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _s.MaxTokens;
+            public int? MaxTokensOverride => _s.OverrideMaxTokens ? _s.MaxTokens : null;
 
-            /// <summary>
-            /// WHY forwarded: the asset has ONE <c>extraBodyJson</c> and it is where provider-specific
-            /// request fields live — the very knobs that decide whether the model thinks, which sampler
-            /// it uses, how it is routed. Dropping them here made a failover answer differently from the
-            /// primary with nothing to see: same prompt, same settings screen, different behaviour.
-            /// Every other provider knob on this adapter (temperature, max tokens, reasoning, thinking
-            /// budget) is already forwarded; this field was the lone silent exception.
-            /// </summary>
-            public string ExtraBodyJson => _s.ExtraBodyJson;
-
-            public LlmReasoningMode ReasoningMode => _s.ReasoningMode;
-            public int ThinkingBudgetTokens => _s.ThinkingBudgetTokens;
+            public string ExtraBodyJson => _s.SecondaryExtraBodyJson;
+            public LlmReasoningMode ReasoningMode => _s.SecondaryReasoningMode;
+            public LlmReasoningEffort ReasoningEffort => _s.SecondaryReasoningEffort;
+            public LlmReasoningDialect ReasoningDialect => _s.SecondaryReasoningDialect;
+            public int ThinkingBudgetTokens => _s.SecondaryThinkingBudgetTokens;
             public bool LogLlmInput => _s.LogLlmInput;
             public bool LogLlmOutput => _s.LogLlmOutput;
             public bool EnableHttpDebugLogging => _s.EnableHttpDebugLogging;
@@ -563,8 +554,10 @@ namespace CoreAI.Composition
             public LlmExecutionMode ExecutionMode => LlmExecutionMode.ServerManagedApi;
 
             public float Temperature => _settings.Temperature;
+            public float? TemperatureOverride => _settings.OverrideTemperature ? _settings.Temperature : null;
             public int RequestTimeoutSeconds => _settings.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _settings.MaxTokens;
+            public int? MaxTokensOverride => _settings.OverrideMaxTokens ? _settings.MaxTokens : null;
 
             /// <summary>
             /// Deliberately empty, and NOT the same omission as on the secondary adapter. Under
@@ -581,6 +574,8 @@ namespace CoreAI.Composition
             public string ExtraBodyJson => "";
 
             public LlmReasoningMode ReasoningMode => _settings.ReasoningMode;
+            public LlmReasoningEffort ReasoningEffort => _settings.ReasoningEffort;
+            public LlmReasoningDialect ReasoningDialect => _settings.ReasoningDialect;
             public int ThinkingBudgetTokens => _settings.ThinkingBudgetTokens;
             public bool LogLlmInput => _settings.LogLlmInput;
             public bool LogLlmOutput => _settings.LogLlmOutput;

@@ -32,15 +32,24 @@ namespace CoreAI.Infrastructure.Llm
         private readonly IAgentMemoryStore? _memoryStore;
         private readonly ICoreAISettings _settings;
         private readonly bool _supportsNativeToolCalling;
+        private readonly IOpenAiHttpSettings? _endpointSettings;
 
         private const int HybridToolJsonHeldTailMaxChars = 64 * 1024;
+
+        /// <summary>Creates a client using the original constructor signature and inferred endpoint settings.</summary>
+        public MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
+            bool supportsNativeToolCalling, IAgentMemoryStore? memoryStore)
+            : this(innerClient, logger, settings, supportsNativeToolCalling, memoryStore, null)
+        {
+        }
 
         /// <param name="supportsNativeToolCalling">
         /// Whether this endpoint accepts the native tools channel. Callers should pass its probed
         /// or explicitly configured capability. There is no implicit channel default.
         /// </param>
         public MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
-            bool supportsNativeToolCalling, IAgentMemoryStore? memoryStore = null)
+            bool supportsNativeToolCalling, IAgentMemoryStore? memoryStore = null,
+            IOpenAiHttpSettings? endpointSettings = null)
         {
             if (innerClient == null)
             {
@@ -51,6 +60,7 @@ namespace CoreAI.Infrastructure.Llm
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _memoryStore = memoryStore;
             _supportsNativeToolCalling = supportsNativeToolCalling;
+            _endpointSettings = endpointSettings ?? (innerClient as MeaiOpenAiChatClient)?.RequestSettings;
         }
 
         /// <summary>
@@ -129,7 +139,7 @@ namespace CoreAI.Infrastructure.Llm
             transport = new HttpClientOpenAiTransport();
 #endif
             MeaiOpenAiChatClient innerClient = new(openAiSettings, transport, supportsNativeToolCalling);
-            return new MeaiLlmClient(innerClient, logger, settings, supportsNativeToolCalling: supportsNativeToolCalling, memoryStore: memoryStore);
+            return new MeaiLlmClient(innerClient, logger, settings, supportsNativeToolCalling: supportsNativeToolCalling, memoryStore: memoryStore, endpointSettings: openAiSettings);
         }
 
         /// <summary>
@@ -205,14 +215,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            MEAI.ChatOptions chatOptions = new()
-            {
-                MaxOutputTokens = ResolveMaxOutputTokens(request.MaxOutputTokens)
-            };
-            if (request.SendTemperature)
-            {
-                chatOptions.Temperature = request.Temperature;
-            }
+            MEAI.ChatOptions chatOptions = BuildChatOptions(request);
 
             if (aiTools.Count > 0)
             {
@@ -302,6 +305,7 @@ namespace CoreAI.Infrastructure.Llm
                 result.PromptTokens = (int)(response.Usage.InputTokenCount ?? 0);
                 result.CompletionTokens = (int)(response.Usage.OutputTokenCount ?? 0);
                 result.TotalTokens = (int)(response.Usage.TotalTokenCount ?? 0);
+                result.ReasoningTokens = ExtractReasoningTokens(response.Usage.AdditionalCounts);
                 (result.CacheReadTokens, result.CacheWriteTokens) =
                     ExtractCacheTokenCounts(response.Usage.AdditionalCounts);
                 // WHY: PromptTokens stays the whole-turn CUMULATIVE sum (Prompt + Completion == Total
@@ -490,6 +494,50 @@ namespace CoreAI.Infrastructure.Llm
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
+            int maxChars = _settings.MaxResponseChars;
+            int keptChars = 0;
+            long droppedChars = 0;
+            await foreach (LlmStreamChunk chunk in CompleteStreamingCoreAsync(request, cancellationToken))
+            {
+                string text = chunk.Text ?? "";
+                if (maxChars > 0 && text.Length > 0)
+                {
+                    int kept = droppedChars > 0 ? 0 : Math.Min(text.Length, Math.Max(0, maxChars - keptChars));
+                    if (kept > 0 && keptChars + kept == maxChars && char.IsHighSurrogate(text[kept - 1]))
+                    {
+                        kept--;
+                    }
+
+                    chunk.Text = text.Substring(0, kept);
+                    keptChars += kept;
+                    droppedChars += text.Length - kept;
+                }
+
+                if (chunk.IsDone && droppedChars > 0)
+                {
+                    string marker = "…[response truncated at " + maxChars + " chars: +" + droppedChars + " chars]";
+                    if (chunk.Text.Length > 0)
+                    {
+                        chunk.Text += "\n" + marker;
+                    }
+                    else
+                    {
+                        yield return new LlmStreamChunk { Text = (keptChars > 0 ? "\n" : "") + marker };
+                    }
+
+                    _logger.LogWarning(GameLogFeature.Llm,
+                        $"MeaiLlmClient: Streaming response text truncated at {maxChars} chars: {keptChars} kept, {droppedChars} dropped.");
+                }
+
+                yield return chunk;
+            }
+        }
+
+        private async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingCoreAsync(
+            LlmCompletionRequest request,
+            [System.Runtime.CompilerServices.EnumeratorCancellation]
+            CancellationToken cancellationToken = default)
+        {
             string roleId = request.AgentRoleId ?? "Unknown";
             using LlmRequestContext.Scope ctxScope = LlmRequestContext.Begin(
                 roleId,
@@ -509,14 +557,7 @@ namespace CoreAI.Infrastructure.Llm
                 yield break;
             }
 
-            MEAI.ChatOptions chatOptions = new()
-            {
-                MaxOutputTokens = ResolveMaxOutputTokens(request.MaxOutputTokens)
-            };
-            if (request.SendTemperature)
-            {
-                chatOptions.Temperature = request.Temperature;
-            }
+            MEAI.ChatOptions chatOptions = BuildChatOptions(request);
 
             if (aiTools.Count > 0)
             {
@@ -630,12 +671,9 @@ namespace CoreAI.Infrastructure.Llm
 
                 // Tools deliberately omitted (not just ToolMode=None): the model physically cannot
                 // emit another native tool call in this extra roundtrip.
-                MEAI.ChatOptions summaryOptions = new()
-                {
-                    Temperature = chatOptions.Temperature,
-                    MaxOutputTokens = chatOptions.MaxOutputTokens,
-                    ToolMode = MEAI.ChatToolMode.None
-                };
+                MEAI.ChatOptions summaryOptions = chatOptions.Clone();
+                summaryOptions.Tools = null;
+                summaryOptions.ToolMode = MEAI.ChatToolMode.None;
 
                 ThinkBlockStreamFilter summaryFilter = new();
                 System.Text.StringBuilder summaryVisible = new();
@@ -1897,6 +1935,23 @@ namespace CoreAI.Infrastructure.Llm
             return chunk;
         }
 
+        private static int? ExtractReasoningTokens(MEAI.AdditionalPropertiesDictionary<long>? counts)
+        {
+            if (counts != null)
+            {
+                foreach (KeyValuePair<string, long> count in counts)
+                {
+                    if (count.Key.Equals("reasoning_tokens", StringComparison.OrdinalIgnoreCase) ||
+                        count.Key.EndsWith(".reasoning_tokens", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return ClampTokenCount(count.Value);
+                    }
+                }
+            }
+
+            return null;
+        }
+
         private static void ApplyStreamingUsageFields(LlmStreamChunk chunk, MEAI.UsageDetails? usage, string model)
         {
             if (chunk == null || usage == null)
@@ -1907,6 +1962,7 @@ namespace CoreAI.Infrastructure.Llm
             chunk.PromptTokens = (int)(usage.InputTokenCount ?? 0);
             chunk.CompletionTokens = (int)(usage.OutputTokenCount ?? 0);
             chunk.TotalTokens = (int)(usage.TotalTokenCount ?? 0);
+            chunk.ReasoningTokens = ExtractReasoningTokens(usage.AdditionalCounts);
             (chunk.CacheReadTokens, chunk.CacheWriteTokens) =
                 ExtractCacheTokenCounts(usage.AdditionalCounts);
             if (!string.IsNullOrEmpty(model))
@@ -2840,16 +2896,63 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
+        /// <inheritdoc />
+        public void ResolveRequestSettings(LlmCompletionRequest request)
+        {
+            request.EffectiveTemperature = request.TemperatureOverride ??
+                (request.SendTemperature && !request.TemperatureIsFallback ? request.Temperature : (float?)null) ??
+                _endpointSettings?.TemperatureOverride ??
+                (request.SendTemperature ? request.Temperature : _settings.OverrideTemperature ? _settings.Temperature : (float?)null);
+            request.EffectiveMaxOutputTokens = ResolveMaxOutputTokens(request.MaxOutputTokens);
+            LlmReasoningEffort effort = request.Reasoning?.Effort ?? LlmReasoningEffort.Default;
+            if (effort == LlmReasoningEffort.Default)
+            {
+                effort = _endpointSettings?.ReasoningEffort ?? LlmReasoningEffort.Default;
+            }
+
+            LlmReasoningMode legacyMode = _endpointSettings?.ReasoningMode ?? LlmReasoningMode.ProviderDefault;
+            LlmReasoningDialect dialect = _endpointSettings?.ReasoningDialect ?? LlmReasoningDialect.Auto;
+            request.EffectiveReasoningDialect = effort == LlmReasoningEffort.Default && dialect == LlmReasoningDialect.Auto
+                ? LlmReasoningDialect.QwenTemplate
+                : LlmReasoningDialectResolver.Resolve(_endpointSettings?.ApiBaseUrl, dialect, effort, legacyMode);
+            request.EffectiveReasoningEffort = effort == LlmReasoningEffort.Default
+                ? legacyMode == LlmReasoningMode.Disabled ? LlmReasoningEffort.None
+                    : legacyMode == LlmReasoningMode.Enabled ? LlmReasoningEffort.Medium : LlmReasoningEffort.Default
+                : effort;
+        }
+
+        private MEAI.ChatOptions BuildChatOptions(LlmCompletionRequest request)
+        {
+            ResolveRequestSettings(request);
+            MEAI.ChatOptions options = new()
+            {
+                Temperature = request.EffectiveTemperature,
+                MaxOutputTokens = request.EffectiveMaxOutputTokens,
+                AdditionalProperties = new MEAI.AdditionalPropertiesDictionary
+                {
+                    ["coreai.max_tokens_resolved"] = true
+                }
+            };
+            if (request.Reasoning.HasValue)
+            {
+                options.AdditionalProperties["coreai.reasoning"] = request.Reasoning.Value;
+            }
+
+            LlmSamplingOptions? sampling = request.Sampling;
+            if (sampling != null)
+            {
+                options.TopP = sampling.TopP;
+                options.Seed = sampling.Seed;
+                options.StopSequences = sampling.Stop?.ToList();
+                options.FrequencyPenalty = sampling.FrequencyPenalty;
+                options.PresencePenalty = sampling.PresencePenalty;
+            }
+
+            return options;
+        }
+
         /// <summary>
-        /// Resolves the effective <c>MaxOutputTokens</c> for a single MEAI <c>ChatOptions</c>:
-        /// a positive per-request value wins; an EXPLICIT per-request <c>0</c> means "no limit"
-        /// (no <c>max_tokens</c> is sent — reasoning models can think as long as they need without
-        /// the thinking budget eating the answer budget); <c>null</c> falls back to
-        /// <see cref="ICoreAISettings.MaxTokens"/> when it is positive; otherwise <c>null</c> so the
-        /// provider uses its own default. HTTP backends honour <c>null</c> by omitting
-        /// <c>max_tokens</c> from the request; the LLMUnity backend honours it by resetting
-        /// <c>numPredict</c> to its unbounded <c>-1</c> sentinel on every request instead of
-        /// retaining a previously applied cap.
+        /// Resolves the call or agent cap, endpoint override, then global cap. Zero means unlimited.
         /// </summary>
         private int? ResolveMaxOutputTokens(int? perRequest)
         {
@@ -2866,7 +2969,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            int settingsValue = _settings?.MaxTokens ?? 0;
+            int settingsValue = _endpointSettings?.MaxTokensOverride ?? _settings?.MaxTokens ?? 0;
             return settingsValue > 0 ? settingsValue : (int?)null;
         }
 
@@ -2968,10 +3071,14 @@ namespace CoreAI.Infrastructure.Llm
             public string Model => _s.ModelName;
             public LlmExecutionMode ExecutionMode => _s.ExecutionMode;
             public float Temperature => _s.Temperature;
+            public float? TemperatureOverride => _s.OverrideTemperature ? _s.Temperature : null;
             public int RequestTimeoutSeconds => _s.EffectiveHttpRequestTimeoutSeconds;
             public int MaxTokens => _s.MaxTokens;
+            public int? MaxTokensOverride => _s.OverrideMaxTokens ? _s.MaxTokens : null;
             public string ExtraBodyJson => _s.ExtraBodyJson;
             public LlmReasoningMode ReasoningMode => _s.ReasoningMode;
+            public LlmReasoningEffort ReasoningEffort => _s.ReasoningEffort;
+            public LlmReasoningDialect ReasoningDialect => _s.ReasoningDialect;
             public int ThinkingBudgetTokens => _s.ThinkingBudgetTokens;
             public bool LogLlmInput => _s.LogLlmInput;
             public bool LogLlmOutput => _s.LogLlmOutput;

@@ -15,15 +15,18 @@ Click **Refresh live turn** to re-read the sink; **Copy live turn** copies the r
 
 ### Enabling Live turn
 
-Live turn requires a readable turn-trace sink in the active container. The default registration is `NullAgentTurnTraceSink`, which is *not* readable — in that case the view explains that no readable sink is registered. To opt in, register an `InMemoryAgentTurnTraceSink` (or any `IAgentTurnTraceReader`) as the `IAgentTurnTraceSink`, for example:
+Live turn requires a readable turn-trace sink in the active container. The default registration is `NullAgentTurnTraceSink`, which is *not* readable — in that case the view explains that no readable sink is registered. To opt in, register an `InMemoryAgentTurnTraceSink` (or any `IAgentTurnTraceReader`) as the `IAgentTurnTraceSink`, after CoreAI's own registrations, for example:
 
 ```csharp
-builder.Register<InMemoryAgentTurnTraceSink>(Lifetime.Singleton)
-    .As<IAgentTurnTraceSink>()
-    .As<IAgentTurnTraceReader>();
+// Register an instance: the constructor's optional capacity arguments are not resolvable by VContainer.
+builder.RegisterInstance<IAgentTurnTraceSink, IAgentTurnTraceReader>(new InMemoryAgentTurnTraceSink());
 ```
 
 The window resolves either an explicitly registered `IAgentTurnTraceReader` or an `IAgentTurnTraceSink` that also implements `IAgentTurnTraceReader`. Reading a trace never mutates or persists anything. Live turn is only available in Play Mode (it reads the running container); if no turn has been recorded for the role yet, the view shows a clear "No turn recorded yet" message.
+
+## From code
+
+`AgentSessionInspector` is registered in the CoreAI container. `Inspect(roleId)` builds the same snapshot the window shows from a neutral request with no user hint. `Inspect(roleId, request)` inspects a specific `AiTaskRequest`: it works on a full copy of the request (`AiTaskRequest.CloneForRole`), so request-scoped fields (`RoutingProfileId`, `RequestSystemInstructions`, `Attachments`, `ActorContext`, `MaxToolCallRoundtrips`, …) reach runtime-context providers, and the request's `SystemPrompt` override shapes the reported prompt exactly as `AiOrchestrator` would apply it. Inspection is read-only: it does not call the conversation context manager, which may persist new summaries while building a real request.
 
 ## Edit Mode usage
 

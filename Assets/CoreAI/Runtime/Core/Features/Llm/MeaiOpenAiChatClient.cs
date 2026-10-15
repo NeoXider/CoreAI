@@ -59,6 +59,8 @@ namespace CoreAI.Infrastructure.Llm
     public sealed class MeaiOpenAiChatClient : MEAI.IChatClient, IDisposable
     {
         private readonly IOpenAiHttpSettings _settings;
+        internal IOpenAiHttpSettings RequestSettings => _settings;
+        private int _typedBodyConflictWarned;
         private readonly IOpenAiHttpTransport _transport;
         private readonly bool _supportsNativeToolCalling;
         private readonly ILog _log;
@@ -300,22 +302,14 @@ namespace CoreAI.Infrastructure.Llm
             Dictionary<string, object> reqBody = new();
             AddRequestModel(reqBody);
             reqBody["messages"] = messages;
-            if (options?.Temperature.HasValue == true)
-            {
-                reqBody["temperature"] = options.Temperature.Value;
-            }
-
-            if (options?.MaxOutputTokens.HasValue == true)
-            {
-                reqBody["max_tokens"] = options.MaxOutputTokens.Value;
-            }
+            ApplyBaseRequestOptions(reqBody, options);
 
             if (toolsList.Count > 0)
             {
                 reqBody["tools"] = toolsList;
             }
 
-            ApplyProviderSpecificRequestBody(reqBody);
+            ApplyProviderSpecificRequestBody(reqBody, options);
             ApplyToolCallingOptions(reqBody, options);
 
             string json = JsonConvert.SerializeObject(reqBody);
@@ -467,22 +461,14 @@ namespace CoreAI.Infrastructure.Llm
             reqBody["messages"] = messages;
             reqBody["stream"] = true;
             reqBody["stream_options"] = new Dictionary<string, object> { { "include_usage", true } };
-            if (options?.Temperature.HasValue == true)
-            {
-                reqBody["temperature"] = options.Temperature.Value;
-            }
-
-            if (options?.MaxOutputTokens.HasValue == true)
-            {
-                reqBody["max_tokens"] = options.MaxOutputTokens.Value;
-            }
+            ApplyBaseRequestOptions(reqBody, options);
 
             if (toolsList.Count > 0)
             {
                 reqBody["tools"] = toolsList;
             }
 
-            ApplyProviderSpecificRequestBody(reqBody);
+            ApplyProviderSpecificRequestBody(reqBody, options);
             ApplyToolCallingOptions(reqBody, options);
 
             string json = JsonConvert.SerializeObject(reqBody);
@@ -3524,13 +3510,39 @@ namespace CoreAI.Infrastructure.Llm
             return toolsList;
         }
 
-        private void ApplyProviderSpecificRequestBody(Dictionary<string, object> reqBody)
+        private void ApplyBaseRequestOptions(Dictionary<string, object> request, MEAI.ChatOptions options)
         {
-            if (reqBody == null)
+            float? temperature = options?.Temperature ?? _settings.TemperatureOverride;
+            if (temperature.HasValue)
             {
-                return;
+                request["temperature"] = temperature.Value;
             }
 
+            int? maxTokens = ResolveRequestTokenCap(options);
+            if (maxTokens > 0)
+            {
+                request["max_tokens"] = maxTokens.Value;
+            }
+        }
+
+        private int? ResolveRequestTokenCap(MEAI.ChatOptions options)
+        {
+            if (options?.MaxOutputTokens.HasValue == true)
+            {
+                return options.MaxOutputTokens;
+            }
+
+            if (options?.AdditionalProperties?.TryGetValue("coreai.max_tokens_resolved", out object resolved) == true &&
+                resolved is true)
+            {
+                return null;
+            }
+
+            return _settings.MaxTokensOverride;
+        }
+
+        private void ApplyProviderSpecificRequestBody(Dictionary<string, object> reqBody, MEAI.ChatOptions options)
+        {
             string extraBodyJson = _settings.ExtraBodyJson;
             if (!string.IsNullOrWhiteSpace(extraBodyJson))
             {
@@ -3548,19 +3560,214 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
-            if (!_settings.SendReasoningControls)
+            float? temperature = options?.Temperature ?? _settings.TemperatureOverride;
+            if (temperature.HasValue)
+            {
+                SetTypedBodyValue(reqBody, "temperature", temperature.Value);
+            }
+
+            int? maxTokens = ResolveRequestTokenCap(options);
+            if (maxTokens > 0)
+            {
+                SetTypedBodyValue(reqBody, "max_tokens", maxTokens.Value);
+                RemoveConflictingTokenCap(reqBody, "max_completion_tokens");
+            }
+            else if (maxTokens.HasValue ||
+                     (options?.AdditionalProperties?.TryGetValue("coreai.max_tokens_resolved", out object resolved) == true &&
+                      resolved is true))
+            {
+                RemoveConflictingTokenCap(reqBody, "max_tokens");
+                RemoveConflictingTokenCap(reqBody, "max_completion_tokens");
+            }
+
+            ApplySamplingOptions(reqBody, options);
+            ApplyReasoningOptions(reqBody, options, maxTokens);
+        }
+
+        private void RemoveConflictingTokenCap(Dictionary<string, object> request, string key)
+        {
+            if (request.Remove(key))
+            {
+                WarnTypedBodyConflict();
+            }
+        }
+
+        private void SetTypedBodyValue(Dictionary<string, object> request, string key, object value)
+        {
+            if (request.TryGetValue(key, out object existing) &&
+                !JToken.DeepEquals(JToken.FromObject(existing), JToken.FromObject(value)))
+            {
+                WarnTypedBodyConflict();
+            }
+
+            request[key] = value;
+        }
+
+        private void WarnTypedBodyConflict()
+        {
+            if (Interlocked.Exchange(ref _typedBodyConflictWarned, 1) == 0)
+            {
+                _log.Warn("MeaiOpenAiChatClient: typed request settings override conflicting ExtraBodyJson fields.",
+                    LogTag.Llm);
+            }
+        }
+
+        private void ApplySamplingOptions(Dictionary<string, object> request, MEAI.ChatOptions options)
+        {
+            if (options == null)
             {
                 return;
             }
 
-            bool enableThinking = _settings.EnableReasoning;
-            reqBody["enable_thinking"] = enableThinking;
-            ApplyChatTemplateThinkingFlag(reqBody, enableThinking);
-
-            int thinkingBudget = _settings.ThinkingBudgetTokens;
-            if (thinkingBudget > 0)
+            if (options.TopP.HasValue)
             {
-                reqBody["thinking_budget"] = thinkingBudget;
+                SetTypedBodyValue(request, "top_p", options.TopP.Value);
+            }
+
+            if (options.Seed.HasValue)
+            {
+                SetTypedBodyValue(request, "seed", options.Seed.Value);
+            }
+
+            if (options.StopSequences != null && options.StopSequences.Count > 0)
+            {
+                SetTypedBodyValue(request, "stop", options.StopSequences);
+            }
+
+            if (options.FrequencyPenalty.HasValue)
+            {
+                SetTypedBodyValue(request, "frequency_penalty", options.FrequencyPenalty.Value);
+            }
+
+            if (options.PresencePenalty.HasValue)
+            {
+                SetTypedBodyValue(request, "presence_penalty", options.PresencePenalty.Value);
+            }
+
+            if (options.ResponseFormat is MEAI.ChatResponseFormatJson json)
+            {
+                Dictionary<string, object> format = new();
+                if (json.Schema.HasValue)
+                {
+                    Dictionary<string, object> schema = new()
+                    {
+                        ["name"] = string.IsNullOrEmpty(json.SchemaName) ? "response" : json.SchemaName,
+                        ["schema"] = JToken.Parse(json.Schema.Value.GetRawText())
+                    };
+                    if (!string.IsNullOrEmpty(json.SchemaDescription))
+                    {
+                        schema["description"] = json.SchemaDescription;
+                    }
+
+                    format["type"] = "json_schema";
+                    format["json_schema"] = schema;
+                }
+                else
+                {
+                    format["type"] = "json_object";
+                }
+
+                SetTypedBodyValue(request, "response_format", format);
+            }
+            else if (options.ResponseFormat is MEAI.ChatResponseFormatText)
+            {
+                SetTypedBodyValue(request, "response_format", new Dictionary<string, object> { ["type"] = "text" });
+            }
+        }
+
+        private void ApplyReasoningOptions(Dictionary<string, object> request, MEAI.ChatOptions options, int? maxTokens)
+        {
+            LlmReasoningOptions? requested = null;
+            if (options?.AdditionalProperties?.TryGetValue("coreai.reasoning", out object value) == true &&
+                value is LlmReasoningOptions reasoning)
+            {
+                requested = reasoning;
+            }
+
+            LlmReasoningEffort effort = requested.HasValue && requested.Value.Effort != LlmReasoningEffort.Default
+                ? requested.Value.Effort : _settings.ReasoningEffort;
+            bool typedEffort = effort != LlmReasoningEffort.Default;
+            int? budget = requested?.BudgetTokens ?? (_settings.ThinkingBudgetTokens > 0
+                ? _settings.ThinkingBudgetTokens : (int?)null);
+            if (!typedEffort && !_settings.SendReasoningControls)
+            {
+                return;
+            }
+
+            // WHY: Existing profiles use Qwen controls on every host; Auto preserves their exact wire contract.
+            LlmReasoningDialect dialect = !typedEffort && _settings.ReasoningDialect == LlmReasoningDialect.Auto
+                ? LlmReasoningDialect.QwenTemplate
+                : LlmReasoningDialectResolver.Resolve(_settings.ApiBaseUrl, _settings.ReasoningDialect, effort,
+                    _settings.ReasoningMode);
+            if (!typedEffort)
+            {
+                effort = _settings.EnableReasoning ? LlmReasoningEffort.Medium : LlmReasoningEffort.None;
+            }
+
+            string effortText = effort.ToString().ToLowerInvariant();
+            switch (dialect)
+            {
+                case LlmReasoningDialect.OpenAi:
+                    SetTypedBodyValue(request, "reasoning_effort", effortText);
+                    if (maxTokens > 0)
+                    {
+                        request.Remove("max_tokens");
+                        SetTypedBodyValue(request, "max_completion_tokens", maxTokens.Value);
+                    }
+                    break;
+                case LlmReasoningDialect.OpenRouter:
+                    Dictionary<string, object> routerReasoning = new() { ["effort"] = effortText };
+                    if (budget > 0)
+                    {
+                        routerReasoning["max_tokens"] = budget.Value;
+                    }
+                    SetTypedBodyValue(request, "reasoning", routerReasoning);
+                    break;
+                case LlmReasoningDialect.QwenTemplate:
+                    bool enabled = effort != LlmReasoningEffort.None;
+                    SetTypedBodyValue(request, "enable_thinking", enabled);
+                    if (request.TryGetValue("chat_template_kwargs", out object template) &&
+                        template is JObject templateObject && templateObject.TryGetValue("enable_thinking", out JToken flag) &&
+                        !JToken.DeepEquals(flag, new JValue(enabled)))
+                    {
+                        WarnTypedBodyConflict();
+                    }
+                    ApplyChatTemplateThinkingFlag(request, enabled);
+                    if (budget > 0)
+                    {
+                        SetTypedBodyValue(request, "thinking_budget", budget.Value);
+                    }
+                    break;
+                case LlmReasoningDialect.AnthropicCompat:
+                    Dictionary<string, object> thinking = new()
+                    {
+                        ["type"] = effort == LlmReasoningEffort.None ? "disabled" : "enabled"
+                    };
+                    if (effort != LlmReasoningEffort.None)
+                    {
+                        int defaultBudget = effort switch
+                        {
+                            LlmReasoningEffort.High => 8192,
+                            LlmReasoningEffort.XHigh => 16384,
+                            LlmReasoningEffort.Medium => 4096,
+                            _ => 1024
+                        };
+                        thinking["budget_tokens"] = Math.Max(1024, budget ?? defaultBudget);
+                    }
+                    SetTypedBodyValue(request, "thinking", thinking);
+                    break;
+                case LlmReasoningDialect.GeminiCompat:
+                    effortText = effort switch
+                    {
+                        LlmReasoningEffort.Minimal => "low",
+                        LlmReasoningEffort.XHigh => "high",
+                        _ => effortText
+                    };
+                    SetTypedBodyValue(request, "reasoning_effort", effortText);
+                    break;
+                case LlmReasoningDialect.PassthroughEffort:
+                    SetTypedBodyValue(request, "reasoning_effort", effortText);
+                    break;
             }
         }
 

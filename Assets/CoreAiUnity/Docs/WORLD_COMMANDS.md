@@ -45,7 +45,7 @@ Current public actions:
 | `set_color` | Set renderer colour from an HTML colour string. |
 | `destroy` | Remove an object by name. |
 | `load_scene` / `reload_scene` | Load or reload scenes. |
-| `set_active` | Enable (show) an object. The public LLM action always activates; use Lua/WorldEdit for disabling. |
+| `set_active` | Enable (show) an object. The public LLM action always activates. |
 | `play_animation` / `stop_animation` / `list_animations` | Control or inspect animations. |
 | `play_sound` / `set_volume` | Control AudioSource playback and volume. |
 | `show_text` / `hide_panel` | Show or hide simple UI text/panels. |
@@ -128,9 +128,43 @@ Use `stringValue: "none"` to detach from the current parent.
 }
 ```
 
-## 3. Public Lua WorldEdit API
+### `spawn_batch`
 
-Use table-shaped spawn calls so optional fields are explicit:
+Required: `itemsJson`, a JSON array string of 1 to 100 items. Each item may carry `prefabKey`, `name`,
+`x/y/z`, `rx/ry/rz`, `scale` or `scaleX/scaleY/scaleZ`, `parent`, `worldPositionStays` and `color`. A field
+an item omits falls back to the call's own `prefabKey`, `fx/fy/fz`, `scale*`, `stringValue` (parent) and
+`worldPositionStays`. An item without `name` is named `<targetName>_<n>` (or `<prefabKey>_<n>` without a
+`targetName`).
+
+```json
+{
+  "name": "world_command",
+  "arguments": {
+    "action": "spawn_batch",
+    "prefabKey": "cube",
+    "targetName": "post",
+    "stringValue": "FenceRoot",
+    "itemsJson": "[{\"x\":0,\"z\":0,\"scaleY\":2},{\"x\":2,\"z\":0,\"scaleY\":2},{\"x\":4,\"z\":0,\"scaleY\":2,\"color\":\"#8b5a2b\"}]"
+  }
+}
+```
+
+Result: `{"Success":true,"Message":"{\"ok\":true,\"spawned\":3,\"failed\":0,\"names\":[...]}","Action":"spawn_batch"}`.
+An item that fails does not undo the items spawned before it.
+
+Every `world_command` call returns `{"Success": bool, "Message": string, "Action": string}`; `list_prefabs`
+puts `{"prefabs":[...],"primitives":[...]}` into `Message`.
+
+## 3. Lua WorldEdit build API
+
+The default Programmer composition (`RegisterCoreAiMods` in `com.neoxider.coreaimods`) does **not** register
+these build functions: it sets `LuaCsModStackOptions.RegisterWorldEditBuildBindings = false`, and a call raises
+an error that points to the Rbx API (`Instance.new('Part')`, `instance:Destroy()`; see
+[RBX_API.md](../../CoreAI/Docs/RBX_API.md)). The read-only queries `coreai_world_find`, `coreai_world_pos`,
+`coreai_world_exists`, `coreai_world_list_prefabs` and `coreai_world_raycast` stay available. A Lua stack you
+build with `LuaCsModRuntimeFactory` keeps the build functions (the option defaults to `true`).
+
+Where they are registered, use table-shaped spawn calls so optional fields are explicit:
 
 ```lua
 coreai_world_spawn({
@@ -155,7 +189,9 @@ coreai_world_set_color("Enemy1", "#ff3300")
 coreai_world_destroy("Enemy1")
 ```
 
-WorldEdit also exposes scene, animation, audio, UI text, physics, object-listing, batch, grid, and transaction helpers where enabled by capabilities.
+The build set also has `coreai_world_set_active`, `coreai_world_load_scene`, `coreai_world_reload_scene`,
+`coreai_world_play_animation`, `coreai_world_play_sound`, `coreai_world_spawn_batch`, `coreai_world_grid` and the
+`coreai_world_begin` / `coreai_world_commit` / `coreai_world_rollback` transaction helpers.
 
 ## 4. Prefabs and built-in primitives
 
@@ -170,15 +206,15 @@ Accepted primitive keys:
 - `plane`
 - `empty`
 
-Primitive fallback is gated by `ICoreAISettings.AllowWorldPrimitives` (default `true`), serialized on the CoreAI Settings asset as `allowWorldPrimitives` (not shown in the custom inspector; set it in code or through the Debug inspector). Registered prefab keys still take precedence.
+Primitive fallback is gated by `ICoreAISettings.AllowWorldPrimitives` (default `true`), serialized on the CoreAI Settings asset as `allowWorldPrimitives`. The custom inspector does not show it: switch the Inspector to Debug mode to change it (`CoreAISettingsAsset.ApplyOptions` does not copy it). It is read when `CoreAILifetimeScope` builds the world-command services. Registered prefab keys still take precedence.
 
 ## 5. Scene tools are separate
 
-`scene_tool` is a separate inspection/edit surface for scene queries and instance-level operations. It is not a replacement for `world_command`, and its `set_transform` action should not be documented as a public world command action. Use `world_command.change` or `coreai_world_change` for name-based gameplay world edits.
+`scene_tool` (functions `find_objects`, `get_hierarchy`, `get_transform`, `set_transform`) is a separate, host-wired inspection/edit surface that addresses objects by `instanceId`. It is not a replacement for `world_command`, and its `set_transform` is not a `world_command` action. Use `world_command` `change` for name-based gameplay world edits. Format: [JSON_COMMAND_FORMAT.md §7](JSON_COMMAND_FORMAT.md#7-scene-tool-host-wired).
 
 ## 6. Component commands
 
-Direct reflection from Lua is risky. Use the native `component_command` LLM tool or Lua `coreai_component_*` functions for common Unity components.
+Direct reflection from Lua is risky. Use the native `component_command` LLM tool (host-wired: `ComponentLlmTool`) or, where the Lua build bindings are registered (see §3), the `coreai_component_*` functions for common Unity components.
 
 | Action | Required parameters | Effect |
 |---|---|---|
@@ -187,9 +223,9 @@ Direct reflection from Lua is risky. Use the native `component_command` LLM tool
 | `set` | `targetName`, `componentType`, `propertyName`, matching value field | Sets a supported property and auto-adds the component if missing. |
 | `list_components` | `targetName` | Lists component type names on the object. |
 
-Supported `componentType` values: `rigidbody`, `rigidbody2d`, `boxcollider`, `spherecollider`, `capsulecollider`, `meshcollider`, `light`, `audiosource`, `camera`, `linerenderer`, `trailrenderer`, `textmesh`, `meshrenderer`, and `particlesystem`.
+Supported `componentType` values: `rigidbody`, `rigidbody2d`, `boxcollider`, `spherecollider`, `capsulecollider`, `meshcollider`, `light`, `audiosource`, `camera`, `linerenderer`, `trailrenderer`, `textmesh`, `meshrenderer`, and `particlesystem`. The properties each one accepts are listed in [TOOL_CALL_SPEC.md §5](TOOL_CALL_SPEC.md#5-component-command-tool).
 
-Lua equivalents:
+Lua equivalents (where registered):
 
 ```lua
 coreai_component_add("Cube", "rigidbody")
@@ -293,4 +329,5 @@ If the saved scene name differs from the current scene, load is skipped. This pr
 ## 8. Tests
 
 - EditMode (`CoreAI.Mods.Tests`): `WorldBindingsStudUnitsEditModeTests` verifies that Lua `coreai_world_*` calls publish valid `WorldCommand` JSON.
-- PlayMode: world-command executor and public world-tool tests should cover spawn/change/colour/destroy/listing plus runtime actions such as animation, audio, physics, and UI.
+- EditMode (CoreAiUnity): `CoreAiWorldCommandExecutorDestroyEditModeTests`, `CoreAiWorldCommandExecutorLoadSceneEditModeTests`, `ComponentCatalogEditModeTests`, `CoreAiComponentCommandExecutorListEditModeTests`, `WorldCommandsInstallerEditModeTests` and the `WorldStateManager*EditModeTests`.
+- PlayMode: `CoreAiWorldCommandExecutorPlayModeTests` and `WorldStateManagerPlayModeTests` (FastNoLlm, no model needed); `WorldCommandPlayModeTests` (LlmVerification, needs a live model).

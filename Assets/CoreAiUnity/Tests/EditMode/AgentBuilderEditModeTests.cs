@@ -17,6 +17,70 @@ namespace CoreAI.Tests.EditMode
     [TestFixture]
     public sealed class AgentBuilderEditModeTests
     {
+        [Test]
+        public void RequestClone_PreservesReasoningTemperatureAndSampling()
+        {
+            LlmSamplingOptions sampling = new LlmSamplingOptions { TopP = 0.75f, Seed = 42 };
+            AiTaskRequest request = new AiTaskRequest
+            {
+                Temperature = 0.1f,
+                Reasoning = new LlmReasoningOptions(LlmReasoningEffort.High, 4096),
+                Sampling = sampling
+            };
+
+            AiTaskRequest clone = request.CloneForRole("copied-role");
+
+            Assert.That(clone.Temperature, Is.EqualTo(0.1f));
+            Assert.That(clone.Reasoning.Value.Effort, Is.EqualTo(LlmReasoningEffort.High));
+            Assert.That(clone.Reasoning.Value.BudgetTokens, Is.EqualTo(4096));
+            Assert.That(clone.Sampling, Is.SameAs(sampling));
+        }
+
+        [Test]
+        public void Build_ReasoningAndSamplingReachPublishedRoleAndSurviveRoleReconfiguration()
+        {
+            LlmSamplingOptions sampling = new LlmSamplingOptions
+            {
+                TopP = 0.8f,
+                Seed = 23,
+                Stop = new[] { "END" },
+                FrequencyPenalty = 0.3f,
+                PresencePenalty = 0.2f
+            };
+            AgentMemoryPolicy policy = new AgentMemoryPolicy();
+            AgentConfig config = new AgentBuilder("RequestSettingsAgent")
+                .WithSystemPrompt("Configure request settings.")
+                .WithReasoning(LlmReasoningEffort.Low, 2048)
+                .WithSampling(sampling)
+                .BuildDetached();
+
+            config.ApplyToPolicy(policy);
+            policy.ConfigureRole("RequestSettingsAgent", useMemoryTool: false);
+            AgentMemoryPolicy.RoleMemoryConfig role = policy.GetRoleConfig("RequestSettingsAgent");
+
+            Assert.That(config.Reasoning.Value.Effort, Is.EqualTo(LlmReasoningEffort.Low));
+            Assert.That(role.Reasoning.Value.Effort, Is.EqualTo(LlmReasoningEffort.Low));
+            Assert.That(role.Reasoning.Value.BudgetTokens, Is.EqualTo(2048));
+            Assert.That(role.Sampling, Is.SameAs(sampling));
+        }
+
+        [Test]
+        public void Policy_RequestSettingsCanBeClearedWithoutChangingTemperature()
+        {
+            AgentMemoryPolicy policy = new AgentMemoryPolicy();
+            policy.SetTemperature("MutableRequestSettingsAgent", 0.4f);
+            policy.SetReasoning("MutableRequestSettingsAgent", new LlmReasoningOptions(LlmReasoningEffort.None));
+            policy.SetSampling("MutableRequestSettingsAgent", new LlmSamplingOptions { TopP = 0.5f });
+            policy.SetReasoning("MutableRequestSettingsAgent", null);
+            policy.SetSampling("MutableRequestSettingsAgent", null);
+
+            AgentMemoryPolicy.RoleMemoryConfig role = policy.GetRoleConfig("MutableRequestSettingsAgent");
+
+            Assert.That(role.Reasoning, Is.Null);
+            Assert.That(role.Sampling, Is.Null);
+            Assert.That(role.Temperature, Is.EqualTo(0.4f));
+        }
+
         private SynchronizationContext _previousSynchronizationContext;
 
         /// <summary>

@@ -22,7 +22,8 @@ closed (2026-09-25, released in 7.47.0)** on the Unity EditMode/PlayMode `FastNo
 and acceptance evidence are in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md). Audits of MVP1, MVP2, the gameplay
 services and the multiplayer foundation (2026-09-24) were followed by fix waves and three audit rounds
 over them, recorded in the rung sections below and in `TODO.md`; they shipped in 7.47.0. Next is MVP4 (script contexts),
-the first of the multiplayer rungs.
+the first of the multiplayer rungs. As of the current release, 7.50.2 (2026-10-15), MVP4 has not started: the
+releases after 7.47.0 (7.47.1–7.50.2) are fixes and features outside the ladder (both changelogs).
 
 **Architecture (normative)**: every deliverable in this ladder is built to
 `Docs/ARCHITECTURE_RULES.md` — engine-free Domain assemblies (`noEngineReferences: true`),
@@ -247,8 +248,9 @@ Derived rules:
   `workspace:GetServerTimeNow()`, `time()` (`DateTime` is a loud backlog stub, M2-15). Full
   clock-mapping table in §5.2.6 (D9).
 - **Hot reload (LOCKED)**: reloading a mod restarts its scripts with clean state; mod-created
-  Instances are destroyed by default (opt-out `preserveInstances` flag per mod); mod stores
-  **always** survive. Full survival matrix in §6.3.
+  Instances are destroyed by default (opt-out `preserveInstances` flag per mod; as shipped, the
+  previous run's startup objects are destroyed and the opt-out is the per-reload
+  `ModReloadMode.KeepObjects`); mod stores **always** survive. Full survival matrix in §6.3.
 - **Mod manifest (LOCKED)**: `mod.json` carries `api_version` from day one; the loader
   version-gates mods against the host's mod-API version (§MVP18).
 - **One JSON contract (LOCKED)**: a single table↔JSON mapping (`HttpService:JSONEncode/JSONDecode`
@@ -529,7 +531,7 @@ this table: a stub that names "MVP9" means DataStore, which is MVP16 now.
 
 ### 4.2 The ladder at a glance
 
-| # | Rung | Status (2026-09-25) | Size | Test | Old |
+| # | Rung | Status (7.50.2, 2026-10-15) | Size | Test | Old |
 |---|---|---|---|---|---|
 | MVP0 | Engine abstraction seam | landed 2026-07-22 | M | EM | MVP0 |
 | MVP1 | Instance/DataModel core | landed in 6.3.0 | L | EM, PT | MVP1 |
@@ -807,7 +809,9 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   - The real WebGL page-reload smoke of the world package (save → reload the page → the bytes and the
     startup selection survive).
   - **S1** and **S2** (§4.3); record the numbers in `TODO.md`.
-  - The live-model PlayMode re-run (four live timeouts on an unresponsive LM Studio server).
+  - One full live-model PlayMode run on a settled tree (four live timeouts on an unresponsive LM Studio
+    server at the close; the runs on 7.47.1–7.47.3 were partial, every failure passing a targeted rerun
+    or retained as a model failure).
   - The MVP3 tail items in `TODO.md` ("Persistence (MVP3 tail)").
 - **Test**: EM, PM, manual WebGL; S1 and S2 as recorded measurements.
 - **DoD**: EditMode 0 failed and PlayMode `FastNoLlm` 0 failed on Unity 6000.3.14f1 (met 2026-09-25);
@@ -851,7 +855,9 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
      overwrite/delete; an AI-initiated restore requires player confirmation) + a rolling
      `Saves/Auto/<timestamp>-<trigger>.world` ring (~10), a snapshot taken before each AI mutation (mod
      load/reload, world-mutating `execute_lua`) with trigger metadata.
-- **Reuses**: MVP1 (registry with stable, serializable ids), MVP2 (`RobloxJson`).
+- **Reuses**: MVP1 (registry with stable, serializable ids). As built, the package codec is
+  `Infrastructure/RbxWorldPackageSerializer.cs` over Newtonsoft.Json DTOs, not the Lua-facing JSON
+  contract of MVP2 (`Scripting/LuaCs/LuaCsRbxJson.cs`) that deliverable 1 planned.
 - **Package/flagship**: packages only.
 
 ### MVP4 — Script contexts & client runtime *(next)* (M)
@@ -971,7 +977,8 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   3. `RemoteFunction` request/response over paired messages, with timeout → Lua error, matching the
      "InvokeClient is hazardous" guidance [^7].
   4. Payload marshalling per the M-doc serialization appendix — the wire envelope is the **identical
-     MVP2 loopback envelope** (§5.2.4: `RobloxJson` + tagged datatype/`InstanceId` entries; table-key
+     MVP2 loopback envelope** (§5.2.4: `LuaCsRbxNetworkCodec` over the shared JSON contract
+     `LuaCsRbxJson`, with tagged datatype/`InstanceId` entries; table-key
      stringification — conformance tests like `M3_8_TableKeysStringified` per §6.6); Instances marshal
      as `InstanceId` and resolve through the registry on the far side (nil + warning if unknown).
   5. `Players` becomes real: one `Player` per admitted connection, `PlayerAdded`/`PlayerRemoving` from
@@ -1193,9 +1200,9 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
     (`Assets/CoreAI/Runtime/Core/Features/Hub/HubPageRegistry.cs`).
   - Configuration assets: `AgentPromptsManifest`, `LlmRoutingManifest`, `SkillSetAsset`,
     `CoreAISettingsAsset`, `AiPermissionsAsset`, `CoreAiPrefabRegistryAsset`.
-  - The player-host (MVP5) and dedicated-server (MVP8) presets. The solo AI sandbox is today's default
-    composition (two lifetime scopes, `CoreAILifetimeScope` and `CoreAiModsLifetimeScope`), not yet a
-    named preset.
+  - No presets exist yet: the player-host (MVP5) and dedicated-server (MVP8) presets come with those
+    rungs. The solo AI sandbox is today's default composition (two lifetime scopes,
+    `CoreAILifetimeScope` and `CoreAiModsLifetimeScope`), not yet a named preset.
   - The principle is normative (`Docs/ARCHITECTURE_RULES.md` §2.1); existing violations are tracked in
     `TODO.md` under the grandfathering rule.
 - **To do**:
@@ -1275,7 +1282,8 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   (`HubIntegration/HubModEditorPage.cs`, `HubIntegration/LuaSyntaxHighlighter.cs`); the click pick
   source (`RbxApi/Binding/IClickPickSource.cs`, `UnityClickPickSource.cs`); the world package as the
   snapshot (staged swap); the autosave ring, revert and origin tags (`RbxApi/Instances/OriginTag.cs`);
-  `world_command`/`execute_lua`; grants and intents (MVP6); roles (MVP11).
+  `world_command`/`execute_lua`; grants and intents in process (`WriteGrantLedger`, `IntentGateway`;
+  over the wire in MVP6). Roles come with MVP11.
 - **To do**:
   - A runtime Explorer (a UI Toolkit tree over `InstanceRegistry` with live `ChildAdded`/`Destroying`)
     and a Properties panel driven by `ClassCatalog` and the binding member tables.
@@ -1315,9 +1323,9 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 - **Done so far**: the world package codec and validation (`Infrastructure/RbxWorldPackageSerializer.cs`,
   `RbxApi/Instances/InstanceTreeSerializer.cs`); the single-mod bundle (`ExportMod`,
   [MOD_SHARING.md](MOD_SHARING.md)); `FileRbxWorldPackageStore`; the Luau downlevel at load
-  (`LuaExecution/LuauSourceGate.cs`); script instances and contexts (MVP4); one argument/property
-  coercion rule on both surfaces (B2-12, RBX-COERCE: numbers ↔ numeric strings, integer truncation,
-  strict booleans, Enum Name/Value on instance members; `Scripting/LuaCs/LuaCsValueMarshaller.cs`).
+  (`LuaExecution/LuauSourceGate.cs`); one argument/property coercion rule on both surfaces (B2-12,
+  RBX-COERCE: numbers ↔ numeric strings, integer truncation, strict booleans, Enum Name/Value on instance
+  members; `Scripting/LuaCs/LuaCsValueMarshaller.cs`). Script instances and contexts come from MVP4.
 - **To do**:
   - A `.model` package: a subtree of the world codec, with id remapping on insert and scripts carried as
     instances.
@@ -1471,7 +1479,7 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   are the author's responsibility, as in Roblox. Values are stored as JSON strings in `FileLuaModStore`
   (atomic writes; durability through `CoreAiWebGlPersistence` on WebGL, as for every store) behind a
   pluggable save-provider interface (a host can adapt its own backend). `UpdateAsync` is a
-  read-modify-write under the store lock. Table↔JSON through the **shared JSON contract** (`RobloxJson`,
+  read-modify-write under the store lock. Table↔JSON through the **shared JSON contract** (`LuaCsRbxJson`,
   §5.2.4); non-JSON values (functions, Instances) raise `BAD_ARGUMENT` naming the key path. Loud stubs:
   `GetVersionAsync`, `ListKeysAsync`, `ListVersionsAsync`/`GetVersionAtTimeAsync`/`RemoveVersionAsync`
   (S1.18), `GetRequestBudgetForRequestType` (S1.24) and `GetOrderedDataStore` (S1.2, S1.27–S1.29; a
@@ -1592,8 +1600,10 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 - **Goal**: the whole stack holds its budget on the weakest targets: WebGL client and Android client.
 - **Done so far**: the per-resume budgets and quarantine; `ILuaCsGuardObserver`; the WebGL browser gate
-  (2026-09-02, `TODO.md`); the WebGL save budget (4 MiB / 4,032 instances,
-  [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md)); MVP9's scale work.
+  (2026-09-02, `TODO.md`); a WebGL player checked in real Chrome for 7.48.0 (chat, attachments, the
+  camera tool, model-written `execute_lua`, persistence across a page reload; `TODO.md` keeps its open
+  findings); the WebGL save budget (4 MiB / 4,032 instances, [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md)).
+  MVP9's scale work lands before this rung.
 - **To do**: lazy material textures (the ~99 MB eager load, `TODO.md`); incremental JSON/ZIP on WebGL;
   the WebGL client soak; an Android client build; the performance regression suite (F-20); the carried
   items below.
@@ -2490,8 +2500,8 @@ optional `LuaLogFileSink`. No Unity console dependency anywhere in the mod path.
 
 ### 6.2 AI toolchain per rung (what the LLM can call)
 
-Existing today: `manage_mods` (`LuaModsLlmTool.cs`) — load/reload/unload/forget/export/import/
-versions/revert/diagnostics; `get_mod_logs` (`GetModLogsLlmTool`, wired for the Programmer role); the
+Existing today: `manage_mods` (`LuaModsLlmTool.cs`) — list/get_source/load/reload/unload/forget/
+export/import/versions/revert/diagnostics; `get_mod_logs` (`GetModLogsLlmTool`, wired for the Programmer role); the
 world tools `save_world`, `load_world`, `list_autosaves`, `load_autosave`; `execute_lua` and
 `world_command`; the hand-written "Rbx API" skill (`read_skill`). Tool-to-role wiring is hard-coded
 today (every Lua/world tool goes to `Programmer`); MVP10 makes it profile data.

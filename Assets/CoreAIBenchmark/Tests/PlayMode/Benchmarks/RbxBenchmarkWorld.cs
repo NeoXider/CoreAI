@@ -177,6 +177,23 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return new Snapshot(parts, names, outOfBounds, Split(fields[3]), Split(fields[4]));
         }
 
+        /// <summary>
+        /// Runs a read-only Lua chunk against the built world and returns its printed output, for graders
+        /// that need more than <see cref="Measure"/> (per-part geometry, materials by role).
+        /// </summary>
+        public bool TryEvaluateLua(string lua, out string output)
+        {
+            output = "";
+            Task<LuaTool.LuaResult> task = _stack.ToolExecutor.ExecuteAsync(lua, _actor, CancellationToken.None);
+            if (!task.IsCompleted || !task.Result.Success)
+            {
+                return false;
+            }
+
+            output = task.Result.Output ?? "";
+            return true;
+        }
+
         private static string[] Split(string csv)
         {
             return string.IsNullOrWhiteSpace(csv)

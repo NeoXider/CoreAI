@@ -13,7 +13,7 @@ namespace CoreAI.ExampleGame.Composition
     {
         protected override void Configure(IContainerBuilder builder)
         {
-            // Опционально: сюда — регистрация SO/UseCases, если уводим проводку с SessionHost на VContainer.
+            // TODO: Register ScriptableObjects and use cases here if SessionHost wiring moves to VContainer.
         }
     }
 }

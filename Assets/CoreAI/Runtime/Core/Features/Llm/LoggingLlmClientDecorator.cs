@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -78,6 +78,12 @@ namespace CoreAI.Infrastructure.Llm
         public bool SupportsNativeToolCalling => _inner?.SupportsNativeToolCalling == true;
 
         /// <inheritdoc />
+        public void ResolveRequestSettings(LlmCompletionRequest request)
+        {
+            _inner?.ResolveRequestSettings(request);
+        }
+
+        /// <inheritdoc />
         public bool SupportsNativeToolCallingForRole(string agentRoleId)
         {
             return _inner?.SupportsNativeToolCallingForRole(agentRoleId) == true;
@@ -129,6 +135,7 @@ namespace CoreAI.Infrastructure.Llm
                 routing.PreflightAnnotate(request);
             }
 
+            _inner.ResolveRequestSettings(request);
             using IDisposable requestHeaders = LlmRequestHeaderScopes.Begin(_inner, request);
 
             string trace = string.IsNullOrWhiteSpace(request.TraceId) ? "-" : request.TraceId.Trim();
@@ -145,7 +152,7 @@ namespace CoreAI.Infrastructure.Llm
             // it depends only on the request, so the completion log line reuses this instance.
             string promptBudgetLine = FormatPromptBudgetLine(system, user, request.Tools);
             _logger.Info(
-                $"LLM > traceId={trace} role={role} backend={backendLine}\n" +
+                $"LLM > traceId={trace} role={role} backend={backendLine} reasoning={request.EffectiveReasoningEffort} dialect={request.EffectiveReasoningDialect} temperature={request.EffectiveTemperature?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "default"} maxTokens={request.EffectiveMaxOutputTokens?.ToString() ?? "default"}\n" +
                 $"  system ({system.Length} chars): {PromptPreview(system, SystemPreviewChars)}\n" +
                 $"  user ({user.Length} chars): {PromptPreview(user, UserPreviewChars)}\n" +
                 $"  {promptBudgetLine}", LogTag.Llm);
@@ -546,6 +553,7 @@ namespace CoreAI.Infrastructure.Llm
                 routing.PreflightAnnotate(request);
             }
 
+            _inner.ResolveRequestSettings(request);
             using IDisposable requestHeaders = LlmRequestHeaderScopes.Begin(_inner, request);
 
             string trace = string.IsNullOrWhiteSpace(request.TraceId) ? "-" : request.TraceId.Trim();
@@ -562,7 +570,7 @@ namespace CoreAI.Infrastructure.Llm
             // WHY once per request: see CompleteAsync - the completion line reuses the same text.
             string promptBudgetLine = FormatPromptBudgetLine(streamSystem, streamUser, streamTools);
             _logger.Info(
-                $"LLM > (stream) traceId={trace} role={role} backend={backendLine}\n" +
+                $"LLM > (stream) traceId={trace} role={role} backend={backendLine} reasoning={request.EffectiveReasoningEffort} dialect={request.EffectiveReasoningDialect} temperature={request.EffectiveTemperature?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "default"} maxTokens={request.EffectiveMaxOutputTokens?.ToString() ?? "default"}\n" +
                 $"  system ({streamSystem.Length} chars): {PromptPreview(request.SystemPrompt, SystemPreviewChars)}\n" +
                 $"  user ({streamUser.Length} chars): {PromptPreview(request.UserPayload, UserPreviewChars)}\n" +
                 $"  {promptBudgetLine}", LogTag.Llm);
@@ -572,6 +580,7 @@ namespace CoreAI.Infrastructure.Llm
             int chunkCount = 0;
             int? promptTokens = null;
             int? completionTokens = null;
+            int? reasoningTokens = null;
             int? totalTokens = null;
             int cacheReadTokens = 0;
             int cacheWriteTokens = 0;
@@ -692,6 +701,7 @@ namespace CoreAI.Infrastructure.Llm
 
                     if (current != null)
                     {
+                        reasoningTokens = current.ReasoningTokens ?? reasoningTokens;
                         if (current.PromptTokens.HasValue)
                         {
                             promptTokens = current.PromptTokens;
@@ -754,6 +764,7 @@ namespace CoreAI.Infrastructure.Llm
                     Content = content,
                     PromptTokens = promptTokens,
                     CompletionTokens = completionTokens,
+                    ReasoningTokens = reasoningTokens,
                     TotalTokens = totalTokens,
                     CacheReadTokens = cacheReadTokens,
                     CacheWriteTokens = cacheWriteTokens,

@@ -14,16 +14,14 @@ globals, `string.rep` / `string.format` caps) and then:
 - renders the same PASS/FAIL report on screen in a uGUI `CoreAiDemoPanel`, so the result is visible
   inside a built WebGL player without a console.
 
-When Lua is not enabled (`COREAI_LUA` absent), the script compiles
-to a no-op fallback that just shows
-"CoreAI Lua sandbox self-test unavailable: COREAI_LUA is not set."
+When Lua is not enabled (`COREAI_LUA` absent), the script compiles to a fallback that only shows a
+`CoreAiDemoPanel` saying "Unavailable: COREAI_LUA is not set for this build."
 
 ## How to use
 
 1. Attach `WebGlLuaSelfTest` to a GameObject in a scene.
 2. Ensure `COREAI_LUA` is defined.
-3. Keep `CoreAISettingsAsset.EnableLuaOnWebGl` on (the default).
-4. Build to WebGL and open the player — the on-screen box reports PASS/FAIL.
+3. Build to WebGL and open the player — the on-screen box reports PASS/FAIL.
 
 ## Requirements
 
@@ -32,4 +30,4 @@ to a no-op fallback that just shows
 
 ## Related
 
-- `Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md` — sandbox boundary and escape coverage.
+- [LUA_SANDBOX_SECURITY.md](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) — sandbox boundary and escape coverage.

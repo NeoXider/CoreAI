@@ -3044,7 +3044,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             Assert.IsFalse(refused.Success, "a client joined before publication");
             Assert.AreEqual(RbxWorldLoadRefusedException.NetworkSessionsActiveStatus, refused.Status);
-            StringAssert.Contains("MVP11 session handoff", refused.Error);
+            StringAssert.Contains("session handoff is unavailable", refused.Error);
             Assert.AreSame(live, session.Controller.CurrentRbxApi.Registry, "the live world was not replaced");
             Assert.IsFalse(live.IsDetached);
             Assert.AreEqual(1, sources.Prepared);

@@ -36,8 +36,8 @@ namespace CoreAI.Mcp.Tools
             "Read Lua mod logs (print/warn/error/runtime-error) captured independently of the Unity " +
             "console, to see what a mod printed or which error it threw during play and repair it. " +
             "Read-only. Entries carry a monotonically increasing sequence number and are returned " +
-            "oldest-first; pass since_sequence to page only newer entries. Output is capped and ends with " +
-            "a '(truncated)' marker when the character budget is exceeded. Params: mod_id (optional filter), " +
+            "oldest-first; pass since_sequence to page only newer entries. When the character budget is exceeded, " +
+            "the newest entries are kept and a leading '...(+N more)' marker counts omitted entries. Params: mod_id (optional filter), " +
             "level (minimum severity: print, warn, error, runtime_error), since_sequence, max_entries (default 50).";
 
         /// <inheritdoc />

@@ -143,6 +143,15 @@ namespace CoreAI.Ai
         /// </summary>
         public int? MaxOutputTokens { get; set; }
 
+        /// <summary>Per-call sampling temperature; null inherits the agent and endpoint defaults.</summary>
+        public float? Temperature { get; set; }
+
+        /// <summary>Per-call reasoning overrides; null or Default effort inherits lower layers.</summary>
+        public LlmReasoningOptions? Reasoning { get; set; }
+
+        /// <summary>Per-call sampling overrides; null fields inherit the agent settings.</summary>
+        public LlmSamplingOptions Sampling { get; set; }
+
         /// <summary>
         /// Per-call override of the tool-call roundtrip cap. <c>null</c> = use the per-agent/global
         /// fallback chain; <c>0</c> = UNLIMITED (no safety valve); positive = that many roundtrips.
@@ -175,7 +184,7 @@ namespace CoreAI.Ai
         /// instead of re-listing properties: a partial copy silently drops whatever the list forgot, and the
         /// drop surfaces far from its cause — a runtime-context provider rejecting a request the orchestrator
         /// had accepted, or a diagnostic showing a prompt no real call builds. The copy shares reference
-        /// fields (attachments, tool names); it is a request snapshot, not a deep copy.
+        /// fields (attachments, tool names, sampling); it is a request snapshot, not a deep copy.
         /// </summary>
         public AiTaskRequest Clone()
         {
@@ -203,6 +212,9 @@ namespace CoreAI.Ai
                 RequiredToolName = RequiredToolName,
                 AllowedToolNames = AllowedToolNames,
                 MaxOutputTokens = MaxOutputTokens,
+                Temperature = Temperature,
+                Reasoning = Reasoning,
+                Sampling = Sampling,
                 MaxToolCallRoundtrips = MaxToolCallRoundtrips,
                 AllowTextShapedToolCallsOnNativeEndpoint = AllowTextShapedToolCallsOnNativeEndpoint
             };

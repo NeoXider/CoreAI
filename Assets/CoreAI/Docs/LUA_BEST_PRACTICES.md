@@ -44,7 +44,7 @@ modRuntime.LoadMod(host, "wave_director", luaCode,
 modRuntime.EmitEvent(host, "wave_started", waveIndex.ToString());
 ```
 
-Per-mod capability is **already enforced**: a read-only mod will not receive world-edit APIs.
+Per-mod capability is **enforced**: a read-only mod does not receive world-edit APIs.
 
 For per-frame-ish logic, `hooks_on("tick", fn)` is a convenience alias for `hooks_every(0.05, fn)` —
 prefer polling held input (`input_key`, `Gameplay` tier) from a timer/tick handler over
@@ -102,9 +102,10 @@ executor.RegisterCustomHandler(new HealWorldHandler());
 ```
 
 `RegisterCustomHandler` lives on the concrete `CoreAiWorldCommandExecutor`. The default composition
-(`WorldCommandsInstaller`) registers the executor only as `ICoreAiWorldCommandExecutor`, wrapped in
-`AuditedWorldCommandExecutor`, so `container.Resolve<CoreAiWorldCommandExecutor>()` does not resolve and
-the audited wrapper does not expose the inner instance. Until the composition offers a registration
+(`WorldCommandsInstaller`) registers the executor only as `ICoreAiWorldCommandExecutor` (wrapped in
+`AuditedWorldCommandExecutor` when an `IAuditLog` is registered), so
+`container.Resolve<CoreAiWorldCommandExecutor>()` does not resolve and the audited wrapper does not
+expose the inner instance. Until the composition offers a registration
 seam, a custom handler only runs on an executor instance your host constructs itself.
 
 From Lua (WorldEdit): publish an envelope through the existing sink or add a thin Lua wrapper in extension bindings.
@@ -114,7 +115,7 @@ From Lua (WorldEdit): publish an envelope through the existing sink or add a thi
 | Task | Minimum tier |
 |---|---|
 | Read the world only | `Read` |
-| Change time scale / UI | `Read \| Gameplay` |
+| Change time scale / read input | `Read \| Gameplay` |
 | Spawn / level edit | `Read \| WorldEdit` |
 | Formulas / mods | `+ LogicOverride` |
 | Arbitrary components | `+ Full` (dev / trusted builds only) |
@@ -199,7 +200,7 @@ In CoreAiUnity, use **`IGameLogger`** / `GameLogFeature`, not `Debug.Log*` in ru
 | Anti-pattern | Why it is bad |
 |---|---|
 | `DynamicInvoke` + `ToObject` on every binding call | Loses typed marshalling; use `LuaCsApiRegistry.Register` with a typed delegate instead |
-| Mix instruction-count limits and time-based timeouts without understanding their semantics | Different failure modes; see LUA_NATIVE_APIS.md |
+| Mix instruction-count limits and time-based timeouts without understanding their semantics | Different failure modes; see [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) |
 | `renderer.material.color = ...` in a tight loop | Material instances; use `MaterialPropertyBlock` |
 | `string.rep(1, 1e9)` without a cap | Allocation bomb; capped in `LuaCsSecureEnvironment` |
 

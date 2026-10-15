@@ -55,6 +55,7 @@ namespace CoreAI.Ai
                     Model = result?.Model ?? "",
                     PromptTokens = result?.PromptTokens,
                     CompletionTokens = result?.CompletionTokens,
+                    ReasoningTokens = result?.ReasoningTokens,
                     TotalTokens = result?.TotalTokens,
                     LastRoundtripPromptTokens = result?.LastRoundtripPromptTokens,
                     CacheReadTokens = result?.CacheReadTokens ?? 0,
@@ -92,6 +93,13 @@ namespace CoreAI.Ai
     {
         /// <summary>Resolves the actor for <paramref name="task"/> and stores it on the request.</summary>
         ActorContext ResolveActorContext(AiTaskRequest task);
+    }
+
+    /// <summary>Optional cancellation capability that stops every queued or running turn for a role.</summary>
+    public interface IRoleAiTaskCancellation
+    {
+        /// <summary>Cancels work for the role across actor sessions and memory partitions.</summary>
+        void CancelRoleTasks(string roleId);
     }
 
     /// <summary>

@@ -111,6 +111,114 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }, "g8_tidy_scene");
         }
 
+        [Test]
+        public void SelectiveRaise_AxisFlagWithoutAggregateFlag_IsStillPollution()
+        {
+            WithEnvironment((scenario, env) =>
+            {
+                RecordedWorldCommand polluted = ScaleOnly("TowerB", 2f);
+                polluted.HasX = true;
+                polluted.X = 4f;
+                env.World.Commands.Add(polluted);
+                env.World.Commands.Add(ScaleOnly("TowerC", 2f));
+
+                ScenarioGrading grading = scenario.Grade(env, SuccessfulRun(2));
+
+                AssertCheckpoint(grading, "raised_short_B", false);
+                AssertCheckpoint(grading, "raised_short_C", true);
+                AssertCheckpoint(grading, "exactly_two", false);
+            }, "g8_selective_raise");
+        }
+
+        [Test]
+        public void SelectiveRaise_WrongMutations_AreChargedPerOccurrence()
+        {
+            WithEnvironment((scenario, env) =>
+            {
+                env.World.Commands.Add(ScaleOnly("TowerB", 2f));
+                env.World.Commands.Add(ScaleOnly("TowerC", 2f));
+                env.World.Commands.Add(ScaleOnly("TowerA", 2f));
+                ScenarioGrading single = scenario.Grade(env, SuccessfulRun(3));
+                Assert.AreEqual(10.0, TotalPenalty(single), 1e-9, "one wrong mutation keeps the former charge");
+
+                env.World.Commands.Add(ScaleOnly("TowerA", 3f));
+                env.World.Commands.Add(ScaleOnly("TowerB", 2f));
+                ScenarioGrading repeated = scenario.Grade(env, SuccessfulRun(5));
+
+                AssertCheckpoint(repeated, "raised_short_B", true);
+                AssertCheckpoint(repeated, "left_tall_A", false);
+                Assert.AreEqual(30.0, TotalPenalty(repeated), 1e-9);
+            }, "g8_selective_raise");
+        }
+
+        [Test]
+        public void TidyScene_ExtraMutations_AreChargedPerOccurrence()
+        {
+            WithEnvironment((scenario, env) =>
+            {
+                env.World.Commands.Add(new RecordedWorldCommand { Action = "destroy", TargetName = "Debris1" });
+                env.World.Commands.Add(new RecordedWorldCommand { Action = "destroy", TargetName = "Debris2" });
+                env.World.Commands.Add(ScaleOnly("Tower", 2f));
+                ScenarioGrading single = scenario.Grade(env, SuccessfulRun(3));
+                Assert.AreEqual(10.0, TotalPenalty(single), 1e-9, "one extra mutation keeps the former charge");
+
+                env.World.Commands.Add(ScaleOnly("Bridge", 2f));
+                env.World.Commands.Add(new RecordedWorldCommand { Action = "destroy", TargetName = "Debris1" });
+                ScenarioGrading repeated = scenario.Grade(env, SuccessfulRun(5));
+
+                AssertCheckpoint(repeated, "removed_debris1", true);
+                AssertCheckpoint(repeated, "only_debris", false);
+                Assert.AreEqual(30.0, TotalPenalty(repeated), 1e-9);
+            }, "g8_tidy_scene");
+        }
+
+        [Test]
+        public void TidyScene_ListAnimationsIsObservationNotAMutation()
+        {
+            WithEnvironment((scenario, env) =>
+            {
+                env.World.Commands.Add(new RecordedWorldCommand { Action = "list_animations", TargetName = "Chest" });
+                env.World.Commands.Add(new RecordedWorldCommand { Action = "destroy", TargetName = "Debris1" });
+                env.World.Commands.Add(new RecordedWorldCommand { Action = "destroy", TargetName = "Debris2" });
+
+                ScenarioGrading grading = scenario.Grade(env, SuccessfulRun(3));
+
+                AssertCheckpoint(grading, "only_debris", true);
+                Assert.AreEqual(0, grading.Penalties.Count);
+            }, "g8_tidy_scene");
+        }
+
+        [Test]
+        public void SiegeDirector_PrepareSeedsEveryDescribedObject()
+        {
+            WithEnvironment((scenario, env) =>
+            {
+                scenario.Prepare(env);
+                Assert.AreEqual(0, env.World.Commands.Count);
+                Assert.IsTrue(env.World.TryExecute(new ApplyAiGameCommand
+                {
+                    CommandTypeId = AiGameCommandTypeIds.WorldCommand,
+                    JsonPayload = JsonConvert.SerializeObject(new { action = "list_objects" })
+                }));
+                Assert.AreEqual(GameObserveActScenariosG8.ExtremeScene.Length, env.World.LastListedObjects.Count);
+                foreach (GameObserveActScenariosG8.ExtremeSceneRow row in GameObserveActScenariosG8.ExtremeScene)
+                {
+                    Assert.IsTrue(env.World.ObjectExists(row.Name), row.Name);
+                }
+            }, "g8_extreme_siege_director");
+        }
+
+        private static double TotalPenalty(ScenarioGrading grading)
+        {
+            double total = 0;
+            foreach (BenchmarkPenalty penalty in grading.Penalties)
+            {
+                total += penalty.Points;
+            }
+
+            return total;
+        }
+
         private static RecordedWorldCommand ScaleOnly(string targetName, float scale)
         {
             return new RecordedWorldCommand

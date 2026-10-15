@@ -7,6 +7,14 @@ namespace CoreAI.Messaging
     /// </summary>
     public readonly struct LlmRequestStarted
     {
+        /// <summary>Preserves the original constructor signature for existing compiled hosts.</summary>
+        public LlmRequestStarted(string traceId, string roleId, string routingProfileId,
+            LlmExecutionMode executionMode, bool streaming, string actorId)
+            : this(traceId, roleId, routingProfileId, executionMode, streaming, actorId,
+                LlmReasoningEffort.Default, LlmReasoningDialect.Auto, null, null)
+        {
+        }
+
         /// <summary>
         /// Creates an immutable LLM request start event.
         /// </summary>
@@ -16,7 +24,11 @@ namespace CoreAI.Messaging
             string routingProfileId,
             LlmExecutionMode executionMode,
             bool streaming,
-            string actorId = "")
+            string actorId = "",
+            LlmReasoningEffort reasoningEffort = LlmReasoningEffort.Default,
+            LlmReasoningDialect reasoningDialect = LlmReasoningDialect.Auto,
+            float? temperature = null,
+            int? maxOutputTokens = null)
         {
             TraceId = traceId ?? "";
             RoleId = roleId ?? "";
@@ -24,6 +36,10 @@ namespace CoreAI.Messaging
             ExecutionMode = executionMode;
             Streaming = streaming;
             ActorId = actorId ?? "";
+            ReasoningEffort = reasoningEffort;
+            ReasoningDialect = reasoningDialect;
+            Temperature = temperature;
+            MaxOutputTokens = maxOutputTokens;
         }
 
         /// <summary>
@@ -55,5 +71,17 @@ namespace CoreAI.Messaging
         /// Whether the request uses streaming completion.
         /// </summary>
         public bool Streaming { get; }
+
+        /// <summary>Effective reasoning effort at request start.</summary>
+        public LlmReasoningEffort ReasoningEffort { get; }
+
+        /// <summary>Effective provider reasoning wire format.</summary>
+        public LlmReasoningDialect ReasoningDialect { get; }
+
+        /// <summary>Effective sampling temperature, when sent.</summary>
+        public float? Temperature { get; }
+
+        /// <summary>Effective output token cap, when sent.</summary>
+        public int? MaxOutputTokens { get; }
     }
 }

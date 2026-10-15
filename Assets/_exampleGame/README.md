@@ -1,4 +1,4 @@
-﻿# Example Game - CoreAI Template Demo
+# Example Game - CoreAI Template Demo
 
 **CoreAI template author:** **Neoxider** (nickname **neoxider**) - [github.com/NeoXider](https://github.com/NeoXider).
 
@@ -11,6 +11,8 @@ Detailed run and meta gameplay concept: [`Docs/ROGUELITE_PLAYBOOK.md`](Docs/ROGU
 ---
 
 ## About the Game
+
+This section is the target concept; what the code implements today is listed in [`Docs/ROGUELITE_PLAYBOOK.md`](Docs/ROGUELITE_PLAYBOOK.md) (*Current Architecture* and *Not Yet Implemented*).
 
 **Genre:** roguelite arena / survival with **meta-progression**.
 
@@ -41,6 +43,8 @@ Detailed run and meta gameplay concept: [`Docs/ROGUELITE_PLAYBOOK.md`](Docs/ROGU
 | **AI Navigation** | Agents on grids/navmeshes (as needed) |
 | **UGUI / UI Toolkit** (through Unity modules) | Hub and run interfaces |
 | **Test Framework** | Tests |
+| **NeoxiderTools** (`com.neoxider.tools`) | `Neo.Save` (meta save), `Neo.Tools.Random` (`ChanceData`), `Neo.Progression` (`LevelCurveDefinition`) for arena progression |
+| **Netcode for GameObjects** (`com.unity.netcode.gameobjects`) | Used by the `SymbiosisArena` mode; `RogueliteArena` has no network stack |
 
 Plugins in `Assets/Plugins` (for example debug utilities) are included as they exist in the repository; the core README does not treat them as a required part of the **template**.
 
@@ -70,26 +74,20 @@ Root product idea of the repository: [README.md](../../README.md) at the CoreAI 
 
 ---
 
-## Development Policy: Use Existing Solutions First, Custom Logic Last
-
-**Required order** when adding any nontrivial capability (networking, DI, pools, UI patterns, saves, enemy waves, meta inventory, etc.):
-
-1. **Search for an existing solution on GitHub** (UPM package, proven repository, official Unity/Cysharp documentation, and so on).
-2. **Search for and adapt patterns in the reference project GameDev-Last-War** (kept outside this repository) - it already has production-level VContainer, MessagePipe, R3, UniTask, feature splitting, ECS for heavy areas, and integrations. Take **ideas and approach fragments**, not the entire repository, when the task is narrow.
-3. **Only if** no suitable open solution or close Last-War analogue is found, write a **custom** implementation from scratch (or minimal glue code).
-
-**Goal:** fewer bugs, faster iteration, consistency with the template stack. Custom code is a deliberate exception, not the first reaction.
-
----
-
 ## `_exampleGame` Folder Structure
 
 | Path | Purpose |
 |------|------------|
-| `RogueliteArena/` | Example code (`CoreAI.ExampleGame`), scene bootstrap |
-| `RogueliteArena/Features/` | **Example** features (waves, hub, run UI) - their own installers / child `LifetimeScope` |
-| `Docs/` | Game concept and notes (`ROGUELITE_PLAYBOOK.md`) |
+| `RogueliteArena/` | Example code (assembly `CoreAI.ExampleGame`) |
+| `RogueliteArena/Features/` | **Example** features (survival, waves, combat, camera, AI events, bootstrap, progression), each split into Domain / UseCases / Presenter / View / Infrastructure folders |
+| `RogueliteArena/Composition/` | `RogueliteArenaLifetimeScope` - optional child `LifetimeScope` for example-only registrations (registers nothing yet; not in the shipped scene) |
+| `Editor/` | `ArenaProgressionAssetFactory` - menus **CoreAI Example -> Arena -> Generate ...** |
+| `Scenes/` | `RogueliteArena.unity` (main arena), `SymbiosisArena.unity` (symbiosis mode), `New Scene.unity` (scratch) |
+| `SymbiosisMode/`, `Prefabs/` | Symbiosis mode scripts, settings and its two networked prefabs |
+| `Scripts/` | `Agent.cs` - a standalone `AgentBuilder` sample component |
+| `Tests/EditMode/` | `CoreAI.ExampleGame.Tests` (kill XP, meta save gateway) |
+| `Docs/` | Game concept, setup and architecture notes |
 
-Entry point: `RogueliteArena/Features/ArenaBootstrap/Infrastructure/ExampleRogueliteEntry.cs` (arena + **`CoreAiLuaHotkey`**). Scene **`RogueliteArena`**: **`CompositionRoot`** has **`CoreAILifetimeScope`** + **`ExampleRogueliteEntry`**. Run state: **`ArenaSurvivalSession`** (no singleton), waves: **`ArenaSurvivalDirector`** + **`IArenaWaveSchedule`**, node role: **`ArenaSimulationRole`**. See [`../CoreAiUnity/README.md`](../CoreAiUnity/README.md) and [`../CoreAI/Docs/README.md`](../CoreAI/Docs/README.md) (UPM).
+Entry point: `RogueliteArena/Features/ArenaBootstrap/Infrastructure/ExampleRogueliteEntry.cs` (adds **`CoreAiLuaHotkey`** and **`CoreAiArenaLlmHotkeys`**). Scene **`RogueliteArena`**: **`CompositionRoot`** has **`CoreAILifetimeScope`** + **`ExampleRogueliteEntry`**; the arena is built by **`ArenaSurvivalProceduralSetup`** on **`ArenaGameplay`**. Run state: **`ArenaSurvivalSession`** (no singleton), waves: **`ArenaSurvivalDirector`** + **`IArenaWaveSchedule`**, node role: **`ArenaSimulationRole`**. See [`../CoreAiUnity/README.md`](../CoreAiUnity/README.md) and [`../CoreAI/Docs/README.md`](../CoreAI/Docs/README.md) (UPM).
 
-Pattern: root `CoreAILifetimeScope` (CoreAI core) +, if needed, a child `LifetimeScope` in this folder only for roguelite-example code.
+Pattern: root `CoreAILifetimeScope` (CoreAI core) +, if needed, a child `LifetimeScope` in this folder only for roguelite-example code (`RogueliteArenaLifetimeScope`).

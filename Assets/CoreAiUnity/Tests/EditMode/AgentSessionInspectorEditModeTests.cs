@@ -392,6 +392,25 @@ namespace CoreAI.Tests.EditMode
                 return 4242 + index;
             }
 
+            if (type == typeof(float))
+            {
+                return 0.375f;
+            }
+
+            if (type == typeof(LlmReasoningOptions))
+            {
+                return new LlmReasoningOptions(LlmReasoningEffort.High, 2048 + index);
+            }
+
+            if (type == typeof(LlmSamplingOptions))
+            {
+                return new LlmSamplingOptions
+                {
+                    TopP = 0.75f, Seed = 42, Stop = new[] { "probe-stop" },
+                    FrequencyPenalty = 0.25f, PresencePenalty = 0.5f
+                };
+            }
+
             if (type == typeof(bool))
             {
                 return true;

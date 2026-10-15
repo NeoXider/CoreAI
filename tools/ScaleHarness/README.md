@@ -21,8 +21,19 @@ dotnet run -c Release --project tools/ScaleHarness/ScaleHarness.csproj -- `
   --label baseline
 ```
 
+Prerequisites are the same as for `tools/G10Harness`: the .NET 10 SDK, Unity 6000.3.14f1 at the default
+Hub path, and the project opened in Unity once so the Unity-generated `CoreAI.*.csproj` files and
+`Library/ScriptAssemblies` exist. The CoreAI projects are rebuilt with `Optimize=true` into
+`Temp/Bin/ScaleOptimized`.
+
 `--quick` (1 x 20 actors, short window) and `--only <N>` / `--repeats <k>` are smoke overrides; a
 report produced with any of them carries `frozenWorkloadHonoured = false` and is not evidence.
+
+`--config <workload.json>` runs another workload (default: `scale.workload.json` copied next to the
+binary); `scale_actor.lua` and `scale_server.lua` are read from the same folder as that file. The
+`diag-*.workload.json` files are diagnostic variants of the frozen workload (each states its change in
+`rationale`) and are never evidence. `--repo <path>` sets the checkout whose `git` HEAD is stamped into
+the report.
 
 The console prints the staircase table; the JSON keeps every per-frame sample so the numbers can be
 re-analysed without re-running.

@@ -2,6 +2,117 @@
 
 ## [Unreleased]
 
+## [7.51.0] - 2026-10-15
+
+### Changed
+
+- **Request settings resolve per call, agent, endpoint, then global defaults.** Nullable temperature and
+  max-token overrides distinguish inheritance from an explicit value; a zero output cap stops inheritance.
+  HTTP streaming and non-streaming requests apply typed temperature, token caps, sampling, and reasoning
+  after `ExtraBodyJson`, so typed values win only for the fields written on that request. Positive caps
+  use `max_completion_tokens` with the OpenAi reasoning dialect and `max_tokens` otherwise. Provider body
+  setters reserve structural keys; unset typed sampling/reasoning fields remain available to provider JSON.
+  Legacy HTTP settings that implement only numeric temperature/max tokens do not opt into overrides:
+  absent per-call options omit both fields. Explicit endpoint overrides still participate in precedence.
+- **Game-creation benchmark: suite version 1.16 → 2.0.** No 2.0 score is comparable with a 1.x score. The suite has
+  35 scenarios (36 with the G6 image-feedback twin): 28 regular and 7 extreme.
+- **G6 is graded on build geometry.** `G6BuildAnalysis` reads every part back through the world's Lua surface and
+  measures the castle from above: curtain walls enclosing at least 400 square studs of open courtyard, a ground-level
+  gate 3-16 studs wide, towers at least 4 studs above the wall crest, a free-standing keep, at least 3 roofed
+  structures, at least 5 objects inside the walls and 4 beyond, and a spread of at least 1500 square studs over a
+  48 x 48 span. Construction quality is scored for every build: at least 95% of parts grounded, no duplicates, at most
+  10% z-fighting, 5% hidden and 5% squashed round parts. The goal states these thresholds in its WHAT IS MEASURED and
+  CONSTRUCTION paragraphs. Material and shape variety still score; the 20+ materials checkpoint (`material_breadth`)
+  is gone, and colour is not scored. A `COREAI_BENCHMARK_FREEBUILD_SUBJECT` build is judged on subject-neutral
+  signals only (spread, height, separate objects). A world that holds parts but cannot be read back is a framework
+  fault, not a model failure.
+- **Grader loopholes closed.** G1 grades the final scene (a destroyed object no longer counts), checks every pair of
+  objects for the 1 m spread the goals now state, adds hidden samples (`score_formula` 17 and 100, `win_condition`
+  50) and a `prefab_keys` checkpoint in `g1_constraint_budget`. G2 adds `win_condition` 99.5, 100.5 and -5, more
+  `g2_multi_arg_damage` samples and clamp cases, and crafting reject cases. G3 adds tiered prices 21 and 100, clamped
+  regen with other `max_hp` values, Fibonacci 15 and 18, and all seven non-winning boolean-dungeon combinations. G4
+  adds `hidden_fights` and `hidden_session` checkpoints (combat and shop weights now sum to 120, normalised to 100)
+  and edge cases. G5 seeds the Chest in `g5_protected_chest` and counts parenting under it as touching it, counts
+  refused non-spawn attempts in `g5_spawn_only`, counts every non-`world_command` attempt in `g5_exactly_three`, and
+  charges `g5_no_lua` per call instead of per turn. G7 checks y = 1 in the key puzzle and samples `key_found` along z
+  and diagonals. G8 rejects single-axis position/rotation pollution, counts `list_animations` as observation, and
+  charges extra mutations per occurrence.
+- **Recorder fidelity.** `list_objects` reports each object's real position (seeded with the new
+  `RecordingWorldExecutor.SeedObject(name, position)`, or last recorded) instead of the origin, and
+  `g8_extreme_siege_director` seeds its described positions. A `spawn_batch` item inherits the batch-level rotation,
+  scale, parent and `worldPositionStays` when it sets none, like `CoreAiWorldCommandExecutor.TrySpawnBatch`.
+
+### Added
+
+- **Typed portable reasoning settings.** `LlmReasoningEffort`, `LlmReasoningDialect`, and
+  `LlmReasoningOptions` support per-call/per-agent effort and thinking budgets, endpoint dialect selection,
+  and Auto provider detection. OpenAi, OpenRouter, QwenTemplate, AnthropicCompat, GeminiCompat,
+  PassthroughEffort, and Off map controls to their provider fields. Default/Auto preserve legacy reasoning
+  bytes. `AgentBuilder.WithReasoning` and role policy setters configure reusable agent defaults.
+- **Typed sampling and effective-settings diagnostics.** `LlmSamplingOptions`,
+  `AgentBuilder.WithSampling`, and call-level overrides carry `top_p`, `seed`, `stop`, and frequency/presence
+  penalties. MEAI `ChatOptions` also serializes `response_format` as text, JSON object, or JSON schema.
+  `ILlmClient.ResolveRequestSettings`, request-start telemetry, and LLM input logs expose effective
+  reasoning effort/dialect, temperature, and output cap; reasoning-token usage is recorded separately.
+- **Benchmark extreme tier.** One extremely hard scenario per group except G6 (`GameBenchmarkScenario.IsExtreme`,
+  difficulty 5, 480-second timeout): `g1_extreme_fortress`, `g2_extreme_damage_pipeline`, `g3_extreme_dungeon_route`,
+  `g4_extreme_auto_battler`, `g5_extreme_work_order`, `g7_extreme_dungeon`, `g8_extreme_siege_director`. Each states
+  every rule exactly and grades per rule family: on hidden samples checked against independent C# references, on
+  live world-mutation probes (the G1 and G7 slots must follow objects the grader moves and removes in a reference
+  copy of the scene), or against a prompt injection in a seeded object name (G5). A partly correct run keeps partial
+  credit.
+- **Tier scores in the benchmark core.** `ScenarioResult.Extreme` and `ScenarioSummary.Extreme`;
+  `BenchmarkReport.ScenarioCount`, `RegularBaseScore`, `RegularScenarioCount`, `ExtremeBaseScore`,
+  `ExtremeScenarioCount`, `ExtremePassCount`, `HasExtreme` and `ExtremeScenarios()`; `GroupScore` regular and extreme
+  means and counts. The suite score still averages both tiers. The JSON adds `extreme` per result and `scenarios`,
+  `regularBaseScore`, `regularScenarios`, `extremeBaseScore`, `extremeScenarios`, `extremePass` and a `groups` object
+  to the summary. The Markdown report adds the tier scores to its header, a "Scores by group" table and an "Extreme
+  tier" section. `BenchmarkInfo.Groups`, `GroupTitles` and `TitleFor` name the groups on cards and tables;
+  `RoleFitness.ShortName` gives compact role labels.
+- **Benchmark cards.** `BenchmarkCardScene` is an engine-free display list that renders to SVG with a light/dark
+  `prefers-color-scheme` override. `BenchmarkReportFormatter.ModelCardScene` / `ToModelCardSvg` build the 1600x900
+  model card that replaces the radar card: header, suite / extreme / verdict / game-fit tiles, one row per group with
+  the extreme scenario as a diamond, a dimension dot plot on a 50-100 axis, role bars and a tokens and speed footer.
+  `ToSvg` renders the redesigned results card (`ResultsCardScene`). Every report writes a `_modelcard.svg` beside the
+  PNG and embeds it when no PNG was rendered; `BenchmarkModelCard` (benchmark package) rasterizes the same scene.
+- **Comparison charts.** `ModelComparison.Build` adds Extreme and Regular columns, a "Scores by group" table, an
+  extreme-tier ranking and a mixed-suite-version warning, and breaks suite-score ties by the extreme score.
+  `ToComparisonSvg` draws the suite ranking with extreme diamonds, a models x groups heatmap with an Extreme column
+  and the extreme ranking; `ToGroupHeatmapSvg` and `ToExtremeRankingSvg` draw the last two on their own.
+  `ModelSummary` carries the tier and per-group values.
+- **Parallel multi-model benchmark runs.** `BenchmarkTarget` / `BenchmarkTargetList` parse `COREAI_BENCHMARK_TARGETS`
+  (JSON array, compact `label|model|baseUrl|apiKey` entries separated by `;` or new lines, or `@file`; `env:VAR` keys;
+  duplicate names get `#2` labels) and `COREAI_BENCHMARK_PARALLEL` (empty or 0 = all). `BenchmarkProgress` tracks
+  several runs (`BeginSession`, `BeginRun`, `Runs`, `RequestStop(displayName)`). The benchmark package runs the
+  targets concurrently inside one test (`GameCreationBenchmarkParallelSuite`, `ParallelBenchmarkScheduler`), each with
+  its own client, report and artifacts (`BENCHMARK_<runId>_<model>[__<label>]`) under one shared suite clock. G6
+  builds and model-card captures take turns on one visual lane, because Rbx parts share world coordinates and the
+  agent camera is found by a global search; every other scenario runs in parallel. A scenario that uses
+  `env.RbxWorld` or the camera tool without `CaptureScene` must override the new `UsesSharedScene`. Single-model runs
+  behave as before. `COREAI_BENCHMARK_SUITE_BUDGET` defaults to 6000 seconds for one model and to the ceiling for
+  several, and is clamped to the NUnit timeout minus 300 seconds plus 30 seconds per extra target. The NUnit
+  `[Timeout]` backstop is now 6 hours.
+
+### Fixed
+
+- **Role-wide cancellation includes actor-context turns.** Queued orchestration cancellation stops
+  running and queued turns for the role across actor scopes, including requests from `CoreAi.StopAgent`
+  and `CoreAiChatService.StopAgent`.
+- **Read-only roles can query game configuration.** `game_config` reads use the role's read grants;
+  updates continue to require write access.
+- **Inventory continuations preserve the caller context.** `InventoryTool` no longer uses
+  `ConfigureAwait(false)` before resuming host inventory work.
+- **Tool descriptions match the supported actions and permissions.** Built-in tool guidance now
+  describes the implemented behavior.
+- **HTTP endpoint validation requires a model.** `LlmEndpointDescriptor.Validate()` rejects empty and
+  whitespace `HttpOpenAi` model names with `HTTP endpoint model is required.` rather than allowing a
+  fabricated `default`/`local` model to reach a provider. Legacy ServerManagedApi requests can still omit
+  the model so the backend selects it.
+- **Duplicate tool-call results identify the refused invocation.** The payload names the tool and its
+  canonical arguments, allowing the model to distinguish a repeated call from a different invocation.
+  Signatures and duplicate payloads serialize `JsonElement` argument values, including nested values,
+  instead of their `ValueKind` metadata, so distinct calls execute and only true echoes are suppressed.
+
 ## [7.50.2] - 2026-10-15
 
 ### Fixed

@@ -59,9 +59,8 @@ wrapper may keep its metadata `ParametersSchema` as `{}`.
 
 ## Minimal template for a new tool
 
-`WorldLlmTool.cs` is the canonical, correct-after-the-fix example (`[Description]` on every `ExecuteAsync`
-parameter, a `ParametersSchema` kept in sync, and `CreateAIFunction()` using `AIFunctionFactory.Create`).
-A trimmed skeleton:
+`WorldLlmTool.cs` shows `[Description]` on every `ExecuteAsync` parameter with a `ParametersSchema` kept in
+sync; `WaitLlmTool.cs` and `LuaTool.cs` show how an awaiting body is published to MEAI. A trimmed skeleton:
 
 ```csharp
 using System;                         // Func<>
@@ -89,12 +88,17 @@ public sealed class WeatherLlmTool : LlmToolBase, IAIFunctionLlmTool
         ("preset", "string", false, "For 'set': clear, rain, storm, fog"));
 
     // The delegate signature IS the native JSON Schema. [Description] is what reaches the model.
-    public async Task<string> ExecuteAsync(
+    // MEAI awaits the returned task with ConfigureAwait(false); Publish lets the result arrive in a
+    // WebGL player, which has no thread pool, once the body really awaits something.
+    public Task<string> ExecuteAsync(
         [Description("Command: get, set")]
         string action,
         [Description("For 'set': clear, rain, storm, fog")]
         string preset = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        MeaiToolTaskBridge.Publish(ExecuteBodyAsync(action, preset, cancellationToken));
+
+    private async Task<string> ExecuteBodyAsync(string action, string preset, CancellationToken cancellationToken)
     {
         // A missing or null action never gets here (the policy refuses it), but "" does.
         if (string.IsNullOrWhiteSpace(action))
@@ -102,7 +106,8 @@ public sealed class WeatherLlmTool : LlmToolBase, IAIFunctionLlmTool
             return "{\"success\":false,\"error\":\"action is required: get, set\"}";
         }
 
-        // ... do the work, return a serializable result string ...
+        // ... await the work (no ConfigureAwait(false)), return a serializable result string ...
+        await Task.Yield();
         return "{\"success\":true}";
     }
 
@@ -163,6 +168,9 @@ input instead of throwing.
 - [ ] `using System.ComponentModel;` is present (for `[Description]`).
 - [ ] Implement `IAIFunctionLlmTool` (or `IAIFunctionsLlmTool`); build the function with
       `AIFunctionFactory.Create`.
+- [ ] **An awaiting body is returned through `MeaiToolTaskBridge.Publish(...)`** and does not use
+      `ConfigureAwait(false)`. Without it the tool works in the Editor and the turn hangs silently in a WebGL
+      player. Details: [MEAI_TOOL_CALLING.md §3.2](../../CoreAI/Docs/MEAI_TOOL_CALLING.md#32-webgl--publishing-an-awaiting-tool-body).
 
 ### Understanding `AllowDuplicates` (args-aware dedup)
 
@@ -326,14 +334,13 @@ tool calls (`CoreAi.OnToolExecuted`) receive the `LlmToolImageResult` itself as 
 
 ## Common pitfalls
 
-**1. The description-less native schema (the rotation/scale bug — worked example).**
-`world_command` exposes `fx/fy/fz` (rotation degrees) and `scale` for inline use on `spawn`. The
-`ParametersSchema` explained all of them clearly — but on the native path `ParametersSchema` is never sent
-(see the two paths above), and the delegate parameters had **no `[Description]`**. So the model saw `fx`, `fy`,
-`fz`, `scale` as bare unlabeled numbers and simply never used them: every spawned object came out axis-aligned
-and default-sized. The fix was to add `[Description]` to every `ExecuteAsync` parameter — across ~13 tools —
-so the native schema actually describes them (see `WorldLlmTool.ExecuteAsync`). Models then started using inline
-rotation and scale. If a model "ignores" a parameter on a modern backend, check the `[Description]` first.
+**1. The description-less native schema (worked example).**
+`world_command` exposes `fx/fy/fz` (rotation degrees) and `scale` for inline use on `spawn`. A
+`ParametersSchema` that explains them is not enough: on the native path it is never sent (see the two paths
+above). Without `[Description]` on the delegate parameters the model sees `fx`, `fy`, `fz`, `scale` as bare
+unlabeled numbers and does not use them, so every spawned object comes out axis-aligned and default-sized.
+`WorldLlmTool.ExecuteAsync` carries `[Description]` on every parameter for that reason. If a model "ignores" a
+parameter on a modern backend, check the `[Description]` first.
 
 **2. Setting `AllowDuplicates => true` to "allow many calls" → spam loops.** Because distinct args are already
 never deduped, the only thing `true` buys you is letting the model repeat the *identical* call. On a spawn-like

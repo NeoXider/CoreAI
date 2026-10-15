@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -105,6 +105,17 @@ namespace CoreAI.Config
                 }
 
                 return access.WriteKeys.ToArray();
+            }
+
+            return Array.Empty<string>();
+        }
+
+        /// <summary>Returns keys the role may read, expanding read-all access to the known key set.</summary>
+        public string[] GetReadableKeys(string roleId)
+        {
+            if (_roleAccess.TryGetValue(roleId, out RoleConfigAccess access))
+            {
+                return access.CanReadAll ? _allKnownKeys : access.ReadKeys.ToArray();
             }
 
             return Array.Empty<string>();

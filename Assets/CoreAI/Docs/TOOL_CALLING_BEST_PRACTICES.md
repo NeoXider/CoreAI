@@ -90,11 +90,10 @@ refusal proves the body never ran. `call_skill_tool` applies the same missing-ar
 and type checks to its target tool before binding. Everything that reached
 `AIFunction.InvokeAsync` is treated as invoked — **including a binding failure the
 preflight could not prove**, for example in a hand-written `AIFunction` with no
-underlying .NET method. That boundary cannot prove the body was never entered, and
-the previous attempt to prove it by reading the exception's stack frames is unusable
-on IL2CPP/WebGL, where frames can be stripped: a body exception then looked like a
-binding failure and the retry replayed a mutation that had already happened. The
-conservative verdict costs a retry; the precise one cost correctness.
+underlying .NET method. That boundary cannot prove the body was never entered
+(stack frames can be stripped on IL2CPP/WebGL, so an exception's frames are no
+proof), so the policy takes the conservative verdict: it may cost a retry, never a
+replayed mutation.
 
 ## Result Envelope
 
@@ -136,9 +135,9 @@ that mutates state. Set `AllowDuplicates = true` ONLY when repeated identical ca
 are meaningful and safe — querying different pages, re-reading live state, rolling
 independent samples, or streaming progress through a host-controlled protocol.
 
-`ToolExecutionPolicy` enforces the following for `AllowDuplicates = false` tools,
-matching how Claude/Cursor stay reliable — no duplicate world mutations from an
-echoed or retried turn, while a legitimate retry is never blocked:
+`ToolExecutionPolicy` enforces the following for `AllowDuplicates = false` tools:
+no duplicate world mutations from an echoed or retried turn, while a legitimate
+retry is never blocked:
 
 - **Cross-turn echo → structured no-op.** A call whose exact canonical
   `name(sorted-args)` signature already **succeeded** earlier in the same request is
@@ -250,11 +249,11 @@ default 20) stops runaway loops, but the right value depends on the agent role:
   `WithMaxToolCallRoundtrips(5)` keeps a misbehaving model from burning tokens.
 - **Unlimited for builders and code agents** — a free-build visual agent that emits 24+ `spawn` calls, or a
   Programmer that iterates Lua (generate → run → read error → fix), should set
-  `WithMaxToolCallRoundtrips(0)` so it is never cut off mid-task. The built-in **Programmer** and
-  **Creator** roles already default to unlimited.
+  `WithMaxToolCallRoundtrips(0)` so it is never cut off mid-task. The built-in **Programmer**,
+  **Creator** and **Builder** roles already default to unlimited.
 
 Set it per agent (`AgentBuilder.WithMaxToolCallRoundtrips`), per call (`AiTaskRequest.MaxToolCallRoundtrips`),
-or globally (`CoreAISettings.MaxToolCallRoundtrips`); priority is per-call → per-agent → per-role policy (`AgentMemoryPolicy`, where the Programmer/Creator unlimited default lives) → global.
+or globally (`CoreAISettings.MaxToolCallRoundtrips`); priority is per-call → per-agent → per-role policy (`AgentMemoryPolicy`, where the Programmer/Creator/Builder unlimited default lives) → global.
 
 ## SkillSet Organization
 

@@ -16,6 +16,9 @@ namespace CoreAI.Benchmarking
         /// <summary>Benchmark family this scenario belongs to (e.g. "G1", "G2").</summary>
         public string Group { get; set; } = string.Empty;
 
+        /// <summary>True for the group's extreme-tier scenario, reported as a separate discriminating sub-score.</summary>
+        public bool Extreme { get; set; }
+
         public string ModelId { get; set; } = string.Empty;
 
         public GoalScore Score { get; set; }

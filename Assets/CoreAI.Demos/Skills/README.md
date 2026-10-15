@@ -5,8 +5,8 @@ Instead of all schemas up front, the model receives a catalog and two meta-tools
 `read_skill` loads the needed instructions and schemas, `call_skill_tool` executes the selected action.
 The catalog grows with the number of skills; detailed instructions and schemas cost context only when read.
 
-Scene: `SkillsDemo.unity`. `CoreAISettings` needs a configured LLM backend: a local model
-via LLMUnity or an HTTP API. Open the scene, press Play and click `Ask the Game Master`.
+Scene: `SkillsDemo.unity`. `COREAI_LLM` must be defined and `CoreAISettings` needs a configured LLM
+backend: a local model via LLMUnity or an HTTP API. Open the scene, press Play and click `Ask the Game Master`.
 Check material consumption, item creation, dummy health decrease, and the panel answer.
 
 Demo skills:

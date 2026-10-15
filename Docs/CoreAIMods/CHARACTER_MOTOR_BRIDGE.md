@@ -35,7 +35,7 @@ conversion; nothing calls it for you.
 | `MeasuredSpeed { get; }` | Optional (default `null`). The horizontal speed the body actually covers, in studs per second. `Humanoid.Running` reports it; when it is `null` the Humanoid falls back to `MoveDirection.Magnitude * WalkSpeed`. CoreAI's own motor implements it. |
 | `IsGrounded { get; }` | Drives the `Running` / `Jumping` / `Freefall` / `Landed` state machine and the `StateChanged` / `FreeFalling` signals directly (`RbxHumanoid.UpdateGroundedState`). It must be honest on every read, not cached from the last physics step. CoreAI's own motor ignores trigger colliders when it probes for ground, so a character above a `CanCollide = false` part (a trigger in Unity) falls through it instead of standing on it. |
 | `IsAvailable { get; }` | Default `true`. Whether this motor can still drive its character. The pipeline checks it on every fixed-step refresh and rebuilds — calls `IRbxCharacterMotorProvider.TryCreate` again for the same character — the moment it reads `false`; that rebuild is also the only supported way to get asked again after declining a character (see `IRbxCharacterMotorProvider`'s remarks). A motor that resolves its body fresh on every call, rather than caching a reference that can go stale, has nothing to answer and can leave the default. CoreAI's own motor answers `false` once its Rigidbody is destroyed (e.g. a script anchors the root part). |
-| `Step(double deltaSeconds)` | Called once per fixed step for every motor, host or CoreAI's own, by `LuaCsRbxApiBindings.StepCharacterMotors` (driven by [`LuaModRuntimeTickDriver`](../../Assets/CoreAIMods/Runtime/Infrastructure/LuaModRuntimeTickDriver.cs)). It has a no-op default body, so a controller that already runs its own `FixedUpdate` can ignore it entirely; implement it if you want CoreAI's cadence for advancing a `MoveTo` walk. The reference motor ignores the step length because it drives velocity and lets the physics step integrate. Stepping is unconditional for every motor, host or CoreAI's own — the pump no longer special-cases CoreAI's own motor by concrete type. |
+| `Step(double deltaSeconds)` | Called once per fixed step for every motor, host or CoreAI's own, by `LuaCsRbxApiBindings.StepCharacterMotors` (driven by [`LuaModRuntimeTickDriver`](../../Assets/CoreAIMods/Runtime/Infrastructure/LuaModRuntimeTickDriver.cs)). It has a no-op default body, so a controller that already runs its own `FixedUpdate` can ignore it entirely; implement it if you want CoreAI's cadence for advancing a `MoveTo` walk. The reference motor ignores the step length because it drives velocity and lets the physics step integrate. Stepping is unconditional: the pump does not special-case CoreAI's own motor by concrete type. |
 | `Release()` | Optional (no-op default). Called exactly once when the pipeline stops using the motor for good, after the Humanoid no longer points at it. Override it to stop reading input, drop registrations, and end the motor's own in-flight walk. |
 
 ## The `Running(speed)` signal: a live speed report
@@ -129,10 +129,10 @@ missing.
 The precedent for that exclusion behaviour already lives in this repository:
 [`CoreAI.Net.Mirror.asmdef`](../../Assets/CoreAIMirror/Runtime/CoreAI.Net.Mirror.asmdef) keeps Mirror
 support optional the same way, with `"defineConstraints": ["MIRROR"]`. Its `MIRROR` symbol comes from
-Mirror's own installer script
-([`Assets/Mirror/CompilerSymbols/PreprocessorDefine.cs`](../../Assets/Mirror/CompilerSymbols/PreprocessorDefine.cs))
-rather than a `versionDefines` entry, because Mirror ships as plain `Assets/Mirror` content here, not a
-UPM package with an id to key against — `versionDefines` is the tidier option when your dependency
+Mirror's own installer script (`Mirror/CompilerSymbols/PreprocessorDefine.cs` inside a Mirror import;
+Mirror is installed per project and is not part of this repository) rather than a `versionDefines`
+entry, because Mirror is imported as plain `Assets/Mirror` content, not a UPM package with an id to key
+against — `versionDefines` is the tidier option when your dependency
 *is* a proper package, as CoreAI Mods is. Either mechanism gets the same result: when the constraint
 isn't satisfied, Unity drops the assembly from the compile set outright, so a tree without Mirror never
 tries to compile `CoreAI.Net.Mirror` against a `Mirror` reference that doesn't exist.

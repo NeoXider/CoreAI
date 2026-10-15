@@ -10,13 +10,14 @@ namespace CoreAI.Presentation
 {
     /// <summary>
     /// Host bridge that lets the model fix failing Lua mods on its own. It subscribes to
-    /// <c>LuaModRuntime.ModHandlerErrored</c> (raised when a loaded mod's hook/timer throws at
-    /// runtime) and, through a debouncing <see cref="LuaModAutoRepairPolicy"/>, schedules a Programmer
+    /// actor-scoped <c>ILuaModRuntime</c> handler-error notifications (raised when a loaded mod's
+    /// hook/timer throws) and, through a debouncing <see cref="LuaModAutoRepairPolicy"/>, schedules a Programmer
     /// task that carries the failing source and error as <c>lua_repair</c> context. The Programmer then
     /// rewrites the mod and re-applies it via <c>manage_mods reload</c>, reusing the same self-repair
     /// pipeline that one-shot <c>execute_lua</c> envelopes already use.
     /// Drop this component into any scene that has a <see cref="CoreAILifetimeScope"/> and a
-    /// <c>LuaModRuntime</c>; it is inert when MoonSharp is unavailable.
+    /// registered <c>ILuaModRuntime</c>, actor identity provider, and orchestration service; it disables
+    /// itself when a required service is missing.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class CoreAiLuaModAutoRepair : MonoBehaviour
@@ -146,7 +147,7 @@ namespace CoreAI.Presentation
             _mods.RemoveModSourceLoadedListener(_actorContext, OnModSourceLoaded);
         }
 
-        // Runs on the main thread inside LuaModRuntime.Tick. Keep it cheap and never reload synchronously.
+        // WHY: handler-error callbacks run on the runtime tick; reloading synchronously would interrupt that tick.
         private void OnModHandlerErrored(string modId, string error, int consecutiveCount)
         {
             if (!_ready || !autoRepairEnabled || _policy == null)

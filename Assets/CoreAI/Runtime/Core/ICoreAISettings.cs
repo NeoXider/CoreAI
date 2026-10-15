@@ -1,3 +1,5 @@
+using CoreAI.Ai;
+
 namespace CoreAI
 {
     /// <summary>
@@ -86,6 +88,18 @@ namespace CoreAI
         /// When <c>false</c>, sampling temperature is omitted so each backend uses its own default.
         /// </summary>
         bool OverrideTemperature => false;
+
+        /// <summary>Primary typed reasoning effort; Default preserves provider or legacy defaults.</summary>
+        LlmReasoningEffort ReasoningEffort => LlmReasoningEffort.Default;
+
+        /// <summary>Primary provider reasoning wire format.</summary>
+        LlmReasoningDialect ReasoningDialect => LlmReasoningDialect.Auto;
+
+        /// <summary>Fallback provider reasoning effort.</summary>
+        LlmReasoningEffort SecondaryReasoningEffort => LlmReasoningEffort.Default;
+
+        /// <summary>Fallback provider reasoning wire format.</summary>
+        LlmReasoningDialect SecondaryReasoningDialect => LlmReasoningDialect.Auto;
 
         /// <summary>Max consecutive tool-call failures before aborting the agent turn.</summary>
         int MaxToolCallRetries { get; }
@@ -227,7 +241,7 @@ namespace CoreAI
         /// <b>Resolution priority (highest first):</b>
         /// per-call <c>AiTaskRequest.MaxToolCallRoundtrips</c> →
         /// per-agent <see cref="AgentBuilder.WithMaxToolCallRoundtrips"/> →
-        /// this global setting. The built-in <c>Programmer</c> and <c>Creator</c> roles default to <c>0</c>
+        /// this global setting. The built-in <c>Programmer</c>, <c>Creator</c> and <c>Builder</c> roles default to <c>0</c>
         /// (unlimited). When the cap is hit, the agent stops and logs a warning explaining how to raise it.
         /// </para>
         /// </summary>
