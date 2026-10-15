@@ -327,7 +327,8 @@ be visible while `Ok` is false — a non-empty string is never treated as proof 
 CoreAI ships a benchmark that scores how well an LLM builds and changes a game by driving real
 `execute_lua` and `world_command` tools — 0–100 across eight scenario groups (G1–G8), against any
 OpenAI-compatible endpoint. The current suite is **v2.0**, which adds an extreme tier (one very hard
-scenario per group except G6); its results are pending. The table below is the historical **suite
+scenario per group except G6); its first six-model run is on the
+[community leaderboard](Docs/BENCHMARK_LEADERBOARD.md). The table below is the historical **suite
 v1.7** frontier sweep (benchmark v2 prompts), and later scores are not mixed with it.
 
 <img src="Docs/Images/benchmark_v2_frontier.png" alt="CoreAI Game-Creation Benchmark v2 — top-tier frontier-model comparison ranked by suite score" width="900">

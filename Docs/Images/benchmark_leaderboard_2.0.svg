@@ -1,0 +1,286 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="1061" viewBox="0 0 1140 1061" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="CoreAI Game-Creation Benchmark suite v2.0 leaderboard">
+<title>CoreAI Game-Creation Benchmark - suite v2.0</title>
+<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#0b0b0b" stroke-width="1.6" stroke-opacity="0.55"/></pattern></defs>
+<rect width="100%" height="100%" rx="10" fill="#fcfcfb"/>
+<text x="24.0" y="34.0" font-size="20" fill="#0b0b0b" text-anchor="start" font-weight="600">CoreAI Game-Creation Benchmark - suite v2.0</text>
+<text x="24.0" y="56.0" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">Base score 0-100, mean over 35 scenarios (G1-G8, 7 of them extreme); the diamond is the extreme-tier score. Scores compare only within suite v2.0.</text>
+<text x="266.0" y="86.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Suite score</text>
+<path d="M362.0,76.0 L367.5,81.5 L362.0,87.0 L356.5,81.5 Z" fill="#eb6834"/>
+<text x="372.0" y="86.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">extreme tier</text>
+<text x="666.0" y="86.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Score by group</text>
+<line x1="266.0" y1="104.0" x2="266.0" y2="332.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="266.0" y="348.0" font-size="11" fill="#6f6e69" text-anchor="middle" font-weight="normal">0</text>
+<line x1="328.5" y1="104.0" x2="328.5" y2="332.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="328.5" y="348.0" font-size="11" fill="#6f6e69" text-anchor="middle" font-weight="normal">25</text>
+<line x1="391.0" y1="104.0" x2="391.0" y2="332.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="391.0" y="348.0" font-size="11" fill="#6f6e69" text-anchor="middle" font-weight="normal">50</text>
+<line x1="453.5" y1="104.0" x2="453.5" y2="332.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="453.5" y="348.0" font-size="11" fill="#6f6e69" text-anchor="middle" font-weight="normal">75</text>
+<line x1="516.0" y1="104.0" x2="516.0" y2="332.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="516.0" y="348.0" font-size="11" fill="#6f6e69" text-anchor="middle" font-weight="normal">100</text>
+<text x="690.3" y="102.0" font-size="11.5" fill="#52514e" text-anchor="middle" font-weight="600">G1</text>
+<text x="739.0" y="102.0" font-size="11.5" fill="#52514e" text-anchor="middle" font-weight="600">G2</text>
+<text x="787.7" y="102.0" font-size="11.5" fill="#52514e" text-anchor="middle" font-weight="600">G3</text>
+<text x="836.3" y="102.0" font-size="11.5" fill="#52514e" text-anchor="middle" font-weight="600">G4</text>
+<text x="885.0" y="102.0" font-size="11.5" fill="#52514e" text-anchor="middle" font-weight="600">G5</text>
+<text x="933.7" y="102.0" font-size="11.5" fill="#52514e" text-anchor="middle" font-weight="600">G6</text>
+<text x="982.3" y="102.0" font-size="11.5" fill="#52514e" text-anchor="middle" font-weight="600">G7</text>
+<text x="1031.0" y="102.0" font-size="11.5" fill="#52514e" text-anchor="middle" font-weight="600">G8</text>
+<text x="1091.7" y="102.0" font-size="11.5" fill="#52514e" text-anchor="middle" font-weight="600">Extreme</text>
+<text x="24.0" y="125.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">claude/Sonnet 5.5</text>
+<text x="24.0" y="139.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 35/0/0</text>
+<rect x="266.0" y="112.0" width="250.0" height="22.0" rx="4" fill="#2a78d6"><title>claude/Sonnet 5.5: suite 100.00 over 35 scenarios</title></rect>
+<text x="522.0" y="127.5" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">100.00</text>
+<path d="M516.0,113.2 L525.8,123.0 L516.0,132.8 L506.2,123.0 Z" fill="#fcfcfb"/>
+<path d="M516.0,116.0 L523.0,123.0 L516.0,130.0 L509.0,123.0 Z" fill="#eb6834"><title>claude/Sonnet 5.5: extreme tier 100.00 (7/7)</title></path>
+<path d="M585.0,118.0 L590.0,123.0 L585.0,128.0 L580.0,123.0 Z" fill="#eb6834"/>
+<text x="594.0" y="127.5" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">100.00</text>
+<rect x="667.0" y="107.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>claude/Sonnet 5.5 G1: 100.00</title></rect>
+<text x="690.3" y="127.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="715.7" y="107.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>claude/Sonnet 5.5 G2: 100.00</title></rect>
+<text x="739.0" y="127.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="764.3" y="107.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>claude/Sonnet 5.5 G3: 100.00</title></rect>
+<text x="787.7" y="127.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="813.0" y="107.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>claude/Sonnet 5.5 G4: 100.00</title></rect>
+<text x="836.3" y="127.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="861.7" y="107.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>claude/Sonnet 5.5 G5: 100.00</title></rect>
+<text x="885.0" y="127.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="910.3" y="107.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>claude/Sonnet 5.5 G6: 100.00</title></rect>
+<text x="933.7" y="127.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="959.0" y="107.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>claude/Sonnet 5.5 G7: 100.00</title></rect>
+<text x="982.3" y="127.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="1007.7" y="107.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>claude/Sonnet 5.5 G8: 100.00</title></rect>
+<text x="1031.0" y="127.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="1068.3" y="107.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>claude/Sonnet 5.5 Extreme: 100.00</title></rect>
+<text x="1091.7" y="127.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<text x="24.0" y="163.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">codex/GPT-6.1 Sol</text>
+<text x="24.0" y="177.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 35/0/0</text>
+<rect x="266.0" y="150.0" width="250.0" height="22.0" rx="4" fill="#2a78d6"><title>codex/GPT-6.1 Sol: suite 100.00 over 35 scenarios</title></rect>
+<text x="522.0" y="165.5" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">100.00</text>
+<path d="M516.0,151.2 L525.8,161.0 L516.0,170.8 L506.2,161.0 Z" fill="#fcfcfb"/>
+<path d="M516.0,154.0 L523.0,161.0 L516.0,168.0 L509.0,161.0 Z" fill="#eb6834"><title>codex/GPT-6.1 Sol: extreme tier 100.00 (7/7)</title></path>
+<path d="M585.0,156.0 L590.0,161.0 L585.0,166.0 L580.0,161.0 Z" fill="#eb6834"/>
+<text x="594.0" y="165.5" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">100.00</text>
+<rect x="667.0" y="145.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>codex/GPT-6.1 Sol G1: 100.00</title></rect>
+<text x="690.3" y="165.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="715.7" y="145.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>codex/GPT-6.1 Sol G2: 100.00</title></rect>
+<text x="739.0" y="165.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="764.3" y="145.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>codex/GPT-6.1 Sol G3: 100.00</title></rect>
+<text x="787.7" y="165.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="813.0" y="145.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>codex/GPT-6.1 Sol G4: 100.00</title></rect>
+<text x="836.3" y="165.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="861.7" y="145.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>codex/GPT-6.1 Sol G5: 100.00</title></rect>
+<text x="885.0" y="165.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="910.3" y="145.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>codex/GPT-6.1 Sol G6: 100.00</title></rect>
+<text x="933.7" y="165.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="959.0" y="145.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>codex/GPT-6.1 Sol G7: 100.00</title></rect>
+<text x="982.3" y="165.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="1007.7" y="145.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>codex/GPT-6.1 Sol G8: 100.00</title></rect>
+<text x="1031.0" y="165.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="1068.3" y="145.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>codex/GPT-6.1 Sol Extreme: 100.00</title></rect>
+<text x="1091.7" y="165.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<text x="24.0" y="201.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">codex/GPT-6 Luna</text>
+<text x="24.0" y="215.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 32/2/1</text>
+<rect x="266.0" y="188.0" width="239.5" height="22.0" rx="4" fill="#2a78d6"><title>codex/GPT-6 Luna: suite 95.82 over 35 scenarios</title></rect>
+<text x="522.0" y="203.5" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">95.82</text>
+<path d="M476.1,189.2 L485.9,199.0 L476.1,208.8 L466.3,199.0 Z" fill="#fcfcfb"/>
+<path d="M476.1,192.0 L483.1,199.0 L476.1,206.0 L469.1,199.0 Z" fill="#eb6834"><title>codex/GPT-6 Luna: extreme tier 84.02 (5/7)</title></path>
+<path d="M585.0,194.0 L590.0,199.0 L585.0,204.0 L580.0,199.0 Z" fill="#eb6834"/>
+<text x="594.0" y="203.5" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">84.02</text>
+<rect x="667.0" y="183.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>codex/GPT-6 Luna G1: 95.23</title></rect>
+<text x="690.3" y="203.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">95.2</text>
+<rect x="715.7" y="183.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>codex/GPT-6 Luna G2: 100.00</title></rect>
+<text x="739.0" y="203.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="764.3" y="183.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>codex/GPT-6 Luna G3: 100.00</title></rect>
+<text x="787.7" y="203.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="813.0" y="183.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>codex/GPT-6 Luna G4: 100.00</title></rect>
+<text x="836.3" y="203.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="861.7" y="183.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>codex/GPT-6 Luna G5: 95.21</title></rect>
+<text x="885.0" y="203.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">95.2</text>
+<rect x="910.3" y="183.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>codex/GPT-6 Luna G6: 84.00</title></rect>
+<rect x="910.3" y="183.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="933.7" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">84.0</text>
+<text x="954.0" y="194.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">1</text>
+<rect x="959.0" y="183.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>codex/GPT-6 Luna G7: 97.50</title></rect>
+<text x="982.3" y="203.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">97.5</text>
+<rect x="1007.7" y="183.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>codex/GPT-6 Luna G8: 81.79</title></rect>
+<text x="1031.0" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">81.8</text>
+<rect x="1068.3" y="183.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>codex/GPT-6 Luna Extreme: 84.02</title></rect>
+<text x="1091.7" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">84.0</text>
+<text x="24.0" y="239.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">claude/Haiku 4.5</text>
+<text x="24.0" y="253.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 32/2/1</text>
+<rect x="266.0" y="226.0" width="235.5" height="22.0" rx="4" fill="#2a78d6"><title>claude/Haiku 4.5: suite 94.19 over 35 scenarios</title></rect>
+<text x="522.0" y="241.5" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">94.19</text>
+<path d="M506.5,227.2 L516.3,237.0 L506.5,246.8 L496.7,237.0 Z" fill="#fcfcfb"/>
+<path d="M506.5,230.0 L513.5,237.0 L506.5,244.0 L499.5,237.0 Z" fill="#eb6834"><title>claude/Haiku 4.5: extreme tier 96.21 (6/7)</title></path>
+<path d="M585.0,232.0 L590.0,237.0 L585.0,242.0 L580.0,237.0 Z" fill="#eb6834"/>
+<text x="594.0" y="241.5" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">96.21</text>
+<rect x="667.0" y="221.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>claude/Haiku 4.5 G1: 95.64</title></rect>
+<text x="690.3" y="241.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">95.6</text>
+<rect x="715.7" y="221.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>claude/Haiku 4.5 G2: 100.00</title></rect>
+<text x="739.0" y="241.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="764.3" y="221.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>claude/Haiku 4.5 G3: 100.00</title></rect>
+<text x="787.7" y="241.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="813.0" y="221.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>claude/Haiku 4.5 G4: 100.00</title></rect>
+<text x="836.3" y="241.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="861.7" y="221.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>claude/Haiku 4.5 G5: 81.92</title></rect>
+<rect x="861.7" y="221.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="885.0" y="241.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">81.9</text>
+<text x="905.3" y="232.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">2</text>
+<rect x="910.3" y="221.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>claude/Haiku 4.5 G6: 60.00</title></rect>
+<rect x="910.3" y="221.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="933.7" y="241.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">60.0</text>
+<text x="954.0" y="232.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">3</text>
+<rect x="959.0" y="221.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>claude/Haiku 4.5 G7: 100.00</title></rect>
+<text x="982.3" y="241.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="1007.7" y="221.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>claude/Haiku 4.5 G8: 95.12</title></rect>
+<text x="1031.0" y="241.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">95.1</text>
+<rect x="1068.3" y="221.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>claude/Haiku 4.5 Extreme: 96.21</title></rect>
+<text x="1091.7" y="241.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">96.2</text>
+<text x="24.0" y="277.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">local/qwen3.8-flash-coder-iq1_m</text>
+<text x="24.0" y="291.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 31/2/2</text>
+<rect x="266.0" y="264.0" width="227.2" height="22.0" rx="4" fill="#2a78d6"><title>local/qwen3.8-flash-coder-iq1_m: suite 90.90 over 35 scenarios</title></rect>
+<text x="522.0" y="279.5" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">90.90</text>
+<path d="M415.0,265.2 L424.8,275.0 L415.0,284.8 L405.2,275.0 Z" fill="#fcfcfb"/>
+<path d="M415.0,268.0 L422.0,275.0 L415.0,282.0 L408.0,275.0 Z" fill="#eb6834"><title>local/qwen3.8-flash-coder-iq1_m: extreme tier 59.59 (3/7)</title></path>
+<path d="M585.0,270.0 L590.0,275.0 L585.0,280.0 L580.0,275.0 Z" fill="#eb6834"/>
+<text x="594.0" y="279.5" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">59.59</text>
+<rect x="667.0" y="259.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>local/qwen3.8-flash-coder-iq1_m G1: 90.00</title></rect>
+<text x="690.3" y="279.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">90.0</text>
+<rect x="715.7" y="259.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>local/qwen3.8-flash-coder-iq1_m G2: 81.57</title></rect>
+<text x="739.0" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">81.6</text>
+<rect x="764.3" y="259.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>local/qwen3.8-flash-coder-iq1_m G3: 99.59</title></rect>
+<text x="787.7" y="279.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">99.6</text>
+<rect x="813.0" y="259.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>local/qwen3.8-flash-coder-iq1_m G4: 72.71</title></rect>
+<text x="836.3" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">72.7</text>
+<rect x="861.7" y="259.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>local/qwen3.8-flash-coder-iq1_m G5: 100.00</title></rect>
+<text x="885.0" y="279.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="910.3" y="259.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>local/qwen3.8-flash-coder-iq1_m G6: 93.00</title></rect>
+<text x="933.7" y="279.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">93.0</text>
+<rect x="959.0" y="259.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>local/qwen3.8-flash-coder-iq1_m G7: 80.00</title></rect>
+<text x="982.3" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">80.0</text>
+<rect x="1007.7" y="259.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>local/qwen3.8-flash-coder-iq1_m G8: 97.73</title></rect>
+<text x="1031.0" y="279.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">97.7</text>
+<rect x="1068.3" y="259.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>local/qwen3.8-flash-coder-iq1_m Extreme: 59.59</title></rect>
+<text x="1091.7" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">59.6</text>
+<text x="24.0" y="315.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">local/MiniCPM-V 4.7 1B</text>
+<text x="24.0" y="329.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 10/2/23</text>
+<rect x="266.0" y="302.0" width="100.8" height="22.0" rx="4" fill="#2a78d6"><title>local/MiniCPM-V 4.7 1B: suite 40.31 over 35 scenarios</title></rect>
+<text x="522.0" y="317.5" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">40.31</text>
+<path d="M279.6,303.2 L289.4,313.0 L279.6,322.8 L269.8,313.0 Z" fill="#fcfcfb"/>
+<path d="M279.6,306.0 L286.6,313.0 L279.6,320.0 L272.6,313.0 Z" fill="#eb6834"><title>local/MiniCPM-V 4.7 1B: extreme tier 5.42 (0/7)</title></path>
+<path d="M585.0,308.0 L590.0,313.0 L585.0,318.0 L580.0,313.0 Z" fill="#eb6834"/>
+<text x="594.0" y="317.5" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">5.42</text>
+<rect x="667.0" y="297.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>local/MiniCPM-V 4.7 1B G1: 53.28</title></rect>
+<rect x="667.0" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="690.3" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">53.3</text>
+<text x="710.7" y="308.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">4</text>
+<rect x="715.7" y="297.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>local/MiniCPM-V 4.7 1B G2: 49.01</title></rect>
+<rect x="715.7" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="739.0" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">49.0</text>
+<text x="759.3" y="308.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">5</text>
+<rect x="764.3" y="297.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>local/MiniCPM-V 4.7 1B G3: 23.46</title></rect>
+<rect x="764.3" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="787.7" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">23.5</text>
+<text x="808.0" y="308.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">6</text>
+<rect x="813.0" y="297.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>local/MiniCPM-V 4.7 1B G4: 5.92</title></rect>
+<rect x="813.0" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="836.3" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">5.9</text>
+<text x="856.7" y="308.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">7</text>
+<rect x="861.7" y="297.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>local/MiniCPM-V 4.7 1B G5: 90.13</title></rect>
+<text x="885.0" y="317.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">90.1</text>
+<rect x="910.3" y="297.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>local/MiniCPM-V 4.7 1B G6: 18.00</title></rect>
+<rect x="910.3" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="933.7" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">18.0</text>
+<text x="954.0" y="308.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">8</text>
+<rect x="959.0" y="297.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>local/MiniCPM-V 4.7 1B G7: 23.91</title></rect>
+<rect x="959.0" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="982.3" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">23.9</text>
+<text x="1002.7" y="308.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">9</text>
+<rect x="1007.7" y="297.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>local/MiniCPM-V 4.7 1B G8: 4.76</title></rect>
+<rect x="1007.7" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="1031.0" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">4.8</text>
+<text x="1051.3" y="308.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">10</text>
+<rect x="1068.3" y="297.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>local/MiniCPM-V 4.7 1B Extreme: 5.42</title></rect>
+<text x="1091.7" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">5.4</text>
+<text x="666.0" y="366.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">Group score:</text>
+<rect x="744.0" y="356.0" width="14" height="12" rx="2" fill="#104281"/>
+<text x="762.0" y="366.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">100</text>
+<rect x="788.6" y="356.0" width="14" height="12" rx="2" fill="#1c5cab"/>
+<text x="806.6" y="366.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">90-99.9</text>
+<rect x="858.0" y="356.0" width="14" height="12" rx="2" fill="#2a78d6"/>
+<text x="876.0" y="366.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">75-89.9</text>
+<rect x="927.4" y="356.0" width="14" height="12" rx="2" fill="#5598e7"/>
+<text x="945.4" y="366.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">50-74.9</text>
+<rect x="996.8" y="356.0" width="14" height="12" rx="2" fill="#86b6ef"/>
+<text x="1014.8" y="366.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">&lt;50</text>
+<rect x="744.0" y="376.0" width="14" height="12" rx="2" fill="#2a78d6"/>
+<rect x="744.0" y="376.0" width="14" height="12" rx="2" fill="url(#hatch)"/>
+<text x="762.0" y="386.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">hatched = a regular-tier PARTIAL/FAIL or an excluded scenario</text>
+<text x="762.0" y="402.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">Extreme = mean of the extreme scenarios (one per group, none for G6)</text>
+<text x="762.0" y="418.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">small numbers refer to the notes below</text>
+<text x="266.0" y="448.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Tokens (prompt + completion, as reported)</text>
+<text x="706.0" y="448.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Failed tool calls / executed</text>
+<line x1="266.0" y1="466.0" x2="266.0" y2="694.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="266.0" y="710.0" font-size="11" fill="#6f6e69" text-anchor="middle" font-weight="normal">0</text>
+<line x1="376.0" y1="466.0" x2="376.0" y2="694.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="376.0" y="710.0" font-size="11" fill="#6f6e69" text-anchor="middle" font-weight="normal">200k</text>
+<line x1="486.0" y1="466.0" x2="486.0" y2="694.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="486.0" y="710.0" font-size="11" fill="#6f6e69" text-anchor="middle" font-weight="normal">400k</text>
+<line x1="596.0" y1="466.0" x2="596.0" y2="694.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="596.0" y="710.0" font-size="11" fill="#6f6e69" text-anchor="middle" font-weight="normal">600k</text>
+<text x="24.0" y="489.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">claude/Sonnet 5.5</text>
+<rect x="266.0" y="474.0" width="23.8" height="22.0" rx="4" fill="#2a78d6"><title>claude/Sonnet 5.5: 43308 tokens</title></rect>
+<text x="295.8" y="489.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">43,308</text>
+<rect x="706.0" y="474.0" width="240.9" height="22.0" rx="4" fill="#f0efec"/>
+<text x="952.9" y="489.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">0 / 107</text>
+<text x="24.0" y="527.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">codex/GPT-6.1 Sol</text>
+<rect x="266.0" y="512.0" width="24.0" height="22.0" rx="4" fill="#2a78d6"><title>codex/GPT-6.1 Sol: 43726 tokens</title></rect>
+<text x="296.0" y="527.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">43,726</text>
+<rect x="706.0" y="512.0" width="229.7" height="22.0" rx="4" fill="#f0efec"/>
+<text x="941.7" y="527.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">0 / 102</text>
+<text x="24.0" y="565.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">codex/GPT-6 Luna</text>
+<rect x="266.0" y="550.0" width="28.6" height="22.0" rx="4" fill="#2a78d6"><title>codex/GPT-6 Luna: 52026 tokens</title></rect>
+<text x="300.6" y="565.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">52,026</text>
+<rect x="706.0" y="550.0" width="301.7" height="22.0" rx="4" fill="#f0efec"/>
+<rect x="706.0" y="550.0" width="38.3" height="22.0" rx="4" fill="#b3261e"><title>codex/GPT-6 Luna: 17 of 134 executed calls failed</title></rect>
+<text x="1013.7" y="565.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">17 / 134</text>
+<text x="24.0" y="603.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">claude/Haiku 4.5</text>
+<rect x="266.0" y="588.0" width="23.8" height="22.0" rx="4" fill="#2a78d6"><title>claude/Haiku 4.5: 43302 tokens</title></rect>
+<text x="295.8" y="603.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">43,302</text>
+<rect x="706.0" y="588.0" width="274.7" height="22.0" rx="4" fill="#f0efec"/>
+<rect x="706.0" y="588.0" width="65.3" height="22.0" rx="4" fill="#b3261e"><title>claude/Haiku 4.5: 29 of 122 executed calls failed</title></rect>
+<text x="986.7" y="603.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">29 / 122</text>
+<text x="24.0" y="641.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">local/qwen3.8-flash-coder-iq1_m</text>
+<rect x="266.0" y="626.0" width="306.2" height="22.0" rx="4" fill="#2a78d6"><title>local/qwen3.8-flash-coder-iq1_m: 556681 tokens</title></rect>
+<text x="578.2" y="641.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">556,681</text>
+<rect x="706.0" y="626.0" width="308.5" height="22.0" rx="4" fill="#f0efec"/>
+<rect x="706.0" y="626.0" width="40.5" height="22.0" rx="4" fill="#b3261e"><title>local/qwen3.8-flash-coder-iq1_m: 18 of 137 executed calls failed</title></rect>
+<text x="1020.5" y="641.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">18 / 137</text>
+<text x="24.0" y="679.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">local/MiniCPM-V 4.7 1B</text>
+<rect x="266.0" y="664.0" width="258.0" height="22.0" rx="4" fill="#2a78d6"><title>local/MiniCPM-V 4.7 1B: 469115 tokens</title></rect>
+<text x="530.0" y="679.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">469,115</text>
+<rect x="706.0" y="664.0" width="340.0" height="22.0" rx="4" fill="#f0efec"/>
+<rect x="706.0" y="664.0" width="137.4" height="22.0" rx="4" fill="#b3261e"><title>local/MiniCPM-V 4.7 1B: 61 of 151 executed calls failed</title></rect>
+<text x="1052.0" y="679.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">61 / 151</text>
+<text x="24.0" y="734.0" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">Notes</text>
+<text x="24.0" y="752.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">1. codex/GPT-6 Luna - G6: g6_free_build_vision PARTIAL 84.00 [224850]</text>
+<text x="24.0" y="768.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">2. claude/Haiku 4.5 - G5: g5_tool_budget FAIL 10.00 [224850]</text>
+<text x="24.0" y="784.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">3. claude/Haiku 4.5 - G6: g6_free_build_vision PARTIAL 60.00 [224850]</text>
+<text x="24.0" y="800.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">4. local/MiniCPM-V 4.7 1B - G1: g1_coin_collector FAIL 38.89 [224850]; g1_constraint_budget PARTIAL 83.33 [224850]</text>
+<text x="24.0" y="816.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">5. local/MiniCPM-V 4.7 1B - G2: g2_crafting_rules PARTIAL 81.82 [224850]; g2_flat_damage FAIL 5.00 [224850]; g2_win_condition FAIL 5.26 [224850]</text>
+<text x="24.0" y="832.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">6. local/MiniCPM-V 4.7 1B - G3: g3_balanced_enemies FAIL 36.84 [224850]; g3_clamped_regen FAIL 10.00 [224850]; g3_fibonacci_rewards FAIL 5.00</text>
+<text x="40.0" y="848.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">[224850]; g3_quadratic_score FAIL 5.26 [224850]; g3_tiered_pricing FAIL 10.00 [224850]</text>
+<text x="24.0" y="864.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">7. local/MiniCPM-V 4.7 1B - G4: g4_combat FAIL 12.50 [224850]; g4_crafting_chain FAIL 5.00 [224850]; g4_shop FAIL 4.17 [224850]</text>
+<text x="24.0" y="880.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">8. local/MiniCPM-V 4.7 1B - G6: g6_free_build_vision FAIL 18.00 [224850]</text>
+<text x="24.0" y="896.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">9. local/MiniCPM-V 4.7 1B - G7: g7_key_puzzle FAIL 47.83 [224850]</text>
+<text x="24.0" y="912.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">10. local/MiniCPM-V 4.7 1B - G8: g8_selective_raise FAIL 13.33 [224850]; g8_state_rule FAIL 4.55 [224850]; g8_tidy_scene FAIL 0.00 [224850]</text>
+<text x="24.0" y="934.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="600">Run ids (Docs/BenchmarkRuns):</text>
+<text x="24.0" y="949.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">claude/Sonnet 5.5: 20261015_224850</text>
+<text x="24.0" y="964.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">codex/GPT-6.1 Sol: 20261015_224850</text>
+<text x="24.0" y="979.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">codex/GPT-6 Luna: 20261015_224850</text>
+<text x="24.0" y="994.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">claude/Haiku 4.5: 20261015_224850</text>
+<text x="24.0" y="1009.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">local/qwen3.8-flash-coder-iq1_m: 20261015_224850</text>
+<text x="24.0" y="1024.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">local/MiniCPM-V 4.7 1B: 20261015_224850</text>
+<text x="24.0" y="1039.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Each scenario uses the newest model-attributable result of that model within the suite; environment/framework failures never count as model scores. Built by tools/benchmark_chart.py.</text>
+</svg>

@@ -468,7 +468,7 @@ per-scenario breakdown and transcript example.
 
 ## Community Leaderboard
 
-Ranked results with version-separated sections (current suite v2.0, results pending; historical v1.15 back to v1.6)
+Ranked results with version-separated sections (current suite v2.0 with its first six-model run; historical v1.15 back to v1.6)
 and a public submission workflow live on the
 [community leaderboard page](../../Docs/BENCHMARK_LEADERBOARD.md). Run the suite as described in
 [How To Run](#how-to-run) above, then open a PR adding your row with the report JSON, run id,

@@ -11,7 +11,7 @@ Full methodology: [benchmark guide](../Assets/CoreAIBenchmark/README.md) · [ben
 
 Scores are only comparable **within the same suite version**. Scenario sets, checkpoint weights, penalties, and caps change between versions, so a v1.6 score and a hypothetical v1.7 score are different measurements even for the same model. The suite version is stamped into every report JSON (`suiteVersion`) and shown in the report header. When the suite version bumps, the leaderboard starts a new section; older sections are kept for history but never mixed into the current ranking.
 
-**Current suite version: v2.0** (G1-G8, 35 scenarios: 28 regular and 7 extreme, plus the optional G6 image-feedback twin). No v2.0 results are published yet. The v1.15 results below are historical and cannot be ranked against v2.0.
+**Current suite version: v2.0** (G1-G8, 35 scenarios: 28 regular and 7 extreme, plus the optional G6 image-feedback twin). The first v2.0 maintainer run is published below. The v1.15 results are historical and cannot be ranked against v2.0.
 
 ### Suite version history
 
@@ -29,7 +29,48 @@ Scores are only comparable **within the same suite version**. Scenario sets, che
 
 ## Leaderboard — Suite v2.0
 
-Results pending. Rows are added here after the maintainer run of suite v2.0.
+<img src="Images/benchmark_leaderboard_2.0.svg" alt="CoreAI Game-Creation Benchmark suite v2.0 leaderboard: suite score, extreme tier, group heatmap, tokens and failed tool calls" width="900">
+
+Maintainer run `20261015_224850` (2026-10-15): suite v2.0, 35 scenarios per model (28 regular, 7 extreme) plus the G6
+image-feedback build, one repetition, reasoning effort `high` (MiniCPM exposes none), no temperature sent
+(each model uses its provider default), except MiniCPM-V 4.7 1B, whose target sets its published sampling
+(temperature 0.7, top_p 0.95, top_k 100, thinking off); four targets in parallel. The GPT-6 and Claude models ran through the Neoxider Agents OpenAI-compatible bridge, qwen3.8 on a
+llama.cpp server on the local network, MiniCPM-V 4.7 1B in LM Studio. Everything is archived in the
+[run archive](BenchmarkRuns/2026-10-15/): report JSON, Markdown transcript, executed-tool JSONL, model card, G6
+screenshot and the model-authored Lua replay. The G6 castles are saved as prefabs in
+[`Assets/Benchmark/Published/2026-10-15/`](../Assets/Benchmark/Published/2026-10-15/), one folder per target.
+
+| Model | Suite | Extreme | Regular | P/PA/F | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | Tool errors | Tokens | Runs |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `claude/Sonnet 5.5` | **100.00** | 100.00 (7/7) | 100.00 | 35/0/0 | 100.00 | 100.00 | 100.00 | 100.00 | 100.00 | 100.00 | 100.00 | 100.00 | 0/107 | 43308 | `224850` |
+| `codex/GPT-6.1 Sol` | **100.00** | 100.00 (7/7) | 100.00 | 35/0/0 | 100.00 | 100.00 | 100.00 | 100.00 | 100.00 | 100.00 | 100.00 | 100.00 | 0/102 | 43726 | `224850` |
+| `codex/GPT-6 Luna` | **95.82** | 84.02 (5/7) | 98.76 | 32/2/1 | 95.23 | 100.00 | 100.00 | 100.00 | 95.21 | 84.00 | 97.50 | 81.79 | 17/134 | 52026 | `224850` |
+| `claude/Haiku 4.5` | **94.19** | 96.21 (6/7) | 93.68 | 32/2/1 | 95.64 | 100.00 | 100.00 | 100.00 | 81.92 | 60.00 | 100.00 | 95.12 | 29/122 | 43302 | `224850` |
+| `local/qwen3.8-flash-coder-iq1_m` | **90.90** | 59.59 (3/7) | 98.72 | 31/2/2 | 90.00 | 81.57 | 99.59 | 72.71 | 100.00 | 93.00 | 80.00 | 97.73 | 18/137 | 556681 | `224850` |
+| `local/MiniCPM-V 4.7 1B` | **40.31** | 5.42 (0/7) | 49.03 | 10/2/23 | 53.28 | 49.01 | 23.46 | 5.92 | 90.13 | 18.00 | 23.91 | 4.76 | 61/151 | 469115 | `224850` |
+
+How to read the run:
+
+- **Sonnet 5.5 and GPT-6.1 Sol scored 100 on all 35 scenarios, including the extreme tier.** At the top the
+  suite no longer separates models; harder extreme scenarios are tracked in the [TODO](../TODO.md).
+- **GPT-6 Luna** failed the G8 siege director (36.7), only partly passed the G5 work order (66.5) and the G6
+  castle (84).
+- **Claude Haiku 4.5** failed the G5 tool budget (10), only partly passed the G5 work order (73.5), and its G6
+  build was cut by the scenario deadline (60).
+- **qwen3.8 flash coder (local)** passes 31 of 35 and loses its points on the extreme tier: four extreme
+  scenarios ran into their scenario deadline (480 s) while the model was still generating, which is graded as a
+  Model failure on the work executed. Its 556,681 tokens include long reasoning.
+- **MiniCPM-V 4.7 1B (local)** passes 10 of 35; its G5 instruction-following (90.1) is the only strong group.
+  Its G6 build is four parts and a deadline hit.
+- **Resumed run.** The first pass of qwen3.8 and MiniCPM graded two scenarios each as Environment failures
+  because the benchmark client enforced a hidden 300 s total request limit. After CoreAI 7.53.0 removed that limit,
+  the run was resumed with the same run id: only those scenarios were re-run, every other result was kept
+  byte-for-byte, and the reports record two segments in their metadata. The re-run scenarios ended at the
+  scenario deadline and count as Model failures, so the scores moved from 96.40 to 90.90 (qwen3.8) and from
+  42.21 to 40.31 (MiniCPM).
+- G6 hero screenshots exist for models whose G6 build was graded cleanly; Haiku and MiniCPM keep only the
+  model-view screenshot of the image-feedback twin. The numeric G6 grader does not score visual composition, so
+  look at the screenshots as well as the score.
 
 ## Historical Leaderboard — Suite v1.15
 
