@@ -324,12 +324,60 @@ be visible while `Ok` is false — a non-empty string is never treated as proof 
 
 ## Game-Creation Benchmark
 
-CoreAI ships a benchmark that scores how well an LLM builds and changes a game by driving real
-`execute_lua` and `world_command` tools — 0–100 across eight scenario groups (G1–G8), against any
-OpenAI-compatible endpoint. The current suite is **v2.0**, which adds an extreme tier (one very hard
-scenario per group except G6); its first six-model run is on the
-[community leaderboard](Docs/BENCHMARK_LEADERBOARD.md). The table below is the historical **suite
-v1.7** frontier sweep (benchmark v2 prompts), and later scores are not mixed with it.
+CoreAI ships a benchmark that scores how well an LLM **builds and changes a game**: it drives the real
+`execute_lua` and `world_command` tools through eight scenario groups (G1–G8) plus a free-form G6 castle
+build, against any OpenAI-compatible endpoint, and grades the resulting world, logic, playthroughs and tool
+trace from 0 to 100. Suite **v2.0** adds an extreme tier — one very hard scenario per group except G6.
+
+<p align="center">
+  <a href="Docs/BENCHMARK_LEADERBOARD.md"><img src="Docs/Images/benchmark_leaderboard_2.0_dark.svg" alt="CoreAI Game-Creation Benchmark suite v2.0 leaderboard: suite score, extreme tier, group heatmap, tokens and failed tool calls" width="900"></a>
+</p>
+
+| # | Model | Suite | Extreme tier | Pass / Partial / Fail |
+|---:|---|---:|---:|---|
+| 1 | Claude Sonnet 5.5 | **100.0** | 100 (7/7) | 35 / 0 / 0 |
+| 1 | GPT-6.1 Sol | **100.0** | 100 (7/7) | 35 / 0 / 0 |
+| 3 | GPT-6 Luna | **95.8** | 84.0 (5/7) | 32 / 2 / 1 |
+| 4 | Claude Haiku 4.5 | **94.2** | 96.2 (6/7) | 32 / 2 / 1 |
+| 5 | qwen3.8 flash coder (local) | **90.9** | 59.6 (3/7) | 31 / 2 / 2 |
+| 6 | MiniCPM-V 4.7 1B (local) | **40.3** | 5.4 (0/7) | 10 / 2 / 23 |
+
+One maintainer run (2026-10-15), one repetition, reasoning effort `high`, no temperature sent; the two
+local models were resumed after an interruption, which the report records. Scores compare only inside
+suite v2.0. The top of the table is saturated, so harder scenarios are on the [TODO](TODO.md). Every raw
+report, transcript and tool trace is in the [run archive](Docs/BenchmarkRuns/2026-10-15/).
+
+### Every model gets a card
+
+<p align="center">
+  <img src="Docs/Images/benchmark_v2/card_qwen3.8-flash-coder.png" alt="Model card of the local qwen3.8 flash coder: suite 90.9, extreme tier 59.6, score by group, dimensions and game-fitness by role" width="900">
+</p>
+
+A card shows the suite and extreme-tier score, the verdict split, every group (the diamond is that group's
+extreme scenario), six skill dimensions and a 0–10 fitness per game-dev role, so you can tell what a model
+is good for, not only how high it scored.
+
+### The G6 castle: a free-form build
+
+Each model builds a castle from scratch with Roblox-style Lua and, in the image-feedback variant, can look
+at its own scene and refine it. The castles are saved as prefabs in
+[`Assets/Benchmark/Published/`](Assets/Benchmark/Published/).
+
+| | | |
+|:---:|:---:|:---:|
+| <img src="Docs/Images/benchmark_v2/castle_gpt-6.1-sol.jpg" alt="GPT-6.1 Sol castle" width="300"><br>**GPT-6.1 Sol** · G6 100 | <img src="Docs/Images/benchmark_v2/castle_claude-sonnet-5.5.jpg" alt="Claude Sonnet 5.5 castle" width="300"><br>**Claude Sonnet 5.5** · G6 100 | <img src="Docs/Images/benchmark_v2/castle_gpt-6-luna.jpg" alt="GPT-6 Luna castle" width="300"><br>**GPT-6 Luna** · G6 84 |
+| <img src="Docs/Images/benchmark_v2/castle_claude-haiku-4.5.jpg" alt="Claude Haiku 4.5 castle" width="300"><br>**Claude Haiku 4.5** · G6 60 | <img src="Docs/Images/benchmark_v2/castle_qwen3.8-flash-coder.jpg" alt="qwen3.8 flash coder castle" width="300"><br>**qwen3.8 flash coder** · G6 93 | <img src="Docs/Images/benchmark_v2/castle_minicpm-v-4.7-1b.jpg" alt="MiniCPM-V 4.7 1B build" width="300"><br>**MiniCPM-V 4.7 1B** · G6 18 |
+
+The numeric G6 grader checks geometry (enclosed courtyard, gate, towers, keep, roofs, objects inside and
+around the walls, spread, construction quality), not taste — look at the pictures as well as the score.
+
+Full tables, methodology, group legend and the run archive:
+**[benchmark guide](Assets/CoreAIBenchmark/README.md)** · **[leaderboard](Docs/BENCHMARK_LEADERBOARD.md)**.
+
+<details>
+<summary>Historical suite v1.7 frontier sweep (not comparable with v2.0)</summary>
+
+The older **suite v1.7** sweep used the benchmark v2 prompts; later scores are not mixed with it.
 
 <img src="Docs/Images/benchmark_v2_frontier.png" alt="CoreAI Game-Creation Benchmark v2 — top-tier frontier-model comparison ranked by suite score" width="900">
 
@@ -356,8 +404,7 @@ Free models through the opencode native API (`opencode serve`, real token stream
 tier's rate limit ended the run mid-suite). Rate-limited and meant for use inside opencode, so treat
 them as "can a free model build a game?" checks.
 
-Full tables, methodology, group legend and per-model castle prefabs:
-**[benchmark guide](Assets/CoreAIBenchmark/README.md)** · **[leaderboard](Docs/BENCHMARK_LEADERBOARD.md)**.
+</details>
 
 ---
 

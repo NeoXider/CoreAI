@@ -29,7 +29,9 @@ Scores are only comparable **within the same suite version**. Scenario sets, che
 
 ## Leaderboard — Suite v2.0
 
-<img src="Images/benchmark_leaderboard_2.0.svg" alt="CoreAI Game-Creation Benchmark suite v2.0 leaderboard: suite score, extreme tier, group heatmap, tokens and failed tool calls" width="900">
+<img src="Images/benchmark_leaderboard_2.0_dark.svg" alt="CoreAI Game-Creation Benchmark suite v2.0 leaderboard: suite score, extreme tier, group heatmap, tokens and failed tool calls" width="900">
+
+[Light version of the chart](Images/benchmark_leaderboard_2.0.svg).
 
 Maintainer run `20261015_224850` (2026-10-15): suite v2.0, 35 scenarios per model (28 regular, 7 extreme) plus the G6
 image-feedback build, one repetition, reasoning effort `high` (MiniCPM exposes none), no temperature sent
