@@ -39,12 +39,16 @@ namespace CoreAI.Infrastructure.Llm
         private bool overrideTemperature = true;
 
         [SerializeField]
-        [Min(5)]
-        private int requestTimeoutSeconds = 120;
+        [Min(0)]
+        private int requestTimeoutSeconds;
+
+        [Tooltip("Response wait in seconds. -1 inherits the global setting; zero disables it.")]
+        [SerializeField]
+        private int responseWaitTimeoutSeconds = -1;
 
         [SerializeField]
-        [Min(64)]
-        private int maxTokens = 128000;
+        [Min(0)]
+        private int maxTokens = 262144;
 
         [SerializeField]
         private bool overrideMaxTokens = true;
@@ -128,6 +132,9 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>UnityWebRequest timeout in seconds.</summary>
         public int RequestTimeoutSeconds => requestTimeoutSeconds;
 
+        /// <summary>Response wait override; null inherits the global setting and zero disables it.</summary>
+        public int? ResponseWaitTimeoutSeconds => responseWaitTimeoutSeconds < 0 ? null : responseWaitTimeoutSeconds;
+
         /// <summary>Maximum response tokens.</summary>
         public int MaxTokens => maxTokens;
 
@@ -202,6 +209,7 @@ namespace CoreAI.Infrastructure.Llm
                 Temperature = Temperature,
                 OverrideTemperature = OverrideTemperature,
                 RequestTimeoutSeconds = RequestTimeoutSeconds,
+                ResponseWaitTimeoutSeconds = ResponseWaitTimeoutSeconds,
                 MaxTokens = MaxTokens,
                 OverrideMaxTokens = OverrideMaxTokens,
                 ExtraBodyJson = ExtraBodyJson,
@@ -237,8 +245,9 @@ namespace CoreAI.Infrastructure.Llm
             model = options.Model ?? "";
             temperature = Mathf.Clamp(options.Temperature, 0f, 2f);
             overrideTemperature = options.OverrideTemperature;
-            requestTimeoutSeconds = options.RequestTimeoutSeconds < 5 ? 5 : options.RequestTimeoutSeconds;
-            maxTokens = options.MaxTokens < 0 ? 128000 : options.MaxTokens;
+            requestTimeoutSeconds = System.Math.Max(0, options.RequestTimeoutSeconds);
+            responseWaitTimeoutSeconds = options.ResponseWaitTimeoutSeconds ?? -1;
+            maxTokens = options.MaxTokens < 0 ? 262144 : options.MaxTokens;
             overrideMaxTokens = options.OverrideMaxTokens;
             extraBodyJson = options.ExtraBodyJson ?? "";
             reasoningMode = options.ReasoningMode;
@@ -271,8 +280,8 @@ namespace CoreAI.Infrastructure.Llm
             string apiKey,
             string model,
             float temperature = 0.2f,
-            int requestTimeoutSeconds = 120,
-            int maxTokens = 128000,
+            int requestTimeoutSeconds = 0,
+            int maxTokens = 262144,
             LlmExecutionMode executionMode = LlmExecutionMode.ClientOwnedApi,
             int maxRequestsPerSession = 0,
             int maxPromptChars = 0,
@@ -290,8 +299,8 @@ namespace CoreAI.Infrastructure.Llm
             this.model = model ?? "";
             this.temperature = temperature;
             this.overrideTemperature = overrideTemperature;
-            this.requestTimeoutSeconds = requestTimeoutSeconds < 5 ? 5 : requestTimeoutSeconds;
-            this.maxTokens = maxTokens < 0 ? 128000 : maxTokens;
+            this.requestTimeoutSeconds = System.Math.Max(0, requestTimeoutSeconds);
+            this.maxTokens = maxTokens < 0 ? 262144 : maxTokens;
             this.overrideMaxTokens = overrideMaxTokens;
             this.reasoningEffort = reasoningEffort;
             this.reasoningDialect = reasoningDialect;

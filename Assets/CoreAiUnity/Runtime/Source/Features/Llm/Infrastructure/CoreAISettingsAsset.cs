@@ -150,7 +150,7 @@ namespace CoreAI.Infrastructure.Llm
             "Used only when max tokens overriding is enabled.")]
         [SerializeField]
         [Min(0)]
-        private int maxTokens = 128000;
+        private int maxTokens = 262144;
 
         [Header("Client limits")]
         [SerializeField]
@@ -161,10 +161,10 @@ namespace CoreAI.Infrastructure.Llm
         [Min(0)]
         private int maxClientLimitedPromptChars;
 
-        [Tooltip("HTTP layer timeout seconds (fallback 120 when unset).")]
+        [Tooltip("Total HTTP timeout seconds. Zero disables the ceiling.")]
         [SerializeField]
         [Min(0)]
-        private int requestTimeoutSeconds = 120;
+        private int requestTimeoutSeconds = 0;
 
         [Header("Fallback Backend (secondary)")]
         [Tooltip(
@@ -547,10 +547,15 @@ namespace CoreAI.Infrastructure.Llm
         private bool logMeaiToolCallingSteps = true;
 
         [Tooltip(
-            "Orchestration-level LLM cancel-after seconds (streaming + heavy tool loops often need 60-180 seconds)..")]
+            "Total LLM cancel-after seconds. Zero disables the ceiling; orchestration idle limits remain separate.")]
         [SerializeField]
         [Min(0f)]
-        private float llmRequestTimeoutSeconds = 120f;
+        private float llmRequestTimeoutSeconds = 0f;
+
+        [Tooltip("Maximum wait for the first model delta or between model deltas. Reasoning and tool deltas count; SSE comments do not. Zero disables it.")]
+        [SerializeField]
+        [Min(0f)]
+        private float llmResponseWaitTimeoutSeconds = 180f;
 
         [Tooltip("Concurrent orchestrator runs allowed by CoreAILifetimeScope.")]
         [SerializeField]
@@ -744,7 +749,7 @@ namespace CoreAI.Infrastructure.Llm
             maxClientLimitedPromptChars < 0 ? 0 : maxClientLimitedPromptChars;
 
         /// <summary>HTTP adapter timeout backing field.</summary>
-        public int RequestTimeoutSeconds => requestTimeoutSeconds <= 0 ? 120 : requestTimeoutSeconds;
+        public int RequestTimeoutSeconds => System.Math.Max(0, requestTimeoutSeconds);
 
         /// <summary>
         /// Single-request HTTP limit aligned with <see cref="LlmRequestTimeoutSeconds"/> so the transport
@@ -762,7 +767,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 int orchestratorCap = System.Math.Max(1, (int)System.Math.Ceiling(llm));
-                return System.Math.Min(http, orchestratorCap);
+                return http > 0 ? System.Math.Min(http, orchestratorCap) : orchestratorCap;
             }
         }
 
@@ -998,6 +1003,9 @@ namespace CoreAI.Infrastructure.Llm
         /// <inheritdoc />
         public float LlmRequestTimeoutSeconds => llmRequestTimeoutSeconds;
 
+        /// <summary>Maximum response wait or model-delta gap; zero disables it.</summary>
+        public float LlmResponseWaitTimeoutSeconds => llmResponseWaitTimeoutSeconds;
+
         /// <summary>Parallel orchestrator task ceiling.</summary>
         public int MaxConcurrentOrchestrations => maxConcurrentOrchestrations < 1 ? 2 : maxConcurrentOrchestrations;
 
@@ -1062,7 +1070,8 @@ namespace CoreAI.Infrastructure.Llm
 
             maxLuaRepairRetries = options.MaxLuaRepairRetries < 1 ? 3 : options.MaxLuaRepairRetries;
             enableMeaiDebugLogging = options.EnableMeaiDebugLogging;
-            llmRequestTimeoutSeconds = options.LlmRequestTimeoutSeconds < 0f ? 120f : options.LlmRequestTimeoutSeconds;
+            llmRequestTimeoutSeconds = System.Math.Max(0f, options.LlmRequestTimeoutSeconds);
+            llmResponseWaitTimeoutSeconds = System.Math.Max(0f, options.LlmResponseWaitTimeoutSeconds);
             maxLlmRequestRetries = options.MaxLlmRequestRetries < 1 ? 1 : options.MaxLlmRequestRetries;
             maxContextOverflowRetries =
                 options.MaxContextOverflowRetries < 0 ? 0 : options.MaxContextOverflowRetries;
@@ -1173,7 +1182,7 @@ namespace CoreAI.Infrastructure.Llm
 
             if (timeoutSeconds.HasValue)
             {
-                requestTimeoutSeconds = timeoutSeconds.Value <= 0 ? 120 : timeoutSeconds.Value;
+                requestTimeoutSeconds = System.Math.Max(0, timeoutSeconds.Value);
             }
 
             if (maxTokens.HasValue)
@@ -1433,7 +1442,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             if (requestTimeoutSeconds < 0)
             {
-                requestTimeoutSeconds = 120;
+                requestTimeoutSeconds = 0;
             }
 
             if (maxLuaRepairRetries < 1)
@@ -1496,9 +1505,11 @@ namespace CoreAI.Infrastructure.Llm
                 maxRetainedToolResultMessages = CoreAISettings.DefaultMaxRetainedToolResultMessages;
             }
 
+            llmResponseWaitTimeoutSeconds = System.Math.Max(0f, llmResponseWaitTimeoutSeconds);
+
             if (llmRequestTimeoutSeconds < 0f)
             {
-                llmRequestTimeoutSeconds = 120f;
+                llmRequestTimeoutSeconds = 0f;
             }
 
             if (llmUnityStartupTimeoutSeconds < 5f)

@@ -4,6 +4,32 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+## [7.52.0] - 2026-10-15
+
+### Added
+
+- Response wait on the settings asset and on runtime endpoints (default 180 seconds, 0 disables), passed
+  through HTTP profiles, route snapshots and managed wrappers.
+- Benchmark window: an optional Temperature per target row (empty = provider default), saved with the
+  other non-secret row fields.
+- Captured-request regressions: classic and multi-target benchmark clients send no temperature, and the
+  MiniCPM-V 4.7 sampling fields reach the wire unchanged through `extraBody`.
+
+### Changed
+
+- The total LLM/HTTP request timeout defaults to 0 (unlimited); values saved in existing assets are kept.
+- The default output cap is 262144 tokens, sent only when the override is enabled or a value is set.
+- Benchmark HTTP clients leave the temperature unset unless a target supplies one (0.1 was forced before).
+
+### Fixed
+
+- Endpoint timeout overrides survive HTTP profiles, snapshots, endpoint construction and managed wrappers.
+- Benchmark grading: a scenario deadline on an accepted provider stream is a Model failure graded on the
+  work executed (0 when nothing ran), with no automatic replay. Connection, provider HTTP and transport
+  failures stay Environment failures with retries.
+- An EditMode SSE test no longer blocks the editor thread while a retry backoff waits for the editor tick,
+  which hung the whole EditMode run.
+
 ## [7.51.0] - 2026-10-15
 
 Benchmark suite 2.0 (extreme tier, G6 geometry grading, hardened graders, parallel multi-model runs) is described

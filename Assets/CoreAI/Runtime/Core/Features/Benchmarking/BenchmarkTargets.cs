@@ -29,14 +29,21 @@ namespace CoreAI.Benchmarking
         /// </param>
         /// <param name="extraBodyJson">Optional provider body fields for this target: the text of one JSON object.</param>
         public BenchmarkTarget(string model, string baseUrl, string apiKey = "", string label = "",
-            string reasoningEffort = "", string extraBodyJson = "")
+            string reasoningEffort = "", string extraBodyJson = "", float? temperature = null)
         {
+            if (temperature.HasValue && (float.IsNaN(temperature.Value) ||
+                float.IsInfinity(temperature.Value) || temperature.Value < 0f || temperature.Value > 2f))
+            {
+                throw new ArgumentOutOfRangeException(nameof(temperature), "Temperature must be a finite number from 0 to 2.");
+            }
+
             Model = (model ?? "").Trim();
             BaseUrl = BenchmarkTargetList.NormalizeBaseUrl(baseUrl);
             ApiKey = (apiKey ?? "").Trim();
             Label = (label ?? "").Trim();
             ReasoningEffort = (reasoningEffort ?? "").Trim().ToLowerInvariant();
             ExtraBodyJson = (extraBodyJson ?? "").Trim();
+            Temperature = temperature;
         }
 
         /// <summary>Model id sent to the provider.</summary>
@@ -59,6 +66,9 @@ namespace CoreAI.Benchmarking
         /// with the provider-body rules, merges them over the shared body and sets the effort on top.
         /// </summary>
         public string ExtraBodyJson { get; }
+
+        /// <summary>Optional sampling temperature (0..2); null leaves the provider/model default unchanged.</summary>
+        public float? Temperature { get; }
 
         /// <summary>The name reports, progress lines and model cards use for this target.</summary>
         public string DisplayName => Label.Length > 0 ? Label : Model;
@@ -89,7 +99,7 @@ namespace CoreAI.Benchmarking
 
         internal BenchmarkTarget WithLabel(string label)
         {
-            return new BenchmarkTarget(Model, BaseUrl, ApiKey, label, ReasoningEffort, ExtraBodyJson);
+            return new BenchmarkTarget(Model, BaseUrl, ApiKey, label, ReasoningEffort, ExtraBodyJson, Temperature);
         }
     }
 
@@ -101,7 +111,7 @@ namespace CoreAI.Benchmarking
     ///   <item>JSON array: <c>[{"label":"q4","model":"qwen3.5-4b","baseUrl":"http://127.0.0.1:8831/v1","apiKey":"env:KEY",
     ///   "reasoningEffort":"high","extraBody":{"top_k":20}}]</c>. Keys are case-insensitive; <c>model</c> and <c>baseUrl</c>
     ///   are required, <c>"enabled": false</c> skips an entry. <c>extraBody</c> is a JSON object (or a string holding
-    ///   one).</item>
+    ///   one). Optional <c>temperature</c> (alias <c>temp</c>) is a number from 0 to 2, JSON only.</item>
     ///   <item>Compact: entries separated by <c>;</c> or new lines, each <c>label|model|baseUrl|apiKey|effort</c>. The base
     ///   URL is found by its <c>http://</c>/<c>https://</c> scheme; one field before it is the model, two are label and
     ///   model; after it come the key and then the effort (<c>baseUrl||high</c> sets an effort without a key). Blank
@@ -154,6 +164,25 @@ namespace CoreAI.Benchmarking
         public static string ReasoningEffortError(string raw)
         {
             return $"reasoning effort '{(raw ?? "").Trim()}' must be one of {string.Join(", ", ReasoningEfforts)}";
+        }
+
+        /// <summary>Parses an optional temperature for a target row; empty means provider default.</summary>
+        public static bool TryParseTemperature(string raw, out float? temperature)
+        {
+            temperature = null;
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return true;
+            }
+
+            if (!double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double value) ||
+                double.IsNaN(value) || double.IsInfinity(value) || value < 0 || value > 2)
+            {
+                return false;
+            }
+
+            temperature = (float)value;
+            return true;
         }
 
         /// <summary>Parses <paramref name="spec"/>; an empty spec yields an empty list.</summary>
@@ -245,6 +274,11 @@ namespace CoreAI.Benchmarking
                 if (t.ExtraBodyJson.Length > 0)
                 {
                     sb.Append(",\"extraBody\":").Append(t.ExtraBodyJson);
+                }
+
+                if (t.Temperature.HasValue)
+                {
+                    sb.Append(",\"temperature\":").Append(t.Temperature.Value.ToString("R", CultureInfo.InvariantCulture));
                 }
 
                 sb.Append('}');
@@ -391,6 +425,7 @@ namespace CoreAI.Benchmarking
                 string label = null;
                 string effort = null;
                 string extraBody = null;
+                float? temperature = null;
                 bool enabled = true;
                 bool valid = true;
                 foreach (KeyValuePair<string, object> property in obj)
@@ -426,6 +461,24 @@ namespace CoreAI.Benchmarking
                         case "extra_body":
                             valid &= ReadExtraBody(property, number, problems, reader, out extraBody);
                             break;
+                        case "temperature":
+                        case "temp":
+                            if (property.Value == null)
+                            {
+                                temperature = null;
+                            }
+                            else if (property.Value is double value && !double.IsNaN(value) &&
+                                     !double.IsInfinity(value) && value >= 0 && value <= 2)
+                            {
+                                temperature = (float)value;
+                            }
+                            else
+                            {
+                                problems.Add($"entry {number}: '{property.Key}' must be a number from 0 to 2");
+                                valid = false;
+                            }
+
+                            break;
                         case "enabled":
                             if (property.Value is bool flag)
                             {
@@ -447,7 +500,7 @@ namespace CoreAI.Benchmarking
 
                 if (valid && enabled)
                 {
-                    AddValidated(targets, problems, number, model, baseUrl, key, label, effort, extraBody);
+                    AddValidated(targets, problems, number, model, baseUrl, key, label, effort, extraBody, temperature);
                 }
             }
 
@@ -541,7 +594,8 @@ namespace CoreAI.Benchmarking
         }
 
         private static void AddValidated(List<BenchmarkTarget> targets, List<string> problems, int number,
-            string model, string baseUrl, string key, string label, string effort, string extraBody)
+            string model, string baseUrl, string key, string label, string effort, string extraBody,
+            float? temperature = null)
         {
             if (string.IsNullOrWhiteSpace(model))
             {
@@ -562,7 +616,7 @@ namespace CoreAI.Benchmarking
                 return;
             }
 
-            targets.Add(new BenchmarkTarget(model, baseUrl, key, label, normalizedEffort, extraBody));
+            targets.Add(new BenchmarkTarget(model, baseUrl, key, label, normalizedEffort, extraBody, temperature));
         }
 
         private static List<BenchmarkTarget> DisambiguateDisplayNames(List<BenchmarkTarget> parsed)

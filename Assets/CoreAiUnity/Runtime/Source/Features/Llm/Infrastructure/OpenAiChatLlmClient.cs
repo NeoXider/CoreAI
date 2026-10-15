@@ -103,6 +103,8 @@ namespace CoreAI.Infrastructure.Llm
             public float Temperature => _s.Temperature;
             public float? TemperatureOverride => _s.OverrideTemperature ? _s.Temperature : null;
             public int RequestTimeoutSeconds => _s.EffectiveHttpRequestTimeoutSeconds;
+
+            public int? ResponseWaitTimeoutSeconds => System.Math.Max(0, (int)System.Math.Ceiling(_s.LlmResponseWaitTimeoutSeconds));
             public int MaxTokens => _s.MaxTokens;
             public int? MaxTokensOverride => _s.OverrideMaxTokens ? _s.MaxTokens : null;
             public string ExtraBodyJson => _s.ExtraBodyJson;

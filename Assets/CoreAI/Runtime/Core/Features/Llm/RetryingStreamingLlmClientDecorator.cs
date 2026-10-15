@@ -305,7 +305,7 @@ namespace CoreAI.Infrastructure.Llm
                     yield break;
                 }
 
-                if (attempt >= _maxRetryAttempts)
+                if (attempt >= _maxRetryAttempts || request?.ProviderResponseState?.RetrySuppressed == true)
                 {
                     yield return terminalErrorChunk ?? new LlmStreamChunk
                     {

@@ -114,7 +114,7 @@ namespace CoreAI.Vision
                     ChatHistory = new List<Microsoft.Extensions.AI.ChatMessage> { userMessage },
                     // WHY: generous budget for reasoning models whose thinking counts toward max_tokens;
                     // the visible answer is one word so the actual cost stays negligible.
-                    MaxOutputTokens = 128000
+                    MaxOutputTokens = 262144
                 };
 
                 LlmCompletionResult result = await client.CompleteAsync(request, linked.Token);

@@ -108,6 +108,9 @@ namespace CoreAI.Tests.PlayMode
             public bool Streaming { get; }
             public bool NativeTools { get; }
 
+            /// <summary>Explicit client temperature; null leaves sampling to the provider/model.</summary>
+            public float? Temperature { get; }
+
             /// <summary>Validated, compact provider-specific body JSON. Empty means no provider overrides.</summary>
             public string ExtraBodyJson { get; }
 
@@ -125,20 +128,22 @@ namespace CoreAI.Tests.PlayMode
                 string model,
                 bool streaming,
                 bool nativeTools,
-                string extraBodyJson)
+                string extraBodyJson,
+                float? temperature = null)
             {
                 BaseUrl = baseUrl;
                 ApiKey = apiKey ?? "";
                 Model = model;
                 Streaming = streaming;
                 NativeTools = nativeTools;
+                Temperature = temperature;
                 ExtraBodyJson = extraBodyJson ?? "";
                 ReasoningEffort = ReadReasoningEffort(ExtraBodyJson);
             }
 
             internal ResolvedConfig WithExtraBody(string extraBodyJson)
             {
-                return new ResolvedConfig(BaseUrl, ApiKey, Model, Streaming, NativeTools, extraBodyJson);
+                return new ResolvedConfig(BaseUrl, ApiKey, Model, Streaming, NativeTools, extraBodyJson, Temperature);
             }
 
             private static string ReadReasoningEffort(string extraBodyJson)
@@ -209,11 +214,19 @@ namespace CoreAI.Tests.PlayMode
         /// sent to another. The provider body is then composed by <see cref="ComposeProviderBody"/> from that shared
         /// body, <paramref name="defaultReasoningEffort"/>, <paramref name="extraBodyJson"/> and
         /// <paramref name="reasoningEffort"/>.
+        /// A null temperature leaves the client's sampling override unset.
         /// </summary>
         /// <exception cref="ArgumentException">The target body or an effort is invalid.</exception>
         public static ResolvedConfig ResolveForEndpoint(string baseUrl, string model, string apiKey,
-            string extraBodyJson = null, string reasoningEffort = null, string defaultReasoningEffort = null)
+            string extraBodyJson = null, string reasoningEffort = null, string defaultReasoningEffort = null,
+            float? temperature = null)
         {
+            if (temperature.HasValue && (float.IsNaN(temperature.Value) || float.IsInfinity(temperature.Value) ||
+                temperature.Value < 0f || temperature.Value > 2f))
+            {
+                throw new ArgumentOutOfRangeException(nameof(temperature), "Temperature must be a finite number from 0 to 2.");
+            }
+
             ResolvedConfig shared = Resolve(model);
             string normalized = NormalizeBaseUrl(baseUrl);
             bool sameEndpoint = normalized != null &&
@@ -225,7 +238,7 @@ namespace CoreAI.Tests.PlayMode
                     : "";
             return new ResolvedConfig(normalized, key, model?.Trim(), shared.Streaming, shared.NativeTools,
                 ComposeProviderBody(sameEndpoint ? shared.ExtraBodyJson : "", extraBodyJson, reasoningEffort,
-                    defaultReasoningEffort));
+                    defaultReasoningEffort), temperature);
         }
 
         /// <summary>

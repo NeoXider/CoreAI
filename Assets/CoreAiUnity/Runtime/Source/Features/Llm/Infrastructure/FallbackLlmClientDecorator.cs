@@ -63,6 +63,7 @@ namespace CoreAI.Infrastructure.Llm
                     !result.Ok &&
                     !cancellationToken.IsCancellationRequested &&
                     !HasExecutedToolCalls(result) &&
+                    request?.ProviderResponseState?.RetrySuppressed != true &&
                     IsRetryableError(result.ErrorCode))
                 {
                     _logger.Warn(
@@ -89,6 +90,11 @@ namespace CoreAI.Infrastructure.Llm
             catch (Exception ex) when (cancellationToken.IsCancellationRequested)
             {
                 throw LlmCancellation.WrapAsCancellation(ex, cancellationToken, "the primary");
+            }
+            // WHY: A configured request deadline must not restart on a secondary endpoint.
+            catch (Exception) when (request?.ProviderResponseState?.RetrySuppressed == true)
+            {
+                throw;
             }
             // WHY: OperationCanceledException with an un-cancelled caller token is an internal provider/transport
             // timeout (e.g. MeaiOpenAiChatClient's transport-level timeout), not a user cancellation.
@@ -164,6 +170,11 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         throw LlmCancellation.WrapAsCancellation(ex, cancellationToken, "the primary stream");
                     }
+                    // WHY: Request-local deadline evidence survives exception-to-chunk adapters without replay.
+                    catch (Exception) when (request?.ProviderResponseState?.RetrySuppressed == true)
+                    {
+                        throw;
+                    }
                     catch (OperationCanceledException ex)
                     {
                         _logger.Warn(
@@ -203,6 +214,11 @@ namespace CoreAI.Infrastructure.Llm
                     }
 
                     LlmStreamChunk chunk = enumerator.Current;
+                    if (request?.ProviderResponseState?.RetrySuppressed == true)
+                    {
+                        yield return chunk;
+                        yield break;
+                    }
                     // WHY: A failing chunk that carries ExecutedToolCalls is a turn in which the tool has
                     // already fired; a run on the secondary would execute it a second time. The check comes
                     // before the error code rather than after it: otherwise it rests on the chunk's producer

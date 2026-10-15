@@ -32,7 +32,9 @@ namespace CoreAI.Infrastructure.Llm
                 uwr.SetRequestHeader("Content-Type", "application/json");
                 ApplyHeaders(uwr, request);
 
-                int t = request.TransportTimeoutSeconds <= 0 ? 120 : request.TransportTimeoutSeconds;
+                int total = System.Math.Max(0, request.TransportTimeoutSeconds);
+                int wait = System.Math.Max(0, request.ResponseWaitTimeoutSeconds);
+                int t = total == 0 ? wait : wait == 0 ? total : System.Math.Min(total, wait);
                 uwr.timeout = t;
 
                 UnityWebRequestAsyncOperation op = uwr.SendWebRequest();

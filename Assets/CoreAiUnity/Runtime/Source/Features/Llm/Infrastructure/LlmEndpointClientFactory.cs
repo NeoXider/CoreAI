@@ -204,11 +204,11 @@ namespace CoreAI.Infrastructure.Llm
                 throw new ArgumentException("HTTP endpoint model is required.", nameof(descriptor));
             }
 
-            int httpTimeout = settings is CoreAISettingsAsset unitySettings
+            int httpTimeout = descriptor.RequestTimeoutSeconds ?? (settings is CoreAISettingsAsset unitySettings
                 ? unitySettings.EffectiveHttpRequestTimeoutSeconds
                 : settings.LlmRequestTimeoutSeconds <= 0f
-                    ? 120
-                    : Math.Min(120, Math.Max(1, (int)Math.Ceiling(settings.LlmRequestTimeoutSeconds)));
+                    ? 0
+                    : Math.Max(1, (int)Math.Ceiling(settings.LlmRequestTimeoutSeconds)));
 
             // WHY: descriptor-level behavior settings (max tokens, reasoning, extra body) must survive
             // a switch from the legacy backend to a runtime endpoint, otherwise the same model silently
@@ -221,6 +221,8 @@ namespace CoreAI.Infrastructure.Llm
                 ApiKey = sessionApiKey ?? "",
                 Model = descriptor.Model.Trim(),
                 RequestTimeoutSeconds = httpTimeout,
+                ResponseWaitTimeoutSeconds = descriptor.ResponseWaitTimeoutSeconds ??
+                    Math.Max(0, (int)Math.Ceiling(settings.LlmResponseWaitTimeoutSeconds)),
                 Temperature = descriptor.Temperature ?? settings.Temperature,
                 OverrideTemperature = descriptor.Temperature.HasValue,
                 MaxTokens = Math.Max(0, descriptor.MaxTokens),

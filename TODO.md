@@ -1,5 +1,16 @@
 # TODO
 
+- [x] Benchmark sampling: remove the imposed temperature; add optional JSON target temperature (0..2), persisted window field, nullable metadata/model summaries, docs and captured-request regressions for provider defaults and MiniCPM-V 4.7 sampling passthrough.
+- [x] Benchmark sampling file-only validation: Benchmarking, Benchmark.Tests and Tests compile with zero errors; portable Release suite passes 2499/2499. CoreAI temperature-override omission guards are preserved.
+- [ ] Benchmark sampling verification gate: run the new target/window/report EditMode and captured-request PlayMode fixtures on the next Unity start; Unity remains closed during file-only validation.
+
+- [x] Owner timeout/output defaults: total ceiling 0, independent global/endpoint response wait 180 (0 disables), reasoning/tool progress without keep-alive resets, default output cap 262144 with unchanged opt-in/zero semantics. Preserve saved values and document migration. Add simulated-clock, routing and serialization regressions; keep deadline expiry from replaying through retry/fallback.
+
+- [x] CoreAI/dsh local-Qwen client comparison: prevent reasoning-only history leakage, preserve nonempty reasoning aliases, add explicit llama.cpp budget controls, endpoint stream deadlines, and request-local HTTP response evidence. Grade healthy-stream scenario deadlines as Model failures with zero credit for no work and no automatic replay; preserve transport/provider Environment failures. Regression fixtures added.
+- [x] Live local-Qwen A/B after target completion: Strata 0.1.43.1 maps High to XHigh; both identical-prompt baselines streamed thinking until the 240 s probe ceiling. CoreAI with a 2048-token reasoning budget produced a valid tool call in 44.38 s; thinking disabled completed in 17.75 s. Probe Lua was not executed or graded.
+- [x] Local-Qwen file-only validation: all four requested Unity-generated projects compile; portable Release suite passes 2499/2499; browser fetch Node fixtures pass. Unity was not started and the active benchmark artifacts were left untouched.
+- [ ] Local-Qwen comparison verification gate: run new EditMode/PlayMode fixtures in Unity after the active benchmark; verify explicit llama.cpp budgets against each deployed server build. Auto capability discovery remains deferred; endpoint dialects are configurable.
+
 - [x] Unity edit3/play3 failure fixes (2026-10-15): restore opt-in HTTP overrides; preserve JsonElement values in dedup signatures; extend clone probes; attach the Hub regression page to a panel; complete pipeline test registrations; correct the non-streaming assertion; await the pumped inventory continuation. Added wire and batch/stream dedup regressions.
 - [x] Unity edit3/play3 file-only validation: Core, Source, Tests and Benchmark.Tests compile with zero errors; portable Release suite passes 2453/2453, including legacy wire omission and batch/stream JsonElement dedup regressions.
 - [ ] Unity edit3/play3 verification gate: rerun EditMode and PlayMode over these fixes; Unity was deliberately not started during file-only verification.

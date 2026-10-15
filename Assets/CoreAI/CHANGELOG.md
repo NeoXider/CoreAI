@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+## [7.52.0] - 2026-10-15
+
+### Added
+
+- Response wait: a global and per-endpoint limit (default 180 seconds, 0 disables) on the wait for the
+  first model delta and on every gap between deltas. Reasoning, text and tool-call fragments count as
+  progress; keep-alive comments and processing metadata do not. Buffered calls apply it to the whole
+  response.
+- Explicit llama.cpp/Strata-compatible reasoning controls: `reasoning_budget_tokens` and the chat-template
+  thinking flags.
+- Optional per-target benchmark `temperature` (`temp` alias, 0..2) in JSON targets, validated and
+  round-tripped. Run metadata and model summaries record it as nullable; the Markdown header says
+  "provider default" when it is unset.
+
+### Changed
+
+- The total LLM/HTTP request timeout defaults to 0 (unlimited); values saved in existing assets are kept.
+- The default output cap is 262144 tokens. It is sent only when the override is enabled or a value is set
+  explicitly; an explicit zero keeps its meaning.
+- The hidden 15-second starved-stream restart is replaced by the response wait, so a model that is still
+  thinking is no longer restarted silently.
+- The Game-Creation Benchmark sends no temperature: every target uses its provider/model default unless the
+  target sets one.
+
+### Fixed
+
+- A configured deadline survives streaming retries and endpoint fallback and surfaces as one timeout
+  without restarting inference; transport timeouts reported on their own keep the retry policy.
+- Reasoning-only assistant messages are kept out of the visible request history.
+- `reasoning_text` deltas are parsed and empty reasoning aliases fall through, so valid thinking deltas
+  count as stream progress.
+- Total and response-wait limits stay independent of parallel tool and session behaviour.
+- Successful provider responses are tracked per request and attempt without synthetic stream chunks.
+- Buffered HTTP calls read the response body under the response-wait token. Mono buffered the body without
+  the token, so a provider that sent headers and then stalled was not bounded in Unity.
+
 ## [7.51.0] - 2026-10-15
 
 ### Changed

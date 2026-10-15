@@ -150,6 +150,8 @@ namespace CoreAI.Infrastructure.Llm
 
             public int RequestTimeoutSeconds => _inner.RequestTimeoutSeconds;
 
+            public int? ResponseWaitTimeoutSeconds => _inner.ResponseWaitTimeoutSeconds;
+
             public int MaxTokens => _inner.MaxTokens;
 
             public bool LogLlmInput => _inner.LogLlmInput;

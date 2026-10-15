@@ -250,7 +250,9 @@
               <uie:PropertyField binding-path="maxConcurrentOrchestrations" label="Max Concurrent"
                                  tooltip="Maximum concurrent orchestrator runs."/>
               <uie:PropertyField binding-path="llmRequestTimeoutSeconds" label="LLM Timeout (sec)"
-                                 tooltip="Overall LLM request timeout in seconds."/>
+                                 tooltip="Total LLM request timeout in seconds. Zero disables the ceiling."/>
+              <uie:PropertyField binding-path="llmResponseWaitTimeoutSeconds" label="Response Wait (sec)"
+                                 tooltip="Maximum first-token wait or gap between model deltas, including reasoning and tools. Zero disables it."/>
 
               <ui:Label text="Retry limits" class="coreai-mini-label"/>
               <uie:PropertyField binding-path="maxLuaRepairRetries" label="Lua Repair Retries"

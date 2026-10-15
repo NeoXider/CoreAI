@@ -203,7 +203,7 @@ Environment shaping is also supported:
 | `COREAI_BENCHMARK_REPS` | Repetitions per scenario (averaged). Use 3-5 to smooth out a noisy local-model run. G1's extreme scenario, G6 and G7 always run once. |
 | `COREAI_BENCHMARK_RETRIES` | Retries after a hard failure that produced no measurement (provider crash, timeout, dropped connection), 0-3; default `1`. G6 is never retried. |
 | `COREAI_BENCHMARK_SUITE_BUDGET` | Soft time budget for the whole run, in seconds. A scenario repetition starts only when its worst case (every attempt at its full timeout) still fits; otherwise the run stops and writes the report for what finished. Default `6000` for a single model; a multi-target run shares one clock and defaults to the ceiling. The value is clamped to the 6-hour NUnit timeout minus a report margin of 300 seconds plus 30 seconds per extra target. |
-| `COREAI_BENCHMARK_TARGETS` | Target list for a parallel multi-model run; empty means the single configured model. A JSON array (`[{"label":"q4","model":"qwen3.5-4b","baseUrl":"http://127.0.0.1:8831/v1","apiKey":"env:KEY","reasoningEffort":"high","extraBody":{"top_k":20}}]`, `"enabled": false` skips an entry), compact `label\|model\|baseUrl\|apiKey\|effort` entries separated by `;` or new lines (label, key and effort optional), or `@path` to read either form from a file. Without a key, retain the empty field: `local\|model\|http://127.0.0.1:8831/v1\|\|high` (`baseUrl\|\|high`). `env:VAR` reads the key from an environment variable. A target without a key reuses the configured test key (`COREAI_TEST_API_KEY` or the local config file) only when its base URL is the configured one. Streaming and native tools follow `COREAI_TEST_STREAMING` / `COREAI_TEST_NATIVE_TOOLS`. Same as `-coreAiBenchmarkTargets`. |
+| `COREAI_BENCHMARK_TARGETS` | Target list for a parallel multi-model run; empty means the single configured model. A JSON array (`[{"label":"q4","model":"qwen3.5-4b","baseUrl":"http://127.0.0.1:8831/v1","apiKey":"env:KEY","reasoningEffort":"high","extraBody":{"top_k":20}}]`, `"enabled": false` skips an entry), compact `label\|model\|baseUrl\|apiKey\|effort` entries separated by `;` or new lines (label, key and effort optional), or `@path` to read either form from a file. Without a key, retain the empty field: `local\|model\|http://127.0.0.1:8831/v1\|\|high` (`baseUrl\|\|high`). `env:VAR` reads the key from an environment variable. A target without a key reuses the configured test key (`COREAI_TEST_API_KEY` or the local config file) only when its base URL is the configured one. Optional JSON-only `temperature` (alias `temp`, number 0..2) sets an explicit temperature; omitted or `null` uses the provider/model default. The compact form has no sixth field. Streaming and native tools follow `COREAI_TEST_STREAMING` / `COREAI_TEST_NATIVE_TOOLS`. Same as `-coreAiBenchmarkTargets`. |
 | `COREAI_BENCHMARK_REASONING_EFFORT` | Suite-wide reasoning effort: `none`, `low`, `medium`, `high`, or `xhigh`; unset uses the provider default. Same as `-coreAiBenchmarkReasoningEffort`. A target's `reasoningEffort` overrides this default. |
 | `COREAI_BENCHMARK_PARALLEL` | How many targets run at the same time; empty, `0` or invalid means all. Same as `-coreAiBenchmarkParallel`. |
 | `COREAI_BENCHMARK_TIMEOUT` | Model timeout override in seconds for non-extreme scenarios, including G6; extreme scenarios retain their own timeout. `0`/unset uses the per-scenario default. G6 model turns are capped at 570 seconds even when this value is higher. After that the runner waits up to 5 seconds for cancellation and plans 30 seconds for capture/export (an allowance, not an enforced cap), so the suite start-gate reserves 605 seconds for a G6 build and adds the 5-second grace to every attempt of the other scenarios. |
@@ -245,10 +245,25 @@ After the sweep, build the comparison report from the Compare tab or the `CoreAI
 
 When the models sit behind endpoints that can serve at the same time (cloud providers, several local servers), one run can benchmark them together through `COREAI_BENCHMARK_TARGETS`, `-coreAiBenchmarkTargets` or the Run tab's target list. Each target gets its own client, settings, report, progress line and artifacts, and the targets share one run id and one suite clock. All scenarios of all targets run in parallel, except the G6 builds and the model-card captures: they take turns on one visual lane. Roblox parts are placed at the model's own world coordinates and the agent camera is found by a global search, so two castles built at once would share one scene. A scenario that uses `env.RbxWorld` or the camera tool without `CaptureScene` must override `UsesSharedScene` to join that lane. Without a target list, a run behaves as a single-model run did before.
 
+The benchmark sends no temperature unless a target explicitly sets one; each provider/model uses its own
+default. Optional JSON `temperature` (alias `temp`) accepts a number from 0 to 2; omitted or `null` means
+provider default. Temperature is JSON-only: the compact form still has five fields, with no sixth field.
+The window's optional **Temperature** column uses an empty field for provider default and saves it with
+the other non-secret target fields. Reports record `temperature: null` and show **temperature provider
+default** when unset; an explicit target value is recorded instead.
+
 Per-target JSON keys `reasoningEffort` and `extraBody` configure effort and provider body fields.
 `extraBody` accepts a JSON object or a string containing one. Target body fields merge over the
 shared body for the same endpoint, and explicit target `reasoningEffort` is applied last. An empty
 target effort inherits the suite default.
+
+For example, MiniCPM-V 4.7 sampling settings can be supplied as one target:
+
+```json
+[{"model":"MiniCPM-V-4_7","baseUrl":"http://127.0.0.1:8831/v1","temperature":0.7,"extraBody":{"top_p":0.95,"top_k":100,"min_p":0,"presence_penalty":0,"repeat_penalty":1.03,"chat_template_kwargs":{"enable_thinking":false}}}]
+```
+
+The benchmark sets no typed values for these `extraBody` sampling fields, so they reach the request unchanged.
 
 ## Comparison Report
 
@@ -394,7 +409,8 @@ clean A/B). A verified `gpt-5.3-spark` re-run after the fix scores the two varia
 confirming vision-feedback is neutral for a non-vision model rather than harmful.
 
 > **Methodology / caveats — read before citing.** Single run per model (reps=1), streaming off, native
-> tools on, temperature 0.1, Unity 6000.3.14f1, suite v1.7 with the benchmark v2 prompts. Run over the CLI bridge (higher latency; each call
+> tools on. Current benchmark runs send no temperature unless a target sets one (provider/model default otherwise).
+> Unity 6000.3.14f1, suite v1.7 with the benchmark v2 prompts. Run over the CLI bridge (higher latency; each call
 > spawns a CLI subprocess), so absolute tokens/time are not comparable to a direct-API run. The Claude rows
 > are penalised by a high bridge tool-failure rate (see above), and the G6 image-feedback numbers do not
 > measure vision (no bridge model can see). Treat these as *indicative* single-shot results, not a controlled

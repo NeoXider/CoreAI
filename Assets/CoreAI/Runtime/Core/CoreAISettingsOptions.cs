@@ -10,7 +10,8 @@ namespace CoreAI
     {
         public int MaxLuaRepairRetries { get; set; } = 3;
         public bool EnableMeaiDebugLogging { get; set; }
-        public float LlmRequestTimeoutSeconds { get; set; } = 120f;
+        public float LlmRequestTimeoutSeconds { get; set; }
+        public float LlmResponseWaitTimeoutSeconds { get; set; } = 180f;
         public int MaxLlmRequestRetries { get; set; } = 1;
         public int MaxContextOverflowRetries { get; set; } = 3;
         public bool EnableHttpDebugLogging { get; set; }
@@ -40,7 +41,7 @@ namespace CoreAI
         public bool LogMeaiToolCallingSteps { get; set; } = true;
         public bool AllowDuplicateToolCalls { get; set; }
         public bool EnableStreaming { get; set; } = true;
-        public int MaxTokens { get; set; } = 128000;
+        public int MaxTokens { get; set; } = 262144;
         public bool EnableLlmContextCompaction { get; set; }
         public bool EnableTokenCalibration { get; set; } = CoreAISettings.DefaultEnableTokenCalibration;
         public string TokenCalibrationModelKey { get; set; } = "default";
@@ -89,6 +90,7 @@ namespace CoreAI
                 MaxLuaRepairRetries = source.MaxLuaRepairRetries,
                 EnableMeaiDebugLogging = source.EnableMeaiDebugLogging,
                 LlmRequestTimeoutSeconds = source.LlmRequestTimeoutSeconds,
+                LlmResponseWaitTimeoutSeconds = source.LlmResponseWaitTimeoutSeconds,
                 MaxLlmRequestRetries = source.MaxLlmRequestRetries,
                 MaxContextOverflowRetries = source.MaxContextOverflowRetries,
                 EnableHttpDebugLogging = source.EnableHttpDebugLogging,

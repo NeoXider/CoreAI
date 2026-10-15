@@ -104,6 +104,12 @@ namespace CoreAI.Ai
         /// <summary>Endpoint sampling temperature; null inherits global settings.</summary>
         public float? Temperature { get; set; }
 
+        /// <summary>Optional total request timeout in seconds; null inherits the host default and zero disables it.</summary>
+        public int? RequestTimeoutSeconds { get; set; }
+
+        /// <summary>Semantic response-wait timeout in seconds; null inherits the host default and zero disables it.</summary>
+        public int? ResponseWaitTimeoutSeconds { get; set; }
+
         /// <summary>Typed reasoning effort; Default inherits legacy or provider settings.</summary>
         public LlmReasoningEffort ReasoningEffort { get; set; } = LlmReasoningEffort.Default;
 
@@ -212,6 +218,16 @@ namespace CoreAI.Ai
             if (MaxTokens < 0)
             {
                 errors.Add("Max tokens must not be negative.");
+            }
+
+            if (RequestTimeoutSeconds < 0)
+            {
+                errors.Add("The total request timeout must not be negative.");
+            }
+
+            if (ResponseWaitTimeoutSeconds < 0)
+            {
+                errors.Add("The response-wait timeout must not be negative.");
             }
 
             if (ThinkingBudgetTokens < 0)

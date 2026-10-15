@@ -371,7 +371,7 @@ The active arrangement is:
 - The caller's token and the deadlines are kept apart. `AiTaskRequest.CallerCancellationToken` is the caller's token only; `AiTaskRequest.DeadlineCancellationToken` is the idle deadline joined with an optional **host deadline** (the overloads that take a `deadlineToken`, which `CoreAiChatPanel` feeds from `CoreAiChatExternalSubmitOptions.DeadlineCancellationToken`); the operation token links all of them. A deadline that fires while the caller's token is alive ends the turn with `LlmOperationTimeoutException` (buffered and streaming) and the orchestrator records `DeadlineCancellation`; a caller stop stays a cancellation even when a deadline fired too.
 - `TimeoutLlmClientDecorator` provides the portable pipeline bound; `LlmPipelineInstaller` injects `UnityMainThreadLlmAsyncMarshaler`, whose `DelayAsync` is also UniTask PlayerLoop-driven.
 - `LoggingLlmClientDecorator` and `RetryingStreamingLlmClientDecorator` use that same injected delay for retry backoff.
-- The timeout value comes from `ICoreAISettings.LlmRequestTimeoutSeconds` (`CoreAISettingsAsset` default: 120 s; the static `CoreAISettings` fallback without an asset is 300 s).
+- The timeout value comes from `ICoreAISettings.LlmRequestTimeoutSeconds` (new asset/options and static fallback default: 0, disabled; existing serialized values are retained).
 
 ```csharp
 // Inside CoreAiChatService.SendMessageStreamingAsync(request, ct, deadlineToken) (simplified)
@@ -411,3 +411,9 @@ Because the orchestrator itself never retries, a failure does not multiply into 
 - **WebGL — incremental SSE** — In the **WebGL player**, keep **`CoreAISettingsAsset.WebGlNativeStreaming`** on (the default; assets created before v1.6.13 may still have it off) so **`FetchSseOpenAiTransport`** + **`CoreAiSseFetch.jslib`** deliver real **`fetch`** streaming. If it is off, the player uses **`UnityWebRequest`** and non-streaming completions: the full reply lands at once. Both paths obey the browser's CORS rules, and the backend must not buffer SSE for the bridge to show tokens live. Verification: [Verifying WebGL streaming](#verifying-webgl-streaming).
 
 Related deep dives: [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) · [TOOL_CALLING_BEST_PRACTICES](../../CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md).
+
+### Provider response wait
+
+`ICoreAISettings.LlmResponseWaitTimeoutSeconds` defaults to 180 seconds. `LlmEndpointDescriptor.ResponseWaitTimeoutSeconds` and `IOpenAiHttpSettings.ResponseWaitTimeoutSeconds` override it per endpoint (null inherits, zero disables). The semantic timer starts before headers, resets on nonempty text/reasoning/tool-call deltas, and bounds every gap, including first-token silence. SSE comments and processing metadata do not reset it. Five minutes of continuously streaming reasoning are valid with no total ceiling. Buffered calls apply the same wait to the whole response. A breach raises `LlmErrorCode.Timeout` and never silently restarts the turn through the removed 15-second starvation watchdog.
+
+The optional total ceiling (`RequestTimeoutSeconds`, default zero) remains independent and is not re-armed by deltas. The browser fetch bridge enforces that total ceiling; the C# parser enforces semantic response wait through the injected PlayerLoop marshaler, without threads or blocking waits. Chat/orchestrator idle windows, tool deadlines and benchmark scenario deadlines keep their separate behavior. Existing serialized total limits remain unchanged during migration.

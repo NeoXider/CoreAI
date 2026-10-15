@@ -1563,7 +1563,7 @@ public void AgentBuilder_CreatesAgent_WithAllSettings()
 CoreAISettings.MaxLuaRepairRetries = 5;        // Max consecutive failed Lua repairs (default 3)
 // WHY: Set Tool Call Retries to 5 on the CoreAISettingsAsset: Advanced Settings -> General -> Tool Call Retries.
 CoreAISettings.EnableMeaiDebugLogging = true; // MEAI debug logging
-CoreAISettings.LlmRequestTimeoutSeconds = 600; // Chat/orchestrator idle timeout (CoreAISettingsAsset default 120)
+CoreAISettings.LlmRequestTimeoutSeconds = 600; // Chat/orchestrator idle timeout (CoreAISettingsAsset default 0, disabled)
 
 // Resilience settings:
 CoreAISettings.MaxToolResultChars = 4000;     // Truncate large tool results (default 8000)

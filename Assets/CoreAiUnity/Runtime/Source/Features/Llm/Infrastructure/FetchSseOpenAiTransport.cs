@@ -175,11 +175,9 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 else if (string.Equals(err, "Timeout", StringComparison.OrdinalIgnoreCase))
                 {
-                    // The jslib watchdog (header timeout + rolling body-inactivity timer) aborts
-                    // with reason "Timeout". Surface it TYPED so the rescue chain and callers see
-                    // LlmErrorCode.Timeout instead of a fake HTTP-0 "CORS/network" failure.
+                    // WHY: The optional browser total ceiling must remain a typed timeout.
                     state.SignalError(new LlmClientException(
-                        "SSE transport timeout (no response activity within the transport window).",
+                        "SSE transport total timeout expired.",
                         LlmErrorCode.Timeout));
                 }
                 else

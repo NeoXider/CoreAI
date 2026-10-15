@@ -639,6 +639,7 @@ namespace CoreAI.Tests.EditMode
             header.Add(urlHead);
             header.Add(FixedLabel("API key", 116));
             header.Add(FixedLabel("Effort", 84));
+            header.Add(FixedLabel("Temperature", 90));
             header.Add(FixedLabel("Extra body", 110));
             header.Add(FixedLabel("", 26));
             _targetRowsContainer.Add(header);
@@ -681,6 +682,8 @@ namespace CoreAI.Tests.EditMode
             effort.tooltip = "reasoning_effort for this target; default = the suite-wide Reasoning effort.";
             effort.style.width = 84;
             line.Add(effort);
+            line.Add(TargetText(row.temperature, 90, 0f, false,
+                "Optional temperature (0..2); empty = provider/model default.", v => row.temperature = v));
             line.Add(TargetText(row.extraBody, 110, 0f, false,
                 "Optional provider body fields for this target as one JSON object, e.g. {\"top_k\":20}. " +
                 "CoreAI-owned fields (messages, model, tools, …) are rejected; the effort overrides reasoning_effort.",
@@ -749,6 +752,7 @@ namespace CoreAI.Tests.EditMode
                     baseUrl = target.BaseUrl,
                     apiKey = target.ApiKey,
                     reasoningEffort = target.ReasoningEffort,
+                    temperature = target.Temperature?.ToString("R", CultureInfo.InvariantCulture) ?? "",
                     extraBody = target.ExtraBodyJson
                 });
             }

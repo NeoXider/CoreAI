@@ -121,11 +121,11 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
-        [TestCase(0f, 120)]
+        [TestCase(0f, 0)]
         [TestCase(0.5f, 1)]
-        [TestCase(600f, 120)]
+        [TestCase(600f, 600)]
         [TestCase(1.5f, 2)]
-        public void BuildHttpOptions_UsesLegacyTransportTimeoutPolicy(float ceiling, int expected)
+        public void BuildHttpOptions_UsesExplicitTotalTimeoutWithoutHiddenCap(float ceiling, int expected)
         {
             _settings.SetOrchestratorTimeoutSeconds(ceiling);
             OpenAiHttpOptions options = LlmEndpointClientFactory.BuildHttpOptions(Descriptor(), "", _settings);
@@ -133,10 +133,36 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(_settings.EffectiveHttpRequestTimeoutSeconds, options.RequestTimeoutSeconds);
         }
 
-        [TestCase(0f, 120)]
+        [Test]
+        public void BuildHttpOptions_PreservesEndpointTimeoutOverrides()
+        {
+            LlmEndpointDescriptor first = Descriptor();
+            first.RequestTimeoutSeconds = 240;
+            first.ResponseWaitTimeoutSeconds = 0;
+            OpenAiHttpOptions options = LlmEndpointClientFactory.BuildHttpOptions(first, "", _settings);
+            Assert.AreEqual(240, options.RequestTimeoutSeconds);
+            Assert.AreEqual(0, options.ResponseWaitTimeoutSeconds);
+
+            LlmEndpointDescriptor second = Descriptor();
+            OpenAiHttpOptions other = LlmEndpointClientFactory.BuildHttpOptions(second, "", _settings);
+            Assert.AreEqual(0, other.RequestTimeoutSeconds);
+            Assert.AreEqual(180, other.ResponseWaitTimeoutSeconds);
+        }
+
+        [TestCase(0f)]
+        [TestCase(73f)]
+        public void BuildHttpOptions_InheritsGlobalResponseWaitWithoutEnablingTotalCeiling(float wait)
+        {
+            OpenAiHttpOptions options = LlmEndpointClientFactory.BuildHttpOptions(
+                Descriptor(), "", new CoreAISettingsOptions { LlmResponseWaitTimeoutSeconds = wait });
+            Assert.AreEqual((int)wait, options.ResponseWaitTimeoutSeconds);
+            Assert.AreEqual(0, options.RequestTimeoutSeconds);
+        }
+
+        [TestCase(0f, 0)]
         [TestCase(0.5f, 1)]
-        [TestCase(600f, 120)]
-        public void BuildHttpOptions_PortableSettingsUseDefaultHttpCap(float ceiling, int expected)
+        [TestCase(600f, 600)]
+        public void BuildHttpOptions_PortableSettingsPreserveUnlimitedAndExplicitCeiling(float ceiling, int expected)
         {
             OpenAiHttpOptions options = LlmEndpointClientFactory.BuildHttpOptions(
                 Descriptor(), "", new CoreAISettingsOptions { LlmRequestTimeoutSeconds = ceiling });
@@ -442,6 +468,7 @@ namespace CoreAI.Tests.EditMode
                 Type type = property.PropertyType;
                 object value = type == typeof(string) ? property.Name
                     : type == typeof(int) ? (object)4096
+                    : type == typeof(int?) ? (object)75
                     : type == typeof(bool) ? !((bool)property.GetValue(descriptor))
                     : type == typeof(float?) ? 0.7f
                     : type.IsEnum ? Enum.GetValues(type).GetValue(1)

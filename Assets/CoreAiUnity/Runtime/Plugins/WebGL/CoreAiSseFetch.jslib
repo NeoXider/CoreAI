@@ -30,19 +30,7 @@ mergeInto(LibraryManager.library, {
           controller.abort();
         }, timeoutSec * 1000)
       : 0;
-    // Rolling inactivity watchdog for the BODY phase: the header timeout above is cleared once
-    // the response arrives, so without this a server that sends headers and then stalls mid-body
-    // would hang the stream forever (C#'s Task.Delay-based idle timeout is not trusted on all
-    // WebGL builds). Re-armed on every delivered read; keep-alive comments count as activity.
-    var idleId = 0;
-    function armIdleWatchdog() {
-      if (timeoutSec <= 0) return;
-      if (idleId) clearTimeout(idleId);
-      idleId = setTimeout(function () {
-        CoreAiSseFetchState.abortReasons[callId] = 'Timeout';
-        controller.abort();
-      }, timeoutSec * 1000);
-    }
+    // WHY: The C# parser owns semantic response wait; raw bytes and comments cannot reset it.
 
     CoreAiSseFetchState.controllers[callId] = controller;
 
@@ -129,7 +117,7 @@ mergeInto(LibraryManager.library, {
         return false;
       }
       finished = true;
-      if (idleId) clearTimeout(idleId);
+      if (timeoutId) clearTimeout(timeoutId);
       delete CoreAiSseFetchState.abortReasons[callId];
       delete CoreAiSseFetchState.controllers[callId];
       return true;
@@ -165,7 +153,6 @@ mergeInto(LibraryManager.library, {
     }
 
     fetchPromise.then(function (response) {
-      if (timeoutId) clearTimeout(timeoutId);
       var status = response.status | 0;
       var hdrFlat = flattenHeaders(response.headers);
       // console.log('[CoreAiSseFetch] response id=' + callId + ' status=' + status +
@@ -211,7 +198,6 @@ mergeInto(LibraryManager.library, {
 
       function pump() {
         reader.read().then(function (r) {
-          armIdleWatchdog();
           if (r.value && r.value.byteLength > 0) {
             totalBytes += r.value.byteLength;
             var text = decoder.decode(r.value, { stream: true });
@@ -254,7 +240,6 @@ mergeInto(LibraryManager.library, {
 
       // Defer the first read so C# finishes OpenSseResponseStreamAsync and
       // attaches its StreamReader before the first onChunk lands.
-      armIdleWatchdog();
       setTimeout(pump, 0);
     }).catch(function (err) {
       if (timeoutId) clearTimeout(timeoutId);

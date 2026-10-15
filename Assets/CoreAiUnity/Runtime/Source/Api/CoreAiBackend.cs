@@ -375,7 +375,7 @@ namespace CoreAI
                     // visible answer (thinking counts toward max_tokens on OpenAI-compatible servers);
                     // still a negligible probe cost. An empty visible answer after the budget is a
                     // REAL failure signal (limits/reasoning misconfiguration), so the probe surfaces it.
-                    MaxOutputTokens = 128000
+                    MaxOutputTokens = 262144
                 }, linked.Token);
 
                 sw.Stop();

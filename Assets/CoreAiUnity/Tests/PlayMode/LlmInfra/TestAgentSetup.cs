@@ -122,7 +122,7 @@ namespace CoreAI.Tests.PlayMode
         {
             SetupHttpLogAsserts();
             float temperature = settings != null ? settings.Temperature : 0.2f;
-            int timeoutSeconds = settings != null ? settings.EffectiveHttpRequestTimeoutSeconds : 120;
+            int timeoutSeconds = settings != null ? settings.EffectiveHttpRequestTimeoutSeconds : 0;
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
                     PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp,
                     temperature,

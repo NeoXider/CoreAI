@@ -158,6 +158,33 @@ namespace CoreAI.Tests.PlayMode
         /// </summary>
         public PlayModeOpenAiTestConfig.ResolvedConfig ResolvedConfig { get; }
 
+        /// <summary>The explicit HTTP temperature; null leaves sampling to the provider/model.</summary>
+        public float? Temperature
+        {
+            get
+            {
+                if (_openAiSettings == null)
+                {
+                    return ResolvedBackend == PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp &&
+                           _coreAiSettings != null && _coreAiSettings.OverrideTemperature
+                        ? _coreAiSettings.Temperature
+                        : null;
+                }
+
+                if (_openAiSettings.TemperatureOverride.HasValue)
+                {
+                    return _openAiSettings.TemperatureOverride;
+                }
+
+                JToken raw = string.IsNullOrWhiteSpace(_openAiSettings.ExtraBodyJson)
+                    ? null
+                    : JObject.Parse(_openAiSettings.ExtraBodyJson)["temperature"];
+                return raw != null && (raw.Type == JTokenType.Float || raw.Type == JTokenType.Integer)
+                    ? raw.Value<float>()
+                    : null;
+            }
+        }
+
         /// <summary>
         /// Re-creates <see cref="Client"/> with a memory store using the exact settings and decorators the
         /// factory applied; <c>null</c> only for the Offline stub, which binds no tools.
@@ -325,7 +352,7 @@ namespace CoreAI.Tests.PlayMode
         /// </summary>
         public static bool TryCreate(
             PlayModeProductionLikeLlmBackend? explicitPreference,
-            float openAiTemperature,
+            float? openAiTemperature,
             int openAiTimeoutSeconds,
             out PlayModeProductionLikeLlmHandle handle,
             out string ignoreReason,
@@ -344,7 +371,7 @@ namespace CoreAI.Tests.PlayMode
         /// </summary>
         public static bool TryCreate(
             PlayModeProductionLikeLlmBackend? explicitPreference,
-            float openAiTemperature,
+            float? openAiTemperature,
             int openAiTimeoutSeconds,
             string modelOverride,
             out PlayModeProductionLikeLlmHandle handle,
@@ -440,13 +467,14 @@ namespace CoreAI.Tests.PlayMode
         /// the usual configuration; see <see cref="PlayModeOpenAiTestConfig.ResolveForEndpoint"/> for the key and
         /// <see cref="PlayModeOpenAiTestConfig.ComposeProviderBody"/> for how <paramref name="extraBodyJson"/>,
         /// <paramref name="reasoningEffort"/> and <paramref name="defaultReasoningEffort"/> form the request body.
+        /// A null temperature sends no explicit client sampling override.
         /// </summary>
         /// <exception cref="ArgumentException">The target body or an effort is invalid.</exception>
         public static bool TryCreateForEndpoint(
             string baseUrl,
             string model,
             string apiKey,
-            float temperature,
+            float? temperature,
             int timeoutSeconds,
             out PlayModeProductionLikeLlmHandle handle,
             out string ignoreReason,
@@ -460,14 +488,14 @@ namespace CoreAI.Tests.PlayMode
             return false;
 #else
             PlayModeOpenAiTestConfig.ResolvedConfig config = PlayModeOpenAiTestConfig.ResolveForEndpoint(baseUrl,
-                model, apiKey, extraBodyJson, reasoningEffort, defaultReasoningEffort);
+                model, apiKey, extraBodyJson, reasoningEffort, defaultReasoningEffort, temperature);
             if (!config.IsComplete)
             {
                 ignoreReason = $"Endpoint target '{model}' needs both a base URL and a model id.";
                 return false;
             }
 
-            handle = CreateOpenAiHandle(config, temperature, timeoutSeconds);
+            handle = CreateOpenAiHandle(config, config.Temperature, timeoutSeconds);
             ignoreReason = null;
             return true;
 #endif
@@ -475,7 +503,7 @@ namespace CoreAI.Tests.PlayMode
 
         private static bool TryCreateOpenAi(
             CoreAISettingsAsset settings,
-            float temperature,
+            float? temperature,
             int timeoutSeconds,
             string modelOverride,
             out PlayModeProductionLikeLlmHandle handle,
@@ -548,7 +576,7 @@ namespace CoreAI.Tests.PlayMode
         /// </summary>
         internal static PlayModeProductionLikeLlmHandle CreateOpenAiHandle(
             PlayModeOpenAiTestConfig.ResolvedConfig config,
-            float temperature,
+            float? temperature,
             int timeoutSeconds)
         {
             if (config == null)
@@ -567,8 +595,9 @@ namespace CoreAI.Tests.PlayMode
                 config.BaseUrl,
                 config.ApiKey,
                 config.Model,
-                temperature,
-                timeoutSeconds);
+                temperature ?? 0f,
+                timeoutSeconds,
+                overrideTemperature: temperature.HasValue);
             if (!string.IsNullOrWhiteSpace(config.ExtraBodyJson))
             {
                 JObject extraBody = JObject.Parse(config.ExtraBodyJson);

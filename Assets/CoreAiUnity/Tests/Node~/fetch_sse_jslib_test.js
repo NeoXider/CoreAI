@@ -261,7 +261,7 @@ async function run() {
       JSON.stringify(log));
   }
 
-  // --- 9. body-inactivity watchdog (headers ok, then stall) -------------------
+  // WHY: The optional total ceiling must also cover body reads after headers.
   {
     const lib = loadLibrary();
     const log = [];
@@ -286,12 +286,48 @@ async function run() {
     });
     openCall(lib, makeCallbacks(log), { callId: 91, timeoutSec: 0.05 });
     await sleep(200);
-    console.log('scenario: body-inactivity watchdog');
+    console.log('scenario: total ceiling after headers');
     check('chunk delivered before stall', log.some((e) => e[0] === 'chunk'), JSON.stringify(log));
     check('stalled body surfaces Timeout error',
       log.some((e) => e[0] === 'error' && e[1] === 'Timeout'),
       JSON.stringify(log));
     check('state cleaned up after timeout', Object.keys(CoreAiSseFetchState.controllers).length === 0);
+  }
+
+  // WHY: Delivered bytes must never re-arm the optional absolute total ceiling.
+  for (const timeoutSec of [0, 0.05]) {
+    const lib = loadLibrary();
+    const log = [];
+    let reads = 0;
+    globalThis.fetch = (url, init) => Promise.resolve({
+      ok: true, status: 200,
+      headers: { forEach: () => {}, get: () => 'text/event-stream' },
+      body: {
+        getReader: () => ({
+          read: async () => {
+            await sleep(15);
+            if (init.signal.aborted) {
+              const error = new Error('aborted');
+              error.name = 'AbortError';
+              throw error;
+            }
+            reads++;
+            return { value: new TextEncoder().encode(': keep-alive\n\n'), done: reads >= 7 };
+          }
+        })
+      }
+    });
+    openCall(lib, makeCallbacks(log), { callId: timeoutSec > 0 ? 101 : 102, timeoutSec });
+    await sleep(400);
+    console.log('scenario: total ceiling with continuing bytes ' + timeoutSec);
+    check('bytes delivered', log.some((entry) => entry[0] === 'chunk'), JSON.stringify(log));
+    if (timeoutSec > 0) {
+      check('total expires despite continuing bytes', log.some((entry) => entry[0] === 'error' && entry[1] === 'Timeout'), JSON.stringify(log));
+      check('stream did not finish', !log.some((entry) => entry[0] === 'done'));
+    } else {
+      check('zero permits the whole stream', log.some((entry) => entry[0] === 'done'), JSON.stringify(log));
+      check('zero has no timeout', !log.some((entry) => entry[0] === 'error'), JSON.stringify(log));
+    }
   }
 
   console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

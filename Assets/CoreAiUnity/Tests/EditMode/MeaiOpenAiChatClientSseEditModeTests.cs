@@ -151,14 +151,572 @@ namespace CoreAI.Tests.EditMode
             return JObject.Parse(transport.Request.JsonBody);
         }
 
+        [Test]
+        public async Task RequestHistory_ReasoningOnlyAssistantNeverBecomesPromptContent([Values(false, true)] bool streaming)
+        {
+            ToolOptionsCaptureTransport transport = new();
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+            MEAI.ChatMessage[] messages =
+            {
+                new(MEAI.ChatRole.Assistant, new List<MEAI.AIContent>
+                {
+                    new MEAI.TextReasoningContent("private diagnostic plan")
+                }),
+                new(MEAI.ChatRole.User, "Continue")
+            };
+            if (streaming)
+            {
+                await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(messages)) { }
+            }
+            else
+            {
+                await client.GetResponseAsync(messages);
+            }
+
+            JObject body = JObject.Parse(transport.Request.JsonBody);
+            Assert.AreEqual("", body["messages"]?[0]?["content"]?.Value<string>());
+            StringAssert.DoesNotContain("private diagnostic plan", transport.Request.JsonBody,
+                "Private reasoning must not inflate or change the next model prompt.");
+            Assert.AreEqual("private diagnostic plan", messages[0].Contents.OfType<MEAI.TextReasoningContent>().Single().Text);
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_ResponseStateIsAvailableBeforeFirstDelta()
+        {
+            LlmProviderResponseState state = new();
+            MEAI.ChatOptions options = new()
+            {
+                AdditionalProperties = new MEAI.AdditionalPropertiesDictionary
+                {
+                    [LlmProviderResponseState.MetadataKey] = state
+                }
+            };
+            TaskCompletionSource<bool> readGate = new();
+            AsyncChunkedSseTransport transport = new(new[]
+            {
+                "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\ndata: [DONE]\n\n"
+            }, readGate: readGate.Task);
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+            await using IAsyncEnumerator<MEAI.ChatResponseUpdate> enumerator = client.GetStreamingResponseAsync(
+                new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }, options).GetAsyncEnumerator();
+            Task<bool> first = enumerator.MoveNextAsync().AsTask();
+
+            try
+            {
+                Assert.IsTrue(state.ResponseObserved, "HTTP success must be observable while generation is still awaited.");
+                Assert.IsFalse(first.IsCompleted, "HTTP success must not yield a chunk that commits fallback routing.");
+            }
+            finally { readGate.TrySetResult(true); }
+            Assert.IsTrue(await first);
+            Assert.AreEqual("answer", enumerator.Current.Text);
+            while (await enumerator.MoveNextAsync()) { }
+        }
+
+        [Test]
+        public async Task RequestResponseState_IsResetBeforeTransportAttempt([Values(false, true)] bool streaming)
+        {
+            LlmProviderResponseState state = new();
+            state.RecordResponse();
+            ToolOptionsCaptureTransport transport = new()
+            {
+                BeforeRequest = () => Assert.IsFalse(state.ResponseObserved,
+                    "A new provider attempt must not inherit success evidence from an earlier attempt.")
+            };
+            MEAI.ChatOptions options = new()
+            {
+                AdditionalProperties = new MEAI.AdditionalPropertiesDictionary
+                {
+                    [LlmProviderResponseState.MetadataKey] = state
+                }
+            };
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+            MEAI.ChatMessage[] messages = { new(MEAI.ChatRole.User, "hi") };
+            if (streaming)
+            {
+                await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(messages, options)) { }
+            }
+            else
+            {
+                await client.GetResponseAsync(messages, options);
+            }
+            Assert.IsTrue(state.ResponseObserved);
+        }
+
+        [Test]
+        public async Task GetStreamingResponseAsync_FailedRetryDoesNotKeepPreviousHttpSuccess()
+        {
+            LlmProviderResponseState state = new();
+            int attempts = 0;
+            ToolOptionsCaptureTransport transport = new()
+            {
+                SsePayload = "data: [DONE]\n\n",
+                BeforeRequest = () =>
+                {
+                    Assert.IsFalse(state.ResponseObserved);
+                    attempts++;
+                    if (attempts == 2)
+                        throw new LlmClientException("The retry failed before opening a provider response.", LlmErrorCode.BackendUnavailable);
+                }
+            };
+            MEAI.ChatOptions options = new()
+            {
+                AdditionalProperties = new MEAI.AdditionalPropertiesDictionary
+                {
+                    [LlmProviderResponseState.MetadataKey] = state
+                }
+            };
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+            // WHY: the empty-stream retry waits a real backoff on the editor-ticked host delay; a blocking
+            // Assert.ThrowsAsync would starve that tick and hang the EditMode run.
+            LlmClientException failure = null;
+            try
+            {
+                await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                                   new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }, options))
+                    Assert.Fail("An empty HTTP-success attempt must not commit the stream by yielding telemetry.");
+            }
+            catch (LlmClientException exception)
+            {
+                failure = exception;
+            }
+
+            Assert.IsNotNull(failure, "The failed retry must surface as an LlmClientException.");
+            Assert.AreEqual(LlmErrorCode.BackendUnavailable, failure.ErrorCode);
+            Assert.AreEqual(2, attempts);
+            Assert.IsFalse(state.ResponseObserved, "A failed retry must remain a transport failure.");
+        }
+
+        [Test]
+        public async Task ResponseWait_FiveMinutesOfReasoning_RemainsOneRequest()
+        {
+            ScriptedTimeTransport transport = new();
+            for (int index = 0; index < 10; index++)
+                transport.Steps.Add((30, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"}}]}\n\n"));
+            transport.Steps.Add((1, "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\ndata: [DONE]\n\n"));
+            MeaiOpenAiChatClient client = TimedClient(transport);
+            Assert.AreEqual("answer", await CollectTimedResponseAsync(client));
+            Assert.AreEqual(301, transport.Seconds);
+            Assert.AreEqual(1, transport.StreamOpens);
+            Assert.AreEqual(0, transport.NonStreamingCalls);
+            Assert.AreEqual(0, transport.Request.TransportTimeoutSeconds);
+            Assert.AreEqual(180, transport.Request.ResponseWaitTimeoutSeconds);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ResponseWait_SilenceTimesOutWithoutRestart(bool afterReasoning)
+        {
+            ScriptedTimeTransport transport = new();
+            if (afterReasoning)
+                transport.Steps.Add((1, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"plan\"}}]}\n\n"));
+            transport.Steps.Add((181, ": keep-alive\n\n"));
+            MeaiOpenAiChatClient client = TimedClient(transport);
+            LlmClientException failure = Assert.ThrowsAsync<LlmClientException>(() => CollectTimedResponseAsync(client));
+            Assert.AreEqual(LlmErrorCode.Timeout, failure.ErrorCode);
+            Assert.AreEqual(1, transport.StreamOpens);
+            Assert.AreEqual(0, transport.NonStreamingCalls, "A response-wait deadline must not silently restart a model turn.");
+            Assert.IsTrue(transport.Stream.Disposed);
+        }
+
+        [TestCase(": keep-alive\n\n")]
+        [TestCase("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n")]
+        [TestCase("data: {\"generation_progress\":{\"phase\":\"processing\"},\"choices\":[]}\n\n")]
+        [TestCase("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"\"}}]}\n\n")]
+        public void ResponseWait_NonTokenFramesDoNotRefreshDeadline(string frame)
+        {
+            ScriptedTimeTransport transport = new();
+            transport.Steps.Add((60, frame));
+            transport.Steps.Add((60, frame));
+            transport.Steps.Add((61, frame));
+            LlmClientException failure = Assert.ThrowsAsync<LlmClientException>(() => CollectTimedResponseAsync(TimedClient(transport)));
+            Assert.AreEqual(LlmErrorCode.Timeout, failure.ErrorCode);
+            Assert.AreEqual(181, transport.Seconds);
+            Assert.AreEqual(1, transport.StreamOpens);
+        }
+
+        [Test]
+        public async Task ResponseWait_ZeroDisablesSemanticDeadline()
+        {
+            ScriptedTimeTransport transport = new();
+            transport.Steps.Add((181, ": keep-alive\n\n"));
+            transport.Steps.Add((600, "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\ndata: [DONE]\n\n"));
+            Assert.AreEqual("answer", await CollectTimedResponseAsync(TimedClient(transport, responseWait: 0)));
+            Assert.AreEqual(0, transport.Request.ResponseWaitTimeoutSeconds);
+        }
+
+        [Test]
+        public void TotalTimeout_PositiveCeilingStopsActiveReasoning()
+        {
+            ScriptedTimeTransport transport = new();
+            for (int index = 0; index < 10; index++)
+                transport.Steps.Add((30, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"}}]}\n\n"));
+            LlmClientException failure = Assert.ThrowsAsync<LlmClientException>(() =>
+                CollectTimedResponseAsync(TimedClient(transport, totalTimeout: 120)));
+            Assert.AreEqual(LlmErrorCode.Timeout, failure.ErrorCode);
+            StringAssert.Contains("total request", failure.Message);
+            Assert.AreEqual(120, transport.Seconds);
+            Assert.AreEqual(1, transport.StreamOpens);
+        }
+
+        [Test]
+        public void ResponseWait_HeaderTimeConsumesFirstTokenBudget()
+        {
+            ScriptedTimeTransport transport = new() { HeaderSeconds = 120 };
+            transport.Steps.Add((61, "data: {\"choices\":[{\"delta\":{\"content\":\"late\"}}]}\n\n"));
+            LlmClientException failure = Assert.ThrowsAsync<LlmClientException>(() => CollectTimedResponseAsync(TimedClient(transport)));
+            Assert.AreEqual(LlmErrorCode.Timeout, failure.ErrorCode);
+            Assert.AreEqual(181, transport.Seconds);
+            Assert.AreEqual(1, transport.StreamOpens);
+        }
+
+        [TestCase(0, 180)]
+        [TestCase(120, 0)]
+        public void NonStreaming_WaitsForWholeResponseWithIndependentLimits(int totalTimeout, int responseWait)
+        {
+            ScriptedTimeTransport transport = new() { NonStreamingSeconds = 181 };
+            MeaiOpenAiChatClient client = TimedClient(transport, totalTimeout, responseWait);
+            LlmClientException failure = Assert.ThrowsAsync<LlmClientException>(async () =>
+                await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hello") }));
+            Assert.AreEqual(LlmErrorCode.Timeout, failure.ErrorCode);
+            Assert.AreEqual(1, transport.NonStreamingCalls);
+            Assert.AreEqual(0, transport.StreamOpens);
+        }
+
+        [Test]
+        public async Task NonStreaming_ZeroLimitsPermitLongResponse()
+        {
+            ScriptedTimeTransport transport = new() { NonStreamingSeconds = 600 };
+            MEAI.ChatResponse response = await TimedClient(transport, responseWait: 0).GetResponseAsync(
+                new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hello") });
+            Assert.AreEqual("answer", response.Text);
+            Assert.AreEqual(0, transport.Request.TransportTimeoutSeconds);
+            Assert.AreEqual(0, transport.Request.ResponseWaitTimeoutSeconds);
+        }
+
+        [Test]
+        public async Task ResponseWait_PartialToolArgumentsRefreshDeadline()
+        {
+            ScriptedTimeTransport transport = new();
+            string[] fragments = { "{", "\"value\":", "1}" };
+            for (int index = 0; index < fragments.Length; index++)
+            {
+                JObject function = new() { ["arguments"] = fragments[index] };
+                if (index == 0) function["name"] = "lookup";
+                JObject root = new()
+                {
+                    ["choices"] = new JArray(new JObject
+                    {
+                        ["delta"] = new JObject
+                        {
+                            ["tool_calls"] = new JArray(new JObject
+                            {
+                                ["index"] = 0, ["id"] = "call_1", ["function"] = function
+                            })
+                        }
+                    })
+                };
+                transport.Steps.Add((100, "data: " + root.ToString(Newtonsoft.Json.Formatting.None) + "\n\n"));
+            }
+            transport.Steps.Add((0, "data: [DONE]\n\n"));
+            List<MEAI.FunctionCallContent> calls = new();
+            await foreach (MEAI.ChatResponseUpdate update in TimedClient(transport).GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hello") }))
+                calls.AddRange(update.Contents.OfType<MEAI.FunctionCallContent>());
+
+            Assert.AreEqual(1, calls.Count);
+            Assert.AreEqual(1L, Convert.ToInt64(calls[0].Arguments["value"]));
+            Assert.AreEqual(300, transport.Seconds);
+            Assert.AreEqual(1, transport.StreamOpens);
+        }
+
+        [Test]
+        public void ResponseWait_AbandonedReadIsCancelledAndDisposedThroughHostDelay()
+        {
+            ScriptedTimeTransport transport = new() { BlockReads = true };
+            OpenAiHttpOptions settings = new() { Model = "model", ResponseWaitTimeoutSeconds = 180 };
+            ExpiringMarshaler marshaler = new(transport);
+            MeaiOpenAiChatClient client = new(settings, transport, null, marshaler)
+            {
+                MonotonicSeconds = () => transport.Seconds
+            };
+            LlmClientException failure = Assert.ThrowsAsync<LlmClientException>(() => CollectTimedResponseAsync(client));
+            Assert.AreEqual(LlmErrorCode.Timeout, failure.ErrorCode);
+            Assert.AreEqual(1, marshaler.Delays);
+            Assert.AreEqual(1, transport.ReadCalls, "A timed-out read must not overlap a new read or request.");
+            Assert.IsTrue(transport.ReadCancelled);
+            Assert.IsTrue(transport.Stream.Disposed);
+            Assert.AreEqual(1, transport.StreamOpens);
+        }
+
+        [Test]
+        public async Task HttpOptions_DefaultsAndSnapshotPreserveIndependentLimits()
+        {
+            OpenAiHttpOptions settings = new() { Model = "model" };
+            Assert.AreEqual(0, settings.RequestTimeoutSeconds);
+            Assert.AreEqual(262144, settings.MaxTokens);
+            Assert.IsNull(settings.ResponseWaitTimeoutSeconds);
+            float savedWait = CoreAISettings.LlmResponseWaitTimeoutSeconds;
+            try
+            {
+                CoreAISettings.LlmResponseWaitTimeoutSeconds = 42f;
+                ToolOptionsCaptureTransport transport = new();
+                await new MeaiOpenAiChatClient(settings, transport).GetResponseAsync(
+                    new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hello") });
+                Assert.AreEqual(0, transport.Request.TransportTimeoutSeconds);
+                Assert.AreEqual(42, transport.Request.ResponseWaitTimeoutSeconds);
+                settings.RequestTimeoutSeconds = 75;
+                settings.ResponseWaitTimeoutSeconds = 0;
+                OpenAiHttpOptions snapshot = OpenAiHttpOptions.From(settings);
+                Assert.AreEqual(75, snapshot.RequestTimeoutSeconds);
+                Assert.AreEqual(0, snapshot.ResponseWaitTimeoutSeconds);
+            }
+            finally { CoreAISettings.LlmResponseWaitTimeoutSeconds = savedWait; }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task ResponseWait_OuterRetryDoesNotReplayDeadlineExpiry(bool mapFailureToChunk)
+        {
+            ScriptedTimeTransport transport = new() { HeaderSeconds = 181 };
+            LlmCompletionRequest request = new() { UserPayload = "hello" };
+            CoreStreamingAdapter adapter = new(TimedClient(transport), mapFailureToChunk);
+            RetryingStreamingLlmClientDecorator client = new(adapter, 3);
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request))
+                chunks.Add(chunk);
+            Assert.AreEqual(LlmErrorCode.Timeout, chunks.Last().ErrorCode);
+            Assert.AreEqual(1, transport.StreamOpens, "The semantic response-wait budget must not restart in an outer retry layer.");
+            Assert.AreEqual(0, client.RetryCount);
+            Assert.IsTrue(request.ProviderResponseState.RetrySuppressed);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task ResponseWait_TransportCancellationRaceSuppressesReplayButTypedTransportTimeoutCanRetry(bool typedTimeout)
+        {
+            int attempts = 0;
+            ToolOptionsCaptureTransport transport = new()
+            {
+                BeforeRequest = () =>
+                {
+                    attempts++;
+                    if (typedTimeout)
+                        throw new LlmClientException("A transport timeout was reported independently of the request budget.", LlmErrorCode.Timeout);
+                    throw new OperationCanceledException("The transport's configured timer fired first.");
+                }
+            };
+            MeaiOpenAiChatClient core = new(new OpenAiHttpOptions { Model = "model", ResponseWaitTimeoutSeconds = 180 }, transport);
+            RetryingStreamingLlmClientDecorator client = new(new CoreStreamingAdapter(core, true), 1);
+            LlmCompletionRequest request = new() { UserPayload = "hello" };
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request))
+                chunks.Add(chunk);
+            Assert.AreEqual(LlmErrorCode.Timeout, chunks.Last().ErrorCode);
+            Assert.AreEqual(typedTimeout ? 2 : 1, attempts);
+            Assert.AreEqual(!typedTimeout, request.ProviderResponseState.RetrySuppressed);
+        }
+
+#if UNITY_EDITOR
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task ResponseWait_MeaiPipelineSurfacesFirstTokenTimeoutWithoutRetryOrFallback(bool streaming)
+        {
+            ScriptedTimeTransport transport = new() { HeaderSeconds = 181, NonStreamingSeconds = 181 };
+            MeaiLlmClient adapter = new(TimedClient(transport),
+                CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance,
+                new CoreAISettingsOptions(), supportsNativeToolCalling: true);
+            RetryingStreamingLlmClientDecorator retry = new(adapter, 3);
+            CoreStreamingAdapter unusedSecondary = new(TimedClient(new ScriptedTimeTransport()), true);
+            FallbackLlmClientDecorator client = new(retry, unusedSecondary);
+            LlmCompletionRequest request = new() { UserPayload = "hello" };
+            if (streaming)
+            {
+                List<LlmStreamChunk> chunks = new();
+                await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(request))
+                    chunks.Add(chunk);
+                Assert.AreEqual(LlmErrorCode.Timeout, chunks.Last().ErrorCode);
+                Assert.AreEqual(1, transport.StreamOpens);
+            }
+            else
+            {
+                LlmCompletionResult result = await client.CompleteAsync(request);
+                Assert.AreEqual(LlmErrorCode.Timeout, result.ErrorCode);
+                Assert.AreEqual(1, transport.NonStreamingCalls);
+            }
+            Assert.AreEqual(0, retry.RetryCount);
+            Assert.AreEqual(0, client.FallbackCount);
+            Assert.AreEqual(0, unusedSecondary.Calls);
+        }
+#endif
+
+        private sealed class CoreStreamingAdapter : ILlmClient
+        {
+            private readonly MeaiOpenAiChatClient _core;
+            private readonly bool _mapFailureToChunk;
+            public int Calls { get; private set; }
+            public CoreStreamingAdapter(MeaiOpenAiChatClient core, bool mapFailureToChunk)
+            {
+                _core = core;
+                _mapFailureToChunk = mapFailureToChunk;
+            }
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken cancellationToken = default)
+                => throw new NotSupportedException();
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                Calls++;
+                request.ProviderResponseState ??= new LlmProviderResponseState();
+                MEAI.ChatOptions options = new()
+                {
+                    AdditionalProperties = new MEAI.AdditionalPropertiesDictionary
+                    {
+                        [LlmProviderResponseState.MetadataKey] = request.ProviderResponseState
+                    }
+                };
+                await using IAsyncEnumerator<MEAI.ChatResponseUpdate> enumerator = _core.GetStreamingResponseAsync(
+                    new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, request.UserPayload) }, options, cancellationToken)
+                    .GetAsyncEnumerator(cancellationToken);
+                LlmClientException failure = null;
+                while (true)
+                {
+                    bool hasNext;
+                    try { hasNext = await enumerator.MoveNextAsync(); }
+                    catch (LlmClientException exception) { failure = exception; break; }
+                    if (!hasNext) break;
+                    yield return new LlmStreamChunk { Text = enumerator.Current.Text };
+                }
+                if (failure != null)
+                {
+                    if (!_mapFailureToChunk) throw failure;
+                    yield return new LlmStreamChunk { IsDone = true, Error = failure.Message, ErrorCode = failure.ErrorCode };
+                }
+            }
+        }
+
+        private sealed class ExpiringMarshaler : ILlmAsyncMarshaler
+        {
+            private readonly ScriptedTimeTransport _clock;
+            public int Delays { get; private set; }
+            public ExpiringMarshaler(ScriptedTimeTransport clock) => _clock = clock;
+            public Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken cancellationToken) => factory();
+            public Task DelayAsync(int milliseconds, CancellationToken cancellationToken)
+            {
+                Delays++;
+                _clock.Seconds += milliseconds / 1000.0;
+                return Task.CompletedTask;
+            }
+        }
+
+        private static MeaiOpenAiChatClient TimedClient(ScriptedTimeTransport transport, int totalTimeout = 0,
+            int? responseWait = null)
+        {
+            OpenAiHttpOptions settings = OpenAiHttpOptions.From(new DoneSentinelSettings());
+            settings.RequestTimeoutSeconds = totalTimeout;
+            settings.ResponseWaitTimeoutSeconds = responseWait;
+            return new MeaiOpenAiChatClient(settings, transport) { MonotonicSeconds = () => transport.Seconds };
+        }
+
+        private static async Task<string> CollectTimedResponseAsync(MeaiOpenAiChatClient client)
+        {
+            StringBuilder text = new();
+            await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hello") }))
+                text.Append(update.Text);
+            return text.ToString();
+        }
+
+        private sealed class ScriptedTimeTransport : IOpenAiHttpTransport
+        {
+            public List<(double Seconds, string Payload)> Steps { get; } = new();
+            public double Seconds { get; set; }
+            public double HeaderSeconds { get; set; }
+            public double NonStreamingSeconds { get; set; }
+            public bool BlockReads { get; set; }
+            public int ReadCalls { get; set; }
+            public bool ReadCancelled { get; set; }
+            public int StreamOpens { get; private set; }
+            public int NonStreamingCalls { get; private set; }
+            public OpenAiHttpPostRequest Request { get; private set; }
+            public ScriptedTimeStream Stream { get; private set; }
+            public string DebugLabel => "ScriptedTime";
+            public bool SupportsSseStreaming => true;
+
+            public Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request, CancellationToken cancellationToken = default)
+            {
+                Request = request;
+                NonStreamingCalls++;
+                Seconds += NonStreamingSeconds;
+                return Task.FromResult(new OpenAiHttpPostResult
+                {
+                    StatusCode = 200,
+                    BodyText = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"answer\"}}]}"
+                });
+            }
+
+            public Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request, CancellationToken cancellationToken = default)
+            {
+                Request = request;
+                StreamOpens++;
+                Seconds += HeaderSeconds;
+                Stream = new ScriptedTimeStream(this);
+                return Task.FromResult(new OpenAiHttpSseOpenResult { StatusCode = 200 }.WithRawStream(Stream));
+            }
+        }
+
+        private sealed class ScriptedTimeStream : Stream
+        {
+            private readonly ScriptedTimeTransport _owner;
+            private readonly Queue<(double Seconds, string Payload)> _steps;
+            public bool Disposed { get; private set; }
+            public ScriptedTimeStream(ScriptedTimeTransport owner)
+            {
+                _owner = owner;
+                _steps = new Queue<(double Seconds, string Payload)>(owner.Steps);
+            }
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                if (_steps.Count == 0) return 0;
+                (double Seconds, string Payload) step = _steps.Dequeue();
+                _owner.Seconds += step.Seconds;
+                byte[] bytes = Encoding.UTF8.GetBytes(step.Payload);
+                Array.Copy(bytes, 0, buffer, offset, bytes.Length);
+                return bytes.Length;
+            }
+            public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            {
+                _owner.ReadCalls++;
+                if (!_owner.BlockReads) return Read(buffer, offset, count);
+                TaskCompletionSource<int> pending = new();
+                using CancellationTokenRegistration registration = cancellationToken.Register(() =>
+                {
+                    _owner.ReadCancelled = true;
+                    pending.TrySetCanceled(cancellationToken);
+                });
+                return await pending.Task;
+            }
+            protected override void Dispose(bool disposing) { Disposed = true; base.Dispose(disposing); }
+            public override void Flush() => throw new NotSupportedException();
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        }
+
         private sealed class ToolOptionsCaptureTransport : IOpenAiHttpTransport
         {
+            public Action BeforeRequest { get; set; }
+            public string SsePayload { get; set; } = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
             public OpenAiHttpPostRequest Request { get; private set; }
             public string DebugLabel => "ToolOptionsCapture";
             public bool SupportsSseStreaming => true;
             public Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request,
                 CancellationToken cancellationToken = default)
             {
+                BeforeRequest?.Invoke();
                 Request = request;
                 return Task.FromResult(new OpenAiHttpPostResult
                 {
@@ -169,15 +727,15 @@ namespace CoreAI.Tests.EditMode
             public Task<OpenAiHttpSseOpenResult> OpenSseResponseStreamAsync(OpenAiHttpPostRequest request,
                 CancellationToken cancellationToken = default)
             {
+                BeforeRequest?.Invoke();
                 Request = request;
-                const string sse = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
                 OpenAiHttpSseOpenResult result = new()
                 {
                     StatusCode = 200,
                     ResponseHeaders = new Dictionary<string, IEnumerable<string>>
                         { ["Content-Type"] = new[] { "text/event-stream" } }
                 };
-                return Task.FromResult(result.WithRawStream(new MemoryStream(Encoding.UTF8.GetBytes(sse))));
+                return Task.FromResult(result.WithRawStream(new MemoryStream(Encoding.UTF8.GetBytes(SsePayload))));
             }
         }
 
@@ -257,6 +815,26 @@ namespace CoreAI.Tests.EditMode
             Assert.IsNotNull(camel);
             Assert.AreEqual("camel",
                 camel.Contents.OfType<MEAI.TextReasoningContent>().Single().Text);
+        }
+
+        [Test]
+        public void ReasoningAlias_EmptyPrimaryFieldDoesNotHideReasoningText(
+            [Values(false, true)] bool streaming, [Values(false, true)] bool nullPrimary)
+        {
+            JObject fields = new()
+            {
+                ["reasoning_content"] = nullPrimary ? JValue.CreateNull() : new JValue(""),
+                ["reasoning_text"] = "alternate thinking"
+            };
+            JObject response = new()
+            {
+                ["choices"] = new JArray(new JObject { [streaming ? "delta" : "message"] = fields })
+            };
+            IList<MEAI.AIContent> contents = streaming
+                ? MeaiOpenAiChatClient.ParseSseDataLineForTests(response.ToString()).Contents
+                : MeaiOpenAiChatClient.ParseResponse(response.ToString()).Messages.Single().Contents;
+            Assert.AreEqual("alternate thinking", contents.OfType<MEAI.TextReasoningContent>().Single().Text);
+            Assert.IsFalse(contents.OfType<MEAI.TextContent>().Any(t => !string.IsNullOrEmpty(t.Text)));
         }
 
         [Test]
@@ -853,68 +1431,6 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task GetStreamingResponseAsync_EndlessKeepAliveStream_AbortsEarlyAndFallsBack()
-        {
-            // A proxy hiding an upstream failure can hold the SSE connection open indefinitely,
-            // sending only ": keep-alive" comment lines and never closing. Waiting for the server
-            // to end the stream would blow through callers' turn budgets (observed ~40s per attempt
-            // x 3 attempts > the 120s briefing watchdog). The starved-stream watchdog must abandon
-            // each attempt after the first-delta window and reach the non-streaming fallback.
-            int savedTimeout = MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds;
-            MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = 0;
-            try
-            {
-                EndlessKeepAliveTransport transport = new();
-                MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
-                List<string> parts = new();
-
-                await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
-                                   new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
-                {
-                    if (!string.IsNullOrEmpty(update.Text))
-                    {
-                        parts.Add(update.Text);
-                    }
-                }
-
-                Assert.AreEqual("fallback answer", string.Concat(parts),
-                    "A never-closing keep-alive-only stream must still deliver the fallback answer.");
-                Assert.AreEqual(3, transport.StreamOpens,
-                    "Each starved attempt must be aborted early and retried only emptyStreamMaxAttempts (3) times.");
-                Assert.AreEqual(1, transport.NonStreamingCalls,
-                    "After the starved-stream retries exactly one non-streaming completion runs.");
-            }
-            finally
-            {
-                MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = savedTimeout;
-            }
-        }
-
-        [TestCase("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n")]
-        [TestCase("data: {\"unexpected\":true}\n\n")]
-        public async Task GetStreamingResponseAsync_NonSemanticPrefix_DoesNotDisableStarvationGuard(string prefix)
-        {
-            int savedTimeout = MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds;
-            MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = 0;
-            try
-            {
-                EndlessKeepAliveTransport transport = new(prefix);
-                MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
-                List<string> parts = new();
-                using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(3));
-
-                await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
-                                   new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }, cancellationToken: deadline.Token))
-                    parts.Add(update.Text);
-
-                Assert.AreEqual("fallback answer", string.Concat(parts));
-                Assert.AreEqual(3, transport.StreamOpens);
-                Assert.AreEqual(1, transport.NonStreamingCalls);
-            }
-            finally { MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = savedTimeout; }
-        }
-
-        [Test]
         public async Task GetStreamingResponseAsync_PartialEof_PreservesPartialAndFailsWithoutFallback()
         {
             AsyncChunkedSseTransport transport = new(new[] { "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n" });
@@ -967,9 +1483,6 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task GetStreamingResponseAsync_ServerManagedKeepAlive_UsesConfiguredDeadline()
         {
-            int savedTimeout = MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds;
-            MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = 0;
-            try
             {
                 AsyncChunkedSseTransport transport = new(new[] { ": keep-alive\n\n", "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\ndata: [DONE]\n\n" });
                 DoneSentinelSettings settings = new() { ExecutionMode = LlmExecutionMode.ServerManagedApi };
@@ -982,16 +1495,12 @@ namespace CoreAI.Tests.EditMode
 
                 Assert.AreEqual("answer", string.Concat(parts), "A managed endpoint may legitimately omit reasoning progress frames.");
             }
-            finally { MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = savedTimeout; }
         }
 
         [Test]
         public async Task GetStreamingResponseAsync_ProgressOnlyTerminal_FailsWithoutFallback()
         {
             // WHY: Progress proves generation, not a completed answer; it must not trigger a fresh fallback attempt.
-            int savedTimeout = MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds;
-            MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = 0;
-            try
             {
                 const string sse =
                     "data: {\"generation_progress\":{\"phase\":\"processing\"},\"choices\":[]}\n\n" +
@@ -1018,10 +1527,6 @@ namespace CoreAI.Tests.EditMode
                     "Progress carries no reasoning.");
                 Assert.AreEqual(1, transport.StreamOpens,
                     "Progress cannot silently complete an empty answer or trigger a mixed fallback.");
-            }
-            finally
-            {
-                MeaiOpenAiChatClient.StarvedStreamFirstDeltaTimeoutSeconds = savedTimeout;
             }
         }
 
@@ -1154,7 +1659,10 @@ namespace CoreAI.Tests.EditMode
                 "data: {\"choices\":[{\"delta\":{\"content\":\"B\"}}]}\n\n",
                 "data: [DONE]\n\n"
             };
-            MeaiOpenAiChatClient client = new(new ShortTimeoutSettings(), new AsyncChunkedSseTransport(chunks));
+            OpenAiHttpOptions settings = OpenAiHttpOptions.From(new ShortTimeoutSettings());
+            settings.RequestTimeoutSeconds = 0;
+            settings.ResponseWaitTimeoutSeconds = 1;
+            MeaiOpenAiChatClient client = new(settings, new AsyncChunkedSseTransport(chunks));
             List<string> parts = new();
 
             await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
@@ -1884,10 +2392,14 @@ namespace CoreAI.Tests.EditMode
         private sealed class AsyncChunkedSseTransport : IOpenAiHttpTransport
         {
             private readonly IReadOnlyList<string> _chunks;
+            private readonly int _readDelayMilliseconds;
+            private readonly Task _readGate;
 
-            public AsyncChunkedSseTransport(IReadOnlyList<string> chunks)
+            public AsyncChunkedSseTransport(IReadOnlyList<string> chunks, int readDelayMilliseconds = 0, Task readGate = null)
             {
                 _chunks = chunks;
+                _readDelayMilliseconds = readDelayMilliseconds;
+                _readGate = readGate;
             }
 
             public string DebugLabel => "AsyncChunked";
@@ -1911,17 +2423,21 @@ namespace CoreAI.Tests.EditMode
                     }
                 };
 
-                return Task.FromResult(result.WithRawStream(new AsyncChunkedReadStream(_chunks)));
+                return Task.FromResult(result.WithRawStream(new AsyncChunkedReadStream(_chunks, _readDelayMilliseconds, _readGate)));
             }
         }
 
         private sealed class AsyncChunkedReadStream : Stream
         {
             private readonly Queue<byte[]> _chunks;
+            private readonly int _readDelayMilliseconds;
+            private readonly Task _readGate;
 
-            public AsyncChunkedReadStream(IEnumerable<string> chunks)
+            public AsyncChunkedReadStream(IEnumerable<string> chunks, int readDelayMilliseconds = 0, Task readGate = null)
             {
                 _chunks = new Queue<byte[]>(chunks.Select(Encoding.UTF8.GetBytes));
+                _readDelayMilliseconds = readDelayMilliseconds;
+                _readGate = readGate;
             }
 
             public override bool CanRead => true;
@@ -1939,6 +2455,10 @@ namespace CoreAI.Tests.EditMode
                 CancellationToken cancellationToken)
             {
                 await Task.Yield();
+                if (_readGate != null)
+                    await _readGate;
+                if (_readDelayMilliseconds > 0)
+                    await Task.Delay(_readDelayMilliseconds, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
                 return Read(buffer, offset, count);
             }

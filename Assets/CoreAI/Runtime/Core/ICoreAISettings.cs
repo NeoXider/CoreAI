@@ -41,8 +41,11 @@ namespace CoreAI
         /// <summary>Verbose MEAI pipeline logging (requests, responses, JSON).</summary>
         bool EnableMeaiDebugLogging { get; }
 
-        /// <summary>LLM request timeout in seconds.</summary>
-        float LlmRequestTimeoutSeconds { get; }
+        /// <summary>Total LLM request timeout in seconds; zero disables the ceiling.</summary>
+        float LlmRequestTimeoutSeconds => 0f;
+
+        /// <summary>Maximum response wait or gap between model deltas in seconds; zero disables it.</summary>
+        float LlmResponseWaitTimeoutSeconds => 180f;
 
         /// <summary>
         /// Max **additional** HTTP completion attempts after a retryable failure (<c>429</c> / <c>5xx</c> surfaced as

@@ -67,7 +67,7 @@ namespace CoreAI.Benchmarking
             // WHY: Speed is a REPORTED metric (see provider-call/effective tok/s above), never a score — a faster
             // model must not look "smarter". The bonus rewards correctness only.
             sb.AppendLine($"- **Model setup:** backend `{m.Backend}` · native-tools {m.NativeToolCalling} · " +
-                          $"streaming {m.Streaming} · temp {F(m.Temperature)} · " +
+                          $"streaming {m.Streaming} · temperature {(m.Temperature.HasValue ? F(m.Temperature.Value) : "provider default")} · " +
                           $"reasoning {(string.IsNullOrEmpty(m.ReasoningEffort) ? "provider default" : m.ReasoningEffort)} · " +
                           $"reps {m.Repetitions} · " +
                           $"parallel-tools {m.MaxParallelToolCalls}");
@@ -900,7 +900,7 @@ namespace CoreAI.Benchmarking
             sb.Append(Bool("nativeToolCalling", m.NativeToolCalling)).Append(',');
             sb.Append(Bool("streaming", m.Streaming)).Append(',');
             sb.Append(Num("maxParallelToolCalls", m.MaxParallelToolCalls)).Append(',');
-            sb.Append(Num("temperature", m.Temperature)).Append(',');
+            sb.Append(m.Temperature.HasValue ? Num("temperature", m.Temperature.Value) : "\"temperature\":null").Append(',');
             sb.Append(Str("reasoningEffort", m.ReasoningEffort ?? "")).Append(',');
             sb.Append(Num("repetitions", m.Repetitions)).Append(',');
             sb.Append(Str("unityVersion", m.UnityVersion)).Append(',');

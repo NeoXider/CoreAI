@@ -23,6 +23,9 @@ namespace CoreAI.Benchmarking
         /// <summary>The run's <c>reasoning_effort</c>; empty for the provider default or an older report.</summary>
         public string ReasoningEffort { get; set; } = string.Empty;
 
+        /// <summary>The explicit sampling temperature; null for the provider default or an older report.</summary>
+        public float? Temperature { get; set; }
+
         public int Repetitions { get; set; } = 1;
         public double SuiteBase { get; set; }
         public double PassRate { get; set; }
@@ -89,6 +92,7 @@ namespace CoreAI.Benchmarking
                 TimestampUtc = report.Metadata.TimestampUtc,
                 SuiteVersion = report.Metadata.SuiteVersion,
                 ReasoningEffort = report.Metadata.ReasoningEffort ?? string.Empty,
+                Temperature = report.Metadata.Temperature,
                 Repetitions = report.Metadata.Repetitions,
                 SuiteBase = report.SuiteBaseScore,
                 PassRate = report.PassRate,
@@ -770,6 +774,8 @@ namespace CoreAI.Benchmarking
                 TimestampUtc = Str(meta, "timestampUtc") ?? string.Empty,
                 SuiteVersion = Str(meta, "suiteVersion") ?? string.Empty,
                 ReasoningEffort = Str(meta, "reasoningEffort") ?? string.Empty,
+                Temperature = meta.TryGetValue("temperature", out object temperature) && temperature is double value &&
+                              double.IsFinite(value) ? (float)value : null,
                 Repetitions = (int)Num(meta, "repetitions", 1),
                 SuiteBase = Num(sum, "suiteBaseScore"),
                 PassRate = Num(sum, "passRate"),

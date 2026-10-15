@@ -55,8 +55,11 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Explicit endpoint temperature override; legacy numeric settings do not opt in. Null inherits global settings.</summary>
         float? TemperatureOverride => null;
 
-        /// <summary>Per-request timeout in seconds.</summary>
-        int RequestTimeoutSeconds { get; }
+        /// <summary>Optional total request timeout in seconds; zero disables the ceiling.</summary>
+        int RequestTimeoutSeconds => 0;
+
+        /// <summary>Semantic response-wait timeout in seconds; null uses the host default (180 for direct clients), zero disables it.</summary>
+        int? ResponseWaitTimeoutSeconds => null;
 
         /// <summary>Maximum number of output tokens requested from the backend.</summary>
         int MaxTokens { get; }

@@ -288,6 +288,18 @@ and rejected. JSON targets accept `reasoningEffort` and `extraBody` (a JSON obje
 holding one). Target body fields merge over the shared body for the same endpoint; explicit target
 `reasoningEffort` is applied last. Empty target effort inherits the suite default.
 
+Sampling temperature is optional and JSON-only: `temperature` (alias `temp`) accepts a number from 0
+to 2; omitted or `null` means provider/model default. There is no sixth compact field. Both the classic
+single-model run and targets without a temperature send no temperature override. The target value is
+passed through `ResolveForEndpoint` to the HTTP profile's opt-in override; the benchmark sets no other
+typed sampling values, so `extraBody` fields such as `top_p`, `top_k`, `min_p`, `presence_penalty`,
+`repeat_penalty` and `chat_template_kwargs` reach the wire unchanged. For MiniCPM-V 4.7, use
+`temperature: 0.7` and `extraBody: {"top_p":0.95,"top_k":100,"min_p":0,"presence_penalty":0,
+"repeat_penalty":1.03,"chat_template_kwargs":{"enable_thinking":false}}` in the target object.
+The window saves its optional Temperature field with the other non-secret row fields; empty means
+provider default. Run metadata and model summaries carry a nullable temperature; JSON uses `null`
+and the Markdown header says `temperature provider default` when unset, or the explicit value when set.
+
 `CooperativeScheduler` (`ParallelBenchmarkScheduler.cs`) steps the target loops inside the one
 `[UnityTest]` coroutine. Scenarios with `UsesSharedScene` (by default `CaptureScene`, so G6) and the
 model-card captures take turns on one `BenchmarkVisualLane`: Rbx parts are bound at the model's own

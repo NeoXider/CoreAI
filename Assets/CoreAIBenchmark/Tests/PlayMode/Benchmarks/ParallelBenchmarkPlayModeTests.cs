@@ -5,6 +5,9 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
+using System.Net.Http;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -30,7 +33,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         private static readonly string[] IsolatedEnvVars =
         {
             "COREAI_BENCHMARK_TIMEOUT", "COREAI_BENCHMARK_RETRIES", "COREAI_BENCHMARK_MAX_OUTPUT_TOKENS",
-            "COREAI_BENCHMARK_ROUNDTRIPS"
+            "COREAI_BENCHMARK_ROUNDTRIPS", PlayModeOpenAiTestConfig.EnvBaseUrl, PlayModeOpenAiTestConfig.EnvModel,
+            PlayModeOpenAiTestConfig.EnvExtraBodyJson, PlayModeOpenAiTestConfig.EnvStreaming,
+            PlayModeOpenAiTestConfig.EnvNativeTools, PlayModeOpenAiTestConfig.EnvBenchmarkReasoningEffort
         };
 
         private readonly Dictionary<string, string> _savedEnv = new();
@@ -811,6 +816,137 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             Assert.AreEqual("", GameCreationBenchmarkPlayModeTests.CreateRunMetadata("r", "m", "b", true, false,
                 settings, 1).ReasoningEffort);
         }
+
+#if UNITY_EDITOR
+        [Test]
+        public async Task BenchmarkClient_TargetSamplingReachesWireUnchanged(
+            [Values("unset", "typed", "raw")] string temperatureMode, [Values(false, true)] bool streaming)
+        {
+            string extraBody = "{\"top_p\":0.95,\"top_k\":100,\"min_p\":0,\"presence_penalty\":0," +
+                               (temperatureMode == "raw" ? "\"temperature\":0.7," : "") +
+                               "\"repeat_penalty\":1.03,\"chat_template_kwargs\":{\"enable_thinking\":false}}";
+            string spec = "[{\"model\":\"MiniCPM-V-4_7\",\"baseUrl\":\"http://offline.invalid/v1\"," +
+                          (temperatureMode == "typed" ? "\"temperature\":0.7," : "") +
+                          "\"extraBody\":" + extraBody + "}]";
+            float? expectedTemperature = temperatureMode == "unset" ? null : 0.7f;
+            BenchmarkTarget target = BenchmarkTargetList.Parse(spec)[0];
+            Environment.SetEnvironmentVariable(PlayModeOpenAiTestConfig.EnvExtraBodyJson, "{}");
+            Environment.SetEnvironmentVariable(PlayModeOpenAiTestConfig.EnvStreaming, streaming ? "true" : "false");
+            Environment.SetEnvironmentVariable(PlayModeOpenAiTestConfig.EnvNativeTools, "true");
+            SamplingCaptureHandler capture = new();
+            Func<HttpClient> previous = MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory;
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(capture, false);
+            try
+            {
+                Assert.IsTrue(PlayModeProductionLikeLlmFactory.TryCreateForEndpoint(target.BaseUrl, target.Model,
+                    "", target.Temperature, 5, out PlayModeProductionLikeLlmHandle handle, out string reason,
+                    target.ExtraBodyJson), reason);
+                using (handle)
+                {
+                    Assert.AreEqual(target.Temperature, handle.ResolvedConfig.Temperature);
+                    Assert.AreEqual(expectedTemperature, handle.Temperature);
+                    await CompleteSamplingRequest(handle, streaming);
+                    Newtonsoft.Json.Linq.JObject body = capture.Body;
+                    Assert.IsNotNull(body);
+                    Assert.AreEqual(streaming, (bool?)body["stream"] == true);
+                    Assert.AreEqual(target.Model, (string)body["model"]);
+                    if (expectedTemperature.HasValue)
+                    {
+                        Assert.That((double)body["temperature"], Is.EqualTo(0.7).Within(0.000001));
+                    }
+                    else
+                    {
+                        Assert.IsNull(body["temperature"], "An unset target must use the provider/model default.");
+                    }
+
+                    foreach (Newtonsoft.Json.Linq.JProperty property in
+                             Newtonsoft.Json.Linq.JObject.Parse(extraBody).Properties())
+                    {
+                        Assert.IsTrue(Newtonsoft.Json.Linq.JToken.DeepEquals(property.Value, body[property.Name]),
+                            property.Name + " must reach the wire unchanged when no typed override is configured.");
+                    }
+
+                    CoreAISettingsAsset settings = GameCreationBenchmarkPlayModeTests.CreateBenchmarkSettings();
+                    _ownedAssets.Add(settings);
+                    BenchmarkRunMetadata metadata = GameCreationBenchmarkPlayModeTests.CreateRunMetadata("r", "m",
+                        "HTTP", true, streaming, settings, 1,
+                        temperature: handle.Temperature);
+                    Assert.AreEqual(expectedTemperature, metadata.Temperature);
+                }
+            }
+            finally
+            {
+                MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = previous;
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task BenchmarkClient_ClassicRunOmitsTemperature(bool streaming)
+        {
+            Environment.SetEnvironmentVariable(PlayModeOpenAiTestConfig.EnvBaseUrl, "http://offline.invalid/v1");
+            Environment.SetEnvironmentVariable(PlayModeOpenAiTestConfig.EnvModel, "benchmark");
+            Environment.SetEnvironmentVariable(PlayModeOpenAiTestConfig.EnvExtraBodyJson, "{}");
+            Environment.SetEnvironmentVariable(PlayModeOpenAiTestConfig.EnvStreaming, streaming ? "true" : "false");
+            Environment.SetEnvironmentVariable(PlayModeOpenAiTestConfig.EnvNativeTools, "true");
+            SamplingCaptureHandler capture = new();
+            Func<HttpClient> previous = MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory;
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(capture, false);
+            try
+            {
+                Assert.IsTrue(PlayModeProductionLikeLlmFactory.TryCreate(
+                    PlayModeProductionLikeLlmBackend.OpenAiCompatibleHttp, null, 5,
+                    out PlayModeProductionLikeLlmHandle handle, out string reason), reason);
+                using (handle)
+                {
+                    await CompleteSamplingRequest(handle, streaming);
+                    Assert.AreEqual(streaming, (bool?)capture.Body["stream"] == true);
+                    Assert.IsNull(handle.Temperature);
+                    Assert.IsNull(capture.Body["temperature"]);
+                }
+            }
+            finally
+            {
+                MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = previous;
+            }
+        }
+
+        private static async Task CompleteSamplingRequest(PlayModeProductionLikeLlmHandle handle, bool streaming)
+        {
+            LlmCompletionRequest request = new() { UserPayload = "hello" };
+            if (streaming)
+            {
+                await foreach (LlmStreamChunk chunk in handle.Client.CompleteStreamingAsync(request))
+                {
+                    Assert.IsTrue(string.IsNullOrEmpty(chunk.Error), chunk.Error);
+                }
+            }
+            else
+            {
+                LlmCompletionResult result = await handle.Client.CompleteAsync(request);
+                Assert.IsTrue(result.Ok, result.Error);
+            }
+        }
+
+        private sealed class SamplingCaptureHandler : HttpMessageHandler
+        {
+            public Newtonsoft.Json.Linq.JObject Body { get; private set; }
+
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+                CancellationToken cancellationToken)
+            {
+                Body = Newtonsoft.Json.Linq.JObject.Parse(await request.Content.ReadAsStringAsync());
+                bool streaming = (bool?)Body["stream"] == true;
+                string response = streaming
+                    ? "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+                    : "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}";
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(response, Encoding.UTF8, streaming ? "text/event-stream" : "application/json")
+                };
+            }
+        }
+#endif
 
         private static string Effort(string body)
         {

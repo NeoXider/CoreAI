@@ -588,6 +588,92 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         [Test]
+        public async Task ProviderResponseEvidence_ResetsBetweenTurnsAndSealFreezesIt()
+        {
+            ResponseEvidenceLlm provider = new();
+            SessionCapturingLlmClient capture = new(provider);
+            await foreach (LlmStreamChunk chunk in capture.CompleteStreamingAsync(new LlmCompletionRequest())) { }
+            Assert.IsTrue(capture.ProviderResponseObserved);
+            provider.OpenResponse = false;
+            IAsyncEnumerator<LlmStreamChunk> waiting = capture.CompleteStreamingAsync(new LlmCompletionRequest())
+                .GetAsyncEnumerator();
+            Assert.IsTrue(await waiting.MoveNextAsync());
+            Assert.IsFalse(capture.ProviderResponseObserved, "A later request cannot inherit an earlier HTTP success.");
+            capture.Seal();
+            provider.LastState.RecordResponse();
+            Assert.IsFalse(capture.ProviderResponseObserved, "Late updates cannot change a sealed scenario.");
+            await waiting.DisposeAsync();
+        }
+
+        [Test]
+        public async Task ProviderResponseEvidence_ParallelCapturesRemainIndependent()
+        {
+            ResponseEvidenceLlm open = new();
+            ResponseEvidenceLlm waiting = new() { OpenResponse = false };
+            SessionCapturingLlmClient first = new(open);
+            SessionCapturingLlmClient second = new(waiting);
+            await foreach (LlmStreamChunk chunk in first.CompleteStreamingAsync(new LlmCompletionRequest())) { }
+            await foreach (LlmStreamChunk chunk in second.CompleteStreamingAsync(new LlmCompletionRequest())) { }
+            Assert.IsTrue(first.ProviderResponseObserved);
+            Assert.IsFalse(second.ProviderResponseObserved);
+            first.Seal();
+            open.LastState.ResetAttempt();
+            Assert.IsTrue(first.ProviderResponseObserved);
+        }
+
+        [Test]
+        public void ProviderFailure_RawTransportFaultsAreEnvironmentFailures()
+        {
+            Assert.AreEqual(FailureAttribution.Environment, ClassifyException(new System.IO.IOException("connection reset")));
+            Assert.AreEqual(FailureAttribution.Environment, ClassifyException(new OperationCanceledException("cancelled",
+                new System.Net.Http.HttpRequestException("send failed"))));
+            Assert.AreEqual(FailureAttribution.Framework, ClassifyException(new InvalidOperationException("grader failed")));
+        }
+
+        [Test]
+        public async Task ProviderResponseEvidence_CapturesHttpFailureBeforeCancellationWrappingIsLost()
+        {
+            ResponseEvidenceLlm provider = new() { FailAfterFirstChunk = true };
+            SessionCapturingLlmClient capture = new(provider);
+            IAsyncEnumerator<LlmStreamChunk> iterator = capture.CompleteStreamingAsync(new LlmCompletionRequest())
+                .GetAsyncEnumerator();
+            Assert.IsTrue(await iterator.MoveNextAsync());
+            bool cancelled = false;
+            try { await iterator.MoveNextAsync(); }
+            catch (OperationCanceledException) { cancelled = true; }
+            await iterator.DisposeAsync();
+            Assert.IsTrue(cancelled);
+            Assert.IsTrue(capture.TransportFailed);
+            StringAssert.Contains("503", capture.FirstProviderError);
+            Assert.AreEqual(FailureAttribution.Environment,
+                BenchmarkProviderFailurePolicy.ClassifyDeadline(true, capture.ProviderResponseObserved, capture.TransportFailed));
+        }
+
+        private sealed class ResponseEvidenceLlm : ILlmClient
+        {
+            public bool OpenResponse = true;
+            public bool FailAfterFirstChunk;
+            public LlmProviderResponseState LastState;
+            public bool SupportsNativeToolCalling => true;
+            public void SetTools(IReadOnlyList<ILlmTool> tools) { }
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                LastState = request.ProviderResponseState;
+                LastState.ResetAttempt();
+                if (OpenResponse) LastState.RecordResponse();
+                yield return new LlmStreamChunk();
+                await Task.CompletedTask;
+                if (FailAfterFirstChunk)
+                    throw new OperationCanceledException("cancelled", new LlmClientException("HTTP 503",
+                        LlmErrorCode.BackendUnavailable, 503));
+                yield return new LlmStreamChunk { IsDone = true };
+            }
+        }
+
+        [Test]
         public void BenchmarkOutputCap_ResolvesOptionalPerCallLimit()
         {
             string previous = Environment.GetEnvironmentVariable("COREAI_BENCHMARK_MAX_OUTPUT_TOKENS");
@@ -925,7 +1011,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             if (!PlayModeProductionLikeLlmFactory.TryCreate(
-                    null, 0.1f, 300, out PlayModeProductionLikeLlmHandle handle, out string ignore))
+                    null, null, 300, out PlayModeProductionLikeLlmHandle handle, out string ignore))
             {
                 Assert.Ignore(ignore);
             }
@@ -965,7 +1051,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     handle.ResolvedBackend.ToString(),
                     handle.ResolvedConfig?.NativeTools ?? handle.Client.SupportsNativeToolCalling,
                     handle.ResolvedConfig?.Streaming ?? false, settings, repetitions,
-                    handle.ResolvedConfig?.ReasoningEffort);
+                    handle.ResolvedConfig?.ReasoningEffort, handle.Temperature);
 
                 GameBenchmarkScenario[] scenarios = AllScenarios();
                 BenchmarkProgress.BeginSession();

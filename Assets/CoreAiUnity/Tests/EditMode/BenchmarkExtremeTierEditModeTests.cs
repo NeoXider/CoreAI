@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Xml;
 using CoreAI.Benchmarking;
+using CoreAI.Ai;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -15,6 +16,67 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class BenchmarkExtremeTierEditModeTests
     {
+        [TestCase(true, true, false, FailureAttribution.Model)]
+        [TestCase(true, false, false, FailureAttribution.Environment)]
+        [TestCase(true, true, true, FailureAttribution.Environment)]
+        [TestCase(false, true, false, FailureAttribution.Environment)]
+        public void ProviderDeadline_RequiresAcceptedResponseAndNoTransportFailure(bool deadline, bool opened,
+            bool transportFailed, FailureAttribution expected)
+        {
+            Assert.AreEqual(expected,
+                BenchmarkProviderFailurePolicy.ClassifyDeadline(deadline, opened, transportFailed));
+        }
+
+        [Test]
+        public void ProviderFailure_CancellationWrappingPreservesExplicitHttpError()
+        {
+            LlmClientException refused = new("HTTP 503", LlmErrorCode.BackendUnavailable, 503);
+            System.OperationCanceledException wrapped = new("cancelled", refused);
+            Assert.IsTrue(LlmCancellation.IsTransportFailure(wrapped));
+            Assert.IsTrue(LlmCancellation.IsTransportFailure(new System.OperationCanceledException("cancelled",
+                new System.IO.IOException("connection reset"))));
+            Assert.IsTrue(LlmCancellation.IsTransportFailure(new System.AggregateException(
+                new System.OperationCanceledException(), new System.Net.Http.HttpRequestException("send failed"))));
+            Assert.IsFalse(LlmCancellation.IsTransportFailure(new System.OperationCanceledException()));
+            Assert.IsFalse(LlmCancellation.IsTransportFailure(
+                new LlmClientException("empty response", LlmErrorCode.EmptyResponse)));
+        }
+
+        [Test]
+        public void ProviderResponseState_RetryResetsEvidenceAndRequestsRemainIndependent()
+        {
+            LlmProviderResponseState first = new();
+            LlmProviderResponseState parallel = new();
+            first.RecordResponse();
+            Assert.IsTrue(first.ResponseObserved);
+            Assert.IsFalse(parallel.ResponseObserved);
+            first.ResetAttempt();
+            Assert.IsFalse(first.ResponseObserved, "A previous response cannot qualify a retry waiting for headers.");
+            parallel.RecordResponse();
+            Assert.IsFalse(first.ResponseObserved);
+        }
+
+        [TestCase(FailureAttribution.Environment, true)]
+        [TestCase(FailureAttribution.Model, false)]
+        [TestCase(FailureAttribution.Framework, false)]
+        [TestCase(FailureAttribution.None, false)]
+        public void ProviderRetry_OnlyEnvironmentFailuresAreReplayed(FailureAttribution attribution, bool expected)
+        {
+            Assert.AreEqual(expected, BenchmarkProviderFailurePolicy.ShouldRetry(attribution, "deadline or failure"));
+            Assert.IsFalse(BenchmarkProviderFailurePolicy.ShouldRetry(attribution, ""));
+        }
+
+        [Test]
+        public void ProviderDeadline_NoWorkReceivesZeroAndRemainsInModelScore()
+        {
+            Assert.IsTrue(BenchmarkProviderFailurePolicy.ZeroUnperformedWork(FailureAttribution.Model, false));
+            Assert.IsFalse(BenchmarkProviderFailurePolicy.ZeroUnperformedWork(FailureAttribution.Model, true));
+            Assert.IsFalse(BenchmarkProviderFailurePolicy.ZeroUnperformedWork(FailureAttribution.Environment, false));
+            ScenarioResult timeout = Result("deadline", "G2", 0, attribution: FailureAttribution.Model);
+            BenchmarkReport report = Report("test/model", timeout, Result("success", "G2", 100));
+            Assert.AreEqual(50, report.SuiteBaseScore);
+        }
+
         private static ScenarioResult Result(string id, string group, double baseScore, bool extreme = false,
             int repetition = 1, FailureAttribution attribution = FailureAttribution.None,
             string modelId = "test/model")

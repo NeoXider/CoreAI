@@ -216,6 +216,7 @@ Under an **Auto** backend with neither HTTP nor LLMUnity available the reason re
   the legacy `coreai_world_spawn` binding. It uses `prefab` and `name` as required by that API;
   the separate Roblox castle showcase covers the default `Instance.new('Part')` path.
 - The orchestration role sweep is `Orchestrator_EachBuiltInRole_PublishesEnvelope_WithProductionLikeLlm_Auto`.
+- The game-creation benchmark sends no temperature override by default, including the classic single-model run. JSON targets can explicitly set `temperature` (alias `temp`, number 0..2); omitted or `null` uses the provider/model default. Temperature is JSON-only, with no sixth compact field. The window's optional Temperature field is saved with each row; empty means provider default. Run metadata records `null` and Markdown shows `temperature provider default` when unset. Other live tests that explicitly pass a temperature retain that override.
 - The game-creation benchmark accepts `COREAI_BENCHMARK_MAX_OUTPUT_TOKENS` as a per-call cap. Use it when an OpenRouter route reserves a large default output budget and returns `402`; keep the cap equal across models for score comparisons. G6 has one build attempt inside a 600-second budget (570 s of model time plus a 30 s capture/export reserve) and saves its model-authored scene even if the provider stops later.
 - `COREAI_BENCHMARK_REASONING_EFFORT` (`none` / `low` / `medium` / `high` / `xhigh`) adds `reasoning_effort` to
   the body of the env/file HTTP client, so it affects every live test that resolves through this surface. It

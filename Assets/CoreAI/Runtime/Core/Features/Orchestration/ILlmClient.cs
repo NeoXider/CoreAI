@@ -198,6 +198,24 @@ namespace CoreAI.Ai
                 callerToken);
         }
 
+        /// <summary>Retains transport failures even when caller cancellation wraps the provider exception.</summary>
+        public static bool IsTransportFailure(Exception exception)
+        {
+            LlmClientException provider = LlmCancellation.FindClientException(exception);
+            if (provider != null && provider.ErrorCode != LlmErrorCode.Cancelled &&
+                provider.ErrorCode != LlmErrorCode.EmptyResponse) return true;
+            for (Exception current = exception; current != null; current = current.InnerException)
+            {
+                if (current is System.IO.IOException || current is System.Net.Http.HttpRequestException) return true;
+                if (current is AggregateException aggregate)
+                {
+                    foreach (Exception inner in aggregate.InnerExceptions)
+                        if (IsTransportFailure(inner)) return true;
+                }
+            }
+            return false;
+        }
+
         /// <summary>
         /// The first <see cref="LlmClientException"/> carried by <paramref name="exception"/>: the exception
         /// itself, its <see cref="Exception.InnerException"/> chain, or the members of an
@@ -376,9 +394,40 @@ namespace CoreAI.Ai
         }
     }
 
+    /// <summary>Request-local transport evidence; each retry or tool round resets the previous response.</summary>
+    public sealed class LlmProviderResponseState
+    {
+        /// <summary>MEAI request option carrying this observer without adding a model-visible field.</summary>
+        public const string MetadataKey = "coreai.provider_response_state";
+        private int _responseObserved;
+        private int _retrySuppressed;
+
+        /// <summary>True once the current provider attempt opened successfully or produced output.</summary>
+        public bool ResponseObserved => Volatile.Read(ref _responseObserved) != 0;
+
+        /// <summary>Starts an attempt without inheriting an earlier attempt's HTTP-success evidence.</summary>
+        public void ResetAttempt()
+        {
+            Volatile.Write(ref _responseObserved, 0);
+            Volatile.Write(ref _retrySuppressed, 0);
+        }
+
+        /// <summary>True when the request's own deadline expired and replay would restart its budget.</summary>
+        public bool RetrySuppressed => Volatile.Read(ref _retrySuppressed) != 0;
+
+        /// <summary>Preserves deadline expiry across adapters that translate exceptions into terminal chunks.</summary>
+        public void SuppressRetries() => Volatile.Write(ref _retrySuppressed, 1);
+
+        /// <summary>Records a successful response or generated delta on this attempt.</summary>
+        public void RecordResponse() => Volatile.Write(ref _responseObserved, 1);
+    }
+
     /// <summary>Input for one <see cref="ILlmClient.CompleteAsync"/> call: role, prompts, tracing.</summary>
     public sealed class LlmCompletionRequest
     {
+        /// <summary>Optional request-local provider response observer for diagnostics and benchmark attribution.</summary>
+        public LlmProviderResponseState ProviderResponseState { get; set; }
+
         /// <summary>Stable actor id admitted for this request.</summary>
         public string ActorId { get; set; } = "";
 
@@ -740,6 +789,7 @@ namespace CoreAI.Ai
         /// Never persisted to history, memory, or notes.
         /// </summary>
         public bool GenerationInProgress { get; set; }
+
 
         /// <summary>
         /// When <c>true</c> with <see cref="BufferedStreamingNoToolBinding"/>, host UI should show a short

@@ -824,6 +824,44 @@ namespace CoreAI.Tests.EditMode
             };
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task ResponseWait_WithUnlimitedTotal_BoundsHeadersOrWholeNonStreamingBody(bool streaming)
+        {
+            MeaiOpenAiChatClientEditorTestHooks.HttpClientFactory = () => new HttpClient(
+                new AsyncDelegateHttpHandler(async (_, token) =>
+                {
+                    if (streaming)
+                        await Task.Delay(System.Threading.Timeout.Infinite, token);
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StreamContent(new NeverEndingStream())
+                    };
+                })) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+            OpenAiHttpPostRequest request = SseRequest(0);
+            request.ResponseWaitTimeoutSeconds = 1;
+            HttpClientOpenAiTransport transport = new();
+            using CancellationTokenSource guard = new(System.TimeSpan.FromSeconds(10));
+            bool timedOut = false;
+            try
+            {
+                if (streaming)
+                {
+                    using OpenAiHttpSseOpenResult response = await transport.OpenSseResponseStreamAsync(request, guard.Token);
+                }
+                else
+                {
+                    await transport.PostNonStreamingAsync(request, guard.Token);
+                }
+            }
+            catch (System.OperationCanceledException)
+            {
+                timedOut = true;
+                Assert.IsFalse(guard.IsCancellationRequested, "The response-wait policy must expire before the test guard.");
+            }
+            Assert.IsTrue(timedOut, "An unlimited total ceiling must retain the independent response-wait deadline.");
+        }
+
         [Test]
         public async Task OpenSse_BackendNeverSendsHeaders_CancelsAfterTransportTimeout()
         {

@@ -204,6 +204,9 @@ namespace CoreAI.Tests.EditMode
             /// <summary>This target's reasoning effort; empty uses the suite default.</summary>
             public string reasoningEffort = "";
 
+            /// <summary>Optional temperature from 0 to 2; empty uses the provider/model default.</summary>
+            public string temperature = "";
+
             /// <summary>Provider body fields for this target: one JSON object, or empty.</summary>
             public string extraBody = "";
         }
@@ -281,6 +284,7 @@ namespace CoreAI.Tests.EditMode
                         ? key
                         : "",
                     reasoningEffort = row.reasoningEffort ?? "",
+                    temperature = row.temperature ?? "",
                     extraBody = row.extraBody ?? ""
                 });
             }
@@ -332,7 +336,13 @@ namespace CoreAI.Tests.EditMode
                     continue;
                 }
 
-                targets.Add(new BenchmarkTarget(row.model, row.baseUrl, row.apiKey, row.label, effort, body));
+                if (!BenchmarkTargetList.TryParseTemperature(row.temperature, out float? temperature))
+                {
+                    problems.Add($"row {number} ({row.model.Trim()}): temperature must be a number from 0 to 2");
+                    continue;
+                }
+
+                targets.Add(new BenchmarkTarget(row.model, row.baseUrl, row.apiKey, row.label, effort, body, temperature));
             }
 
             if (problems.Count > 0)

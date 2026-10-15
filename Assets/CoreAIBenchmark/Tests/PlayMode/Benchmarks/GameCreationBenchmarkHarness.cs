@@ -234,6 +234,33 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             private readonly List<InFlightTurn> _inFlight = new();
             private string _systemPrompt = "";
             private bool _sealed;
+            private LlmProviderResponseState _providerResponseState;
+            private bool _sealedProviderResponseObserved;
+            private bool _transportFailed;
+
+            /// <summary>Explicit transport evidence captured before orchestration can wrap cancellation.</summary>
+            public bool TransportFailed
+            {
+                get { lock (_gate) { return _transportFailed; } }
+            }
+
+            private void RecordTransportFailure(Exception exception)
+            {
+                if (!LlmCancellation.IsTransportFailure(exception)) return;
+                lock (_gate)
+                {
+                    if (_sealed) return;
+                    _transportFailed = true;
+                    FirstProviderError = LlmCancellation.FindClientException(exception)?.Message ?? exception.Message;
+                }
+            }
+
+
+            /// <summary>Per-session evidence that a provider accepted a stream or generated a delta.</summary>
+            public bool ProviderResponseObserved
+            {
+                get { lock (_gate) { return _sealed ? _sealedProviderResponseObserved : _providerResponseState?.ResponseObserved == true; } }
+            }
 
             private sealed class InFlightTurn
             {
@@ -318,9 +345,34 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 bool finished = false;
                 try
                 {
-                    await foreach (LlmStreamChunk chunk in _inner.CompleteStreamingAsync(request, cancellationToken)
-                                       .ConfigureAwait(false))
+                    await using IAsyncEnumerator<LlmStreamChunk> enumerator = _inner
+                        .CompleteStreamingAsync(request, cancellationToken).GetAsyncEnumerator(cancellationToken);
+                    while (true)
                     {
+                        bool hasNext;
+                        try { hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false); }
+                        catch (Exception exception)
+                        {
+                            RecordTransportFailure(exception);
+                            throw;
+                        }
+                        if (!hasNext) break;
+                        LlmStreamChunk chunk = enumerator.Current;
+                        if (!string.IsNullOrEmpty(chunk.Error) && chunk.ErrorCode != LlmErrorCode.Cancelled &&
+                            !IsCancellationError(chunk.Error))
+                        {
+                            RecordTransportFailure(new LlmClientException(chunk.Error, chunk.ErrorCode, chunk.HttpStatus));
+                        }
+
+                        if (chunk.GenerationInProgress ||
+                            !string.IsNullOrEmpty(chunk.ReasoningText) || !string.IsNullOrEmpty(chunk.Text))
+                        {
+                            lock (_gate)
+                            {
+                                if (!_sealed) turn.Request.ProviderResponseState?.RecordResponse();
+                            }
+                        }
+
                         if (!string.IsNullOrEmpty(chunk.Text))
                         {
                             lock (_gate)
@@ -386,17 +438,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     }
 
                     _inFlight.Clear();
+                    _sealedProviderResponseObserved = _providerResponseState?.ResponseObserved == true;
                     _sealed = true;
                 }
             }
 
             private InFlightTurn BeginTurn(LlmCompletionRequest request)
             {
+                request.ProviderResponseState = new LlmProviderResponseState();
                 InFlightTurn turn = new() { Request = request, StartTimestamp = Stopwatch.GetTimestamp() };
                 lock (_gate)
                 {
                     if (!_sealed)
                     {
+                        _providerResponseState = request.ProviderResponseState;
                         _inFlight.Add(turn);
                     }
                 }
@@ -2297,6 +2352,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 settings,
                 new LocalActorIdentityProvider("game-creation-benchmark"));
 
+            int initialWorldCommands = env.World.Commands.Count;
+            int initialLuaExecutions = env.Lua.ExecutionCount;
             Stopwatch sw = Stopwatch.StartNew();
             RunObservation obs = new();
 
@@ -2375,6 +2432,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
                 // WHY: Only scenario-budget cancellation after the model already did work ends the run cleanly.
                 // WHY: Earlier provider timeouts are environment failures, not model quality.
+                bool modelProducedWork = RunProducedWork(capture.ToolCalls, toolObserver.ToolCalls,
+                    env.World.Commands.Count - initialWorldCommands,
+                    env.Lua.ExecutionCount - initialLuaExecutions, false);
                 bool sceneWasBuilt = RunProducedWork(capture.ToolCalls, toolObserver.ToolCalls,
                     env.World.Commands.Count, env.Lua.ExecutionCount,
                     env.World is VisualBenchmarkWorldExecutor { HasRenderableScene: true } ||
@@ -2455,6 +2515,27 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     obs.Failure = $"provider error: {providerError}";
                 }
 
+                // WHY: A scenario deadline measures model performance once the provider accepted the stream.
+                // WHY: Explicit HTTP and transport errors retain their environment attribution.
+                bool scenarioDeadline = cts.IsCancellationRequested && sw.Elapsed.TotalSeconds >= timeoutSeconds;
+                bool transportFailed = capture.TransportFailed || providerFailed && !IsCancellationError(providerError) &&
+                                       !string.IsNullOrWhiteSpace(providerError);
+                Exception taskFault = task.IsFaulted ? task.Exception?.GetBaseException() : null;
+                transportFailed |= taskFault != null && (taskFault is not OperationCanceledException ||
+                    LlmCancellation.FindClientException(taskFault) is { ErrorCode: not LlmErrorCode.Cancelled });
+                if (capture.TransportFailed && obs.Attribution != FailureAttribution.Framework)
+                {
+                    obs.Attribution = FailureAttribution.Environment;
+                    obs.Failure = $"provider error: {capture.FirstProviderError}";
+                }
+                if (scenarioDeadline && capture.ProviderResponseObserved && !transportFailed &&
+                    obs.Attribution != FailureAttribution.Framework)
+                {
+                    obs.TimedOut = true;
+                    obs.Attribution = BenchmarkProviderFailurePolicy.ClassifyDeadline(true, true, false);
+                    obs.Failure = "scenario deadline reached while provider response was open";
+                }
+
                 // Grading is harness territory too: protect the suite from a grader bug.
                 ScenarioGrading grading;
                 try
@@ -2469,6 +2550,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
 
                 ApplyUnscoredToolErrorPenalties(grading, obs);
+                if (BenchmarkProviderFailurePolicy.ZeroUnperformedWork(obs.Attribution, modelProducedWork))
+                {
+                    grading.HardCap = 0;
+                }
+
 
                 // An incomplete run (timeout/fault) cannot be a perfect build.
                 if (!string.IsNullOrEmpty(obs.Failure))
@@ -3939,8 +4025,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             return false;
         }
 
-        private static FailureAttribution ClassifyException(Exception ex)
+        internal static FailureAttribution ClassifyException(Exception ex)
         {
+            if (LlmCancellation.IsTransportFailure(ex)) return FailureAttribution.Environment;
             switch (ex)
             {
                 case null:

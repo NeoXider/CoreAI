@@ -1,4 +1,4 @@
-﻿namespace CoreAI
+namespace CoreAI
 {
     /// <summary>
     /// Static proxy for process-wide CoreAI runtime settings and test-time in-memory overrides.
@@ -38,6 +38,7 @@
         private static int? _maxLuaRepairRetries;
         private static bool? _enableMeaiDebugLogging;
         private static int? _llmRequestTimeoutSeconds;
+        private static float? _llmResponseWaitTimeoutSeconds;
         private static int? _maxLlmRequestRetries;
         private static int? _maxContextOverflowRetries;
         private static bool? _enableHttpDebugLogging;
@@ -75,7 +76,7 @@
 
         private const int DefaultMaxLuaRepairRetries = 3;
         private const bool DefaultEnableMeaiDebugLogging = false;
-        private const int DefaultLlmRequestTimeoutSeconds = 300;
+        private const int DefaultLlmRequestTimeoutSeconds = 0;
         private const int DefaultMaxLlmRequestRetries = 1;
         private const int DefaultMaxContextOverflowRetries = 3;
         private const bool DefaultEnableHttpDebugLogging = false;
@@ -153,6 +154,13 @@
             get => _llmRequestTimeoutSeconds ??
                    (int?)Instance?.LlmRequestTimeoutSeconds ?? DefaultLlmRequestTimeoutSeconds;
             set => _llmRequestTimeoutSeconds = value;
+        }
+
+        /// <summary>Maximum response wait or gap between model deltas; zero disables it.</summary>
+        public static float LlmResponseWaitTimeoutSeconds
+        {
+            get => _llmResponseWaitTimeoutSeconds ?? Instance?.LlmResponseWaitTimeoutSeconds ?? 180f;
+            set => _llmResponseWaitTimeoutSeconds = value;
         }
 
         /// <summary>
@@ -450,6 +458,7 @@
                 _maxLuaRepairRetries = null;
                 _enableMeaiDebugLogging = null;
                 _llmRequestTimeoutSeconds = null;
+                _llmResponseWaitTimeoutSeconds = null;
                 _maxLlmRequestRetries = null;
                 _maxContextOverflowRetries = null;
                 _enableHttpDebugLogging = null;

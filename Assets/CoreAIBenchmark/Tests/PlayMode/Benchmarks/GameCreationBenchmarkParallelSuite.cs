@@ -98,7 +98,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// <param name="reasoningEffort">The <c>reasoning_effort</c> the client sends; empty for the provider default.</param>
         internal static BenchmarkRunMetadata CreateRunMetadata(string runId, string modelId, string backend,
             bool nativeToolCalling, bool streaming, CoreAISettingsAsset settings, int repetitions,
-            string reasoningEffort = "")
+            string reasoningEffort = "", float? temperature = null)
         {
             return new BenchmarkRunMetadata
             {
@@ -109,7 +109,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 NativeToolCalling = nativeToolCalling,
                 Streaming = streaming,
                 MaxParallelToolCalls = settings.MaxParallelToolCalls,
-                Temperature = 0.1f,
+                Temperature = temperature,
                 ReasoningEffort = reasoningEffort ?? "",
                 Repetitions = repetitions,
                 UnityVersion = Application.unityVersion,
@@ -220,9 +220,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                             run.DisplayName, timeout, r => attemptResult = r, run.ScenarioContext);
                         captured = attemptResult;
 
-                        bool hardFailure = captured != null
-                                           && !string.IsNullOrEmpty(captured.Failure)
-                                           && captured.Attribution != FailureAttribution.Framework;
+                        bool hardFailure = captured != null &&
+                                           BenchmarkProviderFailurePolicy.ShouldRetry(captured.Attribution, captured.Failure);
                         if (!hardFailure)
                         {
                             break;
@@ -513,7 +512,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     try
                     {
                         created = PlayModeProductionLikeLlmFactory.TryCreateForEndpoint(target.BaseUrl, target.Model,
-                            target.ResolveApiKey(), 0.1f, 300, out handle, out reason, target.ExtraBodyJson,
+                            target.ResolveApiKey(), target.Temperature, 300, out handle, out reason, target.ExtraBodyJson,
                             target.ReasoningEffort, defaultEffort);
                     }
                     catch (ArgumentException ex)
@@ -541,7 +540,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         Metadata = CreateRunMetadata(runId, target.DisplayName, backend,
                             handle.ResolvedConfig?.NativeTools ?? handle.Client.SupportsNativeToolCalling,
                             handle.ResolvedConfig?.Streaming ?? false, settings, repetitions,
-                            handle.ResolvedConfig?.ReasoningEffort)
+                            handle.ResolvedConfig?.ReasoningEffort, handle.Temperature)
                     };
                     string logPrefix = $"[Benchmark][{target.DisplayName}]";
                     runs.Add(new TargetSuiteRun

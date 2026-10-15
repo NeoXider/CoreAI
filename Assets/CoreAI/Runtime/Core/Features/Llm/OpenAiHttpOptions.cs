@@ -27,8 +27,9 @@ namespace CoreAI.Infrastructure.Llm
         public float Temperature { get; set; } = 0.2f;
         public bool OverrideTemperature { get; set; } = true;
         public float? TemperatureOverride => OverrideTemperature ? Temperature : (float?)null;
-        public int RequestTimeoutSeconds { get; set; } = 120;
-        public int MaxTokens { get; set; } = 128000;
+        public int RequestTimeoutSeconds { get; set; }
+        public int? ResponseWaitTimeoutSeconds { get; set; }
+        public int MaxTokens { get; set; } = 262144;
         public bool OverrideMaxTokens { get; set; } = true;
         public int? MaxTokensOverride => OverrideMaxTokens ? MaxTokens : (int?)null;
         public string ExtraBodyJson { get; set; } = "";
@@ -98,6 +99,7 @@ namespace CoreAI.Infrastructure.Llm
                 Temperature = source.TemperatureOverride ?? source.Temperature,
                 OverrideTemperature = source.TemperatureOverride.HasValue,
                 RequestTimeoutSeconds = source.RequestTimeoutSeconds,
+                ResponseWaitTimeoutSeconds = source.ResponseWaitTimeoutSeconds,
                 MaxTokens = source.MaxTokensOverride ?? source.MaxTokens,
                 OverrideMaxTokens = source.MaxTokensOverride.HasValue,
                 ExtraBodyJson = source.ExtraBodyJson,

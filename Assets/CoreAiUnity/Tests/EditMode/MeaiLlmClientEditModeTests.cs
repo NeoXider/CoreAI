@@ -20,6 +20,30 @@ namespace CoreAI.Tests.EditMode
         private SynchronizationContext _previousSynchronizationContext;
 
         [Test]
+        public async Task ProviderResponseState_IsCreatedForOrdinaryRequests()
+        {
+            CapturingChatClient inner = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance,
+                new StubCoreSettings(), supportsNativeToolCalling: true);
+            LlmCompletionRequest request = new() { UserPayload = "hi" };
+            await client.CompleteAsync(request);
+            Assert.IsNotNull(request.ProviderResponseState);
+            Assert.AreSame(request.ProviderResponseState,
+                inner.LastOptions.AdditionalProperties[LlmProviderResponseState.MetadataKey]);
+        }
+
+        [Test]
+        public async Task ProviderResponseState_IsPassedByReferenceOutsideTheWireBody()
+        {
+            CapturingChatClient inner = new();
+            MeaiLlmClient client = new(inner, GameLoggerUnscopedFallback.Instance,
+                new StubCoreSettings(), supportsNativeToolCalling: true);
+            LlmProviderResponseState observer = new();
+            await client.CompleteAsync(new LlmCompletionRequest { UserPayload = "hi", ProviderResponseState = observer });
+            Assert.AreSame(observer, inner.LastOptions.AdditionalProperties[LlmProviderResponseState.MetadataKey]);
+        }
+
+        [Test]
         public void OriginalConstructorSignature_InfersEndpointRequestSettings()
         {
             System.Reflection.ConstructorInfo constructor = typeof(MeaiLlmClient).GetConstructor(new[]

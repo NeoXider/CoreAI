@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Llm;
 using CoreAI.Messaging;
 using NUnit.Framework;
 
@@ -8,6 +9,35 @@ namespace CoreAI.Core.Tests.EditMode
 {
     public sealed class LlmRequestSettingsCompatibilityEditModeTests
     {
+        [Test]
+        public void SettingsOptions_DefaultTimeoutsAndOutputCap_MatchOwnerPolicy()
+        {
+            CoreAISettingsOptions settings = new CoreAISettingsOptions();
+            OpenAiHttpOptions http = new OpenAiHttpOptions();
+            Assert.AreEqual(0f, settings.LlmRequestTimeoutSeconds);
+            Assert.AreEqual(180f, settings.LlmResponseWaitTimeoutSeconds);
+            Assert.AreEqual(262144, settings.MaxTokens);
+            Assert.AreEqual(0, http.RequestTimeoutSeconds);
+            Assert.AreEqual(262144, http.MaxTokens);
+            Assert.IsNull(http.ResponseWaitTimeoutSeconds);
+        }
+
+        [TestCase(0f)]
+        [TestCase(73f)]
+        public void SettingsOptions_Copy_PreservesExplicitTimeoutsAndUnlimitedOutput(float wait)
+        {
+            CoreAISettingsOptions source = new CoreAISettingsOptions
+            {
+                LlmRequestTimeoutSeconds = 0f,
+                LlmResponseWaitTimeoutSeconds = wait,
+                MaxTokens = 0
+            };
+            CoreAISettingsOptions copy = CoreAISettingsOptions.From(source);
+            Assert.AreEqual(0f, copy.LlmRequestTimeoutSeconds);
+            Assert.AreEqual(wait, copy.LlmResponseWaitTimeoutSeconds);
+            Assert.AreEqual(0, copy.MaxTokens);
+        }
+
         [Test]
         public void SettingsOptions_From_PreservesIndependentPrimaryAndSecondaryReasoning()
         {

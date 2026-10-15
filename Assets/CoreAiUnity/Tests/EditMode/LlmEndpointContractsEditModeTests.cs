@@ -100,6 +100,21 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void HttpDescriptor_RejectsNegativeResponseWait()
+        {
+            LlmEndpointDescriptor descriptor = new()
+            {
+                EndpointId = "http",
+                BaseUrl = "https://example.test/v1",
+                Model = "model",
+                ResponseWaitTimeoutSeconds = -1
+            };
+            Assert.That(descriptor.Validate(), Is.EqualTo(new[] { "The response-wait timeout must not be negative." }));
+            descriptor.ResponseWaitTimeoutSeconds = 0;
+            Assert.That(descriptor.Validate(), Is.Empty);
+        }
+
+        [Test]
         public void RuntimeProfile_RejectsSelfAndDuplicateFallbacks()
         {
             LlmRuntimeProfile profile = new()

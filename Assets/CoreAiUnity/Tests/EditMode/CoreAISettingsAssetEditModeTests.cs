@@ -15,6 +15,36 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class CoreAISettingsAssetEditModeTests
     {
+        [Test]
+        public void SavedTimeoutAndTokenValues_SurviveDeserialization()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                JsonUtility.FromJsonOverwrite(
+                    "{\"requestTimeoutSeconds\":120,\"llmRequestTimeoutSeconds\":120," +
+                    "\"maxTokens\":128000,\"enableMaxTokensOverriding\":true}", settings);
+                Assert.AreEqual(120, settings.RequestTimeoutSeconds);
+                Assert.AreEqual(120f, settings.LlmRequestTimeoutSeconds);
+                Assert.AreEqual(128000, settings.MaxTokens);
+                Assert.AreEqual(180f, settings.LlmResponseWaitTimeoutSeconds);
+                settings.ApplyOptions(new CoreAISettingsOptions
+                {
+                    LlmRequestTimeoutSeconds = 0f,
+                    LlmResponseWaitTimeoutSeconds = 0f,
+                    MaxTokens = 0
+                });
+                Assert.AreEqual(0f, settings.LlmRequestTimeoutSeconds);
+                Assert.AreEqual(0f, settings.LlmResponseWaitTimeoutSeconds);
+                Assert.AreEqual(0, settings.MaxTokens);
+                Assert.IsFalse(settings.OverrideMaxTokens);
+            }
+            finally
+            {
+                Object.DestroyImmediate(settings);
+            }
+        }
+
         [TestCase("maxToolCallRoundtrips")]
         [TestCase("llmUnityToolChannel")]
         public void SettingsInspector_ExposesSerializedToolControls(string propertyName)
@@ -68,7 +98,11 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(settings.OverrideTemperature);
             Assert.IsFalse(settings.OverrideMaxTokens, "No output cap by default: the provider decides.");
             Assert.AreEqual(0, settings.MaxTokens, "0 = no max_tokens sent when overriding is disabled.");
-            Assert.AreEqual(120, settings.RequestTimeoutSeconds);
+            Assert.AreEqual(0, settings.RequestTimeoutSeconds);
+            Assert.AreEqual(0f, settings.LlmRequestTimeoutSeconds);
+            Assert.AreEqual(180f, settings.LlmResponseWaitTimeoutSeconds);
+            SerializedObject defaults = new(settings);
+            Assert.AreEqual(262144, defaults.FindProperty("maxTokens").intValue);
             Assert.AreEqual("", settings.LlmUnityAgentName);
             Assert.AreEqual("Qwen3.5-2B-Q4_K_M.gguf", settings.GgufModelPath);
             Assert.AreEqual(true, settings.LlmUnityDontDestroyOnLoad);

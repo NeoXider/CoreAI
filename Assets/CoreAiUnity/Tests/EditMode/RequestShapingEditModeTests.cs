@@ -52,7 +52,7 @@ namespace CoreAI.Tests.EditMode
             [Values(LlmReasoningDialect.OpenAi, LlmReasoningDialect.OpenRouter,
                 LlmReasoningDialect.QwenTemplate, LlmReasoningDialect.AnthropicCompat,
                 LlmReasoningDialect.GeminiCompat, LlmReasoningDialect.PassthroughEffort,
-                LlmReasoningDialect.Off)] LlmReasoningDialect dialect)
+                LlmReasoningDialect.Off, LlmReasoningDialect.LlamaCpp)] LlmReasoningDialect dialect)
         {
             OpenAiHttpOptions settings = Settings();
             settings.ReasoningDialect = dialect;
@@ -79,6 +79,13 @@ namespace CoreAI.Tests.EditMode
                     Assert.AreEqual("enabled", body["thinking"]?["type"]?.Value<string>());
                     Assert.AreEqual(4096, body["thinking"]?["budget_tokens"]?.Value<int>());
                     break;
+                case LlmReasoningDialect.LlamaCpp:
+                    Assert.AreEqual("high", body["reasoning_effort"]?.Value<string>());
+                    Assert.AreEqual(true, body["chat_template_kwargs"]?["enable_thinking"]?.Value<bool>());
+                    Assert.AreEqual(4096, body["reasoning_budget_tokens"]?.Value<int>());
+                    Assert.IsNull(body["thinking_budget"], "llama.cpp does not read the Qwen provider budget field.");
+                    Assert.AreEqual(777, body["max_tokens"]?.Value<int>());
+                    break;
                 case LlmReasoningDialect.GeminiCompat:
                 case LlmReasoningDialect.PassthroughEffort:
                     Assert.AreEqual("high", body["reasoning_effort"]?.Value<string>());
@@ -90,6 +97,19 @@ namespace CoreAI.Tests.EditMode
                     Assert.IsNull(body["thinking"]);
                     break;
             }
+        }
+
+        [Test]
+        public async Task Reasoning_LlamaCppNoneDisablesTemplateThinking([Values(false, true)] bool streaming)
+        {
+            OpenAiHttpOptions settings = Settings();
+            settings.ReasoningDialect = LlmReasoningDialect.LlamaCpp;
+            settings.ExtraBodyJson = "{\"chat_template_kwargs\":{\"custom\":true,\"enable_thinking\":true}}";
+            JObject body = JObject.Parse(await CaptureAsync(streaming, settings, Reasoning(LlmReasoningEffort.None)));
+            Assert.AreEqual("none", body["reasoning_effort"]?.Value<string>());
+            Assert.AreEqual(false, body["chat_template_kwargs"]?["enable_thinking"]?.Value<bool>());
+            Assert.AreEqual(true, body["chat_template_kwargs"]?["custom"]?.Value<bool>());
+            Assert.IsNull(body["reasoning_budget_tokens"]);
         }
 
         [Test]

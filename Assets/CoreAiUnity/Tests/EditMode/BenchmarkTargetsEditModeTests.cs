@@ -147,7 +147,7 @@ namespace CoreAI.Tests.EditMode
         [TestCase("m|ftp://a/v1", "no http(s) base URL")]
         [TestCase("[{\"model\":\"m\"}]", "needs an absolute http(s) base URL")]
         [TestCase("[{\"baseUrl\":\"http://a/v1\"}]", "has no model id")]
-        [TestCase("[{\"model\":\"m\",\"baseUrl\":\"http://a/v1\",\"temperature\":1}]", "unknown property")]
+        [TestCase("[{\"model\":\"m\",\"baseUrl\":\"http://a/v1\",\"unknown\":1}]", "unknown property")]
         [TestCase("[{\"model\":5,\"baseUrl\":\"http://a/v1\"}]", "must be a string")]
         [TestCase("[{\"model\":\"m\",\"baseUrl\":\"http://a/v1\"", "malformed JSON")]
         [TestCase("[\"m|http://a/v1\"]", "is not a JSON object")]
@@ -596,6 +596,109 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(effort, ModelComparison.ParseSummaryJson(json).ReasoningEffort);
             Assert.AreEqual(effort, ModelSummary.From(report).ReasoningEffort);
             StringAssert.Contains(markdown, BenchmarkReportFormatter.ToMarkdown(report));
+        }
+
+        [TestCase("temperature", "0", 0f)]
+        [TestCase("temperature", "0.7", 0.7f)]
+        [TestCase("temp", "2", 2f)]
+        [TestCase("TEMP", "7e-1", 0.7f)]
+        public void Temperature_ParsesAndRoundTripsWithDuplicateLabels(string key, string jsonValue, float expected)
+        {
+            string entry = "{\"model\":\"m\",\"baseUrl\":\"http://h/v1\",\"" + key + "\":" + jsonValue + "}";
+            List<BenchmarkTarget> targets = BenchmarkTargetList.Parse("[" + entry + "," + entry + "]");
+            List<BenchmarkTarget> back = BenchmarkTargetList.Parse(BenchmarkTargetList.ToJson(targets, false));
+            Assert.AreEqual(expected, back[0].Temperature);
+            Assert.AreEqual(expected, back[1].Temperature, "Disambiguating labels must preserve temperature.");
+            Assert.AreEqual("m#2", back[1].Label);
+        }
+
+        [TestCase("-0.01")]
+        [TestCase("2.00000001")]
+        [TestCase("\"0.7\"")]
+        [TestCase("true")]
+        [TestCase("{}")]
+        public void Temperature_RejectsInvalidJsonValues(string value)
+        {
+            Assert.IsFalse(BenchmarkTargetList.TryParse(
+                "[{\"model\":\"m\",\"baseUrl\":\"http://h/v1\",\"temperature\":" + value + "}]",
+                out _, out string error));
+            StringAssert.Contains("temperature", error);
+        }
+
+        [Test]
+        public void Temperature_RejectsOverflowingNumber()
+        {
+            // WHY: Mono's number reader rejects 1e999 as malformed JSON while .NET reads it as infinity and
+            // the range check rejects it; both runtimes must refuse the target, whatever the message.
+            Assert.IsFalse(BenchmarkTargetList.TryParse(
+                "[{\"model\":\"m\",\"baseUrl\":\"http://h/v1\",\"temperature\":1e999}]",
+                out _, out string error));
+            Assert.IsFalse(string.IsNullOrEmpty(error));
+        }
+
+        [Test]
+        public void Temperature_UnsetAndNullUseProviderDefaultAndCompactHasNoSixthField()
+        {
+            List<BenchmarkTarget> targets = BenchmarkTargetList.Parse(
+                "[{\"model\":\"m\",\"baseUrl\":\"http://h/v1\"}," +
+                "{\"model\":\"n\",\"baseUrl\":\"http://h/v1\",\"temperature\":null}]");
+            Assert.IsNull(targets[0].Temperature);
+            Assert.IsNull(targets[1].Temperature);
+            StringAssert.DoesNotContain("temperature", BenchmarkTargetList.ToJson(targets, false));
+            Assert.IsNull(BenchmarkTargetList.Parse("label|m|http://h/v1||high")[0].Temperature);
+            Assert.IsFalse(BenchmarkTargetList.TryParse("label|m|http://h/v1||high|0.7", out _, out _));
+        }
+
+        [TestCase(-0.1f)]
+        [TestCase(2.1f)]
+        [TestCase(float.NaN)]
+        [TestCase(float.PositiveInfinity)]
+        public void Temperature_ConstructorRejectsInvalidValues(float temperature)
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => new BenchmarkTarget("m", "http://h/v1",
+                temperature: temperature));
+        }
+
+        [TestCase("", true)]
+        [TestCase("0", true)]
+        [TestCase("0.7", true)]
+        [TestCase("2", true)]
+        [TestCase("2.1", false)]
+        [TestCase("NaN", false)]
+        [TestCase("Infinity", false)]
+        [TestCase("0,7", false)]
+        public void Temperature_TargetRowsValidateAndPersist(string temperature, bool valid)
+        {
+            TargetRow row = new() { model = "m", baseUrl = "http://h/v1", temperature = temperature };
+            Assert.AreEqual(valid, GameCreationBenchmarkLauncher.TryBuildTargetSpec(new[] { row },
+                out string spec, out string error), error);
+            GameCreationBenchmarkLauncher.SaveTargetRows(new[] { row });
+            Assert.AreEqual(temperature, GameCreationBenchmarkLauncher.LoadSavedTargetRows()[0].temperature);
+            if (valid)
+            {
+                Assert.IsTrue(BenchmarkTargetList.TryParseTemperature(temperature, out float? expected));
+                Assert.AreEqual(expected, BenchmarkTargetList.Parse(spec)[0].Temperature);
+            }
+            else
+            {
+                StringAssert.Contains("temperature", error);
+            }
+        }
+
+        [TestCase(null, "null", "provider default")]
+        [TestCase(0f, "0", "0")]
+        [TestCase(0.7f, "0.7", "0.7")]
+        public void Temperature_ReportAndSummaryPreserveProviderDefaultOrExplicitValue(
+            float? temperature, string jsonValue, string markdownValue)
+        {
+            BenchmarkReport report = new() { Metadata = new BenchmarkRunMetadata { Temperature = temperature } };
+            string json = BenchmarkReportFormatter.ToJson(report);
+            StringAssert.Contains("\"temperature\":" + jsonValue, json);
+            StringAssert.Contains("temperature " + markdownValue, BenchmarkReportFormatter.ToMarkdown(report));
+            Assert.AreEqual(temperature, ModelSummary.From(report).Temperature);
+            Assert.AreEqual(temperature, ModelComparison.ParseSummaryJson(json).Temperature);
+            Assert.IsNull(ModelComparison.ParseSummaryJson(json.Replace("\"temperature\":" + jsonValue + ",", "")).Temperature,
+                "Older reports without temperature must remain readable.");
         }
 
         private static void AssertTarget(BenchmarkTarget target, string label, string model, string baseUrl,

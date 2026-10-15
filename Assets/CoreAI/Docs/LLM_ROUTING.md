@@ -231,6 +231,7 @@ local Qwen server whose URL does not identify its implementation.
 |---|---|---|
 | `OpenAi` | `reasoning_effort`: lower-case effort, including `none`, `minimal`, and `xhigh` | `max_completion_tokens` |
 | `OpenRouter` | `reasoning.effort`, plus `reasoning.max_tokens` for a positive thinking budget | `max_tokens` |
+| `LlamaCpp` | `reasoning_effort`, `chat_template_kwargs.enable_thinking`; optional positive `reasoning_budget_tokens`. `None` disables template thinking. | `max_tokens` |
 | `QwenTemplate` | `enable_thinking` and `chat_template_kwargs.enable_thinking`; optional positive `thinking_budget`. `None` sets both flags to false. | `max_tokens` |
 | `AnthropicCompat` | `thinking.type` = `disabled` for `None`, otherwise `enabled` with `budget_tokens` (at least 1024). Default budgets: Minimal/Low 1024, Medium 4096, High 8192, XHigh 16384. | `max_tokens` |
 | `GeminiCompat` | `reasoning_effort`; Minimal maps to `low`, XHigh to `high` | `max_tokens` |
@@ -248,3 +249,44 @@ MEAI callers can set `ChatOptions.TopP`, `StopSequences`, `Seed`, `ResponseForma
 `ChatOptions.AdditionalProperties["coreai.reasoning"]` as `LlmReasoningOptions`. Request-start
 telemetry and the `LLM >` log include resolved effort, dialect, temperature and output-token cap;
 reported reasoning-token usage remains separate from visible output.
+
+### Local Qwen servers and stream deadlines
+
+Use an endpoint profile with `ReasoningDialect = LlmReasoningDialect.LlamaCpp` for llama.cpp builds
+that accept `reasoning_budget_tokens`. Configure `ReasoningEffort` and `ThinkingBudgetTokens` explicitly.
+For example, High with a 2048-token thinking budget emits `reasoning_effort: "high"`,
+`chat_template_kwargs: { "enable_thinking": true }`, and `reasoning_budget_tokens: 2048`.
+The budget includes reasoning only; the output cap still bounds the whole completion. Older server
+builds may ignore the budget, so verify the deployed version against the
+[llama.cpp server implementation](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/server-common.cpp).
+Strata 0.1.43.1 also accepts this budget field; its Qwen template maps High to XHigh. Check `/props`
+before treating an OpenAI-compatible endpoint as a particular server implementation. Qwen templates commonly use a boolean
+thinking switch; High alone is a template variable and does not impose a thinking-token budget.
+`reasoning_format` selects parsing of reasoning, rather than how long the model thinks.
+Auto keeps existing URL-based resolution; IP addresses do not prove a provider dialect.
+
+`LlmEndpointDescriptor` exposes nullable `RequestTimeoutSeconds` and `ResponseWaitTimeoutSeconds`.
+Null inherits global settings; zero disables that limit. New global total limits default to zero;
+response wait defaults to 180 seconds. `OpenAiHttpOptions` uses a resolved total and nullable response
+wait (null uses the global default). HTTP profiles serialize -1 for inherited response wait.
+The response wait covers headers, first-token silence and gaps between model deltas; non-streaming
+uses it for the whole response. Nonempty reasoning/content/tool fragments reset it, while comments
+and processing metadata do not. It raises `LlmErrorCode.Timeout` without a hidden 15-second restart.
+These endpoint settings do not serialize agents or sessions. Orchestrator idle and scenario deadlines
+remain separate. Existing serialized total limits and output caps retain their saved values; new cap
+values are 262144, with unchanged override and explicit-zero semantics.
+
+Provider reasoning stays separate from visible history. In particular, reasoning-only assistant
+messages are not stringified into prompt content. Callers that need transport evidence can attach a
+`LlmProviderResponseState` to `LlmCompletionRequest.ProviderResponseState`. It records HTTP success
+without emitting a synthetic content chunk, resets on every retry/tool round, and is never serialized
+into the provider body. Game-creation benchmarks use this request-local evidence: a scenario deadline
+while a successful response is open is a Model failure, graded on completed work (zero when none was
+performed), and the benchmark does not replay that model deadline. Connection failures, provider HTTP
+errors, and transport failures remain Environment failures and retain bounded retries.
+
+For game-creation benchmark targets that pass effort through raw provider JSON, add
+`"reasoning_budget_tokens": 2048` to that target's `extraBodyJson`. This keeps the requested effort while
+bounding thinking. An optional `COREAI_BENCHMARK_MAX_OUTPUT_TOKENS` per-call cap bounds total output;
+benchmark agents otherwise explicitly request unlimited output. Probe results establish tool-call
+latency, not the correctness of the generated Lua; validate grading separately before adopting a budget.

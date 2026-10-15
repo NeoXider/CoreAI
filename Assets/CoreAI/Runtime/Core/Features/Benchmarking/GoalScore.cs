@@ -30,7 +30,7 @@ namespace CoreAI.Benchmarking
         /// <summary>Framework worked; the model skipped a tool, used wrong args, or answered badly.</summary>
         Model = 2,
 
-        /// <summary>Backend unavailable, model load canceled, timeout before first token, etc.</summary>
+        /// <summary>Backend unavailable, provider HTTP errors, connection or transport failures.</summary>
         Environment = 3,
 
         /// <summary>
@@ -40,6 +40,30 @@ namespace CoreAI.Benchmarking
         /// stats/session transcript, just excluded from <see cref="BenchmarkReport"/>'s graded aggregates.
         /// </summary>
         NotGraded = 4
+    }
+
+    /// <summary>Distinguishes scenario deadlines during a provider response from transport failures.</summary>
+    public static class BenchmarkProviderFailurePolicy
+    {
+        /// <summary>A healthy open response consumes the model's scenario budget, even before its first token.</summary>
+        public static FailureAttribution ClassifyDeadline(bool scenarioDeadline, bool providerResponseObserved,
+            bool transportFailed)
+        {
+            return scenarioDeadline && providerResponseObserved && !transportFailed
+                ? FailureAttribution.Model : FailureAttribution.Environment;
+        }
+
+        /// <summary>Retries infrastructure failures without replaying a measured model deadline.</summary>
+        public static bool ShouldRetry(FailureAttribution attribution, string failure)
+        {
+            return attribution == FailureAttribution.Environment && !string.IsNullOrEmpty(failure);
+        }
+
+        /// <summary>A model deadline with no executed work receives no hygiene or default-world credit.</summary>
+        public static bool ZeroUnperformedWork(FailureAttribution attribution, bool producedWork)
+        {
+            return attribution == FailureAttribution.Model && !producedWork;
+        }
     }
 
     /// <summary>

@@ -16,7 +16,8 @@ namespace CoreAI.Benchmarking
         public bool NativeToolCalling { get; set; }
         public bool Streaming { get; set; }
         public int MaxParallelToolCalls { get; set; }
-        public float Temperature { get; set; }
+        /// <summary>The explicit sampling temperature; null means the provider/model default.</summary>
+        public float? Temperature { get; set; }
 
         /// <summary>
         /// The <c>reasoning_effort</c> sent to the provider (none, low, medium, high, xhigh); empty when the

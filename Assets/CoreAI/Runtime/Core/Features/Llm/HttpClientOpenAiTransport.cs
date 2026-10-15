@@ -71,20 +71,18 @@ namespace CoreAI.Infrastructure.Llm
         public async Task<OpenAiHttpPostResult> PostNonStreamingAsync(OpenAiHttpPostRequest request,
             CancellationToken cancellationToken = default)
         {
-            int sec = request.TransportTimeoutSeconds <= 0 ? 120 : request.TransportTimeoutSeconds;
             HttpClient client = GetBoundedHttpClient(request.Url);
-
-            using CancellationTokenSource timeoutCts = new(TimeSpan.FromSeconds(sec));
-            using CancellationTokenSource linkedCts =
-                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+            using CancellationTokenSource linkedCts = CreateWaitCancellation(request, cancellationToken);
 
             using HttpRequestMessage httpRequest = new(HttpMethod.Post, request.Url);
             httpRequest.Content = new StringContent(request.JsonBody ?? "", Encoding.UTF8, "application/json");
             ApplyHeaders(httpRequest, request.Headers, request.AcceptEventStream);
 
+            // WHY: Mono buffers a ResponseContentRead body without the caller token, so a provider that sent
+            // headers and then stalled ignored the response wait; read the body under the same token instead.
             using HttpResponseMessage response =
-                await client.SendAsync(httpRequest, HttpCompletionOption.ResponseContentRead, linkedCts.Token);
-            string bodyText = await response.Content.ReadAsStringAsync();
+                await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, linkedCts.Token);
+            string bodyText = await ReadBodyTextAsync(response.Content, linkedCts.Token);
 
             return new OpenAiHttpPostResult
             {
@@ -103,35 +101,25 @@ namespace CoreAI.Infrastructure.Llm
             httpRequest.Content = new StringContent(request.JsonBody ?? "", Encoding.UTF8, "application/json");
             ApplyHeaders(httpRequest, request.Headers, request.AcceptEventStream);
 
-            // WHY: The streaming client's Timeout is infinite (SSE bodies are long-lived), so a backend
-            // that accepts TCP but never sends response headers used to hang the turn until external
-            // cancellation. Bound ONLY the time-to-headers phase with TransportTimeoutSeconds; the linked
-            // CTS is disposed the moment headers arrive so it never bounds the streaming body (idle-stall
-            // detection there stays with the caller). 0/unset keeps the legacy unbounded behavior.
-            // TimeoutLlmClientDecorator still bounds the WHOLE request at a higher layer; this shorter
-            // header bound only makes a headerless backend fail fast instead of eating the turn budget.
-            HttpResponseMessage response;
-            if (request.TransportTimeoutSeconds > 0)
-            {
-                using CancellationTokenSource headerCts =
-                    CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                headerCts.CancelAfter(TimeSpan.FromSeconds(request.TransportTimeoutSeconds));
-                response = await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead,
-                    headerCts.Token);
-            }
-            else
-            {
-                response = await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead,
-                    cancellationToken);
-            }
+            // WHY: Response wait bounds headers; the core retains the same semantic clock while parsing the body.
+            using CancellationTokenSource headerCts = CreateWaitCancellation(request, cancellationToken);
+            HttpResponseMessage response = await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead,
+                headerCts.Token);
 
             int statusCode = (int)response.StatusCode;
             IReadOnlyDictionary<string, IEnumerable<string>> headers = CopyHeaders(response);
 
             if (!response.IsSuccessStatusCode)
             {
-                string errBody = await ReadBodyTextAsync(response.Content, cancellationToken);
-                response.Dispose();
+                string errBody;
+                try
+                {
+                    errBody = await ReadBodyTextAsync(response.Content, headerCts.Token);
+                }
+                finally
+                {
+                    response.Dispose();
+                }
                 return new OpenAiHttpSseOpenResult
                 {
                     StatusCode = statusCode,
@@ -147,6 +135,18 @@ namespace CoreAI.Infrastructure.Llm
                 ErrorBodyText = "",
                 ResponseHeaders = headers
             }.WithStreamResponse(stream, response);
+        }
+
+        private static CancellationTokenSource CreateWaitCancellation(OpenAiHttpPostRequest request,
+            CancellationToken cancellationToken)
+        {
+            CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            int seconds = request.ResponseWaitTimeoutSeconds > 0 ? request.ResponseWaitTimeoutSeconds : 0;
+            if (request.TransportTimeoutSeconds > 0)
+                seconds = seconds > 0 ? Math.Min(seconds, request.TransportTimeoutSeconds) : request.TransportTimeoutSeconds;
+            if (seconds > 0)
+                linked.CancelAfter(TimeSpan.FromSeconds(seconds));
+            return linked;
         }
 
         /// <summary>

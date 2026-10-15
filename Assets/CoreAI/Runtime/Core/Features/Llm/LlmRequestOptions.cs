@@ -24,7 +24,8 @@ namespace CoreAI.Ai
         AnthropicCompat,
         GeminiCompat,
         PassthroughEffort,
-        Off
+        Off,
+        LlamaCpp
     }
 
     /// <summary>Portable reasoning overrides for one agent or request.</summary>

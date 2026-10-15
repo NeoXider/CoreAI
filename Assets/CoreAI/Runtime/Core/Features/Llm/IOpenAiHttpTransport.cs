@@ -31,7 +31,11 @@ namespace CoreAI.Infrastructure.Llm
         public string Url { get; set; } = "";
         public string JsonBody { get; set; } = "";
         public bool AcceptEventStream { get; set; }
+        /// <summary>Optional total request timeout in seconds; zero disables it.</summary>
         public int TransportTimeoutSeconds { get; set; }
+
+        /// <summary>Response/header wait limit in seconds; zero disables it.</summary>
+        public int ResponseWaitTimeoutSeconds { get; set; } = 180;
 
         public IReadOnlyList<KeyValuePair<string, string>> Headers { get; set; } =
             new List<KeyValuePair<string, string>>();

@@ -75,15 +75,8 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         public static ILlmAsyncMarshaler? DefaultAsyncMarshaler { get; set; }
 
-        /// <summary>
-        /// Starved-stream watchdog: while a streaming attempt has produced ZERO parsed deltas and the
-        /// server has sent nothing but SSE comment lines (": keep-alive"), the attempt is aborted after
-        /// this many seconds instead of waiting for the server to close the stream. A proxy that hides
-        /// an upstream rate limit behind HTTP 200 + keep-alives can hold each attempt open for 30-60s;
-        /// without this cap, the empty-stream retries alone exceed callers' turn timeouts (~120s).
-        /// Internal setter is a test hook (InternalsVisibleTo CoreAI.Tests).
-        /// </summary>
-        internal static int StarvedStreamFirstDeltaTimeoutSeconds { get; set; } = 15;
+        /// <summary>Per-client monotonic clock seam for deterministic timeout regression fixtures.</summary>
+        internal Func<double> MonotonicSeconds { get; set; } = () => (double)Stopwatch.GetTimestamp() / Stopwatch.Frequency;
 
         /// <summary>
         /// Extra attempts after a transient HTTP failure (429/408/5xx) before the request gives up:
@@ -257,8 +250,11 @@ namespace CoreAI.Infrastructure.Llm
             IEnumerable<MEAI.ChatMessage> chatMessages,
             MEAI.ChatOptions? options,
             int transientHttpRetries,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            ResponseWaitBudget timeoutBudget = null)
         {
+            timeoutBudget ??= CreateTimeoutBudget(options);
+            LlmProviderResponseState providerResponseState = GetProviderResponseState(options);
             List<MEAI.ChatMessage> msgs = chatMessages.ToList();
             string url = _settings.ApiBaseUrl.TrimEnd('/') + "/chat/completions";
 
@@ -326,24 +322,27 @@ namespace CoreAI.Infrastructure.Llm
 
             for (int attempt = 1; attempt <= transientLocalLlmReloadMaxAttempts; attempt++)
             {
-                int transportTimeoutSec = _settings.RequestTimeoutSeconds <= 0 ? 120 : _settings.RequestTimeoutSeconds;
+                providerResponseState?.ResetAttempt();
+                int transportTimeoutSec = Math.Max(0, _settings.RequestTimeoutSeconds);
                 _log.Info($"MeaiOpenAiChatClient: Timeout={transportTimeoutSec}s ({_transport.DebugLabel})",
                     LogTag.Llm);
 
                 try
                 {
-                    OpenAiHttpPostResult postResult = await _transport.PostNonStreamingAsync(
-                        new OpenAiHttpPostRequest
+                    OpenAiHttpPostResult postResult = await AwaitWithTimeoutBudgetAsync(
+                        token => _transport.PostNonStreamingAsync(new OpenAiHttpPostRequest
                         {
                             Url = url,
                             JsonBody = json,
                             AcceptEventStream = false,
                             TransportTimeoutSeconds = transportTimeoutSec,
+                            ResponseWaitTimeoutSeconds = timeoutBudget.ResponseWaitSeconds,
                             Headers = BuildTransportHeaders(url, false)
-                        }, cancellationToken);
+                        }, token), timeoutBudget, cancellationToken);
 
                     if (postResult.IsSuccessStatusCode)
                     {
+                        providerResponseState?.RecordResponse();
                         responseJson = postResult.BodyText;
                         break;
                     }
@@ -364,7 +363,7 @@ namespace CoreAI.Infrastructure.Llm
                         _log.Info(
                             $"MeaiOpenAiChatClient: transient local LLM / reload response (attempt {attempt}/{transientLocalLlmReloadMaxAttempts}); retrying after backoff...",
                             LogTag.Llm);
-                        await BackoffDelayAsync(Math.Min(6000, 900 * attempt), cancellationToken);
+                        await BackoffWithTimeoutBudgetAsync(Math.Min(6000, 900 * attempt), timeoutBudget, cancellationToken);
                         continue;
                     }
 
@@ -377,7 +376,7 @@ namespace CoreAI.Infrastructure.Llm
                         _log.Warn(
                             $"MeaiOpenAiChatClient: HTTP {postResult.StatusCode} (transient) - retrying after {transientBackoffMs}ms ({transientHttpRetriesLeft} retries left)...",
                             LogTag.Llm);
-                        await BackoffDelayAsync(transientBackoffMs, cancellationToken);
+                        await BackoffWithTimeoutBudgetAsync(transientBackoffMs, timeoutBudget, cancellationToken);
                         continue;
                     }
 
@@ -392,18 +391,11 @@ namespace CoreAI.Infrastructure.Llm
                         throw;
                     }
 
-                    // WHY: The transport's internal timeout CTS fired while the CALLER's token is still
-                    // live: this is a backend timeout, not a cancellation. Rethrowing the raw OCE made
-                    // MeaiLlmClient map it to LlmErrorCode.Cancelled, which is neither retryable in
-                    // LoggingLlmClientDecorator nor fallback-eligible in FallbackLlmClientDecorator -
-                    // a dead primary backend then blocked the secondary provider entirely. Surfacing a
-                    // typed Timeout keeps retry/fallback resilience working.
+                    // WHY: Owned transport deadlines retain Timeout classification and suppress budget-restarting replay.
                     _log.Warn(
-                        $"MeaiOpenAiChatClient: Request timed out at the transport after {transportTimeoutSec}s ({ex.GetType().Name}): {ex.Message}",
+                        $"MeaiOpenAiChatClient: Request transport deadline expired (total={transportTimeoutSec}s, response wait={timeoutBudget.ResponseWaitSeconds}s) ({ex.GetType().Name}): {ex.Message}",
                         LogTag.Llm);
-                    throw new LlmClientException(
-                        $"LLM request timed out after {transportTimeoutSec}s without a response.",
-                        LlmErrorCode.Timeout);
+                    throw timeoutBudget.BuildTimeoutException();
                 }
                 catch (LlmClientException)
                 {
@@ -436,12 +428,15 @@ namespace CoreAI.Infrastructure.Llm
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
+            ResponseWaitBudget timeoutBudget = CreateTimeoutBudget(options);
+            LlmProviderResponseState providerResponseState = GetProviderResponseState(options);
             if (!_transport.SupportsSseStreaming)
             {
                 _log.Info(
                     "MeaiOpenAiChatClient: transport has no SSE support - using non-stream completion and simulated streaming updates (WebGL / UnityWebRequest).",
                     LogTag.Llm);
-                MEAI.ChatResponse simulated = await GetResponseAsync(chatMessages, options, cancellationToken);
+                MEAI.ChatResponse simulated = await GetResponseCoreAsync(chatMessages, options, RateLimitMaxRetries,
+                    cancellationToken, timeoutBudget);
                 foreach (MEAI.ChatResponseUpdate u in FullResponseToSimulatedStreamingUpdates(simulated))
                 {
                     yield return u;
@@ -476,15 +471,12 @@ namespace CoreAI.Infrastructure.Llm
             const int transientLocalLlmReloadMaxAttempts = 10;
             const int emptyStreamMaxAttempts = 3;
             bool fallBackToNonStreaming = false;
-            int starvedStreamFirstDeltaTimeoutSec = _settings.ExecutionMode == LlmExecutionMode.ServerManagedApi
-                ? (_settings.RequestTimeoutSeconds <= 0 ? 120 : _settings.RequestTimeoutSeconds)
-                : StarvedStreamFirstDeltaTimeoutSeconds;
             int rateLimitRetriesLeft = RateLimitMaxRetries;
 
             for (int attempt = 1; attempt <= transientLocalLlmReloadMaxAttempts; attempt++)
             {
-                int streamTransportTimeoutSec =
-                    _settings.RequestTimeoutSeconds <= 0 ? 120 : _settings.RequestTimeoutSeconds;
+                providerResponseState?.ResetAttempt();
+                int streamTransportTimeoutSec = Math.Max(0, _settings.RequestTimeoutSeconds);
 
                 OpenAiHttpPostRequest transportReq = new()
                 {
@@ -492,6 +484,7 @@ namespace CoreAI.Infrastructure.Llm
                     JsonBody = json,
                     AcceptEventStream = true,
                     TransportTimeoutSeconds = streamTransportTimeoutSec,
+                    ResponseWaitTimeoutSeconds = timeoutBudget.ResponseWaitSeconds,
                     Headers = BuildTransportHeaders(url, true)
                 };
 
@@ -502,7 +495,8 @@ namespace CoreAI.Infrastructure.Llm
                 OpenAiHttpSseOpenResult openResult;
                 try
                 {
-                    openResult = await _transport.OpenSseResponseStreamAsync(transportReq, cancellationToken);
+                    openResult = await AwaitWithTimeoutBudgetAsync(
+                        token => _transport.OpenSseResponseStreamAsync(transportReq, token), timeoutBudget, cancellationToken);
                 }
                 catch (OperationCanceledException ex)
                 {
@@ -511,17 +505,11 @@ namespace CoreAI.Infrastructure.Llm
                         throw;
                     }
 
-                    // WHY: The SSE header-phase timeout (HttpClientOpenAiTransport bounds only the
-                    // time-to-headers with TransportTimeoutSeconds) fired while the CALLER's token is
-                    // still live: a backend that accepts TCP but never sends headers is a TIMEOUT.
-                    // Rethrowing the raw OCE got mapped to LlmErrorCode.Cancelled downstream (not
-                    // retryable, not fallback-eligible), so the secondary provider was never tried.
+                    // WHY: Header silence consumes the configured response budget, even with an unlimited total.
                     _log.Warn(
-                        $"MeaiOpenAiChatClient: stream open timed out at the transport after {streamTransportTimeoutSec}s ({ex.GetType().Name}): {ex.Message}",
+                        $"MeaiOpenAiChatClient: Stream-open transport deadline expired (total={streamTransportTimeoutSec}s, response wait={timeoutBudget.ResponseWaitSeconds}s) ({ex.GetType().Name}): {ex.Message}",
                         LogTag.Llm);
-                    throw new LlmClientException(
-                        $"LLM stream open timed out after {streamTransportTimeoutSec}s without response headers.",
-                        LlmErrorCode.Timeout);
+                    throw timeoutBudget.BuildTimeoutException();
                 }
                 catch (LlmClientException)
                 {
@@ -548,7 +536,7 @@ namespace CoreAI.Infrastructure.Llm
                         _log.Info(
                             "MeaiOpenAiChatClient: transient transport send failure on stream-open; retrying after backoff...",
                             LogTag.Llm);
-                        await BackoffDelayAsync(Math.Min(2000, 300 * attempt), cancellationToken);
+                        await BackoffWithTimeoutBudgetAsync(Math.Min(2000, 300 * attempt), timeoutBudget, cancellationToken);
                         continue;
                     }
 
@@ -582,7 +570,7 @@ namespace CoreAI.Infrastructure.Llm
                             _log.Info(
                                 "MeaiOpenAiChatClient: transient local LLM on stream-open; retrying after backoff...",
                                 LogTag.Llm);
-                            await BackoffDelayAsync(Math.Min(6000, 900 * attempt), cancellationToken);
+                            await BackoffWithTimeoutBudgetAsync(Math.Min(6000, 900 * attempt), timeoutBudget, cancellationToken);
                             continue;
                         }
 
@@ -597,7 +585,7 @@ namespace CoreAI.Infrastructure.Llm
                                 _log.Warn(
                                     $"MeaiOpenAiChatClient: HTTP {openResult.StatusCode} (transient) on stream-open - retrying after {transientBackoffMs}ms ({rateLimitRetriesLeft} retries left)...",
                                     LogTag.Llm);
-                                await BackoffDelayAsync(transientBackoffMs, cancellationToken);
+                                await BackoffWithTimeoutBudgetAsync(transientBackoffMs, timeoutBudget, cancellationToken);
                                 continue;
                             }
 
@@ -624,31 +612,23 @@ namespace CoreAI.Infrastructure.Llm
                             LlmErrorCode.BackendUnavailable);
                     }
 
+                    // WHY: Request-local evidence must not yield a chunk and prematurely commit fallback routing.
+                    providerResponseState?.RecordResponse();
+
                     SseToolCallAccumulator toolAccumulator = new(_log);
-                    DateTime lastProgressUtc = DateTime.UtcNow;
-                    Stopwatch firstDeltaClock = Stopwatch.StartNew();
-                    bool sawSemanticProgress = false;
+
                     bool sawTerminalFrame = false;
                     bool sawUsableOutput = false;
-                    bool starvedAttemptAborted = false;
                     int parsedSseDeltas = 0;
 
                     // WHY: buffering (Mono on Windows can hold lines back until a larger buffer fills, collapsing
                     // 100+ token-by-token deltas into 2 large yields). ReadAsync gives true low-latency streaming.
                     await foreach (string line in ReadUtf8LinesFromStreamAsync(
                                        stream,
-                                       streamTransportTimeoutSec,
+                                       timeoutBudget,
                                        cancellationToken))
                     {
-                        if ((DateTime.UtcNow - lastProgressUtc).TotalSeconds > streamTransportTimeoutSec)
-                        {
-                            _log.Warn(
-                                $"MeaiOpenAiChatClient: SSE stall timeout after {streamTransportTimeoutSec}s without new lines; aborting.",
-                                LogTag.Llm);
-                            throw new LlmClientException(
-                                $"LLM SSE stalled - no data for {streamTransportTimeoutSec}s.",
-                                LlmErrorCode.Timeout);
-                        }
+                        timeoutBudget.ThrowIfExpired();
 
                         if (IsSseDoneLine(line))
                         {
@@ -660,7 +640,9 @@ namespace CoreAI.Infrastructure.Llm
                         // array to re-find a boundary the reader already framed (see ParseSseLine).
                         int fragmentsBefore = toolAccumulator.FragmentVersion;
                         MEAI.ChatResponseUpdate update = ParseSseLine(line, toolAccumulator);
-                        sawSemanticProgress |= IsSemanticStreamingProgress(update) || toolAccumulator.FragmentVersion != fragmentsBefore;
+                        bool semanticProgress = IsSemanticStreamingProgress(update) || toolAccumulator.FragmentVersion != fragmentsBefore;
+                        if (semanticProgress)
+                            timeoutBudget.ResetResponseWait();
                         sawTerminalFrame |= update?.FinishReason != null;
                         sawUsableOutput |= !string.IsNullOrEmpty(update?.Text) ||
                             update?.Contents?.Any(c => c is MEAI.FunctionCallContent) == true;
@@ -677,7 +659,9 @@ namespace CoreAI.Infrastructure.Llm
                             // model actually sent. Streaming means the consumer sees what arrived,
                             // when it arrived; a provider that batches is a provider that batches,
                             // and hiding that here hides it from whoever would otherwise fix it.
+                            double consumerStarted = MonotonicSeconds();
                             yield return update;
+                            timeoutBudget.ExcludeConsumerWait(MonotonicSeconds() - consumerStarted);
                         }
 
                         // WHY: Execute-as-you-stream: surface every tool call whose arguments JSON is
@@ -689,34 +673,15 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             parsedSseDeltas++;
                             sawUsableOutput = true;
+                            double consumerStarted = MonotonicSeconds();
                             yield return completedCalls;
+                            timeoutBudget.ExcludeConsumerWait(MonotonicSeconds() - consumerStarted);
                         }
 
-                        // WHY: Empty role frames, comments and arbitrary extensions do not prove
-                        // generation. Semantic deltas or safe backend progress defeat the first-delta
-                        // ceiling; network keep-alive still serves the independent transport clock.
-                        if (!sawSemanticProgress && !sawTerminalFrame && firstDeltaClock.Elapsed.TotalSeconds > starvedStreamFirstDeltaTimeoutSec)
-                        {
-                            _log.Warn($"MeaiOpenAiChatClient: SSE produced no generation progress for {starvedStreamFirstDeltaTimeoutSec}s; aborting this attempt.", LogTag.Llm);
-                            starvedAttemptAborted = true;
-                            break;
-                        }
-
-                        // WHY: Re-arm the stall clock only AFTER every update for this line has been
-                        // yielded and consumed. This iterator is pull-based: the consumer
-                        // (MeaiLlmClient) executes tool calls between MoveNexts, so re-arming on
-                        // line arrival would charge that consumer time against the transport
-                        // stall budget and abort healthy streams with slow tools. Measured this
-                        // way, the gap checked at the top of the loop is pure transport wait.
-                        // Whitespace-only keep-alive lines still do not count as progress.
-                        if (!string.IsNullOrWhiteSpace(line))
-                        {
-                            lastProgressUtc = DateTime.UtcNow;
-                        }
                     }
 
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (!sawTerminalFrame && !starvedAttemptAborted)
+                    if (!sawTerminalFrame)
                         throw new LlmClientException("LLM SSE ended before a terminal completion frame.", LlmErrorCode.BackendUnavailable);
 
                     MEAI.ChatResponseUpdate flushed = toolAccumulator.Flush();
@@ -737,15 +702,12 @@ namespace CoreAI.Infrastructure.Llm
                         // that will not produce tokens - the chat stays "busy" that whole time.
                         if (attempt < emptyStreamMaxAttempts)
                         {
-                            // WHY: A starved-aborted attempt already spent the whole first-delta window
-                            // waiting; retry immediately instead of stacking more backoff on top.
-                            int emptyStreamBackoffMs =
-                                starvedAttemptAborted ? 0 : Math.Min(6000, 900 * attempt);
+                            int emptyStreamBackoffMs = Math.Min(6000, 900 * attempt);
                             _log.Warn(
                                 $"MeaiOpenAiChatClient: HTTP 200 but 0 parsed SSE deltas (likely only upstream keep-alive comments - provider/model produced no tokens). " +
                                 $"Retrying (attempt {attempt + 1}/{emptyStreamMaxAttempts}) after {emptyStreamBackoffMs}ms backoff...",
                                 LogTag.Llm);
-                            await BackoffDelayAsync(emptyStreamBackoffMs, cancellationToken);
+                            await BackoffWithTimeoutBudgetAsync(emptyStreamBackoffMs, timeoutBudget, cancellationToken);
                             continue;
                         }
 
@@ -781,7 +743,7 @@ namespace CoreAI.Infrastructure.Llm
 
             // WHY: Zero transient budget: this IS the fallback request; if it fails too, the typed
             // error surfaces (request → retry → fallback → error, no hidden extra rounds).
-            MEAI.ChatResponse full = await GetResponseCoreAsync(msgs, options, 0, cancellationToken);
+            MEAI.ChatResponse full = await GetResponseCoreAsync(msgs, options, 0, cancellationToken, timeoutBudget);
             foreach (MEAI.ChatResponseUpdate u in FullResponseToSimulatedStreamingUpdates(full))
             {
                 yield return u;
@@ -795,9 +757,9 @@ namespace CoreAI.Infrastructure.Llm
         /// uses this too because the FetchSseStream pipe doesn't always interoperate cleanly with
         /// <see cref="StreamReader.ReadLineAsync"/>.
         /// </summary>
-        private static async IAsyncEnumerable<string> ReadUtf8LinesFromStreamAsync(
+        private async IAsyncEnumerable<string> ReadUtf8LinesFromStreamAsync(
             Stream stream,
-            int streamIdleTimeoutSeconds,
+            ResponseWaitBudget timeoutBudget,
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken)
         {
@@ -811,13 +773,9 @@ namespace CoreAI.Infrastructure.Llm
                 // WHY: No ConfigureAwait(false): on WebGL the continuation must capture
                 // UnitySynchronizationContext, otherwise it gets posted to the (non-existent)
                 // browser ThreadPool and the read pump silently halts after the first await.
-                int read = await ReadWithIdleTimeoutAsync(
-                    stream,
-                    byteBuffer,
-                    0,
-                    byteBuffer.Length,
-                    streamIdleTimeoutSeconds,
-                    cancellationToken);
+                int read = await AwaitWithTimeoutBudgetAsync(
+                    token => stream.ReadAsync(byteBuffer, 0, byteBuffer.Length, token),
+                    timeoutBudget, cancellationToken);
                 if (read <= 0)
                 {
                     break;
@@ -868,61 +826,129 @@ namespace CoreAI.Infrastructure.Llm
             }
         }
 
-        private static async Task<int> ReadWithIdleTimeoutAsync(
-            Stream stream,
-            byte[] buffer,
-            int offset,
-            int count,
-            int streamIdleTimeoutSeconds,
-            CancellationToken cancellationToken)
+        private ResponseWaitBudget CreateTimeoutBudget(MEAI.ChatOptions options)
         {
-            Task<int> readTask = stream.ReadAsync(buffer, offset, count, cancellationToken);
-            if (readTask.IsCompleted)
-            {
-                return await readTask;
-            }
-
-            int timeoutMs = Math.Max(1, streamIdleTimeoutSeconds) * 1000;
-
-            // WHY: Drive the idle timeout off a linked CTS so that when the read wins (the hot path, hit once
-            // per 8 KB read for the whole stream) we cancel the Task.Delay immediately. That releases its
-            // underlying System.Threading.Timer and the CancellationTokenRegistration it holds on the
-            // request token; leaving it uncancelled accumulates one live ~timeout-length timer per read
-            // across the stream (a steady leak proportional to streamed tokens).
-            using CancellationTokenSource delayCts =
-                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            Task timeoutTask = HostDelayAsync(null, timeoutMs, delayCts.Token);
-            Task completed = await Task.WhenAny(readTask, timeoutTask);
-            if (ReferenceEquals(completed, readTask))
-            {
-                delayCts.Cancel();
-                return await readTask;
-            }
-
-            // WHY: Idle timeout fired: the read is abandoned. Observe it so its eventual fault (e.g.
-            // ObjectDisposedException once the caller disposes the stream) does not surface as an
-            // unobserved task exception. The buffer it may still write into is iterator-local and is
-            // never read again after this throw unwinds the loop.
-            ObserveAbandonedRead(readTask);
-
-            cancellationToken.ThrowIfCancellationRequested();
-            throw new LlmClientException(
-                $"LLM SSE stalled - no data for {Math.Max(1, streamIdleTimeoutSeconds)}s.",
-                LlmErrorCode.Timeout);
+            return new ResponseWaitBudget(MonotonicSeconds, Math.Max(0, _settings.RequestTimeoutSeconds),
+                Math.Max(0, _settings.ResponseWaitTimeoutSeconds ?? (int)Math.Ceiling(CoreAISettings.LlmResponseWaitTimeoutSeconds)),
+                GetProviderResponseState(options));
         }
 
-        /// <summary>
-        /// Attaches a fault-only continuation to an abandoned read so a later exception on it (typically
-        /// <see cref="ObjectDisposedException"/> after the stream is disposed) is observed and not raised
-        /// as an unobserved task exception on the finalizer thread.
-        /// </summary>
-        private static void ObserveAbandonedRead(Task readTask)
+        private async Task BackoffWithTimeoutBudgetAsync(int milliseconds, ResponseWaitBudget budget,
+            CancellationToken cancellationToken)
         {
-            _ = readTask.ContinueWith(
-                t => { _ = t.Exception; },
-                CancellationToken.None,
-                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-                TaskScheduler.Default);
+            await AwaitWithTimeoutBudgetAsync(async token =>
+            {
+                await BackoffDelayAsync(milliseconds, token);
+                return true;
+            }, budget, cancellationToken);
+        }
+
+        private async Task<T> AwaitWithTimeoutBudgetAsync<T>(Func<CancellationToken, Task<T>> operation,
+            ResponseWaitBudget budget, CancellationToken cancellationToken)
+        {
+            int? milliseconds = budget.RemainingMilliseconds();
+            using CancellationTokenSource operationCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            Task<T> operationTask = operation(operationCts.Token);
+            if (!milliseconds.HasValue || operationTask.IsCompleted)
+            {
+                T result = await operationTask;
+                return ValidateOperationResult(result, budget);
+            }
+
+            using CancellationTokenSource delayCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            Task delayTask = HostDelayAsync(milliseconds.Value, delayCts.Token);
+            Task completed = await Task.WhenAny(operationTask, delayTask);
+            if (ReferenceEquals(completed, operationTask))
+            {
+                delayCts.Cancel();
+                T result = await operationTask;
+                return ValidateOperationResult(result, budget);
+            }
+
+            operationCts.Cancel();
+            _ = DisposeAbandonedOperationAsync(operationTask);
+            cancellationToken.ThrowIfCancellationRequested();
+            throw budget.BuildTimeoutException();
+        }
+
+        private sealed class ResponseWaitBudget
+        {
+            private readonly Func<double> _now;
+            private readonly double _started;
+            private readonly int _totalSeconds;
+            private double _lastProgress;
+            private readonly LlmProviderResponseState _providerResponseState;
+            public int ResponseWaitSeconds { get; }
+
+            public ResponseWaitBudget(Func<double> now, int totalSeconds, int responseWaitSeconds,
+                LlmProviderResponseState providerResponseState)
+            {
+                _now = now;
+                _providerResponseState = providerResponseState;
+                _started = now();
+                _lastProgress = _started;
+                _totalSeconds = totalSeconds;
+                ResponseWaitSeconds = responseWaitSeconds;
+            }
+
+            public void ResetResponseWait() => _lastProgress = _now();
+
+            public void ExcludeConsumerWait(double seconds) => _lastProgress += Math.Max(0, seconds);
+
+            public int? RemainingMilliseconds()
+            {
+                double remaining = double.PositiveInfinity;
+                double now = _now();
+                if (_totalSeconds > 0)
+                    remaining = Math.Min(remaining, _totalSeconds - (now - _started));
+                if (ResponseWaitSeconds > 0)
+                    remaining = Math.Min(remaining, ResponseWaitSeconds - (now - _lastProgress));
+                if (remaining <= 0)
+                    throw BuildTimeoutException();
+                return double.IsPositiveInfinity(remaining) ? null
+                    : (int)Math.Min(int.MaxValue, Math.Max(1, Math.Ceiling(remaining * 1000)));
+            }
+
+            public void ThrowIfExpired() => RemainingMilliseconds();
+
+            public LlmClientException BuildTimeoutException()
+            {
+                _providerResponseState?.SuppressRetries();
+                bool totalExpired = _totalSeconds > 0 && _now() - _started >= _totalSeconds;
+                string message = totalExpired
+                    ? $"LLM total request timeout expired after {_totalSeconds}s."
+                    : $"LLM response wait expired after {ResponseWaitSeconds}s without generation progress.";
+                return new LlmClientException(message, LlmErrorCode.Timeout);
+            }
+        }
+
+        private static T ValidateOperationResult<T>(T result, ResponseWaitBudget budget)
+        {
+            try
+            {
+                budget.ThrowIfExpired();
+                return result;
+            }
+            catch
+            {
+                if (result is IDisposable disposable)
+                    disposable.Dispose();
+                throw;
+            }
+        }
+
+        private static async Task DisposeAbandonedOperationAsync<T>(Task<T> operation)
+        {
+            try
+            {
+                T result = await operation;
+                if (result is IDisposable disposable)
+                    disposable.Dispose();
+            }
+            catch
+            {
+                // WHY: Timeout already surfaced; cancellation or disposal faults from the abandoned operation are observed here.
+            }
         }
 
         private List<KeyValuePair<string, string>> BuildTransportHeaders(string url, bool acceptEventStream)
@@ -1639,7 +1665,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>
         /// Reads the provider reasoning field from an OpenAI-compatible delta/message object.
         /// Covers DeepSeek/Qwen <c>reasoning_content</c> plus the <c>reasoning</c> and
-        /// <c>reasoningContent</c> spellings used by other OpenAI-compatible servers.
+        /// <c>reasoningContent</c> and <c>reasoning_text</c> spellings used by other OpenAI-compatible servers.
         /// </summary>
         private static string ExtractReasoningFieldText(JObject obj)
         {
@@ -1648,13 +1674,12 @@ namespace CoreAI.Infrastructure.Llm
                 return "";
             }
 
-            JToken token = obj["reasoning_content"] ?? obj["reasoning"] ?? obj["reasoningContent"];
-            if (token == null || token.Type == JTokenType.Null)
-            {
-                return "";
-            }
-
-            return ExtractMessageContentString(token);
+            string text = ExtractMessageContentString(obj["reasoning_content"]);
+            if (!string.IsNullOrEmpty(text)) return text;
+            text = ExtractMessageContentString(obj["reasoning"]);
+            if (!string.IsNullOrEmpty(text)) return text;
+            text = ExtractMessageContentString(obj["reasoningContent"]);
+            return !string.IsNullOrEmpty(text) ? text : ExtractMessageContentString(obj["reasoning_text"]);
         }
 
         /// <summary>
@@ -2151,15 +2176,20 @@ namespace CoreAI.Infrastructure.Llm
         {
             if (update == null) return false;
             if (!string.IsNullOrEmpty(update.Text)) return true;
-            if (update.AdditionalProperties?.TryGetValue<string>(GenerationProgressMetadataKey, out string phase) == true &&
-                string.Equals(phase, GenerationProgressPhaseProcessing, StringComparison.OrdinalIgnoreCase)) return true;
-            return update.Contents?.Any(content => content is MEAI.TextReasoningContent || content is MEAI.FunctionCallContent) == true;
+            return update.Contents?.Any(content => content is MEAI.TextReasoningContent reasoning &&
+                !string.IsNullOrEmpty(reasoning.Text) || content is MEAI.FunctionCallContent) == true;
+        }
+
+        private static LlmProviderResponseState GetProviderResponseState(MEAI.ChatOptions options)
+        {
+            return options?.AdditionalProperties?.TryGetValue(LlmProviderResponseState.MetadataKey, out object state) == true
+                ? state as LlmProviderResponseState : null;
         }
 
         /// <summary>
         /// Backend generation liveness: an SSE object shaped
         /// <c>generation_progress:{phase:processing},choices:[]</c> becomes a metadata-only update that
-        /// counts as a parsed delta (starved-stream watchdog, empty-stream fallback) without carrying
+        /// counts as a parsed delta without extending the semantic response-wait deadline or carrying
         /// any text or reasoning. WHY only the whitelisted phase: the backend strips private
         /// reasoning before emitting progress, so every other field on the object is ignored and any
         /// unknown phase (or none) falls back to null, keeping unknown extensions backward compatible.
@@ -3195,7 +3225,8 @@ namespace CoreAI.Infrastructure.Llm
                 if (content.Length == 0 && msg.Contents.Count > 0 &&
                     !msg.Contents.Any(part => part is MEAI.TextContent))
                 {
-                    content = string.Join("\n", msg.Contents.Select(c => c.ToString()));
+                    // WHY: Reasoning is diagnostic-only; echoing a reasoning-only message as content leaks it into the next prompt.
+                    content = string.Join("\n", msg.Contents.Where(c => c is not MEAI.TextReasoningContent).Select(c => c.ToString()));
                 }
 
                 Dictionary<string, object> msgDict = new()
@@ -3736,6 +3767,14 @@ namespace CoreAI.Infrastructure.Llm
                     if (budget > 0)
                     {
                         SetTypedBodyValue(request, "thinking_budget", budget.Value);
+                    }
+                    break;
+                case LlmReasoningDialect.LlamaCpp:
+                    SetTypedBodyValue(request, "reasoning_effort", effortText);
+                    ApplyChatTemplateThinkingFlag(request, effort != LlmReasoningEffort.None);
+                    if (budget > 0)
+                    {
+                        SetTypedBodyValue(request, "reasoning_budget_tokens", budget.Value);
                     }
                     break;
                 case LlmReasoningDialect.AnthropicCompat:

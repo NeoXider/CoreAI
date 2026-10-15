@@ -76,6 +76,7 @@ namespace CoreAI.Tests.EditMode
                     MaxLuaRepairRetries = 5,
                     EnableMeaiDebugLogging = true,
                     LlmRequestTimeoutSeconds = 77f,
+                    LlmResponseWaitTimeoutSeconds = 93f,
                     MaxLlmRequestRetries = 3,
                     MaxContextOverflowRetries = 2,
                     EnableHttpDebugLogging = true,
@@ -100,6 +101,7 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreEqual(5, options.MaxLuaRepairRetries);
                 Assert.IsTrue(options.EnableMeaiDebugLogging);
                 Assert.AreEqual(77f, options.LlmRequestTimeoutSeconds);
+                Assert.AreEqual(93f, options.LlmResponseWaitTimeoutSeconds);
                 Assert.AreEqual(2, options.MaxContextOverflowRetries);
                 Assert.AreEqual(16384, options.ContextWindowTokens);
                 Assert.AreEqual("Prefix", options.UniversalSystemPromptPrefix);
@@ -173,6 +175,7 @@ namespace CoreAI.Tests.EditMode
                     ReasoningEffort = LlmReasoningEffort.High,
                     ReasoningDialect = LlmReasoningDialect.OpenRouter,
                     RequestTimeoutSeconds = 44,
+                    ResponseWaitTimeoutSeconds = 0,
                     MaxTokens = 512,
                     MaxRequestsPerSession = 3,
                     MaxPromptChars = 900,
@@ -195,6 +198,7 @@ namespace CoreAI.Tests.EditMode
                 Assert.IsNull(asset.MaxTokensOverride);
                 Assert.AreEqual(LlmReasoningEffort.High, options.ReasoningEffort);
                 Assert.AreEqual(LlmReasoningDialect.OpenRouter, options.ReasoningDialect);
+                Assert.AreEqual(0, options.ResponseWaitTimeoutSeconds);
                 Assert.AreEqual(3, options.MaxRequestsPerSession);
                 Assert.AreEqual(900, options.MaxPromptChars);
                 Assert.IsTrue(options.EnableHttpDebugLogging);
