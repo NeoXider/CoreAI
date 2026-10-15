@@ -4,6 +4,14 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ## [Unreleased]
 
+### Fixed
+
+- Benchmark hero banner fits long local model labels on one line instead of wrapping mid-word; the width budget is shared by `FitHeroTitle` and covered by a regression test.
+
+### Added
+
+- Hero retake tooling: `CaptureSavedCastlePrefab_ForReport` accepts the banner header, stats and caption from a UTF-8 text file (`COREAI_BENCHMARK_RECAPTURE_TEXT_FILE`), and the new explicit `CaptureSavedCastleReplay_ForReport` re-renders a hero by replaying the recorded `_g6_replay.lua` (`COREAI_BENCHMARK_RECAPTURE_LUA`) so runtime textures are regenerated without contacting the model.
+
 ## [7.53.0] - 2026-10-16
 
 ### Added

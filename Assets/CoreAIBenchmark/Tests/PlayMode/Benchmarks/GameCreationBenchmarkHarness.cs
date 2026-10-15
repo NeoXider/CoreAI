@@ -2961,11 +2961,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     AddQuad(p, new Vector3(0f, halfH - 0.012f, zb - 0.01f),
                         new Vector2(fullW, 0.024f), verdict);
                     // Model name is the headline (so each scene/castle image says which model built it),
-                    // with the scenario + score + verdict as the line below. Long hyphenated model ids are
-                    // wrapped (and shrunk) so they never overflow the banner.
-                    string m = model ?? "";
-                    float mSize = m.Length > 42 ? 0.0064f : m.Length > 26 ? 0.0086f : 0.0112f;
-                    AddCameraText(p, WrapModel(m, 30), new Vector3(0f, halfH - 0.085f, zb - 0.02f),
+                    // with the scenario + score + verdict as the line below. Long model ids shrink to stay on
+                    // one line and only the very long ones wrap, so they never overflow the banner.
+                    float mSize = FitHeroTitle(model, out string mText);
+                    AddCameraText(p, mText, new Vector3(0f, halfH - 0.085f, zb - 0.02f),
                         mSize, Color.white, true);
                     AddCameraText(p, WrapText(header ?? "", 58), new Vector3(0f, halfH - 0.225f, zb - 0.02f),
                         0.0068f, verdict, true);
@@ -3806,6 +3805,32 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             return sb.ToString();
         }
+
+        /// <summary>
+        /// Picks the headline text and character size for the hero banner. A name up to
+        /// <see cref="HeroTitleSingleLineChars"/> characters stays on one line at the largest size that fits;
+        /// a longer one is wrapped at 30 characters and set small.
+        /// </summary>
+        internal static float FitHeroTitle(string model, out string text)
+        {
+            string m = model ?? "";
+            // WHY: the text width grows with characters x size, and one line at 0.0112 holds about 26
+            // characters (a 30-character name at 0.0086 filled 70% of the banner), so a constant budget keeps
+            // the same fill for every length; the old fixed tiers wrapped a 31-character label to "...iq1_" + "m".
+            if (m.Length <= HeroTitleSingleLineChars)
+            {
+                text = m;
+                return Mathf.Min(HeroTitleMaxSize, HeroTitleWidthBudget / Mathf.Max(1, m.Length));
+            }
+
+            text = WrapModel(m, 30);
+            return HeroTitleWrappedSize;
+        }
+
+        internal const int HeroTitleSingleLineChars = 44;
+        private const float HeroTitleMaxSize = 0.0112f;
+        private const float HeroTitleWidthBudget = 0.30f;
+        private const float HeroTitleWrappedSize = 0.0064f;
 
         /// <summary>Wraps a long model id onto multiple lines, breaking after hyphens/underscores/spaces
         /// (model ids rarely contain spaces), so it never overflows the header banner.</summary>

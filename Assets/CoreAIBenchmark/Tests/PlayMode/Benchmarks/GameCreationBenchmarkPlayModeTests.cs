@@ -860,7 +860,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
 #if UNITY_EDITOR
-        /// <summary>Retakes a G6 hero image from the saved model-authored prefab without calling the provider.</summary>
+        /// <summary>
+        /// Retakes a G6 hero image from the saved model-authored prefab without calling the provider. An optional
+        /// UTF-8 file named by <c>COREAI_BENCHMARK_RECAPTURE_TEXT_FILE</c> supplies the banner text so the retake
+        /// matches the original hero: line 1 the score line, line 2 the stats line, line 3 the caption (a blank
+        /// or missing line keeps the default).
+        /// </summary>
         [UnityTest]
         [Explicit("Set COREAI_BENCHMARK_RECAPTURE_PREFAB and COREAI_BENCHMARK_RECAPTURE_OUTPUT")]
         public IEnumerator CaptureSavedCastlePrefab_ForReport()
@@ -881,9 +886,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 byte[] png = null;
                 string model = Environment.GetEnvironmentVariable("COREAI_TEST_MODEL") ?? prefab.name;
                 int parts = world.Root.GetComponentsInChildren<Renderer>(true).Length;
+                string[] text = ReadRecaptureText();
                 yield return CaptureSceneScreenshot(world, model,
-                    "Free build (visual) — saved scene", "Model-authored G6 castle captured from its saved prefab.",
-                    true, $"{parts} rendered parts", image => png = image);
+                    RecaptureLine(text, 0, "Free build (visual) — saved scene"),
+                    RecaptureLine(text, 2, "Model-authored G6 castle captured from its saved prefab."),
+                    true, RecaptureLine(text, 1, $"{parts} rendered parts"), image => png = image);
                 Assert.IsNotNull(png, "The saved scene must render a PNG.");
                 File.WriteAllBytes(outputPath, png);
             }
@@ -892,7 +899,86 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 world.Cleanup();
             }
         }
+
+        /// <summary>
+        /// Retakes a G6 hero image by replaying the report's <c>_g6_replay.lua</c> in a fresh Roblox-API world, so the
+        /// runtime-generated textures and materials look as they did in the run (a saved prefab keeps only colours).
+        /// Reads <c>COREAI_BENCHMARK_RECAPTURE_LUA</c>, <c>COREAI_BENCHMARK_RECAPTURE_OUTPUT</c>, the optional
+        /// <c>COREAI_BENCHMARK_RECAPTURE_TEXT_FILE</c> described on <see cref="CaptureSavedCastlePrefab_ForReport"/> and
+        /// <c>COREAI_TEST_MODEL</c> for the headline.
+        /// </summary>
+        [UnityTest]
+        [Explicit("Set COREAI_BENCHMARK_RECAPTURE_LUA and COREAI_BENCHMARK_RECAPTURE_OUTPUT")]
+        public IEnumerator CaptureSavedCastleReplay_ForReport()
+        {
+            string luaPath = Environment.GetEnvironmentVariable("COREAI_BENCHMARK_RECAPTURE_LUA");
+            string outputPath = Environment.GetEnvironmentVariable("COREAI_BENCHMARK_RECAPTURE_OUTPUT");
+            if (string.IsNullOrWhiteSpace(luaPath) || string.IsNullOrWhiteSpace(outputPath))
+            {
+                Assert.Ignore("No castle replay requested for screenshot recapture.");
+            }
+
+            Assert.IsTrue(File.Exists(luaPath), "The requested replay script must exist.");
+            VisualBenchmarkWorldExecutor world = new() { HideLabels = true };
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            RbxBenchmarkWorld rbx = null;
+            try
+            {
+                rbx = new RbxBenchmarkWorld(settings, world.Root);
+                Assert.IsTrue(rbx.TryEvaluateLua(File.ReadAllText(luaPath, System.Text.Encoding.UTF8), out string output),
+                    "The replay must finish synchronously; output: " + output);
+                int parts = rbx.Measure().Parts;
+                Assert.Greater(parts, 0, "The replay must build at least one castle part.");
+                yield return null;
+                byte[] png = null;
+                string model = Environment.GetEnvironmentVariable("COREAI_TEST_MODEL") ?? "replay";
+                string[] text = ReadRecaptureText();
+                yield return CaptureSceneScreenshot(world, model,
+                    RecaptureLine(text, 0, "Free build (visual) — replayed scene"),
+                    RecaptureLine(text, 2, "Model-authored G6 castle replayed from its recorded Lua."),
+                    true, RecaptureLine(text, 1, $"{parts} parts"), image => png = image);
+                Assert.IsNotNull(png, "The replayed scene must render a PNG.");
+                File.WriteAllBytes(outputPath, png);
+            }
+            finally
+            {
+                rbx?.Dispose();
+                world.Cleanup();
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
+        }
+
+        private static string[] ReadRecaptureText()
+        {
+            string file = Environment.GetEnvironmentVariable("COREAI_BENCHMARK_RECAPTURE_TEXT_FILE");
+            return string.IsNullOrWhiteSpace(file) || !File.Exists(file)
+                ? Array.Empty<string>()
+                : File.ReadAllLines(file, System.Text.Encoding.UTF8);
+        }
+
+        private static string RecaptureLine(string[] lines, int index, string fallback)
+        {
+            return index < lines.Length && !string.IsNullOrWhiteSpace(lines[index]) ? lines[index].Trim() : fallback;
+        }
 #endif
+
+        [Test]
+        public void HeroTitle_KeepsLongLocalModelLabelOnOneLine()
+        {
+            float size = FitHeroTitle("local/qwen3.8-flash-coder-iq1_m", out string text);
+            Assert.AreEqual("local/qwen3.8-flash-coder-iq1_m", text,
+                "A 31-character label fits one line; it used to wrap to a lone 'm'.");
+            Assert.That(size, Is.GreaterThan(0.0086f), "The label must not be set smaller than the old wrapped tier.");
+            Assert.That(size * text.Length, Is.LessThanOrEqualTo(0.30001f), "The line must stay inside the width budget.");
+
+            Assert.AreEqual(0.0112f, FitHeroTitle("codex/GPT-6.1 Sol", out string shortText), 1e-6f);
+            Assert.AreEqual("codex/GPT-6.1 Sol", shortText);
+
+            string veryLong = "provider/some-extremely-long-model-identifier-with-many-hyphenated-parts-v2";
+            float wrapped = FitHeroTitle(veryLong, out string wrappedText);
+            Assert.That(wrappedText, Does.Contain("\n"), "A name over the single-line limit wraps.");
+            Assert.AreEqual(0.0064f, wrapped, 1e-6f);
+        }
 
         [Test]
         public void StopAtRetryBoundary_ClearsUnretriedHardFailureBeforeScoring()
