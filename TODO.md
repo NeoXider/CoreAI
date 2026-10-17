@@ -69,6 +69,16 @@
   filenames, model cards and charts. `BenchmarkTargetList` should carry the provider's display name
   separately from the id, or the UI should ask for the display name.
 
+## Extreme-scenario token budget vs heavy-thinking models
+
+- [ ] Check how the 16k `TokenBudget` of the two extreme scenarios behaves on models that think a lot.
+  `g1_extreme_fortress` and `g7_extreme_dungeon` declare `TokenBudget => 16000` as the efficiency
+  reference, and the harness feeds `actualTokens` from provider completion usage, which counts
+  reasoning tokens — a heavy thinker reads far over the reference on little visible work. Nothing
+  caps output (`MaxOutputTokens => 0` is the suite default), so this is a reporting-accuracy check,
+  not a starvation risk. Run a heavy thinker through G1/G7 and decide whether the reference should
+  exclude reasoning tokens or be recalibrated.
+
 ## Configuration defect verification
 
 - [x] F3/F4/F15/F18: align runtime transport timeout with the legacy cap, preserve all endpoint properties
