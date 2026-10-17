@@ -1,23 +1,23 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="1061" viewBox="0 0 1140 1061" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="CoreAI Game-Creation Benchmark suite v2.0 leaderboard">
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="3305" viewBox="0 0 1140 3305" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="CoreAI Game-Creation Benchmark suite v2.0 leaderboard">
 <title>CoreAI Game-Creation Benchmark - suite v2.0</title>
 <defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#ffffff" stroke-width="1.6" stroke-opacity="0.55"/></pattern></defs>
 <rect width="100%" height="100%" rx="10" fill="#1a1a19"/>
 <text x="24.0" y="34.0" font-size="20" fill="#ffffff" text-anchor="start" font-weight="600">CoreAI Game-Creation Benchmark - suite v2.0</text>
-<text x="24.0" y="56.0" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Base score 0-100, mean over 35 scenarios (G1-G8, 7 of them extreme); the diamond is the extreme-tier score. Scores compare only within suite v2.0.</text>
+<text x="24.0" y="56.0" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Base score 0-100, mean over 36 scenarios (G1-G8, 7 of them extreme); the diamond is the extreme-tier score. Scores compare only within suite v2.0.</text>
 <text x="266.0" y="86.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">Suite score</text>
 <path d="M362.0,76.0 L367.5,81.5 L362.0,87.0 L356.5,81.5 Z" fill="#d95926"/>
 <text x="372.0" y="86.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">extreme tier</text>
 <text x="666.0" y="86.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">Score by group</text>
-<line x1="266.0" y1="104.0" x2="266.0" y2="332.0" stroke="#2c2c2a" stroke-width="1"/>
-<text x="266.0" y="348.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">0</text>
-<line x1="328.5" y1="104.0" x2="328.5" y2="332.0" stroke="#2c2c2a" stroke-width="1"/>
-<text x="328.5" y="348.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">25</text>
-<line x1="391.0" y1="104.0" x2="391.0" y2="332.0" stroke="#2c2c2a" stroke-width="1"/>
-<text x="391.0" y="348.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">50</text>
-<line x1="453.5" y1="104.0" x2="453.5" y2="332.0" stroke="#2c2c2a" stroke-width="1"/>
-<text x="453.5" y="348.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">75</text>
-<line x1="516.0" y1="104.0" x2="516.0" y2="332.0" stroke="#2c2c2a" stroke-width="1"/>
-<text x="516.0" y="348.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">100</text>
+<line x1="266.0" y1="104.0" x2="266.0" y2="674.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="266.0" y="690.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">0</text>
+<line x1="328.5" y1="104.0" x2="328.5" y2="674.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="328.5" y="690.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">25</text>
+<line x1="391.0" y1="104.0" x2="391.0" y2="674.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="391.0" y="690.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">50</text>
+<line x1="453.5" y1="104.0" x2="453.5" y2="674.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="453.5" y="690.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">75</text>
+<line x1="516.0" y1="104.0" x2="516.0" y2="674.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="516.0" y="690.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">100</text>
 <text x="690.3" y="102.0" font-size="11.5" fill="#c3c2b7" text-anchor="middle" font-weight="600">G1</text>
 <text x="739.0" y="102.0" font-size="11.5" fill="#c3c2b7" text-anchor="middle" font-weight="600">G2</text>
 <text x="787.7" y="102.0" font-size="11.5" fill="#c3c2b7" text-anchor="middle" font-weight="600">G3</text>
@@ -28,9 +28,10 @@
 <text x="1031.0" y="102.0" font-size="11.5" fill="#c3c2b7" text-anchor="middle" font-weight="600">G8</text>
 <text x="1091.7" y="102.0" font-size="11.5" fill="#c3c2b7" text-anchor="middle" font-weight="600">Extreme</text>
 <text x="24.0" y="125.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">claude/Sonnet 5.5</text>
-<text x="24.0" y="139.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 35/0/0</text>
+<text x="24.0" y="139.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 35/0/0 - 35/36 scored</text>
 <rect x="266.0" y="112.0" width="250.0" height="22.0" rx="4" fill="#3987e5"><title>claude/Sonnet 5.5: suite 100.00 over 35 scenarios</title></rect>
-<text x="522.0" y="127.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">100.00</text>
+<rect x="266.0" y="112.0" width="250.0" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="127.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">100.00*</text>
 <path d="M516.0,113.2 L525.8,123.0 L516.0,132.8 L506.2,123.0 Z" fill="#1a1a19"/>
 <path d="M516.0,116.0 L523.0,123.0 L516.0,130.0 L509.0,123.0 Z" fill="#d95926"><title>claude/Sonnet 5.5: extreme tier 100.00 (7/7)</title></path>
 <path d="M585.0,118.0 L590.0,123.0 L585.0,128.0 L580.0,123.0 Z" fill="#d95926"/>
@@ -46,7 +47,9 @@
 <rect x="861.7" y="107.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>claude/Sonnet 5.5 G5: 100.00</title></rect>
 <text x="885.0" y="127.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
 <rect x="910.3" y="107.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>claude/Sonnet 5.5 G6: 100.00</title></rect>
+<rect x="910.3" y="107.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="933.7" y="127.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<text x="954.0" y="118.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">1</text>
 <rect x="959.0" y="107.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>claude/Sonnet 5.5 G7: 100.00</title></rect>
 <text x="982.3" y="127.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
 <rect x="1007.7" y="107.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>claude/Sonnet 5.5 G8: 100.00</title></rect>
@@ -54,9 +57,10 @@
 <rect x="1068.3" y="107.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>claude/Sonnet 5.5 Extreme: 100.00</title></rect>
 <text x="1091.7" y="127.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
 <text x="24.0" y="163.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">codex/GPT-6.1 Sol</text>
-<text x="24.0" y="177.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 35/0/0</text>
+<text x="24.0" y="177.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 35/0/0 - 35/36 scored</text>
 <rect x="266.0" y="150.0" width="250.0" height="22.0" rx="4" fill="#3987e5"><title>codex/GPT-6.1 Sol: suite 100.00 over 35 scenarios</title></rect>
-<text x="522.0" y="165.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">100.00</text>
+<rect x="266.0" y="150.0" width="250.0" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="165.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">100.00*</text>
 <path d="M516.0,151.2 L525.8,161.0 L516.0,170.8 L506.2,161.0 Z" fill="#1a1a19"/>
 <path d="M516.0,154.0 L523.0,161.0 L516.0,168.0 L509.0,161.0 Z" fill="#d95926"><title>codex/GPT-6.1 Sol: extreme tier 100.00 (7/7)</title></path>
 <path d="M585.0,156.0 L590.0,161.0 L585.0,166.0 L580.0,161.0 Z" fill="#d95926"/>
@@ -72,215 +76,681 @@
 <rect x="861.7" y="145.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>codex/GPT-6.1 Sol G5: 100.00</title></rect>
 <text x="885.0" y="165.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
 <rect x="910.3" y="145.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>codex/GPT-6.1 Sol G6: 100.00</title></rect>
+<rect x="910.3" y="145.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="933.7" y="165.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<text x="954.0" y="156.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">2</text>
 <rect x="959.0" y="145.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>codex/GPT-6.1 Sol G7: 100.00</title></rect>
 <text x="982.3" y="165.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
 <rect x="1007.7" y="145.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>codex/GPT-6.1 Sol G8: 100.00</title></rect>
 <text x="1031.0" y="165.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
 <rect x="1068.3" y="145.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>codex/GPT-6.1 Sol Extreme: 100.00</title></rect>
 <text x="1091.7" y="165.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
-<text x="24.0" y="201.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">codex/GPT-6 Luna</text>
-<text x="24.0" y="215.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 32/2/1</text>
-<rect x="266.0" y="188.0" width="239.5" height="22.0" rx="4" fill="#3987e5"><title>codex/GPT-6 Luna: suite 95.82 over 35 scenarios</title></rect>
-<text x="522.0" y="203.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">95.82</text>
-<path d="M476.1,189.2 L485.9,199.0 L476.1,208.8 L466.3,199.0 Z" fill="#1a1a19"/>
-<path d="M476.1,192.0 L483.1,199.0 L476.1,206.0 L469.1,199.0 Z" fill="#d95926"><title>codex/GPT-6 Luna: extreme tier 84.02 (5/7)</title></path>
+<text x="24.0" y="201.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">mimo-flash</text>
+<text x="24.0" y="215.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 30/0/0 - 30/36 scored</text>
+<rect x="266.0" y="188.0" width="248.6" height="22.0" rx="4" fill="#3987e5"><title>mimo-flash: suite 99.44 over 30 scenarios</title></rect>
+<rect x="266.0" y="188.0" width="248.6" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="203.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">99.44*</text>
+<path d="M510.3,189.2 L520.1,199.0 L510.3,208.8 L500.5,199.0 Z" fill="#1a1a19"/>
+<path d="M510.3,192.0 L517.3,199.0 L510.3,206.0 L503.3,199.0 Z" fill="#d95926"><title>mimo-flash: extreme tier 97.72 (3/3)</title></path>
 <path d="M585.0,194.0 L590.0,199.0 L585.0,204.0 L580.0,199.0 Z" fill="#d95926"/>
-<text x="594.0" y="203.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">84.02</text>
-<rect x="667.0" y="183.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>codex/GPT-6 Luna G1: 95.23</title></rect>
-<text x="690.3" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">95.2</text>
-<rect x="715.7" y="183.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>codex/GPT-6 Luna G2: 100.00</title></rect>
+<text x="594.0" y="203.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">97.72</text>
+<rect x="667.0" y="183.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>mimo-flash G1: 100.00</title></rect>
+<rect x="667.0" y="183.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="690.3" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<text x="710.7" y="194.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">3</text>
+<rect x="715.7" y="183.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>mimo-flash G2: 100.00</title></rect>
 <text x="739.0" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
-<rect x="764.3" y="183.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>codex/GPT-6 Luna G3: 100.00</title></rect>
+<rect x="764.3" y="183.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>mimo-flash G3: 100.00</title></rect>
+<rect x="764.3" y="183.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="787.7" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
-<rect x="813.0" y="183.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>codex/GPT-6 Luna G4: 100.00</title></rect>
+<text x="808.0" y="194.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">4</text>
+<rect x="813.0" y="183.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>mimo-flash G4: 100.00</title></rect>
+<rect x="813.0" y="183.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="836.3" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
-<rect x="861.7" y="183.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>codex/GPT-6 Luna G5: 95.21</title></rect>
-<text x="885.0" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">95.2</text>
-<rect x="910.3" y="183.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>codex/GPT-6 Luna G6: 84.00</title></rect>
-<rect x="910.3" y="183.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="933.7" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">84.0</text>
-<text x="954.0" y="194.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">1</text>
-<rect x="959.0" y="183.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>codex/GPT-6 Luna G7: 97.50</title></rect>
-<text x="982.3" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">97.5</text>
-<rect x="1007.7" y="183.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>codex/GPT-6 Luna G8: 81.79</title></rect>
-<text x="1031.0" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">81.8</text>
-<rect x="1068.3" y="183.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>codex/GPT-6 Luna Extreme: 84.02</title></rect>
-<text x="1091.7" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">84.0</text>
-<text x="24.0" y="239.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">claude/Haiku 4.5</text>
-<text x="24.0" y="253.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 32/2/1</text>
-<rect x="266.0" y="226.0" width="235.5" height="22.0" rx="4" fill="#3987e5"><title>claude/Haiku 4.5: suite 94.19 over 35 scenarios</title></rect>
-<text x="522.0" y="241.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">94.19</text>
-<path d="M506.5,227.2 L516.3,237.0 L506.5,246.8 L496.7,237.0 Z" fill="#1a1a19"/>
-<path d="M506.5,230.0 L513.5,237.0 L506.5,244.0 L499.5,237.0 Z" fill="#d95926"><title>claude/Haiku 4.5: extreme tier 96.21 (6/7)</title></path>
+<text x="856.7" y="194.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">5</text>
+<rect x="861.7" y="183.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>mimo-flash G5: 99.02</title></rect>
+<text x="885.0" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">99.0</text>
+<rect x="910.3" y="183.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="933.7" y="203.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="954.0" y="194.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">6</text>
+<rect x="959.0" y="183.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>mimo-flash G7: 100.00</title></rect>
+<rect x="959.0" y="183.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="982.3" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<text x="1002.7" y="194.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">7</text>
+<rect x="1007.7" y="183.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>mimo-flash G8: 97.50</title></rect>
+<text x="1031.0" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">97.5</text>
+<rect x="1068.3" y="183.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>mimo-flash Extreme: 97.72</title></rect>
+<text x="1091.7" y="203.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">97.7</text>
+<text x="24.0" y="239.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">longcat</text>
+<text x="24.0" y="253.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 29/1/0 - 30/36 scored</text>
+<rect x="266.0" y="226.0" width="244.3" height="22.0" rx="4" fill="#3987e5"><title>longcat: suite 97.71 over 30 scenarios</title></rect>
+<rect x="266.0" y="226.0" width="244.3" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="241.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">97.71*</text>
+<path d="M516.0,227.2 L525.8,237.0 L516.0,246.8 L506.2,237.0 Z" fill="#1a1a19"/>
+<path d="M516.0,230.0 L523.0,237.0 L516.0,244.0 L509.0,237.0 Z" fill="#d95926"><title>longcat: extreme tier 100.00 (3/3)</title></path>
 <path d="M585.0,232.0 L590.0,237.0 L585.0,242.0 L580.0,237.0 Z" fill="#d95926"/>
-<text x="594.0" y="241.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">96.21</text>
-<rect x="667.0" y="221.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>claude/Haiku 4.5 G1: 95.64</title></rect>
-<text x="690.3" y="241.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">95.6</text>
-<rect x="715.7" y="221.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>claude/Haiku 4.5 G2: 100.00</title></rect>
+<text x="594.0" y="241.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">100.00</text>
+<rect x="667.0" y="221.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>longcat G1: 96.97</title></rect>
+<rect x="667.0" y="221.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="690.3" y="241.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">97.0</text>
+<text x="710.7" y="232.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">8</text>
+<rect x="715.7" y="221.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>longcat G2: 100.00</title></rect>
 <text x="739.0" y="241.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
-<rect x="764.3" y="221.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>claude/Haiku 4.5 G3: 100.00</title></rect>
+<rect x="764.3" y="221.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>longcat G3: 100.00</title></rect>
+<rect x="764.3" y="221.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="787.7" y="241.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
-<rect x="813.0" y="221.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>claude/Haiku 4.5 G4: 100.00</title></rect>
-<text x="836.3" y="241.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
-<rect x="861.7" y="221.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>claude/Haiku 4.5 G5: 81.92</title></rect>
-<rect x="861.7" y="221.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="885.0" y="241.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">81.9</text>
-<text x="905.3" y="232.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">2</text>
-<rect x="910.3" y="221.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>claude/Haiku 4.5 G6: 60.00</title></rect>
-<rect x="910.3" y="221.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="933.7" y="241.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">60.0</text>
-<text x="954.0" y="232.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">3</text>
-<rect x="959.0" y="221.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>claude/Haiku 4.5 G7: 100.00</title></rect>
+<text x="808.0" y="232.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">9</text>
+<rect x="813.0" y="221.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>longcat G4: 86.67</title></rect>
+<rect x="813.0" y="221.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="836.3" y="241.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">86.7</text>
+<text x="856.7" y="232.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">10</text>
+<rect x="861.7" y="221.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>longcat G5: 100.00</title></rect>
+<text x="885.0" y="241.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="910.3" y="221.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="933.7" y="241.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="954.0" y="232.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">11</text>
+<rect x="959.0" y="221.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>longcat G7: 100.00</title></rect>
+<rect x="959.0" y="221.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="982.3" y="241.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
-<rect x="1007.7" y="221.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>claude/Haiku 4.5 G8: 95.12</title></rect>
+<text x="1002.7" y="232.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">12</text>
+<rect x="1007.7" y="221.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>longcat G8: 95.12</title></rect>
 <text x="1031.0" y="241.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">95.1</text>
-<rect x="1068.3" y="221.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>claude/Haiku 4.5 Extreme: 96.21</title></rect>
-<text x="1091.7" y="241.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">96.2</text>
-<text x="24.0" y="277.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">local/qwen3.8-flash-coder-iq1_m</text>
-<text x="24.0" y="291.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 31/2/2</text>
-<rect x="266.0" y="264.0" width="227.2" height="22.0" rx="4" fill="#3987e5"><title>local/qwen3.8-flash-coder-iq1_m: suite 90.90 over 35 scenarios</title></rect>
-<text x="522.0" y="279.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">90.90</text>
-<path d="M415.0,265.2 L424.8,275.0 L415.0,284.8 L405.2,275.0 Z" fill="#1a1a19"/>
-<path d="M415.0,268.0 L422.0,275.0 L415.0,282.0 L408.0,275.0 Z" fill="#d95926"><title>local/qwen3.8-flash-coder-iq1_m: extreme tier 59.59 (3/7)</title></path>
+<rect x="1068.3" y="221.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>longcat Extreme: 100.00</title></rect>
+<text x="1091.7" y="241.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<text x="24.0" y="277.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">deepseek-flash</text>
+<text x="24.0" y="291.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 33/2/0 - 35/36 scored</text>
+<rect x="266.0" y="264.0" width="243.7" height="22.0" rx="4" fill="#3987e5"><title>deepseek-flash: suite 97.48 over 35 scenarios</title></rect>
+<rect x="266.0" y="264.0" width="243.7" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="279.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">97.48*</text>
+<path d="M516.0,265.2 L525.8,275.0 L516.0,284.8 L506.2,275.0 Z" fill="#1a1a19"/>
+<path d="M516.0,268.0 L523.0,275.0 L516.0,282.0 L509.0,275.0 Z" fill="#d95926"><title>deepseek-flash: extreme tier 100.00 (7/7)</title></path>
 <path d="M585.0,270.0 L590.0,275.0 L585.0,280.0 L580.0,275.0 Z" fill="#d95926"/>
-<text x="594.0" y="279.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">59.59</text>
-<rect x="667.0" y="259.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>local/qwen3.8-flash-coder-iq1_m G1: 90.00</title></rect>
-<text x="690.3" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">90.0</text>
-<rect x="715.7" y="259.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>local/qwen3.8-flash-coder-iq1_m G2: 81.57</title></rect>
-<text x="739.0" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">81.6</text>
-<rect x="764.3" y="259.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>local/qwen3.8-flash-coder-iq1_m G3: 99.59</title></rect>
-<text x="787.7" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">99.6</text>
-<rect x="813.0" y="259.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>local/qwen3.8-flash-coder-iq1_m G4: 72.71</title></rect>
-<text x="836.3" y="279.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">72.7</text>
-<rect x="861.7" y="259.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>local/qwen3.8-flash-coder-iq1_m G5: 100.00</title></rect>
-<text x="885.0" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
-<rect x="910.3" y="259.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>local/qwen3.8-flash-coder-iq1_m G6: 93.00</title></rect>
-<text x="933.7" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">93.0</text>
-<rect x="959.0" y="259.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>local/qwen3.8-flash-coder-iq1_m G7: 80.00</title></rect>
-<text x="982.3" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">80.0</text>
-<rect x="1007.7" y="259.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>local/qwen3.8-flash-coder-iq1_m G8: 97.73</title></rect>
-<text x="1031.0" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">97.7</text>
-<rect x="1068.3" y="259.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>local/qwen3.8-flash-coder-iq1_m Extreme: 59.59</title></rect>
-<text x="1091.7" y="279.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">59.6</text>
-<text x="24.0" y="315.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">local/MiniCPM-V 4.7 1B</text>
-<text x="24.0" y="329.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 10/2/23</text>
-<rect x="266.0" y="302.0" width="100.8" height="22.0" rx="4" fill="#3987e5"><title>local/MiniCPM-V 4.7 1B: suite 40.31 over 35 scenarios</title></rect>
-<text x="522.0" y="317.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">40.31</text>
-<path d="M279.6,303.2 L289.4,313.0 L279.6,322.8 L269.8,313.0 Z" fill="#1a1a19"/>
-<path d="M279.6,306.0 L286.6,313.0 L279.6,320.0 L272.6,313.0 Z" fill="#d95926"><title>local/MiniCPM-V 4.7 1B: extreme tier 5.42 (0/7)</title></path>
+<text x="594.0" y="279.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">100.00</text>
+<rect x="667.0" y="259.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>deepseek-flash G1: 97.73</title></rect>
+<text x="690.3" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">97.7</text>
+<rect x="715.7" y="259.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>deepseek-flash G2: 100.00</title></rect>
+<text x="739.0" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="764.3" y="259.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>deepseek-flash G3: 100.00</title></rect>
+<text x="787.7" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="813.0" y="259.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>deepseek-flash G4: 88.96</title></rect>
+<rect x="813.0" y="259.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="836.3" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">89.0</text>
+<text x="856.7" y="270.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">13</text>
+<rect x="861.7" y="259.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>deepseek-flash G5: 99.14</title></rect>
+<text x="885.0" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">99.1</text>
+<rect x="910.3" y="259.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>deepseek-flash G6: 81.00</title></rect>
+<rect x="910.3" y="259.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="933.7" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">81.0</text>
+<text x="954.0" y="270.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">14</text>
+<rect x="959.0" y="259.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>deepseek-flash G7: 100.00</title></rect>
+<text x="982.3" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="1007.7" y="259.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>deepseek-flash G8: 97.50</title></rect>
+<text x="1031.0" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">97.5</text>
+<rect x="1068.3" y="259.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>deepseek-flash Extreme: 100.00</title></rect>
+<text x="1091.7" y="279.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<text x="24.0" y="315.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">pickle</text>
+<text x="24.0" y="329.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 28/0/1 - 29/36 scored</text>
+<rect x="266.0" y="302.0" width="241.6" height="22.0" rx="4" fill="#3987e5"><title>pickle: suite 96.64 over 29 scenarios</title></rect>
+<rect x="266.0" y="302.0" width="241.6" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="317.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">96.64*</text>
+<path d="M514.1,303.2 L523.9,313.0 L514.1,322.8 L504.3,313.0 Z" fill="#1a1a19"/>
+<path d="M514.1,306.0 L521.1,313.0 L514.1,320.0 L507.1,313.0 Z" fill="#d95926"><title>pickle: extreme tier 99.25 (4/4)</title></path>
 <path d="M585.0,308.0 L590.0,313.0 L585.0,318.0 L580.0,313.0 Z" fill="#d95926"/>
-<text x="594.0" y="317.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">5.42</text>
-<rect x="667.0" y="297.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>local/MiniCPM-V 4.7 1B G1: 53.28</title></rect>
-<rect x="667.0" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="690.3" y="317.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">53.3</text>
-<text x="710.7" y="308.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">4</text>
-<rect x="715.7" y="297.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>local/MiniCPM-V 4.7 1B G2: 49.01</title></rect>
-<rect x="715.7" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="739.0" y="317.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">49.0</text>
-<text x="759.3" y="308.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">5</text>
-<rect x="764.3" y="297.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>local/MiniCPM-V 4.7 1B G3: 23.46</title></rect>
-<rect x="764.3" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="787.7" y="317.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">23.5</text>
-<text x="808.0" y="308.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">6</text>
-<rect x="813.0" y="297.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>local/MiniCPM-V 4.7 1B G4: 5.92</title></rect>
+<text x="594.0" y="317.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">99.25</text>
+<rect x="667.0" y="297.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>pickle G1: 99.25</title></rect>
+<text x="690.3" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">99.2</text>
+<rect x="715.7" y="297.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>pickle G2: 100.00</title></rect>
+<text x="739.0" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="764.3" y="297.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>pickle G3: 100.00</title></rect>
+<text x="787.7" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="813.0" y="297.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>pickle G4: 100.00</title></rect>
 <rect x="813.0" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="836.3" y="317.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">5.9</text>
-<text x="856.7" y="308.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">7</text>
-<rect x="861.7" y="297.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>local/MiniCPM-V 4.7 1B G5: 90.13</title></rect>
-<text x="885.0" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">90.1</text>
-<rect x="910.3" y="297.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>local/MiniCPM-V 4.7 1B G6: 18.00</title></rect>
-<rect x="910.3" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="933.7" y="317.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">18.0</text>
-<text x="954.0" y="308.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">8</text>
-<rect x="959.0" y="297.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>local/MiniCPM-V 4.7 1B G7: 23.91</title></rect>
-<rect x="959.0" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="982.3" y="317.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">23.9</text>
-<text x="1002.7" y="308.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">9</text>
-<rect x="1007.7" y="297.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>local/MiniCPM-V 4.7 1B G8: 4.76</title></rect>
+<text x="836.3" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<text x="856.7" y="308.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">15</text>
+<rect x="861.7" y="297.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>pickle G5: 87.86</title></rect>
+<rect x="861.7" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="885.0" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">87.9</text>
+<text x="905.3" y="308.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">16</text>
+<rect x="910.3" y="297.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="933.7" y="317.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="954.0" y="308.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">17</text>
+<rect x="959.0" y="297.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="982.3" y="317.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="1002.7" y="308.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">18</text>
+<rect x="1007.7" y="297.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>pickle G8: 96.83</title></rect>
 <rect x="1007.7" y="297.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="1031.0" y="317.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">4.8</text>
-<text x="1051.3" y="308.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">10</text>
-<rect x="1068.3" y="297.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>local/MiniCPM-V 4.7 1B Extreme: 5.42</title></rect>
-<text x="1091.7" y="317.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">5.4</text>
-<text x="666.0" y="366.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">Group score:</text>
-<rect x="744.0" y="356.0" width="14" height="12" rx="2" fill="#9ec5f4"/>
-<text x="762.0" y="366.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">100</text>
-<rect x="788.6" y="356.0" width="14" height="12" rx="2" fill="#6da7ec"/>
-<text x="806.6" y="366.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">90-99.9</text>
-<rect x="858.0" y="356.0" width="14" height="12" rx="2" fill="#3987e5"/>
-<text x="876.0" y="366.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">75-89.9</text>
-<rect x="927.4" y="356.0" width="14" height="12" rx="2" fill="#256abf"/>
-<text x="945.4" y="366.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">50-74.9</text>
-<rect x="996.8" y="356.0" width="14" height="12" rx="2" fill="#184f95"/>
-<text x="1014.8" y="366.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">&lt;50</text>
-<rect x="744.0" y="376.0" width="14" height="12" rx="2" fill="#3987e5"/>
-<rect x="744.0" y="376.0" width="14" height="12" rx="2" fill="url(#hatch)"/>
-<text x="762.0" y="386.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">hatched = a regular-tier PARTIAL/FAIL or an excluded scenario</text>
-<text x="762.0" y="402.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">Extreme = mean of the extreme scenarios (one per group, none for G6)</text>
-<text x="762.0" y="418.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">small numbers refer to the notes below</text>
-<text x="266.0" y="448.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">Tokens (prompt + completion, as reported)</text>
-<text x="706.0" y="448.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">Failed tool calls / executed</text>
-<line x1="266.0" y1="466.0" x2="266.0" y2="694.0" stroke="#2c2c2a" stroke-width="1"/>
-<text x="266.0" y="710.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">0</text>
-<line x1="376.0" y1="466.0" x2="376.0" y2="694.0" stroke="#2c2c2a" stroke-width="1"/>
-<text x="376.0" y="710.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">200k</text>
-<line x1="486.0" y1="466.0" x2="486.0" y2="694.0" stroke="#2c2c2a" stroke-width="1"/>
-<text x="486.0" y="710.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">400k</text>
-<line x1="596.0" y1="466.0" x2="596.0" y2="694.0" stroke="#2c2c2a" stroke-width="1"/>
-<text x="596.0" y="710.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">600k</text>
-<text x="24.0" y="489.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">claude/Sonnet 5.5</text>
-<rect x="266.0" y="474.0" width="23.8" height="22.0" rx="4" fill="#3987e5"><title>claude/Sonnet 5.5: 43308 tokens</title></rect>
-<text x="295.8" y="489.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">43,308</text>
-<rect x="706.0" y="474.0" width="240.9" height="22.0" rx="4" fill="#262624"/>
-<text x="952.9" y="489.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">0 / 107</text>
-<text x="24.0" y="527.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">codex/GPT-6.1 Sol</text>
-<rect x="266.0" y="512.0" width="24.0" height="22.0" rx="4" fill="#3987e5"><title>codex/GPT-6.1 Sol: 43726 tokens</title></rect>
-<text x="296.0" y="527.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">43,726</text>
-<rect x="706.0" y="512.0" width="229.7" height="22.0" rx="4" fill="#262624"/>
-<text x="941.7" y="527.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">0 / 102</text>
-<text x="24.0" y="565.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">codex/GPT-6 Luna</text>
-<rect x="266.0" y="550.0" width="28.6" height="22.0" rx="4" fill="#3987e5"><title>codex/GPT-6 Luna: 52026 tokens</title></rect>
-<text x="300.6" y="565.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">52,026</text>
-<rect x="706.0" y="550.0" width="301.7" height="22.0" rx="4" fill="#262624"/>
-<rect x="706.0" y="550.0" width="38.3" height="22.0" rx="4" fill="#f2877f"><title>codex/GPT-6 Luna: 17 of 134 executed calls failed</title></rect>
-<text x="1013.7" y="565.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">17 / 134</text>
-<text x="24.0" y="603.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">claude/Haiku 4.5</text>
-<rect x="266.0" y="588.0" width="23.8" height="22.0" rx="4" fill="#3987e5"><title>claude/Haiku 4.5: 43302 tokens</title></rect>
-<text x="295.8" y="603.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">43,302</text>
-<rect x="706.0" y="588.0" width="274.7" height="22.0" rx="4" fill="#262624"/>
-<rect x="706.0" y="588.0" width="65.3" height="22.0" rx="4" fill="#f2877f"><title>claude/Haiku 4.5: 29 of 122 executed calls failed</title></rect>
-<text x="986.7" y="603.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">29 / 122</text>
-<text x="24.0" y="641.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">local/qwen3.8-flash-coder-iq1_m</text>
-<rect x="266.0" y="626.0" width="306.2" height="22.0" rx="4" fill="#3987e5"><title>local/qwen3.8-flash-coder-iq1_m: 556681 tokens</title></rect>
-<text x="578.2" y="641.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">556,681</text>
-<rect x="706.0" y="626.0" width="308.5" height="22.0" rx="4" fill="#262624"/>
-<rect x="706.0" y="626.0" width="40.5" height="22.0" rx="4" fill="#f2877f"><title>local/qwen3.8-flash-coder-iq1_m: 18 of 137 executed calls failed</title></rect>
-<text x="1020.5" y="641.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">18 / 137</text>
-<text x="24.0" y="679.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">local/MiniCPM-V 4.7 1B</text>
-<rect x="266.0" y="664.0" width="258.0" height="22.0" rx="4" fill="#3987e5"><title>local/MiniCPM-V 4.7 1B: 469115 tokens</title></rect>
-<text x="530.0" y="679.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">469,115</text>
-<rect x="706.0" y="664.0" width="340.0" height="22.0" rx="4" fill="#262624"/>
-<rect x="706.0" y="664.0" width="137.4" height="22.0" rx="4" fill="#f2877f"><title>local/MiniCPM-V 4.7 1B: 61 of 151 executed calls failed</title></rect>
-<text x="1052.0" y="679.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">61 / 151</text>
-<text x="24.0" y="734.0" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">Notes</text>
-<text x="24.0" y="752.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">1. codex/GPT-6 Luna - G6: g6_free_build_vision PARTIAL 84.00 [224850]</text>
-<text x="24.0" y="768.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">2. claude/Haiku 4.5 - G5: g5_tool_budget FAIL 10.00 [224850]</text>
-<text x="24.0" y="784.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">3. claude/Haiku 4.5 - G6: g6_free_build_vision PARTIAL 60.00 [224850]</text>
-<text x="24.0" y="800.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">4. local/MiniCPM-V 4.7 1B - G1: g1_coin_collector FAIL 38.89 [224850]; g1_constraint_budget PARTIAL 83.33 [224850]</text>
-<text x="24.0" y="816.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">5. local/MiniCPM-V 4.7 1B - G2: g2_crafting_rules PARTIAL 81.82 [224850]; g2_flat_damage FAIL 5.00 [224850]; g2_win_condition FAIL 5.26 [224850]</text>
-<text x="24.0" y="832.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">6. local/MiniCPM-V 4.7 1B - G3: g3_balanced_enemies FAIL 36.84 [224850]; g3_clamped_regen FAIL 10.00 [224850]; g3_fibonacci_rewards FAIL 5.00</text>
-<text x="40.0" y="848.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">[224850]; g3_quadratic_score FAIL 5.26 [224850]; g3_tiered_pricing FAIL 10.00 [224850]</text>
-<text x="24.0" y="864.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">7. local/MiniCPM-V 4.7 1B - G4: g4_combat FAIL 12.50 [224850]; g4_crafting_chain FAIL 5.00 [224850]; g4_shop FAIL 4.17 [224850]</text>
-<text x="24.0" y="880.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">8. local/MiniCPM-V 4.7 1B - G6: g6_free_build_vision FAIL 18.00 [224850]</text>
-<text x="24.0" y="896.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">9. local/MiniCPM-V 4.7 1B - G7: g7_key_puzzle FAIL 47.83 [224850]</text>
-<text x="24.0" y="912.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">10. local/MiniCPM-V 4.7 1B - G8: g8_selective_raise FAIL 13.33 [224850]; g8_state_rule FAIL 4.55 [224850]; g8_tidy_scene FAIL 0.00 [224850]</text>
-<text x="24.0" y="934.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="600">Run ids (Docs/BenchmarkRuns):</text>
-<text x="24.0" y="949.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">claude/Sonnet 5.5: 20261015_224850</text>
-<text x="24.0" y="964.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">codex/GPT-6.1 Sol: 20261015_224850</text>
-<text x="24.0" y="979.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">codex/GPT-6 Luna: 20261015_224850</text>
-<text x="24.0" y="994.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">claude/Haiku 4.5: 20261015_224850</text>
-<text x="24.0" y="1009.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">local/qwen3.8-flash-coder-iq1_m: 20261015_224850</text>
-<text x="24.0" y="1024.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">local/MiniCPM-V 4.7 1B: 20261015_224850</text>
-<text x="24.0" y="1039.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">Each scenario uses the newest model-attributable result of that model within the suite; environment/framework failures never count as model scores. Built by tools/benchmark_chart.py.</text>
+<text x="1031.0" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">96.8</text>
+<text x="1051.3" y="308.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">19</text>
+<rect x="1068.3" y="297.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>pickle Extreme: 99.25</title></rect>
+<text x="1091.7" y="317.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">99.2</text>
+<text x="24.0" y="353.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">codex/GPT-6 Luna</text>
+<text x="24.0" y="367.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 32/2/1 - 35/36 scored</text>
+<rect x="266.0" y="340.0" width="239.5" height="22.0" rx="4" fill="#3987e5"><title>codex/GPT-6 Luna: suite 95.82 over 35 scenarios</title></rect>
+<rect x="266.0" y="340.0" width="239.5" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="355.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">95.82*</text>
+<path d="M476.1,341.2 L485.9,351.0 L476.1,360.8 L466.3,351.0 Z" fill="#1a1a19"/>
+<path d="M476.1,344.0 L483.1,351.0 L476.1,358.0 L469.1,351.0 Z" fill="#d95926"><title>codex/GPT-6 Luna: extreme tier 84.02 (5/7)</title></path>
+<path d="M585.0,346.0 L590.0,351.0 L585.0,356.0 L580.0,351.0 Z" fill="#d95926"/>
+<text x="594.0" y="355.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">84.02</text>
+<rect x="667.0" y="335.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>codex/GPT-6 Luna G1: 95.23</title></rect>
+<text x="690.3" y="355.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">95.2</text>
+<rect x="715.7" y="335.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>codex/GPT-6 Luna G2: 100.00</title></rect>
+<text x="739.0" y="355.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="764.3" y="335.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>codex/GPT-6 Luna G3: 100.00</title></rect>
+<text x="787.7" y="355.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="813.0" y="335.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>codex/GPT-6 Luna G4: 100.00</title></rect>
+<text x="836.3" y="355.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="861.7" y="335.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>codex/GPT-6 Luna G5: 95.21</title></rect>
+<text x="885.0" y="355.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">95.2</text>
+<rect x="910.3" y="335.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>codex/GPT-6 Luna G6: 84.00</title></rect>
+<rect x="910.3" y="335.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="933.7" y="355.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">84.0</text>
+<text x="954.0" y="346.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">20</text>
+<rect x="959.0" y="335.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>codex/GPT-6 Luna G7: 97.50</title></rect>
+<text x="982.3" y="355.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">97.5</text>
+<rect x="1007.7" y="335.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>codex/GPT-6 Luna G8: 81.79</title></rect>
+<text x="1031.0" y="355.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">81.8</text>
+<rect x="1068.3" y="335.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>codex/GPT-6 Luna Extreme: 84.02</title></rect>
+<text x="1091.7" y="355.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">84.0</text>
+<text x="24.0" y="391.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">glm-flash</text>
+<text x="24.0" y="405.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 28/2/1 - 31/36 scored</text>
+<rect x="266.0" y="378.0" width="237.6" height="22.0" rx="4" fill="#3987e5"><title>glm-flash: suite 95.03 over 31 scenarios</title></rect>
+<rect x="266.0" y="378.0" width="237.6" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="393.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">95.03*</text>
+<path d="M428.5,379.2 L438.3,389.0 L428.5,398.8 L418.7,389.0 Z" fill="#1a1a19"/>
+<path d="M428.5,382.0 L435.5,389.0 L428.5,396.0 L421.5,389.0 Z" fill="#d95926"><title>glm-flash: extreme tier 64.99 (1/4)</title></path>
+<path d="M585.0,384.0 L590.0,389.0 L585.0,394.0 L580.0,389.0 Z" fill="#d95926"/>
+<text x="594.0" y="393.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">64.99</text>
+<rect x="667.0" y="373.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>glm-flash G1: 100.00</title></rect>
+<rect x="667.0" y="373.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="690.3" y="393.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<text x="710.7" y="384.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">21</text>
+<rect x="715.7" y="373.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>glm-flash G2: 83.83</title></rect>
+<text x="739.0" y="393.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">83.8</text>
+<rect x="764.3" y="373.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>glm-flash G3: 100.00</title></rect>
+<text x="787.7" y="393.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="813.0" y="373.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>glm-flash G4: 100.00</title></rect>
+<rect x="813.0" y="373.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="836.3" y="393.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<text x="856.7" y="384.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">22</text>
+<rect x="861.7" y="373.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>glm-flash G5: 95.64</title></rect>
+<text x="885.0" y="393.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">95.6</text>
+<rect x="910.3" y="373.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="933.7" y="393.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="954.0" y="384.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">23</text>
+<rect x="959.0" y="373.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>glm-flash G7: 100.00</title></rect>
+<rect x="959.0" y="373.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="982.3" y="393.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<text x="1002.7" y="384.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">24</text>
+<rect x="1007.7" y="373.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>glm-flash G8: 93.38</title></rect>
+<text x="1031.0" y="393.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">93.4</text>
+<rect x="1068.3" y="373.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>glm-flash Extreme: 64.99</title></rect>
+<text x="1091.7" y="393.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">65.0</text>
+<text x="24.0" y="429.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">claude/Haiku 4.5</text>
+<text x="24.0" y="443.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 32/2/1 - 35/36 scored</text>
+<rect x="266.0" y="416.0" width="235.5" height="22.0" rx="4" fill="#3987e5"><title>claude/Haiku 4.5: suite 94.19 over 35 scenarios</title></rect>
+<rect x="266.0" y="416.0" width="235.5" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="431.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">94.19*</text>
+<path d="M506.5,417.2 L516.3,427.0 L506.5,436.8 L496.7,427.0 Z" fill="#1a1a19"/>
+<path d="M506.5,420.0 L513.5,427.0 L506.5,434.0 L499.5,427.0 Z" fill="#d95926"><title>claude/Haiku 4.5: extreme tier 96.21 (6/7)</title></path>
+<path d="M585.0,422.0 L590.0,427.0 L585.0,432.0 L580.0,427.0 Z" fill="#d95926"/>
+<text x="594.0" y="431.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">96.21</text>
+<rect x="667.0" y="411.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>claude/Haiku 4.5 G1: 95.64</title></rect>
+<text x="690.3" y="431.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">95.6</text>
+<rect x="715.7" y="411.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>claude/Haiku 4.5 G2: 100.00</title></rect>
+<text x="739.0" y="431.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="764.3" y="411.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>claude/Haiku 4.5 G3: 100.00</title></rect>
+<text x="787.7" y="431.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="813.0" y="411.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>claude/Haiku 4.5 G4: 100.00</title></rect>
+<text x="836.3" y="431.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="861.7" y="411.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>claude/Haiku 4.5 G5: 81.92</title></rect>
+<rect x="861.7" y="411.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="885.0" y="431.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">81.9</text>
+<text x="905.3" y="422.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">25</text>
+<rect x="910.3" y="411.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>claude/Haiku 4.5 G6: 60.00</title></rect>
+<rect x="910.3" y="411.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="933.7" y="431.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">60.0</text>
+<text x="954.0" y="422.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">26</text>
+<rect x="959.0" y="411.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>claude/Haiku 4.5 G7: 100.00</title></rect>
+<text x="982.3" y="431.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="1007.7" y="411.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>claude/Haiku 4.5 G8: 95.12</title></rect>
+<text x="1031.0" y="431.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">95.1</text>
+<rect x="1068.3" y="411.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>claude/Haiku 4.5 Extreme: 96.21</title></rect>
+<text x="1091.7" y="431.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">96.2</text>
+<text x="24.0" y="467.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">local/qwen3.8-flash-coder-iq1_m</text>
+<text x="24.0" y="481.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 31/2/2 - 35/36 scored</text>
+<rect x="266.0" y="454.0" width="227.2" height="22.0" rx="4" fill="#3987e5"><title>local/qwen3.8-flash-coder-iq1_m: suite 90.90 over 35 scenarios</title></rect>
+<rect x="266.0" y="454.0" width="227.2" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="469.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">90.90*</text>
+<path d="M415.0,455.2 L424.8,465.0 L415.0,474.8 L405.2,465.0 Z" fill="#1a1a19"/>
+<path d="M415.0,458.0 L422.0,465.0 L415.0,472.0 L408.0,465.0 Z" fill="#d95926"><title>local/qwen3.8-flash-coder-iq1_m: extreme tier 59.59 (3/7)</title></path>
+<path d="M585.0,460.0 L590.0,465.0 L585.0,470.0 L580.0,465.0 Z" fill="#d95926"/>
+<text x="594.0" y="469.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">59.59</text>
+<rect x="667.0" y="449.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>local/qwen3.8-flash-coder-iq1_m G1: 90.00</title></rect>
+<text x="690.3" y="469.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">90.0</text>
+<rect x="715.7" y="449.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>local/qwen3.8-flash-coder-iq1_m G2: 81.57</title></rect>
+<text x="739.0" y="469.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">81.6</text>
+<rect x="764.3" y="449.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>local/qwen3.8-flash-coder-iq1_m G3: 99.59</title></rect>
+<text x="787.7" y="469.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">99.6</text>
+<rect x="813.0" y="449.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>local/qwen3.8-flash-coder-iq1_m G4: 72.71</title></rect>
+<text x="836.3" y="469.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">72.7</text>
+<rect x="861.7" y="449.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>local/qwen3.8-flash-coder-iq1_m G5: 100.00</title></rect>
+<text x="885.0" y="469.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="910.3" y="449.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>local/qwen3.8-flash-coder-iq1_m G6: 93.00</title></rect>
+<rect x="910.3" y="449.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="933.7" y="469.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">93.0</text>
+<text x="954.0" y="460.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">27</text>
+<rect x="959.0" y="449.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>local/qwen3.8-flash-coder-iq1_m G7: 80.00</title></rect>
+<text x="982.3" y="469.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">80.0</text>
+<rect x="1007.7" y="449.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>local/qwen3.8-flash-coder-iq1_m G8: 97.73</title></rect>
+<text x="1031.0" y="469.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">97.7</text>
+<rect x="1068.3" y="449.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>local/qwen3.8-flash-coder-iq1_m Extreme: 59.59</title></rect>
+<text x="1091.7" y="469.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">59.6</text>
+<text x="24.0" y="505.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">bunny</text>
+<text x="24.0" y="519.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 30/2/3 - 35/36 scored</text>
+<rect x="266.0" y="492.0" width="225.1" height="22.0" rx="4" fill="#3987e5"><title>bunny: suite 90.02 over 35 scenarios</title></rect>
+<rect x="266.0" y="492.0" width="225.1" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="507.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">90.02*</text>
+<path d="M472.0,493.2 L481.8,503.0 L472.0,512.8 L462.2,503.0 Z" fill="#1a1a19"/>
+<path d="M472.0,496.0 L479.0,503.0 L472.0,510.0 L465.0,503.0 Z" fill="#d95926"><title>bunny: extreme tier 82.39 (5/7)</title></path>
+<path d="M585.0,498.0 L590.0,503.0 L585.0,508.0 L580.0,503.0 Z" fill="#d95926"/>
+<text x="594.0" y="507.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">82.39</text>
+<rect x="667.0" y="487.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>bunny G1: 76.14</title></rect>
+<rect x="667.0" y="487.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="690.3" y="507.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">76.1</text>
+<text x="710.7" y="498.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">28</text>
+<rect x="715.7" y="487.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>bunny G2: 100.00</title></rect>
+<text x="739.0" y="507.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="764.3" y="487.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>bunny G3: 85.99</title></rect>
+<text x="787.7" y="507.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">86.0</text>
+<rect x="813.0" y="487.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>bunny G4: 99.25</title></rect>
+<text x="836.3" y="507.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">99.2</text>
+<rect x="861.7" y="487.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>bunny G5: 100.00</title></rect>
+<text x="885.0" y="507.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="910.3" y="487.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>bunny G6: 74.00</title></rect>
+<rect x="910.3" y="487.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="933.7" y="507.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">74.0</text>
+<text x="954.0" y="498.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">29</text>
+<rect x="959.0" y="487.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>bunny G7: 91.00</title></rect>
+<text x="982.3" y="507.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">91.0</text>
+<rect x="1007.7" y="487.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>bunny G8: 72.83</title></rect>
+<rect x="1007.7" y="487.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="1031.0" y="507.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">72.8</text>
+<text x="1051.3" y="498.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">30</text>
+<rect x="1068.3" y="487.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>bunny Extreme: 82.39</title></rect>
+<text x="1091.7" y="507.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">82.4</text>
+<text x="24.0" y="543.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">beam</text>
+<text x="24.0" y="557.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 24/1/10 - 35/36 scored</text>
+<rect x="266.0" y="530.0" width="180.7" height="22.0" rx="4" fill="#3987e5"><title>beam: suite 72.28 over 35 scenarios</title></rect>
+<rect x="266.0" y="530.0" width="180.7" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="545.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">72.28*</text>
+<path d="M446.7,531.2 L456.5,541.0 L446.7,550.8 L436.9,541.0 Z" fill="#1a1a19"/>
+<path d="M446.7,534.0 L453.7,541.0 L446.7,548.0 L439.7,541.0 Z" fill="#d95926"><title>beam: extreme tier 72.27 (5/7)</title></path>
+<path d="M585.0,536.0 L590.0,541.0 L585.0,546.0 L580.0,541.0 Z" fill="#d95926"/>
+<text x="594.0" y="545.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">72.27</text>
+<rect x="667.0" y="525.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>beam G1: 97.73</title></rect>
+<text x="690.3" y="545.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">97.7</text>
+<rect x="715.7" y="525.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>beam G2: 60.52</title></rect>
+<rect x="715.7" y="525.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="739.0" y="545.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">60.5</text>
+<text x="759.3" y="536.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">31</text>
+<rect x="764.3" y="525.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>beam G3: 58.95</title></rect>
+<rect x="764.3" y="525.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="787.7" y="545.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">58.9</text>
+<text x="808.0" y="536.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">32</text>
+<rect x="813.0" y="525.0" width="46.7" height="32.0" rx="3" fill="#3987e5"><title>beam G4: 76.04</title></rect>
+<rect x="813.0" y="525.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="836.3" y="545.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">76.0</text>
+<text x="856.7" y="536.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">33</text>
+<rect x="861.7" y="525.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>beam G5: 91.43</title></rect>
+<rect x="861.7" y="525.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="885.0" y="545.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">91.4</text>
+<text x="905.3" y="536.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">34</text>
+<rect x="910.3" y="525.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>beam G6: 0.00</title></rect>
+<rect x="910.3" y="525.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="933.7" y="545.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">0.0</text>
+<text x="954.0" y="536.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">35</text>
+<rect x="959.0" y="525.0" width="46.7" height="32.0" rx="3" fill="#9ec5f4"><title>beam G7: 100.00</title></rect>
+<text x="982.3" y="545.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">100</text>
+<rect x="1007.7" y="525.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>beam G8: 54.77</title></rect>
+<rect x="1007.7" y="525.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="1031.0" y="545.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">54.8</text>
+<text x="1051.3" y="536.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">36</text>
+<rect x="1068.3" y="525.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>beam Extreme: 72.27</title></rect>
+<text x="1091.7" y="545.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">72.3</text>
+<text x="24.0" y="581.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">local/MiniCPM-V 4.7 1B</text>
+<text x="24.0" y="595.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 10/2/23 - 35/36 scored</text>
+<rect x="266.0" y="568.0" width="100.8" height="22.0" rx="4" fill="#3987e5"><title>local/MiniCPM-V 4.7 1B: suite 40.31 over 35 scenarios</title></rect>
+<rect x="266.0" y="568.0" width="100.8" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="583.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">40.31*</text>
+<path d="M279.6,569.2 L289.4,579.0 L279.6,588.8 L269.8,579.0 Z" fill="#1a1a19"/>
+<path d="M279.6,572.0 L286.6,579.0 L279.6,586.0 L272.6,579.0 Z" fill="#d95926"><title>local/MiniCPM-V 4.7 1B: extreme tier 5.42 (0/7)</title></path>
+<path d="M585.0,574.0 L590.0,579.0 L585.0,584.0 L580.0,579.0 Z" fill="#d95926"/>
+<text x="594.0" y="583.5" font-size="12.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">5.42</text>
+<rect x="667.0" y="563.0" width="46.7" height="32.0" rx="3" fill="#256abf"><title>local/MiniCPM-V 4.7 1B G1: 53.28</title></rect>
+<rect x="667.0" y="563.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="690.3" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">53.3</text>
+<text x="710.7" y="574.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">37</text>
+<rect x="715.7" y="563.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>local/MiniCPM-V 4.7 1B G2: 49.01</title></rect>
+<rect x="715.7" y="563.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="739.0" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">49.0</text>
+<text x="759.3" y="574.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">38</text>
+<rect x="764.3" y="563.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>local/MiniCPM-V 4.7 1B G3: 23.46</title></rect>
+<rect x="764.3" y="563.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="787.7" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">23.5</text>
+<text x="808.0" y="574.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">39</text>
+<rect x="813.0" y="563.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>local/MiniCPM-V 4.7 1B G4: 5.92</title></rect>
+<rect x="813.0" y="563.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="836.3" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">5.9</text>
+<text x="856.7" y="574.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">40</text>
+<rect x="861.7" y="563.0" width="46.7" height="32.0" rx="3" fill="#6da7ec"><title>local/MiniCPM-V 4.7 1B G5: 90.13</title></rect>
+<text x="885.0" y="583.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">90.1</text>
+<rect x="910.3" y="563.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>local/MiniCPM-V 4.7 1B G6: 18.00</title></rect>
+<rect x="910.3" y="563.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="933.7" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">18.0</text>
+<text x="954.0" y="574.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">41</text>
+<rect x="959.0" y="563.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>local/MiniCPM-V 4.7 1B G7: 23.91</title></rect>
+<rect x="959.0" y="563.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="982.3" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">23.9</text>
+<text x="1002.7" y="574.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">42</text>
+<rect x="1007.7" y="563.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>local/MiniCPM-V 4.7 1B G8: 4.76</title></rect>
+<rect x="1007.7" y="563.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="1031.0" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">4.8</text>
+<text x="1051.3" y="574.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">43</text>
+<rect x="1068.3" y="563.0" width="46.7" height="32.0" rx="3" fill="#184f95"><title>local/MiniCPM-V 4.7 1B Extreme: 5.42</title></rect>
+<text x="1091.7" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">5.4</text>
+<text x="24.0" y="619.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">ll-alpha</text>
+<text x="24.0" y="633.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 0/0/0 - 0/36 scored</text>
+<rect x="266.0" y="606.0" width="2.0" height="22.0" rx="4" fill="#3987e5"><title>ll-alpha: suite 0.00 over 0 scenarios</title></rect>
+<rect x="266.0" y="606.0" width="2.0" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="621.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">0.00*</text>
+<text x="594.0" y="621.5" font-size="12.5" fill="#9a988f" text-anchor="start" font-weight="normal">-</text>
+<rect x="667.0" y="601.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="690.3" y="621.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="710.7" y="612.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">44</text>
+<rect x="715.7" y="601.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="739.0" y="621.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="759.3" y="612.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">45</text>
+<rect x="764.3" y="601.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="787.7" y="621.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="808.0" y="612.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">46</text>
+<rect x="813.0" y="601.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="836.3" y="621.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="856.7" y="612.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">47</text>
+<rect x="861.7" y="601.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="885.0" y="621.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="905.3" y="612.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">48</text>
+<rect x="910.3" y="601.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="933.7" y="621.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="954.0" y="612.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">49</text>
+<rect x="959.0" y="601.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="982.3" y="621.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="1002.7" y="612.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">50</text>
+<rect x="1007.7" y="601.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="1031.0" y="621.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="1051.3" y="612.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">51</text>
+<rect x="1068.3" y="601.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="1091.7" y="621.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="24.0" y="657.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">muse-spark</text>
+<text x="24.0" y="671.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">P/PA/F 0/0/0 - 0/36 scored</text>
+<rect x="266.0" y="644.0" width="2.0" height="22.0" rx="4" fill="#3987e5"><title>muse-spark: suite 0.00 over 0 scenarios</title></rect>
+<rect x="266.0" y="644.0" width="2.0" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="659.5" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">0.00*</text>
+<text x="594.0" y="659.5" font-size="12.5" fill="#9a988f" text-anchor="start" font-weight="normal">-</text>
+<rect x="667.0" y="639.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="690.3" y="659.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="710.7" y="650.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">52</text>
+<rect x="715.7" y="639.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="739.0" y="659.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="759.3" y="650.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">53</text>
+<rect x="764.3" y="639.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="787.7" y="659.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="808.0" y="650.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">54</text>
+<rect x="813.0" y="639.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="836.3" y="659.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="856.7" y="650.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">55</text>
+<rect x="861.7" y="639.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="885.0" y="659.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="905.3" y="650.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">56</text>
+<rect x="910.3" y="639.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="933.7" y="659.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="954.0" y="650.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">57</text>
+<rect x="959.0" y="639.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="982.3" y="659.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="1002.7" y="650.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">58</text>
+<rect x="1007.7" y="639.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="1031.0" y="659.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="1051.3" y="650.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">59</text>
+<rect x="1068.3" y="639.0" width="46.7" height="32.0" rx="3" fill="#262624"/>
+<text x="1091.7" y="659.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">n/a</text>
+<text x="666.0" y="708.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">Group score:</text>
+<rect x="744.0" y="698.0" width="14" height="12" rx="2" fill="#9ec5f4"/>
+<text x="762.0" y="708.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">100</text>
+<rect x="788.6" y="698.0" width="14" height="12" rx="2" fill="#6da7ec"/>
+<text x="806.6" y="708.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">90-99.9</text>
+<rect x="858.0" y="698.0" width="14" height="12" rx="2" fill="#3987e5"/>
+<text x="876.0" y="708.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">75-89.9</text>
+<rect x="927.4" y="698.0" width="14" height="12" rx="2" fill="#256abf"/>
+<text x="945.4" y="708.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">50-74.9</text>
+<rect x="996.8" y="698.0" width="14" height="12" rx="2" fill="#184f95"/>
+<text x="1014.8" y="708.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">&lt;50</text>
+<rect x="744.0" y="718.0" width="14" height="12" rx="2" fill="#3987e5"/>
+<rect x="744.0" y="718.0" width="14" height="12" rx="2" fill="url(#hatch)"/>
+<text x="762.0" y="728.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">hatched = a regular-tier PARTIAL/FAIL or an excluded scenario</text>
+<text x="762.0" y="744.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">Extreme = mean of the extreme scenarios (one per group, none for G6)</text>
+<text x="762.0" y="760.0" font-size="11" fill="#c3c2b7" text-anchor="start" font-weight="normal">small numbers refer to the notes below</text>
+<text x="266.0" y="790.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">Tokens (prompt + completion, as reported)</text>
+<text x="706.0" y="790.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">Failed tool calls / executed</text>
+<line x1="266.0" y1="808.0" x2="266.0" y2="1378.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="266.0" y="1394.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">0</text>
+<line x1="376.0" y1="808.0" x2="376.0" y2="1378.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="376.0" y="1394.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">200k</text>
+<line x1="486.0" y1="808.0" x2="486.0" y2="1378.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="486.0" y="1394.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">400k</text>
+<line x1="596.0" y1="808.0" x2="596.0" y2="1378.0" stroke="#2c2c2a" stroke-width="1"/>
+<text x="596.0" y="1394.0" font-size="11" fill="#9a988f" text-anchor="middle" font-weight="normal">600k</text>
+<text x="24.0" y="831.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">claude/Sonnet 5.5</text>
+<rect x="266.0" y="816.0" width="23.8" height="22.0" rx="4" fill="#3987e5"><title>claude/Sonnet 5.5: 43308 tokens</title></rect>
+<text x="295.8" y="831.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">43,308</text>
+<rect x="706.0" y="816.0" width="224.6" height="22.0" rx="4" fill="#262624"/>
+<text x="936.6" y="831.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">0 / 107</text>
+<text x="24.0" y="869.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">codex/GPT-6.1 Sol</text>
+<rect x="266.0" y="854.0" width="24.0" height="22.0" rx="4" fill="#3987e5"><title>codex/GPT-6.1 Sol: 43726 tokens</title></rect>
+<text x="296.0" y="869.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">43,726</text>
+<rect x="706.0" y="854.0" width="214.1" height="22.0" rx="4" fill="#262624"/>
+<text x="926.1" y="869.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">0 / 102</text>
+<text x="24.0" y="907.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">mimo-flash</text>
+<rect x="266.0" y="892.0" width="12.4" height="22.0" rx="4" fill="#3987e5"><title>mimo-flash: 22462 tokens</title></rect>
+<text x="284.4" y="907.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">22,462</text>
+<rect x="706.0" y="892.0" width="151.1" height="22.0" rx="4" fill="#262624"/>
+<rect x="706.0" y="892.0" width="4.2" height="22.0" rx="4" fill="#f2877f"><title>mimo-flash: 2 of 72 executed calls failed</title></rect>
+<text x="863.1" y="907.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">2 / 72</text>
+<text x="24.0" y="945.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">longcat</text>
+<rect x="266.0" y="930.0" width="12.5" height="22.0" rx="4" fill="#3987e5"><title>longcat: 22653 tokens</title></rect>
+<text x="284.5" y="945.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">22,653</text>
+<rect x="706.0" y="930.0" width="155.3" height="22.0" rx="4" fill="#262624"/>
+<rect x="706.0" y="930.0" width="10.5" height="22.0" rx="4" fill="#f2877f"><title>longcat: 5 of 74 executed calls failed</title></rect>
+<text x="867.3" y="945.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">5 / 74</text>
+<text x="24.0" y="983.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">deepseek-flash</text>
+<rect x="266.0" y="968.0" width="32.1" height="22.0" rx="4" fill="#3987e5"><title>deepseek-flash: 58323 tokens</title></rect>
+<text x="304.1" y="983.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">58,323</text>
+<rect x="706.0" y="968.0" width="264.4" height="22.0" rx="4" fill="#262624"/>
+<rect x="706.0" y="968.0" width="14.7" height="22.0" rx="4" fill="#f2877f"><title>deepseek-flash: 7 of 126 executed calls failed</title></rect>
+<text x="976.4" y="983.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">7 / 126</text>
+<text x="24.0" y="1021.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">pickle</text>
+<rect x="266.0" y="1006.0" width="13.6" height="22.0" rx="4" fill="#3987e5"><title>pickle: 24745 tokens</title></rect>
+<text x="285.6" y="1021.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">24,745</text>
+<rect x="706.0" y="1006.0" width="134.3" height="22.0" rx="4" fill="#262624"/>
+<rect x="706.0" y="1006.0" width="4.2" height="22.0" rx="4" fill="#f2877f"><title>pickle: 2 of 64 executed calls failed</title></rect>
+<text x="846.3" y="1021.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">2 / 64</text>
+<text x="24.0" y="1059.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">codex/GPT-6 Luna</text>
+<rect x="266.0" y="1044.0" width="28.6" height="22.0" rx="4" fill="#3987e5"><title>codex/GPT-6 Luna: 52026 tokens</title></rect>
+<text x="300.6" y="1059.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">52,026</text>
+<rect x="706.0" y="1044.0" width="281.2" height="22.0" rx="4" fill="#262624"/>
+<rect x="706.0" y="1044.0" width="35.7" height="22.0" rx="4" fill="#f2877f"><title>codex/GPT-6 Luna: 17 of 134 executed calls failed</title></rect>
+<text x="993.2" y="1059.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">17 / 134</text>
+<text x="24.0" y="1097.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">glm-flash</text>
+<rect x="266.0" y="1082.0" width="15.9" height="22.0" rx="4" fill="#3987e5"><title>glm-flash: 28846 tokens</title></rect>
+<text x="287.9" y="1097.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">28,846</text>
+<rect x="706.0" y="1082.0" width="184.7" height="22.0" rx="4" fill="#262624"/>
+<rect x="706.0" y="1082.0" width="21.0" height="22.0" rx="4" fill="#f2877f"><title>glm-flash: 10 of 88 executed calls failed</title></rect>
+<text x="896.7" y="1097.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">10 / 88</text>
+<text x="24.0" y="1135.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">claude/Haiku 4.5</text>
+<rect x="266.0" y="1120.0" width="23.8" height="22.0" rx="4" fill="#3987e5"><title>claude/Haiku 4.5: 43302 tokens</title></rect>
+<text x="295.8" y="1135.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">43,302</text>
+<rect x="706.0" y="1120.0" width="256.0" height="22.0" rx="4" fill="#262624"/>
+<rect x="706.0" y="1120.0" width="60.9" height="22.0" rx="4" fill="#f2877f"><title>claude/Haiku 4.5: 29 of 122 executed calls failed</title></rect>
+<text x="968.0" y="1135.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">29 / 122</text>
+<text x="24.0" y="1173.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">local/qwen3.8-flash-coder-iq1_m</text>
+<rect x="266.0" y="1158.0" width="306.2" height="22.0" rx="4" fill="#3987e5"><title>local/qwen3.8-flash-coder-iq1_m: 556681 tokens</title></rect>
+<text x="578.2" y="1173.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">556,681</text>
+<rect x="706.0" y="1158.0" width="287.5" height="22.0" rx="4" fill="#262624"/>
+<rect x="706.0" y="1158.0" width="37.8" height="22.0" rx="4" fill="#f2877f"><title>local/qwen3.8-flash-coder-iq1_m: 18 of 137 executed calls failed</title></rect>
+<text x="999.5" y="1173.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">18 / 137</text>
+<text x="24.0" y="1211.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">bunny</text>
+<rect x="266.0" y="1196.0" width="33.7" height="22.0" rx="4" fill="#3987e5"><title>bunny: 61212 tokens</title></rect>
+<text x="305.7" y="1211.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">61,212</text>
+<rect x="706.0" y="1196.0" width="340.0" height="22.0" rx="4" fill="#262624"/>
+<rect x="706.0" y="1196.0" width="92.3" height="22.0" rx="4" fill="#f2877f"><title>bunny: 44 of 162 executed calls failed</title></rect>
+<text x="1052.0" y="1211.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">44 / 162</text>
+<text x="24.0" y="1249.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">beam</text>
+<rect x="266.0" y="1234.0" width="20.1" height="22.0" rx="4" fill="#3987e5"><title>beam: 36582 tokens</title></rect>
+<text x="292.1" y="1249.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">36,582</text>
+<rect x="706.0" y="1234.0" width="136.4" height="22.0" rx="4" fill="#262624"/>
+<rect x="706.0" y="1234.0" width="4.0" height="22.0" rx="4" fill="#f2877f"><title>beam: 1 of 65 executed calls failed</title></rect>
+<text x="848.4" y="1249.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">1 / 65</text>
+<text x="24.0" y="1287.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">local/MiniCPM-V 4.7 1B</text>
+<rect x="266.0" y="1272.0" width="258.0" height="22.0" rx="4" fill="#3987e5"><title>local/MiniCPM-V 4.7 1B: 469115 tokens</title></rect>
+<text x="530.0" y="1287.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">469,115</text>
+<rect x="706.0" y="1272.0" width="316.9" height="22.0" rx="4" fill="#262624"/>
+<rect x="706.0" y="1272.0" width="128.0" height="22.0" rx="4" fill="#f2877f"><title>local/MiniCPM-V 4.7 1B: 61 of 151 executed calls failed</title></rect>
+<text x="1028.9" y="1287.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">61 / 151</text>
+<text x="24.0" y="1325.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">ll-alpha</text>
+<rect x="266.0" y="1310.0" width="2.0" height="22.0" rx="4" fill="#3987e5"><title>ll-alpha: 0 tokens</title></rect>
+<text x="274.0" y="1325.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">0</text>
+<rect x="706.0" y="1310.0" width="2.0" height="22.0" rx="4" fill="#262624"/>
+<text x="712.0" y="1325.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">0 / 0</text>
+<text x="24.0" y="1363.0" font-size="13" fill="#ffffff" text-anchor="start" font-weight="600">muse-spark</text>
+<rect x="266.0" y="1348.0" width="2.0" height="22.0" rx="4" fill="#3987e5"><title>muse-spark: 0 tokens</title></rect>
+<text x="274.0" y="1363.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">0</text>
+<rect x="706.0" y="1348.0" width="2.0" height="22.0" rx="4" fill="#262624"/>
+<text x="712.0" y="1363.5" font-size="12" fill="#ffffff" text-anchor="start" font-weight="normal">0 / 0</text>
+<text x="24.0" y="1418.0" font-size="12.5" fill="#ffffff" text-anchor="start" font-weight="600">Notes</text>
+<text x="24.0" y="1436.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">* incomplete run: mean over the scored scenarios only, not rankable against complete rows (hatched bar).</text>
+<text x="24.0" y="1453.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">1. claude/Sonnet 5.5 - G6: g6_free_build not run</text>
+<text x="24.0" y="1469.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">2. codex/GPT-6.1 Sol - G6: g6_free_build not run</text>
+<text x="24.0" y="1485.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">3. mimo-flash - G1: g1_extreme_fortress Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="1501.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">4. mimo-flash - G3: g3_extreme_dungeon_route Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="1517.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">5. mimo-flash - G4: g4_extreme_auto_battler Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="1533.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">6. mimo-flash - G6: g6_free_build Environment-attributed, no valid rerun; excluded from the score [013724]; g6_free_build_vision not run</text>
+<text x="24.0" y="1549.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">7. mimo-flash - G7: g7_extreme_dungeon Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="1565.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">8. longcat - G1: g1_extreme_fortress Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="1581.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">9. longcat - G3: g3_extreme_dungeon_route Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="1597.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">10. longcat - G4: g4_crafting_chain PARTIAL 60.00 [013724]; g4_extreme_auto_battler Environment-attributed, no valid rerun; excluded from the score</text>
+<text x="40.0" y="1613.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">[013724]</text>
+<text x="24.0" y="1629.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">11. longcat - G6: g6_free_build Environment-attributed, no valid rerun; excluded from the score [013724]; g6_free_build_vision not run</text>
+<text x="24.0" y="1645.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">12. longcat - G7: g7_extreme_dungeon Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="1661.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">13. deepseek-flash - G4: g4_crafting_chain PARTIAL 60.00 [013724]</text>
+<text x="24.0" y="1677.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">14. deepseek-flash - G6: g6_free_build PARTIAL 81.00 [013724]; g6_free_build_vision not run</text>
+<text x="24.0" y="1693.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">15. pickle - G4: g4_extreme_auto_battler Environment-attributed, no valid rerun; excluded from the score [013724]; g4_shop Environment-attributed, no</text>
+<text x="40.0" y="1709.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="1725.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">16. pickle - G5: g5_exactly_three FAIL 15.00 [013724]</text>
+<text x="24.0" y="1741.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">17. pickle - G6: g6_free_build Environment-attributed, no valid rerun; excluded from the score [013724]; g6_free_build_vision not run</text>
+<text x="24.0" y="1757.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">18. pickle - G7: g7_extreme_dungeon Environment-attributed, no valid rerun; excluded from the score [013724]; g7_key_puzzle Environment-attributed, no</text>
+<text x="40.0" y="1773.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="1789.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">19. pickle - G8: g8_extreme_siege_director Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="1805.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">20. codex/GPT-6 Luna - G6: g6_free_build_vision PARTIAL 84.00 [224850]; g6_free_build not run</text>
+<text x="24.0" y="1821.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">21. glm-flash - G1: g1_extreme_fortress Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="1837.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">22. glm-flash - G4: g4_extreme_auto_battler Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="1853.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">23. glm-flash - G6: g6_free_build Environment-attributed, no valid rerun; excluded from the score [013724]; g6_free_build_vision not run</text>
+<text x="24.0" y="1869.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">24. glm-flash - G7: g7_extreme_dungeon Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="1885.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">25. claude/Haiku 4.5 - G5: g5_tool_budget FAIL 10.00 [224850]</text>
+<text x="24.0" y="1901.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">26. claude/Haiku 4.5 - G6: g6_free_build_vision PARTIAL 60.00 [224850]; g6_free_build not run</text>
+<text x="24.0" y="1917.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">27. local/qwen3.8-flash-coder-iq1_m - G6: g6_free_build not run</text>
+<text x="24.0" y="1933.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">28. bunny - G1: g1_spawn_arena FAIL 4.55 [013724]</text>
+<text x="24.0" y="1949.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">29. bunny - G6: g6_free_build PARTIAL 74.00 [013724]; g6_free_build_vision not run</text>
+<text x="24.0" y="1965.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">30. bunny - G8: g8_tidy_scene FAIL 5.00 [013724]</text>
+<text x="24.0" y="1981.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">31. beam - G2: g2_crafting_rules PARTIAL 54.55 [013724]; g2_multi_arg_damage FAIL 5.56 [013724]</text>
+<text x="24.0" y="1997.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">32. beam - G3: g3_boolean_dungeon FAIL 4.76 [013724]; g3_fibonacci_rewards FAIL 5.00 [013724]</text>
+<text x="24.0" y="2013.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">33. beam - G4: g4_shop FAIL 4.17 [013724]</text>
+<text x="24.0" y="2029.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">34. beam - G5: g5_spawn_only FAIL 40.00 [013724]</text>
+<text x="24.0" y="2045.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">35. beam - G6: g6_free_build FAIL 0.00 [013724]; g6_free_build_vision not run</text>
+<text x="24.0" y="2061.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">36. beam - G8: g8_state_rule FAIL 9.09 [013724]; g8_tidy_scene FAIL 10.00 [013724]</text>
+<text x="24.0" y="2077.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">37. local/MiniCPM-V 4.7 1B - G1: g1_coin_collector FAIL 38.89 [224850]; g1_constraint_budget PARTIAL 83.33 [224850]</text>
+<text x="24.0" y="2093.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">38. local/MiniCPM-V 4.7 1B - G2: g2_crafting_rules PARTIAL 81.82 [224850]; g2_flat_damage FAIL 5.00 [224850]; g2_win_condition FAIL 5.26 [224850]</text>
+<text x="24.0" y="2109.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">39. local/MiniCPM-V 4.7 1B - G3: g3_balanced_enemies FAIL 36.84 [224850]; g3_clamped_regen FAIL 10.00 [224850]; g3_fibonacci_rewards FAIL 5.00</text>
+<text x="40.0" y="2125.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">[224850]; g3_quadratic_score FAIL 5.26 [224850]; g3_tiered_pricing FAIL 10.00 [224850]</text>
+<text x="24.0" y="2141.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">40. local/MiniCPM-V 4.7 1B - G4: g4_combat FAIL 12.50 [224850]; g4_crafting_chain FAIL 5.00 [224850]; g4_shop FAIL 4.17 [224850]</text>
+<text x="24.0" y="2157.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">41. local/MiniCPM-V 4.7 1B - G6: g6_free_build_vision FAIL 18.00 [224850]; g6_free_build not run</text>
+<text x="24.0" y="2173.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">42. local/MiniCPM-V 4.7 1B - G7: g7_key_puzzle FAIL 47.83 [224850]</text>
+<text x="24.0" y="2189.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">43. local/MiniCPM-V 4.7 1B - G8: g8_selective_raise FAIL 13.33 [224850]; g8_state_rule FAIL 4.55 [224850]; g8_tidy_scene FAIL 0.00 [224850]</text>
+<text x="24.0" y="2205.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">44. ll-alpha - G1: g1_coin_collector Environment-attributed, no valid rerun; excluded from the score [013724]; g1_constraint_budget</text>
+<text x="40.0" y="2221.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]; g1_extreme_fortress Environment-attributed, no valid rerun; excluded from</text>
+<text x="40.0" y="2237.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">the score [013724]; g1_spawn_arena Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="2253.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">45. ll-alpha - G2: g2_crafting_rules Environment-attributed, no valid rerun; excluded from the score [013724]; g2_extreme_damage_pipeline</text>
+<text x="40.0" y="2269.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]; g2_flat_damage Environment-attributed, no valid rerun; excluded from the</text>
+<text x="40.0" y="2285.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">score [013724]; g2_level_damage Environment-attributed, no valid rerun; excluded from the score [013724]; g2_multi_arg_damage Environment-attributed,</text>
+<text x="40.0" y="2301.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">no valid rerun; excluded from the score [013724]; g2_win_condition Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="2317.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">46. ll-alpha - G3: g3_balanced_enemies Environment-attributed, no valid rerun; excluded from the score [013724]; g3_boolean_dungeon</text>
+<text x="40.0" y="2333.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]; g3_clamped_regen Environment-attributed, no valid rerun; excluded from the</text>
+<text x="40.0" y="2349.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">score [013724]; g3_extreme_dungeon_route Environment-attributed, no valid rerun; excluded from the score [013724]; g3_fibonacci_rewards</text>
+<text x="40.0" y="2365.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]; g3_quadratic_score Environment-attributed, no valid rerun; excluded from the</text>
+<text x="40.0" y="2381.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">score [013724]; g3_tiered_pricing Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="2397.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">47. ll-alpha - G4: g4_combat Environment-attributed, no valid rerun; excluded from the score [013724]; g4_crafting_chain Environment-attributed, no</text>
+<text x="40.0" y="2413.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">valid rerun; excluded from the score [013724]; g4_extreme_auto_battler Environment-attributed, no valid rerun; excluded from the score [013724];</text>
+<text x="40.0" y="2429.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">g4_shop Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="2445.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">48. ll-alpha - G5: g5_exactly_three Environment-attributed, no valid rerun; excluded from the score [013724]; g5_extreme_work_order</text>
+<text x="40.0" y="2461.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]; g5_no_lua Environment-attributed, no valid rerun; excluded from the score</text>
+<text x="40.0" y="2477.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">[013724]; g5_ordered_spawn Environment-attributed, no valid rerun; excluded from the score [013724]; g5_protected_chest Environment-attributed, no</text>
+<text x="40.0" y="2493.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">valid rerun; excluded from the score [013724]; g5_spawn_only Environment-attributed, no valid rerun; excluded from the score [013724]; g5_tool_budget</text>
+<text x="40.0" y="2509.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="2525.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">49. ll-alpha - G6: g6_free_build Environment-attributed, no valid rerun; excluded from the score [013724]; g6_free_build_vision not run</text>
+<text x="24.0" y="2541.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">50. ll-alpha - G7: g7_extreme_dungeon Environment-attributed, no valid rerun; excluded from the score [013724]; g7_key_puzzle Environment-attributed,</text>
+<text x="40.0" y="2557.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="2573.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">51. ll-alpha - G8: g8_extreme_siege_director Environment-attributed, no valid rerun; excluded from the score [013724]; g8_selective_raise</text>
+<text x="40.0" y="2589.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]; g8_state_rule Environment-attributed, no valid rerun; excluded from the</text>
+<text x="40.0" y="2605.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">score [013724]; g8_tidy_scene Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="2621.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">52. muse-spark - G1: g1_coin_collector Environment-attributed, no valid rerun; excluded from the score [013724]; g1_constraint_budget</text>
+<text x="40.0" y="2637.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]; g1_extreme_fortress Environment-attributed, no valid rerun; excluded from</text>
+<text x="40.0" y="2653.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">the score [013724]; g1_spawn_arena Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="2669.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">53. muse-spark - G2: g2_crafting_rules Environment-attributed, no valid rerun; excluded from the score [013724]; g2_extreme_damage_pipeline</text>
+<text x="40.0" y="2685.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]; g2_flat_damage Environment-attributed, no valid rerun; excluded from the</text>
+<text x="40.0" y="2701.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">score [013724]; g2_level_damage Environment-attributed, no valid rerun; excluded from the score [013724]; g2_multi_arg_damage Environment-attributed,</text>
+<text x="40.0" y="2717.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">no valid rerun; excluded from the score [013724]; g2_win_condition Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="2733.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">54. muse-spark - G3: g3_balanced_enemies Environment-attributed, no valid rerun; excluded from the score [013724]; g3_boolean_dungeon</text>
+<text x="40.0" y="2749.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]; g3_clamped_regen Environment-attributed, no valid rerun; excluded from the</text>
+<text x="40.0" y="2765.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">score [013724]; g3_extreme_dungeon_route Environment-attributed, no valid rerun; excluded from the score [013724]; g3_fibonacci_rewards</text>
+<text x="40.0" y="2781.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]; g3_quadratic_score Environment-attributed, no valid rerun; excluded from the</text>
+<text x="40.0" y="2797.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">score [013724]; g3_tiered_pricing Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="2813.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">55. muse-spark - G4: g4_combat Environment-attributed, no valid rerun; excluded from the score [013724]; g4_crafting_chain Environment-attributed, no</text>
+<text x="40.0" y="2829.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">valid rerun; excluded from the score [013724]; g4_extreme_auto_battler Environment-attributed, no valid rerun; excluded from the score [013724];</text>
+<text x="40.0" y="2845.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">g4_shop Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="2861.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">56. muse-spark - G5: g5_exactly_three Environment-attributed, no valid rerun; excluded from the score [013724]; g5_extreme_work_order</text>
+<text x="40.0" y="2877.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]; g5_no_lua Environment-attributed, no valid rerun; excluded from the score</text>
+<text x="40.0" y="2893.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">[013724]; g5_ordered_spawn Environment-attributed, no valid rerun; excluded from the score [013724]; g5_protected_chest Environment-attributed, no</text>
+<text x="40.0" y="2909.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">valid rerun; excluded from the score [013724]; g5_spawn_only Environment-attributed, no valid rerun; excluded from the score [013724]; g5_tool_budget</text>
+<text x="40.0" y="2925.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="2941.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">57. muse-spark - G6: g6_free_build Environment-attributed, no valid rerun; excluded from the score [013724]; g6_free_build_vision not run</text>
+<text x="24.0" y="2957.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">58. muse-spark - G7: g7_extreme_dungeon Environment-attributed, no valid rerun; excluded from the score [013724]; g7_key_puzzle</text>
+<text x="40.0" y="2973.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="2989.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">59. muse-spark - G8: g8_extreme_siege_director Environment-attributed, no valid rerun; excluded from the score [013724]; g8_selective_raise</text>
+<text x="40.0" y="3005.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [013724]; g8_state_rule Environment-attributed, no valid rerun; excluded from the</text>
+<text x="40.0" y="3021.0" font-size="11.5" fill="#c3c2b7" text-anchor="start" font-weight="normal">score [013724]; g8_tidy_scene Environment-attributed, no valid rerun; excluded from the score [013724]</text>
+<text x="24.0" y="3043.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="600">Run ids (Docs/BenchmarkRuns):</text>
+<text x="24.0" y="3058.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">claude/Sonnet 5.5: 20261015_224850</text>
+<text x="24.0" y="3073.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">codex/GPT-6.1 Sol: 20261015_224850</text>
+<text x="24.0" y="3088.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">mimo-flash: 20261017_013724</text>
+<text x="24.0" y="3103.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">longcat: 20261017_013724</text>
+<text x="24.0" y="3118.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">deepseek-flash: 20261017_013724</text>
+<text x="24.0" y="3133.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">pickle: 20261017_013724</text>
+<text x="24.0" y="3148.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">codex/GPT-6 Luna: 20261015_224850</text>
+<text x="24.0" y="3163.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">glm-flash: 20261017_013724</text>
+<text x="24.0" y="3178.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">claude/Haiku 4.5: 20261015_224850</text>
+<text x="24.0" y="3193.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">local/qwen3.8-flash-coder-iq1_m: 20261015_224850</text>
+<text x="24.0" y="3208.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">bunny: 20261017_013724</text>
+<text x="24.0" y="3223.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">beam: 20261017_013724</text>
+<text x="24.0" y="3238.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">local/MiniCPM-V 4.7 1B: 20261015_224850</text>
+<text x="24.0" y="3253.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">ll-alpha: 20261017_013724</text>
+<text x="24.0" y="3268.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">muse-spark: 20261017_013724</text>
+<text x="24.0" y="3283.0" font-size="11" fill="#9a988f" text-anchor="start" font-weight="normal">Each scenario uses the newest model-attributable result of that model within the suite; environment/framework failures never count as model scores. Built by tools/benchmark_chart.py.</text>
 </svg>

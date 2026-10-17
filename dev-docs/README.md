@@ -16,6 +16,7 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 - MOD_SYSTEM_DESIGN_NOTES.md — the mod-panel 6 FPS investigation and the original mod-system phase plan (moved here from `Docs/CoreAIMods/mod-system.md`)
 - PERF_VS_ROBLOX.md — can CoreAI's runtime be faster than Roblox: an engineering assessment
 - LUA_VM_BENCHMARK_PLAN.md — Lua-CSharp vs Roblox Luau micro-benchmark kit and results table
+- opencode-free-bench-2026-10-16/RUN.md — the 2026-10-17 OpenCode free-tier benchmark sweep: target list, the free-tier `FreeTierError` gate that blocked it, the neoxider-agents fix, and results (7 of 9 scored, 2 routes down with provider 502)
 
 ## Capacity and measurements
 

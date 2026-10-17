@@ -74,6 +74,61 @@ How to read the run:
   model-view screenshot of the image-feedback twin. The numeric G6 grader does not score visual composition, so
   look at the screenshots as well as the score.
 
+## OpenCode Free-Tier Sweep — Suite v2.0
+
+Maintainer run `20261017_013724` (2026-10-17): every OpenCode free model except Nemotron
+(9 targets), suite v2.0, all groups G1-G8, one repetition, provider-default reasoning effort and
+temperature, through the Neoxider Agents OpenAI-compatible bridge (ports 8831-8839, 2 targets at a
+time). Raw reports are archived in the [run archive](BenchmarkRuns/2026-10-17/). Nemotron routes
+(`nemotron-3-ultra-free`, `nemotron-3.5-lightning-free`, `nemotron-3.5-super-vl-free`) were
+deliberately excluded from the sweep.
+
+| Model | Suite | Extreme | Regular | P/PA/F | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | Tool errors | Tokens | Runs |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `opencode/mimo-v2.6-flash-free` | **99.44** | 97.72 (3/3) | 99.63 | 30/0/0 | 100.00 | 100.00 | 100.00 | 100.00 | 99.02 | – | 100.00 | 97.50 | 2/72 | 22462 | `013724` |
+| `opencode/longcat-2.5-preview-free` | **97.71** | 100.00 (3/3) | 97.46 | 29/1/0 | 96.97 | 100.00 | 100.00 | 86.67 | 100.00 | – | 100.00 | 95.12 | 5/74 | 22653 | `013724` |
+| `opencode/deepseek-v4.1-flash-free` | **97.48** | 100.00 (7/7) | 96.85 | 33/2/0 | 97.73 | 100.00 | 100.00 | 88.96 | 99.14 | 81.00 | 100.00 | 97.50 | 7/126 | 58323 | `013724` |
+| `opencode/big-pickle` | **96.64** | 99.25 (4/4) | 96.22 | 28/0/1 | 99.25 | 100.00 | 100.00 | 100.00 | 87.86 | – | – | 96.83 | 2/64 | 24745 | `013724` |
+| `opencode/glm-5.3-flash-free` | **95.03** | 64.99 (1/4) | 99.48 | 28/2/1 | 100.00 | 83.83 | 100.00 | 100.00 | 95.64 | – | 100.00 | 93.38 | 10/88 | 28846 | `013724` |
+| `opencode/space-bunny-free` | **90.02** | 82.39 (5/7) | 91.93 | 30/2/3 | 76.14 | 100.00 | 85.99 | 99.25 | 100.00 | 74.00 | 91.00 | 72.83 | 44/162 | 61212 | `013724` |
+| `opencode/beam-free` | **72.28** | 72.27 (5/7) | 72.29 | 24/1/10 | 97.73 | 60.52 | 58.95 | 76.04 | 91.43 | 0.00 | 100.00 | 54.77 | 1/65 | 36582 | `013724` |
+
+How to read the sweep:
+
+- **Free-tier models now sit in the same band as paid frontier runs.** `mimo-flash` (99.44) and
+  `deepseek-v4.1-flash-free` (97.48, extreme tier 100.00 with 7/7) rank between GPT-6 Luna (95.82)
+  and the paid leaders on the same suite version.
+- **Two routes produced no score.** `opencode/ll-alpha-free` and
+  `opencode/muse-spark-1.3-contributor-free` answered `HTTP 502 Unexpected server error` on every
+  scenario, so all 35 results are attributed to Environment and excluded from the score. Both routes
+  answered normally during the pre-flight check hours earlier and fail the same way on the raw
+  OpenCode CLI with its default agent, so this is a provider-side outage, not a harness or profile
+  effect. They are not ranked here and must be re-run before any claim about them.
+- **A dash (`–`) is missing data, not a zero.** Those scenarios were graded Environment during the
+  run (provider 502/timeout) and are excluded from that model's scores, which is why
+  `big-pickle` has no G6/G7 and `mimo-flash` only 3 extreme scenarios. The scored rows are therefore
+  partial-group measurements and are not directly rankable against a full 35/36 row — read them
+  together with the `(n/36)` scenario count the chart prints.
+- **`beam-free` fails on tool emission, not on tool use.** Where it emits calls it does well
+  (G1 97.73, G5 91.43, 1 tool error in 65 calls), but 10 scenarios score 0 because the model answered
+  in prose without a single tool call.
+- **`space-bunny-free` has by far the worst tool-error rate** in the sweep (44/162 failed calls,
+  27%), which is where most of its points go: its G5/G4 scores stay at 100/99.25 while G1 and G8 lose
+  on failed operations.
+
+> **Methodology / caveats — read before citing.** One repetition per model, streaming on, native
+> tools on, no temperature sent (each model's provider default), Unity 6000.3.14f1, suite v2.0 with
+> the benchmark v2 prompts, run over the Neoxider Agents CLI bridge (higher latency than a direct
+> API; each completion spawns a CLI subprocess), so absolute tokens/time are not comparable to a
+> direct-API run. Bridge traffic ran under the **reduced-tool** opencode profile
+> (`AGENT_OPENCODE_FREETIER_COMPAT=1`, neoxider-agents `0b4f600`): the OpenCode free tier refuses
+> tool-less sessions with `FreeTierError` 403, so bridge sessions expose read-only tools (file reads,
+> todo/goal state, web reads) while shell, writes, edits, prompts, subagents and MCP stay disabled.
+> Only the text-protocol tool calls the bridge parses are graded, so a stray native read call cannot
+> inflate a score — but this profile differs from the zero-tool profile used by the 2026-09-29 v1.15
+> run, and the v1.14/v1.15 rows are historical anyway. Treat these as indicative single-shot results,
+> not a controlled multi-rep A/B.
+
 ## Historical Leaderboard — Suite v1.15
 
 Maintainer runs use the Neoxider Agents local API bridge: GPT-6 models through Codex CLI, and free Space Bunny through OpenCode. G6 is a separate image-feedback run with a maximum of 570 seconds for model work plus 30 seconds reserved for capture/export; its score replaces the G6 outcome of the other-groups run. The `Runs` column identifies raw JSON, Markdown transcript, executed-tool JSONL, screenshot, and complete Lua replay in the [run archive](BenchmarkRuns/2026-09-29/). Tool-error counts use executed calls in JSONL; the Markdown transcript also retains attempted calls that the tool orchestration deduplicated. The numeric G6 grader does not score visual composition, so inspect the screenshots as well as the score.
