@@ -50,6 +50,25 @@
 > verification notes" below. Latest full EditMode run: 6753 total / 6736 passed / 0 failed / 17 skipped (7.50.2).
 > Unreleased, in progress: benchmark suite 2.0 (`[Unreleased]` in both changelogs).
 
+## Benchmark reporting defects found by the 2026-10-17 free-tier sweep
+
+- [ ] A run with zero graded scenarios must not render a scored model card. When every result is
+  attributed to Environment, `BenchmarkReportFormatter.ModelCardScene` still prints
+  `Suite score 0.0/100`, grade `Failing`, `Scenario verdicts 0/0 pass` and an empty token footer, so a
+  dead provider route produces a card indistinguishable from a model that scored zero. It must say
+  "no graded scenarios" (and the suite/group/role tiles must stay unrated) — regression test in
+  CoreAiUnity EditMode.
+- [ ] The chart/leaderboard path must refuse to rank a partial run. `tools/benchmark_chart.py` emits
+  one ranked row per `metadata.modelId` regardless of how many scenarios were graded, so a model that
+  never ran G6 (the hardest group) is averaged over an easier mix and can outrank a full run. The
+  leaderboard's own submission rules already say partial-group runs are not rankable; the generator
+  must mark or exclude such rows and print the graded count next to the score.
+- [ ] Comparison notes should expose a like-for-like mean over the groups every compared model
+  actually ran, so a provider outage cannot silently reorder a table.
+- [ ] Benchmark target labels are the report's `modelId`, so short labels ("beam") leak into report
+  filenames, model cards and charts. `BenchmarkTargetList` should carry the provider's display name
+  separately from the id, or the UI should ask for the display name.
+
 ## Configuration defect verification
 
 - [x] F3/F4/F15/F18: align runtime transport timeout with the legacy cap, preserve all endpoint properties
