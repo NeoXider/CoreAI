@@ -34,13 +34,13 @@
   <Project Path="CoreAI.Mods.Editor.csproj" />
   <Project Path="Assembly-CSharp-firstpass.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
+  <Project Path="CoreAI.Net.Mirror.Tests.csproj" />
   <Project Path="CoreAI.Hub.UI.csproj" />
   <Project Path="CoreAI.Core.Tests.csproj" />
   <Project Path="CoreAI.ExampleGame.Tests.csproj" />
   <Project Path="CoreAI.LuauDownlevel.csproj" />
   <Project Path="Assembly-CSharp.csproj" />
   <Project Path="CoreAI.Tests.PlayMode.Scenarios.csproj" />
-  <Project Path="CoreAI.Net.Mirror.Tests.csproj" />
   <Project Path="IngameDebugConsole.Runtime.csproj" />
   <Project Path="Mirror.CompilerSymbols.csproj" />
   <Project Path="CoreAI.Tests.PlayMode.Shared.csproj" />
