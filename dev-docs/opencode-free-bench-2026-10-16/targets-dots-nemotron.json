@@ -1,0 +1,1 @@
+[{"baseUrl": "https://openrouter.ai/api/v1", "label": "Dots 3 Note Preview", "model": "dots-studio/dots-3-note-preview:free", "apiKey": "env:OPENROUTER_API_KEY"}, {"baseUrl": "https://openrouter.ai/api/v1", "label": "Nemotron 3.5 Lightning", "model": "nvidia/nemotron-3.5-lightning:free", "apiKey": "env:OPENROUTER_API_KEY"}]

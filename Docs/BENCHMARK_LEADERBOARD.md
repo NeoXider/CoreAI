@@ -11,7 +11,7 @@ Full methodology: [benchmark guide](../Assets/CoreAIBenchmark/README.md) · [ben
 
 Scores are only comparable **within the same suite version**. Scenario sets, checkpoint weights, penalties, and caps change between versions, so a v1.6 score and a hypothetical v1.7 score are different measurements even for the same model. The suite version is stamped into every report JSON (`suiteVersion`) and shown in the report header. When the suite version bumps, the leaderboard starts a new section; older sections are kept for history but never mixed into the current ranking.
 
-**Current suite version: v2.0** (G1-G8, 35 scenarios: 28 regular and 7 extreme, plus the optional G6 image-feedback twin). The first v2.0 maintainer run is published below. The v1.15 results are historical and cannot be ranked against v2.0.
+**Current suite version: v2.0** (G1-G8, 35 scenarios: 28 regular and 7 extreme, plus the optional G6 image-feedback twin). The current v2.0 section publishes the first maintainer run, the OpenCode free-tier sweep and its resumed run, a local qwen3.8 variant from the same multi-target run, and the 2026-10-18 DeepSeek/Dots/Nemotron runs. The v1.15 results are historical and cannot be ranked against v2.0.
 
 ### Suite version history
 
@@ -32,6 +32,10 @@ Scores are only comparable **within the same suite version**. Scenario sets, che
 <img src="Images/benchmark_leaderboard_2.0_dark.svg" alt="CoreAI Game-Creation Benchmark suite v2.0 leaderboard: suite score, extreme tier, group heatmap, tokens and failed tool calls" width="900">
 
 [Light version of the chart](Images/benchmark_leaderboard_2.0.svg).
+
+PNG exports of the same comparison charts: [dark PNG](Images/benchmark_leaderboard_2.0_dark.png), [light PNG](Images/benchmark_leaderboard_2.0.png).
+
+The chart merges every published v2.0 report under `Docs/BenchmarkRuns`: one row per display name, the newest usable scenario result wins, and newer Environment failures are filled from an older usable attempt when available. Rows with missing model-graded scenarios are hatched and are not rankable against complete rows.
 
 Maintainer run `20261015_224850` (2026-10-15): suite v2.0, 35 scenarios per model (28 regular, 7 extreme) plus the G6
 image-feedback build, one repetition, reasoning effort `high` (MiniCPM exposes none), no temperature sent
@@ -79,9 +83,12 @@ How to read the run:
 Maintainer run `20261017_013724` (2026-10-17): every OpenCode free model except Nemotron
 (9 targets), suite v2.0, all groups G1-G8, one repetition, provider-default reasoning effort and
 temperature, through the Neoxider Agents OpenAI-compatible bridge (ports 8831-8839, 2 targets at a
-time). Raw reports are archived in the [run archive](BenchmarkRuns/2026-10-17/). Nemotron routes
-(`nemotron-3-ultra-free`, `nemotron-3.5-lightning-free`, `nemotron-3.5-super-vl-free`) were
-deliberately excluded from the sweep.
+time). The run was later resumed as `20261017_122332` after provider outages; that resumed run
+completed on 2026-10-18 and is merged with the first attempt by display name. Raw reports are archived
+in the [run archive](BenchmarkRuns/2026-10-17/). Nemotron routes (`nemotron-3-ultra-free`,
+`nemotron-3.5-lightning-free`, `nemotron-3.5-super-vl-free`) were deliberately excluded from this
+OpenCode sweep; a later `nvidia/nemotron-3.5-lightning-free` route is published in the 2026-10-18 runs
+below.
 
 Model names below are the display names the OpenCode model picker shows; the bracketed id is what
 the bridge actually requested.
@@ -91,24 +98,27 @@ the bridge actually requested.
 
 | Model | Suite | Extreme | Regular | P/PA/F | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | Tool errors | Tokens | Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| DeepSeek V4.1 Flash Free (`opencode/deepseek-v4.1-flash-free`) | **97.48** | 100.00 (7/7) | 96.85 | 33/2/0 | 97.73 | 100.00 | 100.00 | 88.96 | 99.14 | 81.00 | 100.00 | 97.50 | 7/126 | 58323 | `013724` |
+| DeepSeek V4.1 Flash Free (`opencode/deepseek-v4.1-flash-free`) | **96.46** | 85.40 (5/7) | 99.23 | 33/1/1 | 97.73 | 100.00 | 100.00 | 100.00 | 100.00 | 97.00 | 86.00 | 79.08 | 3/131 | 51189 | `122332` |
 | Space Bunny Free (`opencode/space-bunny-free`) | **90.02** | 82.39 (5/7) | 91.93 | 30/2/3 | 76.14 | 100.00 | 85.99 | 99.25 | 100.00 | 74.00 | 91.00 | 72.83 | 44/162 | 61212 | `013724` |
-| Beam Free (`opencode/beam-free`) | **72.28** | 72.27 (5/7) | 72.29 | 24/1/10 | 97.73 | 60.52 | 58.95 | 76.04 | 91.43 | 0.00 | 100.00 | 54.77 | 1/65 | 36582 | `013724` |
+| Beam Free (`opencode/beam-free`) | **62.18** | 44.69 (3/7) | 66.55 | 21/0/14 | 76.00 | 36.30 | 32.56 | 52.00 | 100.00 | 0.00 | 100.00 | 79.64 | 0/58 | 33862 | `122332` |
+
+The first `013724` attempt scored 97.48 for DeepSeek and 72.28 for Beam; the completed resumed run
+replaces those full rows with the numbers above.
 
 **Incomplete runs — NOT rankable.** These models had scenarios attributed to Environment during a
 provider outage, so their suite score is a mean over a *different, easier* scenario set and cannot be
-compared with the table above. They are listed for completeness only; a re-run is required before
-any ranking claim. The **shared-6** column is the honest like-for-like number: the mean over the six
-groups every scored model in this sweep actually ran (G1, G2, G3, G4, G5, G8).
+compared with the table above. They are listed for completeness only; a clean re-run is still required
+before any ranking claim. The **shared-6** column is the honest like-for-like number: the mean over the
+six groups every scored model in this sweep actually ran (G1, G2, G3, G4, G5, G8).
 
-| Model | Graded | Suite (unrankable) | shared-6 | Missing | Run |
+| Model | Graded | Suite (unrankable) | shared-6 | Missing | Runs |
 |---|---:|---:|---:|---|---|
-| MiMo-V2.6-Flash Free (`opencode/mimo-v2.6-flash-free`) | 30/35 | 99.44 | **99.42** | G6, 4 extreme | `013724` |
-| Big Pickle (`opencode/big-pickle`) | 29/35 | 96.64 | 97.32 | G6, G7, 3 extreme | `013724` |
-| LongCat 2.5 Preview Free (`opencode/longcat-2.5-preview-free`) | 30/35 | 97.71 | 96.46 | G6, 4 extreme | `013724` |
-| GLM-5.3-Flash Free (`opencode/glm-5.3-flash-free`) | 31/35 | 95.03 | 95.47 | G6, 3 extreme | `013724` |
-| LL Alpha Free (`opencode/ll-alpha-free`) | 0/35 | – | – | all (provider 502) | `013724` |
-| Muse Spark 1.3 Free (`opencode/muse-spark-1.3-contributor-free`) | 0/35 | – | – | all (provider 502) | `013724` |
+| MiMo-V2.6-Flash Free (`opencode/mimo-v2.6-flash-free`) | 30/35 | 99.67 | **99.58** | G6, 4 extreme | `013724`, `122332` |
+| GLM-5.3-Flash Free (`opencode/glm-5.3-flash-free`) | 31/35 | 99.15 | **98.90** | G6, 3 extreme | `013724`, `122332` |
+| LongCat 2.5 Preview Free (`opencode/longcat-2.5-preview-free`) | 30/35 | 98.36 | 97.27 | G6, 4 extreme | `013724`, `122332` |
+| Big Pickle (`opencode/big-pickle`) | 32/35 | 97.95 | 96.90 | G6, 2 extreme | `013724`, `122332` |
+| LL Alpha Free (`opencode/ll-alpha-free`) | 0/35 | – | – | all (provider 502/503) | `013724`, `122332` |
+| Muse Spark 1.3 Free (`opencode/muse-spark-1.3-contributor-free`) | 0/35 | – | – | all (provider 502/503) | `013724`, `122332` |
 
 How to read the sweep:
 
@@ -117,37 +127,40 @@ How to read the sweep:
   penalised for it — its score is computed over an easier mix. This is exactly why `GLM-5.3-Flash
   Free` appeared below `DeepSeek V4.1 Flash Free` in the suite column while being ahead of it on the
   comparable subset.
-- **On the shared six groups GLM is not behind DeepSeek.** `GLM-5.3-Flash Free` scores 95.47 versus
-  `DeepSeek V4.1 Flash Free` 97.22, and the two trade places by group: GLM wins G1 (100.00 vs 97.73)
-  and G4 (100.00 vs 88.96), DeepSeek wins G2 (100.00 vs 83.83) and G8 (97.50 vs 93.38). DeepSeek is
-  ahead by ~1.8 points on this subset, but the 2.45-point gap in the suite column was inflated by a
-  G6 that DeepSeek ran and GLM never got to. Their extreme tiers are not comparable either: DeepSeek
-  graded 7 extreme scenarios, GLM only 4.
-- **Free-tier models now sit in the same band as paid frontier runs.** `DeepSeek V4.1 Flash Free`
-  (97.48 with an extreme tier of 100.00 on 7/7) outranks GPT-6 Luna (95.82) on the same suite
-  version, and `MiMo-V2.6-Flash Free` is the highest number in the whole sweep.
+- **On the shared six groups GLM is ahead of the latest DeepSeek run.** `GLM-5.3-Flash Free` scores
+  98.90 versus `DeepSeek V4.1 Flash Free` 96.14 on G1, G2, G3, G4, G5 and G8. The resumed DeepSeek run
+  recovered G4 (100.00) but collapsed on G8 (79.08), while GLM is still unrankable because it never
+  graded G6 or three extreme scenarios. Their extreme tiers are not comparable: DeepSeek graded 7, GLM
+  only 4.
+- **Free-tier models now sit in the same band as paid frontier runs.** The resumed `DeepSeek V4.1 Flash
+  Free` run (96.46) outranks GPT-6 Luna (95.82) on the same suite version, and `MiMo-V2.6-Flash Free`
+  is the highest unrankable number in the sweep (99.67 over 30 graded scenarios).
 - **`Beam Free` is a real free model the sweep picked up from the live catalogue** — it is not on the
-  older picker screenshot, which is why it was easy to miss. It scores 72.28 because it frequently
-  answers in prose instead of emitting tool calls; see the G6 note below.
-- **Two routes produced no measurable run.** `LL Alpha Free` and `Muse Spark 1.3 Free` answered
-  `HTTP 502 Unexpected server error` on every scenario, so all 35 results are attributed to Environment.
-  Both routes answered normally during the pre-flight check hours earlier and fail the same way on
-  the raw OpenCode CLI with its default agent, so this is a provider-side outage, not a harness or
-  profile effect. Their reports and model cards are deliberately **not** published: a run with zero
-  graded scenarios renders a misleading "suite score 0.0" card, which is a bug worth fixing (see
-  `TODO.md`) rather than a result worth archiving.
+  older picker screenshot, which is why it was easy to miss. It scored 72.28 on `013724` and 62.18 on
+  the completed resumed run `122332`; both runs show the same weakness: frequent prose answers instead
+  of tool calls. See the G6 note below.
+- **Two routes produced no measurable run in either attempt.** `LL Alpha Free` and `Muse Spark 1.3
+  Free` answered with provider errors on every scenario in `013724` (`HTTP 502`) and again in the
+  resumed `122332` attempt (`HTTP 502`/`503` certificate failures), so no graded scenario exists. Both
+  routes answered normally during the pre-flight check hours earlier and fail the same way on the raw
+  OpenCode CLI with its default agent, so this is a provider-side outage, not a harness or profile
+  effect. Their zero-scenario reports are deliberately **not** published: a run with zero graded
+  scenarios renders a misleading "suite score 0.0" card, which is a bug worth fixing (see `TODO.md`)
+  rather than a result worth archiving.
 - **G6 zeros split into two very different causes.** `Beam Free` scored a genuine 0.00: it produced
   **zero tool calls** in the build turn and answered in prose, so nothing was built. The other G6
-  zeros in the sweep are Environment rows, not model failures. Only two free models actually built
-  anything measured here: `DeepSeek V4.1 Flash Free` (81.00 from 35 tool calls) and `Space Bunny
-  Free` (74.00 from 42 tool calls, 550 s, exported prefab) — which also proves the bridge tool path
-  works and that G6 zeros are not a bridge artifact.
-- **`Beam Free` fails on tool emission, not on tool use.** Where it emits calls it does well
-  (G1 97.73, G5 91.43, G7 100.00, 1 tool error in 65 calls), but 10 scenarios score 0 because the model
-  answered in prose without a single tool call.
+  zeros in the sweep are Environment rows, not model failures. Only two free routes have a full
+  rankable G6 build measured here: `DeepSeek V4.1 Flash Free` (97.00 on the resumed run) and `Space
+  Bunny Free` (74.00 from 42 tool calls, 550 s, exported prefab) — which also proves the bridge tool
+  path works and that G6 zeros are not a bridge artifact.
+- **`Beam Free` fails on tool emission, not on tool use.** Where it emits calls it can still score
+  well (G5 and G7 100.00 on the resumed run, 0 tool errors in 58 calls), but 14 scenarios fail because
+  the model answers without the required calls or builds too little. The first attempt showed the same
+  pattern with a different mix of scores.
 - **`Space Bunny Free` has by far the worst tool-error rate** in the sweep (44/162 failed calls,
   27%), which is where most of its points go: its G5/G4 scores stay at 100/99.25 while G1 and G8 lose
-  on failed operations.
+  on failed operations. The resumed `122332` attempt produced no graded scenarios, so the published
+  row remains the `013724` run.
 
 > **Methodology / caveats — read before citing.** One repetition per model, streaming on, native
 > tools on, no temperature sent (each model's provider default), Unity 6000.3.14f1, suite v2.0 with
@@ -163,25 +176,54 @@ How to read the sweep:
 > (`HTTP 502` on two routes plus sporadic `503`/certificate failures elsewhere) forced a resume of the
 > same run id, which kept finished results and retried only Environment failures; every report holds
 > exactly 35 scenarios with no duplicate scenario ids. Treat these as indicative single-shot results,
-> not a controlled multi-rep A/B. **Archived reports in this run carry short target labels
-> (`beam`, `glm-flash`, ...) because the report's model id comes from the target label; the display
-> names above are the OpenCode picker names for the same routes.**
+> not a controlled multi-rep A/B. **Archived reports for `013724` originally carried short target
+> labels (`beam`, `glm-flash`, ...) because the report's model id came from the target label; their
+> `metadata.modelId` was normalized to the picker display names above so the chart merges the two
+> attempts instead of creating duplicate rows.**
 
-> **Methodology / caveats — read before citing.** One repetition per model, streaming on, native
-> tools on, no temperature sent (each model's provider default), Unity 6000.3.14f1, suite v2.0 with
-> the benchmark v2 prompts, run over the Neoxider Agents CLI bridge (higher latency than a direct
-> API; each completion spawns a CLI subprocess), so absolute tokens/time are not comparable to a
-> direct-API run. Bridge traffic ran under the **reduced-tool** opencode profile
-> (`AGENT_OPENCODE_FREETIER_COMPAT=1`, neoxider-agents `0b4f600`): the OpenCode free tier refuses
-> tool-less sessions with `FreeTierError` 403, so bridge sessions expose read-only tools (file reads,
-> todo/goal state, web reads) while shell, writes, edits, prompts, subagents and MCP stay disabled.
-> Only the text-protocol tool calls the bridge parses are graded, so a stray native read call cannot
-> inflate a score — but this profile differs from the zero-tool profile used by the 2026-09-29 v1.15
-> run, and the v1.14/v1.15 rows are historical anyway. A provider outage during the run
-> (`HTTP 502` on two routes plus sporadic `503`/certificate failures elsewhere) forced a resume of the
-> same run id, which kept finished results and retried only Environment failures; every report holds
-> exactly 35 scenarios with no duplicate scenario ids. Treat these as indicative single-shot results,
-> not a controlled multi-rep A/B.
+## Local qwen3.8-flash-next-iq3_xxs in the same multi-target run — Suite v2.0
+
+Maintainer run `20261017_122332` also completed `Strata IQ3_XXS 128K` (`local/qwen3.8-flash-next-iq3_xxs`, llama.cpp server on the local network) after the OpenCode routes stopped returning usable responses. Raw reports are archived in the [run archive](BenchmarkRuns/2026-10-17/).
+
+| Model | Graded | Suite (unrankable) | shared-6 | Missing | Run |
+|---|---:|---:|---:|---|---|
+| Strata IQ3_XXS 128K (`local/qwen3.8-flash-next-iq3_xxs`) | 29/35 | 91.08 | – | G4 (3 regular + 1 extreme), G6, G7 extreme | `122332` |
+
+How to read it:
+
+- **It is not rankable against full rows.** Six results are attributed to Environment, including all
+  model-graded G4 outcomes and G6. The suite score is therefore a mean over an easier scenario mix.
+- **The regular tier is strong where the provider answered** (99.05 regular), but the extreme tier is
+  weak (52.78, 2/5 graded). It passes 26 scenarios and fails 8 with one partial in the graded set.
+
+## Additional v2.0 runs — DeepSeek dated build, Dots and Nemotron (2026-10-18)
+
+Maintainer runs `20261018_022725` and `20261018_024557` add three routes to suite v2.0: a dated
+DeepSeek V4.1 Flash build, Dots 3 Note Preview, and Nemotron 3.5 Lightning. Raw reports are archived in
+the [run archive](BenchmarkRuns/2026-10-18/).
+
+**Ranked rows — full G1-G8 runs only.**
+
+| Model | Suite | Extreme | Regular | P/PA/F | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | Tool errors | Tokens | Run |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| DeepSeek V4.1 Flash 1017 (`deepseek/deepseek-v4.1-flash-1017`) | **95.56** | 79.07 (4/7) | 99.68 | 32/1/2 | 97.50 | 100.00 | 100.00 | 87.25 | 95.21 | 91.00 | 74.00 | 100.00 | 2/157 | 936854 | `022725` |
+
+**Incomplete runs — NOT rankable.**
+
+| Model | Graded | Suite (unrankable) | shared-6 | Missing | Run |
+|---|---:|---:|---:|---|---|
+| Dots 3 Note Preview (`dots-studio/dots-3-note-preview-free`) | 33/35 | 93.81 | 91.61 | G6, 1 extreme | `024557` |
+| Nemotron 3.5 Lightning (`nvidia/nemotron-3.5-lightning-free`) | 34/35 | 59.34 | 60.38 | G6 | `024557` |
+
+How to read the new runs:
+
+- **DeepSeek V4.1 Flash 1017 is a dated build, not the same route as DeepSeek V4.1 Flash Free.** It is
+  full-rankable but uses far more tokens (936,854) and loses ground on G4, G7 and the extreme tier.
+- **Dots 3 Note Preview is close to full but still unrankable.** Two provider-attributed Environment
+  failures remove G6 and one extreme scenario; its regular tier (98.36) is strong, while G4 (64.46) is
+  the visible model weakness.
+- **Nemotron 3.5 Lightning has a clean enough scenario set except for G6**, but its score is low: it
+  graded all seven extreme scenarios and passed none, and it failed 15 scenarios outright.
 
 ## Historical Leaderboard — Suite v1.15
 

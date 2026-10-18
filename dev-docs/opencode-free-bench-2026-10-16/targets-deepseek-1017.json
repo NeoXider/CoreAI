@@ -1,0 +1,1 @@
+[{"baseUrl": "https://openrouter.ai/api/v1", "label": "DeepSeek V4.1 Flash 1017", "model": "deepseek/deepseek-v4.1-flash-1017", "apiKey": "env:OPENROUTER_API_KEY"}]
