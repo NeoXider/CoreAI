@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="4111" viewBox="0 0 1140 4111" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="CoreAI Game-Creation Benchmark suite v2.0 leaderboard">
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="4047" viewBox="0 0 1140 4047" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="CoreAI Game-Creation Benchmark suite v2.0 leaderboard">
 <title>CoreAI Game-Creation Benchmark - suite v2.0</title>
 <defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#0b0b0b" stroke-width="1.6" stroke-opacity="0.55"/></pattern></defs>
 <rect width="100%" height="100%" rx="10" fill="#fcfcfb"/>
@@ -382,99 +382,97 @@
 <text x="1031.0" y="507.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">89.7</text>
 <rect x="1068.3" y="487.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Dots 3 Note Preview Extreme: 73.32</title></rect>
 <text x="1091.7" y="507.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">73.3</text>
-<text x="24.0" y="543.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Strata IQ3_XXS 128K</text>
-<text x="24.0" y="557.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 26/1/2 - 29/36 scored</text>
-<rect x="266.0" y="530.0" width="227.7" height="22.0" rx="4" fill="#2a78d6"><title>Strata IQ3_XXS 128K: suite 91.08 over 29 scenarios</title></rect>
-<rect x="266.0" y="530.0" width="227.7" height="22.0" rx="4" fill="url(#hatch)"/>
-<text x="522.0" y="545.5" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">91.08*</text>
-<path d="M398.0,531.2 L407.8,541.0 L398.0,550.8 L388.2,541.0 Z" fill="#fcfcfb"/>
-<path d="M398.0,534.0 L405.0,541.0 L398.0,548.0 L391.0,541.0 Z" fill="#eb6834"><title>Strata IQ3_XXS 128K: extreme tier 52.78 (2/5)</title></path>
+<text x="24.0" y="543.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">local/qwen3.8-flash-coder-iq1_m</text>
+<text x="24.0" y="557.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 31/2/2 - 35/36 scored</text>
+<rect x="266.0" y="530.0" width="227.2" height="22.0" rx="4" fill="#2a78d6"><title>local/qwen3.8-flash-coder-iq1_m: suite 90.90 over 35 scenarios</title></rect>
+<rect x="266.0" y="530.0" width="227.2" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="545.5" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">90.90*</text>
+<path d="M415.0,531.2 L424.8,541.0 L415.0,550.8 L405.2,541.0 Z" fill="#fcfcfb"/>
+<path d="M415.0,534.0 L422.0,541.0 L415.0,548.0 L408.0,541.0 Z" fill="#eb6834"><title>local/qwen3.8-flash-coder-iq1_m: extreme tier 59.59 (3/7)</title></path>
 <path d="M585.0,536.0 L590.0,541.0 L585.0,546.0 L580.0,541.0 Z" fill="#eb6834"/>
-<text x="594.0" y="545.5" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">52.78</text>
-<rect x="667.0" y="525.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Strata IQ3_XXS 128K G1: 87.69</title></rect>
-<text x="690.3" y="545.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">87.7</text>
-<rect x="715.7" y="525.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Strata IQ3_XXS 128K G2: 83.67</title></rect>
-<text x="739.0" y="545.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">83.7</text>
-<rect x="764.3" y="525.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Strata IQ3_XXS 128K G3: 85.99</title></rect>
-<text x="787.7" y="545.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">86.0</text>
-<rect x="813.0" y="525.0" width="46.7" height="32.0" rx="3" fill="#f0efec"/>
-<text x="836.3" y="545.0" font-size="11" fill="#6f6e69" text-anchor="middle" font-weight="normal">n/a</text>
-<text x="856.7" y="536.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">36</text>
-<rect x="861.7" y="525.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>Strata IQ3_XXS 128K G5: 100.00</title></rect>
+<text x="594.0" y="545.5" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">59.59</text>
+<rect x="667.0" y="525.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>local/qwen3.8-flash-coder-iq1_m G1: 90.00</title></rect>
+<text x="690.3" y="545.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">90.0</text>
+<rect x="715.7" y="525.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>local/qwen3.8-flash-coder-iq1_m G2: 81.57</title></rect>
+<text x="739.0" y="545.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">81.6</text>
+<rect x="764.3" y="525.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>local/qwen3.8-flash-coder-iq1_m G3: 99.59</title></rect>
+<text x="787.7" y="545.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">99.6</text>
+<rect x="813.0" y="525.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>local/qwen3.8-flash-coder-iq1_m G4: 72.71</title></rect>
+<text x="836.3" y="545.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">72.7</text>
+<rect x="861.7" y="525.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>local/qwen3.8-flash-coder-iq1_m G5: 100.00</title></rect>
 <text x="885.0" y="545.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
-<rect x="910.3" y="525.0" width="46.7" height="32.0" rx="3" fill="#f0efec"/>
-<text x="933.7" y="545.0" font-size="11" fill="#6f6e69" text-anchor="middle" font-weight="normal">n/a</text>
-<text x="954.0" y="536.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">37</text>
-<rect x="959.0" y="525.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>Strata IQ3_XXS 128K G7: 95.65</title></rect>
-<rect x="959.0" y="525.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="982.3" y="545.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">95.7</text>
-<text x="1002.7" y="536.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">38</text>
-<rect x="1007.7" y="525.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>Strata IQ3_XXS 128K G8: 97.73</title></rect>
+<rect x="910.3" y="525.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>local/qwen3.8-flash-coder-iq1_m G6: 93.00</title></rect>
+<rect x="910.3" y="525.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="933.7" y="545.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">93.0</text>
+<text x="954.0" y="536.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">36</text>
+<rect x="959.0" y="525.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>local/qwen3.8-flash-coder-iq1_m G7: 80.00</title></rect>
+<text x="982.3" y="545.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">80.0</text>
+<rect x="1007.7" y="525.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>local/qwen3.8-flash-coder-iq1_m G8: 97.73</title></rect>
 <text x="1031.0" y="545.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">97.7</text>
-<rect x="1068.3" y="525.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Strata IQ3_XXS 128K Extreme: 52.78</title></rect>
-<text x="1091.7" y="545.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">52.8</text>
-<text x="24.0" y="581.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">local/qwen3.8-flash-coder-iq1_m</text>
-<text x="24.0" y="595.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 31/2/2 - 35/36 scored</text>
-<rect x="266.0" y="568.0" width="227.2" height="22.0" rx="4" fill="#2a78d6"><title>local/qwen3.8-flash-coder-iq1_m: suite 90.90 over 35 scenarios</title></rect>
-<rect x="266.0" y="568.0" width="227.2" height="22.0" rx="4" fill="url(#hatch)"/>
-<text x="522.0" y="583.5" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">90.90*</text>
-<path d="M415.0,569.2 L424.8,579.0 L415.0,588.8 L405.2,579.0 Z" fill="#fcfcfb"/>
-<path d="M415.0,572.0 L422.0,579.0 L415.0,586.0 L408.0,579.0 Z" fill="#eb6834"><title>local/qwen3.8-flash-coder-iq1_m: extreme tier 59.59 (3/7)</title></path>
+<rect x="1068.3" y="525.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>local/qwen3.8-flash-coder-iq1_m Extreme: 59.59</title></rect>
+<text x="1091.7" y="545.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">59.6</text>
+<text x="24.0" y="581.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Space Bunny Free</text>
+<text x="24.0" y="595.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 30/2/3 - 35/36 scored</text>
+<rect x="266.0" y="568.0" width="225.1" height="22.0" rx="4" fill="#2a78d6"><title>Space Bunny Free: suite 90.02 over 35 scenarios</title></rect>
+<rect x="266.0" y="568.0" width="225.1" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="583.5" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">90.02*</text>
+<path d="M472.0,569.2 L481.8,579.0 L472.0,588.8 L462.2,579.0 Z" fill="#fcfcfb"/>
+<path d="M472.0,572.0 L479.0,579.0 L472.0,586.0 L465.0,579.0 Z" fill="#eb6834"><title>Space Bunny Free: extreme tier 82.39 (5/7)</title></path>
 <path d="M585.0,574.0 L590.0,579.0 L585.0,584.0 L580.0,579.0 Z" fill="#eb6834"/>
-<text x="594.0" y="583.5" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">59.59</text>
-<rect x="667.0" y="563.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>local/qwen3.8-flash-coder-iq1_m G1: 90.00</title></rect>
-<text x="690.3" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">90.0</text>
-<rect x="715.7" y="563.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>local/qwen3.8-flash-coder-iq1_m G2: 81.57</title></rect>
-<text x="739.0" y="583.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">81.6</text>
-<rect x="764.3" y="563.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>local/qwen3.8-flash-coder-iq1_m G3: 99.59</title></rect>
-<text x="787.7" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">99.6</text>
-<rect x="813.0" y="563.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>local/qwen3.8-flash-coder-iq1_m G4: 72.71</title></rect>
-<text x="836.3" y="583.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">72.7</text>
-<rect x="861.7" y="563.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>local/qwen3.8-flash-coder-iq1_m G5: 100.00</title></rect>
+<text x="594.0" y="583.5" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">82.39</text>
+<rect x="667.0" y="563.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Space Bunny Free G1: 76.14</title></rect>
+<rect x="667.0" y="563.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="690.3" y="583.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">76.1</text>
+<text x="710.7" y="574.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">37</text>
+<rect x="715.7" y="563.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>Space Bunny Free G2: 100.00</title></rect>
+<text x="739.0" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
+<rect x="764.3" y="563.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Space Bunny Free G3: 85.99</title></rect>
+<text x="787.7" y="583.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">86.0</text>
+<rect x="813.0" y="563.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>Space Bunny Free G4: 99.25</title></rect>
+<text x="836.3" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">99.2</text>
+<rect x="861.7" y="563.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>Space Bunny Free G5: 100.00</title></rect>
 <text x="885.0" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
-<rect x="910.3" y="563.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>local/qwen3.8-flash-coder-iq1_m G6: 93.00</title></rect>
+<rect x="910.3" y="563.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Space Bunny Free G6: 74.00</title></rect>
 <rect x="910.3" y="563.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="933.7" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">93.0</text>
-<text x="954.0" y="574.0" font-size="9.5" fill="#ffffff" text-anchor="end" font-weight="700">39</text>
-<rect x="959.0" y="563.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>local/qwen3.8-flash-coder-iq1_m G7: 80.00</title></rect>
-<text x="982.3" y="583.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">80.0</text>
-<rect x="1007.7" y="563.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>local/qwen3.8-flash-coder-iq1_m G8: 97.73</title></rect>
-<text x="1031.0" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">97.7</text>
-<rect x="1068.3" y="563.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>local/qwen3.8-flash-coder-iq1_m Extreme: 59.59</title></rect>
-<text x="1091.7" y="583.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">59.6</text>
-<text x="24.0" y="619.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Space Bunny Free</text>
-<text x="24.0" y="633.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 30/2/3 - 35/36 scored</text>
-<rect x="266.0" y="606.0" width="225.1" height="22.0" rx="4" fill="#2a78d6"><title>Space Bunny Free: suite 90.02 over 35 scenarios</title></rect>
-<rect x="266.0" y="606.0" width="225.1" height="22.0" rx="4" fill="url(#hatch)"/>
-<text x="522.0" y="621.5" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">90.02*</text>
-<path d="M472.0,607.2 L481.8,617.0 L472.0,626.8 L462.2,617.0 Z" fill="#fcfcfb"/>
-<path d="M472.0,610.0 L479.0,617.0 L472.0,624.0 L465.0,617.0 Z" fill="#eb6834"><title>Space Bunny Free: extreme tier 82.39 (5/7)</title></path>
+<text x="933.7" y="583.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">74.0</text>
+<text x="954.0" y="574.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">38</text>
+<rect x="959.0" y="563.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>Space Bunny Free G7: 91.00</title></rect>
+<text x="982.3" y="583.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">91.0</text>
+<rect x="1007.7" y="563.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Space Bunny Free G8: 72.83</title></rect>
+<rect x="1007.7" y="563.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
+<text x="1031.0" y="583.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">72.8</text>
+<text x="1051.3" y="574.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">39</text>
+<rect x="1068.3" y="563.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Space Bunny Free Extreme: 82.39</title></rect>
+<text x="1091.7" y="583.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">82.4</text>
+<text x="24.0" y="619.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Strata IQ3_XXS 128K</text>
+<text x="24.0" y="633.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 29/3/3 - 35/36 scored</text>
+<rect x="266.0" y="606.0" width="221.9" height="22.0" rx="4" fill="#2a78d6"><title>Strata IQ3_XXS 128K: suite 88.75 over 35 scenarios</title></rect>
+<rect x="266.0" y="606.0" width="221.9" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="621.5" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">88.75*</text>
+<path d="M397.8,607.2 L407.6,617.0 L397.8,626.8 L388.0,617.0 Z" fill="#fcfcfb"/>
+<path d="M397.8,610.0 L404.8,617.0 L397.8,624.0 L390.8,617.0 Z" fill="#eb6834"><title>Strata IQ3_XXS 128K: extreme tier 52.70 (2/7)</title></path>
 <path d="M585.0,612.0 L590.0,617.0 L585.0,622.0 L580.0,617.0 Z" fill="#eb6834"/>
-<text x="594.0" y="621.5" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">82.39</text>
-<rect x="667.0" y="601.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Space Bunny Free G1: 76.14</title></rect>
-<rect x="667.0" y="601.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="690.3" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">76.1</text>
-<text x="710.7" y="612.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">40</text>
-<rect x="715.7" y="601.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>Space Bunny Free G2: 100.00</title></rect>
-<text x="739.0" y="621.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
-<rect x="764.3" y="601.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Space Bunny Free G3: 85.99</title></rect>
+<text x="594.0" y="621.5" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">52.70</text>
+<rect x="667.0" y="601.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Strata IQ3_XXS 128K G1: 87.69</title></rect>
+<text x="690.3" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">87.7</text>
+<rect x="715.7" y="601.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Strata IQ3_XXS 128K G2: 83.67</title></rect>
+<text x="739.0" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">83.7</text>
+<rect x="764.3" y="601.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Strata IQ3_XXS 128K G3: 85.99</title></rect>
 <text x="787.7" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">86.0</text>
-<rect x="813.0" y="601.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>Space Bunny Free G4: 99.25</title></rect>
-<text x="836.3" y="621.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">99.2</text>
-<rect x="861.7" y="601.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>Space Bunny Free G5: 100.00</title></rect>
+<rect x="813.0" y="601.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>Strata IQ3_XXS 128K G4: 90.00</title></rect>
+<text x="836.3" y="621.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">90.0</text>
+<rect x="861.7" y="601.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>Strata IQ3_XXS 128K G5: 100.00</title></rect>
 <text x="885.0" y="621.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
-<rect x="910.3" y="601.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Space Bunny Free G6: 74.00</title></rect>
+<rect x="910.3" y="601.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Strata IQ3_XXS 128K G6: 60.00</title></rect>
 <rect x="910.3" y="601.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="933.7" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">74.0</text>
-<text x="954.0" y="612.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">41</text>
-<rect x="959.0" y="601.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>Space Bunny Free G7: 91.00</title></rect>
-<text x="982.3" y="621.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">91.0</text>
-<rect x="1007.7" y="601.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Space Bunny Free G8: 72.83</title></rect>
-<rect x="1007.7" y="601.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
-<text x="1031.0" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">72.8</text>
-<text x="1051.3" y="612.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">42</text>
-<rect x="1068.3" y="601.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Space Bunny Free Extreme: 82.39</title></rect>
-<text x="1091.7" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">82.4</text>
+<text x="933.7" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">60.0</text>
+<text x="954.0" y="612.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">40</text>
+<rect x="959.0" y="601.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Strata IQ3_XXS 128K G7: 70.33</title></rect>
+<text x="982.3" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">70.3</text>
+<rect x="1007.7" y="601.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>Strata IQ3_XXS 128K G8: 97.73</title></rect>
+<text x="1031.0" y="621.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">97.7</text>
+<rect x="1068.3" y="601.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Strata IQ3_XXS 128K Extreme: 52.70</title></rect>
+<text x="1091.7" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">52.7</text>
 <text x="24.0" y="657.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Beam Free</text>
 <text x="24.0" y="671.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 21/0/14 - 35/36 scored</text>
 <rect x="266.0" y="644.0" width="155.4" height="22.0" rx="4" fill="#2a78d6"><title>Beam Free: suite 62.18 over 35 scenarios</title></rect>
@@ -489,27 +487,27 @@
 <rect x="715.7" y="639.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>Beam Free G2: 36.30</title></rect>
 <rect x="715.7" y="639.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="739.0" y="659.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">36.3</text>
-<text x="759.3" y="650.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">43</text>
+<text x="759.3" y="650.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">41</text>
 <rect x="764.3" y="639.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>Beam Free G3: 32.56</title></rect>
 <rect x="764.3" y="639.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="787.7" y="659.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">32.6</text>
-<text x="808.0" y="650.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">44</text>
+<text x="808.0" y="650.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">42</text>
 <rect x="813.0" y="639.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Beam Free G4: 52.00</title></rect>
 <rect x="813.0" y="639.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="836.3" y="659.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">52.0</text>
-<text x="856.7" y="650.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">45</text>
+<text x="856.7" y="650.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">43</text>
 <rect x="861.7" y="639.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>Beam Free G5: 100.00</title></rect>
 <text x="885.0" y="659.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
 <rect x="910.3" y="639.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>Beam Free G6: 0.00</title></rect>
 <rect x="910.3" y="639.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="933.7" y="659.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">0.0</text>
-<text x="954.0" y="650.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">46</text>
+<text x="954.0" y="650.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">44</text>
 <rect x="959.0" y="639.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>Beam Free G7: 100.00</title></rect>
 <text x="982.3" y="659.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">100</text>
 <rect x="1007.7" y="639.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Beam Free G8: 79.64</title></rect>
 <rect x="1007.7" y="639.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="1031.0" y="659.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">79.6</text>
-<text x="1051.3" y="650.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">47</text>
+<text x="1051.3" y="650.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">45</text>
 <rect x="1068.3" y="639.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>Beam Free Extreme: 44.69</title></rect>
 <text x="1091.7" y="659.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">44.7</text>
 <text x="24.0" y="695.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Nemotron 3.5 Lightning</text>
@@ -524,24 +522,24 @@
 <rect x="667.0" y="677.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>Nemotron 3.5 Lightning G1: 33.80</title></rect>
 <rect x="667.0" y="677.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="690.3" y="697.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">33.8</text>
-<text x="710.7" y="688.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">48</text>
+<text x="710.7" y="688.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">46</text>
 <rect x="715.7" y="677.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>Nemotron 3.5 Lightning G2: 42.42</title></rect>
 <rect x="715.7" y="677.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="739.0" y="697.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">42.4</text>
-<text x="759.3" y="688.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">49</text>
+<text x="759.3" y="688.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">47</text>
 <rect x="764.3" y="677.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>Nemotron 3.5 Lightning G3: 93.61</title></rect>
 <text x="787.7" y="697.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">93.6</text>
 <rect x="813.0" y="677.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Nemotron 3.5 Lightning G4: 73.75</title></rect>
 <rect x="813.0" y="677.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="836.3" y="697.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">73.8</text>
-<text x="856.7" y="688.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">50</text>
+<text x="856.7" y="688.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">48</text>
 <rect x="861.7" y="677.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>Nemotron 3.5 Lightning G5: 34.29</title></rect>
 <rect x="861.7" y="677.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="885.0" y="697.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">34.3</text>
-<text x="905.3" y="688.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">51</text>
+<text x="905.3" y="688.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">49</text>
 <rect x="910.3" y="677.0" width="46.7" height="32.0" rx="3" fill="#f0efec"/>
 <text x="933.7" y="697.0" font-size="11" fill="#6f6e69" text-anchor="middle" font-weight="normal">n/a</text>
-<text x="954.0" y="688.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">52</text>
+<text x="954.0" y="688.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">50</text>
 <rect x="959.0" y="677.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Nemotron 3.5 Lightning G7: 50.00</title></rect>
 <text x="982.3" y="697.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">50.0</text>
 <rect x="1007.7" y="677.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Nemotron 3.5 Lightning G8: 84.38</title></rect>
@@ -560,33 +558,33 @@
 <rect x="667.0" y="715.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>local/MiniCPM-V 4.7 1B G1: 53.28</title></rect>
 <rect x="667.0" y="715.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="690.3" y="735.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">53.3</text>
-<text x="710.7" y="726.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">53</text>
+<text x="710.7" y="726.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">51</text>
 <rect x="715.7" y="715.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>local/MiniCPM-V 4.7 1B G2: 49.01</title></rect>
 <rect x="715.7" y="715.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="739.0" y="735.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">49.0</text>
-<text x="759.3" y="726.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">54</text>
+<text x="759.3" y="726.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">52</text>
 <rect x="764.3" y="715.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>local/MiniCPM-V 4.7 1B G3: 23.46</title></rect>
 <rect x="764.3" y="715.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="787.7" y="735.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">23.5</text>
-<text x="808.0" y="726.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">55</text>
+<text x="808.0" y="726.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">53</text>
 <rect x="813.0" y="715.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>local/MiniCPM-V 4.7 1B G4: 5.92</title></rect>
 <rect x="813.0" y="715.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="836.3" y="735.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">5.9</text>
-<text x="856.7" y="726.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">56</text>
+<text x="856.7" y="726.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">54</text>
 <rect x="861.7" y="715.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>local/MiniCPM-V 4.7 1B G5: 90.13</title></rect>
 <text x="885.0" y="735.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">90.1</text>
 <rect x="910.3" y="715.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>local/MiniCPM-V 4.7 1B G6: 18.00</title></rect>
 <rect x="910.3" y="715.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="933.7" y="735.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">18.0</text>
-<text x="954.0" y="726.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">57</text>
+<text x="954.0" y="726.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">55</text>
 <rect x="959.0" y="715.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>local/MiniCPM-V 4.7 1B G7: 23.91</title></rect>
 <rect x="959.0" y="715.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="982.3" y="735.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">23.9</text>
-<text x="1002.7" y="726.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">58</text>
+<text x="1002.7" y="726.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">56</text>
 <rect x="1007.7" y="715.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>local/MiniCPM-V 4.7 1B G8: 4.76</title></rect>
 <rect x="1007.7" y="715.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="1031.0" y="735.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">4.8</text>
-<text x="1051.3" y="726.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">59</text>
+<text x="1051.3" y="726.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">57</text>
 <rect x="1068.3" y="715.0" width="46.7" height="32.0" rx="3" fill="#86b6ef"><title>local/MiniCPM-V 4.7 1B Extreme: 5.42</title></rect>
 <text x="1091.7" y="735.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">5.4</text>
 <text x="666.0" y="784.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">Group score:</text>
@@ -681,24 +679,24 @@
 <rect x="706.0" y="1272.0" width="186.8" height="22.0" rx="4" fill="#f0efec"/>
 <rect x="706.0" y="1272.0" width="6.3" height="22.0" rx="4" fill="#b3261e"><title>Dots 3 Note Preview: 3 of 89 executed calls failed</title></rect>
 <text x="898.8" y="1287.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">3 / 89</text>
-<text x="24.0" y="1325.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Strata IQ3_XXS 128K</text>
-<rect x="266.0" y="1310.0" width="86.6" height="22.0" rx="4" fill="#2a78d6"><title>Strata IQ3_XXS 128K: 262512 tokens</title></rect>
-<text x="358.6" y="1325.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">262,512</text>
-<rect x="706.0" y="1310.0" width="209.9" height="22.0" rx="4" fill="#f0efec"/>
-<rect x="706.0" y="1310.0" width="14.7" height="22.0" rx="4" fill="#b3261e"><title>Strata IQ3_XXS 128K: 7 of 100 executed calls failed</title></rect>
-<text x="921.9" y="1325.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">7 / 100</text>
-<text x="24.0" y="1363.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">local/qwen3.8-flash-coder-iq1_m</text>
-<rect x="266.0" y="1348.0" width="183.7" height="22.0" rx="4" fill="#2a78d6"><title>local/qwen3.8-flash-coder-iq1_m: 556681 tokens</title></rect>
-<text x="455.7" y="1363.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">556,681</text>
-<rect x="706.0" y="1348.0" width="287.5" height="22.0" rx="4" fill="#f0efec"/>
-<rect x="706.0" y="1348.0" width="37.8" height="22.0" rx="4" fill="#b3261e"><title>local/qwen3.8-flash-coder-iq1_m: 18 of 137 executed calls failed</title></rect>
-<text x="999.5" y="1363.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">18 / 137</text>
-<text x="24.0" y="1401.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Space Bunny Free</text>
-<rect x="266.0" y="1386.0" width="20.2" height="22.0" rx="4" fill="#2a78d6"><title>Space Bunny Free: 61212 tokens</title></rect>
-<text x="292.2" y="1401.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">61,212</text>
-<rect x="706.0" y="1386.0" width="340.0" height="22.0" rx="4" fill="#f0efec"/>
-<rect x="706.0" y="1386.0" width="92.3" height="22.0" rx="4" fill="#b3261e"><title>Space Bunny Free: 44 of 162 executed calls failed</title></rect>
-<text x="1052.0" y="1401.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">44 / 162</text>
+<text x="24.0" y="1325.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">local/qwen3.8-flash-coder-iq1_m</text>
+<rect x="266.0" y="1310.0" width="183.7" height="22.0" rx="4" fill="#2a78d6"><title>local/qwen3.8-flash-coder-iq1_m: 556681 tokens</title></rect>
+<text x="455.7" y="1325.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">556,681</text>
+<rect x="706.0" y="1310.0" width="287.5" height="22.0" rx="4" fill="#f0efec"/>
+<rect x="706.0" y="1310.0" width="37.8" height="22.0" rx="4" fill="#b3261e"><title>local/qwen3.8-flash-coder-iq1_m: 18 of 137 executed calls failed</title></rect>
+<text x="999.5" y="1325.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">18 / 137</text>
+<text x="24.0" y="1363.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Space Bunny Free</text>
+<rect x="266.0" y="1348.0" width="20.2" height="22.0" rx="4" fill="#2a78d6"><title>Space Bunny Free: 61212 tokens</title></rect>
+<text x="292.2" y="1363.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">61,212</text>
+<rect x="706.0" y="1348.0" width="340.0" height="22.0" rx="4" fill="#f0efec"/>
+<rect x="706.0" y="1348.0" width="92.3" height="22.0" rx="4" fill="#b3261e"><title>Space Bunny Free: 44 of 162 executed calls failed</title></rect>
+<text x="1052.0" y="1363.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">44 / 162</text>
+<text x="24.0" y="1401.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Strata IQ3_XXS 128K</text>
+<rect x="266.0" y="1386.0" width="97.0" height="22.0" rx="4" fill="#2a78d6"><title>Strata IQ3_XXS 128K: 294058 tokens</title></rect>
+<text x="369.0" y="1401.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">294,058</text>
+<rect x="706.0" y="1386.0" width="249.8" height="22.0" rx="4" fill="#f0efec"/>
+<rect x="706.0" y="1386.0" width="16.8" height="22.0" rx="4" fill="#b3261e"><title>Strata IQ3_XXS 128K: 8 of 119 executed calls failed</title></rect>
+<text x="961.8" y="1401.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">8 / 119</text>
 <text x="24.0" y="1439.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Beam Free</text>
 <rect x="266.0" y="1424.0" width="11.2" height="22.0" rx="4" fill="#2a78d6"><title>Beam Free: 33862 tokens</title></rect>
 <text x="283.2" y="1439.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">33,862</text>
@@ -827,52 +825,48 @@
 <text x="24.0" y="3301.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">33. Dots 3 Note Preview - G4: g4_crafting_chain PARTIAL 60.00 [024557]</text>
 <text x="24.0" y="3317.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">34. Dots 3 Note Preview - G6: g6_free_build Environment-attributed, no valid rerun; excluded from the score [024557]; g6_free_build_vision not run</text>
 <text x="24.0" y="3333.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">35. Dots 3 Note Preview - G7: g7_extreme_dungeon Environment-attributed, no valid rerun; excluded from the score [024557]</text>
-<text x="24.0" y="3349.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">36. Strata IQ3_XXS 128K - G4: g4_combat Environment-attributed, no valid rerun; excluded from the score [122332]; g4_crafting_chain</text>
-<text x="40.0" y="3365.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">Environment-attributed, no valid rerun; excluded from the score [122332]; g4_extreme_auto_battler Environment-attributed, no valid rerun; excluded</text>
-<text x="40.0" y="3381.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">from the score [122332]; g4_shop Environment-attributed, no valid rerun; excluded from the score [122332]</text>
-<text x="24.0" y="3397.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">37. Strata IQ3_XXS 128K - G6: g6_free_build Environment-attributed, no valid rerun; excluded from the score [122332]; g6_free_build_vision not run</text>
-<text x="24.0" y="3413.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">38. Strata IQ3_XXS 128K - G7: g7_extreme_dungeon Environment-attributed, no valid rerun; excluded from the score [122332]</text>
-<text x="24.0" y="3429.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">39. local/qwen3.8-flash-coder-iq1_m - G6: g6_free_build not run</text>
-<text x="24.0" y="3445.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">40. Space Bunny Free - G1: g1_spawn_arena FAIL 4.55 [013724]</text>
-<text x="24.0" y="3461.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">41. Space Bunny Free - G6: g6_free_build PARTIAL 74.00 [013724]; g6_free_build_vision not run</text>
-<text x="24.0" y="3477.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">42. Space Bunny Free - G8: g8_tidy_scene FAIL 5.00 [013724]</text>
-<text x="24.0" y="3493.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">43. Beam Free - G2: g2_crafting_rules FAIL 4.55 [122332]; g2_flat_damage FAIL 5.00 [122332]; g2_win_condition FAIL 5.26 [122332]</text>
-<text x="24.0" y="3509.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">44. Beam Free - G3: g3_balanced_enemies FAIL 5.26 [122332]; g3_boolean_dungeon FAIL 9.52 [122332]; g3_fibonacci_rewards FAIL 5.00 [122332];</text>
-<text x="40.0" y="3525.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">g3_quadratic_score FAIL 5.26 [122332]</text>
-<text x="24.0" y="3541.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">45. Beam Free - G4: g4_crafting_chain FAIL 5.00 [122332]</text>
-<text x="24.0" y="3557.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">46. Beam Free - G6: g6_free_build FAIL 0.00 [122332]; g6_free_build_vision not run</text>
-<text x="24.0" y="3573.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">47. Beam Free - G8: g8_selective_raise FAIL 18.57 [122332]</text>
-<text x="24.0" y="3589.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">48. Nemotron 3.5 Lightning - G1: g1_coin_collector FAIL 35.19 [024557]; g1_spawn_arena FAIL 0.00 [024557]</text>
-<text x="24.0" y="3605.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">49. Nemotron 3.5 Lightning - G2: g2_crafting_rules PARTIAL 54.55 [024557]; g2_level_damage FAIL 0.00 [024557]; g2_multi_arg_damage FAIL 0.00 [024557]</text>
-<text x="24.0" y="3621.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">50. Nemotron 3.5 Lightning - G4: g4_crafting_chain PARTIAL 60.00 [024557]</text>
-<text x="24.0" y="3637.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">51. Nemotron 3.5 Lightning - G5: g5_exactly_three FAIL 0.00 [024557]; g5_no_lua FAIL 0.00 [024557]; g5_ordered_spawn FAIL 0.00 [024557];</text>
-<text x="40.0" y="3653.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">g5_protected_chest FAIL 0.00 [024557]</text>
-<text x="24.0" y="3669.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">52. Nemotron 3.5 Lightning - G6: g6_free_build Environment-attributed, no valid rerun; excluded from the score [024557]; g6_free_build_vision not run</text>
-<text x="24.0" y="3685.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">53. local/MiniCPM-V 4.7 1B - G1: g1_coin_collector FAIL 38.89 [224850]; g1_constraint_budget PARTIAL 83.33 [224850]</text>
-<text x="24.0" y="3701.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">54. local/MiniCPM-V 4.7 1B - G2: g2_crafting_rules PARTIAL 81.82 [224850]; g2_flat_damage FAIL 5.00 [224850]; g2_win_condition FAIL 5.26 [224850]</text>
-<text x="24.0" y="3717.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">55. local/MiniCPM-V 4.7 1B - G3: g3_balanced_enemies FAIL 36.84 [224850]; g3_clamped_regen FAIL 10.00 [224850]; g3_fibonacci_rewards FAIL 5.00</text>
-<text x="40.0" y="3733.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">[224850]; g3_quadratic_score FAIL 5.26 [224850]; g3_tiered_pricing FAIL 10.00 [224850]</text>
-<text x="24.0" y="3749.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">56. local/MiniCPM-V 4.7 1B - G4: g4_combat FAIL 12.50 [224850]; g4_crafting_chain FAIL 5.00 [224850]; g4_shop FAIL 4.17 [224850]</text>
-<text x="24.0" y="3765.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">57. local/MiniCPM-V 4.7 1B - G6: g6_free_build_vision FAIL 18.00 [224850]; g6_free_build not run</text>
-<text x="24.0" y="3781.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">58. local/MiniCPM-V 4.7 1B - G7: g7_key_puzzle FAIL 47.83 [224850]</text>
-<text x="24.0" y="3797.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">59. local/MiniCPM-V 4.7 1B - G8: g8_selective_raise FAIL 13.33 [224850]; g8_state_rule FAIL 4.55 [224850]; g8_tidy_scene FAIL 0.00 [224850]</text>
-<text x="24.0" y="3819.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="600">Run ids (Docs/BenchmarkRuns):</text>
-<text x="24.0" y="3834.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">claude/Sonnet 5.5: 20261015_224850</text>
-<text x="24.0" y="3849.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">codex/GPT-6.1 Sol: 20261015_224850</text>
-<text x="24.0" y="3864.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">MiMo-V2.6-Flash Free: 20261017_013724, 20261017_122332</text>
-<text x="24.0" y="3879.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">GLM-5.3-Flash Free: 20261017_013724, 20261017_122332</text>
-<text x="24.0" y="3894.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">LongCat 2.5 Preview Free: 20261017_013724, 20261017_122332</text>
-<text x="24.0" y="3909.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Big Pickle: 20261017_013724, 20261017_122332</text>
-<text x="24.0" y="3924.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">DeepSeek V4.1 Flash Free: 20261017_122332</text>
-<text x="24.0" y="3939.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">codex/GPT-6 Luna: 20261015_224850</text>
-<text x="24.0" y="3954.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">DeepSeek V4.1 Flash 1017: 20261018_022725</text>
-<text x="24.0" y="3969.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">claude/Haiku 4.5: 20261015_224850</text>
-<text x="24.0" y="3984.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Dots 3 Note Preview: 20261018_024557</text>
-<text x="24.0" y="3999.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Strata IQ3_XXS 128K: 20261017_122332</text>
-<text x="24.0" y="4014.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">local/qwen3.8-flash-coder-iq1_m: 20261015_224850</text>
-<text x="24.0" y="4029.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Space Bunny Free: 20261017_013724</text>
-<text x="24.0" y="4044.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Beam Free: 20261017_122332</text>
-<text x="24.0" y="4059.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Nemotron 3.5 Lightning: 20261018_024557</text>
-<text x="24.0" y="4074.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">local/MiniCPM-V 4.7 1B: 20261015_224850</text>
-<text x="24.0" y="4089.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Each scenario uses the newest model-attributable result of that model within the suite; environment/framework failures never count as model scores. Built by tools/benchmark_chart.py.</text>
+<text x="24.0" y="3349.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">36. local/qwen3.8-flash-coder-iq1_m - G6: g6_free_build not run</text>
+<text x="24.0" y="3365.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">37. Space Bunny Free - G1: g1_spawn_arena FAIL 4.55 [013724]</text>
+<text x="24.0" y="3381.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">38. Space Bunny Free - G6: g6_free_build PARTIAL 74.00 [013724]; g6_free_build_vision not run</text>
+<text x="24.0" y="3397.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">39. Space Bunny Free - G8: g8_tidy_scene FAIL 5.00 [013724]</text>
+<text x="24.0" y="3413.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">40. Strata IQ3_XXS 128K - G6: g6_free_build PARTIAL 60.00 [122332]; g6_free_build_vision not run</text>
+<text x="24.0" y="3429.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">41. Beam Free - G2: g2_crafting_rules FAIL 4.55 [122332]; g2_flat_damage FAIL 5.00 [122332]; g2_win_condition FAIL 5.26 [122332]</text>
+<text x="24.0" y="3445.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">42. Beam Free - G3: g3_balanced_enemies FAIL 5.26 [122332]; g3_boolean_dungeon FAIL 9.52 [122332]; g3_fibonacci_rewards FAIL 5.00 [122332];</text>
+<text x="40.0" y="3461.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">g3_quadratic_score FAIL 5.26 [122332]</text>
+<text x="24.0" y="3477.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">43. Beam Free - G4: g4_crafting_chain FAIL 5.00 [122332]</text>
+<text x="24.0" y="3493.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">44. Beam Free - G6: g6_free_build FAIL 0.00 [122332]; g6_free_build_vision not run</text>
+<text x="24.0" y="3509.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">45. Beam Free - G8: g8_selective_raise FAIL 18.57 [122332]</text>
+<text x="24.0" y="3525.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">46. Nemotron 3.5 Lightning - G1: g1_coin_collector FAIL 35.19 [024557]; g1_spawn_arena FAIL 0.00 [024557]</text>
+<text x="24.0" y="3541.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">47. Nemotron 3.5 Lightning - G2: g2_crafting_rules PARTIAL 54.55 [024557]; g2_level_damage FAIL 0.00 [024557]; g2_multi_arg_damage FAIL 0.00 [024557]</text>
+<text x="24.0" y="3557.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">48. Nemotron 3.5 Lightning - G4: g4_crafting_chain PARTIAL 60.00 [024557]</text>
+<text x="24.0" y="3573.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">49. Nemotron 3.5 Lightning - G5: g5_exactly_three FAIL 0.00 [024557]; g5_no_lua FAIL 0.00 [024557]; g5_ordered_spawn FAIL 0.00 [024557];</text>
+<text x="40.0" y="3589.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">g5_protected_chest FAIL 0.00 [024557]</text>
+<text x="24.0" y="3605.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">50. Nemotron 3.5 Lightning - G6: g6_free_build Environment-attributed, no valid rerun; excluded from the score [024557]; g6_free_build_vision not run</text>
+<text x="24.0" y="3621.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">51. local/MiniCPM-V 4.7 1B - G1: g1_coin_collector FAIL 38.89 [224850]; g1_constraint_budget PARTIAL 83.33 [224850]</text>
+<text x="24.0" y="3637.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">52. local/MiniCPM-V 4.7 1B - G2: g2_crafting_rules PARTIAL 81.82 [224850]; g2_flat_damage FAIL 5.00 [224850]; g2_win_condition FAIL 5.26 [224850]</text>
+<text x="24.0" y="3653.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">53. local/MiniCPM-V 4.7 1B - G3: g3_balanced_enemies FAIL 36.84 [224850]; g3_clamped_regen FAIL 10.00 [224850]; g3_fibonacci_rewards FAIL 5.00</text>
+<text x="40.0" y="3669.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">[224850]; g3_quadratic_score FAIL 5.26 [224850]; g3_tiered_pricing FAIL 10.00 [224850]</text>
+<text x="24.0" y="3685.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">54. local/MiniCPM-V 4.7 1B - G4: g4_combat FAIL 12.50 [224850]; g4_crafting_chain FAIL 5.00 [224850]; g4_shop FAIL 4.17 [224850]</text>
+<text x="24.0" y="3701.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">55. local/MiniCPM-V 4.7 1B - G6: g6_free_build_vision FAIL 18.00 [224850]; g6_free_build not run</text>
+<text x="24.0" y="3717.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">56. local/MiniCPM-V 4.7 1B - G7: g7_key_puzzle FAIL 47.83 [224850]</text>
+<text x="24.0" y="3733.0" font-size="11.5" fill="#52514e" text-anchor="start" font-weight="normal">57. local/MiniCPM-V 4.7 1B - G8: g8_selective_raise FAIL 13.33 [224850]; g8_state_rule FAIL 4.55 [224850]; g8_tidy_scene FAIL 0.00 [224850]</text>
+<text x="24.0" y="3755.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="600">Run ids (Docs/BenchmarkRuns):</text>
+<text x="24.0" y="3770.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">claude/Sonnet 5.5: 20261015_224850</text>
+<text x="24.0" y="3785.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">codex/GPT-6.1 Sol: 20261015_224850</text>
+<text x="24.0" y="3800.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">MiMo-V2.6-Flash Free: 20261017_013724, 20261017_122332</text>
+<text x="24.0" y="3815.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">GLM-5.3-Flash Free: 20261017_013724, 20261017_122332</text>
+<text x="24.0" y="3830.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">LongCat 2.5 Preview Free: 20261017_013724, 20261017_122332</text>
+<text x="24.0" y="3845.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Big Pickle: 20261017_013724, 20261017_122332</text>
+<text x="24.0" y="3860.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">DeepSeek V4.1 Flash Free: 20261017_122332</text>
+<text x="24.0" y="3875.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">codex/GPT-6 Luna: 20261015_224850</text>
+<text x="24.0" y="3890.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">DeepSeek V4.1 Flash 1017: 20261018_022725</text>
+<text x="24.0" y="3905.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">claude/Haiku 4.5: 20261015_224850</text>
+<text x="24.0" y="3920.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Dots 3 Note Preview: 20261018_024557</text>
+<text x="24.0" y="3935.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">local/qwen3.8-flash-coder-iq1_m: 20261015_224850</text>
+<text x="24.0" y="3950.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Space Bunny Free: 20261017_013724</text>
+<text x="24.0" y="3965.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Strata IQ3_XXS 128K: 20261017_122332</text>
+<text x="24.0" y="3980.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Beam Free: 20261017_122332</text>
+<text x="24.0" y="3995.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Nemotron 3.5 Lightning: 20261018_024557</text>
+<text x="24.0" y="4010.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">local/MiniCPM-V 4.7 1B: 20261015_224850</text>
+<text x="24.0" y="4025.0" font-size="11" fill="#6f6e69" text-anchor="start" font-weight="normal">Each scenario uses the newest model-attributable result of that model within the suite; environment/framework failures never count as model scores. Built by tools/benchmark_chart.py.</text>
 </svg>

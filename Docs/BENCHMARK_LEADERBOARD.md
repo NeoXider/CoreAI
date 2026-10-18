@@ -185,16 +185,20 @@ How to read the sweep:
 
 Maintainer run `20261017_122332` also completed `Strata IQ3_XXS 128K` (`local/qwen3.8-flash-next-iq3_xxs`, llama.cpp server on the local network) after the OpenCode routes stopped returning usable responses. Raw reports are archived in the [run archive](BenchmarkRuns/2026-10-17/).
 
-| Model | Graded | Suite (unrankable) | shared-6 | Missing | Run |
-|---|---:|---:|---:|---|---|
-| Strata IQ3_XXS 128K (`local/qwen3.8-flash-next-iq3_xxs`) | 29/35 | 91.08 | – | G4 (3 regular + 1 extreme), G6, G7 extreme | `122332` |
+**Ranked row — full G1-G8 run.**
+
+| Model | Suite | Extreme | Regular | P/PA/F | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | Tool errors | Tokens | Run |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| Strata IQ3_XXS 128K (`local/qwen3.8-flash-next-iq3_xxs`) | **88.75** | 52.70 (2/7) | 97.76 | 29/3/3 | 87.69 | 83.67 | 85.99 | 90.00 | 100.00 | 60.00 | 70.33 | 97.73 | 8/119 | 294058 | `122332` |
 
 How to read it:
 
-- **It is not rankable against full rows.** Six results are attributed to Environment, including all
-  model-graded G4 outcomes and G6. The suite score is therefore a mean over an easier scenario mix.
-- **The regular tier is strong where the provider answered** (99.05 regular), but the extreme tier is
-  weak (52.78, 2/5 graded). It passes 26 scenarios and fails 8 with one partial in the graded set.
+- **It is now rankable.** The earlier `91.08` reading was a partial run with six Environment failures;
+  the same run id was resumed for those scenarios and completed all 35 main scenarios with no
+  Environment attribution.
+- **It sits just below qwen3.8-flash-coder-iq1_m (90.90) and Space Bunny Free (90.02).** The regular
+  tier is strong (97.76), but the extreme tier is weak (52.70, 2/7) and G6/G7 are the visible model
+  weaknesses.
 
 ## Additional v2.0 runs — DeepSeek dated build, Dots and Nemotron (2026-10-18)
 
