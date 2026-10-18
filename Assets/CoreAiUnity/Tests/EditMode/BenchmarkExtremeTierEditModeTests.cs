@@ -60,6 +60,23 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        [TestCase(0, 120, FailureAttribution.Model)]
+        [TestCase(119.9, 120, FailureAttribution.Model)]
+        [TestCase(120, 120, FailureAttribution.Environment)]
+        [TestCase(480, 120, FailureAttribution.Environment)]
+        [TestCase(480, 0, FailureAttribution.Model)]
+        public void ProviderStall_ReclassifiesLiveDeadlineAsEnvironmentAndRetries(double stallSeconds,
+            double thresholdSeconds, FailureAttribution expected)
+        {
+            Assert.AreEqual(expected == FailureAttribution.Environment,
+                BenchmarkProviderFailurePolicy.IsProviderStall(stallSeconds, thresholdSeconds));
+            FailureAttribution attribution = BenchmarkProviderFailurePolicy.ClassifyDeadline(true, false, false,
+                true, false, stallSeconds, thresholdSeconds);
+            Assert.AreEqual(expected, attribution);
+            Assert.AreEqual(expected == FailureAttribution.Environment,
+                BenchmarkProviderFailurePolicy.ShouldRetry(attribution, "provider stalled"));
+        }
+
         [Test]
         public void ProviderTimeoutMetadata_SurvivesMappingAndResetsBetweenAttempts()
         {

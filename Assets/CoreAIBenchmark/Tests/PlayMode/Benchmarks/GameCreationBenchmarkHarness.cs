@@ -49,6 +49,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             private int _toolCalls;
             private int _failedToolCalls;
             private int _cameraCalls;
+            private DateTime? _lastActivityUtc;
 
             /// <param name="roleId">Only calls requested by this agent role are counted.</param>
             /// <param name="scenarioId">Scenario id written into each JSONL trace line.</param>
@@ -89,6 +90,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 get { lock (_gate) { return _cameraCalls; } }
             }
 
+            /// <summary>Latest completed or failed tool lifecycle record, used to detect provider stalls.</summary>
+            internal DateTime? LastActivityUtc
+            {
+                get { lock (_gate) { return _lastActivityUtc; } }
+            }
+
             internal string CompletionText
             {
                 get { lock (_gate) { return _completionText.ToString(); } }
@@ -124,6 +131,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 lock (_gate)
                 {
                     _toolCalls++;
+                    _lastActivityUtc = DateTime.UtcNow;
                     if (record.Status == "failed")
                     {
                         _failedToolCalls++;
@@ -237,6 +245,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             private LlmProviderResponseState _providerResponseState;
             private bool _sealedProviderResponseObserved;
             private LlmTimeoutKind _sealedTimeoutKind;
+            private DateTime? _lastProviderActivityUtc;
+            private DateTime? _sealedLastProviderActivityUtc;
             private bool _transportFailed;
 
             /// <summary>Explicit transport evidence captured before orchestration can wrap cancellation.</summary>
@@ -274,6 +284,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public LlmTimeoutKind TimeoutKind
             {
                 get { lock (_gate) { return _sealed ? _sealedTimeoutKind : _providerResponseState?.TimeoutKind ?? LlmTimeoutKind.None; } }
+            }
+
+            /// <summary>Latest provider text/reasoning/tool-call activity, used to detect provider stalls.</summary>
+            public DateTime? LastProviderActivityUtc
+            {
+                get { lock (_gate) { return _sealed ? _sealedLastProviderActivityUtc : _lastProviderActivityUtc; } }
             }
 
             private sealed class InFlightTurn
@@ -382,11 +398,16 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         }
 
                         if (chunk.GenerationInProgress ||
-                            !string.IsNullOrEmpty(chunk.ReasoningText) || !string.IsNullOrEmpty(chunk.Text))
+                            !string.IsNullOrEmpty(chunk.ReasoningText) || !string.IsNullOrEmpty(chunk.Text) ||
+                            chunk.ExecutedToolCalls != null)
                         {
                             lock (_gate)
                             {
-                                if (!_sealed) turn.Request.ProviderResponseState?.RecordResponse();
+                                if (!_sealed)
+                                {
+                                    turn.Request.ProviderResponseState?.RecordResponse();
+                                    _lastProviderActivityUtc = DateTime.UtcNow;
+                                }
                             }
                         }
 
@@ -457,6 +478,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     _inFlight.Clear();
                     _sealedProviderResponseObserved = _providerResponseState?.ResponseObserved == true;
                     _sealedTimeoutKind = _providerResponseState?.TimeoutKind ?? LlmTimeoutKind.None;
+                    _sealedLastProviderActivityUtc = _lastProviderActivityUtc;
                     _sealed = true;
                 }
             }
@@ -577,6 +599,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     && (!string.IsNullOrWhiteSpace(result.Content) || (result.ExecutedToolCalls?.Count ?? 0) > 0))
                 {
                     AnyUsableOutput = true;
+                    _lastProviderActivityUtc = DateTime.UtcNow;
                 }
 
                 Turns.Add(turn);
@@ -2167,6 +2190,43 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// </summary>
         internal const double CancelGraceSeconds = 5.0;
 
+        /// <summary>Gap without provider/tool activity that marks an accepted stream as stalled.</summary>
+        internal const string EnvProviderStallSeconds = "COREAI_BENCHMARK_PROVIDER_STALL_SECONDS";
+
+        /// <summary>Default live-stream inactivity ceiling before a deadline is retried as Environment.</summary>
+        internal const double DefaultProviderStallSeconds = 120.0;
+
+        internal static double ResolveProviderStallSeconds()
+        {
+            string raw = Environment.GetEnvironmentVariable(EnvProviderStallSeconds);
+            if (!double.TryParse(raw, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out double seconds))
+            {
+                return DefaultProviderStallSeconds;
+            }
+
+            return seconds < 0 ? 0 : Math.Min(seconds, 3600);
+        }
+
+        private static double ProviderActivityGapSeconds(DateTime scenarioEndUtc, double scenarioLatencySeconds,
+            DateTime? providerActivityUtc, DateTime? toolActivityUtc)
+        {
+            DateTime lastActivity = DateTime.MinValue;
+            if (providerActivityUtc.HasValue)
+            {
+                lastActivity = providerActivityUtc.Value;
+            }
+
+            if (toolActivityUtc.HasValue && toolActivityUtc.Value > lastActivity)
+            {
+                lastActivity = toolActivityUtc.Value;
+            }
+
+            return lastActivity == DateTime.MinValue
+                ? Math.Max(0, scenarioLatencySeconds)
+                : Math.Max(0, (scenarioEndUtc - lastActivity).TotalSeconds);
+        }
+
         /// <summary>Allows another build turn only when the previous one used tools and time remains.</summary>
         internal static bool CanContinueFreeBuild(int toolCalls, int previousToolCalls,
             int continuations, double elapsedSeconds, float timeoutSeconds)
@@ -2446,10 +2506,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     }
                 }
 
+                DateTime scenarioEndUtc = DateTime.UtcNow;
                 sw.Stop();
                 obs.LatencyMs = sw.Elapsed.TotalMilliseconds;
                 // WHY: a task that outlived the grace window must not append turns while they are read below.
                 capture.Seal();
+                double providerStallSeconds = ProviderActivityGapSeconds(scenarioEndUtc, obs.LatencyMs / 1000.0,
+                    capture.LastProviderActivityUtc, toolObserver.LastActivityUtc);
 
                 // WHY: Budget cancellation after executed work can end a scenario cleanly.
                 // WHY: Typed client deadlines are reconciled with provider-response evidence before grading.
@@ -2553,14 +2616,25 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     obs.Attribution = FailureAttribution.Environment;
                     obs.Failure = $"provider error: {capture.FirstProviderError}";
                 }
-                if ((scenarioDeadline || totalDeadline) && obs.Attribution != FailureAttribution.Framework &&
-                    BenchmarkProviderFailurePolicy.ClassifyDeadline(scenarioDeadline, totalDeadline,
-                        timeoutKind == LlmTimeoutKind.ResponseWait, capture.ProviderResponseObserved, transportFailed) == FailureAttribution.Model)
+                if ((scenarioDeadline || totalDeadline) && obs.Attribution != FailureAttribution.Framework)
                 {
-                    obs.TimedOut = true;
-                    obs.Attribution = FailureAttribution.Model;
-                    obs.Failure = totalDeadline ? "total request deadline reached while provider response was open"
-                        : "scenario deadline reached while provider response was open";
+                    double stallThresholdSeconds = ResolveProviderStallSeconds();
+                    if (BenchmarkProviderFailurePolicy.IsProviderStall(providerStallSeconds, stallThresholdSeconds) &&
+                        capture.ProviderResponseObserved && !transportFailed)
+                    {
+                        obs.TimedOut = true;
+                        obs.Attribution = FailureAttribution.Environment;
+                        obs.Failure = $"provider stream stalled for {providerStallSeconds:0}s after last provider/tool activity";
+                        Debug.LogWarning($"{logPrefix} {scenario.Group}/{scenario.Name}: {obs.Failure}");
+                    }
+                    else if (BenchmarkProviderFailurePolicy.ClassifyDeadline(scenarioDeadline, totalDeadline,
+                                 timeoutKind == LlmTimeoutKind.ResponseWait, capture.ProviderResponseObserved, transportFailed) == FailureAttribution.Model)
+                    {
+                        obs.TimedOut = true;
+                        obs.Attribution = FailureAttribution.Model;
+                        obs.Failure = totalDeadline ? "total request deadline reached while provider response was open"
+                            : "scenario deadline reached while provider response was open";
+                    }
                 }
 
                 // Grading is harness territory too: protect the suite from a grader bug.

@@ -189,15 +189,19 @@ Maintainer run `20261017_122332` also completed `Strata IQ3_XXS 128K` (`local/qw
 
 | Model | Suite | Extreme | Regular | P/PA/F | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | Tool errors | Tokens | Run |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| Strata IQ3_XXS 128K (`local/qwen3.8-flash-next-iq3_xxs`) | **88.75** | 52.70 (2/7) | 97.76 | 29/3/3 | 87.69 | 83.67 | 85.99 | 90.00 | 100.00 | 60.00 | 70.33 | 97.73 | 8/119 | 294058 | `122332` |
+| Strata IQ3_XXS 128K (`local/qwen3.8-flash-next-iq3_xxs`) | **88.55** | 51.71 (2/7) | 97.76 | 29/3/3 | 87.69 | 83.67 | 85.71 | 90.00 | 100.00 | 60.00 | 67.83 | 97.73 | 5/116 | 280857 | `122332` |
 
 How to read it:
 
 - **It is now rankable.** The earlier `91.08` reading was a partial run with six Environment failures;
   the same run id was resumed for those scenarios and completed all 35 main scenarios with no
   Environment attribution.
+- **The suspected provider-stall scenarios were rerun.** `g6_free_build`, `g3_extreme_dungeon_route`,
+  and `g7_extreme_dungeon` were retried under the 120-second provider-stall policy; they still timed
+  out while the provider stream was open, so they remain Model failures rather than Environment
+  failures.
 - **It sits just below qwen3.8-flash-coder-iq1_m (90.90) and Space Bunny Free (90.02).** The regular
-  tier is strong (97.76), but the extreme tier is weak (52.70, 2/7) and G6/G7 are the visible model
+  tier is strong (97.76), but the extreme tier is weak (51.71, 2/7) and G6/G7 are the visible model
   weaknesses.
 
 ## Additional v2.0 runs — DeepSeek dated build, Dots and Nemotron (2026-10-18)

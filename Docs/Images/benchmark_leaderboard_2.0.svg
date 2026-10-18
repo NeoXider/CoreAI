@@ -446,19 +446,19 @@
 <text x="1091.7" y="583.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">82.4</text>
 <text x="24.0" y="619.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Strata IQ3_XXS 128K</text>
 <text x="24.0" y="633.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 29/3/3 - 35/36 scored</text>
-<rect x="266.0" y="606.0" width="221.9" height="22.0" rx="4" fill="#2a78d6"><title>Strata IQ3_XXS 128K: suite 88.75 over 35 scenarios</title></rect>
-<rect x="266.0" y="606.0" width="221.9" height="22.0" rx="4" fill="url(#hatch)"/>
-<text x="522.0" y="621.5" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">88.75*</text>
-<path d="M397.8,607.2 L407.6,617.0 L397.8,626.8 L388.0,617.0 Z" fill="#fcfcfb"/>
-<path d="M397.8,610.0 L404.8,617.0 L397.8,624.0 L390.8,617.0 Z" fill="#eb6834"><title>Strata IQ3_XXS 128K: extreme tier 52.70 (2/7)</title></path>
+<rect x="266.0" y="606.0" width="221.4" height="22.0" rx="4" fill="#2a78d6"><title>Strata IQ3_XXS 128K: suite 88.55 over 35 scenarios</title></rect>
+<rect x="266.0" y="606.0" width="221.4" height="22.0" rx="4" fill="url(#hatch)"/>
+<text x="522.0" y="621.5" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">88.55*</text>
+<path d="M395.3,607.2 L405.1,617.0 L395.3,626.8 L385.5,617.0 Z" fill="#fcfcfb"/>
+<path d="M395.3,610.0 L402.3,617.0 L395.3,624.0 L388.3,617.0 Z" fill="#eb6834"><title>Strata IQ3_XXS 128K: extreme tier 51.71 (2/7)</title></path>
 <path d="M585.0,612.0 L590.0,617.0 L585.0,622.0 L580.0,617.0 Z" fill="#eb6834"/>
-<text x="594.0" y="621.5" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">52.70</text>
+<text x="594.0" y="621.5" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="normal">51.71</text>
 <rect x="667.0" y="601.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Strata IQ3_XXS 128K G1: 87.69</title></rect>
 <text x="690.3" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">87.7</text>
 <rect x="715.7" y="601.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Strata IQ3_XXS 128K G2: 83.67</title></rect>
 <text x="739.0" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">83.7</text>
-<rect x="764.3" y="601.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Strata IQ3_XXS 128K G3: 85.99</title></rect>
-<text x="787.7" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">86.0</text>
+<rect x="764.3" y="601.0" width="46.7" height="32.0" rx="3" fill="#2a78d6"><title>Strata IQ3_XXS 128K G3: 85.71</title></rect>
+<text x="787.7" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">85.7</text>
 <rect x="813.0" y="601.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>Strata IQ3_XXS 128K G4: 90.00</title></rect>
 <text x="836.3" y="621.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">90.0</text>
 <rect x="861.7" y="601.0" width="46.7" height="32.0" rx="3" fill="#104281"><title>Strata IQ3_XXS 128K G5: 100.00</title></rect>
@@ -467,12 +467,12 @@
 <rect x="910.3" y="601.0" width="46.7" height="32.0" rx="3" fill="url(#hatch)"/>
 <text x="933.7" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">60.0</text>
 <text x="954.0" y="612.0" font-size="9.5" fill="#0b0b0b" text-anchor="end" font-weight="700">40</text>
-<rect x="959.0" y="601.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Strata IQ3_XXS 128K G7: 70.33</title></rect>
-<text x="982.3" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">70.3</text>
+<rect x="959.0" y="601.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Strata IQ3_XXS 128K G7: 67.83</title></rect>
+<text x="982.3" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">67.8</text>
 <rect x="1007.7" y="601.0" width="46.7" height="32.0" rx="3" fill="#1c5cab"><title>Strata IQ3_XXS 128K G8: 97.73</title></rect>
 <text x="1031.0" y="621.5" font-size="12" fill="#ffffff" text-anchor="middle" font-weight="600">97.7</text>
-<rect x="1068.3" y="601.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Strata IQ3_XXS 128K Extreme: 52.70</title></rect>
-<text x="1091.7" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">52.7</text>
+<rect x="1068.3" y="601.0" width="46.7" height="32.0" rx="3" fill="#5598e7"><title>Strata IQ3_XXS 128K Extreme: 51.71</title></rect>
+<text x="1091.7" y="621.5" font-size="12" fill="#0b0b0b" text-anchor="middle" font-weight="600">51.7</text>
 <text x="24.0" y="657.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Beam Free</text>
 <text x="24.0" y="671.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal">P/PA/F 21/0/14 - 35/36 scored</text>
 <rect x="266.0" y="644.0" width="155.4" height="22.0" rx="4" fill="#2a78d6"><title>Beam Free: suite 62.18 over 35 scenarios</title></rect>
@@ -692,11 +692,11 @@
 <rect x="706.0" y="1348.0" width="92.3" height="22.0" rx="4" fill="#b3261e"><title>Space Bunny Free: 44 of 162 executed calls failed</title></rect>
 <text x="1052.0" y="1363.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">44 / 162</text>
 <text x="24.0" y="1401.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Strata IQ3_XXS 128K</text>
-<rect x="266.0" y="1386.0" width="97.0" height="22.0" rx="4" fill="#2a78d6"><title>Strata IQ3_XXS 128K: 294058 tokens</title></rect>
-<text x="369.0" y="1401.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">294,058</text>
-<rect x="706.0" y="1386.0" width="249.8" height="22.0" rx="4" fill="#f0efec"/>
-<rect x="706.0" y="1386.0" width="16.8" height="22.0" rx="4" fill="#b3261e"><title>Strata IQ3_XXS 128K: 8 of 119 executed calls failed</title></rect>
-<text x="961.8" y="1401.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">8 / 119</text>
+<rect x="266.0" y="1386.0" width="92.7" height="22.0" rx="4" fill="#2a78d6"><title>Strata IQ3_XXS 128K: 280857 tokens</title></rect>
+<text x="364.7" y="1401.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">280,857</text>
+<rect x="706.0" y="1386.0" width="243.5" height="22.0" rx="4" fill="#f0efec"/>
+<rect x="706.0" y="1386.0" width="10.5" height="22.0" rx="4" fill="#b3261e"><title>Strata IQ3_XXS 128K: 5 of 116 executed calls failed</title></rect>
+<text x="955.5" y="1401.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">5 / 116</text>
 <text x="24.0" y="1439.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">Beam Free</text>
 <rect x="266.0" y="1424.0" width="11.2" height="22.0" rx="4" fill="#2a78d6"><title>Beam Free: 33862 tokens</title></rect>
 <text x="283.2" y="1439.5" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal">33,862</text>

@@ -184,7 +184,7 @@ namespace CoreAI.Demos
             GameObject visual = GameObject.CreatePrimitive(
                 archetype.Team == "ally" ? PrimitiveType.Capsule : PrimitiveType.Cube);
             Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(visual);
-            visual.name = $"{archetype.Name}_{visual.GetInstanceID()}";
+            visual.name = $"{archetype.Name}_{visual.GetEntityId().GetHashCode()}";
             visual.transform.SetParent(unitRoot, false);
             visual.transform.position = position;
             visual.transform.localScale = Vector3.one * 0.8f;
@@ -201,7 +201,7 @@ namespace CoreAI.Demos
 
             _mods?.EmitEvent(_actorContext, "unit_spawned", $"{archetype.Name}:{archetype.Team}");
             RefreshStatus();
-            return visual.GetInstanceID();
+            return visual.GetEntityId().GetHashCode();
         }
 
         public int Count(string team)

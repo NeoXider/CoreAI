@@ -388,7 +388,10 @@ The benchmark client total deadline is zero/unlimited; the response-wait default
 without a generation delta. Scenario CTS owns grading deadlines. Typed `LlmTimeoutKind` evidence
 separates TotalDeadline from ResponseWait and Transport. A total/scenario deadline with an accepted
 provider response and no transport failure is a Model result, graded on work already executed and
-never retried; silence, HTTP/load/transport failures remain Environment. SkillSet similarly enforces
+never retried, unless the live stream had no provider/tool activity for
+`COREAI_BENCHMARK_PROVIDER_STALL_SECONDS` (default 120; `0` disables it). Such a stall is recorded as
+Environment with the elapsed gap in the failure text and retried like other infrastructure failures.
+Silence, HTTP/load/transport failures remain Environment. SkillSet similarly enforces
 its turn budget outside the client and leaves temperature to the provider.
 
 G6 runtime geometry/scoring and replay remain primary. Optional Editor prefab export records

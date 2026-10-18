@@ -61,6 +61,23 @@ namespace CoreAI.Benchmarking
             return ClassifyDeadline(scenarioDeadline || totalRequestDeadline, providerResponseObserved, transportFailed);
         }
 
+        /// <summary>Classifies a deadline while preserving evidence that the provider stopped producing activity.</summary>
+        public static FailureAttribution ClassifyDeadline(bool scenarioDeadline, bool totalRequestDeadline,
+            bool responseWaitExpired, bool providerResponseObserved, bool transportFailed,
+            double providerStallSeconds, double providerStallThresholdSeconds)
+        {
+            if (IsProviderStall(providerStallSeconds, providerStallThresholdSeconds))
+                return FailureAttribution.Environment;
+            return ClassifyDeadline(scenarioDeadline, totalRequestDeadline, responseWaitExpired,
+                providerResponseObserved, transportFailed);
+        }
+
+        /// <summary>A live provider stream that stopped producing observable activity is an infrastructure stall.</summary>
+        public static bool IsProviderStall(double providerStallSeconds, double providerStallThresholdSeconds)
+        {
+            return providerStallThresholdSeconds > 0 && providerStallSeconds >= providerStallThresholdSeconds;
+        }
+
         /// <summary>Retries infrastructure failures without replaying a measured model deadline.</summary>
         public static bool ShouldRetry(FailureAttribution attribution, string failure)
         {

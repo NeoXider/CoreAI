@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Benchmark live-stream stall detection: scenario and total deadlines measure the gap since the last provider/tool activity; gaps of at least `COREAI_BENCHMARK_PROVIDER_STALL_SECONDS` (default 120) are recorded as Environment stalls, reported with the elapsed gap and retried.
+
 ## [7.53.0] - 2026-10-16
 
 ### Fixed

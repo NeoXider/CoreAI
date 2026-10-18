@@ -11,6 +11,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 ### Added
 
 - Hero retake tooling: `CaptureSavedCastlePrefab_ForReport` accepts the banner header, stats and caption from a UTF-8 text file (`COREAI_BENCHMARK_RECAPTURE_TEXT_FILE`), and the new explicit `CaptureSavedCastleReplay_ForReport` re-renders a hero by replaying the recorded `_g6_replay.lua` (`COREAI_BENCHMARK_RECAPTURE_LUA`) so runtime textures are regenerated without contacting the model.
+- Benchmark PlayMode runner records provider/tool inactivity on live scenario deadlines and treats gaps of at least `COREAI_BENCHMARK_PROVIDER_STALL_SECONDS` (default 120) as retryable Environment stalls.
 
 ## [7.53.0] - 2026-10-16
 

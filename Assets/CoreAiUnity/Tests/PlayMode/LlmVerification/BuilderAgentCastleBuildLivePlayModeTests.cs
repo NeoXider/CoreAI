@@ -254,7 +254,7 @@ namespace CoreAI.Tests.PlayMode
             {
                 if (tr != null && tr.name.StartsWith(CastlePrefix, StringComparison.OrdinalIgnoreCase))
                 {
-                    ids.Add(tr.gameObject.GetInstanceID());
+                    ids.Add(tr.gameObject.GetEntityId().GetHashCode());
                 }
             }
 
@@ -272,7 +272,7 @@ namespace CoreAI.Tests.PlayMode
                     continue;
                 }
 
-                if (!preExistingIds.Contains(tr.gameObject.GetInstanceID()))
+                if (!preExistingIds.Contains(tr.gameObject.GetEntityId().GetHashCode()))
                 {
                     names.Add(tr.name);
                 }
@@ -293,7 +293,7 @@ namespace CoreAI.Tests.PlayMode
                 }
 
                 if (tr.name.StartsWith(CastlePrefix, StringComparison.OrdinalIgnoreCase) &&
-                    !preExistingIds.Contains(tr.gameObject.GetInstanceID()))
+                    !preExistingIds.Contains(tr.gameObject.GetEntityId().GetHashCode()))
                 {
                     UnityEngine.Object.Destroy(tr.gameObject);
                 }
