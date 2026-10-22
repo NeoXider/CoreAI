@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Images/header_concept_2.png" alt="CoreAI Banner" width="100%">
+  <img src="Docs/Images/readme/01_hero.svg" alt="CoreAI: a C# agent runtime you embed in your own application" width="100%">
 </p>
 
 # <img src="Docs/Images/coreai_icon.png" alt="CoreAI Icon" width="40" height="40" align="absmiddle"> CoreAI
@@ -46,6 +46,10 @@ where a specific player's memory lives, and what a caller learns when the turn f
 product; your game logic stays yours.
 
 ---
+
+## How it fits together
+
+<p align="center"><img src="Docs/Images/readme/02_architecture.svg" alt="Your application, the CoreAI runtime and the model providers" width="100%"></p>
 
 ## Quick start
 
@@ -133,6 +137,8 @@ result-size cap, and bounded parallelism. Built-ins: `memory`, `game_config`, `g
 `save_world`, `load_world`, `list_autosaves`, `load_autosave` (Mods). A multi-function tool such as `camera` reaches the model as its functions (`camera_capture`,
 `screenshot`, `camera_look`, `camera_list`), and those are the names the model calls.
 
+<p align="center"><img src="Docs/Images/readme/05_skills_savings.svg" alt="Self-Service Skills: about 4,000 tokens of tool schemas per request against about 360" width="100%"></p>
+
 **Skills.** A skill is a named group of tools plus instructions that may span several documents. The
 model sees a one-line catalog entry per skill and two meta-tools, then pulls the entry document with
 `read_skill`, and one reference section — or all of them — on a second call.
@@ -162,6 +168,8 @@ stays a `Timeout`.
 ---
 
 ## Packages and what is optional
+
+<p align="center"><img src="Docs/Images/readme/04_packages.svg" alt="Seven CoreAI packages: two required, five optional" width="100%"></p>
 
 Seven UPM packages, versions kept in lockstep (CI job `package-graph` fails the build if they drift).
 **Only the first two are required.**
@@ -225,6 +233,8 @@ In Unity, install the UPM packages instead. Adding the DLL on top of the sources
 
 Every line below names the type and the test that backs it. Anything that could not be pointed at is
 not on this list.
+
+<p align="center"><img src="Docs/Images/readme/03_turn_loop.svg" alt="One streamed turn: tools run while the model is still generating" width="100%"></p>
 
 **Tool calls run while the model is still generating.** On the native tool-call channel,
 `MeaiLlmClient.CompleteStreamingAsync` hands each `FunctionCallContent` to
