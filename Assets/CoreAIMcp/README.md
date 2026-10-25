@@ -139,11 +139,24 @@ that on a machine you fully trust — the server logs a warning at every start w
 Or start it from code with `CoreAiMcpServer.StartServer()` as in [Quick start](#quick-start) and stop it
 with `CoreAiMcpServer.StopServer()`.
 
+Call the start/stop lifecycle APIs on the Unity main thread. `StartServer` reuses the active server;
+when it creates a persistent host, the framework owns that host. `StopServer` stops its listener and
+fails queued work. The stopped automatic host stays available for restart while already-running
+bodies drain, preserving their admission slots. Once it is stopped and drained, `Update` destroys it;
+an unsuccessful start is cleaned up the same way. A later start creates a new host, so check `IsRunning`
+after starting and reacquire the instance through `StartServer` after retirement. Stopping a component
+on a scene-owned GameObject leaves that GameObject under the host game's ownership.
+
 The component must stay **enabled on an active GameObject**: `Update()` is what drains the tool queue on
 the Unity main thread, and disabling the component stops the server. If `Update()` does not run — the
 server was started from code on a disabled component or an inactive GameObject, or the game is paused —
 a `tools/call` fails after **Main Thread Timeout Seconds** (default 30; `0` disables the timeout) with a
 JSON-RPC error naming the cause, instead of hanging the client forever.
+
+On Windows, an access-denied startup diagnostic includes the URL reservation matching the actual
+listener prefix, for example `netsh http add urlacl url=http://127.0.0.1:8590/ user=%USERNAME%` from an
+administrator command prompt. The reservation is for the root prefix with its trailing slash;
+clients still connect to `http://127.0.0.1:8590/mcp`.
 
 ## Protocol
 
@@ -160,7 +173,8 @@ JSON-RPC error naming the cause, instead of hanging the client forever.
   non-object JSON or an invalid request shape → `-32600`, a stalled main thread → `-32603` (message
   names the cause). A tool that throws returns a normal result with `isError: true`.
 - Request parsing preserves JSON strings exactly, including timestamp-shaped request ids, tool names,
-  and arguments. It does not infer dates or change their formatting; trailing content is rejected.
+  and arguments, including nested broker `arguments_json` objects. It does not infer dates or change
+  their formatting; non-object arguments, excess nesting and trailing content are rejected.
 - Transport rejections: `401` — token, `403` — foreign Origin/Host or non-local address,
   `405` — a method other than GET or POST,
   `413` — body size exceeded in **UTF-8 bytes**, including chunked requests, `415` — not JSON,
@@ -261,6 +275,10 @@ call has started, the timeout no longer applies: the result arrives when the bod
 `StopListening` fails the queued calls and cancels the network requests' lifetime token. A body that has
 already started receives the cancellation but keeps its slot until it actually finishes, even across a
 server restart. Other calls can use the free slots, and asynchronous bodies may run concurrently.
+This also applies to `StopServer` / `StartServer` on the automatic host. A body which ignores
+cancellation delays that host's retirement until actual completion. Stop clears the previous queue
+before cancellation callbacks run, so a callback can restart the host without losing its new listener
+or newly queued calls.
 
 The budget is checked **between** calls and cannot interrupt synchronous code. A host tool should keep
 its synchronous part short, honour cancellation and use asynchronous I/O; split heavy work or move it
@@ -296,6 +314,12 @@ Tools are registered **only when their backing service resolves** in the current
 | `coreai_tools` | always (see [Tool residency](#tool-residency-what-the-model-pays-for)) | Broker over Dynamic tools: `list`, `describe`, `call`. |
 
 Each tool ships a real JSON Schema in `tools/list` so clients validate arguments before calling.
+
+`get_mod_logs` and `world_command` keep their backing tool's JSON text unchanged and map its boolean
+`success` or `Success` field to MCP `isError`. Invalid log levels, missing world parameters, unknown
+actions and executor refusals therefore return `isError: true`, directly and through `coreai_tools`.
+An `OperationCanceledException` reaching the dispatcher remains a protocol error (`-32603`) without
+a tool-result payload; ordinary tool failures keep their normal content.
 
 ### `manage_mods` and host-admin authority
 
@@ -445,6 +469,11 @@ particular varies between client versions — check yours if the connection retu
 | `manage_mods` needs explicit, unrestricted host-admin admission | `CoreAiMcpServerMainThreadEditModeTests.BuildRegistry_ManageModsRequiresExplicitUnrestrictedHostAdminAdmission` |
 | Residency, the broker and the environment-variable override | `McpDynamicToolsEditModeTests` |
 | The main-thread queue honours its budget, capacity and timeout | `CoreAiMcpServerMainThreadEditModeTests` |
+| Direct and broker calls preserve nested timestamp strings and reject invalid argument objects | `McpDynamicToolsEditModeTests.RawCalls_DirectAndBroker_PreserveNestedTimestampStrings`, `Broker_InvalidNestedArguments_RejectBeforeCallingTarget`, `Broker_ExcessiveNestedDepth_RejectsBeforeCallingTarget` |
+| World/log failures set `isError` while retaining content and cancellation semantics | `McpRpcDispatcherEditModeTests.LogAdapter_DirectAndBroker_MapInnerFailureWithoutChangingContent`, `WorldAdapter_DirectAndBroker_MapInnerFailureWithoutChangingContent`, `LogAdapter_QueryCancellationAndFailure_KeepDistinctProtocolMeaning`, `WorldAdapter_CancelledBeforeAdmission_DoesNotInvokeExecutor` |
+| Static restart retains running admission; stopped automatic hosts retire; reentrant restart and disposal failure preserve ownership | `CoreAiMcpServerResidencyPlayModeTests.StaticRestart_RetainsCancellationIgnoringBodyAndRecoversCapacityExactlyOnce`, `StaticIdleCycles_RetireAutomaticHostsAndPreserveSceneOwnedHost`, `StaticStop_ReentrantCancellationRestartPreservesNewGenerationAndQueue`, `StaticStop_DisposeFailureStillClearsStoppedGenerationAndRetainsRunningLease` (in-memory transport, no sockets or models) |
+| Failed automatic starts are cleaned up; an obsolete start failure cannot dispose a replacement listener or change its queue | `CoreAiMcpServerResidencyPlayModeTests.StaticStart_FailedAttemptsReuseThenRetireAutomaticHostAndDisposeTransports`, `StaticStart_ObsoleteFailureCannotDisposeRestartedGenerationOrChangeItsQueue` |
+| Windows startup guidance reserves the canonical listener prefix | `CoreAiMcpServerMainThreadEditModeTests.BindDenied_GuidanceReservesExactCanonicalListeningPrefix_AndDisposesTransport` (fake bind denial, no URLACL mutation) |
 | `serverInfo.version` never drifts from `package.json` | `McpPackageVersionEditModeTests` |
 | The protocol core stays engine-free | `McpArchitectureFitnessEditModeTests` |
 

@@ -38,6 +38,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// <summary>Counts completed tool calls even when a streamed turn is cancelled before its terminal chunk.</summary>
         internal sealed class ScenarioToolCallObserver
         {
+            internal const string ReplayPrefix = "-- CoreAI benchmark independent chunks v1\n";
             private readonly string _roleId;
             private readonly object _gate = new();
             private readonly StringBuilder _completionText = new();
@@ -187,22 +188,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         return "";
                     }
 
-                    StringBuilder script = new();
-                    script.AppendLine("-- Model-authored execute_lua calls in original order.");
-                    script.AppendLine($"-- Model: {modelId}; scenario: {scenarioId}; calls: {_luaChunks.Count}");
-                    script.AppendLine("-- pcall keeps later calls running after a failed section, matching the benchmark.");
-                    script.AppendLine("local function run_chunk(index, body)");
-                    script.AppendLine("    local ok, err = pcall(body)");
-                    script.AppendLine("    if not ok then print('G6 chunk ' .. index .. ' failed: ' .. tostring(err)) end");
-                    script.AppendLine("end");
-                    for (int i = 0; i < _luaChunks.Count; i++)
+                    string payload = Newtonsoft.Json.JsonConvert.SerializeObject(new
                     {
-                        script.AppendLine($"\nrun_chunk({i + 1}, function()");
-                        script.AppendLine(_luaChunks[i]);
-                        script.AppendLine("end)");
-                    }
-
-                    return script.ToString();
+                        modelId, scenarioId, chunks = _luaChunks
+                    }, Newtonsoft.Json.Formatting.Indented);
+                    string equals = "=";
+                    while (payload.Contains("]" + equals + "]")) equals += "=";
+                    return ReplayPrefix + "--[" + equals + "[\n" + payload + "\n]" + equals + "]\n";
                 }
             }
         }
@@ -238,6 +230,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         public sealed class SessionCapturingLlmClient : ILlmClient
         {
             private readonly ILlmClient _inner;
+            private readonly Func<double> _clockMilliseconds;
             private readonly object _gate = new();
             private readonly List<InFlightTurn> _inFlight = new();
             private string _systemPrompt = "";
@@ -274,7 +267,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
 
-            /// <summary>Per-session evidence that a provider accepted a stream or generated a delta.</summary>
+            /// <summary>Per-turn evidence that a provider accepted a request or supplied generation/usage data.</summary>
             public bool ProviderResponseObserved
             {
                 get { lock (_gate) { return _sealed ? _sealedProviderResponseObserved : _providerResponseState?.ResponseObserved == true; } }
@@ -286,7 +279,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 get { lock (_gate) { return _sealed ? _sealedTimeoutKind : _providerResponseState?.TimeoutKind ?? LlmTimeoutKind.None; } }
             }
 
-            /// <summary>Latest provider text/reasoning/tool-call activity, used to detect provider stalls.</summary>
+            /// <summary>Latest provider generation/text/reasoning/tool-call activity, used to detect provider stalls.</summary>
             public DateTime? LastProviderActivityUtc
             {
                 get { lock (_gate) { return _sealed ? _sealedLastProviderActivityUtc : _lastProviderActivityUtc; } }
@@ -295,13 +288,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             private sealed class InFlightTurn
             {
                 public LlmCompletionRequest Request;
-                public long StartTimestamp;
+                public double StartMilliseconds;
                 public readonly StringBuilder Text = new();
             }
 
             public SessionCapturingLlmClient(ILlmClient inner)
+                : this(inner, () => Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency)
+            {
+            }
+
+            internal SessionCapturingLlmClient(ILlmClient inner, Func<double> clockMilliseconds)
             {
                 _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+                _clockMilliseconds = clockMilliseconds ?? throw new ArgumentNullException(nameof(clockMilliseconds));
             }
 
             public readonly List<CapturedTurn> Turns = new();
@@ -312,12 +311,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public bool AnyProviderUsage { get; private set; }
 
             /// <summary>
-            /// Wall-clock spent INSIDE the LLM completion calls (prefill + decode), summed across turns.
-            /// Excludes tool execution, grading and orchestration. NOTE: this is the full provider-call span,
-            /// NOT decode-only, so completion-tokens ÷ this reads LOWER than LM Studio's decode-only tok/s
-            /// (LM Studio excludes prefill). See dev-docs/TOKENS_PER_SEC_FIX_PLAN.md.
+            /// Legacy client-turn timer, including internal tool execution, prefill and decode.
+            /// Does not measure provider-only or decode-only time.
             /// </summary>
             public double GenerationMs { get; private set; }
+
+            /// <summary>Client-turn time including tools; the legacy generation timer has the same value.</summary>
+            public double ClientTurnMs => GenerationMs;
 
             /// <summary>Number of turns the provider returned as failed (Ok == false with an error).</summary>
             public int FailedTurnCount { get; private set; }
@@ -397,16 +397,22 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                                     ? request.ProviderResponseState?.TimeoutKind ?? LlmTimeoutKind.None : LlmTimeoutKind.None));
                         }
 
-                        if (chunk.GenerationInProgress ||
+                        bool providerActivity = chunk.GenerationInProgress ||
                             !string.IsNullOrEmpty(chunk.ReasoningText) || !string.IsNullOrEmpty(chunk.Text) ||
-                            chunk.ExecutedToolCalls != null)
+                            (chunk.ExecutedToolCalls?.Count ?? 0) > 0;
+                        bool providerUsage = chunk.PromptTokens.HasValue || chunk.CompletionTokens.HasValue
+                            || chunk.TotalTokens.HasValue;
+                        if (providerActivity || providerUsage)
                         {
                             lock (_gate)
                             {
                                 if (!_sealed)
                                 {
                                     turn.Request.ProviderResponseState?.RecordResponse();
-                                    _lastProviderActivityUtc = DateTime.UtcNow;
+                                    if (providerActivity)
+                                    {
+                                        _lastProviderActivityUtc = DateTime.UtcNow;
+                                    }
                                 }
                             }
                         }
@@ -486,12 +492,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             private InFlightTurn BeginTurn(LlmCompletionRequest request)
             {
                 request.ProviderResponseState = new LlmProviderResponseState();
-                InFlightTurn turn = new() { Request = request, StartTimestamp = Stopwatch.GetTimestamp() };
+                InFlightTurn turn = new() { Request = request, StartMilliseconds = _clockMilliseconds() };
                 lock (_gate)
                 {
                     if (!_sealed)
                     {
                         _providerResponseState = request.ProviderResponseState;
+                        _lastProviderActivityUtc = null;
                         _inFlight.Add(turn);
                     }
                 }
@@ -508,7 +515,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                         return;
                     }
 
-                    GenerationMs += ElapsedMs(turn.StartTimestamp);
+                    GenerationMs += ElapsedMs(turn.StartMilliseconds);
                     Record(turn.Request, result);
                 }
             }
@@ -526,7 +533,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             private void RecordCutLocked(InFlightTurn turn)
             {
-                GenerationMs += ElapsedMs(turn.StartTimestamp);
+                GenerationMs += ElapsedMs(turn.StartMilliseconds);
                 CutTurnCount++;
                 if (!string.IsNullOrEmpty(turn.Request?.SystemPrompt))
                 {
@@ -543,9 +550,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 });
             }
 
-            private static double ElapsedMs(long startTimestamp)
+            private double ElapsedMs(double startMilliseconds)
             {
-                return (Stopwatch.GetTimestamp() - startTimestamp) * 1000.0 / Stopwatch.Frequency;
+                return Math.Max(0, _clockMilliseconds() - startMilliseconds);
             }
 
             private void Record(LlmCompletionRequest request, LlmCompletionResult result)
@@ -1839,7 +1846,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             public string FinalText = "";
             public double LatencyMs;
 
-            /// <summary>Wall-clock spent inside LLM calls only (generation), excluding tool execution.</summary>
+            /// <summary>Client-turn time including tools executed inside the client.</summary>
             public double GenerationMs;
 
             public bool TimedOut;
@@ -2198,14 +2205,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
         internal static double ResolveProviderStallSeconds()
         {
-            string raw = Environment.GetEnvironmentVariable(EnvProviderStallSeconds);
-            if (!double.TryParse(raw, System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out double seconds))
-            {
-                return DefaultProviderStallSeconds;
-            }
-
-            return seconds < 0 ? 0 : Math.Min(seconds, 3600);
+            return BenchmarkProviderFailurePolicy.NormalizeStallSeconds(
+                Environment.GetEnvironmentVariable(EnvProviderStallSeconds));
         }
 
         private static double ProviderActivityGapSeconds(DateTime scenarioEndUtc, double scenarioLatencySeconds,
@@ -2235,7 +2236,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                    timeoutSeconds - elapsedSeconds > 45.0;
         }
 
-        /// <summary>Token totals and generation throughput reported for one scenario run.</summary>
+        /// <summary>Token totals and client-turn throughput reported for one scenario run.</summary>
         internal readonly struct TokenAccounting
         {
             internal TokenAccounting(int promptTokens, int completionTokens, bool fromProvider, bool partial,
@@ -2262,6 +2263,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             /// <summary>Time inside LLM calls, cut turns included, so it covers the same turns as the tokens.</summary>
             internal double GenerationSeconds { get; }
+            internal double ClientTurnSeconds => GenerationSeconds;
 
             internal double TokensPerSecond => GenerationSeconds > 0.001 ? CompletionTokens / GenerationSeconds : 0.0;
         }
@@ -2283,7 +2285,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 : new TokenAccounting(estimatedPrompt, estimatedCompletion, false, partial, capture.GenerationMs);
         }
 
-        /// <summary>Second line of the G6 hero banner: build effort, tokens and generation throughput.</summary>
+        /// <summary>Second line of the G6 hero banner: build effort, tokens and client-turn throughput.</summary>
         internal static string FormatFreeBuildHeroStats(int toolCalls, int builtParts, int cameraCalls,
             double latencyMs, TokenAccounting tokens)
         {
@@ -2297,12 +2299,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             if (tokens.Partial)
             {
                 return $"{toolCalls} tool-calls · {builtParts} parts · {cameraCalls} camera looks · " +
-                       $"{tokens.GenerationSeconds:0.#}s gen · partial token estimate ~{tokens.CompletionTokens} " +
+                       $"{tokens.ClientTurnSeconds:0.#}s client-turn · partial token estimate ~{tokens.CompletionTokens} " +
                        $"gen tokens · ~{tokens.TokensPerSecond:0.#} tok/s (~{totalTokens} total)";
             }
 
             return $"{toolCalls} tool-calls · {builtParts} parts · {cameraCalls} camera looks · " +
-                   $"{tokens.GenerationSeconds:0.#}s gen · {tokens.CompletionTokens} gen tokens" +
+                   $"{tokens.ClientTurnSeconds:0.#}s client-turn · {tokens.CompletionTokens} gen tokens" +
                    $"{(tokens.FromProvider ? "" : "~")} · {tokens.TokensPerSecond:0.#} tok/s ({totalTokens} total)";
         }
 
@@ -2331,6 +2333,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             /// <summary>Requests cancellation for this target's Stop or elapsed suite budget.</summary>
             public Func<bool> ShouldCancel;
+
+            /// <summary>Distinguishes operator Stop from the scenario deadline and suite budget.</summary>
+            public Func<bool> OperatorStopRequested;
 
             /// <summary>Maximum wind-down time after cancellation, independent of provider cooperation.</summary>
             public double CancellationGraceSeconds = CancelGraceSeconds;
@@ -2495,6 +2500,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     }
                 }
 
+                // WHY: Stop can complete the provider on this same tick; task completion alone is not a grading gate.
+                bool interrupted = context?.OperatorStopRequested?.Invoke() ?? false;
                 if (!task.IsCompleted)
                 {
                     cts.Cancel();
@@ -2507,6 +2514,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
 
                 DateTime scenarioEndUtc = DateTime.UtcNow;
+                interrupted |= context?.OperatorStopRequested?.Invoke() ?? false;
                 sw.Stop();
                 obs.LatencyMs = sw.Elapsed.TotalMilliseconds;
                 // WHY: a task that outlived the grace window must not append turns while they are read below.
@@ -2641,7 +2649,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 ScenarioGrading grading;
                 try
                 {
-                    grading = scenario.Grade(env, obs);
+                    grading = interrupted ? new ScenarioGrading() : scenario.Grade(env, obs);
                 }
                 catch (Exception ex)
                 {
@@ -2650,7 +2658,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     yield break;
                 }
 
-                ApplyUnscoredToolErrorPenalties(grading, obs);
+                if (!interrupted) ApplyUnscoredToolErrorPenalties(grading, obs);
                 if (BenchmarkProviderFailurePolicy.ZeroUnperformedWork(obs.Attribution, modelProducedWork))
                 {
                     grading.HardCap = 0;
@@ -2681,14 +2689,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 bool fromProvider = tokens.FromProvider;
 
                 double totalTokens = promptTokens + completionTokens;
-                GoalScore score = GoalScore.Compute(
+                GoalScore score = interrupted ? default : GoalScore.Compute(
                     grading.Checkpoints, grading.Penalties, grading.Bonus, grading.HardCap,
                     actualTokens: totalTokens, tokenBudget: scenario.TokenBudget,
                     actualMs: obs.LatencyMs, timeBudgetMs: scenario.TimeBudgetMs);
 
-                // A genuine crash/timeout attribution always wins — ExcludeFromScoring only downgrades a
-                // CLEAN run (obs.Attribution == None) to "ran fine, just not comparable", never masks a
-                // real framework/environment failure.
+                // WHY: Eligibility is independent of attribution so custom deadlines retain their diagnostics.
                 FailureAttribution attribution = obs.Attribution == FailureAttribution.None && scenario.ExcludeFromScoring
                     ? FailureAttribution.NotGraded
                     : obs.Attribution;
@@ -2702,6 +2708,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     ModelId = modelId,
                     Score = score,
                     Attribution = attribution,
+                    ExcludeFromScoring = scenario.ExcludeFromScoring,
+                    Interrupted = interrupted,
                     Checkpoints = grading.Checkpoints,
                     Penalties = grading.Penalties,
                     Turns = obs.Turns,
@@ -2718,9 +2726,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     GenerationMs = obs.GenerationMs,
                     CostKnown = false,
                     TimedOut = obs.TimedOut,
-                    Failure = obs.Failure,
+                    Failure = interrupted ? "operator Stop interrupted the attempt" : obs.Failure,
                     SessionTranscript = capture.BuildTranscript(scenario.Goal)
-                        + (string.IsNullOrEmpty(obs.Failure) ? "" : $"\nRUN FAILURE: {obs.Failure}\n"),
+                        + (interrupted ? "\nRUN INTERRUPTED: operator Stop; resume will retry this attempt.\n"
+                            : string.IsNullOrEmpty(obs.Failure) ? "" : $"\nRUN FAILURE: {obs.Failure}\n"),
                     LuaReplayScript = scenario.Group == "G6"
                         ? toolObserver.BuildLuaReplayScript(modelId, scenario.Id)
                         : "",
@@ -2742,7 +2751,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     // failure still produces a picture full of "missing" ghosts rather than no picture).
                     if (scenario.CaptureScene && (vis.HasRenderableScene || vis.ExpectedNames.Count > 0))
                     {
-                        string verdict = score.Classification switch
+                        string verdict = interrupted ? "INTERRUPTED (not scored)" : scenario.ExcludeFromScoring
+                            ? "NOT GRADED" : score.Classification switch
                         {
                             BenchmarkClassification.Pass => "PASS",
                             BenchmarkClassification.Partial => "PARTIAL",

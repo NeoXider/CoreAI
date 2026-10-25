@@ -26,6 +26,20 @@ namespace CoreAI.Ai
         public int MaxPending { get; set; } = 64;
 
         /// <summary>
+        /// Positive cap on chunks retained in each active stream's queued backlog. A producer waits
+        /// asynchronously for the consumer once either backlog limit is reached.
+        /// </summary>
+        public int MaxBufferedStreamChunks { get; set; } = 64;
+
+        /// <summary>
+        /// Positive byte budget for each active stream's queued backlog, charged as retained UTF-16
+        /// strings plus fixed chunk/tool-record overhead. A single larger upstream chunk waits for a
+        /// direct reader handoff after the backlog drains. At most one upstream chunk can wait outside
+        /// the backlog; this is not a total heap or individual provider-payload limit.
+        /// </summary>
+        public int MaxBufferedStreamBytes { get; set; } = 1024 * 1024;
+
+        /// <summary>
         /// Queue options sized for a host that expects <paramref name="expectedActors"/> simultaneous
         /// actors, so a synchronized burst is queued rather than refused.
         /// </summary>

@@ -421,7 +421,7 @@ namespace CoreAI.Infrastructure.Llm
                 // WHY: A failed spawn (most commonly an unknown prefabKey) carries a self-correcting detail —
                 // e.g. the available registered/primitive keys — on the executor; surface it instead of the
                 // generic message so the model can fix the call in one round without a blind retry.
-                if (!success && action == "spawn" && !string.IsNullOrEmpty(_executor.LastErrorMessage))
+                if (!success && !string.IsNullOrEmpty(_executor.LastErrorMessage))
                 {
                     return SerializeResult(false, _executor.LastErrorMessage, action);
                 }
@@ -431,6 +431,10 @@ namespace CoreAI.Infrastructure.Llm
                         ? $"World command '{action}' executed successfully"
                         : $"Failed to execute world command '{action}'",
                     action);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -476,6 +480,10 @@ namespace CoreAI.Infrastructure.Llm
                         items[i].hasWorldPositionStays = true;
                     }
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {

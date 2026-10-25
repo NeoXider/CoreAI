@@ -67,11 +67,14 @@ namespace CoreAI.Ai.Hub
                 throw new ArgumentNullException(nameof(runtime));
             }
 
-            Register(
-                registry,
-                new LuaCsModRuntimeHubService(
-                    runtime, actorContext, sourceStore, grant, allowFull, rbxApiAvailable),
-                order);
+            if (registry == null)
+            {
+                throw new ArgumentNullException(nameof(registry));
+            }
+
+            LuaCsModRuntimeHubService service = new(
+                runtime, actorContext, sourceStore, grant, allowFull, rbxApiAvailable);
+            RegisterService(registry, service, order, service);
         }
 
         /// <summary>Registers the Mods page backed by a pre-built <see cref="IHubModService"/>.</summary>
@@ -87,9 +90,13 @@ namespace CoreAI.Ai.Hub
                 throw new ArgumentNullException(nameof(service));
             }
 
-            // WHY: one top-level Mods tab with [Mods, Logs] sub-tabs instead of two top tabs, keeping the
-            // tab bar compact; HubSubTabPage proxies activation lifecycle to whichever sub-tab is visible.
-            registry.Register(
+            RegisterService(registry, service, order, null);
+        }
+
+        private static void RegisterService(
+            HubPageRegistry registry, IHubModService service, int order, IDisposable lifetime)
+        {
+            registry.RegisterOwned(
                 ModsPageId,
                 () => new HubSubTabPage(
                     ModsPageId,
@@ -97,6 +104,7 @@ namespace CoreAI.Ai.Hub
                     order,
                     new HubModsPage(service, order),
                     new HubModLogsPage(service, DefaultLogsOrder)),
+                lifetime,
                 order);
         }
 
@@ -118,14 +126,48 @@ namespace CoreAI.Ai.Hub
                 throw new ArgumentNullException(nameof(registry));
             }
 
-            HubWorldLoadConfirmationPage page = new(
-                service,
-                attentionRequested,
-                order,
-                actorContext,
-                startupSelection);
-            registry.Register(WorldLoadsPageId, () => page, order);
-            return page;
+            WorldLoadRegistration registration = new(
+                service, attentionRequested, order, actorContext, startupSelection);
+            registry.RegisterOwned(WorldLoadsPageId, registration.GetPage, registration, order);
+            return registration.GetPage();
+        }
+
+        private sealed class WorldLoadRegistration : IDisposable
+        {
+            private readonly Func<HubWorldLoadConfirmationPage> _create;
+            private HubWorldLoadConfirmationPage _page;
+            private bool _disposed;
+
+            public WorldLoadRegistration(IRbxWorldRuntimeService service, Action attention,
+                int order, ActorContext actor, IRbxWorldStartupSelection startup)
+            {
+                _create = () => new HubWorldLoadConfirmationPage(service, attention, order, actor, startup);
+                _page = _create();
+            }
+
+            public HubWorldLoadConfirmationPage GetPage()
+            {
+                if (_disposed)
+                {
+                    throw new ObjectDisposedException(nameof(WorldLoadRegistration));
+                }
+
+                if (_page.IsDestroyed)
+                {
+                    _page = _create();
+                }
+
+                return _page;
+            }
+
+            public void Dispose()
+            {
+                if (!_disposed)
+                {
+                    _disposed = true;
+                    _page.OnDestroyed();
+                }
+            }
         }
     }
 
@@ -156,6 +198,8 @@ namespace CoreAI.Ai.Hub
         private bool _startupClearInFlight;
         private bool _subscribed;
         private bool _destroyed;
+
+        internal bool IsDestroyed => _destroyed;
 
         /// <summary>Creates a confirmation page and immediately listens for future requests.</summary>
         /// <param name="startupSelection">
@@ -233,8 +277,7 @@ namespace CoreAI.Ai.Hub
             _status.name = "coreai-hub-world-loads-status";
             _root.Add(_status);
 
-            // WHY a second line: the status above is rewritten by every refresh, so the outcome of a
-            // confirmed load (above all "it will not reopen after a restart") would vanish at once.
+            // WHY: inventory refresh must not replace the last operation outcome.
             _outcome = HubModWidgets.MakeNote("");
             _outcome.name = "coreai-world-load-outcome";
             _root.Add(_outcome);
@@ -282,7 +325,7 @@ namespace CoreAI.Ai.Hub
                 return;
             }
 
-            // WHY a version: a slower earlier read must never overwrite what a later read showed.
+            // WHY: a slower earlier read must never overwrite what a later read showed.
             int version = ++_startupReadVersion;
             try
             {
@@ -290,6 +333,13 @@ namespace CoreAI.Ai.Hub
                 if (!_destroyed && version == _startupReadVersion)
                 {
                     ShowStartupSelection(selection);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                if (!_destroyed && version == _startupReadVersion)
+                {
+                    _startupLabel.text = "Opens on start: read cancelled.";
                 }
             }
             catch (Exception ex)
@@ -362,6 +412,13 @@ namespace CoreAI.Ai.Hub
                         "Could not choose the default world for the next start: "
                         + (result?.Error ?? "the world service returned no result"),
                         HubModWidgets.Danger);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                if (!_destroyed)
+                {
+                    SetOutcome("Startup selection change cancelled.", HubModWidgets.Muted);
                 }
             }
             catch (Exception ex)
@@ -571,12 +628,18 @@ namespace CoreAI.Ai.Hub
                 await _service.RequestAutoLoadAsync(actorContext, autoFileName);
                 requestQueued = true;
             }
+            catch (OperationCanceledException)
+            {
+                if (!_destroyed)
+                {
+                    SetOutcome("Autosave load request cancelled.", HubModWidgets.Muted);
+                }
+            }
             catch (Exception ex)
             {
                 if (!_destroyed && _status != null)
                 {
-                    _status.text = "Autosave load request failed: " + ex.Message;
-                    _status.style.color = HubModWidgets.Danger;
+                    SetOutcome("Autosave load request failed: " + ex.Message, HubModWidgets.Danger);
                 }
             }
             finally
@@ -669,10 +732,9 @@ namespace CoreAI.Ai.Hub
 
                 if (!playerConfirmed)
                 {
-                    _status.text = "World load rejected. The live world was not changed.";
-                    _status.style.color = HubModWidgets.Muted;
+                    SetOutcome("World load rejected. The live world was not changed.", HubModWidgets.Muted);
                 }
-                else if (result.Success)
+                else if (result != null && result.Success)
                 {
                     _status.text = "World loaded successfully. Active mods started: "
                         + result.ActiveModsStarted + "."
@@ -696,16 +758,22 @@ namespace CoreAI.Ai.Hub
                 }
                 else
                 {
-                    _status.text = "World load failed: " + result.Error;
-                    _status.style.color = HubModWidgets.Danger;
+                    SetOutcome("World load failed: " + (result?.Error ?? "the world service returned no result"),
+                        HubModWidgets.Danger);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                if (!_destroyed)
+                {
+                    SetOutcome("World load decision cancelled.", HubModWidgets.Muted);
                 }
             }
             catch (Exception ex)
             {
                 if (!_destroyed)
                 {
-                    _status.text = "World load decision failed: " + ex.Message;
-                    _status.style.color = HubModWidgets.Danger;
+                    SetOutcome("World load decision failed: " + ex.Message, HubModWidgets.Danger);
                 }
             }
             finally

@@ -16,6 +16,10 @@ namespace CoreAI.Sandbox.LuaCs
     /// </summary>
     public sealed class LuaCsSecureEnvironment
     {
+        /// <summary>Reserved host resolver captured by transformed chunks before user code runs.</summary>
+        public const string TrustedIteratorResolverName = "__coreai_luau_iter";
+        private static readonly ConditionalWeakTable<LuaState, LuaFunction> TrustedIteratorResolvers = new();
+
         /// <summary>
         /// Maximum instruction budget for one-shot Lua script execution. Sized for Roblox parity: paired with
         /// the guard's ~10 s wall-clock timeout (which is the real limiter), a build/setup script gets the same
@@ -219,8 +223,46 @@ namespace CoreAI.Sandbox.LuaCs
             StripRiskyGlobals(state);
             HardenCoroutineLibrary(state, liveResumeBudget ?? new LuaCsCoroutineBudgetSettings());
             CountCallsBackIntoLua(state);
+            InstallTrustedIteratorResolver(state);
             registry?.ApplyToEnvironment(state);
+            InstallTrustedIteratorResolver(state);
             return state;
+        }
+
+        internal static void InstallTrustedIteratorResolver(LuaState state)
+        {
+            state.Environment[TrustedIteratorResolverName] = TrustedIteratorResolvers.GetValue(state, CreateTrustedIteratorResolver);
+        }
+
+        private static LuaFunction CreateTrustedIteratorResolver(LuaState state)
+        {
+            LuaValue next = state.Environment["next"];
+            return new LuaFunction(TrustedIteratorResolverName, async (ctx, ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                if (ctx.ArgumentCount != 1)
+                {
+                    LuaValue[] arguments = new LuaValue[ctx.ArgumentCount];
+                    for (int i = 0; i < arguments.Length; i++) { arguments[i] = ctx.GetArgument(i); }
+                    return ctx.Return(arguments);
+                }
+
+                LuaValue value = ctx.GetArgument(0);
+                LuaTable metatable = value.Type == LuaValueType.Table
+                    ? value.Read<LuaTable>().Metatable
+                    : value.Type == LuaValueType.UserData && value.TryRead(out ILuaUserData userData)
+                        ? userData.Metatable : null;
+                if (metatable != null && metatable.TryGetValue("__iter", out LuaValue iterator)
+                    && iterator.Type != LuaValueType.Nil)
+                {
+                    LuaValue[] results = await CallCountedAsync(ctx.State, iterator,
+                        new[] { value }.AsSpan(), ct, "__iter");
+                    return ctx.Return(results);
+                }
+
+                return value.Type == LuaValueType.Table
+                    ? ctx.Return(next, value, LuaValue.Nil) : ctx.Return(value);
+            });
         }
 
         /// <summary>
@@ -736,6 +778,7 @@ namespace CoreAI.Sandbox.LuaCs
                 throw new ArgumentNullException(nameof(state));
             }
 
+            InstallTrustedIteratorResolver(state);
             LuaClosure closure = state.Load(luaCode, "sandbox_chunk");
             guard ??= new LuaCsExecutionGuard(maxSteps: OneShotHardLimitSteps);
             return guard.Execute(state, closure, cancellationToken);
@@ -761,6 +804,7 @@ namespace CoreAI.Sandbox.LuaCs
 
             // WHY: compilation stays synchronous — Load has no yield points and a chunk's source is
             // bounded by the tool's own input cap, so it cannot be the thing that holds the frame.
+            InstallTrustedIteratorResolver(state);
             LuaClosure closure = state.Load(luaCode, "sandbox_chunk");
             guard ??= new LuaCsExecutionGuard(maxSteps: OneShotHardLimitSteps);
             return guard.ExecuteAsync(state, closure, frameYielder, cancellationToken);
@@ -1387,7 +1431,7 @@ namespace CoreAI.Sandbox.LuaCs
         /// reached it raises the C-stack error instead of calling, and a Lua function it runs that yields fails with
         /// <see cref="YieldAcrossCallBoundaryMessage"/>, as Luau's warn does (audit C3-06). A call that comes back
         /// unfinished (a frame yield of the async guard) stays counted and fenced on this thread until it completes.
-        /// Its one caller is <c>warn</c>, which converts its arguments with the script's <c>tostring</c>; the
+        /// Callers include <c>warn</c> string conversion and the trusted generalized iterator resolver; the
         /// sandbox's own library functions count their calls in place (see <see cref="CallNativeInPlace"/>). A host
         /// function that runs a script's function recursively must call through here too; the host callbacks that
         /// run one as the body of a thread use plain <c>CallAsync</c> (see <see cref="MaxCCallDepth"/>).

@@ -3,6 +3,10 @@
 How mods are identified, stored, shipped with a game, managed on the Hub, and kept alive when they
 fail. Everything on this page is built; §7 lists what is not built yet.
 
+See [runtime mod contracts](../../Assets/CoreAIMods/Runtime/LuaExecution/README.md) for version-write
+grants, persistence failures/retries, dispatch fairness, HTTP lifetime/backpressure, protected Luau
+iteration and identity-verified legacy storage migration.
+
 ## 0. What the mod system does
 
 - Mods are authored by the **LLM** (through `manage_mods`) or by the **player** (paste, edit and create

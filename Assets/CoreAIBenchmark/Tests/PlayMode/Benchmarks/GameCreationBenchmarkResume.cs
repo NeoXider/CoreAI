@@ -19,7 +19,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             EnvGroups, EnvRepetitions, EnvVisionMode, EnvTimeout, EnvRoundtrips,
             BenchmarkTargetList.EnvReasoningEffort, "COREAI_TEST_STREAMING", "COREAI_TEST_NATIVE_TOOLS",
             "COREAI_BENCHMARK_FREEBUILD_PROMPT", "COREAI_BENCHMARK_FREEBUILD_SUBJECT",
-            "COREAI_BENCHMARK_MAX_OUTPUT_TOKENS", "COREAI_BENCHMARK_FREEBUILD_ROUNDTRIPS"
+            "COREAI_BENCHMARK_MAX_OUTPUT_TOKENS", "COREAI_BENCHMARK_FREEBUILD_ROUNDTRIPS",
+            EnvProviderStallSeconds
         };
 
         private static List<BenchmarkPlannedScenario> DurablePlan(IReadOnlyList<GameBenchmarkScenario> scenarios, int reps)
@@ -76,6 +77,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     if (state.Metadata.RunId != runId || state.Metadata.SuiteVersion != SuiteVersion ||
                         state.Metadata.Repetitions != imported[0].Metadata.Repetitions)
                         throw new InvalidOperationException("Cannot resume: legacy report run id, suite version or repetitions mismatch.");
+                RestoreLegacyStallPolicy(imported);
                 if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(EnvGroups)))
                     SetSavedOption(EnvGroups, string.Join(",", imported.SelectMany(s => s.Results).Select(r => r.Group).Distinct()));
                 SetSavedOption(EnvRepetitions, imported[0].Metadata.Repetitions.ToString());
@@ -133,6 +135,17 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             Environment.SetEnvironmentVariable(key, string.IsNullOrEmpty(value) ? null : value);
         }
 
+        private static void RestoreLegacyStallPolicy(IReadOnlyList<BenchmarkTargetState> imported)
+        {
+            double? saved = imported[0].Metadata.ProviderStallSeconds;
+            if (imported.Any(state => state.Metadata.ProviderStallSeconds != saved))
+                throw new InvalidOperationException("Cannot resume: reports disagree on the saved provider inactivity ceiling.");
+            if (!saved.HasValue) return;
+            if (double.IsNaN(saved.Value) || double.IsInfinity(saved.Value) || saved.Value < 0 || saved.Value > 3600)
+                throw new InvalidOperationException("Cannot resume: the saved provider inactivity ceiling is invalid.");
+            SetSavedOption(EnvProviderStallSeconds, saved.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
         private static BenchmarkRunManifest CreateManifest(string runId, IReadOnlyList<BenchmarkTarget> targets,
             IReadOnlyList<GameBenchmarkScenario> scenarios, int reps,
             IReadOnlyDictionary<string, BenchmarkStoredTarget> frozenTargets = null)
@@ -147,7 +160,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             };
             string targetSource = Environment.GetEnvironmentVariable(BenchmarkTargetList.EnvTargets) ?? "";
             if (targetSource.TrimStart().StartsWith("@", StringComparison.Ordinal)) manifest.TargetsFileReference = targetSource;
-            foreach (string option in DurableOptions) manifest.Options[option] = Environment.GetEnvironmentVariable(option) ?? "";
+            foreach (string option in DurableOptions)
+                manifest.Options[option] = option == EnvProviderStallSeconds
+                    ? ResolveProviderStallSeconds().ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+                    : Environment.GetEnvironmentVariable(option) ?? "";
             foreach (BenchmarkTarget target in targets)
             {
                 string slug = ArtifactStem(runId, target.Model, target.Label);
@@ -176,7 +192,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             state.ValidateIdentity(manifest.RunId, manifest.SuiteVersion, run.Report.Metadata.ModelId);
             state.Validate(manifest.Scenarios);
             if (resume)
-                foreach (ScenarioResult restored in state.Results.Where(r => r.Attribution != FailureAttribution.Environment))
+                foreach (ScenarioResult restored in state.Results.Where(r => state.IsFinalized(r.ScenarioId, r.Repetition)))
                     run.Progress.CompleteScenario(ProgressLine(restored), Stars(BenchmarkInfo.DifficultyFor(restored.Group)));
             bool hasMissing = manifest.Scenarios.Any(p => !state.IsFinalized(p.Id, p.Repetition));
             run.SkipCompleted = resume && state.ReportsWritten && !hasMissing && File.Exists(reportPath);

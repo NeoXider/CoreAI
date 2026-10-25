@@ -19,11 +19,21 @@ console, so it can be read back through a plain C# API and surfaced to an in-gam
 
 ## Invariants
 
-- `Sequence` and `UtcTime` are assigned under the service lock; every other field is taken as-is.
+- `Sequence` and `UtcTime` are assigned under the service lock. Stored and queried entries are copies;
+  mutating a caller's entry or a query result cannot expand retained text. `EntryAppended` still receives
+  the original appended entry for compatibility.
 - **`EntryAppended` ordering is best-effort**: the event is raised outside the storage lock so a slow
   handler never stalls other threads' appends. Under concurrent appends two entries can arrive out of
   order — consumers order by `LuaLogEntry.Sequence`. `LuaLogFileSink` writes `Sequence` per line.
-- Ring buffers are bounded, so long-running sessions cannot leak memory.
+- Ring entry counts, retained mod ids and text have independent bounds. Constructor options default to
+  128 mod buffers, 16,384 characters per message/script name and 4,194,304 retained UTF-16 characters (8 MiB of
+  text storage, conservatively counting an entry in both views). Overlong messages and script names
+  carry `...[truncated]`; exact mod ids remain queryable and count toward the retained-character budget.
+  The oldest last-appended mod buffer
+  is evicted first, while the global tail remains independently bounded. Text pressure can evict more
+  buffers and then the oldest global entries. Querying does not change eviction order.
+- `Clear()` releases the global tail and every per-mod buffer. `Clear(modId)` removes that mod buffer
+  while preserving the bounded global diagnostic tail. Sequence numbering remains monotonic.
 - A logging mirror/sink must never throw out of a mod's log call and break gameplay.
 
 ## Recorded deviations / notes

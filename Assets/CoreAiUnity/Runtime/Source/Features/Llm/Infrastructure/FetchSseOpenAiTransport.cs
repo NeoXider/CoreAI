@@ -4,7 +4,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using AOT;
@@ -26,10 +25,23 @@ namespace CoreAI.Infrastructure.Llm
         private static int _nextId;
 
         private readonly bool _sameOriginCredentials;
+        private readonly int _maxBufferedBytes;
+        private readonly int _maxBufferedChunks;
 
+        /// <summary>Creates a fetch pipe with a 1 MiB and 1024-fragment backlog limit.</summary>
         public FetchSseOpenAiTransport(bool sameOriginCredentials)
+            : this(sameOriginCredentials, FetchSseBacklog.DefaultMaxBufferedBytes, FetchSseBacklog.DefaultMaxBufferedChunks)
         {
+        }
+
+        /// <summary>Creates a fetch pipe with positive per-request byte and fragment backlog limits.</summary>
+        public FetchSseOpenAiTransport(bool sameOriginCredentials, int maxBufferedBytes, int maxBufferedChunks)
+        {
+            if (maxBufferedBytes <= 0) throw new ArgumentOutOfRangeException(nameof(maxBufferedBytes));
+            if (maxBufferedChunks <= 0) throw new ArgumentOutOfRangeException(nameof(maxBufferedChunks));
             _sameOriginCredentials = sameOriginCredentials;
+            _maxBufferedBytes = maxBufferedBytes;
+            _maxBufferedChunks = maxBufferedChunks;
         }
 
         public string DebugLabel => "FetchSSE";
@@ -48,7 +60,7 @@ namespace CoreAI.Infrastructure.Llm
             cancellationToken.ThrowIfCancellationRequested();
 
             int id = Interlocked.Increment(ref _nextId);
-            StreamState state = new StreamState(id);
+            StreamState state = new StreamState(id, _maxBufferedBytes, _maxBufferedChunks);
             States[id] = state;
 
             state.AttachCancellation(cancellationToken);
@@ -62,18 +74,6 @@ namespace CoreAI.Infrastructure.Llm
             string headers = BuildHeaderString(request.Headers);
             string credentialsMode = _sameOriginCredentials ? "same-origin" : "omit";
 
-            CoreAi_FetchSseOpen(
-                request.Url,
-                request.JsonBody,
-                headers,
-                request.TransportTimeoutSeconds,
-                credentialsMode,
-                id,
-                Marshal.GetFunctionPointerForDelegate(_onOpenDelegate),
-                Marshal.GetFunctionPointerForDelegate(_onChunkDelegate),
-                Marshal.GetFunctionPointerForDelegate(_onDoneDelegate),
-                Marshal.GetFunctionPointerForDelegate(_onErrorDelegate));
-
             // Wait for fetch headers (status + Content-Type) before returning. Do NOT add
             // continuation through the (non-existent) browser ThreadPool and hang the
             // open path forever. The JS bridge already defers the first ReadableStream
@@ -85,6 +85,19 @@ namespace CoreAI.Infrastructure.Llm
             StreamState.OpenInfo openInfo;
             try
             {
+                CoreAi_FetchSseOpen(
+                    request.Url,
+                    request.JsonBody,
+                    headers,
+                    request.TransportTimeoutSeconds,
+                    credentialsMode,
+                    id,
+                    Marshal.GetFunctionPointerForDelegate(_onOpenDelegate),
+                    Marshal.GetFunctionPointerForDelegate(_onChunkDelegate),
+                    Marshal.GetFunctionPointerForDelegate(_onDoneDelegate),
+                    Marshal.GetFunctionPointerForDelegate(_onErrorDelegate),
+                    _maxBufferedBytes,
+                    _maxBufferedChunks);
                 openInfo = await state.WaitForOpenAsync();
             }
             catch
@@ -169,27 +182,8 @@ namespace CoreAI.Infrastructure.Llm
             if (States.TryGetValue(id, out StreamState state))
             {
                 string err = Marshal.PtrToStringUTF8(errPtr) ?? "Unknown error";
-                if (IsCancelledMessage(err))
-                {
-                    state.SignalError(new OperationCanceledException());
-                }
-                else if (string.Equals(err, "Timeout", StringComparison.OrdinalIgnoreCase))
-                {
-                    // WHY: The optional browser total ceiling must remain a typed timeout.
-                    state.SignalError(new LlmClientException(
-                        "SSE transport total timeout expired.",
-                        LlmErrorCode.Timeout));
-                }
-                else
-                {
-                    state.SignalError(new Exception(err));
-                }
+                state.SignalError(FetchSseTransportProtocol.CreateTransportException(err));
             }
-        }
-
-        private static bool IsCancelledMessage(string message)
-        {
-            return FetchSseTransportProtocol.IsCancelledMessage(message);
         }
 
         [DllImport("__Internal")]
@@ -203,7 +197,12 @@ namespace CoreAI.Infrastructure.Llm
             IntPtr onOpen,
             IntPtr onChunk,
             IntPtr onDone,
-            IntPtr onError);
+            IntPtr onError,
+            int maxBufferedBytes,
+            int maxBufferedChunks);
+
+        [DllImport("__Internal")]
+        private static extern void CoreAi_FetchSseAcknowledge(int callId, int bytes);
 
         [DllImport("__Internal")]
         private static extern void CoreAi_FetchSseAbort(int callId);
@@ -237,18 +236,19 @@ namespace CoreAI.Infrastructure.Llm
             // Synchronous continuations: WebGL is single-threaded, so we want the awaiting C# code to resume
             // continuation to a thread pool that never runs in browser builds, hanging the await forever.
             private readonly TaskCompletionSource<OpenInfo> _openTcs = new();
-            private readonly ConcurrentQueue<string> _queue = new();
-            private readonly AutoResetEvent _signal = new AutoResetEvent(false);
             private readonly FetchSseStream _stream;
             private CancellationTokenRegistration _cancelRegistration;
             private bool _cancelled;
+            private bool _terminated;
+            private int _disposed;
+            private int _aborted;
 
             public int CallId { get; }
 
-            public StreamState(int id)
+            public StreamState(int id, int maxBufferedBytes, int maxBufferedChunks)
             {
                 CallId = id;
-                _stream = new FetchSseStream(_queue, _signal, this);
+                _stream = new FetchSseStream(new FetchSseBacklog(maxBufferedBytes, maxBufferedChunks), this);
             }
 
             public Task<OpenInfo> WaitForOpenAsync() => _openTcs.Task;
@@ -264,7 +264,7 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     try
                     {
-                        CoreAi_FetchSseAbort(CallId);
+                        AbortBrowser();
                     }
                     catch (Exception ex)
                     {
@@ -280,22 +280,34 @@ namespace CoreAI.Infrastructure.Llm
 
             public void SignalOpen(int status, string errorBody, string headersFlat)
             {
+                if (status == 0)
+                {
+                    SignalError(FetchSseTransportProtocol.CreateTransportException(errorBody));
+                    return;
+                }
+
                 IReadOnlyDictionary<string, IEnumerable<string>> hdrs = ParseFlatHeaders(headersFlat);
                 _openTcs.TrySetResult(new OpenInfo(status, errorBody ?? "", hdrs));
             }
 
             public void EnqueueChunk(string chunk)
             {
-                _queue.Enqueue(chunk);
-                _signal.Set();
+                if (_terminated || _disposed != 0) return;
+                if (!_stream.TryEnqueue(chunk))
+                {
+                    SignalError(FetchSseTransportProtocol.CreateTransportException("BacklogOverflow"));
+                    AbortBrowser();
+                    return;
+                }
+
                 _stream.PumpPendingRead();
             }
 
             public void SignalDone()
             {
-                if (_cancelled) return;
+                if (_terminated) return;
+                _terminated = true;
                 _stream.NotifyCompleted();
-                _signal.Set();
                 _stream.PumpPendingRead();
                 // Defensive: if SignalDone fires before SignalOpen (shouldn't happen, but
                 // caller surfaces a transport error instead of awaiting forever.
@@ -312,22 +324,23 @@ namespace CoreAI.Infrastructure.Llm
                 // so drop the States entry now: a consumer that abandons the stream without disposing
                 // it would otherwise leak the entry in the static dictionary permanently.
                 States.TryRemove(CallId, out _);
+                _cancelRegistration.Dispose();
             }
 
             public void SignalError(Exception ex)
             {
-                if (_cancelled && ex is not OperationCanceledException)
+                if (_terminated)
                 {
                     return;
                 }
 
+                _terminated = true;
                 if (ex is OperationCanceledException)
                 {
                     _cancelled = true;
                 }
 
                 _stream.SetError(ex);
-                _signal.Set();
                 _stream.PumpPendingRead();
                 if (ex is OperationCanceledException)
                 {
@@ -349,14 +362,15 @@ namespace CoreAI.Infrastructure.Llm
                 // onError is terminal (the jslib finish() guard drops any later callback for this id),
                 // so drop the States entry now — same abandoned-stream leak rationale as SignalDone.
                 States.TryRemove(CallId, out _);
+                _cancelRegistration.Dispose();
             }
 
             public void SignalCancelled(CancellationToken cancellationToken)
             {
                 _cancelled = true;
+                _terminated = true;
                 OperationCanceledException ex = new OperationCanceledException(cancellationToken);
                 _stream.SetError(ex);
-                _signal.Set();
                 _stream.PumpPendingRead();
                 _openTcs.TrySetCanceled(cancellationToken);
 
@@ -364,10 +378,18 @@ namespace CoreAI.Infrastructure.Llm
                 // per-call state here too. Otherwise a cancelled-but-abandoned stream leaks its entry in the
                 // static States dictionary, which grows unbounded over the app lifetime.
                 States.TryRemove(CallId, out _);
+                _cancelRegistration.Dispose();
+            }
+
+            public void AbortBrowser()
+            {
+                if (Interlocked.Exchange(ref _aborted, 1) == 0) CoreAi_FetchSseAbort(CallId);
             }
 
             public void Dispose()
             {
+                if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+                _terminated = true;
                 // Abandoned-before-read streams are reclaimed here. The dictionary is static, so an entry
                 // that is never removed (consumer drops the stream without reading to completion) is a
                 // permanent leak; removing on Dispose bounds the dictionary to live streams only.
@@ -384,14 +406,12 @@ namespace CoreAI.Infrastructure.Llm
 
                 try
                 {
-                    _signal.Set();
-                    _signal.Dispose();
+                    AbortBrowser();
                 }
                 catch (Exception ex)
                 {
-                    // Double-dispose race: the signal may already be disposed; still worth surfacing.
                     UnityEngine.Debug.LogWarning(
-                        $"[FetchSSE] signal release failed on dispose (callId={CallId}): {ex.Message}");
+                        $"[FetchSSE] fetch release failed on dispose (callId={CallId}): {ex.Message}");
                 }
             }
 
@@ -400,13 +420,10 @@ namespace CoreAI.Infrastructure.Llm
 
         private sealed class FetchSseStream : Stream
         {
-            private readonly ConcurrentQueue<string> _queue;
-            private readonly AutoResetEvent _signal;
+            private readonly FetchSseBacklog _backlog;
             private readonly StreamState _owner;
             private bool _isDone;
             private Exception _error;
-            private byte[] _currentBytes;
-            private int _currentPos;
 
             // WebGL is single-threaded: a synchronous Stream.Read that blocks on _signal.WaitOne would
             // freeze the JS event loop, preventing fetch chunks from ever being delivered. Instead, we
@@ -417,14 +434,14 @@ namespace CoreAI.Infrastructure.Llm
             private int _pendingOffset;
             private int _pendingCount;
 
-            public FetchSseStream(ConcurrentQueue<string> queue, AutoResetEvent signal, StreamState owner)
+            public FetchSseStream(FetchSseBacklog backlog, StreamState owner)
             {
-                _queue = queue;
-                _signal = signal;
+                _backlog = backlog;
                 _owner = owner;
             }
 
-            public void SetError(Exception ex) { _error = ex; }
+            public void SetError(Exception ex) { _error = ex; _backlog.Clear(); }
+            public bool TryEnqueue(string chunk) => _backlog.TryEnqueue(chunk);
             public void NotifyCompleted() { _isDone = true; }
 
             public override bool CanRead => true;
@@ -449,6 +466,10 @@ namespace CoreAI.Infrastructure.Llm
             {
                 if (_error != null) return Task.FromException<int>(_error);
                 if (cancellationToken.IsCancellationRequested) return Task.FromCanceled<int>(cancellationToken);
+                if (buffer == null) return Task.FromException<int>(new ArgumentNullException(nameof(buffer)));
+                if (offset < 0 || count < 0 || offset > buffer.Length - count)
+                    return Task.FromException<int>(new ArgumentOutOfRangeException(nameof(count)));
+                if (count == 0) return Task.FromResult(0);
 
                 // WHY: there is a single pending-read slot; a second concurrent ReadAsync would silently
                 // overwrite _pendingTcs and leave the first awaiter hanging until Dispose. Fail loudly.
@@ -507,6 +528,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (_error != null)
                 {
                     _pendingTcs = null;
+                    _pendingBuffer = null;
                     tcs.TrySetException(_error);
                     return;
                 }
@@ -530,31 +552,9 @@ namespace CoreAI.Infrastructure.Llm
 
             private int TryReadNonBlocking(byte[] buffer, int offset, int count)
             {
-                if (_currentBytes != null && _currentPos < _currentBytes.Length)
-                {
-                    int toCopy = Math.Min(count, _currentBytes.Length - _currentPos);
-                    Array.Copy(_currentBytes, _currentPos, buffer, offset, toCopy);
-                    _currentPos += toCopy;
-                    return toCopy;
-                }
-
-                // Loop instead of single-dequeue: an empty chunk must be SKIPPED, not returned as
-                // 0 bytes - Stream.Read returning 0 means EOF to consumers, which would silently
-                // drop everything still queued behind the empty entry.
-                while (_queue.TryDequeue(out string chunk))
-                {
-                    if (string.IsNullOrEmpty(chunk)) continue;
-                    // Bytes pass through unchanged so the OpenAI SSE parser owns framing, [DONE],
-                    // tool_calls, role, finish_reason, etc.
-                    _currentBytes = Encoding.UTF8.GetBytes(chunk);
-                    _currentPos = 0;
-                    int toCopy = Math.Min(count, _currentBytes.Length - _currentPos);
-                    Array.Copy(_currentBytes, _currentPos, buffer, offset, toCopy);
-                    _currentPos += toCopy;
-                    return toCopy;
-                }
-
-                return 0;
+                int copied = _backlog.Read(buffer, offset, count, out int acknowledgedBytes);
+                if (acknowledgedBytes > 0) CoreAi_FetchSseAcknowledge(_owner.CallId, acknowledgedBytes);
+                return copied;
             }
 
             public override void Flush() { }
@@ -567,13 +567,14 @@ namespace CoreAI.Infrastructure.Llm
                 if (disposing)
                 {
                     _isDone = true;
+                    _backlog.Clear();
                     // A read parked by ReadWithIdleTimeoutAsync and then abandoned must complete
                     // (with EOF) here, otherwise its TCS and per-read cancellation registration
                     // stay alive until the whole request token ends.
                     PumpPendingRead();
                     try
                     {
-                        CoreAi_FetchSseAbort(_owner.CallId);
+                        _owner.AbortBrowser();
                     }
                     catch (Exception ex)
                     {

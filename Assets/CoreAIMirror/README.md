@@ -127,6 +127,20 @@ and the Player is re-created with `PlayerAdded` firing again.
   Player carries over — no `PlayerRemoving`/`PlayerAdded` churn — and `PlayerRemoving` fires only when
   the actor's last session ends. Every teardown is keyed by connection, never by actor alone, so the
   old connection's late disconnect cannot remove the new session.
+- **Disconnect callbacks cannot interrupt mandatory cleanup.** The bridge removes the departing
+  connection's open requests before notifying every peer listener, and completes those requests
+  after the peer/world teardown. Binding-release listeners wait for those peer listeners too, so
+  reentrant unregister or disposal cannot make the session host forget a Player before removing it.
+  Reentrant disposal also releases the departing admission, while preserving a new admission when
+  the transport reuses the connection id during a callback.
+  Each completion and lifecycle subscriber is attempted once; a callback that admits the same
+  actor on a new connection leaves that replacement's requests and session intact. New requests to
+  a connection already tearing down fail at once. Completion and binding-listener failures go to
+  the bridge's `log` callback; if that callback throws, Unity receives both failures as an exception.
+  Peer-listener failures surface after cleanup: a single failure retains its original exception,
+  and several failures become an `AggregateException`. The scene provider reports these failures
+  without throwing them into the transport tick. Client admission loss, disposal and request
+  expiry also attempt every outstanding completion subscriber despite a failure.
 - **Actors local to the server are served in process.** A server never sends a client-bound or
   server-bound envelope to itself over the wire: a remote from or to an actor registered in this
   process is delivered in process (`LocalDeliveries`), so `InvokeServer` from a host-local actor is

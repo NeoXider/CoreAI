@@ -36,9 +36,9 @@ namespace CoreAI.Tests.EditMode
             SynchronizationContext.SetSynchronizationContext(_savedContext);
         }
 
-        private static LuaValue[] RunLuau(string luau)
+        private static LuaValue[] RunLuau(string luau, LuauDownlevelOptions options = null, string hostSetup = null)
         {
-            DownlevelResult result = LuauDownleveler.Process(luau, "exec");
+            DownlevelResult result = LuauDownleveler.Process(luau, "exec", options);
             StringBuilder sb = new();
             foreach (DownlevelDiagnostic d in result.Diagnostics)
             {
@@ -51,6 +51,11 @@ namespace CoreAI.Tests.EditMode
             state.OpenMathLibrary();
             state.OpenStringLibrary();
             state.OpenTableLibrary();
+            if (hostSetup != null)
+            {
+                state.DoStringAsync(hostSetup).GetAwaiter().GetResult();
+            }
+
             return state.DoStringAsync(result.LuaSource).GetAwaiter().GetResult();
         }
 
@@ -197,6 +202,183 @@ namespace CoreAI.Tests.EditMode
                 "until n >= 3\n" +
                 "return n\n";
             Assert.AreEqual(3, RunNumber(luau));
+        }
+
+        [Test]
+        public void ContinueInRepeat_ConditionUsesOriginalBindingsOncePerIteration()
+        {
+            LuaValue[] result = RunLuau(
+                "local n, calls = 0, 0 "
+                + "local function done() calls += 1 return n >= 2 end "
+                + "repeat n += 1 if n > 5 then error('finite guard') end "
+                + "do local n = 99 local function done() error('shadow called') end continue end "
+                + "until done() return n, calls");
+            Assert.AreEqual(2, result[0].Read<double>());
+            Assert.AreEqual(2, result[1].Read<double>());
+        }
+
+        [Test]
+        public void ContinueInRepeat_PreservesEarlierLocalsAndSkipsLaterLocals()
+        {
+            Assert.AreEqual(2, RunNumber(
+                "local n = 0 repeat n += 1 local value = n "
+                + "if n > 5 then error('finite guard') end if true then continue end "
+                + "local unused = 99 until value >= 2 return n"));
+        }
+
+        [Test]
+        public void ContinueInRepeat_LaterClosuresRetainDistinctIterationCells()
+        {
+            LuaValue[] result = RunLuau(
+                "local n = 0 local saved = {} repeat n += 1 "
+                + "if n > 5 then error('finite guard') end if n == 1 then continue end "
+                + "local value = n saved[n] = function() return value end "
+                + "until n >= 3 return saved[2](), saved[3]()");
+            Assert.AreEqual(2, result[0].Read<double>());
+            Assert.AreEqual(3, result[1].Read<double>());
+        }
+
+        [Test]
+        public void ContinueInRepeat_BreakSkipsCondition()
+        {
+            LuaValue[] result = RunLuau(
+                "local n, calls = 0, 0 local function done() calls += 1 return false end "
+                + "repeat n += 1 if n == 2 then break end continue until done() return n, calls");
+            Assert.AreEqual(2, result[0].Read<double>());
+            Assert.AreEqual(1, result[1].Read<double>());
+        }
+
+        [TestCase(1)]
+        [TestCase(4)]
+        [TestCase(8)]
+        public void NestedRepeatConditions_RemainBoundedAndExecute(int depth)
+        {
+            string expression = "true";
+            for (int index = 0; index < depth; index++)
+            {
+                expression = "(function() repeat if true then continue end until " + expression
+                    + " return true end)()";
+            }
+
+            string source = "return " + expression;
+            DownlevelResult transformed = LuauDownleveler.Process(source);
+            Assert.IsFalse(transformed.HasErrors);
+            Assert.Less(transformed.LuaSource.Length, source.Length * 4);
+            Assert.IsTrue(RunLuau(source)[0].Read<bool>());
+        }
+
+        [TestCase("")]
+        [TestCase("local unrelated: number = 0 ")]
+        public void IfExpressions_InStatementConditionsExecuteWithoutAnotherTrigger(string prefix)
+        {
+            Assert.AreEqual(7, RunNumber(prefix
+                + "if if true then true else false then return 7 end return 0"));
+            Assert.AreEqual(8, RunNumber(prefix
+                + "if false then return 0 elseif if true then true else false then return 8 end return 0"));
+            Assert.AreEqual(2, RunNumber(prefix
+                + "local n = 0 while if n < 2 then true else false do n = n + 1 end return n"));
+        }
+
+        [TestCase("local x = 1\n::again::\nreturn x", 1)]
+        [TestCase("x = 1\n::again::\nreturn x", 1)]
+        [TestCase("local n = 0 repeat n = n + 1 until n >= 2\n::again::\nreturn n", 2)]
+        public void LuaLabels_AfterExpressionsExecute(string source, int expected)
+        {
+            Assert.AreEqual(expected, RunNumber(source));
+        }
+
+        [Test]
+        public void GeneratedPrimitives_IgnoreNestedShadowingAndItsSideEffects()
+        {
+            LuaValue[] result = RunLuau(
+                "local calls = 0 local math = {floor = function() calls += 1 return 99 end} "
+                + "local tostring = function() calls += 1 return 'wrong' end "
+                + "local function nested() do local math = 0 local tostring = 0 "
+                + "local x = 9 x //= 2 local t = {9} t[1] //= 2 "
+                + "return 7 // 2, x, t[1], `value={3}` end end "
+                + "local a, b, c, text = nested() return a, b, c, text, calls");
+            Assert.AreEqual(3, result[0].Read<double>());
+            Assert.AreEqual(4, result[1].Read<double>());
+            Assert.AreEqual(4, result[2].Read<double>());
+            Assert.AreEqual("value=3", result[3].Read<string>());
+            Assert.AreEqual(0, result[4].Read<double>());
+        }
+
+        [Test]
+        public void FloorHelper_PrecedesGeneratedCompoundTargetAtChunkStart()
+        {
+            Assert.AreEqual(7, RunNumber("({9})[1] //= 2 return 7"));
+        }
+
+        [Test]
+        public void TrustedIteratorResolver_IsReplaceableAndCapturedBeforeUserLocals()
+        {
+            LuauDownlevelOptions options = new(trustedIteratorResolverName: "trustedIterator");
+            string hostSetup = "resolve_calls = 0 trustedIterator = function(...) "
+                + "resolve_calls = resolve_calls + 1 if select('#', ...) ~= 1 then return ... end "
+                + "return function(_, previous) if previous == nil then return 1, 99 end end, nil, nil end";
+            LuaValue[] result = RunLuau(
+                "local trustedIterator = 0 local total = 0 "
+                + "for _, value in {4, 5} do total += value end return total, resolve_calls",
+                options, hostSetup);
+            Assert.AreEqual(99, result[0].Read<double>());
+            Assert.AreEqual(1, result[1].Read<double>());
+        }
+
+        [TestCase("\n", "\"")]
+        [TestCase("\r\n", "\"")]
+        [TestCase("\n", "'")]
+        [TestCase("\r\n", "'")]
+        public void StringWhitespaceEscape_ConsumesRealNewlines(string newline, string quote)
+        {
+            LuaValue[] result = RunLuau("return " + quote + "a\\z" + newline + "  b" + quote);
+            Assert.AreEqual("ab", result[0].Read<string>());
+        }
+
+        [Test]
+        public void StringEscapedBackslash_DoesNotConsumeFollowingZ()
+        {
+            Assert.AreEqual("a\\z b", RunLuau("return \"a\\\\z b\"")[0].Read<string>());
+        }
+
+        [Test]
+        public void StringEscapedCrLf_ProducesOneNewline()
+        {
+            Assert.AreEqual("a\nb", RunLuau("return \"a\\\r\nb\"")[0].Read<string>());
+        }
+
+        [TestCase("\\u{41}", new int[] { 0x41, 0x32 })]
+        [TestCase("\\u{20AC}", new int[] { 0xE2, 0x82, 0xAC, 0x32 })]
+        [TestCase("\\u{1F680}", new int[] { 0xF0, 0x9F, 0x9A, 0x80, 0x32 })]
+        public void InterpolatedUnicodeEscape_RemainsLiteralBeforeAnExpression(string escape, int[] expected)
+        {
+            AssertLuaBytes("`" + escape + "{2}`", expected);
+        }
+
+        [Test]
+        public void Interpolation_EscapedBackslashAndBraceRemainLiteral()
+        {
+            Assert.AreEqual("\\u{41}", RunLuau("return `\\\\u\\{41}`")[0].Read<string>());
+            Assert.AreEqual("\\u41", RunLuau("return `\\\\u{41}`")[0].Read<string>());
+        }
+
+        [Test]
+        public void UnicodeEscape_UpperSupportedCodePointExecutes()
+        {
+            AssertLuaBytes("\"\\u{10FFFF}\"", 0xF4, 0x8F, 0xBF, 0xBF);
+            AssertLuaBytes("`\\u{10FFFF}{2}`", 0xF4, 0x8F, 0xBF, 0xBF, 0x32);
+        }
+
+        private static void AssertLuaBytes(string expression, params int[] expected)
+        {
+            LuaValue[] result = RunLuau("local value = " + expression
+                + " return #value, string.byte(value, 1, #value)");
+            Assert.AreEqual(expected.Length + 1, result.Length);
+            Assert.AreEqual(expected.Length, result[0].Read<double>());
+            for (int index = 0; index < expected.Length; index++)
+            {
+                Assert.AreEqual(expected[index], result[index + 1].Read<double>(), "Byte " + index);
+            }
         }
 
         [Test]

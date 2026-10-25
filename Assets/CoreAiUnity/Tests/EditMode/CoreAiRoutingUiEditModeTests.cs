@@ -16,6 +16,7 @@ namespace CoreAI.Tests
     public sealed class CoreAiRoutingUiEditModeTests
     {
         private FakeController _controller;
+        private readonly List<HubSettingsPage> _pages = new List<HubSettingsPage>();
 
         [SetUp]
         public void SetUp()
@@ -27,7 +28,19 @@ namespace CoreAI.Tests
         [TearDown]
         public void TearDown()
         {
+            foreach (HubSettingsPage page in _pages)
+            {
+                page.OnDestroyed();
+            }
+
+            _pages.Clear();
             CoreAiRoutingUi.Controller = null;
+        }
+
+        private HubSettingsPage Own(HubSettingsPage page)
+        {
+            _pages.Add(page);
+            return page;
         }
 
         [Test]
@@ -56,7 +69,7 @@ namespace CoreAI.Tests
             }
             finally
             {
-                UnityEngine.Object.DestroyImmediate(gameObject);
+                DestroyRoutingPanel(gameObject);
             }
         }
 
@@ -88,7 +101,7 @@ namespace CoreAI.Tests
             }
             finally
             {
-                UnityEngine.Object.DestroyImmediate(gameObject);
+                DestroyRoutingPanel(gameObject);
             }
         }
 
@@ -116,6 +129,28 @@ namespace CoreAI.Tests
             }
             finally
             {
+                DestroyRoutingPanel(gameObject);
+            }
+        }
+
+        private void DestroyRoutingPanel(GameObject gameObject)
+        {
+            try
+            {
+                CoreAiChatPanel panel = gameObject.GetComponent<CoreAiChatPanel>();
+                if (panel != null)
+                {
+                    // WHY: EditMode tests subscribe manually without running the panel's runtime lifecycle.
+                    MethodInfo destroy = typeof(CoreAiChatPanel).GetMethod("OnDestroy",
+                        BindingFlags.Instance | BindingFlags.NonPublic);
+                    Assert.IsNotNull(destroy, "The manually enabled panel must run its destruction lifecycle.");
+                    destroy.Invoke(panel, null);
+                    Assert.IsFalse(_controller.HasSubscriber(panel),
+                        "A destroyed fixture-owned panel must release its routing-controller subscription.");
+                }
+            }
+            finally
+            {
                 UnityEngine.Object.DestroyImmediate(gameObject);
             }
         }
@@ -123,7 +158,7 @@ namespace CoreAI.Tests
         [Test]
         public void HubEndpointEditor_SendsSessionKeyWriteOnly_AndAssignsAgentProfile()
         {
-            HubSettingsPage page = new(routingController: _controller);
+            HubSettingsPage page = Own(new HubSettingsPage(routingController: _controller));
             ScrollView root = (ScrollView)page.CreatePageContent();
 
             FindTextField(root, "Name").value = "Production API";
@@ -168,7 +203,7 @@ namespace CoreAI.Tests
         [Test]
         public void HubEndpointEditor_HidesSessionKeyClearOutsideHttpEndpoints()
         {
-            HubSettingsPage page = new(routingController: _controller);
+            HubSettingsPage page = Own(new HubSettingsPage(routingController: _controller));
             ScrollView root = (ScrollView)page.CreatePageContent();
             DropdownField kind = FindDropdown(root, "Type");
             Button clearKey = FindButton(root, "Clear saved key");
@@ -189,7 +224,7 @@ namespace CoreAI.Tests
         [Test]
         public void HubEndpointEditor_BlankKeyOnEditMeansPreserve_AndIdIsLocked()
         {
-            HubSettingsPage page = new(routingController: _controller);
+            HubSettingsPage page = Own(new HubSettingsPage(routingController: _controller));
             ScrollView root = (ScrollView)page.CreatePageContent();
             // WHY: the picker dropdown was replaced by a per-row Edit button that loads a specific endpoint;
             // drive the same load path the row's Edit button calls.
@@ -208,7 +243,7 @@ namespace CoreAI.Tests
         [Test]
         public void HubEndpointEditor_RemoveRequiresSecondConfirmation()
         {
-            HubSettingsPage page = new(routingController: _controller);
+            HubSettingsPage page = Own(new HubSettingsPage(routingController: _controller));
             ScrollView root = (ScrollView)page.CreatePageContent();
             // WHY: removal is now a two-click inline confirm on the endpoint row's own Remove button; the
             // first click arms it (text -> "Confirm?") without removing, the second click removes.
@@ -226,7 +261,7 @@ namespace CoreAI.Tests
         [Test]
         public void HubEndpointEditor_InvalidHttpUrl_DoesNotCallRegistry()
         {
-            HubSettingsPage page = new(routingController: _controller);
+            HubSettingsPage page = Own(new HubSettingsPage(routingController: _controller));
             ScrollView root = (ScrollView)page.CreatePageContent();
             FindTextField(root, "Name").value = "Broken API";
             FindTextField(root, "Endpoint ID").value = "broken";
@@ -326,6 +361,18 @@ namespace CoreAI.Tests
             };
 
             public event Action Changed;
+
+            public bool HasSubscriber(object owner)
+            {
+                foreach (Delegate subscriber in Changed?.GetInvocationList() ?? Array.Empty<Delegate>())
+                {
+                    if (ReferenceEquals(subscriber.Target, owner))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
 
             public LlmEndpointDescriptor LastSavedEndpoint { get; private set; }
             public string LastSessionKey { get; private set; }

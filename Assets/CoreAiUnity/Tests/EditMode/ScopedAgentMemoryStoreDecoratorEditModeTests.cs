@@ -246,12 +246,13 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ScopedKeys_PaddedAndUnpaddedLossyValues_MapToSameKey()
+        public void ScopedKeys_PaddedAndUnpaddedOpaqueValues_ProduceDistinctKeys()
         {
             string padded = ScopedKeyFor(new AgentMemoryScope("", " user@x ", "", ""), "role");
             string unpadded = ScopedKeyFor(new AgentMemoryScope("", "user@x", "", ""), "role");
 
-            Assert.AreEqual(unpadded, padded);
+            Assert.AreNotEqual(unpadded, padded,
+                "Scope values are exact host identities; whitespace must not merge distinct principals.");
         }
 
         [Test]
@@ -319,7 +320,7 @@ namespace CoreAI.Tests.EditMode
                     "Case-only identities must not share one filename on case-insensitive filesystems.");
                 foreach (string name in names)
                 {
-                    StringAssert.IsMatch("^scope-v1-[0-9a-f]{64}\\.json$", name);
+                    StringAssert.IsMatch("^key-v2-[0-9a-f]{64}\\.json$", name);
                 }
 
                 provider.UserId = "Student";

@@ -16,6 +16,7 @@ namespace CoreAI.Tests.EditMode
     public sealed class HubSettingsRegressionEditModeTests
     {
         private CoreAISettingsAsset _settings;
+        private readonly List<HubSettingsPage> _pages = new List<HubSettingsPage>();
 
         [SetUp]
         public void SetUp()
@@ -27,6 +28,12 @@ namespace CoreAI.Tests.EditMode
         [TearDown]
         public void TearDown()
         {
+            foreach (HubSettingsPage page in _pages)
+            {
+                page.OnDestroyed();
+            }
+
+            _pages.Clear();
             CoreAISettingsAsset.ResetInstance();
             if (_settings != null)
             {
@@ -51,7 +58,7 @@ namespace CoreAI.Tests.EditMode
             FakeRoutingController controller = new();
             controller.Add("alpha", "Alpha");
             controller.Add("beta", "Beta");
-            HubSettingsPage page = new(_settings, routingController: controller);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings, routingController: controller));
             page.CreatePageContent();
 
             Button armed = RemoveButton(page, "alpha");
@@ -76,7 +83,7 @@ namespace CoreAI.Tests.EditMode
         {
             FakeRoutingController controller = new();
             controller.Add("alpha", "Alpha");
-            HubSettingsPage page = new(_settings, routingController: controller);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings, routingController: controller));
             page.CreatePageContent();
 
             Button remove = RemoveButton(page, "alpha");
@@ -132,7 +139,7 @@ namespace CoreAI.Tests.EditMode
         public void Apply_KeepsClientLimitedMode_WhenTheUserDidNotChangeIt()
         {
             _settings.ConfigureClientLimited("http://old/v1", "key", "old-model", 5, 1000);
-            HubSettingsPage page = new(_settings);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings));
             ScrollView root = (ScrollView)page.CreatePageContent();
             root.Query<TextField>().AtIndex(0).value = "http://new/v1";
             root.Query<TextField>().AtIndex(2).value = "new-model";
@@ -149,7 +156,7 @@ namespace CoreAI.Tests.EditMode
         public void Apply_KeepsServerManagedMode_WhenTheUserDidNotChangeIt()
         {
             _settings.ConfigureServerManagedApi("http://proxy/v1", "old-model", "token");
-            HubSettingsPage page = new(_settings);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings));
             ScrollView root = (ScrollView)page.CreatePageContent();
             root.Query<TextField>().AtIndex(2).value = "new-model";
 
@@ -163,7 +170,7 @@ namespace CoreAI.Tests.EditMode
         public void BrowserSettings_DisablesLocalModelAndShowsActionableLimitation()
         {
             _settings.ConfigureLlmUnity(ggufPath: "browser.gguf");
-            HubSettingsPage page = new(_settings, RuntimePlatform.WebGLPlayer);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings, RuntimePlatform.WebGLPlayer));
             ScrollView root = (ScrollView)page.CreatePageContent();
 
             DropdownField mode = root.Q<DropdownField>();
@@ -202,7 +209,7 @@ namespace CoreAI.Tests.EditMode
             original.MaxTokens = 2048;
             original.ExtraBodyJson = "{\"custom_option\":true}";
             original.ThinkingBudgetTokens = 512;
-            HubSettingsPage page = new(_settings, RuntimePlatform.WindowsPlayer, controller);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings, RuntimePlatform.WindowsPlayer, controller));
             page.CreatePageContent();
 
             Invoke(page, "LoadEndpointById", "configured");
@@ -228,7 +235,7 @@ namespace CoreAI.Tests.EditMode
             LlmEndpointDescriptor original = controller.GetEndpoints()[0].Descriptor;
             original.Kind = LlmEndpointKind.HttpOpenAi;
             original.Model = "model";
-            HubSettingsPage page = new(_settings, routingController: controller);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings, routingController: controller));
             page.CreatePageContent();
             Invoke(page, "LoadEndpointById", "configured");
 
@@ -261,7 +268,7 @@ namespace CoreAI.Tests.EditMode
             original.Model = "model";
             original.Temperature = 0.6f;
             original.MaxTokens = 1000;
-            HubSettingsPage page = new(_settings, routingController: controller);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings, routingController: controller));
             EndpointEditorHostWindow window = ScriptableObject.CreateInstance<EndpointEditorHostWindow>();
             try
             {
@@ -293,6 +300,221 @@ namespace CoreAI.Tests.EditMode
             finally
             {
                 UnityEngine.Object.DestroyImmediate(window);
+            }
+        }
+
+        [Test]
+        public void EndpointSave_NotSavedPreservesTheEditedDescriptorAndRetryKey()
+        {
+            WithoutSynchronizationContext(() =>
+            {
+                FakeRoutingController controller = new();
+                controller.Add("alpha", "Alpha");
+                controller.SaveHandler = (_, __, ___) => Task.FromResult(
+                    new CoreAiRoutingUiResult(false, "store refused"));
+                HubSettingsPage page = Own(new HubSettingsPage(_settings, routingController: controller));
+                page.CreatePageContent();
+                try
+                {
+                    Invoke(page, "LoadEndpointById", "alpha");
+                    Text(page, "_endpointName").value = "Unsaved name";
+                    Text(page, "_endpointModel").value = "unsaved-model";
+                    Text(page, "_endpointSessionKey").value = "retry-key";
+
+                    Invoke(page, "SaveEndpoint");
+
+                    Assert.AreEqual("Unsaved name", Text(page, "_endpointName").value);
+                    Assert.AreEqual("unsaved-model", Text(page, "_endpointModel").value);
+                    Assert.AreEqual("retry-key", Text(page, "_endpointSessionKey").value);
+                    Assert.AreEqual("alpha", Field(page, "_editingEndpointId").GetValue(page));
+                    Assert.AreEqual("store refused", ((Label)Field(page, "_endpointOperationStatus").GetValue(page)).text);
+                    Assert.IsTrue(((Button)Field(page, "_endpointSaveButton").GetValue(page)).enabledSelf);
+                }
+                finally
+                {
+                    page.OnDestroyed();
+                }
+            });
+        }
+
+        [Test]
+        public void EndpointSave_OldCompletionCannotOverwriteAnotherDraftOrReleaseItsBusyState()
+        {
+            WithoutSynchronizationContext(() =>
+            {
+                FakeRoutingController controller = new();
+                controller.Add("alpha", "Alpha");
+                controller.Add("beta", "Beta");
+                TaskCompletionSource<CoreAiRoutingUiResult> first = new();
+                TaskCompletionSource<CoreAiRoutingUiResult> second = new();
+                Queue<Task<CoreAiRoutingUiResult>> completions = new();
+                completions.Enqueue(first.Task);
+                completions.Enqueue(second.Task);
+                controller.SaveHandler = (_, __, ___) => completions.Dequeue();
+                HubSettingsPage page = Own(new HubSettingsPage(_settings, routingController: controller));
+                page.CreatePageContent();
+                try
+                {
+                    Invoke(page, "LoadEndpointById", "alpha");
+                    Invoke(page, "SaveEndpoint");
+                    Invoke(page, "LoadEndpointById", "beta");
+                    Text(page, "_endpointName").value = "Beta draft";
+                    Text(page, "_endpointSessionKey").value = "beta-key";
+                    Invoke(page, "SaveEndpoint");
+                    Assert.IsTrue(controller.SaveTokens[0].IsCancellationRequested);
+
+                    first.SetResult(new CoreAiRoutingUiResult(true, "Old success"));
+
+                    Assert.AreEqual("beta", Field(page, "_editingEndpointId").GetValue(page));
+                    Assert.AreEqual("Beta draft", Text(page, "_endpointName").value);
+                    Assert.AreEqual("beta-key", Text(page, "_endpointSessionKey").value);
+                    Assert.IsFalse(((Button)Field(page, "_endpointSaveButton").GetValue(page)).enabledSelf,
+                        "An older completion cannot enable Save while the current operation is still running.");
+                    second.SetResult(new CoreAiRoutingUiResult(false, "New refusal"));
+                    Assert.AreEqual("beta-key", Text(page, "_endpointSessionKey").value);
+                    Assert.IsTrue(((Button)Field(page, "_endpointSaveButton").GetValue(page)).enabledSelf);
+                }
+                finally
+                {
+                    page.OnDestroyed();
+                }
+            });
+        }
+
+        [Test]
+        public void EndpointSave_ControllerReplacementFencesTheOldResultAndCancelsItsToken()
+        {
+            WithoutSynchronizationContext(() =>
+            {
+                FakeRoutingController firstController = new();
+                firstController.Add("same", "Old");
+                TaskCompletionSource<CoreAiRoutingUiResult> completion = new();
+                firstController.SaveHandler = (_, __, ___) => completion.Task;
+                FakeRoutingController replacement = new();
+                replacement.Add("same", "Replacement");
+                HubSettingsPage page = Own(new HubSettingsPage(_settings, routingController: firstController));
+                page.CreatePageContent();
+                try
+                {
+                    Invoke(page, "LoadEndpointById", "same");
+                    Invoke(page, "SaveEndpoint");
+                    Invoke(page, "AttachRoutingController", replacement);
+                    Invoke(page, "LoadEndpointById", "same");
+                    Text(page, "_endpointName").value = "Replacement draft";
+                    Text(page, "_endpointSessionKey").value = "replacement-key";
+                    completion.SetResult(new CoreAiRoutingUiResult(true));
+
+                    Assert.IsTrue(firstController.SaveTokens[0].IsCancellationRequested);
+                    Assert.AreEqual("Replacement draft", Text(page, "_endpointName").value);
+                    Assert.AreEqual("replacement-key", Text(page, "_endpointSessionKey").value);
+                    Assert.AreEqual(0, firstController.Subscribers);
+                    Assert.AreEqual(1, replacement.Subscribers);
+                }
+                finally
+                {
+                    page.OnDestroyed();
+                }
+
+                Assert.AreEqual(0, replacement.Subscribers);
+            });
+        }
+
+        [Test]
+        public void EndpointSave_DestroyedViewCancelsAndIgnoresALateSuccessfulCompletion()
+        {
+            WithoutSynchronizationContext(() =>
+            {
+                FakeRoutingController controller = new();
+                controller.Add("alpha", "Alpha");
+                TaskCompletionSource<CoreAiRoutingUiResult> completion = new();
+                controller.SaveHandler = (_, __, ___) => completion.Task;
+                HubSettingsPage page = Own(new HubSettingsPage(_settings, routingController: controller));
+                page.CreatePageContent();
+                Invoke(page, "LoadEndpointById", "alpha");
+                Text(page, "_endpointSessionKey").value = "private draft";
+                Invoke(page, "SaveEndpoint");
+
+                page.OnDestroyed();
+                completion.SetResult(new CoreAiRoutingUiResult(true));
+
+                Assert.IsTrue(controller.SaveTokens[0].IsCancellationRequested);
+                Assert.AreEqual("private draft", Text(page, "_endpointSessionKey").value);
+                Assert.AreEqual(0, controller.Subscribers);
+                Assert.IsFalse(((Button)Field(page, "_endpointSaveButton").GetValue(page)).enabledSelf);
+            });
+        }
+
+        [Test]
+        public void EndpointControllerChange_QueuedBeforeDestructionCannotReattachTheView()
+        {
+            ICoreAiRoutingUiController previousController = CoreAiRoutingUi.Controller;
+            SynchronizationContext previousContext = SynchronizationContext.Current;
+            RecordingContext context = new();
+            FakeRoutingController first = new();
+            FakeRoutingController replacement = new();
+            HubSettingsPage page = null;
+            try
+            {
+                CoreAiRoutingUi.Controller = first;
+                SynchronizationContext.SetSynchronizationContext(context);
+                page = Own(new HubSettingsPage(_settings));
+                page.CreatePageContent();
+                Assert.AreEqual(1, first.Subscribers, first.DescribeSubscribers());
+                SynchronizationContext.SetSynchronizationContext(null);
+                CoreAiRoutingUi.Controller = replacement;
+                Assert.AreEqual(1, context.Pending.Count);
+
+                page.OnDestroyed();
+                Assert.AreEqual(0, first.Subscribers);
+                Assert.AreEqual(0, replacement.Subscribers);
+                foreach (Action callback in context.Pending)
+                {
+                    callback();
+                }
+
+                Assert.AreEqual(0, first.Subscribers);
+                Assert.AreEqual(0, replacement.Subscribers,
+                    "A queued global-controller event must not revive a destroyed page subscription.");
+            }
+            finally
+            {
+                page?.OnDestroyed();
+                CoreAiRoutingUi.Controller = previousController;
+                SynchronizationContext.SetSynchronizationContext(previousContext);
+            }
+        }
+
+        private static TextField Text(HubSettingsPage page, string name)
+        {
+            return (TextField)Field(page, name).GetValue(page);
+        }
+
+        private HubSettingsPage Own(HubSettingsPage page)
+        {
+            _pages.Add(page);
+            return page;
+        }
+
+        private static void WithoutSynchronizationContext(Action action)
+        {
+            SynchronizationContext previous = SynchronizationContext.Current;
+            try
+            {
+                SynchronizationContext.SetSynchronizationContext(null);
+                action();
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(previous);
+            }
+        }
+
+        private sealed class RecordingContext : SynchronizationContext
+        {
+            public List<Action> Pending { get; } = new();
+            public override void Post(SendOrPostCallback callback, object state)
+            {
+                Pending.Add(() => callback(state));
             }
         }
 
@@ -376,8 +598,28 @@ namespace CoreAI.Tests.EditMode
         private sealed class FakeRoutingController : ICoreAiRoutingUiController
         {
             private readonly List<LlmEndpointSnapshot> _endpoints = new();
+            private Action _changed;
 
-            public event Action Changed;
+            public event Action Changed { add => _changed += value; remove => _changed -= value; }
+            public int Subscribers => _changed?.GetInvocationList().Length ?? 0;
+
+            public string DescribeSubscribers()
+            {
+                List<string> owners = new();
+                foreach (Delegate subscriber in _changed?.GetInvocationList() ?? Array.Empty<Delegate>())
+                {
+                    object target = subscriber.Target;
+                    UnityEngine.Object unityTarget = target as UnityEngine.Object;
+                    string state = ReferenceEquals(unityTarget, null)
+                        ? "" : ", UnityDestroyed=" + (unityTarget == null);
+                    owners.Add(subscriber.Method.DeclaringType?.FullName + "." + subscriber.Method.Name
+                        + " target=" + (target?.GetType().FullName ?? "<static>") + state);
+                }
+                return string.Join(Environment.NewLine, owners);
+            }
+
+            public Func<LlmEndpointDescriptor, string, CancellationToken, Task<CoreAiRoutingUiResult>> SaveHandler;
+            public List<CancellationToken> SaveTokens { get; } = new();
 
             public List<string> Removed { get; } = new();
 
@@ -422,7 +664,9 @@ namespace CoreAI.Tests.EditMode
                 string sessionApiKey,
                 CancellationToken cancellationToken = default)
             {
-                return Task.FromResult(new CoreAiRoutingUiResult(true));
+                SaveTokens.Add(cancellationToken);
+                return SaveHandler == null ? Task.FromResult(new CoreAiRoutingUiResult(true))
+                    : SaveHandler(endpoint, sessionApiKey, cancellationToken);
             }
 
             public Task<CoreAiRoutingUiResult> RemoveEndpointAsync(
@@ -431,7 +675,7 @@ namespace CoreAI.Tests.EditMode
             {
                 Removed.Add(endpointId);
                 _endpoints.RemoveAll(s => s.Descriptor.EndpointId == endpointId);
-                Changed?.Invoke();
+                _changed?.Invoke();
                 return Task.FromResult(new CoreAiRoutingUiResult(true));
             }
         }

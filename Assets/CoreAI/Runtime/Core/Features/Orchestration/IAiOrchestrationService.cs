@@ -76,8 +76,9 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Cancels in-flight and queued work for the logical cancellation scope in each role's current
-        /// <see cref="AgentMemoryScope"/> partition (for example, a manual agent stop).
+        /// Cancels admitted actor-aware work globally for the logical scope or connection-session alias.
+        /// Actorless work is selected within each role's current <see cref="AgentMemoryScope"/> partition.
+        /// Use <see cref="IActorAiTaskCancellation"/> to stop only one actor connection.
         /// </summary>
         /// <remarks>
         /// Implementations that support scoped multi-user queues must resolve identity with the role captured
@@ -102,14 +103,24 @@ namespace CoreAI.Ai
         void CancelRoleTasks(string roleId);
     }
 
+    /// <summary>Optional connection cancellation capability for hosts supplying trusted actor contexts.</summary>
+    public interface IActorAiTaskCancellation
+    {
+        /// <summary>
+        /// Cancels every queued or running request matching the actor id and connection session id,
+        /// optionally restricted to one role. Logical cancellation scopes may be empty.
+        /// </summary>
+        void CancelActorTasks(ActorContext actorContext, string roleId = null);
+    }
+
     /// <summary>
-    /// Optional cancellation capability for multi-user hosts. It combines the logical cancellation
-    /// scope with the current <see cref="AgentMemoryScope"/> resolved for the supplied role id, so stopping
-    /// one learner's role cannot cancel the same role running for another learner.
+    /// Optional role-filtered logical cancellation capability. Actor-aware logical scopes are global
+    /// admin selections; actorless work uses the role's current <see cref="AgentMemoryScope"/> partition.
+    /// Player/session callers use <see cref="IActorAiTaskCancellation"/> for connection isolation.
     /// </summary>
     public interface IScopedAiTaskCancellation
     {
-        /// <summary>Cancels work only in the current identity scope for <paramref name="roleId"/>.</summary>
+        /// <summary>Cancels matching logical work for <paramref name="roleId"/> using the service's admission model.</summary>
         void CancelTasks(string cancellationScope, string roleId);
     }
 

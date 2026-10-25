@@ -12,7 +12,7 @@ namespace CoreAI.Scripting.LuaCs
     /// the VM: it owns the <see cref="LuaCsSecureEnvironment"/> so nothing outside the adapter layer
     /// creates a <c>LuaState</c> directly.
     /// </summary>
-    public sealed class LuaCsScriptEngine : IScriptEngine
+    public sealed class LuaCsScriptEngine : IScriptEngine, IScriptGeneralizedIteratorSupport
     {
         private readonly LuaCsSecureEnvironment _environment;
         private readonly IRbxRuntimeObservabilitySink _observability;
@@ -51,6 +51,9 @@ namespace CoreAI.Scripting.LuaCs
 
         /// <inheritdoc />
         public string EngineVersion => "0.5.6 (Lua 5.2, double-only numbers)";
+
+        /// <inheritdoc />
+        public string TrustedIteratorResolverName => LuaCsSecureEnvironment.TrustedIteratorResolverName;
 
         /// <inheritdoc />
         public IValueMarshaller Marshaller => LuaCsValueMarshaller.Instance;

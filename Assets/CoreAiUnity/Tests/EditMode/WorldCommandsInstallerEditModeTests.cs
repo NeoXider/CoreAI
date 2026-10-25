@@ -37,6 +37,46 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void RegisterWorldCommands_PassesHostPositionBudgetToComponentExecutor()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            GameObject target = new GameObject("HostComponentBudget_" + System.Guid.NewGuid().ToString("N"));
+            try
+            {
+                ContainerBuilder builder = new ContainerBuilder();
+                builder.RegisterInstance<IGameLogger>(new NullGameLogger());
+                builder.RegisterInstance<ILog>(Log.Instance);
+                builder.Register<NoopSink>(Lifetime.Singleton).As<IAiGameCommandSink>();
+                builder.RegisterInstance(new CoreAiComponentCommandOptions(2));
+                builder.RegisterWorldCommands(registry);
+                using IObjectResolver container = builder.Build();
+                ICoreAiComponentCommandExecutor executor = container.Resolve<ICoreAiComponentCommandExecutor>();
+                CoreAiComponentCommandEnvelope rejected = CoreAiComponentCommandEnvelope.SetFloat(
+                    target.name, "linerenderer", "positioncount", 3f);
+
+                Assert.IsFalse(executor.TryExecute(new ApplyAiGameCommand
+                {
+                    CommandTypeId = AiGameCommandTypeIds.ComponentCommand,
+                    JsonPayload = JsonUtility.ToJson(rejected)
+                }));
+                Assert.IsNull(target.GetComponent<LineRenderer>());
+                rejected.floatValue = 2f;
+                Assert.IsTrue(executor.TryExecute(new ApplyAiGameCommand
+                {
+                    CommandTypeId = AiGameCommandTypeIds.ComponentCommand,
+                    JsonPayload = JsonUtility.ToJson(rejected)
+                }));
+                Assert.AreEqual(2, target.GetComponent<LineRenderer>().positionCount);
+                Assert.AreSame(container.Resolve<IWorldStateManager>(), container.Resolve<IWorldStateWriteResults>());
+            }
+            finally
+            {
+                Object.DestroyImmediate(target);
+                Object.DestroyImmediate(registry);
+            }
+        }
+
+        [Test]
         public void RegisterWorldCommands_AttachesWorldCommandTool_ToCreatorRole()
         {
             CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();

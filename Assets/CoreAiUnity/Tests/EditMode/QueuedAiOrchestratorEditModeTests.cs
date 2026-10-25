@@ -26,6 +26,109 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class QueuedAiOrchestratorEditModeTests
     {
+        [Test]
+        public async Task ActorLogicalScope_IndependentViewsRetainLogicalCancellation()
+        {
+            RecordingOrchestrator inner = new();
+            using QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 2 });
+            ActorContext actor = CreateActorContext("logical-actor", "logical-session");
+            Task<string> first = queue.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "first", ActorContext = actor, CancellationScope = "view-one" });
+            Task<string> second = queue.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "second", ActorContext = actor, CancellationScope = "view-two" });
+            try
+            {
+                await WaitUntilAsync(() => inner.Gates.Count == 2, "Independent logical views must both enter the provider.");
+                Assert.IsFalse(first.IsCompleted, "A different logical scope must not supersede the first turn.");
+                queue.CancelTasks("view-one", "Teacher");
+                await WaitUntilAsync(() => first.IsCompleted, "Logical cancellation must select actor-aware work.");
+                await CaptureExceptionAsync<OperationCanceledException>(() => first);
+                Assert.IsFalse(second.IsCompleted, "Another logical view of the same connection must survive.");
+                inner.Gates[1].TrySetResult("second");
+                Assert.AreEqual("second", await second);
+            }
+            finally
+            {
+                foreach (TaskCompletionSource<string> gate in inner.Gates) gate.TrySetResult("released");
+            }
+        }
+
+        [Test]
+        public async Task CancellationCallbackFault_DisposeStillSettlesPendingTaskAndStream()
+        {
+            ThrowingCancellationOrchestrator inner = new() { IgnoreCancellation = true };
+            QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+            Task<string> active = queue.RunTaskAsync(new AiTaskRequest { Hint = "active" });
+            Task<string> pending = queue.RunTaskAsync(new AiTaskRequest { Hint = "pending" });
+            Task<List<LlmStreamChunk>> pendingStream = DrainAsync(queue.RunStreamingAsync(new AiTaskRequest { Hint = "stream" }));
+            try
+            {
+                Assert.DoesNotThrow(() => queue.Dispose(), "Callback faults must not skip mandatory disposal cleanup.");
+                await WaitUntilAsync(() => pending.IsCompleted && pendingStream.IsCompleted, "Disposal must settle pending work even if the active client ignores cancellation.");
+                await CaptureExceptionAsync<ObjectDisposedException>(() => pending);
+                Assert.AreEqual(LlmErrorCode.BackendUnavailable, (await pendingStream)[0].ErrorCode);
+                Assert.AreEqual(1, inner.Starts);
+                Assert.DoesNotThrow(() => queue.Dispose());
+            }
+            finally
+            {
+                inner.Gate.TrySetResult("released");
+                await active;
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task CancellationCallbackFault_ReplacementOrRoleStopStillPumps(bool roleStop)
+        {
+            ThrowingCancellationOrchestrator inner = new();
+            using QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+            Task<string> active = queue.RunTaskAsync(new AiTaskRequest { Hint = "active", RoleId = "Teacher", CancellationScope = "view" });
+            Task<string> next = null;
+            try
+            {
+                if (roleStop)
+                {
+                    next = queue.RunTaskAsync(new AiTaskRequest { Hint = "next", RoleId = "Other" });
+                    Assert.DoesNotThrow(() => queue.CancelRoleTasks("Teacher"));
+                }
+                else
+                {
+                    Assert.DoesNotThrow(() => next = queue.RunTaskAsync(new AiTaskRequest { Hint = "next", RoleId = "Teacher", CancellationScope = "view" }));
+                }
+                await WaitUntilAsync(() => next != null && next.IsCompleted, "A callback fault may not strand the replacement or another role.");
+                Assert.AreEqual("next", await next);
+                await CaptureExceptionAsync<OperationCanceledException>(() => active);
+                Assert.AreEqual(2, inner.Starts);
+            }
+            finally { inner.Gate.TrySetResult("released"); }
+        }
+
+        private sealed class ThrowingCancellationOrchestrator : IAiOrchestrationService
+        {
+            public readonly TaskCompletionSource<string> Gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public bool IgnoreCancellation;
+            public int Starts;
+
+            public async Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
+            {
+                Starts++;
+                if (task.Hint != "active") return task.Hint;
+                using CancellationTokenRegistration registration = cancellationToken.Register(() =>
+                {
+                    if (!IgnoreCancellation) Gate.TrySetCanceled(cancellationToken);
+                    throw new InvalidOperationException("Cancellation callback failed.");
+                });
+                return await Gate.Task;
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> RunStreamingAsync(AiTaskRequest task, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                string text = await RunTaskAsync(task, cancellationToken);
+                yield return new LlmStreamChunk { IsDone = true, Text = text };
+            }
+
+            public void CancelTasks(string cancellationScope) { }
+        }
+
         [TestCase(false)]
         [TestCase(true)]
         public async Task TypedTask_RealOrchestratorFailureRetainsPartialToolsAndUsage(bool thrownFailure)
@@ -1250,12 +1353,16 @@ namespace CoreAI.Tests.EditMode
             queue.Dispose();
         }
 
-        [TestCase(false, false)]
-        [TestCase(true, false)]
-        [TestCase(false, true)]
-        [TestCase(true, true)]
+        [TestCase(false, false, true)]
+        [TestCase(true, false, true)]
+        [TestCase(false, true, true)]
+        [TestCase(true, true, true)]
+        [TestCase(false, false, false)]
+        [TestCase(true, false, false)]
+        [TestCase(false, true, false)]
+        [TestCase(true, true, false)]
         public async Task CancelRoleTasks_CancelsAllRunningAndQueuedRoleTurnsAcrossScopes(
-            bool withActorContext, bool streaming)
+            bool withActorContext, bool streaming, bool withScope)
         {
             RecordingOrchestrator inner = new();
             using QueuedAiOrchestrator queue = new(inner, new AiOrchestrationQueueOptions { MaxConcurrent = 3 });
@@ -1265,6 +1372,13 @@ namespace CoreAI.Tests.EditMode
             AiTaskRequest survivorRequest = CreateRoleStopRequest(
                 withActorContext, "survivor", withActorContext ? "first-scope" : "survivor-scope");
             survivorRequest.RoleId = "OtherRole";
+            if (!withScope)
+            {
+                first.CancellationScope = "";
+                second.CancellationScope = " ";
+                pending.CancellationScope = null;
+                survivorRequest.CancellationScope = "";
+            }
             List<Task> cancelled = new();
             List<Task<List<LlmStreamChunk>>> streams = new();
 

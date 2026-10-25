@@ -14,11 +14,12 @@ namespace CoreAI.Ai.Hub
     /// <see cref="LuaCsModRuntime.GetRecentHandlerErrors"/>), so the Hub Mods page renders it
     /// identically. Store persistence is handled by <see cref="HubModServiceBase"/>.
     /// </summary>
-    public sealed class LuaCsModRuntimeHubService : HubModServiceBase
+    public sealed class LuaCsModRuntimeHubService : HubModServiceBase, IDisposable
     {
         private readonly ILuaModRuntime _runtime;
         private readonly ActorContext _actorContext;
         private readonly bool _rbxApiAvailable;
+        private bool _disposed;
 
         /// <param name="runtime">The mod runtime, or a facade over the active world session's runtime.</param>
         /// <param name="actorContext">Trusted actor performing Hub mod operations.</param>
@@ -42,10 +43,52 @@ namespace CoreAI.Ai.Hub
             _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
             _actorContext = actorContext;
             _rbxApiAvailable = rbxApiAvailable ?? (runtime is LuaCsModRuntime luaCsRuntime && luaCsRuntime.HasRbxApi);
-            _runtime.AddModSourceLoadedListener(_actorContext, OnModsChanged);
-            _runtime.AddModSourceUnloadedListener(_actorContext, OnModsChanged);
-            _runtime.AddModHandlerErroredListener(_actorContext, OnHandlerErrored);
-            _runtime.AddModReportEmittedListener(_actorContext, OnReportEmitted);
+            try
+            {
+                _runtime.AddModSourceLoadedListener(_actorContext, OnModsChanged);
+                _runtime.AddModSourceUnloadedListener(_actorContext, OnModsChanged);
+                _runtime.AddModHandlerErroredListener(_actorContext, OnHandlerErrored);
+                _runtime.AddModReportEmittedListener(_actorContext, OnReportEmitted);
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
+        }
+
+        /// <summary>Releases runtime listeners. Caller-supplied adapters remain caller-owned.</summary>
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            ClearPendingSaves();
+            try
+            {
+                _runtime.RemoveModSourceLoadedListener(_actorContext, OnModsChanged);
+            }
+            finally
+            {
+                try
+                {
+                    _runtime.RemoveModSourceUnloadedListener(_actorContext, OnModsChanged);
+                }
+                finally
+                {
+                    try
+                    {
+                        _runtime.RemoveModHandlerErroredListener(_actorContext, OnHandlerErrored);
+                    }
+                    finally
+                    {
+                        _runtime.RemoveModReportEmittedListener(_actorContext, OnReportEmitted);
+                    }
+                }
+            }
         }
 
         /// <inheritdoc />
@@ -174,17 +217,27 @@ namespace CoreAI.Ai.Hub
 
         private void OnModsChanged(string modId, string source, LuaCapabilities caps)
         {
-            RaiseChanged();
+            if (!_disposed)
+            {
+                InvalidatePendingSave(modId);
+                RaiseChanged();
+            }
         }
 
         private void OnHandlerErrored(string modId, string error, int consecutiveCount)
         {
-            RaiseLogsChanged();
+            if (!_disposed)
+            {
+                RaiseLogsChanged();
+            }
         }
 
         private void OnReportEmitted(string modId, string message)
         {
-            RaiseLogsChanged();
+            if (!_disposed)
+            {
+                RaiseLogsChanged();
+            }
         }
     }
 }

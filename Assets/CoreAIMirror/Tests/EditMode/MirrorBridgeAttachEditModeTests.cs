@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Instances.Networking;
+using Mirror;
 using NUnit.Framework;
 
 namespace CoreAI.Net.Mirror.Tests
@@ -105,6 +106,44 @@ namespace CoreAI.Net.Mirror.Tests
             OfflineMirror.ExpectNoServerHandler();
             OfflineMirror.DeliverToServer(Connection, OfflineMirror.Event(1UL));
             Assert.AreEqual(0, _bridge.PacketsDelivered);
+        }
+
+        [TestCase(false, 0)]
+        [TestCase(true, 23)]
+        public void OfflineFixture_StartsListeningAndRestoresItsServerSettings(bool listen, int capacity)
+        {
+            bool previousListen = NetworkServer.listen;
+            int previousCapacity = NetworkServer.maxConnections;
+            try
+            {
+                NetworkServer.listen = listen;
+                NetworkServer.maxConnections = capacity;
+                using (OfflineMirror mirror = new(loopback: true))
+                {
+                    OfflineMirror.StartServer();
+                    Assert.IsTrue(NetworkServer.active);
+                    Assert.IsTrue(NetworkServer.listen);
+                    Assert.AreEqual(4, NetworkServer.maxConnections,
+                        "the in-memory fixture must retain capacity when the Editor targets WebGL");
+                    mirror.ConnectLoopback();
+
+                    Assert.IsTrue(NetworkServer.connections.TryGetValue(
+                        OfflineMirror.LoopbackConnectionId, out NetworkConnectionToClient connection),
+                        "the real transport connect event must reach Mirror before admission");
+                    Assert.IsFalse(connection.isAuthenticated,
+                        "fixture startup must leave identity decisions to the authenticator");
+                    Assert.IsTrue(NetworkClient.isConnected);
+                    CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests);
+                }
+
+                Assert.AreEqual(listen, NetworkServer.listen);
+                Assert.AreEqual(capacity, NetworkServer.maxConnections);
+            }
+            finally
+            {
+                NetworkServer.listen = previousListen;
+                NetworkServer.maxConnections = previousCapacity;
+            }
         }
 
         private void StartServerAndBind()

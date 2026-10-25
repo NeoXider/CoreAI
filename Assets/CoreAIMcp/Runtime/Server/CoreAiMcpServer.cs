@@ -90,10 +90,11 @@ namespace CoreAI.Mcp.Server
         private readonly object _callsGate = new();
         private readonly LinkedList<QueuedMainThreadCall> _mainThreadQueue = new();
         private int _runningCalls;
+        private bool _retiringAutomaticHost;
 
         /// <summary>Calls occupying admission capacity, including running work which has not actually finished.</summary>
         public int AdmittedMainThreadCalls { get { lock (_callsGate) return _mainThreadQueue.Count + _runningCalls; } }
-        private McpHttpServer _server;
+        private IMcpServerTransport _server;
         private McpSessionStore _sessions;
 
         /// <summary>Live host catalog while listening. AddOrReplace, Remove and Replace take effect without restarting.</summary>
@@ -102,6 +103,7 @@ namespace CoreAI.Mcp.Server
         private IActorIdentityProvider _hostAdminActorIdentityProvider;
 
         private static CoreAiMcpServer _active;
+        private static CoreAiMcpServer _automaticHost;
 
         /// <summary>True while the underlying HTTP listener is running.</summary>
         public bool IsRunning => _server is { IsRunning: true };
@@ -195,9 +197,23 @@ namespace CoreAI.Mcp.Server
             StopListening();
         }
 
+        private void OnDestroy()
+        {
+            if (_automaticHost == this) _automaticHost = null;
+            if (_active == this) _active = null;
+        }
+
         private void Update()
         {
             PumpMainThreadQueue();
+            if (_automaticHost != this || _server != null) return;
+            lock (_callsGate)
+            {
+                if (_mainThreadQueue.Count != 0 || _runningCalls != 0) return;
+                _retiringAutomaticHost = true;
+            }
+            _automaticHost = null;
+            Destroy(gameObject);
         }
 
         /// <summary>
@@ -255,6 +271,9 @@ namespace CoreAI.Mcp.Server
 
             lock (_callsGate)
             {
+                if (_retiringAutomaticHost)
+                    return Task.FromException<T>(new ObjectDisposedException(nameof(CoreAiMcpServer),
+                        "The automatically owned MCP host has been retired."));
                 if (_mainThreadQueue.Count + _runningCalls >= MainThreadCallCapacity)
                     return Task.FromException<T>(new InvalidOperationException(
                         "The CoreAI MCP main-thread admission capacity is full; wait for active calls to finish."));
@@ -290,8 +309,14 @@ namespace CoreAI.Mcp.Server
         public void StartListening() => StartListening(null);
 
         /// <summary>Starts with an explicit live host catalog, or resolves composition when null. Port is optional.</summary>
-        public void StartListening(McpToolRegistry registry, int? listenPort = null)
+        public void StartListening(McpToolRegistry registry, int? listenPort = null) =>
+            StartListening(registry, listenPort, null);
+
+        internal void StartListening(McpToolRegistry registry, int? listenPort,
+            Func<int, McpRpcDispatcher, string, IMcpServerTransport> transportFactory)
         {
+            if (_retiringAutomaticHost)
+                throw new ObjectDisposedException(nameof(CoreAiMcpServer));
             if (IsRunning)
             {
                 return;
@@ -326,42 +351,58 @@ namespace CoreAI.Mcp.Server
                 registry = BuildRegistry(resolver);
             }
             if (listenPort.HasValue) port = listenPort.Value;
+            int listeningPort = port;
             Registry = registry;
 
             string token = ResolveAuthToken();
             _sessions = new McpSessionStore();
             McpRpcDispatcher dispatcher = new(registry, _sessions, this);
-            _server = new McpHttpServer(port, dispatcher,
-                m => Log.Instance.Info($"[CoreAI MCP] {m}"),
-                e => Log.Instance.Warn($"[CoreAI MCP] {e}"),
-                token);
-
+            IMcpServerTransport transport = null;
             try
             {
-                _server.Start();
+                transport = transportFactory == null
+                    ? new McpHttpServer(listeningPort, dispatcher,
+                        m => Log.Instance.Info($"[CoreAI MCP] {m}"),
+                        e => Log.Instance.Warn($"[CoreAI MCP] {e}"), token)
+                    : transportFactory(listeningPort, dispatcher, token);
+                if (transport == null)
+                    throw new InvalidOperationException("The MCP transport factory returned no transport.");
+                _server = transport;
+                transport.Start();
+                if (!ReferenceEquals(_server, transport)) return;
                 _activeAuthToken = token;
                 _active = this;
                 LogAccessInstructions(token);
             }
             catch (Exception ex)
             {
-                _server?.Dispose();
-                _server = null;
-                Registry = null;
-                _activeAuthToken = null;
-                // WHY: HttpListener on Windows can need a URL ACL for a non-admin process; point the user
-                // at the fix instead of a bare stack trace.
-                Log.Instance.Error(
-                    $"[CoreAI MCP] Failed to start on port {port}: {ex.Message}. " +
-                    $"If this is an access error on Windows, reserve the URL once as admin: " +
-                    $"netsh http add urlacl url=http://127.0.0.1:{port}/mcp/ user=%USERNAME%");
+                try
+                {
+                    if (ReferenceEquals(_server, transport))
+                    {
+                        _server = null;
+                        Registry = null;
+                        _activeAuthToken = null;
+                        if (_active == this) _active = null;
+                        FailPendingMainThreadCalls();
+                        transport?.Dispose();
+                    }
+                }
+                finally
+                {
+                    // WHY: A reentrant restart may change the component's port while the failed transport is disposed.
+                    Log.Instance.Error(
+                        $"[CoreAI MCP] Failed to start on port {listeningPort}: {ex.Message}. " +
+                        $"If this is an access error on Windows, reserve the URL once as admin: " +
+                        $"netsh http add urlacl url={McpHttpServer.GetListeningPrefix(listeningPort)} user=%USERNAME%");
+                }
             }
         }
 
         /// <summary>Stops the server and fails every call still waiting for the main thread.</summary>
         public void StopListening()
         {
-            _server?.Dispose();
+            IMcpServerTransport stopped = _server;
             _server = null;
             Registry = null;
             _activeAuthToken = null;
@@ -370,6 +411,8 @@ namespace CoreAI.Mcp.Server
             {
                 _active = null;
             }
+            // WHY: Cancellation callbacks may restart this host; detach the stopped generation before invoking them.
+            stopped?.Dispose();
         }
 
         private string ResolveAuthToken()
@@ -595,34 +638,40 @@ namespace CoreAI.Mcp.Server
         }
 
         /// <summary>
-        /// Starts (or reuses) a server on <paramref name="port"/> from anywhere, creating a hidden host
-        /// GameObject when no component exists yet. Returns the running instance; read
+        /// Starts (or reuses) a server on <paramref name="port"/>, creating an automatically owned
+        /// persistent host when needed. A stopped host is reused while its running bodies drain, then
+        /// destroyed by the player loop. Returns the instance; read
         /// <see cref="AuthToken"/> on it to obtain the bearer token clients must send.
         /// </summary>
-        public static CoreAiMcpServer StartServer(int port = 8590)
+        public static CoreAiMcpServer StartServer(int port = 8590) => StartServer(port, null, null);
+
+        internal static CoreAiMcpServer StartServer(int port, McpToolRegistry registry,
+            Func<int, McpRpcDispatcher, string, IMcpServerTransport> transportFactory)
         {
             if (_active != null && _active.IsRunning)
             {
                 return _active;
             }
 
-            CoreAiMcpServer instance = _active;
+            CoreAiMcpServer instance = _automaticHost;
             if (instance == null)
             {
                 GameObject host = new("CoreAI_McpServer");
                 DontDestroyOnLoad(host);
                 instance = host.AddComponent<CoreAiMcpServer>();
+                _automaticHost = instance;
             }
 
             instance.port = port;
-            instance.StartListening();
+            instance.StartListening(registry, null, transportFactory);
             return instance;
         }
 
         /// <summary>Stops the active server started via the static API (or any tracked instance).</summary>
         public static void StopServer()
         {
-            _active?.StopListening();
+            CoreAiMcpServer instance = _active != null ? _active : _automaticHost;
+            instance?.StopListening();
         }
 
         /// <summary>

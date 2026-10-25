@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Crafting
@@ -56,6 +58,8 @@ namespace CoreAI.Crafting
 
         /// <summary>
         /// Validates a JSON object string against the configured fields.
+        /// Quoted date-like values remain strings; numeric fields require finite values.
+        /// Json.NET comments and other parser extensions retain their existing parsing behavior.
         /// </summary>
         public JsonValidationResult Validate(string json)
         {
@@ -87,7 +91,14 @@ namespace CoreAI.Crafting
             JObject obj;
             try
             {
-                obj = JObject.Parse(json);
+                using StringReader source = new(json);
+                using JsonTextReader reader = new(source) { DateParseHandling = DateParseHandling.None };
+                obj = JObject.Load(reader);
+                // WHY: JObject.Load alone stops at the object; Parse also reads through the end
+                // so trailing non-comment content must still fail validation.
+                while (reader.Read())
+                {
+                }
             }
             catch (Exception ex)
             {
@@ -203,7 +214,18 @@ namespace CoreAI.Crafting
         private static bool CheckType(JToken token, string expectedType, out string error)
         {
             error = null;
-            switch (expectedType?.ToLowerInvariant())
+            if ((expectedType == "number" || expectedType == "integer") &&
+                (token.Type == JTokenType.Float || token.Type == JTokenType.Integer))
+            {
+                double numericValue = token.Value<double>();
+                if (double.IsNaN(numericValue) || double.IsInfinity(numericValue))
+                {
+                    error = $"expected finite {expectedType} but got {numericValue}";
+                    return false;
+                }
+            }
+
+            switch (expectedType)
             {
                 case "string":
                     if (token.Type != JTokenType.String)

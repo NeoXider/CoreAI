@@ -80,6 +80,24 @@ namespace CoreAI.Ai.Hub
         private Label _titleLabel;
         private VisualElement _historyBox;
         private bool _historyOpen;
+        private VisualElement _builtRoot;
+        private string _baseSource;
+        private string _expectedSource;
+        private bool _expectedExists;
+        private string _savedId;
+        private bool _saving;
+        private bool _saveUnconfirmed;
+        private bool _destroyed;
+        private string _conflictSource;
+        private bool _conflictExists;
+        private Button _overwriteButton;
+        private Button _discardButton;
+
+        /// <summary>The current unsaved buffer, available to a host before ending this view lifetime.</summary>
+        public string DraftSource => _codeField?.value ?? _initialSource;
+
+        /// <summary>Whether the buffer has changes or its last save remains unacknowledged.</summary>
+        public bool IsDirty => _saveUnconfirmed || !string.Equals(DraftSource, _baseSource, StringComparison.Ordinal);
 
         /// <param name="service">CRUD surface used to load/save/validate the mod.</param>
         /// <param name="modId">Existing mod id to edit; null/empty for a new or pasted mod.</param>
@@ -119,14 +137,37 @@ namespace CoreAI.Ai.Hub
             }
             else
             {
+                if (!_isNew)
+                {
+                    throw new InvalidOperationException("The mod source could not be read. No editable replacement was created.");
+                }
+
                 _initialSource = NewModTemplate;
             }
+
+            _baseSource = _isNew ? null : _initialSource;
+            _expectedSource = _baseSource;
+            _expectedExists = !_isNew;
+            _savedId = _modId;
+        }
+
+        /// <summary>Ends this editor lifetime without authorizing any further source mutation.</summary>
+        internal void OnDestroyed()
+        {
+            _destroyed = true;
+            _builtRoot?.SetEnabled(false);
         }
 
         /// <summary>Builds the editor VisualElement.</summary>
         public VisualElement Build()
         {
+            if (_builtRoot != null)
+            {
+                return _builtRoot;
+            }
+
             ScrollView scroll = new(ScrollViewMode.Vertical) { name = "coreai-hub-mod-editor-scroll" };
+            _builtRoot = scroll;
             scroll.style.flexGrow = 1f;
             scroll.style.minHeight = 0f;
 
@@ -135,8 +176,6 @@ namespace CoreAI.Ai.Hub
             root.style.flexGrow = 1f;
             root.style.flexDirection = FlexDirection.Column;
 
-            // Header row: a Back button next to the title so returning to the list is always one click away
-            // and always on-screen (previously the only way back — "Close" — sat below the tall code field).
             VisualElement headerRow = new();
             headerRow.style.flexDirection = FlexDirection.Row;
             headerRow.style.alignItems = Align.Center;
@@ -158,7 +197,6 @@ namespace CoreAI.Ai.Hub
             manifestNote.style.flexShrink = 0f;
             root.Add(manifestNote);
 
-            // Primary actions above the code field so they never scroll off-screen.
             VisualElement actions = new();
             actions.style.flexDirection = FlexDirection.Row;
             actions.style.flexWrap = Wrap.Wrap;
@@ -169,6 +207,14 @@ namespace CoreAI.Ai.Hub
             actions.Add(HubModWidgets.MakeButton("Paste", Paste));
             actions.Add(HubModWidgets.MakeButton("Refresh diagnostics", RefreshDiagnostics));
             actions.Add(HubModWidgets.MakeButton("History", ToggleHistory));
+            _overwriteButton = HubModWidgets.MakeDangerButton("Overwrite reviewed version", () => SaveCore(true));
+            _overwriteButton.name = "coreai-hub-mod-overwrite";
+            _overwriteButton.style.display = DisplayStyle.None;
+            actions.Add(_overwriteButton);
+            _discardButton = HubModWidgets.MakeDangerButton("Discard draft and go back", () => _onClose?.Invoke());
+            _discardButton.name = "coreai-hub-mod-discard";
+            _discardButton.style.display = DisplayStyle.None;
+            actions.Add(_discardButton);
             root.Add(actions);
 
             _keepObjectsToggle = new Toggle("Keep objects on Save & run")
@@ -299,8 +345,18 @@ namespace CoreAI.Ai.Hub
         /// </remarks>
         internal void Save()
         {
+            SaveCore(false);
+        }
+
+        private void SaveCore(bool overwrite)
+        {
+            if (_destroyed || _saving)
+            {
+                return;
+            }
+
             string code = _codeField.value ?? "";
-            string id = _isNew ? ParseId(code) : _modId;
+            string id = _isNew && string.IsNullOrEmpty(_savedId) ? ParseId(code) : _savedId;
             if (string.IsNullOrWhiteSpace(id))
             {
                 SetStatus("Cannot save: set 'id:' in the @coreai header.", true);
@@ -310,9 +366,40 @@ namespace CoreAI.Ai.Hub
             bool keepObjects = _keepObjectsToggle?.value ?? _preferences.KeepObjectsOnSave;
             try
             {
+                bool exists = _service.TryGetSource(id, out string currentSource);
+                bool sameBase = exists == _expectedExists && (!exists ||
+                    string.Equals(currentSource, _expectedSource, StringComparison.Ordinal));
+                bool reviewedOverwrite = overwrite && exists == _conflictExists && (!exists ||
+                    string.Equals(currentSource, _conflictSource, StringComparison.Ordinal));
+                if (!sameBase && !reviewedOverwrite)
+                {
+                    _conflictSource = currentSource;
+                    _conflictExists = exists;
+                    _overwriteButton.style.display = DisplayStyle.Flex;
+                    SetStatus("The source changed outside this editor. Your draft is preserved. Copy it or explicitly overwrite the reviewed version.", true);
+                    return;
+                }
+
+                _saving = true;
                 HubModSaveResult result = _service.SaveOrReload(
                     id, code, keepObjects ? ModReloadMode.KeepObjects : ModReloadMode.CleanStartupObjects);
-                SetStatus(result != null ? result.Describe() : $"Saved & ran '{id}'.", false);
+                bool saved = result != null && result.PersistenceStatus == HubModPersistenceStatus.Saved;
+                _saveUnconfirmed = !saved;
+                SetStatus(result?.Describe() ?? "The service returned no save result. Your draft is preserved.", !saved);
+                if (saved)
+                {
+                    _baseSource = code;
+                    _expectedSource = code;
+                    _expectedExists = true;
+                    _savedId = id;
+                    _overwriteButton.style.display = DisplayStyle.None;
+                    _discardButton.style.display = DisplayStyle.None;
+                }
+                else
+                {
+                    CaptureOwnLiveSource(id, code);
+                }
+
                 if (!_isNew)
                 {
                     _titleLabel.text = $"Edit mod: {id}";
@@ -321,9 +408,39 @@ namespace CoreAI.Ai.Hub
                 RefreshHeaderBox(code);
                 RefreshDiagnostics();
             }
+            catch (OperationCanceledException)
+            {
+                _saveUnconfirmed = true;
+                CaptureOwnLiveSource(id, code);
+                SetStatus("Save cancelled. Your draft is preserved; live state may already have changed.", true);
+            }
             catch (Exception ex)
             {
+                _saveUnconfirmed = true;
+                CaptureOwnLiveSource(id, code);
                 SetStatus($"Save failed: {ex.Message}", true);
+            }
+            finally
+            {
+                _saving = false;
+            }
+        }
+
+        private void CaptureOwnLiveSource(string id, string code)
+        {
+            try
+            {
+                if (_service.TryGetSource(id, out string liveSource) &&
+                    string.Equals(liveSource, code, StringComparison.Ordinal))
+                {
+                    _expectedExists = true;
+                    _expectedSource = liveSource;
+                    _savedId = id;
+                }
+            }
+            catch
+            {
+                // WHY: an unreadable live baseline must not replace the original save failure or clear the draft.
             }
         }
 
@@ -401,7 +518,6 @@ namespace CoreAI.Ai.Hub
                 return;
             }
 
-            // Newest first for readability; ListModVersions itself is oldest-first (revision 0 = original).
             for (int i = revisions.Count - 1; i >= 0; i--)
             {
                 _historyBox.Add(BuildRevisionRow(id, revisions[i]));
@@ -439,6 +555,11 @@ namespace CoreAI.Ai.Hub
 
         private void Revert(string id, int revisionIndex)
         {
+            if (_destroyed)
+            {
+                return;
+            }
+
             try
             {
                 if (!_service.TryRevertMod(id, revisionIndex, out string restored))
@@ -448,6 +569,8 @@ namespace CoreAI.Ai.Hub
                 }
 
                 _codeField.value = restored;
+                _expectedExists = true;
+                _expectedSource = restored;
                 RefreshHeaderBox(restored);
                 RefreshDiagnostics();
                 RefreshHistory();
@@ -461,6 +584,18 @@ namespace CoreAI.Ai.Hub
 
         private void Close()
         {
+            if (_destroyed)
+            {
+                return;
+            }
+
+            if (IsDirty)
+            {
+                _discardButton.style.display = DisplayStyle.Flex;
+                SetStatus("Unsaved draft preserved. Save, copy, or choose Discard draft and go back.", true);
+                return;
+            }
+
             _onClose?.Invoke();
         }
 

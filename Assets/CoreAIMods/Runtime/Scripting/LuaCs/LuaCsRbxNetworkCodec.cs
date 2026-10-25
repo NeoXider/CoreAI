@@ -323,27 +323,30 @@ namespace CoreAI.Ai.LuaCs
 
         public byte[] EncodeArguments(IReadOnlyList<LuaValue> arguments)
         {
-            JArray root = new();
             TraversalState state = new();
             HashSet<LuaTable> activeTables = new(new LuaTableReferenceComparer());
             int count = arguments?.Count ?? 0;
             state.ConsumeEntries(count);
+            using BoundedPayloadStream stream = new();
+            using StreamWriter writer = new(stream, Utf8, 1024, true);
+            using JsonTextWriter json = new(writer)
+            {
+                Formatting = Formatting.None,
+                FloatFormatHandling = FloatFormatHandling.Symbol,
+                AutoCompleteOnClose = false,
+                CloseOutput = false
+            };
+            json.WriteStartArray();
             for (int index = 0; index < count; index++)
             {
                 state.PushIndex(index);
-                root.Add(EncodeValue(arguments[index], state, activeTables, 0));
+                EncodeValue(arguments[index], state, activeTables, 0, json);
                 state.Pop();
             }
 
-            string json = WriteEnvelope(root);
-            byte[] bytes = Utf8.GetBytes(json);
-            if (bytes.Length > MaxPayloadBytes)
-            {
-                throw new RbxError(RbxErrorCode.PayloadTooLarge,
-                    "remote payload exceeds " + MaxPayloadBytes + " bytes (" + bytes.Length + " bytes)",
-                    "send a smaller payload or split the request");
-            }
-            return bytes;
+            json.WriteEndArray();
+            json.Flush();
+            return stream.ToArray();
         }
 
         /// <summary>
@@ -466,31 +469,45 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        private JToken EncodeValue(LuaValue value, TraversalState state,
-            HashSet<LuaTable> activeTables, int depth)
+        private bool EncodeValue(LuaValue value, TraversalState state,
+            HashSet<LuaTable> activeTables, int depth, JsonTextWriter json)
         {
             switch (value.Type)
             {
                 case LuaValueType.Nil:
-                    return JValue.CreateNull();
-                case LuaValueType.Boolean:
-                    return new JValue(value.Read<bool>());
-                case LuaValueType.Number:
-                    return new JValue(value.Read<double>());
-                case LuaValueType.String:
-                    return new JValue(value.Read<string>());
                 case LuaValueType.Function:
-                    return JValue.CreateNull();
+                    json.WriteNull();
+                    return false;
+                case LuaValueType.Boolean:
+                    json.WriteValue(value.Read<bool>());
+                    return true;
+                case LuaValueType.Number:
+                    json.WriteValue(value.Read<double>());
+                    return true;
+                case LuaValueType.String:
+                    string text = value.Read<string>();
+                    if (!(json is GraphValidationWriter))
+                    {
+                        EnsureBoundedString(text);
+                    }
+                    json.WriteValue(text);
+                    return true;
                 case LuaValueType.Table:
-                    return EncodeTable(
-                        value.Read<LuaTable>(), state, activeTables, depth);
+                    EncodeTable(value.Read<LuaTable>(), state, activeTables, depth, json);
+                    return true;
                 default:
-                    return EncodeUserData(value);
+                    JToken token = EncodeUserData(value);
+                    if (!(json is GraphValidationWriter))
+                    {
+                        ValidateTaggedStrings(token);
+                    }
+                    token.WriteTo(json);
+                    return token.Type != JTokenType.Null;
             }
         }
 
-        private JToken EncodeTable(LuaTable table, TraversalState state,
-            HashSet<LuaTable> activeTables, int depth)
+        private void EncodeTable(LuaTable table, TraversalState state,
+            HashSet<LuaTable> activeTables, int depth, JsonTextWriter json)
         {
             if (depth >= MaxNestingDepth)
             {
@@ -534,9 +551,22 @@ namespace CoreAI.Ai.LuaCs
                         "send either a contiguous array or a string-keyed dictionary");
                 }
 
-                return hasNumericKeys
-                    ? EncodeArrayTable(pairs, state, activeTables, depth)
-                    : EncodeDictionaryTable(pairs, state, activeTables, depth);
+                json.WriteStartObject();
+                json.WritePropertyName(TypeKey);
+                json.WriteValue("table");
+                json.WritePropertyName("kind");
+                json.WriteValue(hasNumericKeys ? "array" : "dictionary");
+                json.WritePropertyName("values");
+                if (hasNumericKeys)
+                {
+                    EncodeArrayTable(pairs, state, activeTables, depth, json);
+                }
+                else
+                {
+                    EncodeDictionaryTable(pairs, state, activeTables, depth, json);
+                }
+
+                json.WriteEndObject();
             }
             finally
             {
@@ -544,17 +574,18 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        private JToken EncodeArrayTable(List<KeyValuePair<LuaValue, LuaValue>> pairs,
-            TraversalState state, HashSet<LuaTable> activeTables, int depth)
+        private void EncodeArrayTable(List<KeyValuePair<LuaValue, LuaValue>> pairs,
+            TraversalState state, HashSet<LuaTable> activeTables, int depth, JsonTextWriter json)
         {
-            JToken[] ordered = new JToken[pairs.Count];
+            LuaValue[] ordered = new LuaValue[pairs.Count];
+            bool[] occupied = new bool[pairs.Count];
             for (int index = 0; index < pairs.Count; index++)
             {
                 KeyValuePair<LuaValue, LuaValue> pair = pairs[index];
                 if (!IsArrayIndex(pair.Key, out int arrayIndex)
                     || arrayIndex < 1
                     || arrayIndex > pairs.Count
-                    || ordered[arrayIndex - 1] != null)
+                    || occupied[arrayIndex - 1])
                 {
                     throw RbxError.BadArgument(
                         "remote array keys must be unique contiguous indices 1..N at "
@@ -562,9 +593,15 @@ namespace CoreAI.Ai.LuaCs
                         "remove nil holes and non-contiguous numeric indices");
                 }
 
-                state.PushIndex(arrayIndex);
-                JToken encoded = EncodeValue(pair.Value, state, activeTables, depth + 1);
-                if (encoded.Type == JTokenType.Null)
+                ordered[arrayIndex - 1] = pair.Value;
+                occupied[arrayIndex - 1] = true;
+            }
+
+            json.WriteStartArray();
+            for (int index = 0; index < ordered.Length; index++)
+            {
+                state.PushIndex(index + 1);
+                if (!EncodeValue(ordered[index], state, activeTables, depth + 1, json))
                 {
                     throw RbxError.BadArgument(
                         "remote array contains a nil or non-replicating value at "
@@ -573,50 +610,54 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 state.Pop();
-                ordered[arrayIndex - 1] = encoded;
             }
 
-            JArray values = new();
-            for (int index = 0; index < ordered.Length; index++)
-            {
-                if (ordered[index] == null)
-                {
-                    throw RbxError.BadArgument(
-                        "remote array has a nil hole at " + state.DescribePath()
-                        + "[" + (index + 1) + "]",
-                        "use contiguous indices starting at 1");
-                }
-
-                values.Add(ordered[index]);
-            }
-
-            return new JObject
-            {
-                [TypeKey] = "table",
-                ["kind"] = "array",
-                ["values"] = values
-            };
+            json.WriteEndArray();
         }
 
-        private JToken EncodeDictionaryTable(List<KeyValuePair<LuaValue, LuaValue>> pairs,
-            TraversalState state, HashSet<LuaTable> activeTables, int depth)
+        private void EncodeDictionaryTable(List<KeyValuePair<LuaValue, LuaValue>> pairs,
+            TraversalState state, HashSet<LuaTable> activeTables, int depth, JsonTextWriter json)
         {
-            JObject values = new();
+            List<KeyValuePair<string, LuaValue>> entries = new(pairs.Count);
+            Dictionary<string, int> indices = new(StringComparer.Ordinal);
             for (int index = 0; index < pairs.Count; index++)
             {
                 KeyValuePair<LuaValue, LuaValue> pair = pairs[index];
                 string key = StringifyKey(pair.Key);
-                state.PushKey(key);
-                values[key] = EncodeValue(pair.Value, state, activeTables, depth + 1);
+                if (!(json is GraphValidationWriter))
+                {
+                    EnsureBoundedString(key);
+                }
+                KeyValuePair<string, LuaValue> entry = new(key, pair.Value);
+                if (indices.TryGetValue(key, out int existingIndex))
+                {
+                    state.PushKey(key);
+                    using (GraphValidationWriter validation = new())
+                    {
+                        EncodeValue(entries[existingIndex].Value, state, activeTables,
+                            depth + 1, validation);
+                    }
+
+                    state.Pop();
+                    entries[existingIndex] = entry;
+                }
+                else
+                {
+                    indices.Add(key, entries.Count);
+                    entries.Add(entry);
+                }
+            }
+
+            json.WriteStartObject();
+            foreach (KeyValuePair<string, LuaValue> entry in entries)
+            {
+                state.PushKey(entry.Key);
+                json.WritePropertyName(entry.Key);
+                EncodeValue(entry.Value, state, activeTables, depth + 1, json);
                 state.Pop();
             }
 
-            return new JObject
-            {
-                [TypeKey] = "table",
-                ["kind"] = "dictionary",
-                ["values"] = values
-            };
+            json.WriteEndObject();
         }
 
         private JToken EncodeUserData(LuaValue value)
@@ -1063,27 +1104,108 @@ namespace CoreAI.Ai.LuaCs
             return values;
         }
 
-        /// <summary>Renders the argument envelope exactly as <c>JToken.ToString(Formatting.None)</c> does, except for non-finite numbers.</summary>
-        /// <remarks>
-        /// WHY bare <c>NaN</c>/<c>Infinity</c>/<c>-Infinity</c> tokens: Roblox remotes carry numbers as
-        /// numbers, so <c>0/0</c> and <c>math.huge</c> must arrive as numbers. Json.NET's default
-        /// writes them as the STRINGS "NaN" and "Infinity", which a handler then fails to do arithmetic
-        /// on. The decoder's reader (FloatParseHandling.Double) has always parsed the bare tokens back
-        /// into doubles, so this spelling is readable by every receiver already deployed, where a new
-        /// <c>$rbx</c> tag would make an older receiver refuse the whole payload as an unknown tag. It
-        /// is also the spelling HttpService:JSONEncode (LuaCsRbxJson) uses for the same values.
-        /// </remarks>
-        private static string WriteEnvelope(JToken root)
+        private static void EnsureBoundedString(string text)
         {
-            using StringWriter writer = new(CultureInfo.InvariantCulture);
-            using JsonTextWriter json = new(writer)
+            if (text != null && text.Length > MaxPayloadBytes)
             {
-                Formatting = Formatting.None,
-                FloatFormatHandling = FloatFormatHandling.Symbol
-            };
-            root.WriteTo(json);
-            json.Flush();
-            return writer.ToString();
+                throw PayloadLimitExceeded();
+            }
+        }
+
+        private static void ValidateTaggedStrings(JToken token)
+        {
+            if (token.Type == JTokenType.String)
+            {
+                EnsureBoundedString(token.Value<string>());
+            }
+            else if (token is JContainer container)
+            {
+                foreach (JToken child in container.Children())
+                {
+                    ValidateTaggedStrings(child);
+                }
+            }
+        }
+
+        private static RbxError PayloadLimitExceeded()
+        {
+            return new RbxError(RbxErrorCode.PayloadTooLarge,
+                "remote payload exceeds " + MaxPayloadBytes
+                + " bytes; encoding stopped at the byte limit",
+                "send a smaller payload or split the request");
+        }
+
+        /// <summary>Preserves graph guards on overwritten dictionary values without escaping discarded strings.</summary>
+        private sealed class GraphValidationWriter : JsonTextWriter
+        {
+            public GraphValidationWriter() : base(TextWriter.Null)
+            {
+                AutoCompleteOnClose = false;
+            }
+
+            public override void WriteValue(string value) => base.WriteValue(string.Empty);
+
+            public override void WritePropertyName(string name) => base.WritePropertyName(string.Empty);
+        }
+
+        private sealed class BoundedPayloadStream : Stream
+        {
+            // WHY: Stream routes span writes through Write(byte[]); MemoryStream bypasses that override.
+            private readonly MemoryStream _buffer = new();
+
+            public override bool CanRead => false;
+            public override bool CanSeek => false;
+            public override bool CanWrite => _buffer.CanWrite;
+            public override long Length => _buffer.Length;
+            public override long Position
+            {
+                get => _buffer.Position;
+                set => throw new NotSupportedException();
+            }
+
+            public byte[] ToArray() => _buffer.ToArray();
+
+            public override void Flush()
+            {
+            }
+
+            public override int Read(byte[] buffer, int offset, int count) =>
+                throw new NotSupportedException();
+
+            public override long Seek(long offset, SeekOrigin origin) =>
+                throw new NotSupportedException();
+
+            public override void SetLength(long value) => throw new NotSupportedException();
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                if (count > MaxPayloadBytes - Position)
+                {
+                    throw PayloadLimitExceeded();
+                }
+
+                _buffer.Write(buffer, offset, count);
+            }
+
+            public override void WriteByte(byte value)
+            {
+                if (Position >= MaxPayloadBytes)
+                {
+                    throw PayloadLimitExceeded();
+                }
+
+                _buffer.WriteByte(value);
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    _buffer.Dispose();
+                }
+
+                base.Dispose(disposing);
+            }
         }
     }
 }

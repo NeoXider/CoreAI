@@ -97,15 +97,29 @@ namespace CoreAI.Mods.Rbx.Datatypes
         }
 
         /// <summary>
-        /// UDim2:Lerp — offsets interpolate in float space and round to the nearest integer.
+        /// UDim2:Lerp interpolates offsets in double precision and rounds to the nearest even
+        /// integer. An offset outside the signed 32-bit range raises BAD_ARGUMENT.
         /// </summary>
         public RbxUDim2 Lerp(RbxUDim2 goal, float alpha)
         {
             return new RbxUDim2(
                 X.Scale + (goal.X.Scale - X.Scale) * alpha,
-                (int)MathF.Round(X.Offset + (goal.X.Offset - X.Offset) * alpha),
+                InterpolateOffset(X.Offset, goal.X.Offset, alpha),
                 Y.Scale + (goal.Y.Scale - Y.Scale) * alpha,
-                (int)MathF.Round(Y.Offset + (goal.Y.Offset - Y.Offset) * alpha));
+                InterpolateOffset(Y.Offset, goal.Y.Offset, alpha));
+        }
+
+        private static int InterpolateOffset(int start, int end, float alpha)
+        {
+            double offset = Math.Round(start + ((double)end - start) * alpha);
+            if (double.IsNaN(offset) || offset < int.MinValue || offset > int.MaxValue)
+            {
+                throw RbxApiStubException.BadArgument(
+                    "UDim2:Lerp produced an offset outside the signed 32-bit range",
+                    "use a finite alpha whose interpolated offsets fit signed 32-bit integers");
+            }
+
+            return (int)offset;
         }
 
         public static RbxUDim2 operator +(RbxUDim2 a, RbxUDim2 b)

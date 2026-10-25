@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Reflection;
+using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Composition;
@@ -113,13 +114,26 @@ namespace CoreAI.Tests.EditMode
             FieldInfo cancellationField = typeof(AuditLogWriter).GetField(
                 "_cts", BindingFlags.Instance | BindingFlags.NonPublic);
 
-            Assert.AreEqual(3, ((ICollection)subscriptionsField.GetValue(interceptor)).Count);
-            Assert.IsNotNull(cancellationField.GetValue(writer));
+            CancellationTokenSource cancellation = (CancellationTokenSource)cancellationField.GetValue(writer);
+            CancellationToken token = cancellation.Token;
+            try
+            {
+                Assert.AreEqual(3, ((ICollection)subscriptionsField.GetValue(interceptor)).Count);
+                Assert.IsTrue(writer.DiagnosticPumpForTesting.IsAttached);
 
-            ((IDisposable)container).Dispose();
+                ((IDisposable)container).Dispose();
 
-            Assert.AreEqual(0, ((ICollection)subscriptionsField.GetValue(interceptor)).Count);
-            Assert.IsNull(cancellationField.GetValue(writer));
+                Assert.AreEqual(0, ((ICollection)subscriptionsField.GetValue(interceptor)).Count);
+                Assert.IsTrue(token.IsCancellationRequested);
+                Assert.Throws<ObjectDisposedException>(() => { _ = cancellation.Token; });
+                Assert.IsFalse(writer.DiagnosticPumpForTesting.IsAttached);
+                Assert.IsFalse(writer.DiagnosticPumpForTesting.MoveNext(),
+                    "The detached loop item must not retain its writer until a later player-loop tick.");
+            }
+            finally
+            {
+                ((IDisposable)container).Dispose();
+            }
         }
     }
 }

@@ -230,6 +230,8 @@ Some merchants only trade specific item types.",
         // ── Test ──────────────────────────────────────────────────────────────
 
         [UnityTest]
+        [Category("Benchmark")]
+        [Explicit("Live provider skill-cost benchmark; run manually with a configured model.")]
         [Timeout(600000)]
         public IEnumerator Benchmark_WithSkillProxy_VsDirectTools_ComparesTokesAndTime()
         {

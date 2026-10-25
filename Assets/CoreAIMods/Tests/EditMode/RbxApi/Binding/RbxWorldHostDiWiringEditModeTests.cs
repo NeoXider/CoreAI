@@ -905,6 +905,18 @@ end)",
                     "local marker = Instance.new('Folder') marker.Name = 'CustomBackendStart' marker.Parent = workspace",
                     persistToStore: true);
                 Assert.AreEqual(1, backend.SaveCalls);
+                ILuaModSourceStrictWriter strictWriter = stableSources as ILuaModSourceStrictWriter;
+                ILuaModSourceStrictRemover strictRemover = stableSources as ILuaModSourceStrictRemover;
+                Assert.IsNotNull(strictWriter);
+                Assert.IsNotNull(strictRemover);
+                LuaModManifest strictProbe = new() { Id = "strict-probe", Active = false };
+                strictWriter.SaveStrict("strict-probe", "return 'initial'", strictProbe);
+                Assert.AreEqual(1, backend.StrictSaveCalls);
+                Assert.IsTrue(stableSources.TryLoad("strict-probe", out string initialProbe, out _));
+                Assert.AreEqual("return 'initial'", initialProbe);
+                strictRemover.DeleteStrict("strict-probe");
+                Assert.AreEqual(1, backend.StrictDeleteCalls);
+                Assert.IsFalse(stableSources.TryLoad("strict-probe", out _, out _));
                 RbxWorldPackagePayload captured = worlds.CaptureCurrent();
                 Assert.AreEqual(1, captured.Mods.Count);
                 Assert.AreEqual("custom-backed", captured.Mods[0].Manifest.Id);
@@ -944,6 +956,32 @@ end)",
                 RbxWorldPackagePayload recaptured = worlds.CaptureCurrent();
                 Assert.AreEqual(1, recaptured.Mods.Count);
                 Assert.AreEqual(replacementSource, recaptured.Mods[0].Source);
+                TransactionalMemorySourceStore staged = backend.PreparedSourceStore;
+                Assert.IsNotNull(staged);
+                strictWriter.SaveStrict("strict-probe", "return 'staged'", strictProbe);
+                Assert.AreEqual(1, staged.StrictSaveCalls);
+                Assert.AreEqual(1, backend.StrictSaveCalls, "the retained facade must address the newly published store");
+                Assert.IsTrue(stableSources.TryLoad("strict-probe", out string stagedProbe, out _));
+                Assert.AreEqual("return 'staged'", stagedProbe);
+                IOException saveRefusal = new("injected strict save refusal");
+                staged.StrictSaveError = saveRefusal;
+                int savesBeforeRefusal = staged.SaveCalls;
+                Assert.AreSame(saveRefusal, Assert.Throws<IOException>(() =>
+                    strictWriter.SaveStrict("strict-probe", "return 'refused'", strictProbe)));
+                Assert.AreEqual(savesBeforeRefusal, staged.SaveCalls);
+                Assert.IsTrue(stableSources.TryLoad("strict-probe", out string keptProbe, out _));
+                Assert.AreEqual("return 'staged'", keptProbe);
+                staged.StrictSaveError = null;
+                System.OperationCanceledException removalCancellation = new("injected strict removal cancellation");
+                staged.StrictDeleteError = removalCancellation;
+                Assert.AreSame(removalCancellation, Assert.Throws<System.OperationCanceledException>(() =>
+                    strictRemover.DeleteStrict("strict-probe")));
+                Assert.IsTrue(stableSources.TryLoad("strict-probe", out _, out _));
+                staged.StrictDeleteError = null;
+                strictRemover.DeleteStrict("strict-probe");
+                Assert.IsFalse(stableSources.TryLoad("strict-probe", out _, out _));
+                Assert.AreEqual(1, backend.StrictDeleteCalls);
+                Assert.AreEqual(1, worlds.CaptureCurrent().Mods.Count);
                 Assert.Throws<VContainerException>(() =>
                     container.Resolve<FileLuaModSourceStore>());
             }
@@ -1787,7 +1825,7 @@ camera_follow(p)"),
                 Assert.IsNotNull(store, "without an injected store the installer composes the file store");
                 StringAssert.StartsWith(Application.persistentDataPath, store.StartupDirectoryForTests);
                 StringAssert.EndsWith(
-                    Path.Combine("Saves", "Startup", "Stores", storeId),
+                    LuaModStoreId.ApplyTo(Path.Combine("Saves", "Startup"), storeId),
                     store.StartupDirectoryForTests,
                     "the startup area is namespaced by the composition's mods store id");
             }
@@ -1840,8 +1878,8 @@ camera_follow(p)"),
 
                         Assert.IsTrue(confirmed.Success, confirmed.Error);
                         Assert.IsTrue(confirmed.StartupSelectionPersisted, confirmed.StartupSelectionError);
-                        StringAssert.EndsWith(
-                            Path.Combine("Startup", "Stores", storeId),
+                        Assert.AreEqual(
+                            LuaModStoreId.ApplyTo(Path.Combine(Path.GetFullPath(packageRoot), "Startup"), storeId),
                             firstStore.StartupDirectoryForTests);
                         Assert.IsTrue(File.Exists(
                             Path.Combine(firstStore.StartupDirectoryForTests, "0000000001.world")));
@@ -2263,12 +2301,24 @@ camera_follow(p)"),
 
         private sealed class TransactionalMemorySourceStore :
             ILuaModSourceStore,
+            ILuaModSourceStrictWriter,
+            ILuaModSourceStrictRemover,
             IRbxWorldModSourceStore
         {
             private readonly Dictionary<string, RbxWorldModSource> _mods =
                 new(System.StringComparer.Ordinal);
 
             public int SaveCalls { get; private set; }
+
+            public int StrictSaveCalls { get; private set; }
+
+            public int StrictDeleteCalls { get; private set; }
+
+            public System.Exception StrictSaveError { get; set; }
+
+            public System.Exception StrictDeleteError { get; set; }
+
+            public TransactionalMemorySourceStore PreparedSourceStore { get; private set; }
 
             public int PrepareCalls { get; private set; }
 
@@ -2291,6 +2341,17 @@ camera_follow(p)"),
                 stored.Id = key;
                 _mods[key] = new RbxWorldModSource(stored, source ?? "");
                 SaveCalls++;
+            }
+
+            public void SaveStrict(string id, string source, LuaModManifest manifest)
+            {
+                StrictSaveCalls++;
+                if (StrictSaveError != null)
+                {
+                    throw StrictSaveError;
+                }
+
+                Save(id, source, manifest);
             }
 
             public bool TryLoad(string id, out string source, out LuaModManifest manifest)
@@ -2337,6 +2398,17 @@ camera_follow(p)"),
                 _mods.Remove(id?.Trim() ?? "");
             }
 
+            public void DeleteStrict(string id)
+            {
+                StrictDeleteCalls++;
+                if (StrictDeleteError != null)
+                {
+                    throw StrictDeleteError;
+                }
+
+                Delete(id);
+            }
+
             public Cysharp.Threading.Tasks.UniTask<IRbxWorldModSourceReplacement>
                 PrepareExactReplacementAsync(
                     IReadOnlyList<RbxWorldModSource> mods,
@@ -2350,6 +2422,7 @@ camera_follow(p)"),
                     staged.Save(mod.Manifest.Id, mod.Source, mod.Manifest);
                 }
 
+                PreparedSourceStore = staged;
                 PrepareCalls++;
                 return Cysharp.Threading.Tasks.UniTask.FromResult<IRbxWorldModSourceReplacement>(
                     new MemoryReplacement(this, staged));

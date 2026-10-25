@@ -3,6 +3,7 @@ using CoreAI.Ai;
 using CoreAI.Hub.UI;
 using CoreAI.Infrastructure.Llm;
 using NUnit.Framework;
+using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine.UIElements;
 
@@ -11,6 +12,7 @@ namespace CoreAI.Tests
     public sealed class HubSettingsStatisticsPageEditModeTests
     {
         private CoreAISettingsAsset _settings;
+        private readonly List<HubSettingsPage> _pages = new List<HubSettingsPage>();
 
         [SetUp]
         public void SetUp()
@@ -23,6 +25,12 @@ namespace CoreAI.Tests
         [TearDown]
         public void TearDown()
         {
+            foreach (HubSettingsPage page in _pages)
+            {
+                page.OnDestroyed();
+            }
+
+            _pages.Clear();
             CoreAISettingsAsset.ResetInstance();
             if (_settings != null)
             {
@@ -30,10 +38,16 @@ namespace CoreAI.Tests
             }
         }
 
+        private HubSettingsPage Own(HubSettingsPage page)
+        {
+            _pages.Add(page);
+            return page;
+        }
+
         [Test]
         public void SettingsPage_BuildsEditableAiBackendSurface()
         {
-            HubSettingsPage page = new(_settings);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings));
 
             ScrollView root = page.CreatePageContent() as ScrollView;
 
@@ -48,7 +62,7 @@ namespace CoreAI.Tests
         [Test]
         public void SettingsPage_ApplyHttp_KeepsExistingKeyWhenFieldIsBlank()
         {
-            HubSettingsPage page = new(_settings);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings));
             ScrollView root = (ScrollView)page.CreatePageContent();
 
             DropdownField mode = root.Q<DropdownField>();
@@ -72,7 +86,7 @@ namespace CoreAI.Tests
         [Test]
         public void SettingsPage_ApplyHttp_WhenOverrideTemperatureOff_UsesModelDefault()
         {
-            HubSettingsPage page = new(_settings);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings));
             ScrollView root = (ScrollView)page.CreatePageContent();
 
             DropdownField mode = root.Q<DropdownField>();
@@ -97,7 +111,7 @@ namespace CoreAI.Tests
         [Test]
         public void SettingsPage_ModelPicker_SelectingDiscoveredModel_WritesHttpModelField()
         {
-            HubSettingsPage page = new(_settings);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings));
             ScrollView root = (ScrollView)page.CreatePageContent();
 
             DropdownField mode = root.Q<DropdownField>();
@@ -131,7 +145,7 @@ namespace CoreAI.Tests
         [Test]
         public void SettingsPage_RefreshFromStatus_SyncsModeWhenNotFocused()
         {
-            HubSettingsPage page = new(_settings);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings));
             ScrollView root = (ScrollView)page.CreatePageContent();
             DropdownField mode = root.Q<DropdownField>();
 

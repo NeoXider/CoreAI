@@ -444,6 +444,323 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("Castle")?.FindFirstChild("Door"));
         }
 
+        [Test]
+        public void WorldSourceFacade_LegacyStoreCannotAcknowledgeStrictMutations()
+        {
+            DelegateModSourceStore sources = new();
+            LuaModManifest manifest = StartupManifest("legacy", false);
+            sources.Save("legacy", "return 'kept'", manifest);
+            using RbxWorldRuntimeSessionController controller = CreateController(
+                CreateHeadlessHost(), NewSafetyAutosaveStore(), sources);
+            ILuaModSourceStrictWriter writer = controller.SourceStore as ILuaModSourceStrictWriter;
+            ILuaModSourceStrictRemover remover = controller.SourceStore as ILuaModSourceStrictRemover;
+            Assert.IsNotNull(writer);
+            Assert.IsNotNull(remover);
+            int savesBefore = sources.SaveCalls;
+            int deletesBefore = sources.DeleteCalls;
+
+            NotSupportedException save = Assert.Throws<NotSupportedException>(() =>
+                writer.SaveStrict("legacy", "return 'replacement'", manifest));
+            NotSupportedException removal = Assert.Throws<NotSupportedException>(() =>
+                remover.DeleteStrict("legacy"));
+
+            StringAssert.Contains("no strict save acknowledgment", save.Message);
+            StringAssert.Contains("no strict removal acknowledgment", removal.Message);
+            Assert.AreEqual(savesBefore, sources.SaveCalls);
+            Assert.AreEqual(deletesBefore, sources.DeleteCalls);
+            Assert.IsTrue(controller.SourceStore.TryLoad("legacy", out string source, out LuaModManifest kept));
+            Assert.AreEqual("return 'kept'", source);
+            Assert.AreEqual("legacy", kept.Id);
+            Assert.IsFalse(kept.Active);
+            Assert.AreEqual(1, controller.SourceStore.List().Count);
+        }
+
+        [Test]
+        public async Task ExactReplacement_CompactIdentitiesSurviveReopenCaptureAndStartupRestore()
+        {
+            string root = NewTemporaryDirectory();
+            using FileLuaModSourceStore sources = new(
+                root, persistenceSyncAsync: cancellationToken => UniTask.FromResult(true));
+            sources.SaveStrict("a", "return 'canonical'", StartupManifest("a", false));
+            const string hexFolder = "id-ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb";
+            Assert.IsTrue(File.Exists(Path.Combine(root, hexFolder, "manifest.json")));
+            string[] ids = { "A", "a", "a/b", "a_b_3a8e75c1" };
+            RbxWorldModSource[] mods = new RbxWorldModSource[ids.Length];
+            for (int index = 0; index < ids.Length; index++)
+            {
+                mods[index] = new RbxWorldModSource(
+                    StartupManifest(ids[index], false), "return 'staged-" + index + "'");
+            }
+
+            using IRbxWorldModSourceReplacement prepared = await sources.PrepareExactReplacementAsync(mods);
+            prepared.Activate();
+            await prepared.CompleteAsync();
+
+            string[] sessions = Directory.GetDirectories(Path.Combine(root, ".world-sessions"));
+            Assert.AreEqual(1, sessions.Length);
+            string sessionDirectory = sessions[0];
+            StringAssert.IsMatch("^[a-z2-7]{26}$", Path.GetFileName(sessionDirectory));
+            Assert.AreEqual("sha256-base32-v1", File.ReadAllText(Path.Combine(sessionDirectory, ".source-layout")));
+            string[] modDirectories = Directory.GetDirectories(sessionDirectory);
+            Assert.AreEqual(ids.Length, modDirectories.Length);
+            HashSet<string> caseInsensitiveDirectories = new(StringComparer.OrdinalIgnoreCase);
+            foreach (string modDirectory in modDirectories)
+            {
+                StringAssert.IsMatch("^id-[a-z2-7]{52}$", Path.GetFileName(modDirectory));
+                Assert.IsTrue(caseInsensitiveDirectories.Add(modDirectory), "case-insensitive paths must remain distinct");
+            }
+
+            Assert.IsTrue(Directory.Exists(Path.Combine(
+                sessionDirectory, "id-zklycewkdo64v6wcggzzui64jwtyn37ycr6e44vzqb3yll7ojc5q")),
+                "the full SHA-256 of 'a' uses unpadded lowercase RFC 4648 Base32");
+            using FileLuaModSourceStore reopened = new(
+                sessionDirectory, persistenceSyncAsync: cancellationToken => UniTask.FromResult(true));
+            for (int index = 0; index < mods.Length; index++)
+            {
+                Assert.IsTrue(prepared.SourceStore.TryLoad(ids[index], out string preparedSource, out LuaModManifest preparedManifest));
+                Assert.AreEqual(mods[index].Source, preparedSource);
+                Assert.AreEqual(ids[index], preparedManifest.Id);
+                Assert.IsTrue(reopened.TryLoad(ids[index], out string reopenedSource, out LuaModManifest reopenedManifest));
+                Assert.AreEqual(mods[index].Source, reopenedSource);
+                Assert.AreEqual(ids[index], reopenedManifest.Id);
+                reopened.SaveStrict(ids[index], reopenedSource, reopenedManifest);
+            }
+
+            reopened.DeleteStrict(ids[3]);
+            Assert.IsFalse(reopened.TryLoad(ids[3], out _, out _));
+            reopened.SaveStrict(ids[3], mods[3].Source, mods[3].Manifest);
+            HeadlessRbxWorldSessionHost host = CreateHeadlessHost();
+            RbxWorldPackagePayload captured = RbxWorldPackageSerializer.Capture(
+                new RbxWorldPackageCaptureContext(
+                    host.Registry, host.Game, new InMemoryPartPropertySink(), NewSettings(),
+                    modSourceStore: reopened, capturedAtUtc: CapturedAtUtc));
+            Assert.AreEqual(mods.Length, captured.Mods.Count);
+            FileRbxWorldPackageStore packages = NewStartupStore(NewTemporaryDirectory(), StartupNamespace);
+            RbxWorldPackageWriteResult selected = await packages.SelectStartupAsync(captured, "manual", "compact");
+            Assert.IsTrue(selected.Success, selected.Error);
+            for (int index = 0; index < 4; index++)
+            {
+                string unrelated = Path.Combine(root, ".world-sessions", "host-owned-" + index);
+                Directory.CreateDirectory(unrelated);
+                File.WriteAllText(Path.Combine(unrelated, "kept.txt"), "unrelated-version-" + index);
+            }
+
+            using FileLuaModSourceStore restartedDefault = new(
+                root, persistenceSyncAsync: cancellationToken => UniTask.FromResult(true));
+            using RbxWorldRuntimeSessionController restarted = CreateController(
+                CreateHeadlessHost(), packages, restartedDefault);
+
+            RbxWorldStartupRestoreResult restored = await restarted.RestoreStartupSelectionAsync();
+
+            Assert.AreEqual(RbxWorldStartupRestoreOutcome.Restored, restored.Outcome, restored.Error);
+            Assert.AreEqual(0, restored.ActiveModsStarted);
+            Assert.AreEqual(mods.Length, restarted.CaptureCurrent().Mods.Count);
+            for (int index = 0; index < mods.Length; index++)
+            {
+                Assert.IsTrue(restarted.SourceStore.TryLoad(ids[index], out string source, out LuaModManifest manifest));
+                Assert.AreEqual(mods[index].Source, source);
+                Assert.AreEqual(ids[index], manifest.Id);
+                Assert.IsFalse(manifest.Active);
+            }
+
+            Assert.IsTrue(restartedDefault.TryLoad("a", out string canonical, out _));
+            Assert.AreEqual("return 'canonical'", canonical, "world staging must not rename the canonical source folders");
+            Assert.IsTrue(File.Exists(Path.Combine(root, hexFolder, "manifest.json")));
+            Assert.IsFalse(File.Exists(Path.Combine(root, ".source-layout")));
+            for (int index = 0; index < 4; index++)
+            {
+                Assert.AreEqual("unrelated-version-" + index, File.ReadAllText(
+                    Path.Combine(root, ".world-sessions", "host-owned-" + index, "kept.txt")),
+                    "retention must not claim directories outside the owned version-name shapes");
+            }
+        }
+
+        [Test]
+        public void ExactReplacement_LegacySessionWithoutLayoutMarkerKeepsHexFolders()
+        {
+            string sessionDirectory = Path.Combine(
+                NewTemporaryDirectory(), ".world-sessions", Guid.NewGuid().ToString("N"));
+            using FileLuaModSourceStore original = new(sessionDirectory);
+            original.SaveStrict("a", "return 'legacy-session'", StartupManifest("a", false));
+            using FileLuaModSourceStore reopened = new(sessionDirectory);
+
+            Assert.IsTrue(reopened.TryLoad("a", out string source, out LuaModManifest manifest));
+            Assert.AreEqual("return 'legacy-session'", source);
+            Assert.AreEqual("a", manifest.Id);
+            Assert.IsTrue(File.Exists(Path.Combine(sessionDirectory,
+                "id-ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb", "manifest.json")));
+            Assert.IsFalse(File.Exists(Path.Combine(sessionDirectory, ".source-layout")));
+        }
+
+        [TestCase(0)]
+        [TestCase(16)]
+        [TestCase(4096)]
+        public void SourceLayout_UnknownOrMalformedMarkerRefusesReopenWithoutChangingData(int markerLength)
+        {
+            string root = Path.Combine(
+                NewTemporaryDirectory(), ".world-sessions", Guid.NewGuid().ToString("N"));
+            using FileLuaModSourceStore original = new(root);
+            original.SaveStrict("kept", "return 'kept'", StartupManifest("kept", false));
+            File.WriteAllText(Path.Combine(root, ".source-layout"), new string('x', markerLength));
+            string[] paths = Directory.GetFiles(root, "*", SearchOption.AllDirectories);
+            Dictionary<string, byte[]> before = new(StringComparer.Ordinal);
+            foreach (string path in paths)
+            {
+                before.Add(path, File.ReadAllBytes(path));
+            }
+
+            IOException refusal = Assert.Throws<IOException>(() =>
+            {
+                using FileLuaModSourceStore reopened = new(root);
+            });
+
+            StringAssert.Contains("layout marker", refusal.Message);
+            CollectionAssert.AreEquivalent(paths, Directory.GetFiles(root, "*", SearchOption.AllDirectories));
+            foreach (KeyValuePair<string, byte[]> entry in before)
+            {
+                CollectionAssert.AreEqual(entry.Value, File.ReadAllBytes(entry.Key));
+            }
+        }
+
+        [TestCase("not-a-version")]
+        [TestCase("zzzzzzzzzzzzzzzzzzzzzzzzzz")]
+        public void SourceLayout_UnrecognizedVersionNamesKeepOrdinaryRootSemantics(string versionName)
+        {
+            string root = Path.Combine(NewTemporaryDirectory(), ".world-sessions", versionName);
+            using FileLuaModSourceStore original = new(root);
+            original.SaveStrict("kept", "return 'ordinary'", StartupManifest("kept", false));
+            string marker = Path.Combine(root, ".source-layout");
+            File.WriteAllText(marker, "host-owned layout data");
+            using FileLuaModSourceStore reopened = new(root);
+
+            Assert.IsTrue(reopened.TryLoad("kept", out string source, out LuaModManifest manifest));
+            Assert.AreEqual("return 'ordinary'", source);
+            Assert.AreEqual("kept", manifest.Id);
+            Assert.AreEqual("host-owned layout data", File.ReadAllText(marker));
+        }
+
+        [Test]
+        public void SourceLayout_CompactVersionWithoutItsMarkerRefusesToGuessALegacyCodec()
+        {
+            string root = Path.Combine(NewTemporaryDirectory(), ".world-sessions", new string('a', 26));
+            Directory.CreateDirectory(root);
+            string sentinel = Path.Combine(root, "kept.txt");
+            File.WriteAllText(sentinel, "preserved-unmarked-compact-version");
+
+            IOException refusal = Assert.Throws<IOException>(() =>
+            {
+                using FileLuaModSourceStore reopened = new(root);
+            });
+
+            StringAssert.Contains("layout marker is missing", refusal.Message);
+            Assert.AreEqual("preserved-unmarked-compact-version", File.ReadAllText(sentinel));
+            CollectionAssert.AreEqual(new[] { "kept.txt" }, FileNames(root));
+        }
+
+        [Test]
+        public void SourceLayout_StagingMarkerDirectoryIsRefusedWithoutRemovingItsContents()
+        {
+            string root = Path.Combine(
+                NewTemporaryDirectory(), ".world-sessions", Guid.NewGuid().ToString("N"));
+            string marker = Path.Combine(root, ".source-layout");
+            Directory.CreateDirectory(marker);
+            string sentinel = Path.Combine(marker, "kept.txt");
+            File.WriteAllText(sentinel, "preserved-marker-collision");
+
+            IOException refusal = Assert.Throws<IOException>(() =>
+            {
+                using FileLuaModSourceStore reopened = new(root);
+            });
+
+            StringAssert.Contains("layout marker", refusal.Message);
+            Assert.IsTrue(Directory.Exists(marker));
+            Assert.AreEqual("preserved-marker-collision", File.ReadAllText(sentinel));
+        }
+
+        [Test]
+        public void SourceLayout_OrdinaryLegacyModNamedLikeTheMarkerStillLoads()
+        {
+            string root = NewTemporaryDirectory();
+            string legacy = Path.Combine(root, ".source-layout");
+            Directory.CreateDirectory(legacy);
+            File.WriteAllText(Path.Combine(legacy, "manifest.json"),
+                Newtonsoft.Json.JsonConvert.SerializeObject(StartupManifest(".source-layout", false)));
+            File.WriteAllText(Path.Combine(legacy, "main.lua"), "return 'legacy-marker-name'");
+            using FileLuaModSourceStore reopened = new(root);
+
+            Assert.IsTrue(reopened.TryLoad(".source-layout", out string source, out LuaModManifest manifest));
+            Assert.AreEqual("return 'legacy-marker-name'", source);
+            Assert.AreEqual(".source-layout", manifest.Id);
+            Assert.IsFalse(manifest.Active);
+            Assert.IsFalse(Directory.Exists(legacy), "the verified legacy package still migrates to its canonical identity");
+            Assert.AreEqual(1, reopened.List().Count);
+        }
+
+        [Test]
+        public async Task ExactReplacement_WindowsPathPreflightRefusesBeforeCleanupOrSourceMutation()
+        {
+            if (Path.DirectorySeparatorChar != '\\')
+            {
+                Assert.Ignore("The guarded path-length contract is specific to Windows file APIs.");
+            }
+
+            string parent = NewTemporaryDirectory();
+            int padding = 143 - parent.Length - 1;
+            Assert.Greater(padding, 0);
+            string root = Path.Combine(parent, new string('x', padding));
+            Assert.AreEqual(143, Path.GetFullPath(root).Length);
+            int syncCalls = 0;
+            using FileLuaModSourceStore sources = new(root, persistenceSyncAsync: cancellationToken =>
+            {
+                syncCalls++;
+                return UniTask.FromResult(true);
+            });
+            sources.SaveStrict("kept", "return 'kept'", StartupManifest("kept", false));
+            string sessionsRoot = Path.Combine(root, ".world-sessions");
+            for (int index = 0; index < 4; index++)
+            {
+                string orphan = Path.Combine(sessionsRoot, Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(orphan);
+                File.WriteAllText(Path.Combine(orphan, "kept.txt"), "orphan-" + index);
+            }
+
+            string[] directoriesBefore = Directory.GetDirectories(root, "*", SearchOption.AllDirectories);
+            string[] filesBefore = Directory.GetFiles(root, "*", SearchOption.AllDirectories);
+            Dictionary<string, byte[]> bytesBefore = new(StringComparer.Ordinal);
+            foreach (string path in filesBefore)
+            {
+                bytesBefore.Add(path, File.ReadAllBytes(path));
+            }
+
+            PathTooLongException refusal = null;
+            try
+            {
+                using IRbxWorldModSourceReplacement replacement = await sources.PrepareExactReplacementAsync(
+                    new[] { new RbxWorldModSource(StartupManifest("incoming", false), "return 'incoming'") });
+                Assert.Fail("An oversized configured root must be refused before any staged write.");
+            }
+            catch (PathTooLongException exception)
+            {
+                refusal = exception;
+            }
+
+            Assert.IsNotNull(refusal);
+            StringAssert.Contains(root, refusal.Message);
+            StringAssert.Contains("260 characters", refusal.Message);
+            StringAssert.Contains("259", refusal.Message);
+            Assert.AreEqual(0, syncCalls);
+            CollectionAssert.AreEquivalent(directoriesBefore, Directory.GetDirectories(root, "*", SearchOption.AllDirectories));
+            CollectionAssert.AreEquivalent(filesBefore, Directory.GetFiles(root, "*", SearchOption.AllDirectories));
+            foreach (KeyValuePair<string, byte[]> entry in bytesBefore)
+            {
+                CollectionAssert.AreEqual(entry.Value, File.ReadAllBytes(entry.Key));
+            }
+
+            Assert.IsTrue(sources.TryLoad("kept", out string keptSource, out _));
+            Assert.AreEqual("return 'kept'", keptSource);
+            Assert.IsFalse(sources.TryLoad("incoming", out _, out _));
+        }
+
         private FileLuaModSourceStore NewModSourceStore()
         {
             return new FileLuaModSourceStore(
@@ -715,9 +1032,14 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         {
             private readonly Dictionary<string, RbxWorldModSource> _sources = new(StringComparer.Ordinal);
 
+            public int SaveCalls { get; private set; }
+
+            public int DeleteCalls { get; private set; }
+
             public void Save(string id, string source, LuaModManifest manifest)
             {
                 _sources[id] = new RbxWorldModSource(manifest, source);
+                SaveCalls++;
             }
 
             public bool TryLoad(string id, out string source, out LuaModManifest manifest)
@@ -752,6 +1074,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             public void Delete(string id)
             {
                 _sources.Remove(id);
+                DeleteCalls++;
             }
 
             public UniTask<IRbxWorldModSourceReplacement> PrepareExactReplacementAsync(
@@ -1978,8 +2301,8 @@ end)";
                 RbxWorldPackageWriteResult selected = await writer.SelectStartupAsync(payload, "manual", "slot-a");
 
                 Assert.IsTrue(selected.Success, selected.Error);
-                string startupDirectory = Path.Combine(
-                    Path.GetFullPath(root), "Startup", "Stores", StartupNamespace);
+                string startupDirectory = LuaModStoreId.ApplyTo(
+                    Path.Combine(Path.GetFullPath(root), "Startup"), StartupNamespace);
                 Assert.AreEqual(startupDirectory, writer.StartupDirectoryForTests);
                 Assert.AreEqual(Path.Combine(startupDirectory, "0000000001.world"), selected.Path);
                 CollectionAssert.AreEqual(
@@ -2021,9 +2344,8 @@ end)";
                 string root = Path.Combine(
                     Path.GetTempPath(),
                     "CoreAI-StartupDurability-" + Guid.NewGuid().ToString("N"));
-                string startupDirectory = Path.Combine(
-                    Path.GetFullPath(root), "Startup", "Stores", StartupNamespace);
                 FileRbxWorldPackageStore store = NewDurabilityStartupStore(root, fileSystem, outcomes);
+                string startupDirectory = store.StartupDirectoryForTests;
                 RbxWorldPackagePayload first = CreateStartupPayload("first-world");
 
                 RbxWorldPackageWriteResult kept = await store.SelectStartupAsync(first, "manual", "first");
@@ -2172,7 +2494,13 @@ end)";
             FileRbxWorldPackageStore beta = NewStartupStore(root, "beta");
             FileRbxWorldPackageStore shared = NewStartupStore(root, null);
             string fullRoot = Path.GetFullPath(root);
-            Assert.AreEqual(Path.Combine(fullRoot, "Startup", "Stores", "alpha"), alpha.StartupDirectoryForTests);
+            Assert.AreEqual(
+                LuaModStoreId.ApplyTo(Path.Combine(fullRoot, "Startup"), "alpha"),
+                alpha.StartupDirectoryForTests);
+            Assert.AreEqual(
+                LuaModStoreId.ApplyTo(Path.Combine(fullRoot, "Startup"), "beta"),
+                beta.StartupDirectoryForTests);
+            Assert.AreNotEqual(alpha.StartupDirectoryForTests, beta.StartupDirectoryForTests);
             Assert.AreEqual(Path.Combine(fullRoot, "Startup"), shared.StartupDirectoryForTests);
 
             Assert.IsTrue((await alpha.SelectStartupAsync(CreateStartupPayload("alpha-world"), "manual", "a")).Success);
@@ -2204,8 +2532,6 @@ end)";
             string root = Path.Combine(
                 Path.GetTempPath(),
                 "CoreAI-StartupSerialized-" + Guid.NewGuid().ToString("N"));
-            string startupDirectory = Path.Combine(
-                Path.GetFullPath(root), "Startup", "Stores", StartupNamespace);
             FileRbxWorldPackageStore store = new(
                 root,
                 1,
@@ -2224,6 +2550,7 @@ end)";
                 () => StartupClockUtc,
                 fileSystem,
                 StartupNamespace);
+            string startupDirectory = store.StartupDirectoryForTests;
             RbxWorldPackageWriteResult older = await store.CreateAutoAsync("older", CreateStartupPayload("older"));
             Assert.IsTrue(older.Success, older.Error);
 
@@ -4060,8 +4387,8 @@ end)";
             {
                 PackageRoot = packageRoot;
                 ModsRoot = modsRoot;
-                StartupDirectory = Path.Combine(
-                    Path.GetFullPath(packageRoot), "Startup", "Stores", StartupNamespace);
+                StartupDirectory = LuaModStoreId.ApplyTo(
+                    Path.Combine(Path.GetFullPath(packageRoot), "Startup"), StartupNamespace);
             }
 
             public string PackageRoot { get; }

@@ -964,6 +964,30 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 "the mirror truncates NextInteger bounds toward zero");
         }
 
+        [Test]
+        public void RBX002_LuaLerpHandlesOppositeLargeOffsetsAndPreservesRounding()
+        {
+            MemoryStore store = new();
+            LuaCsRbxApiBindings bindings = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            stack.Runtime.LoadMod("lerp-contract", @"
+                local a = UDim2.fromOffset(-1073741824, 1073741824)
+                local b = UDim2.fromOffset(1073741824, -1073741824)
+                local mid = a:Lerp(b, 0.5)
+                assert(mid.X.Offset == 0 and mid.Y.Offset == 0)
+                assert(a:Lerp(b, 0) == a and a:Lerp(b, 1) == b)
+                assert(b:Lerp(a, 0.5) == mid)
+                local edge = UDim2.fromOffset(2147483647, -2147483648)
+                assert(edge:Lerp(edge, 1) == edge)
+                local rounded = UDim2.fromOffset(0, 0):Lerp(UDim2.fromOffset(11, 5), 0.5)
+                assert(rounded.X.Offset == 6 and rounded.Y.Offset == 2)
+                local ok, err = pcall(function() return UDim2.fromOffset(0, 0):Lerp(edge, 2) end)
+                assert(not ok and string.find(tostring(err), 'BAD_ARGUMENT', 1, true))
+                store_set('passed', 'true')");
+            Assert.AreEqual("true", store.Get("lerp-contract", "passed"));
+            bindings.Dispose();
+        }
+
         // ---- Instance surface ---------------------------------------------------------------
 
         [Test]

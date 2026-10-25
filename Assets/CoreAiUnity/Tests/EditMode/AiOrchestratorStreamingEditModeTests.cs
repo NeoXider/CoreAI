@@ -5,6 +5,9 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Authority;
+using CoreAI.Messaging;
+using CoreAI.Session;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -16,6 +19,132 @@ namespace CoreAI.Tests.EditMode
     public sealed class AiOrchestratorStreamingEditModeTests
     {
         private SynchronizationContext _previousSynchronizationContext;
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task TerminalFinality_StopAtDoneAlreadyHasHistoryPublicationAndTrace(bool queued)
+        {
+            FinalityClient provider = new();
+            InMemoryAgentMemoryStore memory = new();
+            FinalitySink sink = new();
+            InMemoryAgentTurnTraceSink traces = new();
+            AiOrchestrator core = CreateFinalityOrchestrator(provider, memory, sink, traces);
+            using QueuedAiOrchestrator queue = queued ? new QueuedAiOrchestrator(core, new AiOrchestrationQueueOptions()) : null;
+            IAiOrchestrationService service = queued ? (IAiOrchestrationService)queue : core;
+            string text = "";
+            int terminals = 0;
+            await foreach (LlmStreamChunk chunk in service.RunStreamingAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "question" }))
+            {
+                text += chunk.Text;
+                if (!chunk.IsDone) continue;
+                terminals++;
+                Assert.IsTrue(provider.Disposed, "Provider cleanup must precede public finality.");
+                Assert.AreEqual(2, memory.GetChatHistory("Teacher").Length, "Both history records must exist before IsDone.");
+                Assert.AreEqual(1, sink.Publications);
+                Assert.AreEqual(1, traces.Snapshot().Length);
+                Assert.AreEqual(AgentTurnStatus.Completed, traces.Snapshot()[0].Status);
+                Assert.AreEqual(37, chunk.TotalTokens);
+                Assert.AreEqual("finality-model", chunk.Model);
+                break;
+            }
+            Assert.AreEqual(1, terminals);
+            Assert.AreEqual("hello world", text, "Text carried by the provider terminal must be delivered exactly once.");
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task TerminalFinality_InvalidStructuredReplyHasExactlyOneFailure(bool queued)
+        {
+            FinalityClient provider = new();
+            FinalitySink sink = new();
+            InMemoryAgentTurnTraceSink traces = new();
+            AiOrchestrator core = CreateFinalityOrchestrator(provider, new InMemoryAgentMemoryStore(), sink, traces, new FinalityRejectPolicy());
+            using QueuedAiOrchestrator queue = queued ? new QueuedAiOrchestrator(core, new AiOrchestrationQueueOptions()) : null;
+            IAiOrchestrationService service = queued ? (IAiOrchestrationService)queue : core;
+            List<LlmStreamChunk> chunks = await CollectAsync(service.RunStreamingAsync(new AiTaskRequest { RoleId = "Teacher", Hint = "question" }));
+            List<LlmStreamChunk> terminals = chunks.FindAll(chunk => chunk.IsDone);
+            Assert.AreEqual(1, terminals.Count, "Validation may not follow a successful public terminal.");
+            Assert.AreEqual(LlmErrorCode.InvalidRequest, terminals[0].ErrorCode);
+            Assert.AreEqual(37, terminals[0].TotalTokens);
+            Assert.AreEqual(0, sink.Publications);
+            Assert.AreEqual(1, traces.Snapshot().Length);
+            Assert.AreEqual(AgentTurnStatus.Failed, traces.Snapshot()[0].Status);
+        }
+
+        [TestCase("Teacher", "exact")]
+        [TestCase("TeacherAssistant", "prefix")]
+        [TestCase("Other", "fallback")]
+        public void RouteResolver_WhitespacePatternsRetainSpecificity(string roleId, string expected)
+        {
+            LlmRouteResolver resolver = new(new LlmRouteTable
+            {
+                Profiles = new[] { new LlmRouteProfile { ProfileId = "fallback" }, new LlmRouteProfile { ProfileId = "prefix" }, new LlmRouteProfile { ProfileId = "exact" } },
+                Rules = new[]
+                {
+                    new LlmRouteRule { RolePattern = " * ", ProfileId = "fallback" },
+                    new LlmRouteRule { RolePattern = " Teacher* ", ProfileId = "prefix" },
+                    new LlmRouteRule { RolePattern = " Teacher ", ProfileId = "exact" }
+                }
+            });
+            Assert.AreEqual(expected, resolver.Resolve(roleId).Profile.ProfileId);
+        }
+
+        private static AiOrchestrator CreateFinalityOrchestrator(
+            ILlmClient provider, IAgentMemoryStore memory, FinalitySink sink,
+            InMemoryAgentTurnTraceSink traces, IRoleStructuredResponsePolicy policy = null)
+        {
+            AgentMemoryPolicy memoryPolicy = new();
+            memoryPolicy.ConfigureChatHistory("Teacher", true, 4096, false);
+            return new AiOrchestrator(new FinalityAuthority(), provider, sink, new FinalityTelemetry(),
+                new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider(), null),
+                memory, memoryPolicy, policy, null, new CoreAISettingsOptions(), new LocalActorIdentityProvider("finality-test"), traceSink: traces);
+        }
+
+        private sealed class FinalityAuthority : IAuthorityHost
+        {
+            public bool CanRunAiTasks => true;
+            public bool IsServer => true;
+            public bool IsClient => true;
+        }
+
+        private sealed class FinalitySink : IAiGameCommandSink
+        {
+            public int Publications;
+            public void Publish(ApplyAiGameCommand command) { Publications++; }
+        }
+
+        private sealed class FinalityTelemetry : ISessionTelemetryProvider
+        {
+            public GameSessionSnapshot BuildSnapshot() => new();
+        }
+
+        private sealed class FinalityRejectPolicy : IRoleStructuredResponsePolicy
+        {
+            public bool ShouldValidate(string roleId) => true;
+            public bool TryValidate(string roleId, string rawContent, out string failureReason)
+            {
+                failureReason = "invalid structure";
+                return false;
+            }
+        }
+
+        private sealed class FinalityClient : ILlmClient
+        {
+            public bool Disposed;
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request, CancellationToken cancellationToken = default) =>
+                Task.FromResult(new LlmCompletionResult { Ok = true, Content = "hello world" });
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                await Task.CompletedTask;
+                try
+                {
+                    yield return new LlmStreamChunk { Text = "hello " };
+                    yield return new LlmStreamChunk { Text = "world", IsDone = true, TotalTokens = 37, Model = "finality-model" };
+                }
+                finally { Disposed = true; }
+            }
+        }
 
         /// <summary>
         /// WHY this fixture detaches: a test here waits on a Task from the calling thread. Under

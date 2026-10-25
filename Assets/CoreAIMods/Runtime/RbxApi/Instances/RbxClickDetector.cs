@@ -56,5 +56,11 @@ namespace CoreAI.Mods.Rbx.Instances
                 NotifyPropertyChanged(nameof(MaxActivationDistance));
             }
         }
+
+        /// <summary>Copies interaction state without signals or revision changes.</summary>
+        protected internal override void CopyCustomStateTo(RbxInstance copy)
+        {
+            ((RbxClickDetector)copy)._maxActivationDistance = _maxActivationDistance;
+        }
     }
 }

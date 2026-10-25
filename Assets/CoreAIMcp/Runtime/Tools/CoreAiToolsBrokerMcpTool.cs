@@ -150,19 +150,14 @@ namespace CoreAI.Mcp.Tools
             // WHY: a Native tool called through the broker still runs. The model generalises by
             // analogy and wraps known tools in the broker; refusing is pedantry that costs a turn.
             // Unknown names fail listing the available dynamic names so the model can recover.
-            JObject parsed;
-            try
-            {
-                parsed = string.IsNullOrWhiteSpace(argumentsJson)
-                    ? new JObject()
-                    : JObject.Parse(argumentsJson);
-            }
-            catch (JsonException ex)
+            JObject parsed = new();
+            if (!string.IsNullOrWhiteSpace(argumentsJson) &&
+                !JsonRpc.TryParse(argumentsJson, out parsed, out JObject parseError))
             {
                 return new CallBinding(null, null, null, McpToolResult.Failure(JsonConvert.SerializeObject(new
                 {
                     success = false,
-                    error = $"arguments_json is not a JSON object: {ex.Message}.",
+                    error = $"arguments_json is not a JSON object: {parseError["error"]?["message"]}.",
                 })));
             }
 

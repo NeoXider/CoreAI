@@ -399,7 +399,8 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("regular tier 95/100 (2 scenarios)", md);
             StringAssert.Contains("extreme tier **55**/100 (0/2 pass)", md);
             StringAssert.Contains("## 🧩 Scores by group", md);
-            StringAssert.Contains("| G1 | Build | 2 | 85 | 1/2 | 70 · 🟡 PARTIAL |", md);
+            StringAssert.Contains("| G1 | Build | 2 | 85 | 1/2 | 70 (0/1 pass) |", md);
+            StringAssert.Contains("| G1 | g1_extreme name | 70 | 🟡 PARTIAL | 2 | 20 |", md);
             StringAssert.Contains("| G6 | Free build | 1 | 90 | 1/1 | — |", md);
             StringAssert.Contains("## 🔥 Extreme tier — 55/100 (0/2 pass)", md);
             StringAssert.Contains("| G2 | g2_extreme name | 40 | ❌ FAIL | 1 | 0 |", md);

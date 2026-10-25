@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using CoreAI.Authority;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Lua;
@@ -11,6 +12,16 @@ using CoreAI.Scripting;
 
 namespace CoreAI.Ai.LuaCs
 {
+    /// <summary>Scheduler and world lifetime bridge for optional asynchronous script adapters.</summary>
+    public interface ILuaCsRuntimeLifetimeHost
+    {
+        /// <summary>Disposes a participant once at world retirement, or immediately after retirement.</summary>
+        void RegisterRuntimeLifetime(IDisposable participant);
+
+        /// <summary>Current owned scheduler-thread lifetime, already canceled outside a live thread.</summary>
+        CancellationToken CurrentScriptLifetimeToken { get; }
+    }
+
     /// <summary>
     /// Capability-scoped Lua-CSharp gameplay binding aggregator for <see cref="LuaCsModRuntime"/>.
     /// </summary>
@@ -36,6 +47,49 @@ namespace CoreAI.Ai.LuaCs
             ILuaScriptVersionStore luaScriptVersions,
             IDataOverlayVersionStore dataOverlayVersions,
             IAiGameCommandSink commandSink,
+            ICoreAiPrefabRegistry prefabRegistry,
+            IEnumerable<string> allowedScenes,
+            IDataOverlayPayloadValidator validator,
+            IFullLuaAccessBlacklistPolicy fullBlacklistPolicy,
+            bool allowNonPublicFullMembers,
+            LuaCapabilities capabilities,
+            LuaCsRbxApiBindings rbxApi,
+            bool registerWorldEditBuildBindings,
+            IRbxHttpRequestPolicy rbxHttpPolicy,
+            IRbxHttpTransport rbxHttpTransport,
+            IRbxHttpDestinationResolver rbxHttpResolver,
+            int rbxHttpRequestsPerWindow,
+            double rbxHttpRateWindowSeconds,
+            Func<double> rbxMonotonicClock)
+            : this(
+                logger,
+                luaScriptVersions,
+                dataOverlayVersions,
+                commandSink,
+                prefabRegistry,
+                allowedScenes,
+                validator,
+                fullBlacklistPolicy,
+                allowNonPublicFullMembers,
+                capabilities,
+                rbxApi,
+                registerWorldEditBuildBindings,
+                rbxHttpPolicy,
+                rbxHttpTransport,
+                rbxHttpResolver,
+                rbxHttpRequestsPerWindow,
+                rbxHttpRateWindowSeconds,
+                rbxMonotonicClock,
+                null,
+                LuaCsRbxHttpServiceAdapter.DefaultMaximumOutstandingRequests)
+        {
+        }
+
+        public LuaCsGameplayBindings(
+            IGameLogger logger,
+            ILuaScriptVersionStore luaScriptVersions,
+            IDataOverlayVersionStore dataOverlayVersions,
+            IAiGameCommandSink commandSink,
             ICoreAiPrefabRegistry prefabRegistry = null,
             IEnumerable<string> allowedScenes = null,
             IDataOverlayPayloadValidator validator = null,
@@ -49,14 +103,17 @@ namespace CoreAI.Ai.LuaCs
             IRbxHttpDestinationResolver rbxHttpResolver = null,
             int rbxHttpRequestsPerWindow = LuaCsRbxHttpServiceAdapter.DefaultRequestsPerWindow,
             double rbxHttpRateWindowSeconds = LuaCsRbxHttpServiceAdapter.DefaultRateWindowSeconds,
-            Func<double> rbxMonotonicClock = null)
+            Func<double> rbxMonotonicClock = null,
+            ILuaVersioningWritePolicy versioningWritePolicy = null,
+            int rbxHttpMaximumOutstandingRequests = LuaCsRbxHttpServiceAdapter.DefaultMaximumOutstandingRequests)
             : this(
                 logger,
                 new LuaCsVersioningRuntimeBindings(
                     luaScriptVersions,
                     dataOverlayVersions,
                     commandSink,
-                    validator),
+                    validator,
+                    versioningWritePolicy),
                 new LuaCsWorldRuntimeBindings(commandSink, allowedScenes),
                 new LuaCsComponentRuntimeBindings(commandSink),
                 new LuaCsTimeBindings(),
@@ -72,7 +129,50 @@ namespace CoreAI.Ai.LuaCs
                 rbxHttpResolver,
                 rbxHttpRequestsPerWindow,
                 rbxHttpRateWindowSeconds,
-                rbxMonotonicClock)
+                rbxMonotonicClock,
+                rbxHttpMaximumOutstandingRequests)
+        {
+        }
+
+        public LuaCsGameplayBindings(
+            IGameLogger logger,
+            LuaCsVersioningRuntimeBindings versioning,
+            LuaCsWorldRuntimeBindings world,
+            LuaCsComponentRuntimeBindings components,
+            LuaCsTimeBindings time,
+            LuaCsWorldQueryBindings worldQuery,
+            LuaCsFullUnityRuntimeBindings full,
+            LuaCapabilities capabilities,
+            LuaCsInputRuntimeBindings input,
+            LuaCsDefaultRuntimeBindings defaultBindings,
+            LuaCsRbxApiBindings rbxApi,
+            bool registerWorldEditBuildBindings,
+            IRbxHttpRequestPolicy rbxHttpPolicy,
+            IRbxHttpTransport rbxHttpTransport,
+            IRbxHttpDestinationResolver rbxHttpResolver,
+            int rbxHttpRequestsPerWindow,
+            double rbxHttpRateWindowSeconds,
+            Func<double> rbxMonotonicClock)
+            : this(
+                logger,
+                versioning,
+                world,
+                components,
+                time,
+                worldQuery,
+                full,
+                capabilities,
+                input,
+                defaultBindings,
+                rbxApi,
+                registerWorldEditBuildBindings,
+                rbxHttpPolicy,
+                rbxHttpTransport,
+                rbxHttpResolver,
+                rbxHttpRequestsPerWindow,
+                rbxHttpRateWindowSeconds,
+                rbxMonotonicClock,
+                LuaCsRbxHttpServiceAdapter.DefaultMaximumOutstandingRequests)
         {
         }
 
@@ -94,7 +194,8 @@ namespace CoreAI.Ai.LuaCs
             IRbxHttpDestinationResolver rbxHttpResolver = null,
             int rbxHttpRequestsPerWindow = LuaCsRbxHttpServiceAdapter.DefaultRequestsPerWindow,
             double rbxHttpRateWindowSeconds = LuaCsRbxHttpServiceAdapter.DefaultRateWindowSeconds,
-            Func<double> rbxMonotonicClock = null)
+            Func<double> rbxMonotonicClock = null,
+            int rbxHttpMaximumOutstandingRequests = LuaCsRbxHttpServiceAdapter.DefaultMaximumOutstandingRequests)
         {
             _capabilities = capabilities;
             _default = defaultBindings ?? new LuaCsDefaultRuntimeBindings();
@@ -114,7 +215,7 @@ namespace CoreAI.Ai.LuaCs
                     rbxApi, rbxHttpPolicy, rbxHttpTransport,
                     rbxHttpResolver,
                     rbxHttpRequestsPerWindow, rbxHttpRateWindowSeconds,
-                    rbxMonotonicClock);
+                    rbxMonotonicClock, rbxHttpMaximumOutstandingRequests);
             _registerWorldEditBuildBindings = registerWorldEditBuildBindings;
         }
 
@@ -146,6 +247,8 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Optional Roblox API surface shared by every mod and the one-off executor.</summary>
         public LuaCsRbxApiBindings RbxApi => _roblox;
+
+        internal LuaCsRbxHttpServiceAdapter HttpForTesting => _rbxHttp;
 
         public LuaCapabilities Capabilities => _capabilities;
 
@@ -208,7 +311,7 @@ namespace CoreAI.Ai.LuaCs
             if ((effective & LuaCapabilities.Read) != 0)
             {
                 _logging.RegisterGameplayApis(registry);
-                _versioning?.RegisterGameplayApis(registry);
+                _versioning?.Register(registry, effective, ownerModId, actorContext);
                 _worldQuery?.RegisterGameplayApis(registry);
             }
 

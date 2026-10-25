@@ -27,6 +27,8 @@ namespace CoreAI.Infrastructure.Lua
 
         private readonly string _dir;
         private readonly ILog _log;
+        private readonly Func<string, string, bool> _legacyIdentityVerifier;
+        internal static Func<bool> PersistenceArmingForTesting;
 
         /// <summary>
         /// Serializes file access for this store instance so load-modify-save operations cannot race.
@@ -81,7 +83,7 @@ namespace CoreAI.Infrastructure.Lua
             }
             catch (ObjectDisposedException)
             {
-                // Dispose raced with a handler holding the gate; nothing left to release.
+                // WHY: Disposal can race a handler releasing its acquired gate.
             }
         }
 
@@ -97,6 +99,13 @@ namespace CoreAI.Infrastructure.Lua
         /// <see cref="LuaModStoreId"/>.
         /// </param>
         public FileLuaModStore(string rootDirectory = null, ILog log = null, string storeId = null)
+            : this(rootDirectory, log, storeId, null)
+        {
+        }
+
+        /// <summary>Creates a store with a host verifier for identity-less legacy key/value files.</summary>
+        public FileLuaModStore(string rootDirectory, ILog log, string storeId,
+            Func<string, string, bool> legacyIdentityVerifier)
         {
             string baseDir = !string.IsNullOrWhiteSpace(rootDirectory)
                 ? rootDirectory.Trim()
@@ -104,6 +113,7 @@ namespace CoreAI.Infrastructure.Lua
                     CoreAiPersistentPaths.LuaMods);
             _dir = LuaModStoreId.ApplyTo(baseDir, storeId);
             _log = log;
+            _legacyIdentityVerifier = legacyIdentityVerifier;
         }
 
         /// <inheritdoc />
@@ -233,7 +243,7 @@ namespace CoreAI.Infrastructure.Lua
                 EnsureDir();
                 string json = JsonConvert.SerializeObject(values, JsonSettings);
                 AtomicWriteAllText(GetPath(modId), json, _log);
-                CoreAiWebGlPersistence.Sync();
+                RequestPersistenceArming();
             }
             catch (Exception ex)
             {
@@ -249,7 +259,7 @@ namespace CoreAI.Infrastructure.Lua
                 if (File.Exists(path))
                 {
                     File.Delete(path);
-                    CoreAiWebGlPersistence.Sync();
+                    RequestPersistenceArming();
                 }
             }
             catch (Exception ex)
@@ -282,7 +292,8 @@ namespace CoreAI.Infrastructure.Lua
             }
 
             string legacyPath = Path.Combine(_dir, LegacySanitizedFileStem(modId) + ".json");
-            if (!File.Exists(legacyPath))
+            if (!File.Exists(legacyPath) || _legacyIdentityVerifier == null
+                || !_legacyIdentityVerifier(modId, legacyPath))
             {
                 return path;
             }
@@ -291,7 +302,6 @@ namespace CoreAI.Infrastructure.Lua
             try
             {
                 File.Move(legacyPath, path);
-                CoreAiWebGlPersistence.Sync();
             }
             catch (IOException)
             {
@@ -301,7 +311,17 @@ namespace CoreAI.Infrastructure.Lua
                 }
             }
 
+            RequestPersistenceArming();
+
             return path;
+        }
+
+        private static void RequestPersistenceArming()
+        {
+            if (!(PersistenceArmingForTesting?.Invoke() ?? CoreAiWebGlPersistence.Sync()))
+            {
+                throw new IOException("The mod data change was committed locally, but automatic persistence is not armed.");
+            }
         }
 
         /// <summary>

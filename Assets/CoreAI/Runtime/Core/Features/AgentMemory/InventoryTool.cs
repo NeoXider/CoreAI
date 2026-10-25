@@ -36,6 +36,7 @@ namespace CoreAI.Ai
 
         public async Task<string> ExecuteAsync(CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (_settings?.LogToolCalls ?? CoreAISettings.LogToolCalls)
             {
                 Log.Instance.Info($"[Tool Call] get_inventory: fetching items", LogTag.Llm);
@@ -55,6 +56,10 @@ namespace CoreAI.Ai
                     Success = true,
                     Items = items
                 });
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {

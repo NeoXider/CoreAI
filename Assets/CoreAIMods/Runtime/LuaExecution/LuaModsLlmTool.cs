@@ -214,6 +214,7 @@ namespace CoreAI.Ai
         private async Task<string> ExecuteBodyAsync(string action, string mod_id, string code, string bundle,
             int revision, bool keepObjects, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             string normalized = (action ?? "").Trim().ToLowerInvariant();
             if (_settings.LogToolCalls)
             {
@@ -223,6 +224,7 @@ namespace CoreAI.Ai
             string result;
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 ActorContext actor = _actorIdentityProvider.GetActorContext(_roleId);
                 if (!actor.IsTrusted)
                 {
@@ -233,14 +235,20 @@ namespace CoreAI.Ai
                 {
                     result = await _worldMutationGate.ExecuteAsync(
                         trigger,
-                        token => Task.FromResult(ExecuteAuthorizedAction(
-                            normalized,
-                            actor,
-                            mod_id,
-                            code,
-                            bundle,
-                            revision,
-                            keepObjects)),
+                        token =>
+                        {
+                            token.ThrowIfCancellationRequested();
+                            cancellationToken.ThrowIfCancellationRequested();
+                            return Task.FromResult(ExecuteAuthorizedAction(
+                                normalized,
+                                actor,
+                                mod_id,
+                                code,
+                                bundle,
+                                revision,
+                                keepObjects,
+                                cancellationToken));
+                        },
                         cancellationToken);
                 }
                 else
@@ -252,8 +260,13 @@ namespace CoreAI.Ai
                         code,
                         bundle,
                         revision,
-                        keepObjects);
+                        keepObjects,
+                        cancellationToken);
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -295,10 +308,12 @@ namespace CoreAI.Ai
             string code,
             string bundle,
             int revision,
-            bool keepObjects)
+            bool keepObjects,
+            CancellationToken cancellationToken)
         {
             lock (_authorizationGate)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 return normalized switch
                 {
                     "list" => ListMods(actor),

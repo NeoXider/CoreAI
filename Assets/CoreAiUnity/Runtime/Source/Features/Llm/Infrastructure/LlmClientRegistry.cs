@@ -192,12 +192,17 @@ namespace CoreAI.Infrastructure.Llm
 
         private sealed class TrackedEndpointClient : ILlmClient, IDisposable
         {
+            private readonly LlmClientRegistry _registry;
             private readonly RuntimeEndpoint _endpoint;
-            private int _leaseReleased;
+            private readonly long _generation;
+            private readonly ILlmClient _client;
 
-            public TrackedEndpointClient(RuntimeEndpoint endpoint)
+            public TrackedEndpointClient(LlmClientRegistry registry, RuntimeEndpoint endpoint)
             {
+                _registry = registry;
                 _endpoint = endpoint;
+                _generation = endpoint.Generation;
+                _client = endpoint.Client;
             }
 
             // WHY: the lease is taken when a request actually starts, never at resolve time.
@@ -205,40 +210,58 @@ namespace CoreAI.Infrastructure.Llm
             // (SupportsNativeToolCallingForRole, ResolveContextWindowTokensForRole) and neither
             // executes nor disposes the handle, so a resolve-time lease never came back and the
             // endpoint drain waited forever.
-            private void TakeLease()
+            private sealed class RequestLease : IDisposable
             {
-                Interlocked.Exchange(ref _leaseReleased, 0);
-                Interlocked.Increment(ref _endpoint.InFlightRequests);
+                private RuntimeEndpoint _endpoint;
+
+                public RequestLease(LlmClientRegistry registry, RuntimeEndpoint endpoint, long generation)
+                {
+                    // WHY: retirement and lease admission must share one boundary; a metadata handle
+                    // cannot resurrect a released host or silently enter a later generation.
+                    lock (registry._gate)
+                    {
+                        if (registry._disposed || endpoint.ReleaseRequested != 0 ||
+                            endpoint.Generation != generation || !endpoint.Descriptor.Active ||
+                            endpoint.State != LlmEndpointLifecycleState.Ready ||
+                            !registry._runtimeEndpoints.TryGetValue(endpoint.Descriptor.EndpointId, out RuntimeEndpoint current) ||
+                            !ReferenceEquals(current, endpoint))
+                            throw new LlmClientException("The resolved LLM endpoint retired before request admission.",
+                                LlmErrorCode.BackendUnavailable);
+                        _endpoint = endpoint;
+                        Client = endpoint.Client;
+                        Interlocked.Increment(ref endpoint.InFlightRequests);
+                    }
+                }
+
+                internal ILlmClient Client { get; }
+
+                public void Dispose()
+                {
+                    RuntimeEndpoint endpoint = Interlocked.Exchange(ref _endpoint, null);
+                    if (endpoint != null) Interlocked.Decrement(ref endpoint.InFlightRequests);
+                }
             }
 
             public void Dispose()
             {
-                ReleaseLease();
             }
 
             public bool SupportsNativeToolCallingForRole(string agentRoleId)
             {
-                return _endpoint.Client.SupportsNativeToolCallingForRole(agentRoleId);
+                return _client.SupportsNativeToolCallingForRole(agentRoleId);
             }
 
             public void ResolveRequestSettings(LlmCompletionRequest request)
             {
-                _endpoint.Client.ResolveRequestSettings(request);
+                _client.ResolveRequestSettings(request);
             }
 
             public async Task<LlmCompletionResult> CompleteAsync(
                 LlmCompletionRequest request,
                 CancellationToken cancellationToken = default)
             {
-                TakeLease();
-                try
-                {
-                    return await _endpoint.Client.CompleteAsync(request, cancellationToken);
-                }
-                finally
-                {
-                    ReleaseLease();
-                }
+                using RequestLease lease = new RequestLease(_registry, _endpoint, _generation);
+                return await lease.Client.CompleteAsync(request, cancellationToken);
             }
 
             public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
@@ -246,26 +269,11 @@ namespace CoreAI.Infrastructure.Llm
                 [System.Runtime.CompilerServices.EnumeratorCancellation]
                 CancellationToken cancellationToken = default)
             {
-                TakeLease();
-                try
+                using RequestLease lease = new RequestLease(_registry, _endpoint, _generation);
+                await foreach (LlmStreamChunk chunk in
+                               lease.Client.CompleteStreamingAsync(request, cancellationToken))
                 {
-                    await foreach (LlmStreamChunk chunk in
-                                   _endpoint.Client.CompleteStreamingAsync(request, cancellationToken))
-                    {
-                        yield return chunk;
-                    }
-                }
-                finally
-                {
-                    ReleaseLease();
-                }
-            }
-
-            private void ReleaseLease()
-            {
-                if (Interlocked.Exchange(ref _leaseReleased, 1) == 0)
-                {
-                    Interlocked.Decrement(ref _endpoint.InFlightRequests);
+                    yield return chunk;
                 }
             }
         }
@@ -439,7 +447,7 @@ namespace CoreAI.Infrastructure.Llm
                 if (!string.IsNullOrEmpty(runtimeProfile) &&
                     TryResolveReadyRuntimeEndpointLocked(runtimeProfile, out RuntimeEndpoint endpoint, out _))
                 {
-                    return new TrackedEndpointClient(endpoint);
+                    return new TrackedEndpointClient(this, endpoint);
                 }
 
                 if (!string.IsNullOrEmpty(runtimeProfile) &&
@@ -892,15 +900,16 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
 
+                // WHY: publish retirement before reactivation can reuse this mutable endpoint.
+                RequestOwnedHostRelease(pendingRelease);
+                RequestOwnedHostRelease(release);
+
                 // WHY: snapshot under the lock — see AddOrUpdateEndpointAsync.
                 activationToAwait = runtime.ActivationTask != null && !runtime.ActivationTask.IsCompleted
                     ? runtime.ActivationTask
                     : null;
                 immediateSnapshot = activationToAwait == null ? ToSnapshot(runtime) : null;
             }
-
-            RequestOwnedHostRelease(pendingRelease);
-            RequestOwnedHostRelease(release);
 
             SaveRuntimeState();
             Changed?.Invoke();
@@ -1371,18 +1380,31 @@ namespace CoreAI.Infrastructure.Llm
 
         private void RequestOwnedHostRelease(RuntimeEndpoint runtime)
         {
-            if (runtime == null || Interlocked.Exchange(ref runtime.ReleaseRequested, 1) != 0)
+            if (runtime == null)
             {
                 return;
             }
 
-            // WHY: BeginActivationLocked reads HostReleaseTask under _gate to chain a new host behind the
-            // old one's teardown; publishing it outside that lock lets an activation start a second
-            // llama.cpp host on the port the previous one still holds.
+            TaskCompletionSource<bool> completion;
+            // WHY: publish before invoking the host callback, which can reenter activation synchronously.
             lock (_gate)
             {
-                runtime.HostReleaseTask = ReleaseOwnedHostAfterDrainAsync(runtime);
+                if (runtime.ReleaseRequested != 0) return;
+                runtime.ReleaseRequested = 1;
+                completion = new TaskCompletionSource<bool>();
+                runtime.HostReleaseTask = completion.Task;
             }
+            _ = CompleteOwnedHostReleaseAsync(runtime, completion);
+        }
+
+        private async Task CompleteOwnedHostReleaseAsync(RuntimeEndpoint runtime, TaskCompletionSource<bool> completion)
+        {
+            try
+            {
+                await ReleaseOwnedHostAfterDrainAsync(runtime);
+                completion.TrySetResult(true);
+            }
+            catch (Exception ex) { completion.TrySetException(ex); }
         }
 
         private async Task ReleaseOwnedHostAfterDrainAsync(RuntimeEndpoint runtime)

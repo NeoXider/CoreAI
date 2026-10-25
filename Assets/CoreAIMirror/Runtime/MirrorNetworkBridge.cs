@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.ExceptionServices;
 using System.Text;
+using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
@@ -310,6 +312,7 @@ namespace CoreAI.Net.Mirror
         private readonly HashSet<int> _acknowledged = new();
         private readonly List<OwedDrop> _owedDrops = new();
         private readonly HashSet<int> _tearingDown = new();
+        private readonly HashSet<int> _notifyingDisconnect = new();
         private readonly List<HeldSend> _heldUntilAdmitted = new();
         private readonly RbxNetworkRateLimiter _rateLimiter;
         private readonly Func<double> _clockSeconds;
@@ -838,7 +841,7 @@ namespace CoreAI.Net.Mirror
             if (!_isServer)
             {
                 DiscardHeldUntilAdmitted();
-                FailAllPending(NotConnectedReason, containCompletionFailures: false);
+                FailAllPending(NotConnectedReason);
             }
         }
 
@@ -926,32 +929,83 @@ namespace CoreAI.Net.Mirror
         /// Only this connection's binding is released — a connection that was already replaced by a
         /// newer one for the same actor was unbound when it was replaced, so its late report finds
         /// nothing here and cannot reach the session that replaced it.
+        /// Peer listeners run before completions, so a completion that unregisters or disposes the
+        /// bridge cannot prevent world teardown. Listener failures surface after every listener and
+        /// cleanup have run; completion failures are logged without interrupting the world.
         /// </remarks>
         public void NotifyDisconnected(int connectionId, RbxNetworkDisconnectReason reason)
         {
-            if (!_peersByConnection.TryGetValue(connectionId, out RbxNetworkPeer peer))
+            if (!_peersByConnection.TryGetValue(connectionId, out RbxNetworkPeer peer)
+                || !_notifyingDisconnect.Add(connectionId))
             {
                 return;
             }
 
             bool marked = BeginTeardown(connectionId);
+            ActorAdmissionResult admission = _authenticator?.ResultFor(connectionId);
+            NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient connection);
+            // WHY: the world's unregister runs before Player removal. Completions must wait for both.
+            List<PendingRequest> pending = TakePendingRequests(FindPendingFor(connectionId));
+            Action<int> bindingReleased = BindingReleased;
+            List<Exception> failures = null;
             try
             {
-                FailPendingFor(connectionId, PeerDisconnectedReason);
-                PeerDisconnected?.Invoke(new RbxNetworkPeerDisconnected(peer, reason));
+                InvokeSubscribers(PeerDisconnected, new RbxNetworkPeerDisconnected(peer, reason),
+                    ref failures);
             }
             finally
             {
-                if (marked)
+                try
                 {
-                    EndTeardown(connectionId);
+                    CompletePendingRequests(pending, PeerDisconnectedReason);
                 }
+                finally
+                {
+                    try
+                    {
+                        if (_peersByConnection.TryGetValue(connectionId, out RbxNetworkPeer still)
+                            && SamePeer(still, peer))
+                        {
+                            ReleaseConnection(connectionId, PeerDisconnectedReason);
+                        }
+                        else if (!_peersByConnection.ContainsKey(connectionId) && admission != null
+                                 && ReferenceEquals(_authenticator?.ResultFor(connectionId), admission)
+                                 && (!NetworkServer.connections.TryGetValue(connectionId,
+                                         out NetworkConnectionToClient current)
+                                     || ReferenceEquals(current, connection)))
+                        {
+                            // WHY: reentrant disposal clears the binding before its admission is released.
+                            _authenticator.Forget(connectionId);
+                        }
+                    }
+                    finally
+                    {
+                        List<Exception> bindingFailures = null;
+                        try
+                        {
+                            InvokeSubscribers(bindingReleased, connectionId, ref bindingFailures);
+                            ReportCleanupFailures(bindingFailures, "releasing connection " + connectionId);
+                        }
+                        finally
+                        {
+                            if (marked)
+                            {
+                                EndTeardown(connectionId);
+                            }
 
-                if (_peersByConnection.TryGetValue(connectionId, out RbxNetworkPeer still)
-                    && SamePeer(still, peer))
-                {
-                    ReleaseConnection(connectionId, PeerDisconnectedReason);
+                            _notifyingDisconnect.Remove(connectionId);
+                        }
+                    }
                 }
+            }
+
+            if (failures?.Count == 1)
+            {
+                ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            }
+            else if (failures != null)
+            {
+                throw new AggregateException("Mirror peer disconnect listeners failed", failures);
             }
         }
 
@@ -1242,7 +1296,8 @@ namespace CoreAI.Net.Mirror
             if (_isServer)
             {
                 routed = !string.IsNullOrEmpty(message.RecipientActorId)
-                         && _connectionsByActor.TryGetValue(message.RecipientActorId, out connectionId);
+                         && _connectionsByActor.TryGetValue(message.RecipientActorId, out connectionId)
+                         && !_tearingDown.Contains(connectionId);
                 if (!routed)
                 {
                     // WHY failed now: the player holds no connection here, so nothing will be sent
@@ -1324,7 +1379,7 @@ namespace CoreAI.Net.Mirror
 
             if (!_isServer && !NetworkClient.isConnected)
             {
-                FailAllPending(NotConnectedReason, containCompletionFailures: false);
+                FailAllPending(NotConnectedReason);
                 return;
             }
 
@@ -1344,6 +1399,7 @@ namespace CoreAI.Net.Mirror
                 return;
             }
 
+            List<Exception> failures = null;
             for (int index = 0; index < expired.Count; index++)
             {
                 // WHY remove-and-test: a completion is mod code and may reach UnregisterActor,
@@ -1354,10 +1410,12 @@ namespace CoreAI.Net.Mirror
                 }
 
                 TimedOutRequests++;
-                request.Complete?.Invoke(RbxNetworkResponse.Failure(
+                InvokeSubscribers(request.Complete, RbxNetworkResponse.Failure(
                     "the remote did not answer within "
-                    + RequestTimeoutSeconds.ToString("0") + " seconds"));
+                    + RequestTimeoutSeconds.ToString("0") + " seconds"), ref failures);
             }
+
+            ReportCleanupFailures(failures, "timing out open requests");
         }
 
         /// <summary>
@@ -1445,7 +1503,7 @@ namespace CoreAI.Net.Mirror
             PeerDisconnected = null;
             DisconnectNoticeReceived = null;
             BindingReleased = null;
-            FailAllPending(DisposedReason, containCompletionFailures: true);
+            FailAllPending(DisposedReason);
         }
 
         private void UnregisterHandlers()
@@ -2634,6 +2692,7 @@ namespace CoreAI.Net.Mirror
         /// </summary>
         private void ReleaseBinding(int connectionId, string reason)
         {
+            List<uint> pending = FindPendingFor(connectionId);
             bool wasBound = _peersByConnection.TryGetValue(connectionId, out RbxNetworkPeer peer);
             if (wasBound)
             {
@@ -2653,17 +2712,24 @@ namespace CoreAI.Net.Mirror
 
             _acknowledged.Remove(connectionId);
             _authenticator?.Forget(connectionId);
-            if (wasBound)
+            List<Exception> failures = null;
+            // WHY: an earlier peer listener can unregister or dispose before the session host runs.
+            // NotifyDisconnected retains this notification until all peer listeners have finished.
+            if (wasBound && !_notifyingDisconnect.Contains(connectionId))
             {
-                // WHY before the open requests fail: their completions are mod code, and one that
-                // throws must not leave the session host holding a session nothing is bound to.
-                BindingReleased?.Invoke(connectionId);
+                InvokeSubscribers(BindingReleased, connectionId, ref failures);
             }
 
-            FailPendingFor(connectionId, reason);
+            FailPendingRequests(pending, reason);
+            ReportCleanupFailures(failures, "releasing connection " + connectionId);
         }
 
         private void FailPendingFor(int connectionId, string reason)
+        {
+            FailPendingRequests(FindPendingFor(connectionId), reason);
+        }
+
+        private List<uint> FindPendingFor(int connectionId)
         {
             List<uint> affected = null;
             foreach (KeyValuePair<uint, PendingRequest> pair in _pending)
@@ -2675,55 +2741,96 @@ namespace CoreAI.Net.Mirror
                 }
             }
 
+            return affected;
+        }
+
+        private void FailPendingRequests(List<uint> affected, string reason)
+        {
+            CompletePendingRequests(TakePendingRequests(affected), reason);
+        }
+
+        private List<PendingRequest> TakePendingRequests(List<uint> affected)
+        {
             if (affected == null)
+            {
+                return null;
+            }
+
+            List<PendingRequest> requests = new(affected.Count);
+            for (int index = 0; index < affected.Count; index++)
+            {
+                if (_pending.Remove(affected[index], out PendingRequest request))
+                {
+                    requests.Add(request);
+                }
+            }
+
+            return requests;
+        }
+
+        private void CompletePendingRequests(List<PendingRequest> requests, string reason)
+        {
+            if (requests == null)
             {
                 return;
             }
 
-            for (int index = 0; index < affected.Count; index++)
+            List<Exception> failures = null;
+            for (int index = 0; index < requests.Count; index++)
             {
-                // WHY remove-and-test: same as PumpTimeouts — a completion that unregisters the
-                // actor re-enters here and empties the rest of this list first.
-                if (!_pending.Remove(affected[index], out PendingRequest request))
-                {
-                    continue;
-                }
+                InvokeSubscribers(requests[index].Complete, RbxNetworkResponse.Failure(reason), ref failures);
+            }
 
-                request.Complete?.Invoke(RbxNetworkResponse.Failure(reason));
+            ReportCleanupFailures(failures, "failing open requests (" + reason + ")");
+        }
+
+        private static void InvokeSubscribers<T>(Action<T> subscribers, T message,
+            ref List<Exception> failures)
+        {
+            if (subscribers == null)
+            {
+                return;
+            }
+
+            foreach (Action<T> subscriber in subscribers.GetInvocationList())
+            {
+                try
+                {
+                    subscriber(message);
+                }
+                catch (Exception exception)
+                {
+                    failures ??= new List<Exception>();
+                    failures.Add(exception);
+                }
             }
         }
 
-        private void FailAllPending(string reason, bool containCompletionFailures)
+        private void ReportCleanupFailures(List<Exception> failures, string operation)
+        {
+            for (int index = 0; failures != null && index < failures.Count; index++)
+            {
+                Exception failure = failures[index];
+                try
+                {
+                    _log("[CoreAI.Mirror] a callback threw while " + operation + ": " + failure);
+                }
+                catch (Exception logFailure)
+                {
+                    Debug.LogException(new AggregateException(
+                        "Mirror cleanup diagnostics failed while " + operation, failure, logFailure));
+                }
+            }
+        }
+
+        private void FailAllPending(string reason)
         {
             if (_pending.Count == 0)
             {
                 return;
             }
 
-            List<uint> open = new(_pending.Keys);
-            for (int index = 0; index < open.Count; index++)
-            {
-                if (!_pending.Remove(open[index], out PendingRequest request))
-                {
-                    continue;
-                }
-
-                if (!containCompletionFailures)
-                {
-                    request.Complete?.Invoke(RbxNetworkResponse.Failure(reason));
-                    continue;
-                }
-
-                try
-                {
-                    request.Complete?.Invoke(RbxNetworkResponse.Failure(reason));
-                }
-                catch (Exception exception)
-                {
-                    _log("[CoreAI.Mirror] a RemoteFunction completion threw while the bridge failed "
-                         + "its open requests (" + reason + "): " + exception.Message);
-                }
-            }
+            FailPendingRequests(new List<uint>(_pending.Keys), reason);
         }
 
         private static void RequirePayloadFits(byte[] payload, int ceiling, string what, string fix)
@@ -2967,7 +3074,7 @@ namespace CoreAI.Net.Mirror
             _admittedActorId = null;
             _admittedOn = null;
             _readyAcknowledgedOn = null;
-            FailAllPending(NotConnectedReason, containCompletionFailures: true);
+            FailAllPending(NotConnectedReason);
         }
 
         /// <summary>Whether the hold for this client's admission takes one more payload of this size.</summary>

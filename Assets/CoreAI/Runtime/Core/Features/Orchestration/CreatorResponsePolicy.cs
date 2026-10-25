@@ -1,5 +1,8 @@
 ﻿namespace CoreAI.Ai
 {
+    using System;
+    using System.Text.Json;
+
     /// <summary>
     /// Structured-response policy for creator roles.
     /// </summary>
@@ -14,40 +17,78 @@
         /// <inheritdoc />
         public bool TryValidate(string roleId, string rawContent, out string failureReason)
         {
+            bool valid = StructuredResponseJson.TryParseObject(rawContent, out JsonDocument document, out failureReason);
+            document?.Dispose();
+            return valid;
+        }
+    }
+
+    internal static class StructuredResponseJson
+    {
+        internal static bool TryParseObject(string rawContent, out JsonDocument document, out string failureReason)
+        {
+            document = null;
             if (string.IsNullOrWhiteSpace(rawContent))
             {
                 failureReason = "Response is empty or whitespace.";
                 return false;
             }
-
-            string trimmed = rawContent.Trim();
-
-            if (trimmed.StartsWith("```json"))
+            string content = rawContent.Trim();
+            int objectStart = content.IndexOf('{');
+            int fenceStart = content.IndexOf("```", StringComparison.Ordinal);
+            if (fenceStart >= 0 && (objectStart < 0 || fenceStart < objectStart))
             {
-                int endFence = trimmed.IndexOf("```", 7);
-                if (endFence > 0)
+                int lineEnd = content.IndexOf('\n', fenceStart);
+                string header = lineEnd >= 0 ? content.Substring(fenceStart, lineEnd - fenceStart).Trim() : "";
+                if ((header != "```" && !string.Equals(header, "```json", StringComparison.OrdinalIgnoreCase)) ||
+                    lineEnd < 0 || !content.EndsWith("```", StringComparison.Ordinal))
                 {
-                    trimmed = trimmed.Substring(7, endFence - 7).Trim();
+                    failureReason = "Expected JSON object in a complete JSON code fence.";
+                    return false;
                 }
+                content = content.Substring(lineEnd + 1, content.Length - lineEnd - 4).Trim();
             }
-
-            if (!trimmed.StartsWith("{") || !trimmed.EndsWith("}"))
+            else if (objectStart > 0)
             {
-                int jsonStart = trimmed.IndexOf('{');
-                int jsonEnd = trimmed.LastIndexOf('}');
-
-                if (jsonStart >= 0 && jsonEnd > jsonStart)
+                content = content.Substring(objectStart);
+            }
+            try
+            {
+                document = JsonDocument.Parse(content);
+                if (document.RootElement.ValueKind == JsonValueKind.Object)
                 {
                     failureReason = "";
                     return true;
                 }
-
-                failureReason = "Expected JSON command object. Got plain text instead.";
-                return false;
+                document.Dispose();
+                document = null;
             }
+            catch (JsonException)
+            {
+                document?.Dispose();
+                document = null;
+            }
+            failureReason = "Expected JSON object with valid syntax and no trailing content.";
+            return false;
+        }
 
-            failureReason = "";
-            return true;
+        internal static bool ContainsProperty(JsonElement value, Func<JsonProperty, bool> predicate)
+        {
+            if (value.ValueKind == JsonValueKind.Object)
+            {
+                foreach (JsonProperty property in value.EnumerateObject())
+                {
+                    if (predicate(property) || ContainsProperty(property.Value, predicate)) return true;
+                }
+            }
+            else if (value.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement item in value.EnumerateArray())
+                {
+                    if (ContainsProperty(item, predicate)) return true;
+                }
+            }
+            return false;
         }
     }
 }

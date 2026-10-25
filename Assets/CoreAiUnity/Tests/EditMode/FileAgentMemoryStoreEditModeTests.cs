@@ -9,14 +9,15 @@ using CoreAI.Ai;
 using CoreAI.Infrastructure.AiMemory;
 using CoreAI.Logging;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// The on-disk layout: <see cref="FileAgentMemoryStore"/> keeps the memory document in <c>&lt;role&gt;.json</c>
-    /// and the conversation in <c>&lt;role&gt;.history.jsonl</c>. The tests are written from the defect's side: what the
+    /// The on-disk layout: <see cref="FileAgentMemoryStore"/> keeps the memory document in <c>&lt;key-v2-stem&gt;.json</c>
+    /// and the conversation in <c>&lt;key-v2-stem&gt;.history.jsonl</c>. The tests are written from the defect's side: what the
     /// learner loses when the store lies about success, swaps an unread document for an empty one, silently cuts the
     /// history or rewrites everything per message. Each test runs in its own temp directory, writing nothing to the machine.
     /// </summary>
@@ -49,8 +50,9 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
-        private string MemoryPath => Path.Combine(_root, _roleId + ".json");
-        private string HistoryPath => Path.Combine(_root, _roleId + ".history.jsonl");
+        private string MemoryPath => Path.Combine(_root, AgentMemoryFileKey.FileStem(_roleId) + ".json");
+        private string HistoryPath => Path.Combine(_root, AgentMemoryFileKey.FileStem(_roleId) + ".history.jsonl");
+        private string LegacyMemoryPath => Path.Combine(_root, AgentMemoryFileKey.LegacyFileStem(_roleId) + ".json");
 
         private FileAgentMemoryStore NewStore(ILog log = null, int chatCap = 500, int transcriptCap = 2000)
         {
@@ -355,6 +357,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsEmpty(NewStore().GetChatHistory(_roleId));
             Assert.IsTrue(NewStore().TryLoad(_roleId, out AgentMemoryState state));
             Assert.AreEqual("keep memory", state.Memory);
+            Assert.AreEqual(_roleId, JObject.Parse(File.ReadAllText(MemoryPath))["roleId"].Value<string>());
         }
 
         // ---------------------------------------------------------------------------------------------
@@ -411,16 +414,18 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void Save_AfterUnreadableDocument_HealsTheRole()
+        public void Save_AfterUnreadableDocument_PreservesSourceUntilExplicitClear()
         {
-            File.WriteAllText(MemoryPath, "{ definitely not json");
+            const string corrupt = "{ definitely not json";
+            File.WriteAllText(MemoryPath, corrupt);
             FileAgentMemoryStore store = NewStore();
 
             store.Save(_roleId, new AgentMemoryState { Memory = "recovered" });
-
-            Assert.AreEqual(AgentMemoryLoadStatus.Loaded, NewStore().TryLoadDetailed(_roleId, out AgentMemoryState loaded),
-                "Save used to read the old file through `FromJson(...) ?? new`, parsing threw, and after ONE corrupted " +
-                "file every later write for that role went into the log and saved nothing, forever.");
+            Assert.AreEqual(corrupt, File.ReadAllText(MemoryPath), "Ordinary saves must preserve recoverable source.");
+            Assert.AreEqual(AgentMemoryLoadStatus.Failed, store.TryLoadDetailed(_roleId, out _));
+            store.Clear(_roleId);
+            store.Save(_roleId, new AgentMemoryState { Memory = "recovered" });
+            Assert.AreEqual(AgentMemoryLoadStatus.Loaded, NewStore().TryLoadDetailed(_roleId, out AgentMemoryState loaded));
             Assert.AreEqual("recovered", loaded.Memory);
         }
 
@@ -615,7 +620,8 @@ namespace CoreAI.Tests.EditMode
                 }),
                 maxMemoryVersions = 30
             };
-            File.WriteAllText(MemoryPath, JsonUtility.ToJson(legacy, true));
+            File.WriteAllText(LegacyMemoryPath, JsonUtility.ToJson(legacy, true));
+            byte[] originalBytes = File.ReadAllBytes(LegacyMemoryPath);
 
             FileAgentMemoryStore store = NewStore();
             ChatMessage[] chat = store.GetChatHistory(_roleId);
@@ -630,12 +636,53 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, state.Versions.Length);
 
             Assert.IsTrue(File.Exists(HistoryPath), "The conversation is moved out into its own file.");
+            Assert.IsFalse(File.Exists(LegacyMemoryPath));
+            CollectionAssert.AreEqual(originalBytes, File.ReadAllBytes(LegacyMemoryPath + ".legacy"),
+                "Canonical migration must retain the exact original legacy bytes.");
+            Assert.AreEqual(_roleId, JObject.Parse(File.ReadAllText(MemoryPath))["roleId"].Value<string>(),
+                "A rewritten untagged legacy document must retain its proven requested identity.");
             LegacyPersisted rewritten = JsonUtility.FromJson<LegacyPersisted>(File.ReadAllText(MemoryPath));
             Assert.IsTrue(string.IsNullOrEmpty(rewritten.chatHistoryJson) && string.IsNullOrEmpty(rewritten.transcriptEntriesJson),
                 "The memory document no longer carries the conversation, so the migration does not run twice.");
             FileAgentMemoryStore reloaded = NewStore();
             Assert.AreEqual(2, reloaded.GetChatHistory(_roleId).Length);
             Assert.AreEqual(3, reloaded.GetTranscriptEntries(_roleId, 0).Count);
+        }
+
+        [TestCase(false, "")]
+        [TestCase(false, "another-role")]
+        [TestCase(false, null)]
+        [TestCase(true, "")]
+        [TestCase(true, "another-role")]
+        [TestCase(true, null)]
+        public void LegacyConversation_ExplicitInvalidIdentity_IsRejectedBeforeMutation(bool legacyFilename,
+            string storedIdentity)
+        {
+            LegacyPersisted legacy = new LegacyPersisted
+            {
+                memory = "preserve memory",
+                chatHistoryJson = JsonUtility.ToJson(new LegacyChatWrapper
+                {
+                    Items = new[] { new ChatMessage("user", "preserve conversation") }
+                })
+            };
+            JObject document = JObject.Parse(JsonUtility.ToJson(legacy));
+            document["roleId"] = storedIdentity == null ? JValue.CreateNull() : new JValue(storedIdentity);
+            string path = legacyFilename ? LegacyMemoryPath : MemoryPath;
+            File.WriteAllText(path, document.ToString(Formatting.None));
+            byte[] originalBytes = File.ReadAllBytes(path);
+            using FileAgentMemoryStore store = NewStore();
+
+            Assert.AreEqual(AgentMemoryLoadStatus.Failed, store.TryLoadDetailed(_roleId, out _));
+            Assert.Throws<InvalidDataException>(() => store.GetChatHistory(_roleId));
+
+            CollectionAssert.AreEqual(originalBytes, File.ReadAllBytes(path));
+            Assert.IsFalse(File.Exists(HistoryPath));
+            Assert.IsFalse(File.Exists(LegacyMemoryPath + ".legacy"));
+            if (legacyFilename)
+            {
+                Assert.IsFalse(File.Exists(MemoryPath));
+            }
         }
 
         [Test]

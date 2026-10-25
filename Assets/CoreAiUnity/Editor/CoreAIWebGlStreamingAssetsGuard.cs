@@ -77,59 +77,15 @@ namespace CoreAI.Editor
                 return;
             }
 
-            string streamingAssetsAbsolute = Path.Combine(Application.dataPath, "StreamingAssets");
-            string backupRoot = GetBackupRoot();
-
-            // WHY: entries left over from an interrupted build are still parked in the backup root; carry
-            // them into the new manifest instead of overwriting (and thereby orphaning) them.
-            List<MovedFolderEntry> moved = LoadPendingEntries(backupRoot);
-            int carriedOver = moved.Count;
-
-            if (!Directory.Exists(streamingAssetsAbsolute))
-            {
-                if (carriedOver == 0)
-                {
-                    EraseManifest(backupRoot);
-                }
-
-                return;
-            }
-
-            Directory.CreateDirectory(backupRoot);
-
             try
             {
-                string[] subDirectories =
-                    Directory.GetDirectories(streamingAssetsAbsolute, "*", SearchOption.TopDirectoryOnly);
-                foreach (string sourceAbs in subDirectories)
+                string projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? string.Empty;
+                int newlyMoved = ExcludeFolders(projectRoot, report.summary.platform);
+                if (newlyMoved > 0)
                 {
-                    string folderName = Path.GetFileName(sourceAbs);
-                    if (!ShouldGuardFolder(folderName))
-                    {
-                        continue;
-                    }
-
-                    string backupAbs = Path.Combine(backupRoot, folderName);
-                    if (Directory.Exists(backupAbs))
-                    {
-                        Directory.Delete(backupAbs, true);
-                    }
-
-                    Directory.Move(sourceAbs, backupAbs);
-                    MoveMetaIfExists(sourceAbs, backupAbs);
-
-                    moved.RemoveAll(e =>
-                        string.Equals(e.backupAbsolutePath, backupAbs, StringComparison.OrdinalIgnoreCase));
-                    moved.Add(new MovedFolderEntry
-                    {
-                        sourceAbsolutePath = sourceAbs,
-                        backupAbsolutePath = backupAbs
-                    });
-
-                    // WHY: persist after EVERY move. A manifest written only after the loop means an
-                    // IOException halfway through leaves already-moved folders with no record of where
-                    // they went, and Library/ is a directory users delete freely.
-                    PersistManifest(backupRoot, moved);
+                    AssetDatabase.Refresh();
+                    CoreAIEditorLog.Log(
+                        $"WebGL build: temporarily excluded {newlyMoved} StreamingAssets folder(s) from build output.");
                 }
             }
             catch (Exception ex)
@@ -139,23 +95,59 @@ namespace CoreAI.Editor
                 RestoreMovedFoldersIfAny(true);
                 throw;
             }
+        }
 
-            if (moved.Count == 0)
+        internal static int ExcludeFolders(string projectRoot, BuildTarget target,
+            Action<string, string> afterFolderMove = null)
+        {
+            if (target != BuildTarget.WebGL)
             {
-                EraseManifest(backupRoot);
-                return;
+                return 0;
             }
 
-            int newlyMoved = moved.Count - carriedOver;
-            if (newlyMoved <= 0)
+            string backupRoot = GetBackupRoot(projectRoot);
+            RestoreMovedFolders(backupRoot, projectRoot, false, target);
+            List<MovedFolderEntry> moved = LoadManifest(backupRoot);
+            if (moved.Count > 0)
             {
-                return;
+                throw new BuildFailedException(
+                    "StreamingAssets guard has unresolved backups. Resolve the source/backup conflict before building.");
             }
 
-            AssetDatabase.Refresh();
+            string streamingAssetsAbsolute = Path.Combine(projectRoot, "Assets", "StreamingAssets");
+            if (!Directory.Exists(streamingAssetsAbsolute))
+            {
+                return 0;
+            }
 
-            CoreAIEditorLog.Log(
-                $"WebGL build: temporarily excluded {newlyMoved} StreamingAssets folder(s) from build output.");
+            string generation = Guid.NewGuid().ToString("N");
+            string generationRoot = Path.Combine(backupRoot, generation);
+            foreach (string sourceAbs in Directory.GetDirectories(streamingAssetsAbsolute))
+            {
+                string folderName = Path.GetFileName(sourceAbs);
+                if (!ShouldGuardFolder(folderName))
+                {
+                    continue;
+                }
+
+                string backupAbs = Path.Combine(generationRoot, folderName);
+                Directory.CreateDirectory(generationRoot);
+                MovedFolderEntry entry = new MovedFolderEntry
+                {
+                    sourceAbsolutePath = sourceAbs,
+                    backupAbsolutePath = backupAbs,
+                    buildTarget = target.ToString(),
+                    buildId = generation
+                };
+                moved.Add(entry);
+                // WHY: Persist intent before effects so a fault between the folder and metadata moves is recoverable.
+                PersistManifest(backupRoot, moved);
+                Directory.Move(sourceAbs, backupAbs);
+                afterFolderMove?.Invoke(sourceAbs, backupAbs);
+                MoveMetaIfExists(sourceAbs, backupAbs);
+            }
+
+            return moved.Count;
         }
 
         public void OnPostprocessBuild(BuildReport report)
@@ -656,7 +648,13 @@ namespace CoreAI.Editor
 
         private static void RestoreMovedFoldersIfAny(bool refreshAssetDatabase)
         {
-            string backupRoot = GetBackupRoot();
+            string projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? string.Empty;
+            RestoreMovedFolders(GetBackupRoot(projectRoot), projectRoot, refreshAssetDatabase, BuildTarget.WebGL);
+        }
+
+        internal static void RestoreMovedFolders(string backupRoot, string projectRoot,
+            bool refreshAssetDatabase, BuildTarget target)
+        {
             List<MovedFolderEntry> entries = LoadManifest(backupRoot);
             if (entries.Count == 0)
             {
@@ -668,18 +666,21 @@ namespace CoreAI.Editor
             int restored = 0;
             foreach (MovedFolderEntry entry in entries)
             {
-                if (string.IsNullOrWhiteSpace(entry.sourceAbsolutePath) ||
-                    string.IsNullOrWhiteSpace(entry.backupAbsolutePath))
+                if (!EntryMatchesTarget(entry, target) || !EntryPathsAreSafe(entry, projectRoot, backupRoot))
                 {
+                    remaining.Add(entry);
                     continue;
                 }
 
-                if (!Directory.Exists(entry.backupAbsolutePath))
+                bool folderParked = Directory.Exists(entry.backupAbsolutePath);
+                bool metaParked = File.Exists(entry.backupAbsolutePath + ".meta");
+                if (!folderParked && !metaParked)
                 {
+                    RemoveEmptyGeneration(entry, backupRoot);
                     continue;
                 }
 
-                if (Directory.Exists(entry.sourceAbsolutePath))
+                if (folderParked && (Directory.Exists(entry.sourceAbsolutePath) || File.Exists(entry.sourceAbsolutePath)))
                 {
                     CoreAIEditorLog.LogWarning(
                         $"StreamingAssets guard restore skipped: destination already exists ({entry.sourceAbsolutePath}).");
@@ -689,8 +690,13 @@ namespace CoreAI.Editor
 
                 try
                 {
-                    Directory.Move(entry.backupAbsolutePath, entry.sourceAbsolutePath);
+                    if (folderParked)
+                    {
+                        Directory.Move(entry.backupAbsolutePath, entry.sourceAbsolutePath);
+                    }
+
                     MoveMetaIfExists(entry.backupAbsolutePath, entry.sourceAbsolutePath);
+                    RemoveEmptyGeneration(entry, backupRoot);
                     restored++;
                 }
                 catch (Exception ex)
@@ -724,25 +730,46 @@ namespace CoreAI.Editor
             CoreAIEditorLog.Log($"WebGL build: restored {restored} excluded StreamingAssets folder(s).");
         }
 
-        /// <summary>Manifest entries whose backup folder is still parked in the backup root.</summary>
-        private static List<MovedFolderEntry> LoadPendingEntries(string backupRoot)
+        private static bool EntryMatchesTarget(MovedFolderEntry entry, BuildTarget target)
         {
-            List<MovedFolderEntry> pending = new();
-            foreach (MovedFolderEntry entry in LoadManifest(backupRoot))
-            {
-                if (!string.IsNullOrWhiteSpace(entry.backupAbsolutePath) &&
-                    Directory.Exists(entry.backupAbsolutePath))
-                {
-                    pending.Add(entry);
-                }
-            }
-
-            return pending;
+            return entry != null && target == BuildTarget.WebGL &&
+                   (string.IsNullOrEmpty(entry.buildTarget) ||
+                    string.Equals(entry.buildTarget, target.ToString(), StringComparison.Ordinal));
         }
 
-        private static string GetBackupRoot()
+        private static void RemoveEmptyGeneration(MovedFolderEntry entry, string backupRoot)
         {
-            string projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? string.Empty;
+            if (string.IsNullOrEmpty(entry.buildId))
+            {
+                return;
+            }
+
+            string generationRoot = Path.GetDirectoryName(entry.backupAbsolutePath);
+            string expectedRoot = Path.Combine(backupRoot, entry.buildId);
+            if (string.Equals(Path.GetFullPath(generationRoot), Path.GetFullPath(expectedRoot),
+                    StringComparison.OrdinalIgnoreCase) &&
+                IsPathBelow(generationRoot, backupRoot) && Directory.Exists(generationRoot) &&
+                Directory.GetFileSystemEntries(generationRoot).Length == 0)
+            {
+                Directory.Delete(generationRoot);
+            }
+        }
+
+        private static bool EntryPathsAreSafe(MovedFolderEntry entry, string projectRoot, string backupRoot)
+        {
+            return IsPathBelow(entry.sourceAbsolutePath, Path.Combine(projectRoot, "Assets", "StreamingAssets")) &&
+                   IsPathBelow(entry.backupAbsolutePath, backupRoot);
+        }
+
+        private static bool IsPathBelow(string path, string root)
+        {
+            return !string.IsNullOrWhiteSpace(path) && Path.GetFullPath(path).StartsWith(
+                Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
+                Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static string GetBackupRoot(string projectRoot)
+        {
             return Path.Combine(projectRoot, "Library", "CoreAI", "WebGlBuildBackup");
         }
 
@@ -764,7 +791,17 @@ namespace CoreAI.Editor
         {
             Directory.CreateDirectory(backupRoot);
             MovedFoldersManifest manifest = new() { entries = entries?.ToArray() ?? Array.Empty<MovedFolderEntry>() };
-            File.WriteAllText(GetManifestPath(backupRoot), JsonUtility.ToJson(manifest));
+            string path = GetManifestPath(backupRoot);
+            string temporaryPath = path + ".tmp";
+            File.WriteAllText(temporaryPath, JsonUtility.ToJson(manifest));
+            if (File.Exists(path))
+            {
+                File.Replace(temporaryPath, path, null);
+            }
+            else
+            {
+                File.Move(temporaryPath, path);
+            }
         }
 
         /// <summary>Reads the restore manifest, returning an empty list when it is missing or unreadable.</summary>
@@ -813,34 +850,33 @@ namespace CoreAI.Editor
 
         private static void PersistManifest(string backupRoot, List<MovedFolderEntry> entries)
         {
-            try
-            {
-                WriteManifestFile(backupRoot, entries);
-            }
-            catch (Exception ex)
-            {
-                CoreAIEditorLog.LogWarning($"StreamingAssets guard: cannot write restore manifest: {ex.Message}");
-            }
+            WriteManifestFile(backupRoot, entries);
 
             // WHY: SessionState stays as a fast in-session cache; the file is the source of truth.
             MovedFoldersManifest manifest = new() { entries = entries?.ToArray() ?? Array.Empty<MovedFolderEntry>() };
-            SessionState.SetString(SessionStateKey, JsonUtility.ToJson(manifest));
+            SessionState.SetString(SessionStateKey + backupRoot, JsonUtility.ToJson(manifest));
         }
 
         private static List<MovedFolderEntry> LoadManifest(string backupRoot)
         {
-            List<MovedFolderEntry> fromFile = ReadManifestFile(backupRoot);
-            if (fromFile.Count > 0)
+            string path = GetManifestPath(backupRoot);
+            if (File.Exists(path))
             {
-                return fromFile;
+                MovedFoldersManifest manifest = JsonUtility.FromJson<MovedFoldersManifest>(File.ReadAllText(path));
+                if (manifest?.entries == null)
+                {
+                    throw new BuildFailedException("StreamingAssets guard restore manifest is invalid; preserve it for recovery.");
+                }
+
+                return new List<MovedFolderEntry>(manifest.entries);
             }
 
-            return ParseManifest(SessionState.GetString(SessionStateKey, string.Empty));
+            return ParseManifest(SessionState.GetString(SessionStateKey + backupRoot, string.Empty));
         }
 
         private static void EraseManifest(string backupRoot)
         {
-            SessionState.EraseString(SessionStateKey);
+            SessionState.EraseString(SessionStateKey + backupRoot);
             try
             {
                 string path = GetManifestPath(backupRoot);
@@ -866,7 +902,7 @@ namespace CoreAI.Editor
 
             if (File.Exists(toMeta))
             {
-                File.Delete(toMeta);
+                throw new IOException("StreamingAssets guard metadata destination already exists.");
             }
 
             File.Move(fromMeta, toMeta);
@@ -901,6 +937,8 @@ namespace CoreAI.Editor
         {
             public string sourceAbsolutePath;
             public string backupAbsolutePath;
+            public string buildTarget;
+            public string buildId;
         }
 
         private readonly struct StagedAssembly

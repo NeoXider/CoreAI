@@ -671,6 +671,8 @@ namespace CoreAI.Mods.Rbx.Instances
             string resolvedOriginTag = overrideOwnership ? originTag : sourceRecord.OriginTag;
             RbxInstance copy = Registry.Create(
                 ClassName, resolvedOwnerModId, resolvedOriginTag, authority,
+                ownerActorId: overrideOwnership ? null : sourceRecord.OwnerActorId,
+                accessScope: overrideOwnership ? (InstanceAccessScope?)null : sourceRecord.AccessScope,
                 operation: "cloning " + ClassName);
             try
             {
@@ -1145,15 +1147,20 @@ namespace CoreAI.Mods.Rbx.Instances
         private void DisconnectSignals()
         {
             _attributeSignals?.DisconnectAll();
-            if (_signals == null)
+            if (_signals != null)
             {
-                return;
+                foreach (RbxScriptSignal signal in _signals.Values)
+                {
+                    signal.DisconnectAll();
+                }
             }
 
-            foreach (RbxScriptSignal signal in _signals.Values)
-            {
-                signal.DisconnectAll();
-            }
+            DisconnectCustomSignals();
+        }
+
+        /// <summary>Disconnects subclass-owned signals once during Destroy, preserving queued calls.</summary>
+        protected virtual void DisconnectCustomSignals()
+        {
         }
 
         private RbxScriptSignal GetSignal(string signalName)

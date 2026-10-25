@@ -1,5 +1,8 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using CoreAI.Benchmarking;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode
@@ -104,6 +107,156 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(95, score.Base, 1e-6);
             Assert.AreEqual(BenchmarkClassification.Partial, score.Classification);
+        }
+
+        [TestCase(false, 1)]
+        [TestCase(true, 1)]
+        [TestCase(true, 2)]
+        public void BenchmarkMandatoryGates_SurviveMeanAggregationAndReportImport(bool extreme, int repetitions)
+        {
+            BenchmarkReport report = new();
+            for (int repetition = 1; repetition <= repetitions; repetition++)
+            {
+                BenchmarkCheckpoint[] checkpoints = { Cp("main", 95, true), Cp("gate", 5, repetition > 1, true) };
+                report.Add(new ScenarioResult
+                {
+                    ScenarioId = "gated", ScenarioName = "Gated scenario", Group = "G2", Extreme = extreme,
+                    Repetition = repetition, Checkpoints = checkpoints, Score = GoalScore.Compute(checkpoints)
+                });
+            }
+
+            string json = BenchmarkReportFormatter.ToJson(report);
+            BenchmarkReport restored = BenchmarkRunStore.ImportReport(json).ToReport();
+            foreach (BenchmarkReport candidate in new[] { report, restored })
+            {
+                Assert.AreEqual(repetitions == 1 ? 95 : 97.5, candidate.SuiteBaseScore, 1e-6);
+                Assert.AreEqual(BenchmarkClassification.Partial, candidate.Scenarios()[0].Classification);
+                Assert.AreEqual(0, candidate.PassCount);
+                Assert.AreEqual(0, candidate.PassRate);
+                Assert.AreEqual(1, candidate.PartialCount);
+                Assert.AreEqual(0, candidate.GroupBreakdown()[0].PassCount);
+                Assert.AreEqual(0, candidate.ExtremePassCount);
+                Assert.AreEqual(0, candidate.GroupBreakdown()[0].ExtremePassCount);
+                StringAssert.Contains("PASS 0 / PARTIAL 1 / FAIL 0", BenchmarkReportFormatter.ToMarkdown(candidate));
+                if (extreme) StringAssert.Contains("(0/1 pass)", BenchmarkReportFormatter.ToMarkdown(candidate));
+                JObject summary = JObject.Parse(BenchmarkReportFormatter.ToJson(candidate));
+                Assert.AreEqual(0, (int)summary["summary"]["pass"]);
+                Assert.AreEqual(0, (int)summary["summary"]["groups"]["G2"]["pass"]);
+            }
+
+            JObject fallback = JObject.Parse(json);
+            ((JObject)fallback["summary"]).Remove("extremeScenarios");
+            ((JObject)fallback["summary"]).Remove("groups");
+            ModelSummary model = ModelComparison.ParseSummaryJson(fallback.ToString());
+            Assert.AreEqual(0, model.ExtremePass, "Raw-row reconstruction must retain mandatory gates.");
+            Assert.AreEqual(1, model.Scenarios);
+        }
+
+        [Test]
+        public void BenchmarkRepetitionMean_DoesNotRequireEveryIndividualNumericScoreToPass()
+        {
+            BenchmarkReport report = new();
+            foreach (int points in new[] { 80, 100 })
+            {
+                BenchmarkCheckpoint[] checkpoints = { Cp("earned", points, true), Cp("missed", 100 - points, false) };
+                report.Add(new ScenarioResult
+                {
+                    ScenarioId = "mean", Score = GoalScore.Compute(checkpoints), Checkpoints = checkpoints
+                });
+            }
+            Assert.AreEqual(90, report.SuiteBaseScore);
+            Assert.AreEqual(1, report.PassCount, "Mandatory obligations survive; numeric classification still uses the mean.");
+        }
+
+        [TestCase(FailureAttribution.Model)]
+        [TestCase(FailureAttribution.Environment)]
+        [TestCase(FailureAttribution.Framework)]
+        public void BenchmarkExcludedDeadline_PreservesAttributionWithoutAffectingScoresOrRoleSpeed(FailureAttribution attribution)
+        {
+            BenchmarkCheckpoint[] measured = Enum.GetValues(typeof(BenchmarkDimension)).Cast<BenchmarkDimension>()
+                .Select(d => new BenchmarkCheckpoint(d.ToString(), d.ToString(), 10, true, dimension: d)).ToArray();
+            BenchmarkReport report = new();
+            report.Add(new ScenarioResult
+            {
+                ScenarioId = "measured", Group = "G2", Score = GoalScore.Compute(measured), Checkpoints = measured,
+                CompletionTokens = 10, GenerationMs = 1000
+            });
+            double[] ratings = RoleFitness.Evaluate(report).Roles.Select(r => r.Rating).ToArray();
+            report.Add(new ScenarioResult
+            {
+                ScenarioId = "custom", Group = "G6", Extreme = true, ExcludeFromScoring = true,
+                Attribution = attribution, TimedOut = true, Failure = "scripted deadline", ToolCalls = 3,
+                CompletionTokens = 1000000, GenerationMs = 1,
+                Checkpoints = new[] { Cp("unrelated", 100, false, true) }
+            });
+
+            BenchmarkReport restored = BenchmarkRunStore.ImportReport(BenchmarkReportFormatter.ToJson(report)).ToReport();
+            foreach (BenchmarkReport candidate in new[] { report, restored })
+            {
+                Assert.AreEqual(attribution, candidate.Results[1].Attribution);
+                Assert.IsTrue(candidate.Results[1].ExcludeFromScoring);
+                Assert.AreEqual(2, candidate.Results.Count);
+                Assert.AreEqual(1, candidate.ScenarioCount);
+                Assert.AreEqual(100, candidate.SuiteBaseScore);
+                Assert.AreEqual(0, candidate.ExtremeScenarioCount);
+                Assert.AreEqual(1, candidate.GroupBreakdown().Count);
+                Assert.AreEqual(6, candidate.DimensionBreakdown().Count);
+                Assert.IsTrue(candidate.DimensionBreakdown().All(d => d.Score == 100));
+                CollectionAssert.AreEqual(ratings, RoleFitness.Evaluate(candidate).Roles.Select(r => r.Rating));
+                Assert.AreEqual(3, candidate.TotalToolCalls, "Unscored evidence must stay visible.");
+            }
+
+            JObject fallback = JObject.Parse(BenchmarkReportFormatter.ToJson(report));
+            ((JObject)fallback["summary"]).Remove("extremeScenarios");
+            ((JObject)fallback["summary"]).Remove("groups");
+            ModelSummary summary = ModelComparison.ParseSummaryJson(fallback.ToString());
+            Assert.AreEqual(1, summary.Scenarios);
+            Assert.AreEqual(0, summary.ExtremeScenarios);
+            Assert.AreEqual(1, summary.Groups.Count);
+        }
+
+        [Test]
+        public void BenchmarkInterruptedAttempt_IsEvidenceWithoutFinalizationAndIsReplacedOnce()
+        {
+            BenchmarkPlannedScenario[] plan = { new BenchmarkPlannedScenario { Id = "partial", Group = "G2", Repetition = 1 } };
+            BenchmarkTargetState state = new();
+            state.Merge(new ScenarioResult
+            {
+                ScenarioId = "partial", Group = "G2", Interrupted = true,
+                SessionTranscript = "partial answer", ToolTraceJsonl = "partial tool evidence", ToolCalls = 1
+            }, plan);
+            Assert.IsFalse(state.IsFinalized("partial", 1));
+            Assert.AreEqual(0, state.ToReport().ScenarioCount);
+            BenchmarkTargetState restored = BenchmarkRunStore.ImportReport(BenchmarkReportFormatter.ToJson(state.ToReport()));
+            Assert.IsFalse(restored.IsFinalized("partial", 1));
+            Assert.AreEqual("partial answer", restored.Results[0].SessionTranscript);
+            Assert.IsTrue(restored.Results[0].Interrupted);
+            StringAssert.Contains("INTERRUPTED", BenchmarkReportFormatter.ToMarkdown(state.ToReport()));
+            BenchmarkCheckpoint[] checkpoints = { Cp("done", 1, true) };
+            restored.Merge(new ScenarioResult
+            {
+                ScenarioId = "partial", Group = "G2", Score = GoalScore.Compute(checkpoints), Checkpoints = checkpoints
+            }, plan);
+            Assert.AreEqual(1, restored.Results.Count);
+            Assert.IsTrue(restored.IsFinalized("partial", 1));
+            Assert.AreEqual(1, restored.ToReport().PassCount);
+        }
+
+        [TestCase(null, 120)]
+        [TestCase("NaN", 120)]
+        [TestCase("Infinity", 120)]
+        [TestCase("-10", 0)]
+        [TestCase("0", 0)]
+        [TestCase("23.5", 23.5)]
+        [TestCase("5000", 3600)]
+        public void BenchmarkStallThreshold_UsesFiniteNormalizedResumeIdentity(string raw, double expected)
+        {
+            Assert.AreEqual(expected, BenchmarkProviderFailurePolicy.NormalizeStallSeconds(raw));
+            const string key = "COREAI_BENCHMARK_PROVIDER_STALL_SECONDS";
+            Assert.IsTrue(BenchmarkRunManifest.OptionMatches(key, raw, expected.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            double differentNormalizedThreshold = expected == 0 ? 1 : 0;
+            Assert.IsFalse(BenchmarkRunManifest.OptionMatches(key, raw, differentNormalizedThreshold.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            Assert.IsTrue(BenchmarkRunManifest.OptionMatches("COREAI_BENCHMARK_RETRIES", "0", "3"));
         }
 
         [Test]

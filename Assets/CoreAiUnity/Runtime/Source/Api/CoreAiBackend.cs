@@ -126,6 +126,14 @@ namespace CoreAI
         /// <summary>Raised after a successful switch/mutation, with the now-active execution mode.</summary>
         public static event Action<CoreAiBackendStatus>? OnBackendChanged;
 
+        internal static void ResetStaticState()
+        {
+            lock (SyncRoot)
+            {
+                OnBackendChanged = null;
+            }
+        }
+
         /// <summary>Current backend snapshot (settings-level; independent of in-flight requests).</summary>
         public static CoreAiBackendStatus Status
         {

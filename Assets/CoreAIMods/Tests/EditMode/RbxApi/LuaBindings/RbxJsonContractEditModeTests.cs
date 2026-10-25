@@ -816,6 +816,93 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
+        public void RBX008_RepeatedStringsStopAtTheByteQuotaWithBoundedAllocation()
+        {
+            LuaCsRbxNetworkCodec codec = NewStandaloneCodec();
+            LuaTable repeated = new();
+            string shared = new('x', 4096);
+            for (int index = 1; index <= 256; index++)
+            {
+                repeated[index] = new LuaValue(shared);
+            }
+
+            LuaValue[] arguments = { new LuaValue(repeated) };
+            Assert.Throws<RbxError>(() => codec.EncodeArguments(arguments));
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            RbxError error = Assert.Throws<RbxError>(() => codec.EncodeArguments(arguments));
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.AreEqual(RbxErrorCode.PayloadTooLarge, error.Code);
+            StringAssert.Contains("encoding stopped", error.RawMessage);
+            Assert.Less(allocated, 1_500_000L,
+                "the 1 MiB expansion must be refused without materializing its JSON/string/UTF-8 copies");
+        }
+
+        [Test]
+        public void RBX008_OneHugeStringIsRejectedBeforeJsonEscapingAllocatesItsBuffer()
+        {
+            LuaCsRbxNetworkCodec codec = NewStandaloneCodec();
+            LuaValue[] arguments = { new LuaValue(new string('"', 1_000_000)) };
+            Assert.Throws<RbxError>(() => codec.EncodeArguments(arguments));
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            RbxError error = Assert.Throws<RbxError>(() => codec.EncodeArguments(arguments));
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.AreEqual(RbxErrorCode.PayloadTooLarge, error.Code);
+            Assert.Less(allocated, 500_000L);
+        }
+
+        [TestCase("x", 1)]
+        [TestCase("\"", 2)]
+        [TestCase("\n", 2)]
+        [TestCase("\u00e9", 2)]
+        [TestCase("\u2028", 6)]
+        [TestCase("\ud83d\ude03", 4)]
+        public void RBX008_ByteQuotaIncludesEscapingMultibyteCharactersAndEnvelope(string unit, int bytes)
+        {
+            LuaCsRbxNetworkCodec codec = NewStandaloneCodec();
+            int contentBytes = LuaCsRbxNetworkCodec.MaxPayloadBytes - 4;
+            StringBuilder text = new();
+            for (int index = 0; index < contentBytes / bytes; index++)
+            {
+                text.Append(unit);
+            }
+
+            text.Append('a', contentBytes % bytes);
+            string content = text.ToString();
+            byte[] wire = codec.EncodeArguments(new LuaValue[] { new LuaValue(content) });
+            Assert.AreEqual(LuaCsRbxNetworkCodec.MaxPayloadBytes, wire.Length);
+            Assert.AreEqual(content, codec.DecodeArguments(wire)[0]);
+            RbxError error = Assert.Throws<RbxError>(() => codec.EncodeArguments(
+                new LuaValue[] { new LuaValue(content + "a") }));
+            Assert.AreEqual(RbxErrorCode.PayloadTooLarge, error.Code);
+        }
+
+        [Test]
+        public void RBX008_DictionaryKeysTagsAndDelimitersCountTowardTheWireQuota()
+        {
+            LuaCsRbxNetworkCodec codec = NewStandaloneCodec();
+            LuaTable table = new();
+            table[new string('k', 40_000)] = new LuaValue(new string('v', 30_000));
+            RbxError error = Assert.Throws<RbxError>(() => codec.EncodeArguments(
+                new LuaValue[] { new LuaValue(table) }));
+            Assert.AreEqual(RbxErrorCode.PayloadTooLarge, error.Code);
+            LuaTable collision = new();
+            LuaValue booleanKey = new(true);
+            collision[booleanKey] = new LuaValue("first");
+            collision[booleanKey.ToString()] = new LuaValue("second");
+            byte[] wire = codec.EncodeArguments(new LuaValue[] { new LuaValue(collision) });
+            Assert.AreEqual(1, ((LuaCsRbxNetworkTable)codec.DecodeArguments(wire)[0])
+                .DictionaryValues.Count);
+            LuaTable cycle = new();
+            cycle["self"] = new LuaValue(cycle);
+            collision[booleanKey] = new LuaValue(cycle);
+            RbxError cyclic = Assert.Throws<RbxError>(() => codec.EncodeArguments(
+                new LuaValue[] { new LuaValue(collision) }));
+            Assert.AreEqual(RbxErrorCode.BadArgument, cyclic.Code);
+            StringAssert.Contains("cyclic table", cyclic.RawMessage);
+        }
+
+        [Test]
         public void NetworkCodec_DecodeErrorDeepInsideAStructure_ReportsTheExactPathText()
         {
             LuaCsRbxNetworkCodec codec = NewStandaloneCodec();

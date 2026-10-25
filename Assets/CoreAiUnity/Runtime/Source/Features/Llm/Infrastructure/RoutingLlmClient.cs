@@ -211,7 +211,12 @@ namespace CoreAI.Infrastructure.Llm
                     }
 
                     LlmStreamChunk chunk = enumerator.Current;
-                    if (chunk != null && (chunk.ErrorCode != LlmErrorCode.None || !string.IsNullOrEmpty(chunk.Error)))
+                    if (chunk == null)
+                    {
+                        continue;
+                    }
+
+                    if (chunk.ErrorCode != LlmErrorCode.None || !string.IsNullOrEmpty(chunk.Error))
                     {
                         // WHY: an error chunk after the caller cancelled is the caller's stop whatever its code
                         // (LlmCancellation.ClassifyCode); route health keeps the code the endpoint reported.
@@ -226,13 +231,16 @@ namespace CoreAI.Infrastructure.Llm
                         {
                             chunk = chunk.WithError(LlmCancellation.CancelledErrorText, LlmErrorCode.Cancelled);
                         }
-                    }
 
-                    if (chunk != null && !string.IsNullOrEmpty(chunk.Error))
-                    {
                         ok = false;
-                        error = chunk.Error;
-                        errorCode = chunk.ErrorCode;
+                        error = chunk.Error ?? "";
+                        errorCode = chunk.ErrorCode == LlmErrorCode.None
+                            ? LlmErrorCode.ProviderError
+                            : chunk.ErrorCode;
+                        if (faultCode == LlmErrorCode.None)
+                        {
+                            faultCode = errorCode;
+                        }
                     }
 
                     // WHY: count reasoning too — reasoning models (DeepSeek/Qwen) can emit far more

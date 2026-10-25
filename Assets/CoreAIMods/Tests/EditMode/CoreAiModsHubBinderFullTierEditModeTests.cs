@@ -1,6 +1,7 @@
 #if COREAI_HAS_HUB
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
@@ -12,6 +13,8 @@ using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Demos;
+using CoreAI.Hub;
+using CoreAI.Infrastructure.Lua;
 using CoreAI.Mods.WorldPackages;
 using NUnit.Framework;
 using UnityEngine;
@@ -31,6 +34,11 @@ namespace CoreAI.Tests.EditMode
     {
         private sealed class RecordingWorldRuntimeService : IRbxWorldRuntimeService
         {
+            public Exception AutoLoadFailure;
+            public Exception ConfirmationFailure;
+            public string ConfirmationError;
+            public UniTaskCompletionSource<RbxWorldLoadResult> ConfirmationCompletion;
+            public int ListenerCount => ManualLoadConfirmationRequested?.GetInvocationList().Length ?? 0;
             public IReadOnlyList<RbxAutoSaveInfo> ListAutoSaves()
             {
                 return AutoSaves.ToArray();
@@ -42,6 +50,11 @@ namespace CoreAI.Tests.EditMode
                 CancellationToken cancellationToken = default)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (AutoLoadFailure != null)
+                {
+                    throw AutoLoadFailure;
+                }
+
                 AutoLoadCallers.Add(caller);
                 RequestedAutoFiles.Add(autoFileName);
                 return QueuePending(autoFileName);
@@ -140,6 +153,7 @@ namespace CoreAI.Tests.EditMode
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 ConfirmCalls++;
+                _pending.RemoveAll(request => request.ExpiresAtUtc <= UtcNow);
                 int index = _pending.FindIndex(request =>
                     string.Equals(request.RequestId, requestId, StringComparison.Ordinal));
                 if (index < 0)
@@ -151,6 +165,21 @@ namespace CoreAI.Tests.EditMode
                 }
 
                 _pending.RemoveAt(index);
+                if (ConfirmationFailure != null)
+                {
+                    throw ConfirmationFailure;
+                }
+
+                if (ConfirmationCompletion != null)
+                {
+                    return ConfirmationCompletion.Task;
+                }
+
+                if (ConfirmationError != null)
+                {
+                    return UniTask.FromResult(new RbxWorldLoadResult(false, ConfirmationError, 0));
+                }
+
                 if (!playerConfirmed)
                 {
                     return UniTask.FromResult(new RbxWorldLoadResult(
@@ -740,6 +769,119 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        [TestCase("failed")]
+        [TestCase("exception")]
+        [TestCase("cancelled")]
+        [TestCase("expired")]
+        public void WorldLoadPage_FailedDecisionOutcomeSurvivesFinallyAndLaterInventoryRefresh(string failure)
+        {
+            RecordingWorldRuntimeService service = new();
+            HubWorldLoadConfirmationPage page = new(service);
+            try
+            {
+                VisualElement root = (VisualElement)page.CreatePageContent();
+                RbxWorldLoadRequest request = service.RequestManualLoadAsync(default, "broken").GetAwaiter().GetResult();
+                Button confirm = root.Q<Button>("coreai-world-load-confirm-" + request.RequestId);
+                if (failure == "failed")
+                {
+                    service.ConfirmationError = "load refused";
+                }
+                else if (failure == "exception")
+                {
+                    service.ConfirmationFailure = new InvalidOperationException("load threw");
+                }
+                else if (failure == "cancelled")
+                {
+                    service.ConfirmationFailure = new OperationCanceledException();
+                }
+                else
+                {
+                    service.UtcNow = service.UtcNow.AddMinutes(2);
+                }
+
+                InvokeButton(confirm);
+                Label outcome = root.Q<Label>("coreai-world-load-outcome");
+                string text = outcome.text;
+                StringAssert.Contains(failure == "cancelled" ? "cancelled" : "failed", text);
+                Assert.AreEqual("No pending requests.", root.Q<Label>("coreai-hub-world-loads-status").text);
+
+                page.OnActivated();
+                page.OnActivated();
+                Assert.AreEqual(text, outcome.text,
+                    "Pending-list refresh cannot erase the last operation's failure or cancellation.");
+                Assert.AreEqual(0, service.AppliedCount);
+            }
+            finally
+            {
+                page.OnDestroyed();
+            }
+        }
+
+        [Test]
+        public void WorldLoadPage_AutosaveRequestFailureRemainsVisibleAfterRefresh()
+        {
+            RecordingWorldRuntimeService service = new()
+            {
+                AutoLoadFailure = new InvalidOperationException("autosave unreadable")
+            };
+            service.AutoSaves.Add(new RbxAutoSaveInfo("broken.world", "interval", DateTime.UtcNow, 10));
+            HubWorldLoadConfirmationPage page = new(service);
+            try
+            {
+                VisualElement root = (VisualElement)page.CreatePageContent();
+                Button request = root.Q<Button>("coreai-autosave-load-broken.world");
+                Assert.IsNotNull(request);
+                InvokeButton(request);
+                page.OnActivated();
+                StringAssert.Contains("autosave unreadable", root.Q<Label>("coreai-world-load-outcome").text);
+                Assert.AreEqual(0, service.GetPendingManualLoads().Count);
+            }
+            finally
+            {
+                page.OnDestroyed();
+            }
+        }
+
+        [Test]
+        public void WorldLoadRegistration_RevivesWithANewPageAndFencesAnOutstandingOldDecision()
+        {
+            RecordingWorldRuntimeService service = new()
+            {
+                ConfirmationCompletion = new UniTaskCompletionSource<RbxWorldLoadResult>()
+            };
+            HubPageRegistry registry = new();
+            int attention = 0;
+            HubWorldLoadConfirmationPage old = HubModsPages.RegisterWorldLoadConfirmation(
+                registry, service, () => attention++);
+            VisualElement oldRoot = (VisualElement)old.CreatePageContent();
+            RbxWorldLoadRequest request = service.RequestManualLoadAsync(default, "old").GetAwaiter().GetResult();
+            InvokeButton(oldRoot.Q<Button>("coreai-world-load-confirm-" + request.RequestId));
+            old.OnDestroyed();
+            Assert.AreEqual(0, service.ListenerCount);
+            Assert.IsTrue(registry.TryGet(HubModsPages.WorldLoadsPageId, out Func<IHubPage> factory));
+            HubWorldLoadConfirmationPage replacement = (HubWorldLoadConfirmationPage)factory();
+            try
+            {
+                Assert.AreNotSame(old, replacement);
+                VisualElement replacementRoot = (VisualElement)replacement.CreatePageContent();
+                Assert.AreEqual(1, service.ListenerCount);
+                service.ConfirmationCompletion.TrySetResult(new RbxWorldLoadResult(false, "old completion", 0));
+                Assert.AreEqual("", replacementRoot.Q<Label>("coreai-world-load-outcome").text);
+                StringAssert.DoesNotContain("old completion", oldRoot.Q<Label>("coreai-world-load-outcome").text);
+                service.ConfirmationCompletion = null;
+                RbxWorldLoadRequest next = service.RequestManualLoadAsync(default, "next").GetAwaiter().GetResult();
+                InvokeButton(replacementRoot.Q<Button>("coreai-world-load-reject-" + next.RequestId));
+                Assert.AreEqual(2, attention);
+                Assert.AreEqual(2, service.ConfirmCalls);
+            }
+            finally
+            {
+                registry.Unregister(HubModsPages.WorldLoadsPageId);
+            }
+
+            Assert.AreEqual(0, service.ListenerCount);
+        }
+
         private static void InvokeButton(Button button)
         {
             MethodInfo invoke = typeof(Clickable).GetMethod(
@@ -868,7 +1010,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>In-memory package store so the test can drive import without touching the file system.</summary>
-        private sealed class FakeSourceStore : ILuaModSourceStore
+        private sealed class FakeSourceStore : ILuaModSourceStore, ILuaModSourceStrictWriter, ILuaModSourceStrictRemover
         {
             private sealed class Entry
             {
@@ -877,14 +1019,80 @@ namespace CoreAI.Tests.EditMode
             }
 
             private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
+            public bool ThrowOnSave;
+            public bool RefuseSave;
+            public bool ThrowOnDelete;
+            public bool RefuseDelete;
+            public bool ThrowOnSetActive;
+            public bool ThrowOnRead;
+            public bool RefusePersistenceArming;
+            public bool CancelStrictSave;
+            public int StrictSaveCalls;
+            public int StrictDeleteCalls;
+            public bool CancelStrictDelete;
+
+            public void DeleteStrict(string id)
+            {
+                StrictDeleteCalls++;
+                if (CancelStrictDelete)
+                {
+                    throw new OperationCanceledException();
+                }
+
+                if (ThrowOnDelete || RefuseDelete)
+                {
+                    throw new LuaModSourcePersistenceException(false, new IOException("source removal refused"));
+                }
+
+                Delete(id);
+                if (RefusePersistenceArming)
+                {
+                    throw new LuaModSourcePersistenceException(true, new IOException("automatic persistence arming refused"));
+                }
+            }
+
+            public void SaveStrict(string id, string source, LuaModManifest manifest)
+            {
+                StrictSaveCalls++;
+                if (CancelStrictSave)
+                {
+                    throw new OperationCanceledException();
+                }
+
+                if (ThrowOnSave || RefuseSave)
+                {
+                    throw new LuaModSourcePersistenceException(false, new IOException("source installation refused"));
+                }
+
+                Save(id, source, manifest);
+                if (RefusePersistenceArming)
+                {
+                    throw new LuaModSourcePersistenceException(true, new IOException("automatic persistence arming refused"));
+                }
+            }
 
             public void Save(string id, string source, LuaModManifest manifest)
             {
+                if (ThrowOnSave)
+                {
+                    throw new InvalidOperationException("source save refused");
+                }
+
+                if (RefuseSave)
+                {
+                    return;
+                }
+
                 _entries[id] = new Entry { Source = source, Manifest = manifest };
             }
 
             public bool TryLoad(string id, out string source, out LuaModManifest manifest)
             {
+                if (ThrowOnRead)
+                {
+                    throw new InvalidOperationException("source unreadable");
+                }
+
                 if (_entries.TryGetValue(id, out Entry entry))
                 {
                     source = entry.Source;
@@ -913,6 +1121,11 @@ namespace CoreAI.Tests.EditMode
 
             public void SetActive(string id, bool active)
             {
+                if (ThrowOnSetActive)
+                {
+                    throw new InvalidOperationException("active state refused");
+                }
+
                 if (_entries.TryGetValue(id, out Entry entry) && entry.Manifest != null)
                 {
                     entry.Manifest.Active = active;
@@ -921,8 +1134,29 @@ namespace CoreAI.Tests.EditMode
 
             public void Delete(string id)
             {
+                if (ThrowOnDelete)
+                {
+                    throw new InvalidOperationException("source delete refused");
+                }
+
+                if (RefuseDelete)
+                {
+                    return;
+                }
+
                 _entries.Remove(id);
             }
+        }
+
+        private sealed class LegacySourceStore : ILuaModSourceStore
+        {
+            public FakeSourceStore Storage { get; } = new();
+            public void Save(string id, string source, LuaModManifest manifest) => Storage.Save(id, source, manifest);
+            public bool TryLoad(string id, out string source, out LuaModManifest manifest) =>
+                Storage.TryLoad(id, out source, out manifest);
+            public IReadOnlyList<LuaModManifest> List() => Storage.List();
+            public void SetActive(string id, bool active) => Storage.SetActive(id, active);
+            public void Delete(string id) => Storage.Delete(id);
         }
 
         private static string ExportFullTierBundle()
@@ -994,6 +1228,401 @@ namespace CoreAI.Tests.EditMode
         {
             Assert.IsTrue(store.TryLoad(id, out _, out LuaModManifest manifest), "'" + id + "' must be stored.");
             return manifest.LoadOrder;
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void HubService_SaveRefusalReportsLiveAndStoredStateSeparatelyAndCanRetry(bool throws)
+        {
+            ActorContext actor = CreateHostActor();
+            FakeSourceStore store = new();
+            store.Save("edit", "local x = 1", new LuaModManifest { Id = "edit", Active = true });
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            using (LuaCsModRuntimeHubService service = new(runtime, actor, store))
+            {
+                runtime.LoadMod(actor, "edit", "local x = 1");
+                int liveLoads = 0;
+                runtime.AddModSourceLoadedListener(actor,
+                    (string id, string source, LuaCapabilities caps) => liveLoads++);
+                store.ThrowOnSave = throws;
+                store.RefuseSave = !throws;
+
+                HubModSaveResult failed = service.SaveOrReload("edit", "local x = 2", ModReloadMode.KeepObjects);
+
+                Assert.AreEqual(HubModPersistenceStatus.Failed, failed.PersistenceStatus);
+                Assert.IsFalse(failed.LocalCommitCompleted);
+                StringAssert.Contains("NOT saved", failed.Describe());
+                Assert.IsTrue(runtime.TryGetModSource(actor, "edit", out string live));
+                Assert.AreEqual("local x = 2", live);
+                Assert.IsTrue(store.TryLoad("edit", out string retained, out _));
+                Assert.AreEqual("local x = 1", retained);
+                store.ThrowOnSave = false;
+                store.RefuseSave = false;
+                HubModSaveResult retry = service.SaveOrReload("edit", "local x = 2", ModReloadMode.KeepObjects);
+                Assert.AreEqual(HubModPersistenceStatus.Saved, retry.PersistenceStatus);
+                Assert.IsTrue(retry.LocalCommitCompleted);
+                Assert.AreEqual(2, store.StrictSaveCalls);
+                Assert.AreEqual(1, liveLoads, "Retrying source storage must not execute the accepted main chunk again.");
+                Assert.IsTrue(store.TryLoad("edit", out string saved, out _));
+                Assert.AreEqual("local x = 2", saved);
+                service.SaveOrReload("edit", "local x = 2", ModReloadMode.KeepObjects);
+                Assert.AreEqual(2, liveLoads, "A new save after acknowledged persistence is a new execution.");
+            }
+        }
+
+        [Test]
+        public void HubService_ArmingRefusalReportsLocalCommitAndIdenticalRetryDoesNotReload()
+        {
+            ActorContext actor = CreateHostActor();
+            FakeSourceStore store = new() { RefusePersistenceArming = true };
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            int liveLoads = 0;
+            runtime.AddModSourceLoadedListener(actor,
+                (string id, string source, LuaCapabilities caps) => liveLoads++);
+            using (LuaCsModRuntimeHubService service = new(runtime, actor, store))
+            {
+                HubModSaveResult failed = service.SaveOrReload("arming", "local x = 1", ModReloadMode.KeepObjects);
+                Assert.AreEqual(HubModPersistenceStatus.Failed, failed.PersistenceStatus);
+                Assert.IsTrue(failed.LocalCommitCompleted);
+                StringAssert.Contains("saved locally", failed.Describe());
+                StringAssert.Contains("NOT armed", failed.Describe());
+                StringAssert.DoesNotContain("NOT saved", failed.Describe());
+                Assert.IsTrue(store.TryLoad("arming", out string source, out _));
+                Assert.AreEqual("local x = 1", source);
+
+                store.RefusePersistenceArming = false;
+                HubModSaveResult retry = service.SaveOrReload("arming", source, ModReloadMode.KeepObjects);
+                Assert.AreEqual(HubModPersistenceStatus.Saved, retry.PersistenceStatus);
+                Assert.AreEqual(2, store.StrictSaveCalls);
+                Assert.AreEqual(1, liveLoads);
+                Assert.IsFalse(retry.Reloaded, "A storage-only retry retains the original first-load receipt.");
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void HubService_LegacyStoreReadbackNeverAcknowledgesPersistence(bool silentlyRefuses)
+        {
+            ActorContext actor = CreateHostActor();
+            LegacySourceStore store = new();
+            store.Storage.RefuseSave = silentlyRefuses;
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            int liveLoads = 0;
+            runtime.AddModSourceLoadedListener(actor,
+                (string id, string source, LuaCapabilities caps) => liveLoads++);
+            using (LuaCsModRuntimeHubService service = new(runtime, actor, store))
+            {
+                HubModSaveResult first = service.SaveOrReload("legacy", "local x = 1", ModReloadMode.KeepObjects);
+                Assert.AreEqual(HubModPersistenceStatus.Unconfirmed, first.PersistenceStatus);
+                Assert.IsFalse(first.LocalCommitCompleted);
+                StringAssert.Contains("unconfirmed", first.Describe());
+                StringAssert.DoesNotContain("Saved & ran", first.Describe());
+                Assert.AreEqual(!silentlyRefuses, store.TryLoad("legacy", out _, out _));
+                Assert.Throws<InvalidOperationException>(() => service.SaveOrReload("legacy", "local x = 1"));
+                Assert.AreEqual(1, liveLoads, "A legacy persistence retry cannot justify running the same source twice.");
+            }
+        }
+
+        [Test]
+        public void HubService_StrictSaveCancellationPropagatesAndRetryDoesNotReload()
+        {
+            ActorContext actor = CreateHostActor();
+            FakeSourceStore store = new() { CancelStrictSave = true };
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            int liveLoads = 0;
+            runtime.AddModSourceLoadedListener(actor,
+                (string id, string source, LuaCapabilities caps) => liveLoads++);
+            using (LuaCsModRuntimeHubService service = new(runtime, actor, store))
+            {
+                Assert.Throws<OperationCanceledException>(() =>
+                    service.SaveOrReload("cancel", "local x = 1", ModReloadMode.KeepObjects));
+                store.CancelStrictSave = false;
+                HubModSaveResult retry = service.SaveOrReload("cancel", "local x = 1", ModReloadMode.KeepObjects);
+                Assert.AreEqual(HubModPersistenceStatus.Saved, retry.PersistenceStatus);
+                Assert.AreEqual(1, liveLoads);
+            }
+        }
+
+        [Test]
+        public void HubService_PersistenceRetryReexecutesWhenAnotherWriterChangedTheLiveSource()
+        {
+            ActorContext actor = CreateHostActor();
+            FakeSourceStore store = new() { RefusePersistenceArming = true };
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            int liveLoads = 0;
+            runtime.AddModSourceLoadedListener(actor,
+                (string id, string source, LuaCapabilities caps) => liveLoads++);
+            using (LuaCsModRuntimeHubService service = new(runtime, actor, store))
+            {
+                service.SaveOrReload("changed", "local draft = 1", ModReloadMode.KeepObjects);
+                runtime.ReloadMod(actor, "changed", "local external = 2");
+                store.RefusePersistenceArming = false;
+                HubModSaveResult retry = service.SaveOrReload("changed", "local draft = 1", ModReloadMode.KeepObjects);
+                Assert.AreEqual(HubModPersistenceStatus.Saved, retry.PersistenceStatus);
+                Assert.IsTrue(retry.Reloaded);
+                Assert.AreEqual(3, liveLoads,
+                    "A storage retry can reuse a prior live result only while its exact source remains live.");
+                Assert.IsTrue(runtime.TryGetModSource(actor, "changed", out string live));
+                Assert.AreEqual("local draft = 1", live);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void HubService_DeleteRefusalCannotClaimSuccessAndRemainsRetryable(bool throws)
+        {
+            ActorContext actor = CreateHostActor();
+            FakeSourceStore store = new();
+            store.Save("delete", "local x = 1", new LuaModManifest { Id = "delete", Active = true });
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            using (LuaCsModRuntimeHubService service = new(runtime, actor, store))
+            {
+                runtime.LoadMod(actor, "delete", "local x = 1");
+                store.ThrowOnDelete = throws;
+                store.RefuseDelete = !throws;
+                LuaModSourcePersistenceException failure = Assert.Throws<LuaModSourcePersistenceException>(() =>
+                    service.Delete("delete"));
+                Assert.IsFalse(failure.LocalCommitCompleted);
+
+                Assert.IsFalse(runtime.IsLoaded(actor, "delete"));
+                Assert.IsTrue(store.TryLoad("delete", out _, out _));
+                store.ThrowOnDelete = false;
+                store.RefuseDelete = false;
+                Assert.IsTrue(service.Delete("delete"));
+                Assert.IsFalse(store.TryLoad("delete", out _, out _));
+            }
+        }
+
+        [Test]
+        public void HubService_DeleteArmingFailureRemainsRetryableAfterTheLocalPackageIsGone()
+        {
+            ActorContext actor = CreateHostActor();
+            FakeSourceStore store = new();
+            store.Save("delete", "local x = 1", new LuaModManifest { Id = "delete" });
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            runtime.LoadMod(actor, "delete", "local x = 1");
+            int unloads = 0;
+            runtime.AddModSourceUnloadedListener(actor,
+                (string id, string source, LuaCapabilities caps) => unloads++);
+            using (LuaCsModRuntimeHubService service = new(runtime, actor, store))
+            {
+                store.RefusePersistenceArming = true;
+                LuaModSourcePersistenceException failure = Assert.Throws<LuaModSourcePersistenceException>(() =>
+                    service.Delete("delete"));
+                Assert.IsTrue(failure.LocalCommitCompleted);
+                Assert.IsFalse(store.TryLoad("delete", out _, out _));
+                Assert.IsFalse(runtime.IsLoaded(actor, "delete"));
+                store.RefusePersistenceArming = false;
+                Assert.IsTrue(service.Delete("delete"));
+                Assert.AreEqual(2, store.StrictDeleteCalls);
+                Assert.AreEqual(1, unloads, "A persistence retry cannot unload the same live run twice.");
+            }
+        }
+
+        [Test]
+        public void HubService_DeleteCancellationPropagatesAndRemainsRetryable()
+        {
+            FakeSourceStore store = new() { CancelStrictDelete = true };
+            store.Save("cancel-delete", "local x = 1", new LuaModManifest { Id = "cancel-delete" });
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            using (LuaCsModRuntimeHubService service = new(runtime, CreateHostActor(), store))
+            {
+                Assert.Throws<OperationCanceledException>(() => service.Delete("cancel-delete"));
+                Assert.IsTrue(store.TryLoad("cancel-delete", out _, out _));
+                store.CancelStrictDelete = false;
+                Assert.IsTrue(service.Delete("cancel-delete"));
+            }
+        }
+
+        [Test]
+        public void HubService_LegacyDeletionRemainsUnconfirmedAfterLocalAbsence()
+        {
+            LegacySourceStore store = new();
+            store.Save("legacy-delete", "local x = 1", new LuaModManifest { Id = "legacy-delete" });
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            using (LuaCsModRuntimeHubService service = new(runtime, CreateHostActor(), store))
+            {
+                Assert.IsFalse(service.Delete("legacy-delete"));
+                Assert.IsFalse(store.TryLoad("legacy-delete", out _, out _));
+                Assert.IsFalse(service.Delete("legacy-delete"), "Local absence cannot manufacture an arming receipt.");
+            }
+        }
+
+        [Test]
+        public void HubService_ActiveStateRefusalExposesTheLiveMutationAndAnAlreadyEnabledModCanRetry()
+        {
+            ActorContext actor = CreateHostActor();
+            FakeSourceStore store = new();
+            store.Save("toggle", "local x = 1", new LuaModManifest { Id = "toggle", Active = false });
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            using (LuaCsModRuntimeHubService service = new(runtime, actor, store))
+            {
+                store.ThrowOnSave = true;
+                Assert.Throws<InvalidOperationException>(() => service.Enable("toggle"));
+                Assert.IsTrue(runtime.IsLoaded(actor, "toggle"));
+                Assert.IsTrue(store.TryLoad("toggle", out _, out LuaModManifest previous));
+                Assert.IsFalse(previous.Active);
+
+                store.ThrowOnSave = false;
+                service.Enable("toggle");
+                Assert.IsTrue(store.TryLoad("toggle", out _, out LuaModManifest enabled));
+                Assert.IsTrue(enabled.Active, "Retry must repair the stored flag even though the first attempt loaded the mod.");
+                store.ThrowOnSave = true;
+                Assert.Throws<InvalidOperationException>(() => service.Disable("toggle"));
+                Assert.IsFalse(runtime.IsLoaded(actor, "toggle"));
+                Assert.IsTrue(enabled.Active);
+                store.ThrowOnSave = false;
+                service.Disable("toggle");
+                Assert.IsTrue(store.TryLoad("toggle", out _, out LuaModManifest disabled));
+                Assert.IsFalse(disabled.Active);
+            }
+        }
+
+        [Test]
+        public void HubService_ActiveStateArmingFailureKeepsItsLocalReceiptAndRetryDoesNotReload()
+        {
+            ActorContext actor = CreateHostActor();
+            FakeSourceStore store = new();
+            store.Save("active", "local x = 1", new LuaModManifest
+            {
+                Id = "active", Active = false, SuspendedAfterBudgetTrips = true, OwnerActorId = "owner", LoadOrder = 7
+            });
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            int liveLoads = 0;
+            runtime.AddModSourceLoadedListener(actor,
+                (string id, string source, LuaCapabilities caps) => liveLoads++);
+            using (LuaCsModRuntimeHubService service = new(runtime, actor, store))
+            {
+                store.RefusePersistenceArming = true;
+                InvalidOperationException failure = Assert.Throws<InvalidOperationException>(() => service.Enable("active"));
+                Assert.IsInstanceOf<LuaModSourcePersistenceException>(failure.InnerException);
+                Assert.IsTrue(((LuaModSourcePersistenceException)failure.InnerException).LocalCommitCompleted);
+                Assert.IsTrue(store.TryLoad("active", out _, out LuaModManifest local));
+                Assert.IsTrue(local.Active);
+                Assert.IsFalse(local.SuspendedAfterBudgetTrips);
+                Assert.AreEqual("owner", local.OwnerActorId);
+                Assert.AreEqual(7, local.LoadOrder);
+                store.RefusePersistenceArming = false;
+                service.Enable("active");
+                Assert.AreEqual(1, liveLoads);
+                Assert.AreEqual(2, store.StrictSaveCalls);
+            }
+        }
+
+        [Test]
+        public void HubService_LegacyActiveStateWriteRemainsUnconfirmedAfterSuccessfulReadback()
+        {
+            ActorContext actor = CreateHostActor();
+            LegacySourceStore store = new();
+            store.Save("active", "local x = 1", new LuaModManifest { Id = "active", Active = false });
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            using (LuaCsModRuntimeHubService service = new(runtime, actor, store))
+            {
+                InvalidOperationException enable = Assert.Throws<InvalidOperationException>(() => service.Enable("active"));
+                StringAssert.Contains("unconfirmed", enable.Message);
+                Assert.IsTrue(runtime.IsLoaded(actor, "active"));
+                Assert.IsTrue(store.TryLoad("active", out _, out LuaModManifest enabled));
+                Assert.IsTrue(enabled.Active);
+                InvalidOperationException disable = Assert.Throws<InvalidOperationException>(() => service.Disable("active"));
+                StringAssert.Contains("unconfirmed", disable.Message);
+                Assert.IsFalse(runtime.IsLoaded(actor, "active"));
+                Assert.IsFalse(enabled.Active);
+            }
+        }
+
+        [Test]
+        public void HubService_UnreadableStoredSourceDoesNotBecomeAnEmptyEditableReplacement()
+        {
+            ActorContext actor = CreateHostActor();
+            FakeSourceStore store = new();
+            store.Save("unreadable", "local preserved = true", new LuaModManifest { Id = "unreadable" });
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            using (LuaCsModRuntimeHubService service = new(runtime, actor, store))
+            {
+                store.ThrowOnRead = true;
+                Assert.Throws<InvalidOperationException>(() => new HubModEditorPage(service, "unreadable", null, null));
+                Assert.IsFalse(runtime.IsLoaded(actor, "unreadable"));
+                store.ThrowOnRead = false;
+                Assert.IsTrue(store.TryLoad("unreadable", out string source, out _));
+                Assert.AreEqual("local preserved = true", source);
+            }
+        }
+
+        [Test]
+        public void HubService_WithoutAStoreReportsRunOnly()
+        {
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            using (LuaCsModRuntimeHubService service = new(runtime, CreateHostActor(), null))
+            {
+                HubModSaveResult result = service.SaveOrReload("live", "local x = 1", ModReloadMode.KeepObjects);
+                Assert.AreEqual(HubModPersistenceStatus.NotConfigured, result.PersistenceStatus);
+                StringAssert.Contains("without source storage", result.Describe());
+                StringAssert.DoesNotContain("Saved", result.Describe());
+            }
+        }
+
+        [Test]
+        public void HubRuntimeRegistration_RepeatedReplacementAndRemovalReturnAllListenerCountsToBaseline()
+        {
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            ActorContext actor = CreateHostActor();
+            int[] baseline = RuntimeListenerCounts(runtime);
+            HubPageRegistry registry = new();
+            for (int iteration = 0; iteration < 6; iteration++)
+            {
+                HubModsPages.Register(registry, runtime, actor);
+                int[] current = RuntimeListenerCounts(runtime);
+                for (int index = 0; index < current.Length; index++)
+                {
+                    Assert.AreEqual(baseline[index] + 1, current[index]);
+                }
+            }
+
+            Assert.IsTrue(registry.Unregister(HubModsPages.ModsPageId));
+            CollectionAssert.AreEqual(baseline, RuntimeListenerCounts(runtime));
+            Assert.IsFalse(registry.Unregister(HubModsPages.ModsPageId));
+        }
+
+        [Test]
+        public void HubCallerOwnedService_SurvivesEitherSharedPagesDestructionAndUnregistration()
+        {
+            LuaCsModRuntime runtime = new(autoPersistMods: false);
+            ActorContext actor = CreateHostActor();
+            int[] baseline = RuntimeListenerCounts(runtime);
+            using (LuaCsModRuntimeHubService service = new(runtime, actor, null))
+            {
+                HubPageRegistry registry = new();
+                HubModsPages.Register(registry, service);
+                Assert.IsTrue(registry.TryGet(HubModsPages.ModsPageId, out Func<IHubPage> factory));
+                IHubPage first = factory();
+                IHubPage second = factory();
+                first.CreatePageContent();
+                second.CreatePageContent();
+                first.OnDestroyed();
+                registry.Unregister(HubModsPages.ModsPageId);
+                int notices = 0;
+                service.ModsChanged += () => notices++;
+                runtime.LoadMod(actor, "still-live", "local x = 1");
+                Assert.Greater(notices, 0);
+                Assert.IsTrue(service.IsLoaded("still-live"));
+                second.OnDestroyed();
+            }
+
+            CollectionAssert.AreEqual(baseline, RuntimeListenerCounts(runtime));
+        }
+
+        private static int[] RuntimeListenerCounts(LuaCsModRuntime runtime)
+        {
+            string[] events = { "ModSourceLoaded", "ModSourceUnloaded", "ModHandlerErrored", "ModReportEmitted" };
+            int[] counts = new int[events.Length];
+            for (int index = 0; index < events.Length; index++)
+            {
+                FieldInfo field = typeof(LuaCsModRuntime).GetField(events[index], BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.IsNotNull(field, events[index]);
+                counts[index] = (field.GetValue(runtime) as Delegate)?.GetInvocationList().Length ?? 0;
+            }
+
+            return counts;
         }
 
         /// <summary>

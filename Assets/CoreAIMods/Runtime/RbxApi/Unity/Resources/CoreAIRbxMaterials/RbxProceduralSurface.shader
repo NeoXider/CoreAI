@@ -93,8 +93,11 @@ Shader "CoreAI/Rbx/Procedural Surface"
                 output.positionCS = positionInputs.positionCS;
                 output.positionWS = positionInputs.positionWS;
                 output.normalWS = TransformObjectToWorldNormal(input.normalOS);
-                output.positionAligned = input.positionOS.xyz * RbxObjectAxisScale();
-                output.normalAligned = normalize(input.normalOS);
+                float3 objectAxisScale = RbxObjectAxisScale();
+                output.positionAligned = input.positionOS.xyz * objectAxisScale;
+                // WHY: projection positions include physical axis scale, so their geometric
+                // normal needs its inverse transpose independently of the world lighting normal.
+                output.normalAligned = normalize(input.normalOS / max(objectAxisScale, 0.00001));
                 return output;
             }
 

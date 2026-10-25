@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Reflection;
 using CoreAI.Hub.UI;
 using CoreAI.Infrastructure.World;
@@ -12,29 +11,22 @@ using CoreAI.WebGl;
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
-    /// Adversarial WebGL QA for the G11 §6.5 browser acceptance surface.
-    /// <para>
-    /// Two production defects are pinned here. (1) The Hub World page reported
-    /// <c>Has saved state: Yes</c> the instant <c>Save Now</c> was pressed, i.e. at IDBFS
-    /// request-issuance time, while the browser <c>FS.syncfs</c> callback had not run yet — MVP2.5
-    /// gate W3.5 fails a build that "reports success before sync". The same applied to
-    /// <c>Reset World</c> reporting <c>No</c>. (2) The unsupported-local-model scene guard rescanned
-    /// every <c>MonoBehaviour</c> in the scene on every single frame of the browser player.
-    /// </para>
+    /// Verifies truthful local-operation/automatic-persistence receipts without an IndexedDB
+    /// completion claim, plus bounded unsupported-local-model scene scanning. Browser durability
+    /// requires a separate real reload check; Unity supplies no browser-completion callback here.
     /// </summary>
     public sealed class CoreAiWebGlQaEditModeTests
     {
         /// <summary>
-        /// World-state double whose durability confirmation is released by the test. The production
-        /// confirmation now resolves immediately (the engine owns browser persistence — see
-        /// <c>CoreAiWebGlPersistence</c>), but the rule under test is about ORDER, not latency: the
-        /// page must never publish a durable state before the confirmation it asked for comes back.
+        /// Controls a synchronous operation receipt, including callbacks before the operation returns.
+        /// Global durability confirmation deliberately returns true to detect false promotion of failures.
         /// </summary>
-        private sealed class DeferredDurabilityWorldStateManager : IWorldStateManager
+        private sealed class ControlledReceiptWorldStateManager : IWorldStateManager, IWorldStateWriteResults
         {
-            private readonly List<Action<bool>> _pending = new();
-
-            public bool HasSavedState { get; private set; }
+            public bool HasSavedState { get; set; }
+            public WorldStateWriteResult Result = new(WorldStateWriteStatus.Succeeded, true);
+            public Exception Failure;
+            public Action BeforeReceipt;
 
             public bool WorldRestoreCompleted => true;
 
@@ -42,7 +34,7 @@ namespace CoreAI.Tests.EditMode
 
             public int ResetCount { get; private set; }
 
-            public int PendingConfirmations => _pending.Count;
+            public int ConfirmationCalls { get; private set; }
 
             public event Action StateReset;
 
@@ -52,22 +44,29 @@ namespace CoreAI.Tests.EditMode
                 remove { }
             }
 
-            public void Save()
-            {
-                SaveCount++;
-                HasSavedState = true;
-            }
+            public void Save() => SaveWithResult();
+            public void Reset() => ResetWithResult();
+            public WorldStateWriteResult SaveWithResult() => Write(false);
+            public WorldStateWriteResult ResetWithResult() => Write(true);
 
             public bool TryLoad(string sceneName = null)
             {
                 return false;
             }
 
-            public void Reset()
+            private WorldStateWriteResult Write(bool reset)
             {
-                ResetCount++;
-                HasSavedState = false;
-                StateReset?.Invoke();
+                if (reset) { ResetCount++; }
+                else { SaveCount++; }
+                if (Failure != null) { throw Failure; }
+                if (Result.LocalOperationSucceeded)
+                {
+                    HasSavedState = !reset;
+                    if (reset) { StateReset?.Invoke(); }
+                }
+
+                BeforeReceipt?.Invoke();
+                return Result;
             }
 
             public void StartAutoSave(float intervalSeconds)
@@ -76,46 +75,35 @@ namespace CoreAI.Tests.EditMode
 
             public void ConfirmDurability(Action<bool> onConfirmed)
             {
-                _pending.Add(onConfirmed);
-            }
-
-            /// <summary>Releases every deferred confirmation, as the browser callback would.</summary>
-            public void ReleaseDurability(bool durable)
-            {
-                List<Action<bool>> released = new(_pending);
-                _pending.Clear();
-                for (int index = 0; index < released.Count; index++)
-                {
-                    released[index]?.Invoke(durable);
-                }
+                ConfirmationCalls++;
+                onConfirmed(true);
             }
         }
 
         [Test]
-        public void StatusText_WhileTheBrowserFlushIsPending_KeepsTheLastConfirmedText()
+        public void StatusText_WhileLocalOperationIsPending_KeepsTheLastInventoryText()
         {
             Assert.AreEqual(
                 "Has saved state: No",
                 WorldStateHubPage.ComposeStatusText(true, "Has saved state: No", true),
-                "W3.5: a pending IDBFS flush must not promote the label to Yes; the browser has not " +
-                "confirmed the write, so the last confirmed text stands.");
+                "An operation that has not returned must not publish its changed inventory.");
             Assert.AreEqual(
                 "Has saved state: Yes",
                 WorldStateHubPage.ComposeStatusText(true, "Has saved state: Yes", false),
-                "The same rule in reverse: Reset World must not publish No before the delete is flushed.");
+                "Reset World must also retain the previous inventory until its operation returns.");
             Assert.AreEqual(
                 "Has saved state: Yes",
                 WorldStateHubPage.ComposeStatusText(false, "Has saved state: No", true),
-                "Once the callback has arrived the label reports the real state.");
+                "Completed inventory reports local presence without asserting browser durability.");
             Assert.AreEqual(
                 "Has saved state: No",
                 WorldStateHubPage.ComposeStatusText(false, "Has saved state: Yes", false));
         }
 
         [Test]
-        public void SaveNow_DoesNotClaimSavedState_BeforeTheBrowserFlushCallback()
+        public void SaveNow_LocalWriteAndArmingReceiptDoesNotClaimBrowserCompletion()
         {
-            DeferredDurabilityWorldStateManager manager = new();
+            ControlledReceiptWorldStateManager manager = new();
             WorldStateHubPage page = new(manager);
             VisualElement panel = (VisualElement)page.CreatePageContent();
             Label status = FindByName<Label>(panel, "coreai-hub-worldstate-status");
@@ -124,41 +112,42 @@ namespace CoreAI.Tests.EditMode
             Click(save);
 
             Assert.AreEqual(1, manager.SaveCount, "Save Now must still perform the write.");
-            Assert.AreEqual(1, manager.PendingConfirmations,
-                "Save Now must request a durability confirmation, not assume durability.");
-            Assert.AreEqual("Has saved state: No", status.text,
-                "W3.5: the page must not report a durable save at IDBFS request-issuance time; the " +
-                "FS.syncfs completion callback has not run yet.");
-
-            manager.ReleaseDurability(true);
-
-            Assert.AreEqual("Has saved state: Yes", status.text,
-                "Once the browser confirms the flush the page must report the saved state.");
+            Assert.AreEqual(0, manager.ConfirmationCalls);
+            Assert.AreEqual("Has saved state: Yes", status.text);
+            Label durability = FindByName<Label>(panel, "coreai-hub-worldstate-durability");
+            Assert.AreEqual(WorldStateHubPage.FlushConfirmedText, durability.text);
+            StringAssert.Contains("automatic persistence is armed", durability.text);
+            StringAssert.Contains("Browser completion is not confirmed", durability.text);
+            StringAssert.DoesNotContain("survives a reload", durability.text);
+            page.OnDestroyed();
         }
 
-        [Test]
-        public void SaveNow_FailedBrowserFlush_ReportsUnconfirmedDurability()
+        [TestCase(WorldStateWriteStatus.Failed, true, "unconfirmed")]
+        [TestCase(WorldStateWriteStatus.Succeeded, false, "NOT armed")]
+        public void SaveNow_FailedLocalWriteOrRefusedArmingCannotUseGlobalConfirmation(
+            WorldStateWriteStatus status, bool armed, string expected)
         {
-            DeferredDurabilityWorldStateManager manager = new();
+            ControlledReceiptWorldStateManager manager = new()
+            {
+                Result = new WorldStateWriteResult(status, armed, "write refused")
+            };
             WorldStateHubPage page = new(manager);
             VisualElement panel = (VisualElement)page.CreatePageContent();
             Label durability = FindByName<Label>(panel, "coreai-hub-worldstate-durability");
             Button save = FindByName<Button>(panel, "coreai-hub-worldstate-save");
 
             Click(save);
-            Assert.AreEqual(WorldStateHubPage.FlushPendingText, durability.text);
-
-            manager.ReleaseDurability(false);
-
-            Assert.AreEqual(WorldStateHubPage.FlushUnconfirmedText, durability.text,
-                "A syncfs error (quota, blocked storage) must be surfaced, not hidden behind 'Yes'.");
+            StringAssert.Contains(expected, durability.text);
+            Assert.AreEqual(0, manager.ConfirmationCalls,
+                "A global true arming result cannot acknowledge a failed local operation.");
+            Assert.IsTrue(save.enabledSelf);
+            page.OnDestroyed();
         }
 
         [Test]
-        public void ResetWorld_DoesNotClaimClearedState_BeforeTheBrowserFlushCallback()
+        public void ResetWorld_UpdatesLocalInventoryWithoutClaimingBrowserCommit()
         {
-            DeferredDurabilityWorldStateManager manager = new();
-            manager.Save();
+            ControlledReceiptWorldStateManager manager = new() { HasSavedState = true };
             WorldStateHubPage page = new(manager);
             VisualElement panel = (VisualElement)page.CreatePageContent();
             Label status = FindByName<Label>(panel, "coreai-hub-worldstate-status");
@@ -168,33 +157,74 @@ namespace CoreAI.Tests.EditMode
             Click(reset);
 
             Assert.AreEqual(1, manager.ResetCount);
-            Assert.AreEqual("Has saved state: Yes", status.text,
-                "§6.5 requires the reload after Reset World to still read No; the page must not " +
-                "claim the delete is durable before the IndexedDB flush callback confirms it.");
-
-            manager.ReleaseDurability(true);
-
             Assert.AreEqual("Has saved state: No", status.text);
+            StringAssert.Contains("Browser completion is not confirmed",
+                FindByName<Label>(panel, "coreai-hub-worldstate-durability").text);
+            Assert.AreEqual(0, manager.ConfirmationCalls);
+            page.OnDestroyed();
         }
 
-        [Test]
-        public void DurabilityWait_DisablesBothControls_UntilTheCallbackArrives()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void OperationReceipt_DisablesControlsAndSuppressesReentrantWritesUntilItReturns(bool resetOperation)
         {
-            DeferredDurabilityWorldStateManager manager = new();
+            ControlledReceiptWorldStateManager manager = new() { HasSavedState = resetOperation };
             WorldStateHubPage page = new(manager);
             VisualElement panel = (VisualElement)page.CreatePageContent();
             Button save = FindByName<Button>(panel, "coreai-hub-worldstate-save");
             Button reset = FindByName<Button>(panel, "coreai-hub-worldstate-reset");
 
-            Click(save);
+            bool controlsDisabled = false;
+            bool callbackCompleted = false;
+            string pendingText = null;
+            string inventoryText = null;
+            int writesBeforeReceipt = 0;
+            manager.BeforeReceipt = () =>
+            {
+                controlsDisabled = !save.enabledSelf && !reset.enabledSelf;
+                pendingText = FindByName<Label>(panel, "coreai-hub-worldstate-durability").text;
+                inventoryText = FindByName<Label>(panel, "coreai-hub-worldstate-status").text;
+                Click(save);
+                Click(reset);
+                writesBeforeReceipt = manager.SaveCount + manager.ResetCount;
+                callbackCompleted = true;
+            };
 
-            Assert.IsFalse(save.enabledSelf, "A second Save Now must not stack another pending flush.");
-            Assert.IsFalse(reset.enabledSelf);
+            Click(resetOperation ? reset : save);
 
-            manager.ReleaseDurability(true);
-
-            Assert.IsTrue(save.enabledSelf, "Controls must re-enable once the browser answers.");
+            Assert.IsTrue(callbackCompleted, "The controlled operation must reach the receipt boundary.");
+            Assert.IsTrue(controlsDisabled);
+            Assert.AreEqual(WorldStateHubPage.FlushPendingText, pendingText);
+            Assert.AreEqual(resetOperation ? "Has saved state: Yes" : "Has saved state: No", inventoryText);
+            Assert.AreEqual(1, writesBeforeReceipt,
+                "Reentrant actions cannot start a second write before the current receipt returns.");
+            Assert.IsTrue(save.enabledSelf, "Controls must re-enable after the operation returns.");
             Assert.IsTrue(reset.enabledSelf);
+            Assert.AreEqual(0, manager.ConfirmationCalls);
+            page.OnDestroyed();
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void OperationExceptionOrCancellationRestoresControlsAndAllowsAnHonestRetry(bool cancelled)
+        {
+            ControlledReceiptWorldStateManager manager = new()
+            {
+                Failure = cancelled ? new OperationCanceledException() : new InvalidOperationException("write refused")
+            };
+            WorldStateHubPage page = new(manager);
+            VisualElement panel = (VisualElement)page.CreatePageContent();
+            Button save = FindByName<Button>(panel, "coreai-hub-worldstate-save");
+            Label durability = FindByName<Label>(panel, "coreai-hub-worldstate-durability");
+            Click(save);
+            StringAssert.Contains(cancelled ? "cancelled" : "write refused", durability.text);
+            Assert.IsTrue(save.enabledSelf);
+            manager.Failure = null;
+            Click(save);
+            Assert.AreEqual(2, manager.SaveCount);
+            Assert.AreEqual(WorldStateHubPage.FlushConfirmedText, durability.text);
+            Assert.AreEqual(0, manager.ConfirmationCalls);
+            page.OnDestroyed();
         }
 
 #if COREAI_HAS_LLMUNITY

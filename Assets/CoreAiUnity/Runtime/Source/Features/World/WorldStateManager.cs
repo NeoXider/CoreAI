@@ -9,7 +9,7 @@ using UnityEngine.SceneManagement;
 
 namespace CoreAI.Infrastructure.World
 {
-    public sealed class WorldStateManager : IWorldStateManager, IDisposable
+    public sealed class WorldStateManager : IWorldStateManager, IWorldStateWriteResults, IDisposable
     {
         private const string SaveFileName = "world_state.json";
         private const string FormatVersion = "1.1";
@@ -21,8 +21,8 @@ namespace CoreAI.Infrastructure.World
         public const float DefaultAutoSaveIntervalSeconds = 60f;
 
         /// <summary>
-        /// Durability answer for the writes this manager has just performed; false when the browser
-        /// page has no durable storage armed. Internal set accessor is the test seam
+        /// Automatic-persistence arming observation; false when the browser page has no persistence
+        /// armed. This is not a local-write or IndexedDB-transaction receipt. Internal set accessor is the test seam
         /// (InternalsVisibleTo) used to observe the answer without a browser.
         /// </summary>
         internal Func<bool> WebGlFlushSync { get; set; } = CoreAiWebGlPersistence.Sync;
@@ -46,9 +46,7 @@ namespace CoreAI.Infrastructure.World
                 return;
             }
 
-            // WHY: still routed through the async seam although it now resolves immediately - the
-            // callback contract (never inline, never throwing) is what callers were built against, and
-            // a host that supplies its own confirmation through the seam keeps working.
+            // WHY: A host-supplied arming observer may still be asynchronous even though Unity's default resolves immediately.
             ConfirmDurabilityAsync(onConfirmed).Forget();
         }
 
@@ -61,17 +59,16 @@ namespace CoreAI.Infrastructure.World
             }
             catch (OperationCanceledException)
             {
-                // WHY: a cancelled flush is not a durable one — the browser never confirmed the write.
                 durable = false;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(GameLogFeature.Core,
-                    $"[WorldState] IndexedDB flush confirmation failed: {ex.Message}");
+                    $"[WorldState] Automatic persistence arming check failed: {ex.Message}");
                 durable = false;
             }
 
-            InvokeDurabilityCallback(onConfirmed, durable);
+            InvokeDurabilityCallback(onConfirmed, !_disposed && durable);
         }
 
         private void InvokeDurabilityCallback(Action<bool> onConfirmed, bool durable)
@@ -88,9 +85,7 @@ namespace CoreAI.Infrastructure.World
         }
 
         /// <summary>
-        /// On WebGL pushes the in-memory IDBFS tree into IndexedDB after a save so it survives a
-        /// reload/tab close. Returns false when the flush threw (the save reached IDBFS memory only),
-        /// so the caller can report the save honestly instead of claiming durable success.
+        /// Observes automatic persistence arming after a local operation without claiming browser completion.
         /// </summary>
         private bool PersistFsForWebGl()
         {
@@ -98,10 +93,14 @@ namespace CoreAI.Infrastructure.World
             {
                 return WebGlFlushSync();
             }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(GameLogFeature.Core,
-                    $"[WorldState] IndexedDB flush failed after save: {ex.Message}");
+                    $"[WorldState] Automatic persistence arming check failed after local operation: {ex.Message}");
                 return false;
             }
         }
@@ -251,11 +250,36 @@ namespace CoreAI.Infrastructure.World
 
         public void Save()
         {
+            SaveWithResult();
+        }
+
+        public WorldStateWriteResult SaveWithResult()
+        {
             if (_disposed)
             {
-                return;
+                return new WorldStateWriteResult(WorldStateWriteStatus.Unsupported,
+                    error: "The world state manager is disposed.");
             }
 
+            try
+            {
+                return SaveCore();
+            }
+            catch (OperationCanceledException)
+            {
+                return new WorldStateWriteResult(WorldStateWriteStatus.Cancelled,
+                    error: "The local snapshot write was cancelled.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(GameLogFeature.Core, $"[WorldState] Save failed: {ex.Message}");
+                return new WorldStateWriteResult(WorldStateWriteStatus.Failed,
+                    error: "The local snapshot write failed.");
+            }
+        }
+
+        private WorldStateWriteResult SaveCore()
+        {
             string sceneName = SceneManager.GetActiveScene().name;
             WorldObjectComponent[] allTags = UnityEngine.Object.FindObjectsByType<WorldObjectComponent>(
                 FindObjectsInactive.Include, FindObjectsSortMode.None);
@@ -350,45 +374,38 @@ namespace CoreAI.Infrastructure.World
                 objects = objects.ToArray()
             };
 
-            try
+            string dir = Path.GetDirectoryName(_saveFilePath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             {
-                string dir = Path.GetDirectoryName(_saveFilePath);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
-
-                string json = JsonUtility.ToJson(data, true);
-                string tmpPath = _saveFilePath + ".tmp";
-                File.WriteAllText(tmpPath, json);
-                if (File.Exists(_saveFilePath))
-                {
-                    File.Replace(tmpPath, _saveFilePath, null);
-                }
-                else
-                {
-                    File.Move(tmpPath, _saveFilePath);
-                }
-
-                if (PersistFsForWebGl())
-                {
-                    _logger.LogInfo(GameLogFeature.Core,
-                        $"[WorldState] Saved {objects.Count} objects.");
-                }
-                else
-                {
-                    // WHY: On WebGL the file only reached the in-memory IDBFS tree; the IndexedDB
-                    // flush threw, so a reload/tab close can still lose this save. Don't claim
-                    // durable success — the flush failure was already logged by PersistFsForWebGl.
-                    _logger.LogWarning(GameLogFeature.Core,
-                        $"[WorldState] Saved {objects.Count} objects to in-memory FS, but the IndexedDB flush failed; the save may not survive a reload.");
-                }
+                Directory.CreateDirectory(dir);
             }
-            catch (Exception ex)
+
+            string json = JsonUtility.ToJson(data, true);
+            string tmpPath = _saveFilePath + ".tmp";
+            File.WriteAllText(tmpPath, json);
+            if (File.Exists(_saveFilePath))
+            {
+                File.Replace(tmpPath, _saveFilePath, null);
+            }
+            else
+            {
+                File.Move(tmpPath, _saveFilePath);
+            }
+
+            bool persistenceArmed = PersistFsForWebGl();
+            if (persistenceArmed)
+            {
+                _logger.LogInfo(GameLogFeature.Core,
+                    $"[WorldState] Saved {objects.Count} objects.");
+            }
+            else
             {
                 _logger.LogWarning(GameLogFeature.Core,
-                    $"[WorldState] Save failed: {ex.Message}");
+                    $"[WorldState] Saved {objects.Count} objects locally, but automatic persistence is not armed.");
             }
+
+            return new WorldStateWriteResult(WorldStateWriteStatus.Succeeded, persistenceArmed,
+                persistenceArmed ? null : "Automatic persistence is not armed.");
         }
 
         public bool TryLoad(string sceneName = null)
@@ -537,6 +554,8 @@ namespace CoreAI.Infrastructure.World
                 }
             }
 
+            RestoreTransforms(snapshotObjects, idToGo);
+
             _logger.LogInfo(GameLogFeature.Core,
                 $"[WorldState] Loaded {spawned} objects ({failed} failed).");
             return true;
@@ -554,9 +573,15 @@ namespace CoreAI.Infrastructure.World
 
         public void Reset()
         {
+            ResetWithResult();
+        }
+
+        public WorldStateWriteResult ResetWithResult()
+        {
             if (_disposed)
             {
-                return;
+                return new WorldStateWriteResult(WorldStateWriteStatus.Unsupported,
+                    error: "The world state manager is disposed.");
             }
 
             DestroyAllWorldObjects();
@@ -569,6 +594,8 @@ namespace CoreAI.Infrastructure.World
             // fresh world's saves.
             _pendingParentByChildId.Clear();
 
+            WorldStateWriteStatus status = WorldStateWriteStatus.Succeeded;
+            string error = null;
             try
             {
                 if (File.Exists(_saveFilePath))
@@ -582,22 +609,84 @@ namespace CoreAI.Infrastructure.World
                     File.Delete(tmpPath);
                 }
             }
+            catch (OperationCanceledException)
+            {
+                status = WorldStateWriteStatus.Cancelled;
+                error = "The local snapshot deletion was cancelled.";
+            }
             catch (Exception ex)
             {
+                status = WorldStateWriteStatus.Failed;
+                error = "The local snapshot deletion failed.";
                 _logger.LogWarning(GameLogFeature.Core,
                     $"[WorldState] Reset: failed to delete save file: {ex.Message}");
             }
-            finally
+
+            bool persistenceArmed = PersistFsForWebGl();
+            NotifyStateReset();
+            if (status == WorldStateWriteStatus.Succeeded)
             {
-                // WHY: Without the flush the WebGL IndexedDB still holds the deleted save, so the old
-                // world state would resurrect on the next page reload. Finally, so a delete that
-                // succeeded before a later delete threw is still persisted.
-                PersistFsForWebGl();
+                _logger.LogInfo(GameLogFeature.Core,
+                    "[WorldState] Reset: all world objects destroyed, local snapshot deleted.");
+                if (!persistenceArmed)
+                {
+                    error = "Automatic persistence is not armed.";
+                }
             }
 
-            StateReset?.Invoke();
-            _logger.LogInfo(GameLogFeature.Core,
-                "[WorldState] Reset: all world objects destroyed, save file deleted.");
+            return new WorldStateWriteResult(status, persistenceArmed, error);
+        }
+
+        private void NotifyStateReset()
+        {
+            Action handlers = StateReset;
+            if (handlers == null)
+            {
+                return;
+            }
+
+            foreach (Delegate handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    ((Action)handler).Invoke();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(GameLogFeature.Core, $"[WorldState] Reset observer failed: {ex.Message}");
+                }
+            }
+        }
+
+        private static void RestoreTransforms(ObjectData[] snapshotObjects, Dictionary<string, GameObject> idToGo)
+        {
+            List<ObjectData> ordered = new List<ObjectData>(snapshotObjects.Length);
+            Dictionary<string, int> depths = new Dictionary<string, int>(snapshotObjects.Length);
+            foreach (ObjectData obj in snapshotObjects)
+            {
+                if (!idToGo.TryGetValue(obj.id, out GameObject go))
+                {
+                    continue;
+                }
+
+                int depth = 0;
+                for (Transform parent = go.transform.parent; parent != null; parent = parent.parent)
+                {
+                    depth++;
+                }
+
+                depths[obj.id] = depth;
+                ordered.Add(obj);
+            }
+
+            ordered.Sort((left, right) => depths[left.id].CompareTo(depths[right.id]));
+            foreach (ObjectData obj in ordered)
+            {
+                Transform transform = idToGo[obj.id].transform;
+                transform.localScale = new Vector3(obj.sx, obj.sy, obj.sz);
+                transform.SetPositionAndRotation(new Vector3(obj.px, obj.py, obj.pz),
+                    Quaternion.Euler(obj.rx, obj.ry, obj.rz));
+            }
         }
 
         private static void DestroyAllWorldObjects()

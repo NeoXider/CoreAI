@@ -7,6 +7,10 @@ streaming turn loop that executes tool calls while the model is still generating
 No `UnityEngine`. The assembly definition declares `noEngineReferences: true`, and the same sources
 build as a plain `netstandard2.1` DLL through [`tools/portable`](../../tools/portable/README.md).
 
+Hosts supplying multiple players should start with [multiplayer sessions](../../Docs/CoreAI/MULTIPLAYER_SESSIONS.md): an actor, connection session, persistence partition and role have different purposes. Players may share a role. Supply the admitted `ActorContext` on each request, and use actor/session cancellation for a player stop; global role/scope operations are administrative. The host owns authentication, admission and view lifetimes.
+
+[7.54.0 notes](CHANGELOG.md) and the [acceptance ledger](../../dev-docs/fix-wave-2026-10-24/README.md) record the root-accepted source joins and measured portable/Windows gates, exact exceptions and unrun platform/quality limits. Publication uses the [Git tag and GitHub release](https://github.com/NeoXider/CoreAI/releases/tag/v7.54.0).
+
 ---
 
 ## Who this is for

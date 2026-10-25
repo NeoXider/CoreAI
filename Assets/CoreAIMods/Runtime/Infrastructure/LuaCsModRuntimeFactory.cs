@@ -36,6 +36,9 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Backs the <c>coreai_data_*</c> overlay APIs (null =&gt; NullDataOverlayVersionStore).</summary>
         public IDataOverlayVersionStore DataOverlayVersions;
 
+        /// <summary>Explicit per-key write grant for WorldEdit scripts; null exposes version inspection only.</summary>
+        public ILuaVersioningWritePolicy VersioningWritePolicy;
+
         /// <summary>Receives world/data commands produced by WorldEdit-tier APIs.</summary>
         public IAiGameCommandSink CommandSink;
 
@@ -88,6 +91,9 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>Optional monotonic clock for HTTP rate accounting (os.clock owns its clock).</summary>
         public Func<double> RbxMonotonicClock;
+
+        /// <summary>Shared bound on pending outbound requests and undelivered HTTP completions.</summary>
+        public int RbxHttpMaximumOutstandingRequests = LuaCsRbxHttpServiceAdapter.DefaultMaximumOutstandingRequests;
 
         /// <summary>
         /// When false, the low-level WorldEdit build/edit APIs (<c>coreai_world_spawn</c>/... and the
@@ -185,6 +191,9 @@ namespace CoreAI.Ai.LuaCs
         /// <see cref="CoroutineResumeBudget"/> instead.
         /// </summary>
         public long HandlerMaxSteps = LuaCsModRuntime.DefaultHandlerMaxSteps;
+
+        /// <summary>Reserved legacy event invocations under timer saturation; valid range is 64 through 240.</summary>
+        public int ReservedEventInvocationsPerTick = LuaCsModRuntime.DefaultMaxEventsDispatchedPerTick;
 
         /// <summary>
         /// Per-actor persistent mod capacity. Defaults to the existing production limit; benchmark hosts may set
@@ -332,6 +341,12 @@ namespace CoreAI.Ai.LuaCs
                 throw new ArgumentNullException(nameof(options));
             }
 
+            if (options.ReservedEventInvocationsPerTick < LuaCsModRuntime.DefaultMaxEventsDispatchedPerTick
+                || options.ReservedEventInvocationsPerTick > LuaCsModRuntime.DefaultMaxEventsDispatchedPerTickGlobal - LuaCsModRuntime.DefaultMaxTimersPerMod)
+            {
+                throw new ArgumentOutOfRangeException(nameof(options.ReservedEventInvocationsPerTick));
+            }
+
             // WHY: warn belongs in the mod's own log next to its print output, where get_mod_logs and the
             // repair loop read it; unattached, the Rbx surface sent every mod's warn to the host's log
             // sink. Only a configured log is attached, so a stack built without one leaves a log the host
@@ -358,7 +373,9 @@ namespace CoreAI.Ai.LuaCs
                 rbxHttpResolver: options.RbxHttpResolver,
                 rbxHttpRequestsPerWindow: options.RbxHttpRequestsPerWindow,
                 rbxHttpRateWindowSeconds: options.RbxHttpRateWindowSeconds,
-                rbxMonotonicClock: options.RbxMonotonicClock);
+                rbxMonotonicClock: options.RbxMonotonicClock,
+                versioningWritePolicy: options.VersioningWritePolicy,
+                rbxHttpMaximumOutstandingRequests: options.RbxHttpMaximumOutstandingRequests);
 
             // WHY: The factory is the composition root: it wires the Lua-CSharp engine as THE single
             // IScriptEngine of the stack, so nothing above the Scripting/ adapter layer creates a VM
@@ -417,6 +434,7 @@ namespace CoreAI.Ai.LuaCs
                 options.MaxRegisteredInstancesPerActor,
                 options.MaxEventSubscriptionsPerActor,
                 maxBudgetTripsBeforeQuarantine: options.MaxBudgetTripsBeforeQuarantine);
+            runtime.ReservedEventInvocationsPerTick = options.ReservedEventInvocationsPerTick;
 
             if (options.RbxApi != null)
             {

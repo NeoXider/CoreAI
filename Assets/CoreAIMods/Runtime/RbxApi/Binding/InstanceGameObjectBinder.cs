@@ -73,6 +73,8 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private readonly Transform _worldParent;
         private readonly IRbxMaterialProvider<Material> _materialProvider;
+        private readonly IRbxMaterialLeaseProvider<Material> _materialLeaseProvider;
+        private readonly bool _ownsMaterialProvider;
         private readonly Dictionary<InstanceId, BindingEntry> _bindings = new();
 
         // WHY: every contact event and every ray hit maps a collider back to its instance, and a scan
@@ -127,6 +129,7 @@ namespace CoreAI.Mods.Rbx.Binding
             // GetComponent scans; rebuilt on every shape switch. See CacheVisualComponents for
             // how the target visual is resolved.
             public Renderer Renderer;
+            public Material LeasedMaterial;
             public Collider Collider;
 
             /// <summary>The part's Rigidbody when unanchored; null when anchored. Lives on the root
@@ -173,6 +176,8 @@ namespace CoreAI.Mods.Rbx.Binding
             _worldParent = worldParent;
             _log = log;
             _materialProvider = materialProvider ?? new RbxTextureMaterialProvider();
+            _materialLeaseProvider = _materialProvider as IRbxMaterialLeaseProvider<Material>;
+            _ownsMaterialProvider = materialProvider == null;
         }
 
         /// <summary>Re-points diagnostics at the composition-scoped logger after construction, so a
@@ -191,7 +196,28 @@ namespace CoreAI.Mods.Rbx.Binding
         /// and backing objects without moving them into the dying hierarchy.</summary>
         public void BeginHostTeardown()
         {
+            if (_hostTeardownStarted)
+            {
+                return;
+            }
+
             _hostTeardownStarted = true;
+            foreach (BindingEntry entry in new List<BindingEntry>(_bindings.Values))
+            {
+                ReleaseEntryMaterial(entry);
+            }
+
+            if (_ownsMaterialProvider && _materialProvider is IDisposable disposable)
+            {
+                try
+                {
+                    disposable.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    ReportMaterialCleanupFailure(exception);
+                }
+            }
         }
 
         /// <summary>Count of live backing GameObjects (materialized or parked-deactivated).</summary>
@@ -453,6 +479,53 @@ namespace CoreAI.Mods.Rbx.Binding
                 && mapped.Value == id.Value)
             {
                 _idsByGameObject.Remove(entry.GameObject);
+            }
+
+            ReleaseEntryMaterial(entry);
+        }
+
+        private void ReleaseEntryMaterial(BindingEntry entry)
+        {
+            Material material = entry.LeasedMaterial;
+            entry.LeasedMaterial = null;
+            if (ReferenceEquals(material, null))
+            {
+                return;
+            }
+
+            try
+            {
+                if (entry.Renderer != null)
+                {
+                    entry.Renderer.sharedMaterial = null;
+                }
+            }
+            finally
+            {
+                ReleaseMaterial(material);
+            }
+        }
+
+        private void ReleaseMaterial(Material material)
+        {
+            try
+            {
+                _materialLeaseProvider?.ReleaseMaterial(material);
+            }
+            catch (Exception exception)
+            {
+                ReportMaterialCleanupFailure(exception);
+            }
+        }
+
+        private void ReportMaterialCleanupFailure(Exception exception)
+        {
+            try
+            {
+                Logger.Warn("[CoreAI.RbxApi] Material lease cleanup failed: " + exception.Message);
+            }
+            catch
+            {
             }
         }
 
@@ -1676,7 +1749,7 @@ namespace CoreAI.Mods.Rbx.Binding
         private void ApplyAppearance(BindingEntry entry, in PartProperties properties)
         {
             Renderer renderer = entry.Renderer;
-            if (renderer == null)
+            if (renderer == null || _hostTeardownStarted)
             {
                 return;
             }
@@ -1688,8 +1761,32 @@ namespace CoreAI.Mods.Rbx.Binding
                     properties.Material.Value, properties.MaterialVariant);
             }
 
-            _materialProvider.TryGetMaterial(in materialId, out Material sharedMaterial);
-            renderer.sharedMaterial = sharedMaterial;
+            Material sharedMaterial;
+            if (_materialLeaseProvider == null)
+            {
+                _materialProvider.TryGetMaterial(in materialId, out sharedMaterial);
+                renderer.sharedMaterial = sharedMaterial;
+            }
+            else
+            {
+                _materialLeaseProvider.TryAcquireMaterial(in materialId, out sharedMaterial);
+                try
+                {
+                    renderer.sharedMaterial = sharedMaterial;
+                }
+                catch
+                {
+                    ReleaseMaterial(sharedMaterial);
+                    throw;
+                }
+
+                Material previous = entry.LeasedMaterial;
+                entry.LeasedMaterial = sharedMaterial;
+                if (!ReferenceEquals(previous, null))
+                {
+                    ReleaseMaterial(previous);
+                }
+            }
 
             // WHY: MaterialPropertyBlock avoids per-part material instantiation (edit-mode
             // safe, no leaks); both _Color and _BaseColor are set so BiRP and URP shaders read

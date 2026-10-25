@@ -69,6 +69,7 @@ Key files:
 How a stream ends is checked, not assumed:
 
 - **Terminal frame required.** `data: [DONE]` or a chunk with a `finish_reason` ends the stream. A body that closes without either is a failure (`LlmClientException`, `BackendUnavailable`: "LLM SSE ended before a terminal completion frame.").
+- **Malformed data fails.** Invalid JSON and malformed known delta/tool/usage fields produce a redacted `ProviderError`, including after valid partial output. A later terminal frame cannot hide that corruption. Comments, null optional fields, usage-only frames and unknown provider extensions remain valid.
 - **HTTP 200 with zero parsed deltas** (typically only keep-alive comments) is retried, up to three attempts in all, then the turn falls back to **one non-streaming completion**. The same fallback follows a 408 / 429 / 5xx on stream open once the rate-limit retry is spent.
 - **No generation progress.** An attempt that shows no semantic progress (text, reasoning, tool-call fragments or a backend `generation_progress` frame) within 15 s of opening is aborted and handled like an empty stream; for `ServerManagedApi` that window is `RequestTimeoutSeconds`.
 - **No usable output.** A terminated stream with no visible text and no tool call ends as `EmptyResponse`.
@@ -79,6 +80,19 @@ How a stream ends is checked, not assumed:
 - **Off** — **`UnityWebRequestOpenAiTransport`** alone (**`SupportsSseStreaming = false`**): `MeaiOpenAiChatClient` makes a **non-streaming** JSON completion and **simulates** the **`ChatResponseUpdate`** stream, and `CoreAiChatService.IsStreamingEnabled` returns `false` in the player (one warning in the log). `CoreAI/Validate Production Settings` and a WebGL build warn when global streaming is on and this flag is off.
 
 Servers must allow **CORS** when cross-origin. Bridge details (credentials mode, watchdog, guarded callbacks, abort, logging): [`HTTP_TRANSPORT_SPEC.md`](HTTP_TRANSPORT_SPEC.md).
+
+The fetch bridge bounds unread UTF-8 bytes and fragment count (defaults: 1 MiB / 1024). Managed
+consumption acknowledges complete fragments. Exceeding either configured capacity aborts the reader
+and fetch with a typed `BackendUnavailable` failure; it does not discard fragments or accumulate the
+entire response. A browser without `ReadableStream.getReader` fails the native bridge; the explicit
+UnityWebRequest transport choice remains available. Node mocks verify the bridge protocol, while
+browser/WASM allocation and throughput require a separate player check.
+
+The default completion-to-stream adapter preserves failure receipts and usage metadata. Text or any
+streamed tool receipt commits the turn, including a receipt-only error with no visible text. Retry,
+fallback and auth refresh cannot replay it. Code-only errors remain failures for fallback, logging,
+routing health and completion/usage events. Every registry operation owns its own release token even
+when concurrent calls reuse one resolved client handle.
 
 - **Timeouts** → `RequestTimeoutSeconds` bounds the wait for response headers and, as a **per-read stall budget**, every gap between lines of the body (`LlmErrorCode.Timeout`: "LLM SSE stalled"). The shared streaming `HttpClient` has no client timeout (`Timeout.InfiniteTimeSpan`), so a long generation is not cut off at the transport level.
 - **Cancellation** → cooperative via **`CancellationToken`**.

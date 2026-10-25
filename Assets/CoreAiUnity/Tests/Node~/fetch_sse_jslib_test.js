@@ -20,7 +20,7 @@ const path = require('path');
 
 const JSLIB_PATH = path.join(__dirname, '..', '..', 'Runtime', 'Plugins', 'WebGL', 'CoreAiSseFetch.jslib');
 
-function loadLibrary() {
+function loadLibrary(overrides = {}) {
   let src = fs.readFileSync(JSLIB_PATH, 'utf8');
   // {{{ makeDynCall('sig', 'ptr') }}}(args) -> (ptr)(args): pointers are plain JS functions here.
   src = src.replace(/\{\{\{\s*makeDynCall\('[^']*'\s*,\s*'([A-Za-z0-9_]+)'\)\s*\}\}\}/g, '($1)');
@@ -43,6 +43,7 @@ function loadLibrary() {
     // each scenario installs its mock as globalThis.fetch.
     fetch: (u, i) => globalThis.fetch(u, i),
   };
+  Object.assign(sandbox, overrides);
   const fn = new Function(...Object.keys(sandbox), src);
   fn(...Object.values(sandbox));
 
@@ -60,8 +61,130 @@ function makeCallbacks(log) {
   };
 }
 
-function openCall(lib, cb, { url = 'http://x/v1/chat', body = '{}', headers = 'Content-Type:application/json', timeoutSec = 0, creds = 'omit', callId = 1 } = {}) {
-  lib.CoreAi_FetchSseOpen(url, body, headers, timeoutSec, creds, callId, cb.onOpen, cb.onChunk, cb.onDone, cb.onError);
+function openCall(lib, cb, { url = 'http://x/v1/chat', body = '{}', headers = 'Content-Type:application/json', timeoutSec = 0, creds = 'omit', callId = 1, maxBufferedBytes, maxBufferedChunks } = {}) {
+  lib.CoreAi_FetchSseOpen(url, body, headers, timeoutSec, creds, callId, cb.onOpen, cb.onChunk, cb.onDone, cb.onError, maxBufferedBytes, maxBufferedChunks);
+}
+
+function virtualClock() {
+  let serial = 0;
+  let now = 0;
+  const pending = new Map();
+  return {
+    setTimeout: (callback, delay = 0) => { const id = ++serial; pending.set(id, { callback, at: now + delay }); return id; },
+    clearTimeout: (id) => pending.delete(id),
+    count: () => pending.size,
+    flush: async () => {
+      for (let step = 0; step < 2048; step++) {
+        for (let microtask = 0; microtask < 12; microtask++) await Promise.resolve();
+        if (!pending.size) return;
+        const [id, task] = [...pending.entries()].sort((left, right) => left[1].at - right[1].at || left[0] - right[0])[0];
+        pending.delete(id);
+        now = task.at;
+        task.callback();
+      }
+      throw new Error('Virtual fetch did not terminate within the bounded fixture.');
+    },
+  };
+}
+
+async function runBoundedBridgeScenarios() {
+  for (const byChunks of [false, true]) {
+    const clock = virtualClock();
+    const stats = { reads: 0, cancels: 0, aborts: 0, peak: 0 };
+    const lib = loadLibrary({ setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
+      AbortController: class extends AbortController { abort() { stats.aborts++; super.abort(); } } });
+    const log = [];
+    const callbacks = makeCallbacks(log);
+    const originalChunk = callbacks.onChunk;
+    callbacks.onChunk = (id, text) => {
+      stats.peak = Math.max(stats.peak, CoreAiSseFetchState.calls[id].pendingBytes);
+      originalChunk(id, text);
+    };
+    globalThis.fetch = () => Promise.resolve({ ok: true, status: 200,
+      headers: { forEach() {} }, body: { getReader: () => ({
+        read: () => { stats.reads++; return Promise.resolve({ value: new Uint8Array(byChunks ? 1 : 4).fill(65), done: false }); },
+        cancel: () => { stats.cancels++; return Promise.resolve(); },
+      }) } });
+    openCall(lib, callbacks, { callId: 201, timeoutSec: 1, maxBufferedBytes: 8, maxBufferedChunks: byChunks ? 2 : 8 });
+    await clock.flush();
+    lib.CoreAi_FetchSseAbort(201);
+    lib.CoreAi_FetchSseAbort(201);
+    await clock.flush();
+    console.log('scenario: bounded backlog ' + (byChunks ? 'fragments' : 'bytes'));
+    check('overflow is one terminal error', log.filter(entry => entry[0] === 'error' && entry[1] === 'BacklogOverflow').length === 1, JSON.stringify(log));
+    check('overflow never reports done', !log.some(entry => entry[0] === 'done'));
+    check('pump stops at the first overflowing fragment', stats.reads === 3, JSON.stringify(stats));
+    check('retained payload stays within byte budget', stats.peak <= 8, JSON.stringify(stats));
+    check('overflow cancels reader and controller once', stats.cancels === 1 && stats.aborts === 1, JSON.stringify(stats));
+    check('overflow releases timers and bridge leases', clock.count() === 0 &&
+      Object.keys(CoreAiSseFetchState.controllers).length === 0 && Object.keys(CoreAiSseFetchState.calls).length === 0 &&
+      Object.keys(CoreAiSseFetchState.abortReasons).length === 0);
+    check('overflow frees every marshaled allocation', globalThis.__allocs === globalThis.__frees);
+  }
+
+  {
+    const clock = virtualClock();
+    let decodes = 0;
+    let cancels = 0;
+    const lib = loadLibrary({ setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
+      TextDecoder: class extends TextDecoder { decode(...args) { decodes++; return super.decode(...args); } } });
+    const log = [];
+    globalThis.fetch = () => Promise.resolve({ ok: true, status: 200, headers: { forEach() {} },
+      body: { getReader: () => ({ read: () => Promise.resolve({ value: new Uint8Array(128 * 1024), done: false }),
+        cancel: () => { cancels++; return Promise.resolve(); } }) } });
+    openCall(lib, makeCallbacks(log), { callId: 202, maxBufferedBytes: 32, maxBufferedChunks: 4 });
+    await clock.flush();
+    console.log('scenario: oversized upstream fragment');
+    check('oversized bytes are rejected before decoding or marshaling', decodes === 0 && !log.some(entry => entry[0] === 'chunk'));
+    check('oversized fragment cancels once with capacity error', cancels === 1 && log.filter(entry => entry[0] === 'error' && entry[1] === 'BacklogOverflow').length === 1);
+  }
+
+  {
+    const clock = virtualClock();
+    const lib = loadLibrary({ setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout });
+    const log = [];
+    const cb = makeCallbacks(log);
+    const onChunk = cb.onChunk;
+    cb.onChunk = (id, text) => { onChunk(id, text); lib.CoreAi_FetchSseAcknowledge(id, Buffer.byteLength(text, 'utf8')); };
+    globalThis.fetch = () => Promise.resolve(sseResponse(Array(8).fill('é🙂')));
+    openCall(lib, cb, { callId: 203, maxBufferedBytes: 6, maxBufferedChunks: 1 });
+    await clock.flush();
+    console.log('scenario: managed acknowledgements');
+    check('acknowledging consumed UTF-8 fragments permits a long stream', log.filter(entry => entry[0] === 'chunk').length === 8 && log.filter(entry => entry[0] === 'done').length === 1, JSON.stringify(log));
+    check('acknowledged stream has no error or remaining lease', !log.some(entry => entry[0] === 'error') && Object.keys(CoreAiSseFetchState.calls).length === 0);
+  }
+
+  {
+    const clock = virtualClock();
+    let cancels = 0;
+    let aborts = 0;
+    const lib = loadLibrary({ setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
+      AbortController: class extends AbortController { abort() { aborts++; super.abort(); } } });
+    const log = [];
+    globalThis.fetch = () => Promise.resolve({ ok: true, status: 200, headers: { forEach() {} },
+      body: { getReader: () => ({ read: () => new Promise(() => {}), cancel: () => { cancels++; return Promise.resolve(); } }) } });
+    openCall(lib, makeCallbacks(log), { callId: 204, timeoutSec: 1 });
+    for (let microtask = 0; microtask < 12; microtask++) await Promise.resolve();
+    lib.CoreAi_FetchSseAbort(204);
+    lib.CoreAi_FetchSseAbort(204);
+    await clock.flush();
+    console.log('scenario: cancellation with a non-settling reader');
+    check('repeated abort releases controller and reader once', cancels === 1 && aborts === 1);
+    check('cancellation is silent and clears timeout and leases', log.every(entry => entry[0] !== 'error' && entry[0] !== 'done') && clock.count() === 0 && Object.keys(CoreAiSseFetchState.calls).length === 0);
+  }
+
+  {
+    const clock = virtualClock();
+    const lib = loadLibrary({ setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout });
+    const log = [];
+    let bufferedReads = 0;
+    globalThis.fetch = () => Promise.resolve({ ok: true, status: 200, headers: { forEach() {} }, body: null,
+      text: () => { bufferedReads++; return Promise.resolve('unbounded'); } });
+    openCall(lib, makeCallbacks(log), { callId: 205, timeoutSec: 1 });
+    await clock.flush();
+    console.log('scenario: unavailable streaming reader');
+    check('missing ReadableStream fails without buffering the whole body', bufferedReads === 0 && log.some(entry => entry[0] === 'error' && entry[1] === 'StreamingUnavailable'));
+  }
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -95,6 +218,7 @@ function check(name, cond, detail) {
 }
 
 async function run() {
+  await runBoundedBridgeScenarios();
   // --- 1. success stream ---------------------------------------------------
   {
     const lib = loadLibrary();

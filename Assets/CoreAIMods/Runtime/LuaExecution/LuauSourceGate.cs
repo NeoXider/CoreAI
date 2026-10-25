@@ -35,10 +35,11 @@ namespace CoreAI.Ai.LuaCs
         /// carries a downlevel Error; otherwise returns the compilable source (the original instance
         /// when nothing needed rewriting).
         /// </summary>
-        public static string ToLua52(string source, string chunkName)
+        public static string ToLua52(string source, string chunkName, string trustedIteratorResolverName = null)
         {
             string name = string.IsNullOrWhiteSpace(chunkName) ? "chunk" : chunkName;
-            DownlevelResult result = LuauDownleveler.Process(source ?? "", name);
+            DownlevelResult result = LuauDownleveler.Process(source ?? "", name,
+                new LuauDownlevelOptions(trustedIteratorResolverName: trustedIteratorResolverName));
             if (result.HasErrors)
             {
                 throw new LuauDownlevelSyntaxException(BuildErrorMessage(result));

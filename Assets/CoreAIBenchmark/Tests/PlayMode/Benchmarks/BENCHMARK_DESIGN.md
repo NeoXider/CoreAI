@@ -21,20 +21,24 @@ under dotnet (`GoalScoreEditModeTests`). Summary:
   Token/time efficiency is **reported as a tok/s metric, never scored**, so a merely-faster model
   cannot look smarter than an equally-correct but slower one. Total bonus is capped at 20.
 - `Total = Base + Bonus`; suites are compared on **Base** only.
-- Verdict: **PASS** (base ≥ 90 and all mandatory checkpoints) / **PARTIAL** (50–89) / **FAIL** (< 50).
+- Verdict: **PASS** (base ≥ 90 and all mandatory checkpoints) / **PARTIAL** (base ≥ 50 without PASS, including a failed mandatory gate) / **FAIL** (< 50).
 - Non-finite inputs are sanitized so a single NaN can never poison a score.
 - `FailureAttribution` separates `Framework` / `Model` / `Environment` (classified by exception type)
   so a harness bug is never mistaken for a weak model. The runner **never throws** on a model
   timeout/fault — it records the failure and still grades + reports.
 - Repetitions: each scenario can run N times; the suite scorecard uses the **per-scenario mean (average)**
-  base (robust to a single noisy run on a small local model) and reports the spread.
+  base (robust to a single noisy run on a small local model) and reports the spread. PASS requires
+  both the mean bar and all mandatory gates in every scored repetition; individual numeric scores
+  need not all reach 90. Group and extreme pass counts use that same verdict.
 - **Tiers** (suite 2.0): a scenario with `IsExtreme` belongs to the extreme tier (`ScenarioResult.Extreme`).
   `BenchmarkReport.SuiteBaseScore` still averages every graded scenario of both tiers;
   `RegularBaseScore` and `ExtremeBaseScore` average the per-scenario means of each tier (with
   `RegularScenarioCount`, `ExtremeScenarioCount`, `ExtremePassCount`, `HasExtreme`). Each `GroupScore`
   carries the both-tier mean plus `RegularMeanBase`/`RegularCount` and
   `ExtremeMeanBase`/`ExtremeCount`/`ExtremePassCount`. Environment/Framework/NotGraded results are
-  excluded from every tier, as from the suite score.
+  excluded from every tier, as from the suite score. `ExcludeFromScoring` is independent of attribution:
+  a custom-prompt Model deadline retains diagnostics but cannot contribute to suite, dimension or role
+  inputs. `Interrupted` rows retain Stop evidence without grading or finalization.
 - **Real metrics:** a session-capturing `ILlmClient` decorator records true per-turn token usage
   (provider `usage` when available, else a labeled BPE estimate), tool-call counts (incl. failures),
   and the **full model session**, which is appended to the end of every report.
@@ -54,7 +58,7 @@ checkpoints tagged with it:
 6. **Instruction adherence** — obeying explicit constraints under a subtractive score (prohibitions,
    exact counts, forbidden tools, ordering, tool budgets). Each violation costs points.
 
-From these dimensions (+ generation speed) the report derives a **game-fitness** verdict: a 0..10 fit
+From these dimensions (+ client-turn throughput from scored rows) the report derives a **game-fitness** verdict: a 0..10 fit
 rating per game-dev role (NPC, Mechanic/GameMaster, Scene/Tool Operator, Programmer, Orchestrator/Director,
 QA) with role-specific weights and gates, plus an overall score and the best-fit role. A tiny model that
 cannot call tools reads clearly as 'Not suitable for agentic roles'. Shown in the report and the window.
@@ -78,9 +82,18 @@ footer). The SVG output carries a `prefers-color-scheme: dark` override. `Benchm
 (benchmark package) rasterizes the same scene into a dark 3200x1800 PNG when a graphics device exists;
 the SVG twin is written with every report, so headless runs still get a model card.
 
-Speed is reported honestly as **generation tokens/sec** (completion tokens ÷ wall-clock); prompt tokens
-are excluded because they are prefilled far faster than generated. Speed is **reported, never scored** —
-a token/time figure in the report, not points in the bonus — so a faster model never looks smarter.
+Speed is reported as **client-turn tokens/sec**: completion tokens divided by summed outer client-turn
+time, including internal tool execution, prefill and decode. Effective throughput divides by recorded
+session latency. Neither isolates provider-only or decode-only time; overlapping turns give no fixed
+ordering between the rates. Legacy generation names remain aliases with the same values. Speed adds
+no base or bonus points; it can affect the separately reported role fitness.
+
+New G6 replay files preserve independently compiled source chunks in a JSON envelope inside a Lua
+comment. `RbxBenchmarkWorld.TryReplayLua` executes them in original order through the same tool executor:
+syntax errors do not prevent later compilation, and runtime failures retain prior mutations. The
+recapture entry uses that loader and also accepts old executable replay scripts. G6 containment uses
+`Size` and `CFrame` full projected extents within x/z -64..64 and y 0..96, with 0.001-stud tolerance
+and no below-ground exemption.
 
 Reports are machine-readable too: the JSON carries the summary, per-dimension scores, tool stats, and
 per-checkpoint dimensions. Since suite 2.0 the summary also has `scenarios`, `regularBaseScore`,
@@ -346,7 +359,8 @@ writes its own date+model report.
 The portable `BenchmarkRunStore` owns engine-free JSON checkpoint data and atomic storage; the suite
 owns configuration resolution, secret retrieval, Unity execution and final artifact generation.
 `BenchmarkTargetState.IsFinalized` is the shared resume predicate: a scenario id/repetition is skipped
-only when its saved result is not Environment. `Merge` replaces exactly that identity and restores
+only when its saved result is neither Environment nor operator-interrupted. Stop skips the grader
+even when the provider finishes on the same tick. `Merge` replaces exactly that identity and restores
 canonical plan order for new runs, independent of cooperative visual-lane scheduling. Legacy imports retain original row positions; replacement rows occupy the original identity's position and missing rows append. No result is recomputed
 from checkpoints or rounded public scores. Every finalized repetition is flushed before progress
 advances. An in-flight or computed-but-uncommitted result runs again after interruption.
@@ -357,13 +371,20 @@ target atomically replaces only its own checkpoint. State includes full result o
 legacy JSON rows, traces, replay, screenshot bytes and segment clocks. Files use UTF-8 and flush to
 disk before same-directory atomic replacement. A torn temporary file is never read as committed
 state. Replacement failure surfaces as a harness failure instead of silently claiming durability.
-The completed marker is `ReportsWritten` on each target and is set only after all report artifacts
-are written and every planned identity is finalized. Completed folders remain available for repair.
+`ReportsWritten` records successful required publication; the completed marker is set only after
+publication succeeds and every planned identity is finalized. Required report/vector/trace/replay/INDEX
+failures surface as suite problems and a failing CLI outcome. The checkpoint stays incomplete so resume
+can republish finalized measurements without calling a provider again. Optional image failures retain
+vector/text fallbacks. Completed folders remain available for repair.
 
 Resume resolves env secret references again, requires externally held literal secrets again, and
 validates suite/schema, plan and all resolved target inputs before executing scenarios. There is no
 silent suite migration. Raw API keys never enter manifests. Resolved streaming/native-tool settings
-and benchmark shaping options are frozen as well. LLMUnity retains its backend route and validates
+and benchmark shaping options are frozen as well, including the normalized provider inactivity ceiling
+(`metadata.providerStallSeconds` in public JSON). Invalid/nonfinite values use 120; negative values
+normalize to 0, and the maximum is 3600. Conflicting current values refuse resume before requests;
+retry count remains adjustable. Older reports without this field cannot reconstruct an unrecorded
+historical ceiling. LLMUnity retains its backend route and validates
 its original configuration. Only the selected target labels are reopened; all others keep state.
 Public report names retain the original run id. INDEX upserts by exact Markdown filename.
 

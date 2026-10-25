@@ -14,25 +14,33 @@
 mergeInto(LibraryManager.library, {
   $CoreAiSseFetchState: {
     controllers: {},
-    abortReasons: {}
+    abortReasons: {},
+    calls: {}
   },
 
   CoreAi_FetchSseOpen__deps: ['$CoreAiSseFetchState', 'free'],
-  CoreAi_FetchSseOpen: function (urlPtr, bodyPtr, headersPtr, timeoutSec, credentialsMode, callId, onOpenPtr, onChunkPtr, onDonePtr, onErrorPtr) {
+  CoreAi_FetchSseOpen: function (urlPtr, bodyPtr, headersPtr, timeoutSec, credentialsMode, callId, onOpenPtr, onChunkPtr, onDonePtr, onErrorPtr, maxBufferedBytes, maxBufferedChunks) {
     var url = UTF8ToString(urlPtr);
     var body = UTF8ToString(bodyPtr);
     var modeStr = UTF8ToString(credentialsMode);
     var credentials = modeStr === 'include' ? 'include' : modeStr === 'omit' ? 'omit' : 'same-origin';
+    var byteLimit = maxBufferedBytes > 0 ? Math.floor(maxBufferedBytes) : 1024 * 1024;
+    var chunkLimit = maxBufferedChunks > 0 ? Math.floor(maxBufferedChunks) : 1024;
     var controller = new AbortController();
+    var reader = null;
+    var readerCancelled = false;
+    var pumpId = 0;
+    var opened = false;
+    var callState = { pendingBytes: 0, pendingChunks: [], abort: abortRequest };
     var timeoutId = timeoutSec > 0
       ? setTimeout(function () {
-          CoreAiSseFetchState.abortReasons[callId] = 'Timeout';
-          controller.abort();
+          abortRequest('Timeout');
         }, timeoutSec * 1000)
       : 0;
     // WHY: The C# parser owns semantic response wait; raw bytes and comments cannot reset it.
 
     CoreAiSseFetchState.controllers[callId] = controller;
+    CoreAiSseFetchState.calls[callId] = callState;
 
     var headerObj = {};
     var hdrStr = UTF8ToString(headersPtr);
@@ -118,9 +126,85 @@ mergeInto(LibraryManager.library, {
       }
       finished = true;
       if (timeoutId) clearTimeout(timeoutId);
+      if (pumpId) clearTimeout(pumpId);
       delete CoreAiSseFetchState.abortReasons[callId];
       delete CoreAiSseFetchState.controllers[callId];
+      delete CoreAiSseFetchState.calls[callId];
+      callState.pendingBytes = 0;
+      callState.pendingChunks.length = 0;
       return true;
+    }
+
+    function cancelReader() {
+      if (readerCancelled || !reader || typeof reader.cancel !== 'function') return;
+      readerCancelled = true;
+      try { Promise.resolve(reader.cancel()).catch(function () {}); } catch (e) { }
+    }
+
+    function abortRequest(reason) {
+      if (!finish(reason)) return;
+      cancelReader();
+      try { controller.abort(); } catch (e) { }
+      if (reason === 'cancelled') return;
+      if (!opened) callOpen(0, reason, '', 'abort');
+      callError(reason, 'abort');
+    }
+
+    function utf8ByteLength(text) {
+      var bytes = 0;
+      for (var i = 0; i < text.length; i++) {
+        var value = text.charCodeAt(i);
+        if (value < 128) bytes++;
+        else if (value < 2048) bytes += 2;
+        else if (value >= 55296 && value <= 56319 && i + 1 < text.length &&
+                 text.charCodeAt(i + 1) >= 56320 && text.charCodeAt(i + 1) <= 57343) { bytes += 4; i++; }
+        else bytes += 3;
+      }
+      return bytes;
+    }
+
+    function deliver(text, label) {
+      if (finished) return false;
+      if (!text) return true;
+      var bytes = utf8ByteLength(text);
+      if (bytes > byteLimit - callState.pendingBytes || callState.pendingChunks.length >= chunkLimit) {
+        abortRequest('BacklogOverflow');
+        return false;
+      }
+      callState.pendingBytes += bytes;
+      callState.pendingChunks.push(bytes);
+      if (!callChunk(text, label)) {
+        abortRequest('CallbackFailed');
+        return false;
+      }
+      return !finished;
+    }
+
+    function readErrorBody(response) {
+      if (!response.body || typeof response.body.getReader !== 'function') return Promise.resolve('');
+      reader = response.body.getReader();
+      var decoder = new TextDecoder('utf-8');
+      var parts = [];
+      var bytes = 0;
+      function readPart() {
+        return reader.read().then(function (part) {
+          if (finished) return '';
+          if (part.value && part.value.byteLength > 0) {
+            if (part.value.byteLength > byteLimit - bytes || parts.length >= chunkLimit) {
+              abortRequest('BacklogOverflow');
+              return '';
+            }
+            bytes += part.value.byteLength;
+            parts.push(decoder.decode(part.value, { stream: true }));
+          }
+          if (part.done) {
+            parts.push(decoder.decode(new Uint8Array(0), { stream: false }));
+            return parts.join('');
+          }
+          return readPart();
+        });
+      }
+      return readPart();
     }
 
     // Verbose lifecycle (uncomment for browser DevTools tracing):
@@ -153,13 +237,20 @@ mergeInto(LibraryManager.library, {
     }
 
     fetchPromise.then(function (response) {
+      if (finished) {
+        if (response.body && typeof response.body.getReader === 'function') {
+          reader = response.body.getReader();
+          cancelReader();
+        }
+        return;
+      }
       var status = response.status | 0;
       var hdrFlat = flattenHeaders(response.headers);
       // console.log('[CoreAiSseFetch] response id=' + callId + ' status=' + status +
       //             ' ok=' + response.ok + ' content-type=' + response.headers.get('content-type'));
 
       if (!response.ok) {
-        response.text().then(function (errBody) {
+        readErrorBody(response).then(function (errBody) {
           if (!finish('http-error')) return;
           callOpen(status, errBody || '', hdrFlat, 'http-error');
           setTimeout(function () { callDone('http-error'); }, 0);
@@ -172,38 +263,38 @@ mergeInto(LibraryManager.library, {
       }
 
       // Headers received - let C# return its open result.
-      callOpen(status, '', hdrFlat, 'response');
+      opened = true;
+      if (!callOpen(status, '', hdrFlat, 'response')) {
+        abortRequest('CallbackFailed');
+        return;
+      }
+      if (finished) return;
 
       if (!response.body || typeof response.body.getReader !== 'function') {
-        // Browsers without streaming body support: deliver the whole text at once.
-        // C#'s SSE parser still works on a fully-buffered payload.
-        response.text().then(function (txt) {
-          if (!finish('buffered-response')) return;
-          if (txt && txt.length > 0) {
-            callChunk(txt, 'buffered-response');
-          }
-          setTimeout(function () { callDone('buffered-response'); }, 0);
-        }).catch(function (err) {
-          if (!finish('buffered-response-error')) return;
-          var msg = err && err.message ? err.message : 'response.text() failed';
-          callError(msg, 'buffered-response');
-        });
+        abortRequest('StreamingUnavailable');
         return;
       }
 
-      var reader = response.body.getReader();
+      reader = response.body.getReader();
       var decoder = new TextDecoder('utf-8');
       var chunkCount = 0;
       var totalBytes = 0;
 
       function pump() {
+        if (finished) return;
         reader.read().then(function (r) {
+          if (finished) return;
           if (r.value && r.value.byteLength > 0) {
+            if (r.value.byteLength > byteLimit - callState.pendingBytes ||
+                callState.pendingChunks.length >= chunkLimit) {
+              abortRequest('BacklogOverflow');
+              return;
+            }
             totalBytes += r.value.byteLength;
             var text = decoder.decode(r.value, { stream: true });
             if (text.length > 0) {
               chunkCount++;
-              callChunk(text, 'stream');
+              if (!deliver(text, 'stream')) return;
             }
           }
 
@@ -212,7 +303,7 @@ mergeInto(LibraryManager.library, {
             var tail = decoder.decode(new Uint8Array(0), { stream: false });
             if (tail && tail.length > 0) {
               chunkCount++;
-              callChunk(tail, 'stream-tail');
+              if (!deliver(tail, 'stream-tail')) return;
             }
             // console.log('[CoreAiSseFetch] done id=' + callId +
             //             ' chunks=' + chunkCount + ' bytes=' + totalBytes);
@@ -223,7 +314,7 @@ mergeInto(LibraryManager.library, {
 
           // Yield between reads so C# ReadAsync continuations run and the
           // browser can paint between bursts. Critical on single-threaded WebGL.
-          setTimeout(pump, 0);
+          pumpId = setTimeout(pump, 0);
         }).catch(function (err) {
           if (timeoutId) clearTimeout(timeoutId);
           var reason = CoreAiSseFetchState.abortReasons[callId];
@@ -231,6 +322,7 @@ mergeInto(LibraryManager.library, {
             ? (reason || 'cancelled')
             : (err && err.message ? err.message : 'fetch read error');
           if (!finish('read-error')) return;
+          cancelReader();
           if (msg !== 'cancelled') console.warn('[CoreAiSseFetch] read-error id=' + callId + ' msg=' + msg);
           if (msg !== 'cancelled') {
             callError(msg, 'read-error');
@@ -240,7 +332,7 @@ mergeInto(LibraryManager.library, {
 
       // Defer the first read so C# finishes OpenSseResponseStreamAsync and
       // attaches its StreamReader before the first onChunk lands.
-      setTimeout(pump, 0);
+      pumpId = setTimeout(pump, 0);
     }).catch(function (err) {
       if (timeoutId) clearTimeout(timeoutId);
       var reason = CoreAiSseFetchState.abortReasons[callId];
@@ -254,6 +346,18 @@ mergeInto(LibraryManager.library, {
         callError(msg, 'fetch-rejected');
       }
     });
+  },
+
+  CoreAi_FetchSseAcknowledge__deps: ['$CoreAiSseFetchState'],
+  CoreAi_FetchSseAcknowledge: function (callId, bytes) {
+    var state = CoreAiSseFetchState.calls[callId];
+    if (!state || bytes <= 0 || !state.pendingChunks.length) return;
+    if (state.pendingChunks[0] !== bytes) {
+      state.abort('AcknowledgementMismatch');
+      return;
+    }
+    state.pendingChunks.shift();
+    state.pendingBytes -= bytes;
   },
 
   CoreAi_FetchSseSelfTest__deps: ['$CoreAiSseFetchState', 'free'],
@@ -314,15 +418,18 @@ mergeInto(LibraryManager.library, {
   CoreAi_FetchSseAbort__deps: ['$CoreAiSseFetchState'],
   CoreAi_FetchSseAbort: function (callId) {
     var c = CoreAiSseFetchState.controllers[callId];
-    if (!c) {
+    if (!c || c.coreAiAbortScheduled) {
       // Call already finished (finish() removed it): recording a reason here would leak one
       // abortReasons entry per completed request, since no catch path runs again to delete it.
       return;
     }
-    CoreAiSseFetchState.abortReasons[callId] = 'cancelled';
+    c.coreAiAbortScheduled = true;
     setTimeout(function () {
       try {
-        if (c && c.abort) c.abort();
+        if (CoreAiSseFetchState.controllers[callId] !== c) return;
+        var state = CoreAiSseFetchState.calls[callId];
+        if (state) state.abort('cancelled');
+        else if (c && c.abort) c.abort();
       } catch (err) {
         console.warn('[CoreAiSseFetch] abort failed id=' + callId, err);
       }

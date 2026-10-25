@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using CoreAI.Ai.Logging;
@@ -29,7 +30,7 @@ namespace CoreAI.Ai.LuaCs
     /// <see cref="IScriptFunctionRegistry"/> seam; value globals use the Lua-CSharp registry's
     /// engine-specific value escape hatch, which is why this class lives in the adapter layer.
     /// </summary>
-    public sealed class LuaCsRbxApiBindings : IDisposable
+    public sealed class LuaCsRbxApiBindings : IDisposable, ILuaCsRuntimeLifetimeHost
     {
         private const double LegacySchedulerMinimumDelaySeconds = 0.029d;
         internal const double RemoteFunctionInvokeTimeoutSeconds = 30d;
@@ -412,11 +413,14 @@ namespace CoreAI.Ai.LuaCs
             new(StringComparer.Ordinal);
         private readonly ModActorLedger _actorLedger = new();
         private readonly Action<string> _log;
+        private readonly object _runtimeLifetimeGate = new();
+        private readonly ConditionalWeakTable<IDisposable, object> _registeredRuntimeLifetimes = new();
+        private readonly List<IDisposable> _runtimeLifetimeParticipants = new();
         private ILuaLogService _modLog;
         private CoreAI.Ai.IInGameLlmChatServiceFactory _chatFactory;
         private int _consoleInvocationCounter;
         private double _runServiceElapsed;
-        private bool _disposed;
+        private volatile bool _disposed;
 
         private bool _mouseButton1Down;
 
@@ -1144,6 +1148,39 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public ModScheduler Scheduler => _scheduler;
 
+        /// <summary>The live owned Lua coroutine's cancellation, or an already-cancelled token.</summary>
+        public CancellationToken CurrentScriptLifetimeToken => !_disposed
+            && _schedulerThreadFactory.CurrentThread is LuaCsRbxScriptThread thread
+            && !thread.IsDead && thread.IsOwnCoroutineRunning
+                ? thread.LifetimeToken
+                : new CancellationToken(true);
+
+        /// <summary>Owns a participant once by reference, disposing late registrations immediately.</summary>
+        public void RegisterRuntimeLifetime(IDisposable participant)
+        {
+            if (participant == null)
+            {
+                throw new ArgumentNullException(nameof(participant));
+            }
+
+            lock (_runtimeLifetimeGate)
+            {
+                if (_registeredRuntimeLifetimes.TryGetValue(participant, out _))
+                {
+                    return;
+                }
+
+                _registeredRuntimeLifetimes.Add(participant, new object());
+                if (!_disposed)
+                {
+                    _runtimeLifetimeParticipants.Add(participant);
+                    return;
+                }
+            }
+
+            DisposeRuntimeLifetimeContained(participant);
+        }
+
         /// <summary>The scheduler thread factory (tests read its runner-reuse counters).</summary>
         internal LuaCsRbxScriptThreadFactory SchedulerThreadFactory => _schedulerThreadFactory;
 
@@ -1645,12 +1682,25 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Releases bridge subscriptions, scheduler work, and captured Lua callback state.</summary>
         public void Dispose()
         {
-            if (_disposed)
+            IDisposable[] participants;
+            lock (_runtimeLifetimeGate)
             {
-                return;
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+                participants = _runtimeLifetimeParticipants.ToArray();
+                _runtimeLifetimeParticipants.Clear();
             }
 
-            _disposed = true;
+            // WHY: mark and detach ownership before callbacks can reenter disposal or registration.
+            foreach (IDisposable participant in participants)
+            {
+                DisposeRuntimeLifetimeContained(participant);
+            }
+
             _networkBridge.EventReceived -= DeliverNetworkEvent;
             _networkBridge.RequestReceived -= QueueNetworkRequest;
             _networkBridge.DetachServerClock(_serverClockReader);
@@ -1704,6 +1754,25 @@ namespace CoreAI.Ai.LuaCs
             _originTagByMod.Clear();
             _networkWarningWindows.Clear();
             ActorModsDisconnected = null;
+        }
+
+        private void DisposeRuntimeLifetimeContained(IDisposable participant)
+        {
+            try
+            {
+                participant.Dispose();
+            }
+            catch (Exception exception)
+            {
+                try
+                {
+                    _log?.Invoke("[RbxApi] A runtime lifetime participant failed to dispose: "
+                                 + exception.Message);
+                }
+                catch
+                {
+                }
+            }
         }
 
         internal ModLoadCandidate BeginModLoadCandidate(string ownerModId)

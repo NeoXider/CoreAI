@@ -51,6 +51,26 @@ if there is neither a successful action nor a usable result, the terminal chunk 
 `ProviderError`, and traces of failed calls. A successful tool preserves the existing valid
 completion even with an empty final response.
 
+### Failure receipts and request-local bindings
+
+The default `ILlmClient` completion-to-stream adapter carries tool receipts, partial text and reasoning,
+usage, model, HTTP status and retry hints on failed completions as well as successful ones. A failed
+completion with no error code becomes `ProviderError`; failure text is optional. Fallback, logging
+and routing classify a nonzero stream `ErrorCode` as a failure even when `Error` is empty. A later
+usage/control frame cannot turn that failed request into a successful health or usage report.
+
+Auth refresh can update credentials for future requests, but it never replays a completion that
+already invoked a tool, or a stream that already emitted visible text or a tool receipt. The original
+failure classification, HTTP/retry metadata and available receipts reach the caller. A reusable
+registry client handle takes one separate lease for each admitted operation; disposing the handle
+alone does not release an active operation or decrement the count before any request starts.
+
+`MeaiLlmClient` creates one request-local effective tool list before constructing either its execution
+policy or MEAI function bindings. When a memory store is supplied, `call_skill_tool` proxies bind
+declarative memory targets to the admitted role using `CallSkillToolLlmTool.BindForRole`. The shared
+catalog remains unchanged. A host without a memory store keeps its existing non-memory bindings;
+unavailable declarative memory targets do not fall back to global memory.
+
 ### Waiting for HTTP in Unity
 
 Streaming retry disposes each provider enumerator once. If the request already failed, a secondary
@@ -97,5 +117,7 @@ The bridge ships in `com.neoxider.coreaiunity` (`Runtime/Plugins/WebGL/CoreAiSse
 - **Logging.** The DevTools `console.log` lines (open / response / done) are commented out in the jslib; uncomment them for tracing. `console.warn` stays on for read and network errors.
 - **`Content-Type: application/json` is always sent.** **`FetchSseTransportProtocol.BuildHeaderString`** guarantees the header even when the caller supplies none — without it, the browser defaults to `text/plain;charset=UTF-8`, which Groq tolerates but LM Studio's Express server hard-resets as "Failed to fetch".
 - **Separate total and response wait.** The fetch bridge's optional total timer is never re-armed by raw bytes. The C# parser owns the configurable semantic response wait (default 180 seconds) using the PlayerLoop marshaler. Reasoning and tool-call fragments reset it; SSE keep-alive comments do not. Zero disables either limit independently. A timer abort reports typed `LlmErrorCode.Timeout`, rather than a fake HTTP-0 network error.
+- **Bounded unread payload.** `FetchSseOpenAiTransport(bool sameOriginCredentials)` defaults to 1 MiB of UTF-8 payload and 1024 fragments per request. Hosts replacing the transport can use the overload with positive `maxBufferedBytes` and `maxBufferedChunks`. Managed reads acknowledge a fragment only after consuming all of its bytes. Both sides enforce the limits; a slow consumer that exceeds either limit receives `LlmClientException(BackendUnavailable)` with a capacity diagnostic, rather than silently dropped output. The bridge rejects an oversized upstream byte array before decoding it, cancels the reader/controller once, and removes timers and per-call state. This is a deterministic overflow abort, not a browser throughput or memory-allocation guarantee. If the browser has no streaming reader, the bridge fails without buffering an unlimited `response.text()` body; select `WebGlNativeStreaming=false` for the existing UnityWebRequest simulated-stream path.
+- **Malformed SSE is observable.** Invalid JSON or invalid types in known OpenAI delta/tool/usage fields produce a redacted `LlmClientException(ProviderError)`. Earlier partial output remains partial and a later `[DONE]` cannot turn corruption into a successful answer. Comments, blank frames and unknown extension fields remain supported. Executed tool receipts still suppress replay in outer decorators.
 - **429 retry window from the error body.** On WebGL, `fetch` cannot read the `Retry-After` header (CORS strips it), so `MeaiOpenAiChatClient.ResolveRateLimitBackoffMs` falls back to parsing the window out of the error body text (Groq's `"Please try again in 14.017s"`, minutes+seconds supported, capped at 20s, +250ms margin) before falling back further to `2s * retryIndex`.
 - **Per-callback string allocations are freed.** Every `stringToNewUTF8` used to marshal a chunk/open/error string into wasm is freed (`_free`) right after the dynCall returns, so a long session does not grow the wasm heap chunk by chunk.

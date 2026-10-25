@@ -87,7 +87,7 @@ namespace CoreAI.Ai
         /// </summary>
         public ActorContext? ActorContext { get; set; }
 
-        /// <summary>Logical latest-wins cancellation scope for legacy callers.</summary>
+        /// <summary>Optional logical latest-wins scope; actor-aware requests isolate it by actor, connection and role.</summary>
         public string CancellationScope { get; set; } = "";
 
         /// <summary>

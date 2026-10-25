@@ -133,5 +133,13 @@ namespace CoreAI.Ai
                 "[ScopedConversationSummaryStore] Inner store does not implement IAsyncConversationSummaryStore; " +
                 "wrap it in BlockingSyncSummaryStoreAsyncAdapter or explicitly enable blocking fallback.");
         }
+
+        internal IConversationSummaryStore Bind(string roleId, out string boundRoleId)
+        {
+            boundRoleId = AgentMemoryScopeKey.Resolve(_scopeProvider, roleId);
+            return _inner is ScopedConversationSummaryStoreDecorator nested
+                ? nested.Bind(boundRoleId, out boundRoleId)
+                : _inner;
+        }
     }
 }

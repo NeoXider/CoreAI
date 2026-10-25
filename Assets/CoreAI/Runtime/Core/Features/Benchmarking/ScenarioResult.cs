@@ -31,6 +31,12 @@ namespace CoreAI.Benchmarking
         public BenchmarkClassification Classification => Score.Classification;
         public FailureAttribution Attribution { get; set; } = FailureAttribution.None;
 
+        /// <summary>Excludes deliberately incomparable work independently of its failure attribution.</summary>
+        public bool ExcludeFromScoring { get; set; }
+
+        /// <summary>Operator-interrupted evidence; never graded or finalized and rerun on resume.</summary>
+        public bool Interrupted { get; set; }
+
         public IReadOnlyList<BenchmarkCheckpoint> Checkpoints { get; set; } = Array.Empty<BenchmarkCheckpoint>();
         public IReadOnlyList<BenchmarkPenalty> Penalties { get; set; } = Array.Empty<BenchmarkPenalty>();
 
@@ -79,8 +85,11 @@ namespace CoreAI.Benchmarking
 
         public double LatencyMs { get; set; }
 
-        /// <summary>Wall-clock spent inside LLM calls only (generation), excluding tool execution and grading.</summary>
+        /// <summary>Legacy name for client-turn milliseconds, including tools executed inside the client.</summary>
         public double GenerationMs { get; set; }
+
+        /// <summary>Client-turn milliseconds, including internal tool execution, prefill and decode.</summary>
+        public double ClientTurnMs { get => GenerationMs; set => GenerationMs = value; }
 
         public double CostUsd { get; set; }
         public bool CostKnown { get; set; }

@@ -952,24 +952,17 @@ namespace CoreAI.Ai
                 yield break;
             }
 
-            if (!result.Ok)
-            {
-                yield return new LlmStreamChunk
-                {
-                    IsDone = true,
-                    Error = result.Error,
-                    ErrorCode = result.ErrorCode,
-                    HttpStatus = result.HttpStatus,
-                    RetryAfterSeconds = result.RetryAfterSeconds,
-                    Model = result.Model
-                };
-                yield break;
-            }
-
             yield return new LlmStreamChunk
             {
                 Text = result.Content ?? "",
+                ReasoningText = result.ReasoningContent ?? "",
                 IsDone = true,
+                Error = result.Error,
+                ErrorCode = !result.Ok && result.ErrorCode == LlmErrorCode.None
+                    ? LlmErrorCode.ProviderError
+                    : result.ErrorCode,
+                HttpStatus = result.HttpStatus,
+                RetryAfterSeconds = result.RetryAfterSeconds,
                 PromptTokens = result.PromptTokens,
                 LastRoundtripPromptTokens = result.LastRoundtripPromptTokens,
                 CompletionTokens = result.CompletionTokens,

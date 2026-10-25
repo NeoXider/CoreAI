@@ -47,6 +47,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
         [TearDown]
         public void TearDown()
         {
+            _provider?.Dispose();
             foreach (Texture2D texture in _textures.Values)
             {
                 Object.DestroyImmediate(texture);
@@ -105,7 +106,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
         [Test]
         public void MissingVariantSource_FallsBackToPlainMaterial()
         {
-            RbxTextureMaterialProvider naked = new(LoadTexture);
+            using RbxTextureMaterialProvider naked = new(LoadTexture);
             RbxMaterialId brick = new("Brick", BrickValue);
             RbxMaterialId variant = new("Brick", BrickValue, "MyBrick");
 
@@ -222,7 +223,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
         [Test]
         public void LuaPartMaterialVariant_RendersVariantMaterialOnBackingRenderer()
         {
-            RbxTextureMaterialProvider provider = new(LoadTexture);
+            using RbxTextureMaterialProvider provider = new(LoadTexture);
             using (Mvp1AcceptanceWorld world = new(materialProvider: provider))
             {
                 world.Binder.MaterialVariantSource =
@@ -267,7 +268,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
             // materializes before the host can point the binder at the new MaterialService — so a
             // binder that only consults the source at materialization time renders every variant
             // in a loaded world plain, and never asks again.
-            RbxTextureMaterialProvider provider = new(LoadTexture);
+            using RbxTextureMaterialProvider provider = new(LoadTexture);
             using (Mvp1AcceptanceWorld world = new(materialProvider: provider))
             {
                 world.Stack.Runtime.LoadMod("variant-late-source", @"
@@ -306,7 +307,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
             // variant's own properties touches no part. Without a push from the write path a script
             // that changed a live variant's ColorMap left every part wearing it on the old texture,
             // forever, with nothing in the log.
-            RbxTextureMaterialProvider provider = new(LoadTexture);
+            using RbxTextureMaterialProvider provider = new(LoadTexture);
             using (Mvp1AcceptanceWorld world = new(materialProvider: provider))
             {
                 world.Binder.MaterialVariantSource =

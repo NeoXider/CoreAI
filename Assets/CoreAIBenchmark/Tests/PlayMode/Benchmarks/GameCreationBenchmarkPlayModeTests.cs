@@ -591,25 +591,31 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         [Test]
         public async Task ProviderResponseEvidence_ResetsBetweenTurnsAndSealFreezesIt()
         {
-            ResponseEvidenceLlm provider = new();
+            ResponseEvidenceLlm provider = new() { FirstChunk = new LlmStreamChunk { Text = "previous turn" } };
             SessionCapturingLlmClient capture = new(provider);
             await foreach (LlmStreamChunk chunk in capture.CompleteStreamingAsync(new LlmCompletionRequest())) { }
             Assert.IsTrue(capture.ProviderResponseObserved);
+            Assert.IsTrue(capture.LastProviderActivityUtc.HasValue);
             provider.OpenResponse = false;
+            provider.FirstChunk = new LlmStreamChunk();
             IAsyncEnumerator<LlmStreamChunk> waiting = capture.CompleteStreamingAsync(new LlmCompletionRequest())
                 .GetAsyncEnumerator();
             Assert.IsTrue(await waiting.MoveNextAsync());
             Assert.IsFalse(capture.ProviderResponseObserved, "A later request cannot inherit an earlier HTTP success.");
+            Assert.IsNull(capture.LastProviderActivityUtc, "A later request cannot inherit earlier provider activity.");
             capture.Seal();
             provider.LastState.RecordResponse();
+            provider.LastState.RecordTimeout(LlmTimeoutKind.ResponseWait);
             Assert.IsFalse(capture.ProviderResponseObserved, "Late updates cannot change a sealed scenario.");
+            Assert.IsNull(capture.LastProviderActivityUtc);
+            Assert.AreEqual(LlmTimeoutKind.None, capture.TimeoutKind);
             await waiting.DisposeAsync();
         }
 
         [Test]
         public async Task ProviderResponseEvidence_ParallelCapturesRemainIndependent()
         {
-            ResponseEvidenceLlm open = new();
+            ResponseEvidenceLlm open = new() { FirstChunk = new LlmStreamChunk { Text = "first capture" } };
             ResponseEvidenceLlm waiting = new() { OpenResponse = false };
             SessionCapturingLlmClient first = new(open);
             SessionCapturingLlmClient second = new(waiting);
@@ -617,9 +623,44 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             await foreach (LlmStreamChunk chunk in second.CompleteStreamingAsync(new LlmCompletionRequest())) { }
             Assert.IsTrue(first.ProviderResponseObserved);
             Assert.IsFalse(second.ProviderResponseObserved);
+            Assert.IsTrue(first.LastProviderActivityUtc.HasValue);
+            Assert.IsNull(second.LastProviderActivityUtc);
+            Assert.AreNotSame(open.LastState, waiting.LastState);
             first.Seal();
+            DateTime? frozenActivity = first.LastProviderActivityUtc;
             open.LastState.ResetAttempt();
             Assert.IsTrue(first.ProviderResponseObserved);
+            waiting.LastState.RecordResponse();
+            waiting.LastState.RecordTimeout(LlmTimeoutKind.ResponseWait);
+            Assert.IsTrue(second.ProviderResponseObserved);
+            Assert.AreEqual(LlmTimeoutKind.ResponseWait, second.TimeoutKind);
+            Assert.AreEqual(LlmTimeoutKind.None, first.TimeoutKind);
+            Assert.AreEqual(frozenActivity, first.LastProviderActivityUtc);
+
+            (string Name, LlmStreamChunk Chunk, bool Response, bool Activity, bool Usable, bool Usage)[] cases =
+            {
+                ("empty", new LlmStreamChunk(), false, false, false, false),
+                ("terminal", new LlmStreamChunk { IsDone = true }, false, false, false, false),
+                ("null receipts", new LlmStreamChunk { ExecutedToolCalls = null }, false, false, false, false),
+                ("visible text", new LlmStreamChunk { Text = "answer" }, true, true, true, false),
+                ("hidden reasoning", new LlmStreamChunk { ReasoningText = "reasoning" }, true, true, false, false),
+                ("provider progress", new LlmStreamChunk { GenerationInProgress = true }, true, true, false, false),
+                ("tool receipt", new LlmStreamChunk
+                {
+                    ExecutedToolCalls = new[] { new LlmToolCallTrace("execute_lua", true, 1, "native") }
+                }, true, true, true, false),
+                ("provider usage", new LlmStreamChunk { PromptTokens = 3, CompletionTokens = 0 }, true, false, false, true)
+            };
+            foreach ((string name, LlmStreamChunk body, bool response, bool activity, bool usable, bool usage) in cases)
+            {
+                ResponseEvidenceLlm evidenceProvider = new() { OpenResponse = false, FirstChunk = body };
+                SessionCapturingLlmClient evidenceCapture = new(evidenceProvider);
+                await foreach (LlmStreamChunk chunk in evidenceCapture.CompleteStreamingAsync(new LlmCompletionRequest())) { }
+                Assert.AreEqual(response, evidenceCapture.ProviderResponseObserved, name);
+                Assert.AreEqual(activity, evidenceCapture.LastProviderActivityUtc.HasValue, name);
+                Assert.AreEqual(usable, evidenceCapture.AnyUsableOutput, name);
+                Assert.AreEqual(usage, evidenceCapture.AnyProviderUsage, name);
+            }
         }
 
         [Test]
@@ -654,6 +695,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         {
             public bool OpenResponse = true;
             public bool FailAfterFirstChunk;
+            public LlmStreamChunk FirstChunk = new();
             public LlmProviderResponseState LastState;
             public bool SupportsNativeToolCalling => true;
             public void SetTools(IReadOnlyList<ILlmTool> tools) { }
@@ -665,12 +707,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 LastState = request.ProviderResponseState;
                 LastState.ResetAttempt();
                 if (OpenResponse) LastState.RecordResponse();
-                yield return new LlmStreamChunk();
+                yield return FirstChunk;
                 await Task.CompletedTask;
                 if (FailAfterFirstChunk)
                     throw new OperationCanceledException("cancelled", new LlmClientException("HTTP 503",
                         LlmErrorCode.BackendUnavailable, 503));
-                yield return new LlmStreamChunk { IsDone = true };
+                yield return new LlmStreamChunk
+                {
+                    IsDone = true,
+                    ExecutedToolCalls = FirstChunk.ExecutedToolCalls,
+                    PromptTokens = FirstChunk.PromptTokens,
+                    CompletionTokens = FirstChunk.CompletionTokens,
+                    TotalTokens = FirstChunk.TotalTokens
+                };
             }
         }
 
@@ -711,7 +760,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             StringAssert.Contains("execute_lua", observer.CompletionText);
             StringAssert.Contains("build()", observer.CompletionText);
             string replay = observer.BuildLuaReplayScript("bunny", "g6_free_build_vision");
-            StringAssert.Contains("run_chunk(1, function()", replay);
+            StringAssert.StartsWith(ScenarioToolCallObserver.ReplayPrefix, replay);
             StringAssert.Contains("build()", replay);
             StringAssert.Contains("bad()", replay);
             Assert.Less(replay.IndexOf("build()", StringComparison.Ordinal),
@@ -748,6 +797,198 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             Assert.AreEqual(2, observer.ToolCalls);
             Assert.AreEqual(0, observer.FailedToolCalls);
             StringAssert.DoesNotContain("orphan()", observer.CompletionText);
+        }
+
+        [TestCase(0)]
+        [TestCase(2500)]
+        public void ClientTurnTiming_IncludesInternalToolsAndKeepsLegacyAliases(double toolMilliseconds)
+        {
+            double now = 0;
+            ClockedToolLlm inner = new(amount => now += amount, toolMilliseconds);
+            SessionCapturingLlmClient capture = new(inner, () => now);
+            IAsyncEnumerator<LlmStreamChunk> stream = capture.CompleteStreamingAsync(new LlmCompletionRequest()).GetAsyncEnumerator();
+            try
+            {
+                while (stream.MoveNextAsync().AsTask().GetAwaiter().GetResult()) { }
+            }
+            finally
+            {
+                stream.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            Assert.AreEqual(200, inner.ProviderMilliseconds);
+            Assert.AreEqual(200 + toolMilliseconds, capture.ClientTurnMs);
+            Assert.AreEqual(capture.ClientTurnMs, capture.GenerationMs);
+            BenchmarkReport report = new();
+            report.Add(new ScenarioResult
+            {
+                ScenarioId = "clocked", CompletionTokens = 20, ClientTurnMs = capture.ClientTurnMs,
+                LatencyMs = capture.ClientTurnMs + 100
+            });
+            Assert.AreEqual(20 / ((200 + toolMilliseconds) / 1000.0), report.ClientTurnTokensPerSecond, 1e-9);
+            Assert.AreEqual(report.ClientTurnTokensPerSecond, report.GenerationTokensPerSecond);
+            Assert.AreEqual(report.TotalClientTurnMs, report.TotalGenerationMs);
+            string json = BenchmarkReportFormatter.ToJson(report);
+            JObject document = JObject.Parse(json);
+            Assert.AreEqual((double)document["summary"]["totalGenerationMs"], (double)document["summary"]["totalClientTurnMs"]);
+            Assert.AreEqual((double)document["results"][0]["generationMs"], (double)document["results"][0]["clientTurnMs"]);
+            Assert.AreEqual(capture.ClientTurnMs, BenchmarkRunStore.ImportReport(json).Results[0].ClientTurnMs);
+            StringAssert.Contains("client-turn (includes internal tools)", BenchmarkReportFormatter.ToMarkdown(report));
+            StringAssert.DoesNotContain("tok/s provider-call", BenchmarkReportFormatter.ToMarkdown(report));
+            StringAssert.Contains("tok/s client-turn", BenchmarkReportFormatter.ToSvg(report));
+            StringAssert.Contains("tok/s client-turn", BenchmarkReportFormatter.ToModelCardSvg(report));
+            StringAssert.Contains("s client-turn", FormatFreeBuildHeroStats(1, 1, 0, report.TotalLatencyMs,
+                ResolveTokenAccounting(capture, 20, 0)));
+        }
+
+        /// <summary>Separates deterministic provider and tool intervals without claiming a provider-only capture metric.</summary>
+        private sealed class ClockedToolLlm : ILlmClient
+        {
+            private readonly Action<double> _advance;
+            private readonly double _toolMilliseconds;
+            public double ProviderMilliseconds { get; private set; }
+
+            public ClockedToolLlm(Action<double> advance, double toolMilliseconds)
+            {
+                _advance = advance;
+                _toolMilliseconds = toolMilliseconds;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default) => throw new InvalidOperationException("Streaming is required.");
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                await Task.CompletedTask;
+                _advance(100);
+                ProviderMilliseconds += 100;
+                yield return new LlmStreamChunk { Text = "part " };
+                _advance(_toolMilliseconds);
+                _advance(100);
+                ProviderMilliseconds += 100;
+                yield return new LlmStreamChunk { Text = "done", IsDone = true, CompletionTokens = 20 };
+            }
+        }
+
+        [TestCase("0", 0)]
+        [TestCase("23.5", 23.5)]
+        [TestCase("5000", 3600)]
+        [TestCase("NaN", 120)]
+        public void ResumeManifest_RestoresNormalizedStallPolicyAndRejectsChangedOverride(string raw, double expected)
+        {
+            string previous = Environment.GetEnvironmentVariable(EnvProviderStallSeconds);
+            string directory = Path.Combine(Path.GetTempPath(), "CoreAiStallPolicy_" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                Environment.SetEnvironmentVariable(EnvProviderStallSeconds, raw);
+                BenchmarkRunManifest manifest = CreateManifest("stall-policy", new[] { new BenchmarkTarget("model", "http://localhost", "") },
+                    Array.Empty<GameBenchmarkScenario>(), 1);
+                BenchmarkRunStore store = new(directory, manifest.RunId);
+                store.SaveManifest(manifest);
+                BenchmarkRunManifest saved = store.LoadManifest();
+                string frozen = expected.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+                Assert.AreEqual(frozen, saved.Options[EnvProviderStallSeconds]);
+                Environment.SetEnvironmentVariable(EnvProviderStallSeconds, null);
+                SetSavedOption(EnvProviderStallSeconds, saved.Options[EnvProviderStallSeconds]);
+                Assert.AreEqual(expected, ResolveProviderStallSeconds());
+                double differentNormalizedThreshold = expected == 0 ? 1 : 0;
+                Environment.SetEnvironmentVariable(EnvProviderStallSeconds, differentNormalizedThreshold.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                Assert.Throws<InvalidOperationException>(() => SetSavedOption(EnvProviderStallSeconds, saved.Options[EnvProviderStallSeconds]));
+                Assert.IsTrue(BenchmarkRunManifest.OptionMatches(EnvRetries, "0", "3"));
+                BenchmarkTargetState legacy = new() { Metadata = new BenchmarkRunMetadata { ProviderStallSeconds = expected } };
+                Assert.Throws<InvalidOperationException>(() => RestoreLegacyStallPolicy(new[] { legacy }));
+                Environment.SetEnvironmentVariable(EnvProviderStallSeconds, null);
+                RestoreLegacyStallPolicy(new[] { legacy });
+                Assert.AreEqual(expected, ResolveProviderStallSeconds());
+                BenchmarkTargetState conflicting = new() { Metadata = new BenchmarkRunMetadata { ProviderStallSeconds = differentNormalizedThreshold } };
+                Assert.Throws<InvalidOperationException>(() => RestoreLegacyStallPolicy(new[] { legacy, conflicting }));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(EnvProviderStallSeconds, previous);
+                if (Directory.Exists(directory)) Directory.Delete(directory, true);
+            }
+        }
+
+        [Test]
+        public void OptionalModelCardWriteFailure_StillPublishesRequiredReportsWithVectorFallback()
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "CoreAiOptionalArtifact_" + Guid.NewGuid().ToString("N"));
+            const string stem = "optional-artifact";
+            try
+            {
+                Directory.CreateDirectory(Path.Combine(directory, stem + "_modelcard.png"));
+                string markdown = WriteArtifacts(new BenchmarkReport(), new byte[] { 1, 2, 3 }, stem, directory);
+                Assert.IsTrue(File.Exists(markdown));
+                Assert.IsTrue(File.Exists(Path.Combine(directory, stem + ".json")));
+                Assert.IsTrue(File.Exists(Path.Combine(directory, "INDEX.md")));
+                Assert.IsTrue(File.Exists(Path.Combine(directory, stem + ".svg")));
+                Assert.IsTrue(File.Exists(Path.Combine(directory, stem + "_modelcard.svg")));
+                Assert.IsFalse(File.Exists(Path.Combine(directory, stem + "_modelcard.png")));
+                string published = File.ReadAllText(markdown);
+                StringAssert.Contains(stem + "_modelcard.svg", published);
+                StringAssert.DoesNotContain(stem + "_modelcard.png", published);
+            }
+            finally
+            {
+                if (Directory.Exists(directory)) Directory.Delete(directory, true);
+            }
+        }
+
+        [Test]
+        public void LuaReplay_CompilesEachCallAndRetainsRuntimeFailureEffectsInOrder()
+        {
+            string[] chunks =
+            {
+                "local =",
+                "local hidden = 7; local p = Instance.new('Part'); p.Name = 'CastlePartial'; " +
+                "p.Size = Vector3.new(1,1,1); p.Position = Vector3.new(0,0.5,0); p.Anchored = true; " +
+                "p.Parent = workspace; error('scripted runtime failure')",
+                "assert(hidden == nil); assert(workspace:FindFirstChild('CastlePartial') ~= nil); " +
+                "local p = Instance.new('Part'); p.Name = 'CastleFinal'; p.Size = Vector3.new(1,1,1); " +
+                "p.Position = Vector3.new(2,0.5,0); p.Anchored = true; p.Parent = workspace; " +
+                "local message = 'quotes \\\" and fences ]=] ]==] survive'; print(message); return message"
+            };
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                using RbxBenchmarkWorld original = new(settings, null);
+                using RbxBenchmarkWorld replayed = new(settings, null);
+                ScenarioToolCallObserver observer = new("GameMaster", "g6_free_build");
+                for (int i = 0; i < chunks.Length; i++)
+                {
+                    bool success = original.TryEvaluateLua(chunks[i], out _);
+                    Assert.AreEqual(i == 2, success, $"Original chunk {i + 1} must have the intended outcome.");
+                    observer.Record(new LlmToolCallRecord
+                    {
+                        Info = new LlmToolCallInfo("trace", "GameMaster", "call-" + i, "execute_lua",
+                            new JObject { ["code"] = chunks[i] }.ToString()),
+                        Status = success ? "completed" : "failed"
+                    });
+                }
+                string script = observer.BuildLuaReplayScript("model\nwith a newline", "g6_free_build");
+                int payloadStart = script.IndexOf('{');
+                JObject recorded = JObject.Parse(script.Substring(payloadStart, script.LastIndexOf('}') - payloadStart + 1));
+                CollectionAssert.AreEqual(chunks, ((JArray)recorded["chunks"]).Values<string>().ToArray());
+                Assert.AreEqual("model\nwith a newline", (string)recorded["modelId"]);
+                Assert.AreEqual("g6_free_build", (string)recorded["scenarioId"]);
+                Assert.IsTrue(replayed.TryReplayLua(script, out string evidence), evidence);
+                Assert.AreEqual(2, original.Measure().Parts);
+                Assert.AreEqual(original.Measure().Parts, replayed.Measure().Parts);
+                Assert.AreEqual(original.Measure().DistinctNames, replayed.Measure().DistinctNames);
+                Assert.Less(evidence.IndexOf("G6 chunk 1 failed", StringComparison.Ordinal),
+                    evidence.IndexOf("G6 chunk 2 failed", StringComparison.Ordinal));
+                StringAssert.Contains("G6 chunk 1 failed", evidence);
+                StringAssert.Contains("scripted runtime failure", evidence);
+                StringAssert.Contains("fences ]=] ]==] survive", evidence);
+                StringAssert.DoesNotContain("G6 chunk 3 failed", evidence);
+                Assert.IsTrue(replayed.TryReplayLua("return 42", out string legacy), legacy);
+                StringAssert.Contains("42", legacy);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
         }
 
         [Test]
@@ -925,7 +1166,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             try
             {
                 rbx = new RbxBenchmarkWorld(settings, world.Root);
-                Assert.IsTrue(rbx.TryEvaluateLua(File.ReadAllText(luaPath, System.Text.Encoding.UTF8), out string output),
+                Assert.IsTrue(rbx.TryReplayLua(File.ReadAllText(luaPath, System.Text.Encoding.UTF8), out string output),
                     "The replay must finish synchronously; output: " + output);
                 int parts = rbx.Measure().Parts;
                 Assert.Greater(parts, 0, "The replay must build at least one castle part.");
@@ -1231,7 +1472,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             yield return CaptureReportModelCard(report, visualLane, png => modelCardPng = png);
 
             string artifactPath = WriteArtifacts(report, modelCardPng);
-            if (artifactPath != "(not written)" && singleRun != null)
+            if (singleRun != null)
                 SaveCheckpoint(singleRun, singleRun.Plan.All(p => singleRun.Checkpoint.IsFinalized(p.Id, p.Repetition)), true);
 
             Debug.Log($"[Benchmark] ===== SUITE COMPLETE =====\n" +
@@ -1287,12 +1528,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
         private static string ProgressLine(ScenarioResult r)
         {
+            if (r.Interrupted) return $"⚪ {r.ScenarioName} — interrupted (not scored; resume will retry)";
             if (r.Attribution == FailureAttribution.Environment)
             {
                 return $"⚠ {r.ScenarioName} — provider/env failure (excluded)";
             }
 
-            if (r.Attribution == FailureAttribution.NotGraded)
+            if (r.ExcludeFromScoring || r.Attribution == FailureAttribution.NotGraded)
             {
                 return $"⚪ {r.ScenarioName} — custom prompt (not scored)";
             }
@@ -1328,10 +1570,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         internal static string WriteArtifacts(BenchmarkReport report, byte[] modelCardPng = null, string stem = null,
-            string directory = null)
+            string directory = null, Action<string, string> requiredWriter = null)
         {
-            try
-            {
+                Action<string, string> writeRequired = requiredWriter ?? ((path, content) => BenchmarkRunStore.AtomicWrite(path, content));
                 string dir = string.IsNullOrWhiteSpace(directory) ? DefaultResultsDirectory() : directory;
                 Directory.CreateDirectory(dir);
 
@@ -1342,7 +1583,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 string heroScenarioId = null;
 
                 // Visual results card, embedded near the top of the Markdown report.
-                BenchmarkRunStore.AtomicWrite(Path.Combine(dir, svgName), BenchmarkReportFormatter.ToSvg(report));
+                writeRequired(Path.Combine(dir, svgName), BenchmarkReportFormatter.ToSvg(report));
                 string md = EmbedResultsImage(BenchmarkReportFormatter.ToMarkdown(report), svgName);
                 System.Text.StringBuilder toolTrace = new(report.PreservedToolTraceJsonl);
                 foreach (ScenarioResult scenarioResult in report.Results)
@@ -1353,13 +1594,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 if (toolTrace.Length > 0)
                 {
                     string traceName = stem + ".tools.jsonl";
-                    BenchmarkRunStore.AtomicWrite(Path.Combine(dir, traceName), toolTrace.ToString());
+                    writeRequired(Path.Combine(dir, traceName), toolTrace.ToString());
                     md += $"\n[Tool-call arguments and result previews (up to 2,000 characters each)]({traceName})\n";
                 }
 
                 // WHY: the vector card needs no GPU, so a headless run still gets a model card.
                 string cardSvgName = stem + "_modelcard.svg";
-                BenchmarkRunStore.AtomicWrite(Path.Combine(dir, cardSvgName), BenchmarkReportFormatter.ToModelCardSvg(report));
+                writeRequired(Path.Combine(dir, cardSvgName), BenchmarkReportFormatter.ToModelCardSvg(report));
 
                 // The rendered model card leads the report when available, else its vector twin.
                 if (modelCardPng == null || modelCardPng.Length == 0)
@@ -1377,6 +1618,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     catch (Exception ex)
                     {
                         Debug.LogWarning($"[Benchmark] failed to write model card: {ex.Message}");
+                        md = EmbedResultsImage(md, cardSvgName);
                     }
                 }
 
@@ -1386,7 +1628,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     if (!string.IsNullOrWhiteSpace(hero.LuaReplayScript))
                     {
                         string luaName = stem + "_g6_replay.lua";
-                        BenchmarkRunStore.AtomicWrite(Path.Combine(dir, luaName), hero.LuaReplayScript);
+                        writeRequired(Path.Combine(dir, luaName), hero.LuaReplayScript);
                         md += $"\n[Replay the model's complete G6 Lua calls]({luaName})\n";
                     }
 
@@ -1405,27 +1647,21 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 }
 
                 md += WriteSceneScreenshots(report, dir, stem, heroScenarioId);
-                BenchmarkRunStore.AtomicWrite(mdPath, md);
-                BenchmarkRunStore.AtomicWrite(Path.Combine(dir, stem + ".json"), BenchmarkReportFormatter.ToJson(report));
+                writeRequired(mdPath, md);
+                writeRequired(Path.Combine(dir, stem + ".json"), BenchmarkReportFormatter.ToJson(report));
 
                 // Append a one-line row to the rolling index so many runs stay easy to scan/compare.
                 string indexPath = Path.Combine(dir, "INDEX.md");
                 if (!File.Exists(indexPath))
                 {
-                    BenchmarkRunStore.AtomicWrite(indexPath, BenchmarkReportFormatter.IndexHeader());
+                    writeRequired(indexPath, BenchmarkReportFormatter.IndexHeader());
                 }
 
                 List<string> indexLines = File.ReadAllLines(indexPath).Where(line => !line.Contains("](" + mdName + ")")).ToList();
                 indexLines.Add(BenchmarkReportFormatter.IndexRow(report, mdName));
-                BenchmarkRunStore.AtomicWrite(indexPath, string.Join("\n", indexLines) + "\n");
+                writeRequired(indexPath, string.Join("\n", indexLines) + "\n");
 
                 return mdPath;
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[Benchmark] failed to write artifacts: {ex.Message}");
-                return "(not written)";
-            }
         }
 
         internal static ScenarioResult FindFreeBuildHeroResult(BenchmarkReport report) =>

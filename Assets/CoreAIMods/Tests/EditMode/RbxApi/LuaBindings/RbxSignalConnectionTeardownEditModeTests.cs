@@ -44,6 +44,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         {
             private readonly Dictionary<(string ModId, string Key), string> _values = new();
 
+            public System.Action<string, string, string> AfterSet { get; set; }
+
             public string Get(string modId, string key)
             {
                 return _values.TryGetValue((modId, key), out string value) ? value : "";
@@ -58,6 +60,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 }
 
                 _values[(modId, key)] = value;
+                AfterSet?.Invoke(modId, key, value);
             }
 
             public void Clear(string modId)
@@ -100,6 +103,125 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         private sealed class TeardownProbe
         {
             public int KilledThreads { get; set; } = -1;
+        }
+
+        private sealed class LifetimeParticipant : System.IDisposable
+        {
+            public System.Action OnDispose { get; set; }
+            public int DisposeCount { get; private set; }
+
+            public void Dispose()
+            {
+                DisposeCount++;
+                OnDispose?.Invoke();
+            }
+
+            public override bool Equals(object other) => other is LifetimeParticipant;
+            public override int GetHashCode() => 0;
+        }
+
+        [Test]
+        public void MOD006_RuntimeParticipantsDisposeOnceDespiteFaultsReentryAndLateRegistration()
+        {
+            bool failLog = false;
+            int cleanupLogs = 0;
+            LuaCsRbxApiBindings bindings = new(log: _ =>
+            {
+                if (failLog)
+                {
+                    cleanupLogs++;
+                    throw new System.InvalidOperationException("Expected diagnostic failure.");
+                }
+            });
+            ILuaCsRuntimeLifetimeHost host = bindings;
+            LifetimeParticipant first = new();
+            LifetimeParticipant second = new();
+            LifetimeParticipant late = new();
+            first.OnDispose = () =>
+            {
+                bindings.Dispose();
+                host.RegisterRuntimeLifetime(first);
+                host.RegisterRuntimeLifetime(late);
+                throw new System.InvalidOperationException("Expected participant failure.");
+            };
+            host.RegisterRuntimeLifetime(first);
+            host.RegisterRuntimeLifetime(first);
+            host.RegisterRuntimeLifetime(second);
+            failLog = true;
+
+            Assert.DoesNotThrow(bindings.Dispose);
+            host.RegisterRuntimeLifetime(first);
+            host.RegisterRuntimeLifetime(second);
+            host.RegisterRuntimeLifetime(late);
+            Assert.DoesNotThrow(bindings.Dispose);
+
+            Assert.AreEqual(1, first.DisposeCount);
+            Assert.AreEqual(1, second.DisposeCount,
+                "participants with equal values still have independent reference ownership");
+            Assert.AreEqual(1, late.DisposeCount);
+            Assert.AreEqual(1, cleanupLogs);
+            Assert.IsTrue(host.CurrentScriptLifetimeToken.IsCancellationRequested);
+            Assert.Throws<System.ArgumentNullException>(() => host.RegisterRuntimeLifetime(null));
+        }
+
+        [Test]
+        public void MOD006_ScriptTokensBelongToTheRunningCoroutineAndCancelOnItsRetirement()
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildWiredStack(out LuaCsRbxApiBindings bindings, store);
+            using LuaCsRbxApiBindings otherWorld = new();
+            Dictionary<string, CancellationToken> tokens = new();
+            Dictionary<string, bool> initiallyCancelled = new();
+            store.AfterSet = (modId, key, value) =>
+            {
+                tokens[key] = bindings.CurrentScriptLifetimeToken;
+                initiallyCancelled[key] = tokens[key].IsCancellationRequested;
+                Assert.IsTrue(otherWorld.CurrentScriptLifetimeToken.IsCancellationRequested,
+                    "another world's active thread cannot provide this world's lifetime");
+            };
+            try
+            {
+                Assert.IsTrue(bindings.CurrentScriptLifetimeToken.IsCancellationRequested);
+                stack.Runtime.LoadMod("lifetime", @"
+                    store_set('chunk', 'yes')
+                    local nested = coroutine.create(function() store_set('nested', 'yes') end)
+                    assert(coroutine.resume(nested))
+                    task.spawn(function()
+                        store_set('pending', 'yes')
+                        task.wait(10)
+                        store_set('unexpected', 'yes')
+                    end)
+                    local fires = 0
+                    game:GetService('RunService').Heartbeat:Connect(function()
+                        fires = fires + 1
+                        store_set('signal' .. fires, 'yes')
+                    end)");
+
+                Assert.IsFalse(initiallyCancelled["chunk"]);
+                Assert.IsTrue(tokens["chunk"].IsCancellationRequested);
+                Assert.IsTrue(initiallyCancelled["nested"],
+                    "nested coroutine callbacks do not own the surrounding scheduler thread");
+                Assert.IsFalse(initiallyCancelled["pending"]);
+                Assert.IsFalse(tokens["pending"].IsCancellationRequested);
+                Assert.AreNotEqual(tokens["chunk"], tokens["pending"]);
+                Assert.IsTrue(bindings.CurrentScriptLifetimeToken.IsCancellationRequested);
+                bindings.Scheduler.Advance(0d);
+                bindings.Scheduler.Advance(0d);
+                Assert.IsFalse(initiallyCancelled["signal1"]);
+                Assert.IsFalse(initiallyCancelled["signal2"]);
+                Assert.IsTrue(tokens["signal1"].IsCancellationRequested);
+                Assert.IsTrue(tokens["signal2"].IsCancellationRequested);
+                Assert.AreNotEqual(tokens["signal1"], tokens["signal2"],
+                    "a pooled handler never reuses a retired iteration's cancellation source");
+                stack.Runtime.UnloadMod("lifetime");
+                Assert.IsTrue(tokens["pending"].IsCancellationRequested);
+                bindings.Scheduler.Advance(10d);
+                Assert.AreEqual("", store.Get("lifetime", "unexpected"));
+            }
+            finally
+            {
+                bindings.Dispose();
+            }
         }
 
         /// <summary>
@@ -535,6 +657,31 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.AreEqual("payload", store.Get("m", "seen"),
                 "the destroyed child is the same table key the script stored");
             Assert.AreEqual("true", store.Get("m", "same"));
+        }
+
+        [TestCase("RemoteEvent")]
+        [TestCase("UnreliableRemoteEvent")]
+        public void RBX006_LuaDestroyDisconnectsSavedRemoteConnections(string className)
+        {
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildWiredStack(out LuaCsRbxApiBindings bindings, store);
+            using (bindings)
+            {
+                stack.Runtime.LoadMod("remote-destroy", @"
+                    for index = 1, 64 do
+                        local folder = Instance.new('Folder', workspace)
+                        local remote = Instance.new('" + className + @"', folder)
+                        local connection = remote.OnServerEvent:Connect(function() end)
+                        if index % 2 == 0 then folder:Destroy() else remote:Destroy() end
+                        assert(connection.Connected == false)
+                        connection:Disconnect()
+                        if index % 2 ~= 0 then folder:Destroy() end
+                    end
+                    store_set('passed', 'true')");
+                Assert.AreEqual("true", store.Get("remote-destroy", "passed"));
+                Assert.AreEqual(0, bindings.Connections.GetOwnedBy("remote-destroy").Count);
+                Assert.LessOrEqual(bindings.Connections.TrackedEntryCount("remote-destroy"), 16);
+            }
         }
 
         [Test]

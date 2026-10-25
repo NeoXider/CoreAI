@@ -1697,8 +1697,8 @@ namespace CoreAI.Tests.EditMode
             stack.Runtime.EmitEvent("work", "");
             stack.Runtime.Tick(1);
 
-            Assert.AreEqual("", store.Get("event-subscriber", "event"),
-                "Exactly 256 due timers must exhaust the shared budget and leave the event queued.");
+            Assert.AreEqual("delivered", store.Get("event-subscriber", "event"),
+                "Pending events retain a reserved share of the global budget under timer saturation.");
 
             stack.Runtime.Tick(0);
 

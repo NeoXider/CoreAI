@@ -374,7 +374,17 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     candidate => candidate.Id == "g6_free_build");
                 Assert.IsNotNull(scenario);
 
-                ScenarioGrading castle = GradeBuild(scenario, CoherentCastle());
+                List<PartSpec> compliantCastle = CoherentCastle();
+                Assert.AreEqual(60, compliantCastle.Count, "The golden castle retains all original parts.");
+                // WHY: lift the existing foundation into bounds without losing a part or changing support contacts.
+                for (int index = 0; index < compliantCastle.Count; index++)
+                {
+                    PartSpec part = compliantCastle[index];
+                    compliantCastle[index] = new PartSpec(part.Name, part.Shape, part.Material,
+                        part.Sx, part.Sy, part.Sz, part.X, part.Y + 1, part.Z,
+                        part.Rx, part.Ry, part.Rz);
+                }
+                ScenarioGrading castle = GradeBuild(scenario, compliantCastle);
                 double totalWeight = 0;
                 foreach (BenchmarkCheckpoint checkpoint in castle.Checkpoints)
                 {
@@ -505,6 +515,47 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 Assert.IsNotNull(vision);
                 Assert.AreEqual(plain.Goal, vision.Goal);
                 Assert.AreEqual(plain.SystemPrompt, vision.SystemPrompt);
+            }
+        }
+
+        [TestCase("Vector3.new(20,2,2)", "CFrame.new(63,2,0)", false)]
+        [TestCase("Vector3.new(2,2,20)", "CFrame.new(0,2,-63)", false)]
+        [TestCase("Vector3.new(2,4,2)", "CFrame.new(0,95,0)", false)]
+        [TestCase("Vector3.new(2,2,2)", "CFrame.new(0,-1,0)", false)]
+        [TestCase("Vector3.new(2,2,2)", "CFrame.new(0,0.5,0)", false)]
+        [TestCase("Vector3.new(2,2,8)", "CFrame.new(62,2,0)*CFrame.Angles(0,math.pi/4,0)", false)]
+        [TestCase("Vector3.new(8,2,2)", "CFrame.new(0,2,62)*CFrame.Angles(0,math.pi/4,0)", false)]
+        [TestCase("Vector3.new(2,8,2)", "CFrame.new(0,2,0)*CFrame.Angles(0,0,math.pi/4)", false)]
+        [TestCase("Vector3.new(128,96,128)", "CFrame.new(0,48,0)", true)]
+        [TestCase("Vector3.new(2,2,2)", "CFrame.new(63.0005,1,0)", true)]
+        [TestCase("Vector3.new(2,2,2)", "CFrame.new(63.01,1,0)", false)]
+        [TestCase("Vector3.new(2,2,8)", "CFrame.new(62,2,0)*CFrame.Angles(0,math.pi/2,0)", false)]
+        [TestCase("Vector3.new(8,2,2)", "CFrame.new(62,2,0)*CFrame.Angles(0,math.pi/2,0)", true)]
+        public void LiveWorld_BuildVolumeUsesRotatedFullExtentsAndPublishedGround(string size, string cframe, bool inside)
+        {
+            using (new EnvScope(("COREAI_BENCHMARK_FREEBUILD_SUBJECT", null),
+                       ("COREAI_BENCHMARK_FREEBUILD_PROMPT", null), ("COREAI_BENCHMARK_VISION_MODE", null)))
+            {
+                CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+                BenchmarkEnvironment env = new(settings);
+                try
+                {
+                    string chunk = "local p=Instance.new('Part'); p.Name='CastleBoundary'; p.Anchored=true; " +
+                                   $"p.Size={size}; p.CFrame={cframe}; p.Parent=workspace";
+                    Assert.IsTrue(env.RbxWorld.TryEvaluateLua(chunk, out string output), output);
+                    RbxBenchmarkWorld.Snapshot snapshot = env.RbxWorld.Measure();
+                    Assert.AreEqual(1, snapshot.Parts, "The actual Rbx world must contain the test part.");
+                    Assert.AreEqual(inside ? 0 : 1, snapshot.OutOfBounds);
+                    GameBenchmarkScenario scenario = Array.Find(GameFreeBuildScenariosG6.All(), candidate => candidate.Id == "g6_free_build");
+                    BenchmarkCheckpoint gate = scenario.Grade(env, new RunObservation()).Checkpoints.Find(cp => cp.Id == "within_build_volume");
+                    Assert.IsTrue(gate.Mandatory);
+                    Assert.AreEqual(inside, gate.Passed, gate.Detail);
+                }
+                finally
+                {
+                    env.DisposeRbxWorld();
+                    UnityEngine.Object.DestroyImmediate(settings);
+                }
             }
         }
 

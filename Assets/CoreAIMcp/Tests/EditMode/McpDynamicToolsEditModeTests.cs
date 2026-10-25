@@ -302,6 +302,120 @@ namespace CoreAI.Mcp.Tests
             Assert.AreEqual("keep:v", ResultText(result));
         }
 
+        [TestCase("2026-09-08T10:00:00.000Z")]
+        [TestCase("2026-09-08T15:00:00.1234567+05:00")]
+        [TestCase("2026-09-08T06:30:00.001-03:30")]
+        public async Task RawCalls_DirectAndBroker_PreserveNestedTimestampStrings(string value)
+        {
+            StrictStringTool tool = new();
+            McpToolRegistry registry = RegistryWithDynamic(new[] { tool }, tool.Name);
+            McpRpcDispatcher dispatcher = new(registry, new McpSessionStore(), new InlineMainThreadDispatcher());
+            JObject arguments = new()
+            {
+                ["echo"] = value,
+                ["nested"] = new JObject { ["echo"] = value },
+                ["array"] = new JArray(value)
+            };
+            JObject brokerArguments = new()
+            {
+                ["action"] = "call", ["tool"] = tool.Name,
+                ["arguments_json"] = arguments.ToString(Formatting.None)
+            };
+
+            McpDispatchResult direct = await DispatchRawCall(dispatcher, tool.Name, arguments);
+            McpDispatchResult broker = await DispatchRawCall(dispatcher, CoreAiToolsBrokerMcpTool.ToolName, brokerArguments);
+            McpToolResult invokedBroker = await registry.Find(CoreAiToolsBrokerMcpTool.ToolName)
+                .InvokeAsync(brokerArguments, CancellationToken.None);
+
+            Assert.IsNull(direct.Response["error"]);
+            Assert.IsNull(broker.Response["error"]);
+            Assert.IsFalse((bool)direct.Response["result"]["isError"]);
+            Assert.IsFalse((bool)broker.Response["result"]["isError"]);
+            Assert.IsFalse(invokedBroker.IsError);
+            Assert.AreEqual(value, (string)direct.Response["result"]["content"][0]["text"]);
+            Assert.AreEqual(value, (string)broker.Response["result"]["content"][0]["text"]);
+            Assert.AreEqual(value, ResultText(invokedBroker));
+            Assert.AreEqual(3, tool.Observed.Count);
+            foreach (JObject observed in tool.Observed)
+            {
+                foreach (JToken token in StrictStringTool.StringTokens(observed))
+                {
+                    Assert.AreEqual(JTokenType.String, token.Type);
+                    Assert.AreEqual(value, token.Value<string>());
+                }
+            }
+        }
+
+        [TestCase("{} {}")]
+        [TestCase("{} true")]
+        [TestCase("{} trailing")]
+        [TestCase("[]")]
+        [TestCase("null")]
+        [TestCase("42")]
+        [TestCase("{broken")]
+        public async Task Broker_InvalidNestedArguments_RejectBeforeCallingTarget(string argumentsJson)
+        {
+            await AssertNestedArgumentsRejected(argumentsJson);
+        }
+
+        [Test]
+        public async Task Broker_ExcessiveNestedDepth_RejectsBeforeCallingTarget()
+        {
+            await AssertNestedArgumentsRejected("{\"echo\":" + new string('[', 65) + "0" + new string(']', 65) + "}");
+        }
+
+        private static async Task AssertNestedArgumentsRejected(string argumentsJson)
+        {
+            StrictStringTool tool = new();
+            McpToolRegistry registry = RegistryWithDynamic(new[] { tool }, tool.Name);
+            McpRpcDispatcher dispatcher = new(registry, new McpSessionStore(), new InlineMainThreadDispatcher());
+            JObject arguments = new()
+            {
+                ["action"] = "call", ["tool"] = tool.Name, ["arguments_json"] = argumentsJson
+            };
+            McpDispatchResult dispatched = await DispatchRawCall(dispatcher, CoreAiToolsBrokerMcpTool.ToolName, arguments);
+            McpToolResult invoked = await registry.Find(CoreAiToolsBrokerMcpTool.ToolName)
+                .InvokeAsync(arguments, CancellationToken.None);
+
+            Assert.IsNull(dispatched.Response["error"]);
+            Assert.IsTrue((bool)dispatched.Response["result"]["isError"]);
+            Assert.IsTrue(invoked.IsError);
+            StringAssert.Contains("arguments_json is not a JSON object", ResultText(invoked));
+            Assert.AreEqual(0, tool.Observed.Count);
+        }
+
+        private static Task<McpDispatchResult> DispatchRawCall(McpRpcDispatcher dispatcher, string name, JObject arguments)
+        {
+            JObject envelope = new()
+            {
+                ["jsonrpc"] = "2.0", ["id"] = 1, ["method"] = McpMethods.ToolsCall,
+                ["params"] = new JObject { ["name"] = name, ["arguments"] = arguments }
+            };
+            Assert.IsTrue(JsonRpc.TryParse(envelope.ToString(Formatting.None), out JObject parsed, out JObject error),
+                error?.ToString());
+            return dispatcher.DispatchAsync(parsed, CancellationToken.None);
+        }
+
+        private sealed class StrictStringTool : IMcpTool
+        {
+            public string Name => "strict_strings";
+            public string Description => "Accepts only unchanged JSON string tokens.";
+            public string InputSchemaJson => "{\"type\":\"object\"}";
+            public List<JObject> Observed { get; } = new();
+            public static JToken[] StringTokens(JObject arguments) => new[]
+            {
+                arguments["echo"], arguments["nested"]?["echo"], arguments["array"]?[0]
+            };
+            public Task<McpToolResult> InvokeAsync(JObject arguments, CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Observed.Add((JObject)arguments.DeepClone());
+                if (StringTokens(arguments).Any(token => token?.Type != JTokenType.String))
+                    return Task.FromResult(McpToolResult.Failure("Every input must remain a JSON string."));
+                return Task.FromResult(McpToolResult.Text(McpArguments.String(arguments, "echo")));
+            }
+        }
+
         [Test]
         public void Broker_IsAlwaysNative_EvenWhenPolicyMarksAllDynamic()
         {

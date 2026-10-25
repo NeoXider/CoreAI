@@ -6,6 +6,28 @@
 
 - Benchmark live-stream stall detection: scenario and total deadlines measure the gap since the last provider/tool activity; gaps of at least `COREAI_BENCHMARK_PROVIDER_STALL_SECONDS` (default 120) are recorded as Environment stalls, reported with the elapsed gap and retried.
 
+## [7.54.0] - 2026-10-25
+
+[Acceptance evidence](../../dev-docs/fix-wave-2026-10-24/README.md) records root-accepted source joins and measured portable/Windows gates, exact exceptions and unrun limits. Publication uses the Git tag and [GitHub release](https://github.com/NeoXider/CoreAI/releases/tag/v7.54.0). Intake findings are not a count of runtime-confirmed fixes.
+
+### Fixed
+
+- Orchestration freezes supplied actor/memory scope, including empty scope, before awaiting. Terminal outcomes follow validation/history/publication/cleanup. Actor cancellation selects trusted actor, connection session and optional role; independent logical scopes remain distinct and global cancellation stays administrative.
+- Queued streaming bounds retained chunks/bytes with cancellable producer backpressure and a one-item oversized-chunk handoff. Defaults are64 chunks/1 MiB per active stream; this is backlog accounting, not a total provider/heap bound.
+- Provider adapters preserve typed failure, usage and side-effect receipts through retry/fallback/auth refresh. Malformed known SSE fields fail explicitly, quoted date strings remain strings, and comments/usage/unknown extensions remain compatible.
+- Memory/skills preserve callable restrictions, bind role-specific tools per invocation, count expanded descriptors and clear replaced prompt/catalog state. Optional summary CAS and disposable snapshots prevent stale commits and release prepared generations; legacy store interfaces retain their documented weaker contract.
+- File stores preserve corrupt source/conflicting migration bytes, use opaque versioned keys and bounded shared/resident state, and distinguish absent legacy identity from explicit invalid tags before rewriting. Persistence arming is distinct from browser transaction completion.
+- Mods preserve scoped WorldEdit policy, generation fences, same-root transactions, bounded logs, fair dispatch, collision-safe identities and owned HTTP cancellation. Optional SaveStrict reports local commit/arming separately; legacy Save stays best effort. MOD-003 finite startup defaults remain a configuration limitation.
+- Rbx repairs cover ray/UDim conversion, material leases, clone ownership, signal cleanup, tween admission and bounded UTF-8 serialization. Luau lowering adds resource limits, correct loop/continue/label handling and a trusted iterator seam without exposing raw metatables; full Luau parity is not claimed.
+- Crafting matches overlapping requirements independently of order; schema checks preserve strings and reject nonfinite numbers. Actual projection-shader GPU regressions and a scaled/baked pair support the Editor projection correction, with player/device variants separate.
+- Benchmark gates preserve custom/interrupted evidence and truthful timing. Empty tool-trace arrays no longer fabricate provider activity, optional PNG failure retains SVG fallback, and replay/G6 controls preserve chunk effects, original geometry and grading thresholds. Historical model evidence is unchanged.
+
+### Integration and verification
+
+- [Supplied multiplayer sessions](../../Docs/CoreAI/MULTIPLAYER_SESSIONS.md) documents host-owned identity/admission/lifetimes, per-operation actor context, durable partitions and factory ownership. Roles may coincide across players; independent worlds need host storage/world composition.
+- Portable Core 2,850 Passed/3 NotExecuted, Lua1,932 Passed/41 NotExecuted, analyzer 8 Passed, both Node harnesses and version/opt-in checks passed. Windows EditMode 7,917 Passed/0 Failed/13 Skipped and final hermetic Windows PlayMode 386 Passed/0 Failed/2 batch EndOfFrame skips are accepted selections with exact two EditMode/two PlayMode environmental exceptions.
+- Raw mixed Windows runs included a local structural skill-cost test; it is now Benchmark/Explicit/manual-only and absent from the final hermetic result. No model-quality or broad live-provider acceptance is inferred. An earlier cancellation watchdog timeout remains unreproduced despite later scoped/full passes; no product/root-cause fix is claimed. Built-player/IL2CPP/browser durability/device/real-network/load/performance/quality gates remain separate.
+
 ## [7.53.0] - 2026-10-16
 
 ### Fixed

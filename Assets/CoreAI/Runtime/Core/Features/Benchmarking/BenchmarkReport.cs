@@ -30,6 +30,8 @@ namespace CoreAI.Benchmarking
         public int Repetitions { get; set; } = 1;
         public string UnityVersion { get; set; } = string.Empty;
         public string SuiteVersion { get; set; } = string.Empty;
+        /// <summary>Normalized inactivity ceiling used for deadline attribution; null for older reports.</summary>
+        public double? ProviderStallSeconds { get; set; }
         /// <summary>Process segments; a crashed segment's duration is a checkpointed lower bound.</summary>
         public List<BenchmarkRunSegment> Segments { get; set; } = new();
         public bool Resumed => Segments.Count > 1;
@@ -96,7 +98,8 @@ namespace CoreAI.Benchmarking
         /// score. Those runs are still reported in the tool stats, sessions, and screenshots.
         /// </summary>
         private IEnumerable<ScenarioResult> GradedResults =>
-            Results.Where(r => r.Attribution != FailureAttribution.Environment
+            Results.Where(r => !r.ExcludeFromScoring && !r.Interrupted
+                               && r.Attribution != FailureAttribution.Environment
                                && r.Attribution != FailureAttribution.Framework
                                && r.Attribution != FailureAttribution.NotGraded);
 
@@ -123,16 +126,17 @@ namespace CoreAI.Benchmarking
                     MeanBase = meanBase,
                     MeanBonus = meanBonus,
                     Spread = group.Max(r => r.Score.Base) - group.Min(r => r.Score.Base),
-                    Classification = Classify(meanBase)
+                    Classification = Classify(meanBase, group.All(r =>
+                        !r.Checkpoints.Any(cp => cp.Mandatory && !cp.Passed)))
                 });
             }
 
             return summaries;
         }
 
-        private static BenchmarkClassification Classify(double meanBase)
+        private static BenchmarkClassification Classify(double meanBase, bool mandatoryGatesPassed)
         {
-            if (meanBase >= GoalScore.PassBase)
+            if (meanBase >= GoalScore.PassBase && mandatoryGatesPassed)
             {
                 return BenchmarkClassification.Pass;
             }
@@ -231,25 +235,37 @@ namespace CoreAI.Benchmarking
         public double TotalCostUsd => Results.Where(r => r.CostKnown).Sum(r => r.CostUsd);
         public double TotalLatencyMs => Results.Sum(r => r.LatencyMs);
 
-        /// <summary>Wall-clock spent inside LLM calls only (generation), summed across the suite.</summary>
+        /// <summary>Legacy alias for client-turn time, including internal tool execution.</summary>
         public double TotalGenerationMs => Results.Sum(r => r.GenerationMs);
 
+        /// <summary>Client-turn time summed across the suite, including internal tool execution.</summary>
+        public double TotalClientTurnMs => TotalGenerationMs;
+
         /// <summary>
-        /// Provider-call throughput: COMPLETION tokens ÷ time spent INSIDE the LLM calls, which is
-        /// <b>prefill + decode</b> (NOT decode-only), excluding tool execution, grading and orchestration.
-        /// This is LOWER than the decode-only tok/s a runtime like LM Studio reports, because LM Studio
-        /// excludes prompt prefill — and CoreAI's agentic prompts are large (often ~14x the output), so
-        /// prefill dominates. True decode-only timing needs TTFT, which is only measurable on the streaming
-        /// path (see dev-docs/TOKENS_PER_SEC_FIX_PLAN.md). Falls back to the session-wide rate if per-call timing
-        /// is absent.
+        /// Legacy alias for <see cref="ClientTurnTokensPerSecond"/>. This includes internal tools and
+        /// does not measure provider-only or decode-only throughput.
         /// </summary>
         public double GenerationTokensPerSecond =>
             TotalGenerationMs > 0 ? TotalCompletionTokens / (TotalGenerationMs / 1000.0)
             : TotalLatencyMs <= 0 ? 0 : TotalCompletionTokens / (TotalLatencyMs / 1000.0);
 
+        /// <summary>Completion tokens per client-turn second, including internal tools; session fallback for older rows.</summary>
+        public double ClientTurnTokensPerSecond => GenerationTokensPerSecond;
+
+        internal double GradedClientTurnTokensPerSecond
+        {
+            get
+            {
+                List<ScenarioResult> graded = GradedResults.ToList();
+                double elapsedMs = graded.Sum(r => r.ClientTurnMs);
+                if (elapsedMs <= 0) elapsedMs = graded.Sum(r => r.LatencyMs);
+                return elapsedMs <= 0 ? 0 : graded.Sum(r => (long)r.CompletionTokens) / (elapsedMs / 1000.0);
+            }
+        }
+
         /// <summary>
         /// End-to-end throughput across the whole agentic session (includes prompt prefill, tool execution
-        /// and orchestration gaps) — always lower than <see cref="GenerationTokensPerSecond"/>.
+        /// and orchestration gaps). Parallel turns may overlap, so rates need not be ordered.
         /// </summary>
         public double EffectiveTokensPerSecond =>
             TotalLatencyMs <= 0 ? 0 : TotalCompletionTokens / (TotalLatencyMs / 1000.0);

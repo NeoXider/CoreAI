@@ -585,6 +585,7 @@ namespace CoreAI.Infrastructure.Llm
             int cacheReadTokens = 0;
             int cacheWriteTokens = 0;
             string terminalError = null;
+            LlmErrorCode terminalErrorCode = LlmErrorCode.None;
             IReadOnlyList<LlmToolCallTrace> executedTools = Array.Empty<LlmToolCallTrace>();
 
             // Timeout is enforced by the Unity-aware caller (CoreAiChatService)
@@ -727,9 +728,14 @@ namespace CoreAI.Infrastructure.Llm
                             cacheWriteTokens = current.CacheWriteTokens;
                         }
 
-                        if (!string.IsNullOrEmpty(current.Error))
+                        if (current.ErrorCode != LlmErrorCode.None || !string.IsNullOrEmpty(current.Error))
                         {
-                            terminalError = current.Error;
+                            terminalErrorCode = current.ErrorCode == LlmErrorCode.None
+                                ? LlmErrorCode.ProviderError
+                                : current.ErrorCode;
+                            terminalError = string.IsNullOrEmpty(current.Error)
+                                ? terminalErrorCode.ToString()
+                                : current.Error;
                         }
 
                         if (current.ExecutedToolCalls != null && current.ExecutedToolCalls.Count > 0)
@@ -760,7 +766,7 @@ namespace CoreAI.Infrastructure.Llm
                 string content = accumulated.ToString();
                 LlmCompletionResult synthetic = new()
                 {
-                    Ok = string.IsNullOrEmpty(terminalError),
+                    Ok = terminalErrorCode == LlmErrorCode.None && string.IsNullOrEmpty(terminalError),
                     Content = content,
                     PromptTokens = promptTokens,
                     CompletionTokens = completionTokens,
@@ -769,6 +775,7 @@ namespace CoreAI.Infrastructure.Llm
                     CacheReadTokens = cacheReadTokens,
                     CacheWriteTokens = cacheWriteTokens,
                     Error = terminalError ?? "",
+                    ErrorCode = terminalErrorCode,
                     ExecutedToolCalls = executedTools
                 };
                 string tokLine = FormatTokenLine(synthetic, wallMs, content.Length, promptBudgetLine);

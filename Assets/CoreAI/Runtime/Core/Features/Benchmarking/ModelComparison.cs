@@ -58,7 +58,7 @@ namespace CoreAI.Benchmarking
         /// <summary>True when the run graded at least one extreme-tier scenario.</summary>
         public bool HasExtreme => ExtremeScenarios > 0;
 
-        /// <summary>Generation throughput: COMPLETION tokens per wall-clock second (the real "tokens/sec").</summary>
+        /// <summary>Client-turn throughput including internal tools; legacy generation timer or session fallback.</summary>
         public double TokensPerSecond
         {
             get
@@ -784,7 +784,7 @@ namespace CoreAI.Benchmarking
                 Fail = (int)Num(sum, "fail"),
                 TotalTokens = (long)Num(sum, "totalTokens"),
                 TotalCompletionTokens = (long)Num(sum, "totalCompletionTokens"),
-                TotalGenerationMs = Num(sum, "totalGenerationMs"),
+                TotalGenerationMs = Num(sum, "totalClientTurnMs", Num(sum, "totalGenerationMs")),
                 TotalLatencyMs = Num(sum, "totalLatencyMs"),
                 MeanEfficiencyBonus = Num(sum, "meanEfficiencyBonus"),
                 MeanTokenBonus = Num(sum, "meanTokenBonus"),
@@ -854,7 +854,7 @@ namespace CoreAI.Benchmarking
         /// <summary>
         /// Recomputes per-group and per-tier means from a report's raw <c>results</c> array, mirroring
         /// <see cref="BenchmarkReport.Scenarios"/>: graded results only, repetitions averaged per scenario,
-        /// PASS when the scenario mean reaches <see cref="GoalScore.PassBase"/>.
+        /// PASS requires the mean bar and every scored repetition's mandatory gates.
         /// </summary>
         private sealed class ResultAggregate
         {
@@ -875,7 +875,7 @@ namespace CoreAI.Benchmarking
                     return agg;
                 }
 
-                Dictionary<string, (string Group, bool Extreme, double Sum, int Count)> perScenario = new();
+                Dictionary<string, (string Group, bool Extreme, double Sum, int Count, bool Gates)> perScenario = new();
                 List<string> order = new();
                 foreach (object item in results)
                 {
@@ -887,25 +887,31 @@ namespace CoreAI.Benchmarking
                     string attribution = Str(r, "attribution") ?? string.Empty;
                     if (attribution == nameof(FailureAttribution.Environment)
                         || attribution == nameof(FailureAttribution.Framework)
-                        || attribution == nameof(FailureAttribution.NotGraded))
+                        || attribution == nameof(FailureAttribution.NotGraded)
+                        || r.TryGetValue("excludeFromScoring", out object excluded) && excluded is true
+                        || r.TryGetValue("interrupted", out object interrupted) && interrupted is true)
                     {
                         continue;
                     }
 
                     string id = Str(r, "scenarioId") ?? string.Empty;
                     bool extreme = r.TryGetValue("extreme", out object e) && e is bool b && b;
-                    if (!perScenario.TryGetValue(id, out (string Group, bool Extreme, double Sum, int Count) acc))
+                    if (!perScenario.TryGetValue(id, out (string Group, bool Extreme, double Sum, int Count, bool Gates) acc))
                     {
-                        acc = (Str(r, "group") ?? string.Empty, false, 0, 0);
+                        acc = (Str(r, "group") ?? string.Empty, false, 0, 0, true);
                         order.Add(id);
                     }
 
-                    perScenario[id] = (acc.Group, acc.Extreme || extreme, acc.Sum + Num(r, "base"), acc.Count + 1);
+                    bool gates = !(Arr(r, "checkpoints") ?? new List<object>()).OfType<Dictionary<string, object>>()
+                        .Any(cp => cp.TryGetValue("mandatory", out object mandatory) && mandatory is true &&
+                            (!cp.TryGetValue("passed", out object passed) || passed is not true));
+                    perScenario[id] = (acc.Group, acc.Extreme || extreme, acc.Sum + Num(r, "base"), acc.Count + 1,
+                        acc.Gates && gates);
                 }
 
-                List<(string Group, bool Extreme, double Mean)> scenarios = order
+                List<(string Group, bool Extreme, double Mean, bool Gates)> scenarios = order
                     .Select(id => perScenario[id])
-                    .Select(a => (a.Group, a.Extreme, a.Sum / a.Count))
+                    .Select(a => (a.Group, a.Extreme, a.Sum / a.Count, a.Gates))
                     .ToList();
                 agg.Scenarios = scenarios.Count;
                 List<double> regular = scenarios.Where(x => !x.Extreme).Select(x => x.Mean).ToList();
@@ -914,8 +920,8 @@ namespace CoreAI.Benchmarking
                 agg.RegularBase = regular.Count == 0 ? 0 : regular.Average();
                 agg.ExtremeScenarios = extremes.Count;
                 agg.ExtremeBase = extremes.Count == 0 ? 0 : extremes.Average();
-                agg.ExtremePass = extremes.Count(v => v >= GoalScore.PassBase);
-                foreach (IGrouping<string, (string Group, bool Extreme, double Mean)> g in scenarios.GroupBy(x => x.Group))
+                agg.ExtremePass = scenarios.Count(s => s.Extreme && s.Mean >= GoalScore.PassBase && s.Gates);
+                foreach (IGrouping<string, (string Group, bool Extreme, double Mean, bool Gates)> g in scenarios.GroupBy(x => x.Group))
                 {
                     agg.Groups[g.Key] = g.Average(x => x.Mean);
                     List<double> ge = g.Where(x => x.Extreme).Select(x => x.Mean).ToList();

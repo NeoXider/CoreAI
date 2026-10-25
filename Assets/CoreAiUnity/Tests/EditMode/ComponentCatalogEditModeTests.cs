@@ -114,6 +114,55 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(result, "setting an unsupported property should fail");
         }
 
+        [TestCase(-1f)]
+        [TestCase(1.5f)]
+        [TestCase(9f)]
+        [TestCase(float.NaN)]
+        [TestCase(float.PositiveInfinity)]
+        [TestCase(float.NegativeInfinity)]
+        public void Executor_LinePositionCount_InvalidValue_DoesNotAddOrMutate(float count)
+        {
+            _executor = new CoreAiComponentCommandExecutor(new NullGameLogger(),
+                new CoreAiComponentCommandOptions(8));
+            CoreAiComponentCommandEnvelope envelope =
+                CoreAiComponentCommandEnvelope.SetFloat(_targetName, "linerenderer", "positionCount", count);
+
+            Assert.IsFalse(Execute(envelope));
+            Assert.IsNull(_target.GetComponent<LineRenderer>(), "Validation must run before auto-add.");
+
+            LineRenderer line = _target.AddComponent<LineRenderer>();
+            line.positionCount = 3;
+            Assert.IsFalse(Execute(envelope));
+            Assert.AreEqual(3, line.positionCount, "Rejected counts must preserve the existing native buffer.");
+        }
+
+        [TestCase(0)]
+        [TestCase(7)]
+        [TestCase(8)]
+        public void Executor_LinePositionCount_WithinHostBudget_Succeeds(int count)
+        {
+            _executor = new CoreAiComponentCommandExecutor(new NullGameLogger(),
+                new CoreAiComponentCommandOptions(8));
+
+            Assert.IsTrue(Execute(CoreAiComponentCommandEnvelope.SetFloat(
+                _targetName, "line", "positioncount", count)));
+            Assert.AreEqual(count, _target.GetComponent<LineRenderer>().positionCount);
+        }
+
+        [TestCase("type", "not-a-light")]
+        [TestCase("type", "9999")]
+        [TestCase("color", "not-a-color")]
+        public void Executor_InvalidLightValue_DoesNotAddComponent(string property, string value)
+        {
+            CoreAiComponentCommandEnvelope envelope = new CoreAiComponentCommandEnvelope
+            {
+                action = "set", targetName = _targetName, componentType = "light",
+                propertyName = property, stringValue = value
+            };
+            Assert.IsFalse(Execute(envelope));
+            Assert.IsNull(_target.GetComponent<Light>());
+        }
+
         private bool Execute(CoreAiComponentCommandEnvelope envelope)
         {
             // Mirror the marshaling the real tools/bindings perform: serialize the envelope into the

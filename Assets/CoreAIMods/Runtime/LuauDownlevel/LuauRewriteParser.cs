@@ -18,12 +18,14 @@ namespace CoreAI.Infrastructure.Luau
     /// </summary>
     internal sealed class RewriteContext
     {
-        public RewriteContext(string source)
+        public RewriteContext(string source, DownlevelBudget budget)
         {
             Source = source;
+            Budget = budget;
         }
 
         public readonly string Source;
+        public readonly DownlevelBudget Budget;
         public readonly List<SourceEdit> Edits = new();
         public readonly List<DownlevelDiagnostic> Diagnostics = new();
         public readonly List<RewriteNote> Notes = new();
@@ -36,6 +38,8 @@ namespace CoreAI.Infrastructure.Luau
         /// </summary>
         public int NestingDepth;
         public string GeneralizedIteratorName;
+        public string FloorName;
+        public string ToStringName;
 
         public sealed class RewriteNote
         {
@@ -65,9 +69,8 @@ namespace CoreAI.Infrastructure.Luau
     /// edits instead of building a tree: type annotations/declarations are deleted, compound
     /// assignments, <c>continue</c>, string interpolation, if-expressions, floor division and
     /// Luau-only number literals are rewritten to Lua 5.2 equivalents. Deletions re-emit the newlines
-    /// they cover and insertions never add lines, so line numbers are preserved (the one exception —
-    /// a multi-line <c>repeat</c>-<c>until</c> condition duplicated for <c>continue</c> — emits a
-    /// Warning diagnostic).
+    /// they cover and insertions never add lines. Whitespace swallowed by a string escape can remove
+    /// lines and emits a Warning diagnostic.
     /// </summary>
     internal sealed class LuauRewriteParser
     {
@@ -86,6 +89,7 @@ namespace CoreAI.Infrastructure.Luau
         private readonly List<LuauToken> _toks;
         private int _i;
         private int _funcDepth;
+        private int _blockDepth;
         private int _pendingEqPos = -1;
         private readonly List<LoopFrame> _loops = new();
         private readonly List<int> _ifExprFuncDepths = new();
@@ -95,8 +99,10 @@ namespace CoreAI.Infrastructure.Luau
         {
             public bool Barrier;
             public bool IsRepeat;
+            public int BodyDepth;
             public readonly List<LuauToken> Continues = new();
             public readonly List<LuauToken> Breaks = new();
+            public readonly List<LuauToken> Locals = new();
         }
 
         private enum SuffixKind
@@ -154,6 +160,7 @@ namespace CoreAI.Infrastructure.Luau
 
         private void Advance()
         {
+            _ctx.Budget.Spend(1, Cur.Line, Cur.Column);
             if (_i < _toks.Count - 1)
             {
                 _i++;
@@ -247,9 +254,14 @@ namespace CoreAI.Infrastructure.Luau
             return _pendingEqPos >= 0 || IsPunct(Cur, "=");
         }
 
-        private void AddEdit(int start, int end, string text)
+        private void AddEdit(int start, int end, string text, bool prelude = false)
         {
-            _ctx.Edits.Add(new SourceEdit { Start = start, End = end, Seq = _ctx.Edits.Count, Text = text });
+            _ctx.Budget.RecordEdit(end - start, text.Length);
+            _ctx.Edits.Add(new SourceEdit
+            {
+                Start = start, End = end,
+                Seq = prelude ? int.MinValue + _ctx.Edits.Count : _ctx.Edits.Count, Text = text
+            });
         }
 
         private void ReplaceToken(LuauToken t, string text)
@@ -262,10 +274,16 @@ namespace CoreAI.Infrastructure.Luau
             AddEdit(pos, pos, text);
         }
 
+        private void InsertChunkPrelude(string text)
+        {
+            AddEdit(_ctx.ChunkInsertionPosition, _ctx.ChunkInsertionPosition, text, true);
+        }
+
         /// <summary>Deletes a span while re-emitting its newlines so following lines keep their numbers.</summary>
         private void DeleteKeepNewlines(int start, int end)
         {
             int newlines = 0;
+            _ctx.Budget.Spend(end - start);
             for (int i = start; i < end; i++)
             {
                 if (_ctx.Source[i] == '\n')
@@ -279,6 +297,7 @@ namespace CoreAI.Infrastructure.Luau
 
         private bool SpanHasChar(int start, int end, char c)
         {
+            _ctx.Budget.Spend(end - start);
             for (int i = start; i < end; i++)
             {
                 if (_ctx.Source[i] == c)
@@ -303,6 +322,10 @@ namespace CoreAI.Infrastructure.Luau
             if (t.StringRewrite != null)
             {
                 ReplaceToken(t, t.StringRewrite);
+                if (CountNewlines(t.Text) != CountNewlines(t.StringRewrite))
+                {
+                    Warn("string whitespace escape removed source newlines; following runtime line numbers shift", t);
+                }
                 _ctx.Note("string escape", t);
             }
         }
@@ -312,42 +335,19 @@ namespace CoreAI.Infrastructure.Luau
             _ctx.Diagnostics.Add(new DownlevelDiagnostic(DownlevelSeverity.Warning, message, at.Line, at.Column));
         }
 
-        /// <summary>
-        /// Renders a source span with all edits recorded so far applied — used when a rewrite has to
-        /// duplicate an already-rewritten fragment (compound-assign targets, repeat-until conditions).
-        /// Insertions sitting exactly at <paramref name="start"/> are excluded: they belong to the
-        /// construct preceding the span.
-        /// </summary>
-        private string GetRewrittenText(int start, int end)
+        private int CountNewlines(string text)
         {
-            List<SourceEdit> slice = new();
-            for (int i = 0; i < _ctx.Edits.Count; i++)
+            _ctx.Budget.Spend(text.Length);
+            int count = 0;
+            for (int i = 0; i < text.Length; i++)
             {
-                SourceEdit e = _ctx.Edits[i];
-                if (e.Start >= start && e.End <= end && !(e.Start == start && e.End == start))
+                if (text[i] == '\n')
                 {
-                    slice.Add(e);
+                    count++;
                 }
             }
 
-            slice.Sort(CompareEdits);
-            StringBuilder sb = new();
-            int pos = start;
-            for (int i = 0; i < slice.Count; i++)
-            {
-                SourceEdit e = slice[i];
-                if (e.Start < pos)
-                {
-                    continue;
-                }
-
-                sb.Append(_ctx.Source, pos, e.Start - pos);
-                sb.Append(e.Text);
-                pos = e.End;
-            }
-
-            sb.Append(_ctx.Source, pos, end - pos);
-            return sb.ToString();
+            return count;
         }
 
         internal static int CompareEdits(SourceEdit a, SourceEdit b)
@@ -373,9 +373,17 @@ namespace CoreAI.Infrastructure.Luau
 
         private void ParseBlock()
         {
-            while (!IsBlockEnd())
+            _blockDepth++;
+            try
             {
-                ParseStatement();
+                while (!IsBlockEnd())
+                {
+                    ParseStatement();
+                }
+            }
+            finally
+            {
+                _blockDepth--;
             }
         }
 
@@ -689,6 +697,14 @@ namespace CoreAI.Infrastructure.Luau
             if (_ctx.GeneralizedIteratorName == null)
             {
                 _ctx.GeneralizedIteratorName = NextTemp();
+                if (_ctx.Budget.TrustedIteratorResolverName != null)
+                {
+                    InsertChunkPrelude("local " + _ctx.GeneralizedIteratorName + " = "
+                        + _ctx.Budget.TrustedIteratorResolverName + ";");
+                    _ctx.Note("generalized iteration", at);
+                    return _ctx.GeneralizedIteratorName;
+                }
+
                 string helper = "local " + _ctx.GeneralizedIteratorName
                     + " = (function(__s,__g,__t,__r,__n) return function(...) "
                     + "if __s('#', ...) ~= 1 then return ... end "
@@ -697,7 +713,7 @@ namespace CoreAI.Infrastructure.Luau
                     + "if __i ~= nil then return __i(__v) end "
                     + "if __t(__v) == 'table' then return __n, __v, nil end "
                     + "return __v end end)(select,getmetatable,type,rawget,next);";
-                Insert(_ctx.ChunkInsertionPosition, helper);
+                InsertChunkPrelude(helper);
             }
 
             _ctx.Note("generalized iteration", at);
@@ -706,20 +722,18 @@ namespace CoreAI.Infrastructure.Luau
 
         private void ParseRepeatStatement()
         {
-            LuauToken repeatTok = Cur;
             Advance();
             LoopFrame frame = PushLoop(true);
             ParseBlock();
             LuauToken untilTok = ExpectKeyword("until");
             PopLoop();
-            int condStart = Cur.Start;
-            int condEnd = ParseExpr();
-            FinalizeRepeatLoop(frame, repeatTok, untilTok, condStart, condEnd);
+            ParseExpr();
+            FinalizeRepeatLoop(frame, untilTok);
         }
 
         private LoopFrame PushLoop(bool isRepeat)
         {
-            LoopFrame frame = new() { IsRepeat = isRepeat };
+            LoopFrame frame = new() { IsRepeat = isRepeat, BodyDepth = _blockDepth + 1 };
             _loops.Add(frame);
             return frame;
         }
@@ -766,40 +780,56 @@ namespace CoreAI.Infrastructure.Luau
             _ctx.Note("continue", frame.Continues[0]);
         }
 
-        private void FinalizeRepeatLoop(LoopFrame frame, LuauToken repeatTok, LuauToken untilTok, int condStart,
-            int condEnd)
+        private void FinalizeRepeatLoop(LoopFrame frame, LuauToken untilTok)
         {
             if (frame.Continues.Count == 0)
             {
                 return;
             }
 
-            string flag = NextTemp();
-            string cond = GetRewrittenText(condStart, condEnd);
+            string label = NextTemp();
+            bool wrappedSuffix = false;
+            for (int i = 0; i < frame.Locals.Count; i++)
+            {
+                if (frame.Locals[i].Start > frame.Continues[0].Start)
+                {
+                    // WHY: Lua rejects a goto entering later locals. Valid Luau conditions cannot
+                    // refer to locals skipped by continue, so their suffix can end before the label.
+                    Insert(frame.Locals[i].Start, "do ");
+                    wrappedSuffix = true;
+                    break;
+                }
+            }
 
-            // WHY: 'continue' in repeat-until must evaluate the condition at the continue site (Luau
-            // forbids the condition referencing locals declared after a continue, so the scope there is
-            // sufficient); the loop is rebuilt as while-true so the condition never runs twice per pass.
-            ReplaceToken(repeatTok, "while true do local " + flag + " = false repeat");
             for (int i = 0; i < frame.Continues.Count; i++)
             {
-                ReplaceToken(frame.Continues[i], "if " + cond + " then " + flag + " = true end break");
+                ReplaceToken(frame.Continues[i], "goto " + label);
             }
 
-            for (int i = 0; i < frame.Breaks.Count; i++)
-            {
-                ReplaceToken(frame.Breaks[i], flag + " = true break");
-            }
-
-            ReplaceToken(untilTok, "if");
-            Insert(condEnd, " then " + flag + " = true end until true if " + flag + " then break end end");
-            if (cond.IndexOf('\n') >= 0)
-            {
-                Warn("multi-line repeat-until condition duplicated for 'continue'; line numbers shift inside this loop",
-                    frame.Continues[0]);
-            }
-
+            Insert(untilTok.Start, (wrappedSuffix ? "end " : "") + "::" + label + ":: ");
             _ctx.Note("continue", frame.Continues[0]);
+        }
+
+        private string EnsureFloor()
+        {
+            if (_ctx.FloorName == null)
+            {
+                _ctx.FloorName = NextTemp();
+                InsertChunkPrelude("local " + _ctx.FloorName + " = math.floor;");
+            }
+
+            return _ctx.FloorName;
+        }
+
+        private string EnsureToString()
+        {
+            if (_ctx.ToStringName == null)
+            {
+                _ctx.ToStringName = NextTemp();
+                InsertChunkPrelude("local " + _ctx.ToStringName + " = tostring;");
+            }
+
+            return _ctx.ToStringName;
         }
 
         private void ParseFuncName()
@@ -875,6 +905,12 @@ namespace CoreAI.Infrastructure.Luau
 
         private void ParseLocalStatement()
         {
+            LoopFrame loop = EnclosingLoop();
+            if (loop != null && loop.IsRepeat && loop.BodyDepth == _blockDepth)
+            {
+                loop.Locals.Add(Cur);
+            }
+
             Advance();
             if (IsName(Cur, "function"))
             {
@@ -992,10 +1028,11 @@ namespace CoreAI.Infrastructure.Luau
             bool needTemp = target.LastKind != SuffixKind.Name;
             if (!needTemp)
             {
-                string lhs = GetRewrittenText(target.Start, target.End);
+                _ctx.Budget.Spend(target.End - target.Start);
+                string lhs = _ctx.Source.Substring(target.Start, target.End - target.Start);
                 if (binOp == "//")
                 {
-                    ReplaceToken(opTok, "= math.floor(" + lhs + " / (");
+                    ReplaceToken(opTok, "= " + EnsureFloor() + "(" + lhs + " / (");
                     int end = ParseExpr();
                     Insert(end, "))");
                 }
@@ -1034,7 +1071,7 @@ namespace CoreAI.Infrastructure.Luau
 
                 if (binOp == "//")
                 {
-                    ReplaceToken(opTok, access + " = math.floor(" + access + " / (");
+                    ReplaceToken(opTok, access + " = " + EnsureFloor() + "(" + access + " / (");
                     int end = ParseExpr();
                     Insert(end, ")) end");
                 }
@@ -1167,7 +1204,7 @@ namespace CoreAI.Infrastructure.Luau
                 (int _, int rhsEnd) = ParseBinExpr(IsRightAssociative(op) ? prec - 1 : prec);
                 if (op.Text == "//")
                 {
-                    Insert(start, "math.floor(");
+                    Insert(start, EnsureFloor() + "(");
                     ReplaceToken(op, "/");
                     Insert(rhsEnd, ")");
                     _ctx.Note("floor division", op);
@@ -1235,7 +1272,7 @@ namespace CoreAI.Infrastructure.Luau
                 end = ParseSuffixedExpr().End;
             }
 
-            while (IsPunct(Cur, "::"))
+            while (IsPunct(Cur, "::") && !IsLabelAhead())
             {
                 LuauToken castTok = Cur;
                 Advance();
@@ -1246,6 +1283,12 @@ namespace CoreAI.Infrastructure.Luau
             }
 
             return end;
+        }
+
+        private bool IsLabelAhead()
+        {
+            return IsPunct(Cur, "::") && Peek(1).Kind == LuauTokenKind.Name
+                && !Keywords.Contains(Peek(1).Text) && IsPunct(Peek(2), "::");
         }
 
         /// <summary>
@@ -1268,6 +1311,9 @@ namespace CoreAI.Infrastructure.Luau
         private int ParseIfExpression(LuauToken ifTok)
         {
             int editMark = _ctx.Edits.Count;
+            string iteratorName = _ctx.GeneralizedIteratorName;
+            string floorName = _ctx.FloorName;
+            string toStringName = _ctx.ToStringName;
             ReplaceToken(ifTok, "(function() if");
             Advance();
             _ifExprFuncDepths.Add(_funcDepth);
@@ -1297,7 +1343,15 @@ namespace CoreAI.Infrastructure.Luau
                 // WHY: a top-level vararg in a branch cannot be lowered into the closure; drop every
                 // edit this if-expression produced and pass the original construct through with a
                 // diagnostic rather than emitting code that fails to parse under Lua 5.2.
+                for (int i = _ctx.Edits.Count - 1; i >= editMark; i--)
+                {
+                    _ctx.Budget.RollbackEdit(_ctx.Edits[i]);
+                }
+
                 _ctx.Edits.RemoveRange(editMark, _ctx.Edits.Count - editMark);
+                _ctx.GeneralizedIteratorName = iteratorName;
+                _ctx.FloorName = floorName;
+                _ctx.ToStringName = toStringName;
                 Warn(
                     "'...' (varargs) inside an if-then-else expression is unsupported; the construct was left unchanged",
                     ifTok);
@@ -1481,11 +1535,16 @@ namespace CoreAI.Infrastructure.Luau
                     if (escaped != null)
                     {
                         AddEdit(part.Start, part.End, escaped);
+                        if (SpanHasChar(part.Start, part.End, '\n') && escaped.IndexOf('\n') < 0)
+                        {
+                            Warn("string whitespace escape removed source newlines; following runtime line numbers shift",
+                                tok);
+                        }
                     }
                 }
                 else
                 {
-                    AddEdit(part.Start - 1, part.Start, "\" .. tostring(");
+                    AddEdit(part.Start - 1, part.Start, "\" .. " + EnsureToString() + "(");
                     AddEdit(part.End, part.End + 1, ") .. \"");
                     LuauRewriteParser sub = new(_ctx, part.Tokens);
                     sub.ParseInterpolationExpression();
@@ -1504,12 +1563,14 @@ namespace CoreAI.Infrastructure.Luau
         private string EscapeInterpText(int start, int end)
         {
             string src = _ctx.Source;
-            StringBuilder sb = new(end - start + 4);
+            _ctx.Budget.Spend(end - start);
+            StringBuilder sb = new(end - start);
             bool changed = false;
             int i = start;
             while (i < end)
             {
                 char c = src[i];
+                _ctx.Budget.CheckTextLength(sb.Length + 2L);
                 if (c == '\\' && i + 1 < end)
                 {
                     char n = src[i + 1];
@@ -1538,7 +1599,10 @@ namespace CoreAI.Infrastructure.Luau
                 }
             }
 
-            return changed ? sb.ToString() : null;
+            _ctx.Budget.Spend(sb.Length);
+            string text = sb.ToString();
+            string converted = LuauLexer.ConvertLuauStringEscapes(text, _ctx.Budget);
+            return converted ?? (changed ? text : null);
         }
 
         // ---------------------------------------------------------------- type skipping

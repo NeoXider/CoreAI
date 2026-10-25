@@ -41,7 +41,10 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
 - This character slice does not implement avatar rigs, animation, or appearance loading. The network
   transport is the optional `com.neoxider.coreaimirror` package, not this assembly.
 - `Clone()` copies external part state through the backing binder and removes partially created
-  copies if that binder fails. Lua clones receive the calling actor's ownership recursively. A
+  copies if that binder fails. C# `Clone()` preserves source actor ownership and access scope;
+  the ownership-override overload and Lua clones receive the calling actor's ownership recursively.
+  ClickDetector activation distance and every implemented MaterialVariant map, base material and
+  tile-width property copy silently. Connection handlers never copy. A
   `Humanoid` clone keeps `MaxHealth`, `Health`, `WalkSpeed`, `JumpPower`, `JumpHeight`,
   `UseJumpPower` and `DisplayName` (silently — no `Changed`); a clone at 0 health dies on its first
   Heartbeat inside the Workspace.
@@ -50,6 +53,10 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
 
 - Signals are live: `RunService.Heartbeat`, `UserInputService` input events and `ClickDetector`
   clicks all deliver through `RbxScriptSignal`.
+- Destroying either remote-event class disconnects its server signal and every per-actor client
+  signal, including when an ancestor is destroyed. Actor signal storage is cleared even when no
+  handlers were connected. Already queued invocations retain the normal destruction semantics;
+  repeated Destroy calls do not disconnect or deliver anything again.
 - DEV-7 at Domain level: tombstone reads (`Name`, `ClassName`, `Parent`, `IsDestroyed`) stay
   available on destroyed instances in C#; the stricter Lua-context rule is enforced by the
   marshalling layer. Inside a destruction-queued handler (`Destroying`, `AncestryChanged`, and the
@@ -84,3 +91,63 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
 - `RbxError` lives in this assembly.
 - Instances are created only through `InstanceRegistry` (no public `Register(instance)`)—
   identity can therefore never be missing or duplicated.
+
+## Runtime arithmetic and mutation admission
+
+Raycast direction is a displacement in studs: its magnitude is the maximum range. The Unity port
+converts that displacement once, then derives its normalized direction and metre range. Fractional
+and diagonal displacements follow the same contract as unit and axis-aligned displacements.
+
+UDim2 interpolation promotes signed integer offsets before subtraction and rounds the result to the
+nearest even integer. Endpoints retain their exact offsets, including the signed 32-bit limits.
+Extrapolation that cannot produce a representable offset raises `BAD_ARGUMENT` through the datatype
+layer's `RbxApiStubException`; it does not wrap or saturate.
+
+An explicit mutation envelope for TweenService:Create or Tween:Play/Pause/Cancel names the **tweened
+instance**, rather than the TweenService or Tween handle. The Lua adapter checks that target before
+allocating a tween or changing playback. WorldEdit and actor ACL checks still apply. Ordinary actor
+calls use server-generated envelopes; scheduled interpolation continues toward the admitted goals
+after the initiating call returns. Identity and game-session policy belong to the host.
+
+Remote encoding writes JSON through a bounded UTF-8 stream. The 65,536-byte ceiling includes tags,
+keys, escaping and delimiters; an oversized string is refused before allocating its JSON escaping
+buffer. Oversized graph expansion stops at the quota without producing the full JSON string or
+byte array, and no rejected payload reaches the network bridge. Depth, aggregate-entry and cycle
+guards still apply, including to dictionary values replaced by a stringified-key collision. The
+quota diagnostic states that encoding stopped rather than claiming an unmeasured final size.
+
+## Mutable render-material ownership
+
+`RbxTextureMaterialProvider` owns its mutable MaterialVariant cache per provider. Compose a separate
+provider for each world. Plain finite catalog materials may remain shared; independent providers
+with the same variant name never share mutable handles or overwrite one another's maps or tiling.
+
+The optional `IRbxMaterialLeaseProvider<TMaterial>` extends the existing lookup interface with
+`TryAcquireMaterial` and `ReleaseMaterial`. A successful acquisition pins its mutable handle until
+the matching release or provider disposal. Acquire a replacement before releasing the old handle,
+so another renderer wearing the same variant stays valid. The final release reclaims that variant.
+The plain `TryGetMaterial` API returns borrowed handles; at most 32 idle variants remain cached, so
+long-lived consumers must acquire a lease. Changing VariantSource retires old cache entries while
+preserving acquired handles until their consumers release them.
+
+`InstanceGameObjectBinder` uses this seam when supplied, releases leases on replacement, binding
+removal and BeginHostTeardown, and makes teardown idempotent before calling cleanup hooks. Cleanup
+failures are reported without preventing other lease releases. The binder disposes the provider it
+creates; a supplied provider remains owned by the host, which calls its IDisposable.Dispose after
+its consumers stop. Provider disposal clears all mutable materials and rejects subsequent lookups.
+Unity may defer native destruction until the end of the frame in Play Mode. Existing providers that
+implement only `IRbxMaterialProvider<TMaterial>` retain their original integration path.
+
+## Optional script adapter lifetime
+
+`LuaCsRbxApiBindings` implements `ILuaCsRuntimeLifetimeHost` for optional asynchronous script
+adapters. `CurrentScriptLifetimeToken` belongs to the currently executing scheduler coroutine in
+that world. It is already cancelled outside that coroutine, during a nested `coroutine.create` call or
+after binding disposal. Thread completion, cancellation and generation teardown cancel the token;
+each invocation of a pooled handler has its own lifetime.
+
+`RegisterRuntimeLifetime` transfers disposal of a participant to the bindings. Registration uses
+reference identity, so the same participant is disposed once even if registered repeatedly or
+from a disposal callback. Binding disposal contains participant and diagnostic failures, releases
+all registered participants, and disposes a new late registration immediately. Host adapters
+remain responsible for cancelling their pending work when they are disposed.

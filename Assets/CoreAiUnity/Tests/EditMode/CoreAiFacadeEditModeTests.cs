@@ -24,6 +24,7 @@ namespace CoreAI.Tests.EditMode
     public sealed class CoreAiFacadeEditModeTests
     {
         private SynchronizationContext _previousSynchronizationContext;
+        private readonly List<CoreAISettingsAsset> _ownedSettings = new List<CoreAISettingsAsset>();
 
         /// <summary>
         /// WHY this fixture detaches: it asserts through Assert.ThrowsAsync/CatchAsync, which BLOCK
@@ -42,6 +43,25 @@ namespace CoreAI.Tests.EditMode
         public void RestoreSynchronizationContext()
         {
             SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
+            try
+            {
+                foreach (CoreAISettingsAsset settings in _ownedSettings)
+                {
+                    UnityEngine.Object.DestroyImmediate(settings);
+                }
+            }
+            finally
+            {
+                _ownedSettings.Clear();
+            }
+        }
+
+        private CoreAISettingsAsset CreateSettings()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            _ownedSettings.Add(settings);
+            settings.ConfigureOffline();
+            return settings;
         }
 
         [SetUp]
@@ -151,6 +171,11 @@ namespace CoreAI.Tests.EditMode
             IAiOrchestrationService resolved = CoreAi.GetOrchestrator();
 
             Assert.AreSame(resolverOrchestrator, resolved);
+            Assert.IsTrue(CoreAi.IsReady);
+            Assert.IsNull(CoreAi.GetSettings());
+            Assert.IsTrue(CoreAi.TryGetOrchestrator(out IAiOrchestrationService second));
+            Assert.AreSame(resolverOrchestrator, second);
+            Assert.AreSame(resolverOrchestrator, CoreAi.GetOrchestrator());
         }
 
         [Test]
@@ -167,8 +192,8 @@ namespace CoreAI.Tests.EditMode
             FixedMemoryScopeProvider legacyScopeProvider = new();
             ScopedAgentMemoryStoreDecorator memoryStore = new(backingStore, legacyScopeProvider);
             BlockingFirstLlmClient llmClient = new();
-            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-            settings.ConfigureOffline();
+            CoreAISettingsAsset settings = CreateSettings();
+            CoreAISettingsAsset otherSettings = CreateSettings();
 
             ContainerBuilder builder = new();
             builder.RegisterInstance<IActorIdentityProvider>(actorIdentityProvider);
@@ -186,10 +211,31 @@ namespace CoreAI.Tests.EditMode
                 suppressDefaultConversationSummaryStore: false,
                 suppressDefaultAgentMemoryStore: true);
 
+            LocalActorIdentityProvider otherActorIdentityProvider = new(
+                "facade-actor-2", "facade-session-2", "", ActorGrantSet.None, AgentMemoryScope.Empty);
+            SequentialLlmClient otherLlmClient = new();
+            ContainerBuilder otherBuilder = new();
+            otherBuilder.RegisterInstance<IActorIdentityProvider>(otherActorIdentityProvider);
+            otherBuilder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
+            otherBuilder.RegisterCore();
+            otherBuilder.RegisterInstance<ICoreAISettings, CoreAISettingsAsset>(otherSettings);
+            otherBuilder.RegisterAgentPrompts(null);
+            otherBuilder.RegisterInstance<ILlmClient>(otherLlmClient);
+            otherBuilder.RegisterInstance<IAiOrchestrationMetrics>(new NullAiOrchestrationMetrics());
+            otherBuilder.RegisterInstance(new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
+            otherBuilder.RegisterInstance<IAuthorityHost>(new SoloAuthorityHost());
+            otherBuilder.RegisterInstance<IAgentMemoryScopeProvider>(legacyScopeProvider);
+            otherBuilder.RegisterInstance<IAgentMemoryStore>(memoryStore);
+            otherBuilder.RegisterCorePortable(
+                suppressDefaultConversationSummaryStore: false,
+                suppressDefaultAgentMemoryStore: true);
+
             try
             {
                 using IObjectResolver container = builder.Build();
+                using IObjectResolver otherContainer = otherBuilder.Build();
                 IAiOrchestrationService orchestrator = container.Resolve<IAiOrchestrationService>();
+                IAiOrchestrationService otherOrchestrator = otherContainer.Resolve<IAiOrchestrationService>();
                 CoreAi.SetResolver(() => orchestrator);
 
                 AiTaskRequest firstRequest = new()
@@ -205,6 +251,9 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreSame(firstStarted, startWinner, "The first production request did not reach the LLM.");
                 await firstStarted;
 
+                // WHY: Distinct logical scopes remain independent; the host explicitly stops its actor session.
+                CoreAi.StopAgent(RoleId, firstRequest.ActorContext);
+
                 AiTaskRequest secondRequest = new()
                 {
                     RoleId = RoleId,
@@ -215,7 +264,7 @@ namespace CoreAI.Tests.EditMode
                 Task secondWinner = await Task.WhenAny(second, Task.Delay(TimeSpan.FromSeconds(5)));
 
                 Assert.AreSame(second, secondWinner,
-                    "Different legacy scopes must still be latest-wins within the actor SessionId.");
+                    "A new logical scope must run after the host explicitly stops the actor session.");
                 Assert.AreEqual("ok", await second);
                 // WHY: TaskCanceledException derives from OperationCanceledException, and
                 // ThrowsAsync matches the exact type — CatchAsync accepts either.
@@ -244,47 +293,13 @@ namespace CoreAI.Tests.EditMode
                 // memoryStore/backingStore and assert its key differs from the first actor's: this is the
                 // value assertion that would have caught F1 (an ActorId-agnostic pin merging two actors'
                 // memory onto one key).
-                LocalActorIdentityProvider otherActorIdentityProvider = new(
-                    "facade-actor-2",
-                    "facade-session-2",
-                    "",
-                    ActorGrantSet.None,
-                    AgentMemoryScope.Empty);
-                SequentialLlmClient otherLlmClient = new();
-                CoreAISettingsAsset otherSettings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
-                otherSettings.ConfigureOffline();
-                try
+                CoreAi.SetResolver(() => otherOrchestrator);
+                AiTaskRequest otherActorRequest = new()
                 {
-                    ContainerBuilder otherBuilder = new();
-                    otherBuilder.RegisterInstance<IActorIdentityProvider>(otherActorIdentityProvider);
-                    otherBuilder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
-                    otherBuilder.RegisterCore();
-                    otherBuilder.RegisterInstance<ICoreAISettings, CoreAISettingsAsset>(otherSettings);
-                    otherBuilder.RegisterAgentPrompts(null);
-                    otherBuilder.RegisterInstance<ILlmClient>(otherLlmClient);
-                    otherBuilder.RegisterInstance<IAiOrchestrationMetrics>(new NullAiOrchestrationMetrics());
-                    otherBuilder.RegisterInstance(new AiOrchestrationQueueOptions { MaxConcurrent = 1 });
-                    otherBuilder.RegisterInstance<IAuthorityHost>(new SoloAuthorityHost());
-                    otherBuilder.RegisterInstance<IAgentMemoryScopeProvider>(legacyScopeProvider);
-                    otherBuilder.RegisterInstance<IAgentMemoryStore>(memoryStore);
-                    otherBuilder.RegisterCorePortable(
-                        suppressDefaultConversationSummaryStore: false,
-                        suppressDefaultAgentMemoryStore: true);
-
-                    using IObjectResolver otherContainer = otherBuilder.Build();
-                    CoreAi.SetResolver(() => otherContainer.Resolve<IAiOrchestrationService>());
-
-                    AiTaskRequest otherActorRequest = new()
-                    {
-                        RoleId = RoleId,
-                        Hint = "other-actor"
-                    };
-                    Assert.AreEqual("reply-1", await CoreAi.OrchestrateAsync(otherActorRequest));
-                }
-                finally
-                {
-                    UnityEngine.Object.DestroyImmediate(otherSettings);
-                }
+                    RoleId = RoleId,
+                    Hint = "other-actor"
+                };
+                Assert.AreEqual("reply-1", await CoreAi.OrchestrateAsync(otherActorRequest));
 
                 Assert.AreEqual(2, backingStore.SeenKeys.Length,
                     "A different actor must resolve to its own durable memory key.");
@@ -295,7 +310,6 @@ namespace CoreAI.Tests.EditMode
             finally
             {
                 CoreAi.Invalidate();
-                UnityEngine.Object.DestroyImmediate(settings);
             }
         }
 
@@ -391,12 +405,13 @@ namespace CoreAI.Tests.EditMode
 
         [TestCase(false)]
         [TestCase(true)]
-        public void StopAgent_PrefersRoleCancellationAcrossFacadeAndInjectedChatService(bool throughChatService)
+        public void StopAgent_UsesActorCancellationAcrossFacadeAndInjectedChatService(bool throughChatService)
         {
             RoleCancellationOrchestrator orchestrator = new();
             if (throughChatService)
             {
-                CoreAI.Chat.CoreAiChatService service = new(orchestrator);
+                CoreAI.Chat.CoreAiChatService service = new(orchestrator,
+                    actorIdentityProvider: orchestrator.IdentityProvider);
                 service.StopAgent("Teacher");
             }
             else
@@ -413,13 +428,21 @@ namespace CoreAI.Tests.EditMode
             }
 
             Assert.AreEqual("Teacher", orchestrator.StoppedRole);
-            Assert.IsNull(orchestrator.StoppedScope, "Role stop must use the role capability when available.");
+            Assert.AreEqual("facade-stop-actor", orchestrator.StoppedActor.ActorId);
+            Assert.AreEqual("facade-stop-session", orchestrator.StoppedActor.SessionId);
+            Assert.IsNull(orchestrator.StoppedScope, "Actor stop must not use global scope cancellation.");
+            Assert.IsNull(orchestrator.GloballyStoppedRole, "Actor stop must not use global role cancellation.");
         }
 
-        private sealed class RoleCancellationOrchestrator : IAiOrchestrationService, IRoleAiTaskCancellation
+        private sealed class RoleCancellationOrchestrator : IAiOrchestrationService, IRoleAiTaskCancellation,
+            IActorAiTaskCancellation, IAiActorContextResolver
         {
             public string StoppedRole;
             public string StoppedScope;
+            public string GloballyStoppedRole;
+            public ActorContext StoppedActor;
+            public IActorIdentityProvider IdentityProvider { get; } = new LocalActorIdentityProvider(
+                "facade-stop-actor", "facade-stop-session", "", ActorGrantSet.None, AgentMemoryScope.Empty);
 
             public Task<string> RunTaskAsync(AiTaskRequest task, CancellationToken cancellationToken = default)
             {
@@ -428,7 +451,19 @@ namespace CoreAI.Tests.EditMode
 
             public void CancelRoleTasks(string roleId)
             {
+                GloballyStoppedRole = roleId;
+            }
+
+            public void CancelActorTasks(ActorContext actorContext, string roleId = null)
+            {
                 StoppedRole = roleId;
+                StoppedActor = actorContext;
+            }
+
+            public ActorContext ResolveActorContext(AiTaskRequest request)
+            {
+                request.ActorContext ??= IdentityProvider.GetActorContext(request.RoleId);
+                return request.ActorContext.Value;
             }
 
             public void CancelTasks(string cancellationScope)

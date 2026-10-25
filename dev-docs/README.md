@@ -1,6 +1,6 @@
 # CoreAI dev-docs
 
-Internal design, planning and research notes. NOT user documentation — user/product docs live under `Docs/` and `Assets/**/Docs/`. Do not mix the two. Per AGENTS.md, audit reports do not live in the repo (this folder included): findings become `TODO.md` items and report files get deleted. Every file in this folder is listed here; a file that is superseded says so in its own header and stays only as the record of what was chosen and why.
+Internal design, planning and research notes. NOT user documentation — user/product docs live under `Docs/` and `Assets/**/Docs/`. Do not mix the two. Per AGENTS.md, audit reports do not live in the repo (this folder included): findings become `TODO.md` items and report files get deleted. The owner-requested audit and repair-wave reports linked below are explicit scoped exceptions. Every file in this folder is listed here; a file that is superseded says so in its own header and stays only as the record of what was chosen and why.
 
 ## Roblox API track, multiplayer and replication
 
@@ -55,3 +55,7 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 
 - MOVED_FROM_USER_DOCS.md — internal notes and TODOs moved out of the user documentation, each with the document it came from
 - COREAIUNITY_DOCS_MOVED_NOTES.md — internal details removed from `Assets/CoreAiUnity/Docs` on 2026-09-17, each with the document it came from
+
+- [audits/2026-10-23/README.md](audits/2026-10-23/README.md) - owner-requested CoreAI framework and package audit; individual module reports, coverage and verification limits. Demos, the example game and general developer tooling are outside the final scope.
+
+- [fix-wave-2026-10-24/README.md](fix-wave-2026-10-24/README.md) - 7.54.0 source/acceptance evidence: twelve module joins and MD14-19 follow-ups, passing portable and Windows EditMode/hermetic PlayMode selections, exact exceptions, raw mixed/negative receipts and platform/quality limits. Publication uses the release tag and GitHub release.

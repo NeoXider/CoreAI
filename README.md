@@ -474,6 +474,7 @@ All documentation is English. Entry points: **[Docs/README.md](Docs/README.md)**
 | One-liners from any script | [COREAI_SINGLETON_API](Assets/CoreAiUnity/Docs/COREAI_SINGLETON_API.md) |
 | Build agents, tools, skills | [AGENT_BUILDER](Assets/CoreAI/Docs/AGENT_BUILDER.md) · [TOOL_CALLING_BEST_PRACTICES](Assets/CoreAI/Docs/TOOL_CALLING_BEST_PRACTICES.md) |
 | Chat UI and streaming | [README_CHAT](Assets/CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md) · [STREAMING_ARCHITECTURE](Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md) |
+| Supplied players, sessions, cancellation and service lifetime | [MULTIPLAYER_SESSIONS](Docs/CoreAI/MULTIPLAYER_SESSIONS.md) |
 | Memory, context budget, compaction | [MemorySystem](Assets/CoreAiUnity/Docs/MemorySystem.md) · [ARCHITECTURE](Assets/CoreAiUnity/Docs/ARCHITECTURE.md) |
 | Endpoints, profiles, per-role routing | [LLM_ROUTING](Assets/CoreAI/Docs/LLM_ROUTING.md) · [RUNTIME_BACKEND_SWITCHING](Assets/CoreAiUnity/Docs/RUNTIME_BACKEND_SWITCHING.md) |
 | Lua modding and its sandbox | [Mods package](Assets/CoreAIMods/README.md) · [LUA_GAME_API](Assets/CoreAI/Docs/LUA_GAME_API.md) · [LUA_SANDBOX_SECURITY](Assets/CoreAI/Docs/LUA_SANDBOX_SECURITY.md) · [RBX_API](Assets/CoreAI/Docs/RBX_API.md) |
@@ -496,6 +497,8 @@ files. Assets under `Assets/` are untouched.
 Release notes live only in the two changelogs — [core](Assets/CoreAI/CHANGELOG.md) (core + mods) and
 [Unity host](Assets/CoreAiUnity/CHANGELOG.md). The authoritative version of each package is the
 `version` field in its `package.json`; all seven move together via `python tools/bump_version.py <version>`.
+
+7.54.0 acceptance evidence is recorded in the [release ledger](dev-docs/fix-wave-2026-10-24/README.md): portable Core/Lua/analyzer/Node checks, Windows EditMode 7,917 Passed/13 Skipped and hermetic Windows PlayMode 386 Passed/2 Skipped, all with zero failures in the accepted selections. Exact environmental exceptions, earlier mixed local-provider runs and unrun platform/quality limits remain explicit. Publication uses the [Git tag and GitHub release](https://github.com/NeoXider/CoreAI/releases/tag/v7.54.0). For multiplayer embedding, [supply an admitted context per operation](Docs/CoreAI/MULTIPLAYER_SESSIONS.md); the host owns authentication and connection/view lifetimes.
 
 ---
 

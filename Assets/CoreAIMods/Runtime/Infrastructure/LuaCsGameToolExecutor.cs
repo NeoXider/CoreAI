@@ -765,9 +765,9 @@ namespace CoreAI.Ai.LuaCs
         // WHY: Downlevel Luau -> Lua 5.2 before compiling so one-shot scripts accept the same
         // WHY: Luau syntax mods do; a downlevel Error is thrown here and caught by the caller as the exec
         // WHY: failure (never a silent raw fallback). Chunk name is stable so diagnostics are legible.
-        private static string CompileChunk(string code)
+        private string CompileChunk(string code)
         {
-            return LuauSourceGate.ToLua52(code, "execute_lua");
+            return LuauSourceGate.ToLua52(code, "execute_lua", _engine.TrustedIteratorResolverName);
         }
 
         private LuaTool.LuaResult ReportSuccess(string code, object[] results)

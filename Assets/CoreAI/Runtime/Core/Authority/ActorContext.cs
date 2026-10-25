@@ -113,6 +113,7 @@ namespace CoreAI.Authority
         private readonly string _actorId;
         private readonly ActorGrantSet _grants;
         private readonly AgentMemoryScope _memoryScope;
+        private readonly bool _hasBoundMemoryScope;
         private readonly string _roleId;
         private readonly string _sessionId;
         private readonly bool _trusted;
@@ -124,7 +125,8 @@ namespace CoreAI.Authority
             string roleId,
             string worldId,
             ActorGrantSet grants,
-            AgentMemoryScope memoryScope)
+            AgentMemoryScope memoryScope,
+            bool hasBoundMemoryScope = false)
         {
             _actorId = RequireId(actorId, nameof(actorId));
             _sessionId = RequireId(sessionId, nameof(sessionId));
@@ -132,6 +134,7 @@ namespace CoreAI.Authority
             _worldId = worldId?.Trim() ?? "";
             _grants = grants ?? throw new ArgumentNullException(nameof(grants));
             _memoryScope = memoryScope;
+            _hasBoundMemoryScope = hasBoundMemoryScope;
             _trusted = true;
         }
 
@@ -158,12 +161,20 @@ namespace CoreAI.Authority
         /// <summary>Whether this value was issued by an identity provider.</summary>
         public bool IsTrusted => _trusted;
 
+        internal bool HasBoundMemoryScope => _hasBoundMemoryScope;
+
+        internal ActorContext BindMemoryScope(AgentMemoryScope scope)
+        {
+            AssertTrusted();
+            return new ActorContext(ActorId, SessionId, RoleId, WorldId, Grants, scope, true);
+        }
+
         /// <summary>Creates a copy whose grants are intersected with a narrower set.</summary>
         public ActorContext NarrowGrants(ActorGrantSet restriction)
         {
             AssertTrusted();
             ActorGrantSet narrowed = _grants.NarrowTo(restriction);
-            return new ActorContext(ActorId, SessionId, RoleId, WorldId, narrowed, MemoryScope);
+            return new ActorContext(ActorId, SessionId, RoleId, WorldId, narrowed, MemoryScope, HasBoundMemoryScope);
         }
 
         internal static ActorContext IssueRestricted(

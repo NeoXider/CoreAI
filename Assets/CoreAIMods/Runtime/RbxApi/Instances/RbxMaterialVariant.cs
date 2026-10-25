@@ -93,6 +93,18 @@ namespace CoreAI.Mods.Rbx.Instances
                 RoughnessMap ?? string.Empty, MetalnessMap ?? string.Empty, StudsPerTile);
         }
 
+        /// <summary>Copies material state without signals or revision changes.</summary>
+        protected internal override void CopyCustomStateTo(RbxInstance copy)
+        {
+            RbxMaterialVariant variant = (RbxMaterialVariant)copy;
+            variant._baseMaterial = _baseMaterial;
+            variant._colorMap = _colorMap;
+            variant._normalMap = _normalMap;
+            variant._roughnessMap = _roughnessMap;
+            variant._metalnessMap = _metalnessMap;
+            variant._studsPerTile = _studsPerTile;
+        }
+
         /// <summary>Stores a map reference (null reads back as empty) and notifies on a change.</summary>
         private void SetMap(ref string field, string value, string propertyName)
         {

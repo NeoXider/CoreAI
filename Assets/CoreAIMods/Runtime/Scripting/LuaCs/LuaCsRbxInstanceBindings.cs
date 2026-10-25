@@ -1519,22 +1519,21 @@ namespace CoreAI.Ai.LuaCs
                 return LuaValue.Nil;
             }, "ScriptContext");
 
-            // WHY: Create/Play/Pause/Cancel stay out of IsMutatingMethod like AddItem —
-            // Create authorizes at call time inside RbxTweenService, Play re-checks there, and
-            // per-frame writes take no envelope (they converge to the authorized goals), so
-            // none of them run inside the per-call server-generated mutation envelope.
+            // WHY: scheduled ticks outlive a call's envelope; admission constrains the target
+            // before creating a tween or changing playback, while the service retains actor ACL.
             Method("Create", (ctx, self) =>
             {
                 // WHY: a tween moves, recolours and resizes parts frame by frame — the same writes
                 // a property assignment gates on WorldEdit; Play/Pause/Cancel re-check it below.
                 context.RequireWorldEdit("TweenService:Create");
+                RbxInstance target =
+                    ReadTargetInstance(Arg(ctx, 1), "TweenService:Create", 1);
+                context.RequireMutationTarget(target, "TweenService:Create");
                 RbxTweenService tweenService = (RbxTweenService)self;
                 tweenService.EnsureHost(context.Bindings.Scheduler,
                     context.Bindings.TweenPropertyHost,
                     context.Bindings.ResolvePlaybackStateItem,
                     context.Bindings.LogSink);
-                RbxInstance target =
-                    ReadTargetInstance(Arg(ctx, 1), "TweenService:Create", 1);
                 RbxTweenInfo info = LuaCsRbxDatatypeBindings.ReadTweenInfo(
                     Arg(ctx, 2), "TweenService:Create", 2);
                 List<KeyValuePair<string, object>> goals =
@@ -1570,18 +1569,21 @@ namespace CoreAI.Ai.LuaCs
             Method("Play", (_, self) =>
             {
                 context.RequireWorldEdit("Tween:Play");
+                context.RequireMutationTarget(((RbxTween)self).Target, "Tween:Play");
                 ((RbxTween)self).Play(CreateTweenCaller(context));
                 return LuaValue.Nil;
             }, "Tween");
             Method("Pause", (_, self) =>
             {
                 context.RequireWorldEdit("Tween:Pause");
+                context.RequireMutationTarget(((RbxTween)self).Target, "Tween:Pause");
                 ((RbxTween)self).Pause(CreateTweenCaller(context));
                 return LuaValue.Nil;
             }, "Tween");
             Method("Cancel", (_, self) =>
             {
                 context.RequireWorldEdit("Tween:Cancel");
+                context.RequireMutationTarget(((RbxTween)self).Target, "Tween:Cancel");
                 ((RbxTween)self).Cancel(CreateTweenCaller(context));
                 return LuaValue.Nil;
             }, "Tween");
@@ -1923,6 +1925,11 @@ namespace CoreAI.Ai.LuaCs
 
         private static bool IsMutatingMethod(string name)
         {
+            if (name == "Create" || name == "Play" || name == "Pause" || name == "Cancel")
+            {
+                return true;
+            }
+
             return name == "Clone"
                    || name == "Destroy"
                    || name == "ClearAllChildren"

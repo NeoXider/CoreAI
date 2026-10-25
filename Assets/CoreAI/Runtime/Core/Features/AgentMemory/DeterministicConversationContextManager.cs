@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,14 +37,24 @@ namespace CoreAI.Ai
                 return new ConversationContextSnapshot();
             }
 
-            ConversationContextSnapshot snapshot = ProjectSnapshot(roleId, history, roleConfig, buildArgs,
-                _summaryStore.LoadSummary(roleId) ?? "", out string persistedSummary);
-            if (persistedSummary != null)
+            ConversationSummaryTransaction transaction = ConversationSummaryTransactions.Open(_summaryStore, roleId);
+            ConversationContextSnapshot snapshot = null;
+            bool transferred = false;
+            try
             {
-                snapshot.CommitSummary = () => _summaryStore.SaveSummary(roleId, persistedSummary);
-                if (buildArgs?.DeferSummaryPersistence != true) snapshot.Commit();
+                snapshot = ProjectSnapshot(roleId, history, roleConfig, buildArgs,
+                    transaction.Summary, out string persistedSummary);
+                if (persistedSummary != null)
+                {
+                    snapshot.OwnSummaryLease(transaction);
+                    snapshot.CommitSummary = () => transaction.Commit(persistedSummary);
+                    transferred = true;
+                    if (buildArgs?.DeferSummaryPersistence != true) snapshot.Commit();
+                }
+                return snapshot;
             }
-            return snapshot;
+            catch { snapshot?.Dispose(); throw; }
+            finally { if (!transferred) transaction.Dispose(); }
         }
 
         private ConversationContextSnapshot ProjectSnapshot(string roleId, ChatMessage[] history,
@@ -149,18 +159,25 @@ namespace CoreAI.Ai
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (history == null || history.Length == 0) return new ConversationContextSnapshot();
-            string summaryRoleId = roleId;
-            IAsyncConversationSummaryStore asyncStore = RequireAsyncStore(_summaryStore, ref summaryRoleId);
-            string storedSummary = await asyncStore.LoadSummaryAsync(summaryRoleId, cancellationToken) ?? "";
-            cancellationToken.ThrowIfCancellationRequested();
-            ConversationContextSnapshot snapshot = ProjectSnapshot(roleId, history, roleConfig, buildArgs,
-                storedSummary, out string persistedSummary);
-            if (persistedSummary != null)
+            ConversationSummaryTransaction transaction = await ConversationSummaryTransactions.OpenAsync(_summaryStore, roleId, cancellationToken);
+            ConversationContextSnapshot snapshot = null;
+            bool transferred = false;
+            try
             {
-                snapshot.CommitSummaryAsync = token => asyncStore.SaveSummaryAsync(summaryRoleId, persistedSummary, token);
-                if (buildArgs?.DeferSummaryPersistence != true) await snapshot.CommitAsync(cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                snapshot = ProjectSnapshot(roleId, history, roleConfig, buildArgs,
+                    transaction.Summary, out string persistedSummary);
+                if (persistedSummary != null)
+                {
+                    snapshot.OwnSummaryLease(transaction);
+                    snapshot.CommitSummaryAsync = token => transaction.CommitAsync(persistedSummary, token);
+                    transferred = true;
+                    if (buildArgs?.DeferSummaryPersistence != true) await snapshot.CommitAsync(cancellationToken);
+                }
+                return snapshot;
             }
-            return snapshot;
+            catch { snapshot?.Dispose(); throw; }
+            finally { if (!transferred) transaction.Dispose(); }
         }
 
         internal static IAsyncConversationSummaryStore RequireAsyncStore(IConversationSummaryStore store, ref string roleId)

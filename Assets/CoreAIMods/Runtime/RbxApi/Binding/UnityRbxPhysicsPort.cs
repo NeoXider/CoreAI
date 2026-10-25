@@ -87,10 +87,9 @@ namespace CoreAI.Mods.Rbx.Binding
         {
             hit = default;
             Vector3 origin = RbxSpace.ToUnity(originStuds);
-            Vector3 direction = RbxSpace.DirectionToUnity(directionStuds)
-                * RbxSpace.LengthToUnity(directionStuds.Magnitude);
+            Vector3 direction = RbxSpace.ToUnity(directionStuds);
             float distance = direction.magnitude;
-            if (distance <= 0f)
+            if (distance <= 0f || float.IsNaN(distance) || float.IsInfinity(distance))
             {
                 return false;
             }

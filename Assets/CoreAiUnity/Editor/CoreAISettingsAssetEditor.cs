@@ -26,7 +26,7 @@ namespace CoreAI.Infrastructure.Llm.Editor
     [CustomEditor(typeof(CoreAISettingsAsset))]
     public sealed class CoreAISettingsAssetEditor : UnityEditor.Editor
     {
-        private const string UxmlPath = "Assets/CoreAiUnity/Editor/CoreAISettingsAssetEditor.uxml";
+        internal const string LayoutGuid = "afb3284056076b84cadfdaaa9d09a27d";
         private const string PrefAdvancedOpen = "CoreAI.SettingsEditor.AdvancedOpen";
         private const string PrefActiveTab = "CoreAI.SettingsEditor.ActiveTab";
 
@@ -87,12 +87,13 @@ namespace CoreAI.Infrastructure.Llm.Editor
         {
             serializedObject.Update();
 
-            VisualTreeAsset tree = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(UxmlPath);
+            string uxmlPath = AssetDatabase.GUIDToAssetPath(LayoutGuid);
+            VisualTreeAsset tree = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(uxmlPath);
             if (tree == null)
             {
                 VisualElement fallback = new();
                 fallback.Add(new HelpBox(
-                    $"CoreAI settings inspector layout is missing: {UxmlPath}. Showing the default inspector.",
+                    $"CoreAI settings inspector layout is missing for GUID: {LayoutGuid}. Showing the default inspector.",
                     HelpBoxMessageType.Error));
                 InspectorElement.FillDefaultInspector(fallback, serializedObject, this);
                 return fallback;

@@ -85,6 +85,7 @@ namespace CoreAI.Crafting
 
         /// <summary>
         /// Evaluates the supplied ingredients against explicit rules, groups, and validators.
+        /// Each rule element consumes a distinct ingredient, independently of either element order.
         /// </summary>
         public CompatibilityResult Check(IReadOnlyList<string> ingredients)
         {
@@ -229,37 +230,60 @@ namespace CoreAI.Crafting
                 return false;
             }
 
-            bool[] used = new bool[ingredients.Count];
+            int[] ingredientMatches = new int[ingredients.Count];
+            int[] ruleMatches = new int[ruleElements.Count];
+            int[] predecessors = new int[ingredients.Count];
+            int[] pendingRules = new int[ruleElements.Count];
+            Array.Fill(ingredientMatches, -1);
+            Array.Fill(ruleMatches, -1);
 
-            foreach (string ruleEl in ruleElements)
+            for (int ruleIndex = 0; ruleIndex < ruleElements.Count; ruleIndex++)
             {
-                bool found = false;
-                for (int i = 0; i < ingredients.Count; i++)
+                Array.Fill(predecessors, -1);
+                int nextRule = 0;
+                int pendingCount = 1;
+                int freeIngredient = -1;
+                pendingRules[0] = ruleIndex;
+
+                while (nextRule < pendingCount && freeIngredient < 0)
                 {
-                    if (used[i])
+                    int candidateRule = pendingRules[nextRule++];
+                    string ruleElement = ruleElements[candidateRule];
+                    for (int ingredientIndex = 0; ingredientIndex < ingredients.Count; ingredientIndex++)
                     {
-                        continue;
-                    }
+                        if (predecessors[ingredientIndex] >= 0 ||
+                            (!ruleElement.Equals(ingredients[ingredientIndex], StringComparison.OrdinalIgnoreCase) &&
+                             !ruleElement.Equals(resolvedGroups[ingredientIndex], StringComparison.OrdinalIgnoreCase)))
+                        {
+                            continue;
+                        }
 
-                    if (ruleEl.Equals(ingredients[i], StringComparison.OrdinalIgnoreCase))
-                    {
-                        used[i] = true;
-                        found = true;
-                        break;
-                    }
+                        predecessors[ingredientIndex] = candidateRule;
+                        int assignedRule = ingredientMatches[ingredientIndex];
+                        if (assignedRule < 0)
+                        {
+                            freeIngredient = ingredientIndex;
+                            break;
+                        }
 
-                    if (resolvedGroups[i] != null &&
-                        ruleEl.Equals(resolvedGroups[i], StringComparison.OrdinalIgnoreCase))
-                    {
-                        used[i] = true;
-                        found = true;
-                        break;
+                        pendingRules[pendingCount++] = assignedRule;
                     }
                 }
 
-                if (!found)
+                if (freeIngredient < 0)
                 {
                     return false;
+                }
+
+                // WHY: Reassign along the augmenting path so a broad group cannot reserve the
+                // only ingredient for an exact requirement. Each search visits an ingredient once.
+                while (freeIngredient >= 0)
+                {
+                    int matchedRule = predecessors[freeIngredient];
+                    int previousIngredient = ruleMatches[matchedRule];
+                    ingredientMatches[freeIngredient] = matchedRule;
+                    ruleMatches[matchedRule] = freeIngredient;
+                    freeIngredient = previousIngredient;
                 }
             }
 

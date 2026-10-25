@@ -174,6 +174,86 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(0f, result.CompatibilityScore);
         }
 
+        [TestCase("Metal", "IronOre", "IronOre", "CopperOre")]
+        [TestCase("Metal", "IronOre", "CopperOre", "IronOre")]
+        [TestCase("IronOre", "Metal", "IronOre", "CopperOre")]
+        [TestCase("IronOre", "Metal", "CopperOre", "IronOre")]
+        [TestCase("METAL", "ironore", "IRONORE", "copperore")]
+        public async Task Compatibility_OverlappingGroupAndExactRule_IsOrderIndependent(
+            string firstRequirement, string secondRequirement, string firstIngredient, string secondIngredient)
+        {
+            CompatibilityChecker checker = new();
+            checker.RegisterElement("IronOre", "Metal");
+            checker.RegisterElement("CopperOre", "Metal");
+            checker.AddGroupRule(0f, "Overlapping rule blocks", firstRequirement, secondRequirement);
+
+            await AssertCheckerAndToolResult(checker, new[] { firstIngredient, secondIngredient },
+                false, 0f, "Overlapping rule blocks");
+        }
+
+        [TestCase("IronOre", "CopperOre", "TinOre")]
+        [TestCase("TinOre", "IronOre", "CopperOre")]
+        [TestCase("CopperOre", "TinOre", "IronOre")]
+        public async Task Compatibility_RepeatedGroups_ReserveOneIngredientPerRequirement(
+            string firstIngredient, string secondIngredient, string thirdIngredient)
+        {
+            CompatibilityChecker checker = new();
+            checker.RegisterElement("IronOre", "Metal");
+            checker.RegisterElement("CopperOre", "Metal");
+            checker.RegisterElement("TinOre", "Metal");
+            checker.AddGroupRule(0f, "Three distinct metals block", "Metal", "Metal", "IronOre");
+
+            await AssertCheckerAndToolResult(checker,
+                new[] { firstIngredient, secondIngredient, thirdIngredient },
+                false, 0f, "Three distinct metals block");
+        }
+
+        [TestCase("IronOre", "CopperOre", "Stone")]
+        [TestCase("Stone", "IronOre", "CopperOre")]
+        public async Task Compatibility_InsufficientGroupMultiset_DoesNotReuseIngredients(
+            string firstIngredient, string secondIngredient, string thirdIngredient)
+        {
+            CompatibilityChecker checker = new(0.75f);
+            checker.RegisterElement("IronOre", "Metal");
+            checker.RegisterElement("CopperOre", "Metal");
+            checker.AddGroupRule(0f, "Requires three metals", "Metal", "Metal", "IronOre");
+
+            await AssertCheckerAndToolResult(checker,
+                new[] { firstIngredient, secondIngredient, thirdIngredient },
+                true, 0.75f, "Ingredients are compatible");
+        }
+
+        [TestCase("IronOre", "IronOre", false)]
+        [TestCase("IronOre", "CopperOre", true)]
+        [TestCase("CopperOre", "IronOre", true)]
+        public async Task Compatibility_RepeatedExactRequirement_UsesMultisetCounts(
+            string firstIngredient, string secondIngredient, bool expectedCompatible)
+        {
+            CompatibilityChecker checker = new(0.75f);
+            checker.RegisterElement("IronOre", "Metal");
+            checker.RegisterElement("CopperOre", "Metal");
+            checker.AddGroupRule(0f, "Requires two iron ores", "IronOre", "IronOre");
+
+            await AssertCheckerAndToolResult(checker, new[] { firstIngredient, secondIngredient },
+                expectedCompatible, expectedCompatible ? 0.75f : 0f,
+                expectedCompatible ? "Ingredients are compatible" : "Requires two iron ores");
+        }
+
+        [TestCase("IronOre", "Metal", "Resource")]
+        [TestCase("Resource", "Metal", "IronOre")]
+        public async Task Compatibility_GroupAndElementNamesOverlap_ReassignsAlongAnAugmentingPath(
+            string firstIngredient, string secondIngredient, string thirdIngredient)
+        {
+            CompatibilityChecker checker = new();
+            checker.RegisterElement("IronOre", "Metal");
+            checker.RegisterElement("Metal", "Resource");
+            checker.AddGroupRule(0f, "Chained assignment blocks", "Metal", "Resource", "IronOre");
+
+            await AssertCheckerAndToolResult(checker,
+                new[] { firstIngredient, secondIngredient, thirdIngredient },
+                false, 0f, "Chained assignment blocks");
+        }
+
         [Test]
         public void Compatibility_CustomValidator_Rejects()
         {
@@ -303,6 +383,74 @@ namespace CoreAI.Tests.EditMode
             JsonValidationResult result = schema.Validate("{\"itemName\":\"Sword\",\"quality\":85}");
             Assert.IsTrue(result.IsValid);
             Assert.IsNotNull(result.ParsedObject);
+        }
+
+        [TestCase("\"2026-10-24T12:00:00Z\"", "2026-10-24T12:00:00Z")]
+        [TestCase("\"2026-10-24T17:00:00+05:00\"", "2026-10-24T17:00:00+05:00")]
+        [TestCase("\"2026-10-24T12\\u003a00\\u003a00Z\"", "2026-10-24T12:00:00Z")]
+        public void Schema_DateLikeQuotedValues_RemainStringsAndHonorAllowedValues(
+            string literal, string expectedValue)
+        {
+            JsonSchemaValidator schema = new JsonSchemaValidator("Timestamp")
+                .AddField("when", "string", true, allowedValues: new[] { expectedValue });
+
+            JsonValidationResult result = schema.Validate("{\"when\":" + literal + "}");
+
+            Assert.IsTrue(result.IsValid, result.ErrorSummary);
+            Assert.AreEqual(JTokenType.String, result.ParsedObject["when"].Type);
+            Assert.AreEqual(expectedValue, result.ParsedObject["when"].Value<string>());
+
+            JsonSchemaValidator differentAllowedValue = new JsonSchemaValidator("Timestamp")
+                .AddField("when", "string", true, allowedValues: new[] { "another timestamp" });
+            JsonValidationResult rejected = differentAllowedValue.Validate("{\"when\":" + literal + "}");
+            Assert.IsFalse(rejected.IsValid);
+            StringAssert.Contains("not in allowed values", rejected.ErrorSummary);
+        }
+
+        [TestCase("42")]
+        [TestCase("true")]
+        [TestCase("{}")]
+        [TestCase("[]")]
+        public void Schema_StringConstraint_StillRejectsOtherJsonTypes(string literal)
+        {
+            JsonSchemaValidator schema = new JsonSchemaValidator("Timestamp")
+                .AddField("when", "string", true);
+
+            JsonValidationResult result = schema.Validate("{\"when\":" + literal + "}");
+
+            Assert.IsFalse(result.IsValid);
+            StringAssert.Contains("expected string", result.ErrorSummary);
+        }
+
+        [TestCase(" {}")]
+        [TestCase(" 5")]
+        [TestCase(" true")]
+        [TestCase(" trailing text")]
+        public void Schema_TrailingContent_IsRejectedAfterDatePreservingLoad(string trailingContent)
+        {
+            JsonSchemaValidator schema = new JsonSchemaValidator("Timestamp")
+                .AddField("when", "string", true);
+
+            JsonValidationResult result = schema.Validate(
+                "{\"when\":\"2026-10-24T12:00:00Z\"}" + trailingContent);
+
+            Assert.IsFalse(result.IsValid);
+            Assert.IsNull(result.ParsedObject);
+            StringAssert.Contains("Invalid JSON", result.ErrorSummary);
+        }
+
+        [TestCase(" \r\n\t")]
+        [TestCase(" /* trailing comment */")]
+        public void Schema_TrailingWhitespaceAndJsonNetComments_RetainExistingBehavior(string trailingContent)
+        {
+            JsonSchemaValidator schema = new JsonSchemaValidator("Timestamp")
+                .AddField("when", "string", true);
+
+            JsonValidationResult result = schema.Validate(
+                "{\"when\":\"2026-10-24T12:00:00Z\"}" + trailingContent);
+
+            Assert.IsTrue(result.IsValid, result.ErrorSummary);
+            Assert.AreEqual(JTokenType.String, result.ParsedObject["when"].Type);
         }
 
         [Test]
@@ -443,6 +591,49 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(schema.Validate("{\"count\": 5}").IsValid);
             Assert.IsTrue(schema.Validate("{\"count\": 5.0}").IsValid);
             Assert.IsFalse(schema.Validate("{\"count\": 5.7}").IsValid);
+        }
+
+        [Test]
+        public void Schema_NonFiniteNumericFields_ReturnStableErrors(
+            [Values("number", "Number", "NUMBER", "integer", "Integer", "INTEGER")] string fieldType,
+            [Values("NaN", "Infinity", "-Infinity")] string literal,
+            [Values(false, true)] bool bounded)
+        {
+            JsonSchemaValidator schema = new JsonSchemaValidator("FiniteNumber")
+                .AddField("value", fieldType, true, bounded ? 1d : (double?)null,
+                    bounded ? 100d : (double?)null);
+
+            JsonValidationResult result = null;
+            Assert.DoesNotThrow(() => result = schema.Validate("{\"value\":" + literal + "}"));
+
+            Assert.IsNotNull(result);
+            Assert.IsFalse(result.IsValid);
+            Assert.AreEqual(1, result.Errors.Count);
+            StringAssert.Contains("expected finite " + fieldType.ToLowerInvariant(), result.ErrorSummary);
+        }
+
+        [Test]
+        public void Schema_FiniteNumericFields_RetainIntegerAndInclusiveRangeRules(
+            [Values("number", "Number", "NUMBER", "integer", "Integer", "INTEGER")] string fieldType)
+        {
+            JsonSchemaValidator schema = new JsonSchemaValidator("FiniteNumber")
+                .AddField("value", fieldType, true, 1d, 100d);
+
+            foreach (string literal in new[] { "1", "100", "1.0", "5.0" })
+            {
+                JsonValidationResult valid = schema.Validate("{\"value\":" + literal + "}");
+                Assert.IsTrue(valid.IsValid, literal + ": " + valid.ErrorSummary);
+            }
+
+            JsonValidationResult belowMinimum = schema.Validate("{\"value\":0}");
+            JsonValidationResult aboveMaximum = schema.Validate("{\"value\":101}");
+            Assert.IsFalse(belowMinimum.IsValid);
+            Assert.IsFalse(aboveMaximum.IsValid);
+            StringAssert.Contains("below minimum", belowMinimum.ErrorSummary);
+            StringAssert.Contains("exceeds maximum", aboveMaximum.ErrorSummary);
+
+            JsonValidationResult fractional = schema.Validate("{\"value\":5.5}");
+            Assert.AreEqual(fieldType.ToLowerInvariant() == "number", fractional.IsValid);
         }
 
         [Test]
@@ -650,6 +841,25 @@ namespace CoreAI.Tests.EditMode
         // ═══════════════════════════════════════════════════
         // Test helpers
         // ═══════════════════════════════════════════════════
+
+        private static async Task AssertCheckerAndToolResult(CompatibilityChecker checker,
+            string[] ingredients, bool expectedCompatible, float expectedScore, string expectedReason)
+        {
+            CompatibilityResult result = checker.Check(ingredients);
+            Assert.AreEqual(expectedCompatible, result.IsCompatible);
+            Assert.AreEqual(expectedScore, result.CompatibilityScore);
+            Assert.AreEqual(expectedReason, result.Reason);
+            Assert.AreEqual(expectedCompatible ? 0 : 1, result.Warnings.Count);
+
+            CompatibilityLlmTool tool = new(checker);
+            JObject toolResult = JObject.Parse(await tool.ExecuteAsync(ingredients));
+            Assert.IsTrue(toolResult["Success"].Value<bool>());
+            Assert.AreEqual(result.IsCompatible, toolResult["IsCompatible"].Value<bool>());
+            Assert.AreEqual(result.CompatibilityScore, toolResult["Score"].Value<float>());
+            Assert.AreEqual(result.Reason, toolResult["Reason"].Value<string>());
+            CollectionAssert.AreEqual(result.Warnings, toolResult["Warnings"].ToObject<string[]>());
+            CollectionAssert.AreEqual(result.Bonuses, toolResult["Bonuses"].ToObject<string[]>());
+        }
 
         private sealed class RejectAllValidator : ICompatibilityValidator
         {

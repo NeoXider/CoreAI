@@ -74,15 +74,46 @@ namespace CoreAI.Ai.Hub
         public bool SuspendedAfterBudgetTrips;
     }
 
-    /// <summary>What a Hub "Save &amp; run" did: a first load, or a reload and what it did with the previous run's objects.</summary>
+    /// <summary>Source-store outcome, separate from successful live execution.</summary>
+    public enum HubModPersistenceStatus
+    {
+        NotConfigured = 0,
+        Saved,
+        Failed,
+        Unconfirmed
+    }
+
+    /// <summary>What a Hub "Save &amp; run" did to the live runtime and source store.</summary>
     public sealed class HubModSaveResult
     {
+        /// <summary>
+        /// Creates a legacy successful result. Custom services using this constructor assert that
+        /// source persistence succeeded; use the explicit-status overload when no receipt is available.
+        /// </summary>
         public HubModSaveResult(string modId, bool reloaded, ModReloadMode mode, ModReloadReport reload)
+            : this(modId, reloaded, mode, reload, HubModPersistenceStatus.Saved)
+        {
+        }
+
+        /// <summary>Creates a result with an explicit source-store outcome.</summary>
+        public HubModSaveResult(string modId, bool reloaded, ModReloadMode mode, ModReloadReport reload,
+            HubModPersistenceStatus persistenceStatus, string persistenceError = null)
+            : this(modId, reloaded, mode, reload, persistenceStatus, persistenceError,
+                persistenceStatus == HubModPersistenceStatus.Saved)
+        {
+        }
+
+        /// <summary>Creates a result separating local installation from the persistence receipt.</summary>
+        public HubModSaveResult(string modId, bool reloaded, ModReloadMode mode, ModReloadReport reload,
+            HubModPersistenceStatus persistenceStatus, string persistenceError, bool localCommitCompleted)
         {
             ModId = modId ?? "";
             Reloaded = reloaded;
             Mode = mode;
             Reload = reload;
+            PersistenceStatus = persistenceStatus;
+            PersistenceError = persistenceError ?? "";
+            LocalCommitCompleted = localCommitCompleted;
         }
 
         /// <summary>The saved mod.</summary>
@@ -97,10 +128,27 @@ namespace CoreAI.Ai.Hub
         /// <summary>What the reload did with the previous run's startup objects; null for a first load or a runtime that reports nothing.</summary>
         public ModReloadReport Reload { get; }
 
+        /// <summary>Whether a strict writer acknowledged local installation and automatic persistence arming.</summary>
+        public HubModPersistenceStatus PersistenceStatus { get; }
+
+        /// <summary>Whether both source and manifest were installed locally; this is not browser durability.</summary>
+        public bool LocalCommitCompleted { get; }
+
+        /// <summary>Source-store failure detail; live execution may already have changed.</summary>
+        public string PersistenceError { get; }
+
         /// <summary>The status line the mod editor shows, e.g. "Saved &amp; ran 'castle'; cleaned 126 objects of the previous run."</summary>
         public string Describe()
         {
-            string saved = "Saved & ran '" + ModId + "'";
+            string saved = PersistenceStatus == HubModPersistenceStatus.Saved
+                ? "Saved & ran '" + ModId + "'"
+                : PersistenceStatus == HubModPersistenceStatus.NotConfigured
+                    ? "Ran '" + ModId + "' without source storage"
+                    : PersistenceStatus == HubModPersistenceStatus.Unconfirmed
+                        ? "Ran '" + ModId + "', but source persistence is unconfirmed: " + PersistenceError
+                        : LocalCommitCompleted
+                            ? "Ran '" + ModId + "'; source and manifest were saved locally, but automatic persistence is NOT armed: " + PersistenceError
+                            : "Ran '" + ModId + "', but source was NOT saved: " + PersistenceError;
             return Reload == null ? saved + "." : saved + "; " + Reload.Describe() + ".";
         }
     }
@@ -211,29 +259,33 @@ namespace CoreAI.Ai.Hub
         bool IsLoaded(string id);
 
         /// <summary>
-        /// Persists and (re)runs a mod: reloads it when already loaded, otherwise loads it fresh, then
-        /// writes source + a header-derived manifest to the store. Throws on a Lua compile/run error so
-        /// the editor can surface it (this doubles as the validate affordance).
+        /// Runs a mod and then saves its source and manifest. An exact retry after failed/unconfirmed
+        /// persistence saves again without repeating the accepted live mutation. Throws on a Lua
+        /// compile/run error or failed/unconfirmed configured storage; live execution may have changed.
         /// </summary>
         void SaveOrReload(string id, string code);
 
         /// <summary>
         /// <see cref="SaveOrReload(string, string)"/> with an explicit reload <paramref name="mode"/> for an
         /// already loaded mod (the mode-less overload cleans the previous run's startup objects), returning
-        /// what the save did. Throws like the mode-less overload.
+        /// what the save did. Compile/run errors and cancellation propagate; storage failure or a legacy
+        /// store without strict acknowledgment is returned separately from the accepted live mutation.
         /// </summary>
         HubModSaveResult SaveOrReload(string id, string code, ModReloadMode mode);
 
         /// <summary>The starter source the Mods page "Add" button opens, matched to the composition (<see cref="HubModTemplates"/>).</summary>
         string NewModTemplate { get; }
 
-        /// <summary>Loads a dormant stored mod (using its persisted source) and marks it active.</summary>
+        /// <summary>Loads a dormant stored mod and saves its active state. Throws if configured storage cannot acknowledge the write; retry does not reload an already live mod.</summary>
         void Enable(string id);
 
-        /// <summary>Unloads a loaded mod and marks its stored package dormant (source kept).</summary>
+        /// <summary>Unloads a mod and saves its dormant state, keeping the source. Throws if configured storage cannot acknowledge the write; the live mod may already be unloaded.</summary>
         void Disable(string id);
 
-        /// <summary>Unloads (if loaded) and permanently deletes the stored package. Returns true.</summary>
+        /// <summary>
+        /// Unloads (if loaded) and deletes the stored package. False or an exception means deletion
+        /// was not confirmed; a runtime mutation may already have happened and retry is supported.
+        /// </summary>
         bool Delete(string id);
 
         /// <summary>

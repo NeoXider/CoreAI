@@ -11,6 +11,10 @@ package is the adapter layer that puts it on a scene.
 |---|---|---|
 | `com.neoxider.coreaiunity` | `com.neoxider.coreai` (same version, lockstep) | see [`package.json`](package.json) |
 
+For supplied player identities, follow [multiplayer sessions](../../Docs/CoreAI/MULTIPLAYER_SESSIONS.md). `Resolve(actor)` on the actor-keyed chat factory selects and tracks a service lifetime; it does not bind later requests/history/clear/stop calls. Supply their admitted `ActorContext`, or compose a factory with a connection-bound identity provider for the simple overloads. Roles may be shared across players; the host owns authentication and connection/view transitions.
+
+[7.54.0 notes](CHANGELOG.md) and the [acceptance ledger](../../dev-docs/fix-wave-2026-10-24/README.md) record root-accepted Windows EditMode 7,917 Passed/13 Skipped and hermetic PlayMode 386 Passed/2 Skipped, both zero-failure selections. Exact exceptions, skipped cases and unrun player/browser/device/network/quality gates remain explicit. Publication uses the [Git tag and GitHub release](https://github.com/NeoXider/CoreAI/releases/tag/v7.54.0). Default shared world capture/storage is a local preset requiring host composition for independent worlds.
+
 ---
 
 ## Who this is for

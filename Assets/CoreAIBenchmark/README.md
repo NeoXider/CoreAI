@@ -43,7 +43,7 @@ The extreme scenarios count in the suite score like any other scenario. Reports 
 
 ### G6 Grading
 
-G6 reads every built part back through the world's Lua surface, so it grades what was actually built. Besides tool hygiene it checks part count (40+, and 60+ for depth), distinct names, the build volume (x and z within -64..64 studs, y within 0..96), at least 12 materials and all five shapes. The default castle is also graded on its measured structure:
+G6 reads every built part back through the world's Lua surface, so it grades what was actually built. Besides tool hygiene it checks part count (40+, and 60+ for depth), distinct names, the build volume (x and z within -64..64 studs, y within 0..96), at least 12 materials and all five shapes. Containment uses the complete part bounds projected from `Size` and `CFrame`, including rotation, with a 0.001-stud boundary tolerance. Ground slabs must also stay inside that volume; there is no below-ground exemption. The default castle is also graded on its measured structure:
 
 - curtain walls (at least 5 studs tall and 1.5 studs thick, base within 3 studs of the ground) that enclose at least 400 square studs of open courtyard;
 - a gate: an opening through the curtain at ground level, 3 to 16 studs wide;
@@ -110,14 +110,16 @@ Verdicts:
 | Verdict | Rule |
 |---|---|
 | PASS | Base score >= 90 and all mandatory checkpoints passed. |
-| PARTIAL | Base score from 50 to 89. |
+| PARTIAL | Base score >= 50 when the PASS conditions are not met, including a failed mandatory checkpoint at a higher score. |
 | FAIL | Base score below 50. |
 
-When repetitions are enabled, each scenario is run multiple times and the suite score uses the per-scenario **mean (average)** base score over its repetitions. This makes rankings less sensitive to one noisy local-model run. G6 runs one scene without resetting it for retries. If the model ends a build turn early after using tools, the runner can ask it to continue that same scene, up to eight times while at least 45 seconds remain. The build budget is 600 seconds: up to 570 seconds for model turns and a planned 30 seconds for capture/export. The capture is not time-limited, and the runner's 5-second post-cancel grace comes on top, so the suite start-gate reserves 605 seconds for it. `COREAI_BENCHMARK_TIMEOUT` can shorten the model portion.
+When repetitions are enabled, each scenario is run multiple times and the suite score uses the per-scenario **mean (average)** base score over its scored repetitions. PASS requires a mean of at least 90 and every mandatory checkpoint in every scored repetition to pass; a high mean cannot erase a failed mandatory gate. Individual numeric scores may fall below 90 when the mean still passes. Group and extreme summaries retain the same pass counts. This makes rankings less sensitive to one noisy local-model run. G6 runs one scene without resetting it for retries. If the model ends a build turn early after using tools, the runner can ask it to continue that same scene, up to eight times while at least 45 seconds remain. The build budget is 600 seconds: up to 570 seconds for model turns and a planned 30 seconds for capture/export. The capture is not time-limited, and the runner's 5-second post-cancel grace comes on top, so the suite start-gate reserves 605 seconds for it. `COREAI_BENCHMARK_TIMEOUT` can shorten the model portion.
+
+Full custom G6 prompts remain unscored even when a deadline has Model attribution. Their diagnostics, tokens, tool calls and transcripts stay visible, while suite, tier, group, dimension and role inputs exclude them. Operator-interrupted attempts are also unscored, retain partial evidence and remain unfinished for resume.
 
 ## Game-Fitness Roles
 
-The report converts dimension scores plus generation speed into a 0-10 fitness rating for each game-development role:
+The report converts dimension scores plus client-turn throughput from scored rows into a 0-10 fitness rating for each game-development role. Speed can affect this separate role rating; it never adds points to base or bonus scores:
 
 | Role | What it needs most |
 |---|---|
@@ -136,10 +138,12 @@ The benchmark reports two speed numbers:
 
 | Metric | Meaning |
 |---|---|
-| Provider-call tok/s | Completion tokens divided by time spent inside the LLM calls — this is **prefill + decode**, not decode-only. It excludes tool execution, grading and orchestration gaps. |
+| Client-turn tok/s | Completion tokens divided by the summed outer client-turn time. This includes prefill, decode and tools executed internally by the client, plus any internal orchestration. It excludes grading and gaps outside those calls. |
 | Effective tok/s | Completion tokens divided by the whole agentic session time, including tool execution, grading, orchestration gaps, and other overhead. |
 
-> **Why this is LOWER than LM Studio's tok/s.** LM Studio reports **decode-only** throughput (it excludes prompt prefill). CoreAI's provider-call tok/s includes prefill, and agentic prompts are large — tool schemas, role instructions, scenario goals, traces, grading context — commonly ~14x the generated output. With a big prompt, prefill dominates the call time, so CoreAI's number reads much lower than LM Studio's even on the same model. True decode-only timing requires measuring time-to-first-token, which is only available on the streaming path (see `dev-docs/TOKENS_PER_SEC_FIX_PLAN.md`). Effective tok/s is the honest end-to-end user experience; provider-call tok/s is the closest non-streaming comparison.
+The client interface does not expose isolated provider intervals. These numbers therefore do not establish provider-only or decode-only throughput, and a slower internal tool lowers client-turn tok/s. Parallel turns may overlap, so the two rates have no guaranteed ordering. Rows without a client-turn timer fall back to recorded session time.
+
+The C# `GenerationMs`, `TotalGenerationMs` and `GenerationTokensPerSecond` names and JSON `generationMs`, `totalGenerationMs` and `generationTokensPerSecond` fields remain compatible aliases. Their explicit equivalents are `ClientTurnMs`, `TotalClientTurnMs` and `ClientTurnTokensPerSecond` (JSON: `clientTurnMs`, `totalClientTurnMs`, `clientTurnTokensPerSecond`). The aliases preserve recorded values; historical reports are not retimed.
 
 ## How To Run
 
@@ -167,7 +171,7 @@ Set `COREAI_BENCHMARK_REASONING_EFFORT` or batchmode `-coreAiBenchmarkReasoningE
 effective `reasoningEffort` in JSON metadata and show the effort (or `provider default`) in the
 Markdown header. Keep effort consistent when comparing models.
 
-The same directory also contains the results card (`<stem>.svg`), the model card as a vector file (`<stem>_modelcard.svg`, written with every report) and, when a graphics device is available, as a PNG (`<stem>_modelcard.png`), the `.tools.jsonl` trace of executed tool calls and, for a G6 build, a `_g6_replay.lua` script and castle screenshot. The Markdown report embeds the PNG model card, or the SVG one when no PNG was rendered. The Markdown transcript retains attempted calls that the orchestration layer deduplicates before execution; compare it with the JSONL trace when auditing exact-call constraints. The Lua script replays every model-authored `execute_lua` call in order with `pcall`, preserving a failed section without stopping later sections. Camera frames are omitted from the text trace; inspect the PNG hero and the camera tool records together when auditing visual feedback.
+The same directory also contains the results card (`<stem>.svg`), the model card as a vector file (`<stem>_modelcard.svg`, written with every report) and, when a graphics device is available, as a PNG (`<stem>_modelcard.png`), the `.tools.jsonl` trace of executed tool calls and, for a G6 build, a `_g6_replay.lua` file and castle screenshot. The Markdown report embeds the PNG model card, or the SVG one when no PNG was rendered. The Markdown transcript retains attempted calls that the orchestration layer deduplicates before execution; compare it with the JSONL trace when auditing exact-call constraints. New replay files contain the original Lua chunks as JSON inside a Lua comment, identified by `CoreAI benchmark independent chunks v1`. The benchmark replay loader compiles and executes each chunk separately in recorded order, preserving partial mutations from a runtime failure and continuing after syntax errors. Use the recapture entry below or `RbxBenchmarkWorld.TryReplayLua`; executing the envelope directly as one Lua chunk does not rebuild the scene. The loader also accepts older executable single-chunk replay files. Camera frames are omitted from the text trace; inspect the PNG hero and the camera tool records together when auditing visual feedback.
 
 For batchmode or automation, launch the explicit PlayMode suite through:
 
@@ -209,6 +213,7 @@ Environment shaping is also supported:
 | `COREAI_BENCHMARK_TIMEOUT` | Model timeout override in seconds for non-extreme scenarios, including G6; extreme scenarios retain their own timeout. `0`/unset uses the per-scenario default. G6 model turns are capped at 570 seconds even when this value is higher. After that the runner waits up to 5 seconds for cancellation and plans 30 seconds for capture/export (an allowance, not an enforced cap), so the suite start-gate reserves 605 seconds for a G6 build and adds the 5-second grace to every attempt of the other scenarios. |
 | `COREAI_BENCHMARK_ROUNDTRIPS` | Per-request tool-call roundtrip cap for the standard scenarios (G1-G5, G7-G8); `0`/unset means the default `40`. The G1 and G7 extreme scenarios fix their cap at 80 and the G2-G4 ones at 40, and G6 has its own, much higher cap (below). |
 | `COREAI_BENCHMARK_MAX_OUTPUT_TOKENS` | Optional positive per-call output cap (64-128000). Set this for providers that reserve the full requested `max_tokens` against available credit; it overrides an agent's unlimited-output setting. Keep the same value across models when comparing scores. |
+| `COREAI_BENCHMARK_PROVIDER_STALL_SECONDS` | Inactivity ceiling for accepted provider responses at a deadline. Default `120`; `0` disables it; negative values normalize to `0`, values above `3600` clamp to `3600`, and invalid/nonfinite values use the default. Provider or tool activity resets the gap. The normalized value is frozen for resume and recorded as `metadata.providerStallSeconds`. |
 | `COREAI_BENCHMARK_VISION_MODE` | G6 free-build vision mode: `off` (default, text-only build), `image` (the model gets a camera tool to SEE and refine its own scene — vision-capable models only), or `both` (run the text-only build AND an image-feedback build to compare). Also a **Vision feedback** dropdown in the benchmark window. |
 | `COREAI_BENCHMARK_FREEBUILD_PROMPT` | Replaces the G6 free-build prompt with your own (e.g. build something other than the default castle). Your text is used verbatim; the only addition is the subject-neutral clock note appended after a blank line: `You are on a time budget. Every execute_lua result carries a TimeLeft note with the seconds remaining. Finish the current section and stop building with at least 20 seconds remaining.` A full custom prompt is not scored. |
 | `COREAI_BENCHMARK_FREEBUILD_SUBJECT` | Swaps only the G6 subject (e.g. `a futuristic city`) into the generic free-build prompt, keeping the standard build/grading scaffold. The generic prompt ends with the same clock note plus subject-neutral pacing (`Complete the main structure during the first half of the budget, then spend the remaining time on secondary structures, surroundings and surface details.`); only the default castle prompt gets the castle-specific pacing (ground, curtain walls, towers, gate and keep first). A subject build is graded without the castle checks, on the subject-neutral signals only (see [G6 grading](#g6-grading)). Also settable from the benchmark window UI field. |
@@ -217,7 +222,7 @@ Environment shaping is also supported:
 G6 counts and frames rendered Roblox parts, including parts created through `execute_lua`; the hero banner shows the real part count. The saved model-authored prefab is under the ignored `Assets/Benchmark/<target-label>/g6_free_build.prefab`. To retake a hero image from that prefab without contacting the model, set `COREAI_BENCHMARK_RECAPTURE_PREFAB` to its Unity asset path and `COREAI_BENCHMARK_RECAPTURE_OUTPUT` to an absolute PNG path, then run the explicit PlayMode test `CaptureSavedCastlePrefab_ForReport` in the open Editor. Prefabs saved by older harness versions keep only colour materials, so a prefab retake looks flat. For a full-fidelity retake without contacting the model, set `COREAI_BENCHMARK_RECAPTURE_LUA` to the report's `_g6_replay.lua` and run the explicit PlayMode test `CaptureSavedCastleReplay_ForReport`: it replays the recorded Lua in a fresh benchmark world (runtime textures included) and writes the hero to `COREAI_BENCHMARK_RECAPTURE_OUTPUT`. Both tests read the banner header, stats and caption from `COREAI_BENCHMARK_RECAPTURE_TEXT_FILE` (UTF-8, one line each) when it is set.
 
 A provider `402` or `429` can leave a partial castle. Such a result records the provider failure and is not a comparable model-quality score; retain the saved scene and rerun when the provider quota is available.
-When G6 reaches its time limit during a streaming turn, the benchmark counts completed tool calls from lifecycle events and records the cut turn in the transcript (`CUT:`) with the time it ran. That time is part of the generation time, so tok/s divides tokens and time over the same turns. Because the provider never delivered usage for the cut turn, the run reports `TokensFromProvider = false`: report totals carry `~`, and the hero banner reads `partial token estimate ~N gen tokens · ~X tok/s`. Tool calls on the process-wide lifecycle hook are attributed by agent role and by the trace id each benchmark turn carries (`bench-<scenario>-<run>-t<n>`), so an orphaned call from an earlier scenario is not counted.
+When G6 reaches its time limit during a streaming turn, the benchmark counts completed tool calls from lifecycle events and records the cut turn in the transcript (`CUT:`) with the time it ran. That time is part of the client-turn timer, so tok/s divides tokens and time over the same turns, including internal tools. Because the provider never delivered usage for the cut turn, the run reports `TokensFromProvider = false`: report totals carry `~`, and the hero banner labels `s client-turn` and `partial token estimate ~N gen tokens · ~X tok/s`. Tool calls on the process-wide lifecycle hook are attributed by agent role and by the trace id each benchmark turn carries (`bench-<scenario>-<run>-t<n>`), so an orphaned call from an earlier scenario is not counted.
 
 For an LM Studio multi-model sweep, load one model at a time, run the benchmark, unload it, and move to the next model. Example structure:
 
@@ -479,7 +484,7 @@ honesty rules.
 
 Every finalized scenario repetition is checkpointed immediately, including extreme scenarios and G6
 visual-lane builds. Resume retains the run id and reruns only unfinished repetitions and Environment
-failures. Model failures and low scores are measurements and are never retried by resume. A crash
+failures. An operator Stop, including one arriving with useful work or provider completion on the same tick, retains an `interrupted` row with partial evidence but never invokes its grader or finalizes that repetition. Resume replaces that identity with one completed attempt. Model failures and low scores are measurements and are never retried by resume. A crash
 before checkpoint replacement can lose only the current scenario; it runs again.
 
 Use the same launcher entry point with `-coreAiBenchmarkResume <runId|latest>`, or set
@@ -513,7 +518,7 @@ TestResults/CoreAI/Benchmarks/.runs/<runId>/<BENCHMARK_runId_model__label>.state
 ```
 
 The manifest freezes suite version, start time, scenario order/groups/tiers/repetitions, resolved
-model/endpoint/label/effort/temperature/provider body, vision mode and grading options. Conflicting
+model/endpoint/label/effort/temperature/provider body, vision mode and grading options, including the normalized provider inactivity ceiling. Conflicting
 current grading overrides are refused; retry count remains adjustable; clear stale overrides or restore the original values. API keys are
 never written: original `env:NAME` references are kept and resolved again. The original `@targets` file and classic local configuration secret source are reopened when available.
 Literal inline secrets must be supplied again with the targets; prefer env references. Credential-bearing URLs and secret
@@ -524,10 +529,10 @@ share a state file. It contains all result fields and scores without regrading, 
 trace JSONL, G6 Lua replay, captured PNG bytes, prefab paths and process segment timings. Temporary
 files left by a crash are ignored. Atomic commit retries transient file-lock/access failures four times with short bounded backoff before surfacing an error. State folders are retained after completion with per-target
 `<artifactStem>.state.json.completed` markers written after the state. Listing reads only manifests and these small markers, skips corrupt/invalid folders with a warning, and never deserializes screenshot-heavy checkpoints; they can be removed manually once no further repair is needed. An
-Environment result leaves the target incomplete and eligible for another resume.
+Environment or interrupted result leaves the target incomplete and eligible for another resume.
 
 Final Markdown/JSON/SVG, vector and rendered model cards, screenshots, replay and INDEX are generated
-from merged results. INDEX replaces the original target row. Before reopening existing reports the
+from merged results. Required Markdown/JSON/SVG, vector model-card, trace/replay evidence and INDEX publication failures fail the suite and its CLI outcome; the checkpoint stays incomplete. Resume republishes finalized results without another provider call. Optional image rendering/writes may fall back to vector or text evidence. INDEX replaces the original target row. Before reopening existing reports the
 launcher saves timestamped `.json.bak-<timestamp>` backups, plus Markdown, every screenshot/hero image, replay, cards, charts, tool trace and INDEX backups. Backup names are unique across targets and repeated attachment in the same clock tick. Legacy result JSON rows, original ISO timestamp strings and kept trace lines are preserved byte for byte. Existing rows keep their original positions, including rerun replacements; new missing rows are appended. Unchanged summary contributions retain their original numeric precision. Kept failure/penalty, session and scene Markdown sections are carried over verbatim; tool traces restore failed-call/invalid-command counts and the old Markdown token table preserves provider-versus-estimated flags. Screenshots and replay are restored from companions. Trace lines are assigned once to their scenario; ambiguous repeated-scenario or unknown trace lines remain in a separate aggregate without duplication. Combined efficiency is recovered from the old score table. Separate token/time bonus components absent from all companions remain unknown; both owner reports record zero. Session/failure/scene sections are matched by the formatter's exact row headers and repetition, independently of nested or truncated code fences. Missing kept evidence or ambiguous legacy hero ownership aborts repair with a named error. Kept sections retain their original whitespace; repeated formatting is idempotent. Fields absent from every companion cannot be invented.
 
 Metadata reports segment count, individual active wall times and their total. For a killed process,

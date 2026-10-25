@@ -26,6 +26,7 @@ namespace CoreAI.Tests.EditMode
     public sealed class LlmConfigurationDefectsEditModeTests
     {
         private CoreAISettingsAsset _settings;
+        private readonly List<HubSettingsPage> _pages = new List<HubSettingsPage>();
 
         [SetUp]
         public void SetUp()
@@ -36,7 +37,19 @@ namespace CoreAI.Tests.EditMode
         [TearDown]
         public void TearDown()
         {
+            foreach (HubSettingsPage page in _pages)
+            {
+                page.OnDestroyed();
+            }
+
+            _pages.Clear();
             Object.DestroyImmediate(_settings);
+        }
+
+        private HubSettingsPage Own(HubSettingsPage page)
+        {
+            _pages.Add(page);
+            return page;
         }
 
 #if COREAI_LLM
@@ -352,7 +365,7 @@ namespace CoreAI.Tests.EditMode
         {
             LlmEndpointDescriptor original = PopulatedDescriptor();
             RoutingController controller = new(original);
-            HubSettingsPage page = new(_settings, routingController: controller);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings, routingController: controller));
             page.CreatePageContent();
             Invoke(page, "LoadEndpointById", original.EndpointId);
             LlmEndpointDescriptor edited = (LlmEndpointDescriptor)Invoke(page, "ReadEndpointEditor");
@@ -385,7 +398,7 @@ namespace CoreAI.Tests.EditMode
             LlmEndpointDescriptor original = PopulatedDescriptor();
             original.ExtraBodyJson = null;
             typeof(LlmEndpointDescriptor).GetProperty("Temperature")?.SetValue(original, null);
-            HubSettingsPage page = new(_settings, routingController: new RoutingController(original));
+            HubSettingsPage page = Own(new HubSettingsPage(_settings, routingController: new RoutingController(original)));
             page.CreatePageContent();
             Invoke(page, "LoadEndpointById", original.EndpointId);
             LlmEndpointDescriptor edited = (LlmEndpointDescriptor)Invoke(page, "ReadEndpointEditor");
@@ -402,7 +415,7 @@ namespace CoreAI.Tests.EditMode
             using LlmClientRegistry registry = new(GameLoggerUnscopedFallback.Instance, _settings);
             await registry.AddOrUpdateEndpointAsync(original);
             RoutingController controller = new(registry.GetEndpoints()[0].Descriptor);
-            HubSettingsPage page = new(_settings, routingController: controller);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings, routingController: controller));
             page.CreatePageContent();
             Invoke(page, "LoadEndpointById", original.EndpointId);
             ((TextField)GetField(page, "_endpointName")).SetValueWithoutNotify("Renamed");

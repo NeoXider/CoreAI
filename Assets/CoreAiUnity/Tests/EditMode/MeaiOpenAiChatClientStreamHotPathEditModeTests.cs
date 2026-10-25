@@ -1,6 +1,7 @@
 #if COREAI_LLM
 using System.Collections.Generic;
 using System.Linq;
+using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
 using MEAI = Microsoft.Extensions.AI;
 using NUnit.Framework;
@@ -84,10 +85,17 @@ namespace CoreAI.Tests.EditMode
         [TestCase(": keep-alive")]
         [TestCase("")]
         [TestCase("data:")]
-        [TestCase("data: not json")]
         public void ParseSseLine_ReturnsNullWhereTheLoopMustSkip(string line)
         {
             Assert.IsNull(MeaiOpenAiChatClient.ParseSseLineForTests(line));
+        }
+
+        [Test]
+        public void ParseSseLine_MalformedPayload_RaisesTypedFailure()
+        {
+            LlmClientException failure = Assert.Throws<LlmClientException>(() =>
+                MeaiOpenAiChatClient.ParseSseLineForTests("data: not json"));
+            Assert.AreEqual(LlmErrorCode.ProviderError, failure.ErrorCode);
         }
 
         // ---- Incremental tool-argument completeness ---------------------------------------------

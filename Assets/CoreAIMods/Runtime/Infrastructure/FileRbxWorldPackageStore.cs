@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using CoreAI.Infrastructure;
@@ -15,6 +16,99 @@ using UnityEngine;
 
 namespace CoreAI.Mods.WorldPackages
 {
+    internal static class WorldPackageTransactions
+    {
+        private static readonly object Gate = new();
+        private static readonly Dictionary<Key, Entry> Entries = new();
+        private static readonly StringComparer PathComparer = Path.DirectorySeparatorChar == '\\'
+            ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+        internal static int RetainedRootCountForTesting { get { lock (Gate) { return Entries.Count; } } }
+
+        private readonly struct Key : IEquatable<Key>
+        {
+            public readonly string Path;
+            public readonly object FileSystem;
+            public Key(string path, object fileSystem) { Path = path; FileSystem = fileSystem; }
+            public bool Equals(Key other) => ReferenceEquals(FileSystem, other.FileSystem) && PathComparer.Equals(Path, other.Path);
+            public override bool Equals(object obj) => obj is Key other && Equals(other);
+            public override int GetHashCode() => (PathComparer.GetHashCode(Path) * 397) ^ RuntimeHelpers.GetHashCode(FileSystem);
+        }
+
+        private sealed class Entry
+        {
+            public readonly SemaphoreSlim Semaphore = new(1, 1);
+            public int References;
+        }
+
+        private sealed class Lease : IDisposable
+        {
+            private readonly Key _key;
+            private Entry _entry;
+            public Lease(Key key, Entry entry) { _key = key; _entry = entry; }
+            public void Dispose()
+            {
+                Entry entry = Interlocked.Exchange(ref _entry, null);
+                if (entry == null) { return; }
+                entry.Semaphore.Release();
+                ReleaseReference(_key, entry);
+            }
+        }
+
+        private static Entry Retain(Key key)
+        {
+            lock (Gate)
+            {
+                if (!Entries.TryGetValue(key, out Entry entry))
+                {
+                    entry = new Entry();
+                    Entries.Add(key, entry);
+                }
+
+                entry.References++;
+                return entry;
+            }
+        }
+
+        private static void ReleaseReference(Key key, Entry entry)
+        {
+            lock (Gate)
+            {
+                if (--entry.References == 0)
+                {
+                    Entries.Remove(key);
+                    entry.Semaphore.Dispose();
+                }
+            }
+        }
+
+        public static async UniTask<IDisposable> EnterAsync(string root, object fileSystem, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            Key key = new(root, fileSystem);
+            Entry entry = Retain(key);
+            try
+            {
+                await entry.Semaphore.WaitAsync(token);
+                return new Lease(key, entry);
+            }
+            catch
+            {
+                ReleaseReference(key, entry);
+                throw;
+            }
+        }
+
+        public static IDisposable TryEnter(string root, object fileSystem)
+        {
+            Key key = new(root, fileSystem);
+            Entry entry = Retain(key);
+            if (entry.Semaphore.Wait(0)) { return new Lease(key, entry); }
+            ReleaseReference(key, entry);
+            return null;
+        }
+    }
+
     /// <summary>Result of a durable package write or pre-mutation backup attempt.</summary>
     public sealed class RbxWorldPackageWriteResult
     {
@@ -408,7 +502,8 @@ namespace CoreAI.Mods.WorldPackages
         private readonly Func<CancellationToken, UniTask<bool>> _persistenceSyncAsync;
         private readonly Func<DateTime> _utcNow;
         private readonly IRbxWorldPackageFileSystem _fileSystem;
-        private readonly SemaphoreSlim _mutationGate = new(1, 1);
+        private readonly string _transactionRoot;
+        private readonly object _transactionFileSystem;
 
         /// <param name="startupNamespace">
         /// Composition namespace of the startup area (production passes the mods store id), so a world
@@ -470,7 +565,16 @@ namespace CoreAI.Mods.WorldPackages
             _persistenceSyncAsync = persistenceSyncAsync ?? RequestPersistenceCompletionAsync;
             _utcNow = utcNow ?? (() => DateTime.UtcNow);
             _fileSystem = fileSystem ?? new SystemRbxWorldPackageFileSystem();
-            SweepCrashLeftTemporaryFiles();
+            _transactionRoot = Path.GetFullPath(resolvedRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            _transactionFileSystem = _fileSystem is SystemRbxWorldPackageFileSystem
+                ? typeof(SystemRbxWorldPackageFileSystem) : _fileSystem;
+            using (IDisposable transaction = WorldPackageTransactions.TryEnter(_transactionRoot, _transactionFileSystem))
+            {
+                if (transaction != null)
+                {
+                    SweepCrashLeftTemporaryFiles();
+                }
+            }
         }
 
         /// <summary>
@@ -495,7 +599,8 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            await _mutationGate.WaitAsync(cancellationToken);
+            IDisposable transaction = await WorldPackageTransactions.EnterAsync(
+                _transactionRoot, _transactionFileSystem, cancellationToken);
             try
             {
                 int sequence;
@@ -539,7 +644,7 @@ namespace CoreAI.Mods.WorldPackages
             }
             finally
             {
-                _mutationGate.Release();
+                transaction.Dispose();
             }
         }
 
@@ -547,7 +652,8 @@ namespace CoreAI.Mods.WorldPackages
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await _mutationGate.WaitAsync(cancellationToken);
+            IDisposable transaction = await WorldPackageTransactions.EnterAsync(
+                _transactionRoot, _transactionFileSystem, cancellationToken);
             try
             {
                 int sequence;
@@ -588,7 +694,7 @@ namespace CoreAI.Mods.WorldPackages
             }
             finally
             {
-                _mutationGate.Release();
+                transaction.Dispose();
             }
         }
 
@@ -596,7 +702,8 @@ namespace CoreAI.Mods.WorldPackages
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await _mutationGate.WaitAsync(cancellationToken);
+            IDisposable transaction = await WorldPackageTransactions.EnterAsync(
+                _transactionRoot, _transactionFileSystem, cancellationToken);
             try
             {
                 StartupEntry current;
@@ -658,7 +765,7 @@ namespace CoreAI.Mods.WorldPackages
             }
             finally
             {
-                _mutationGate.Release();
+                transaction.Dispose();
             }
         }
 
@@ -666,7 +773,8 @@ namespace CoreAI.Mods.WorldPackages
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await _mutationGate.WaitAsync(cancellationToken);
+            IDisposable transaction = await WorldPackageTransactions.EnterAsync(
+                _transactionRoot, _transactionFileSystem, cancellationToken);
             try
             {
                 StartupEntry current;
@@ -704,7 +812,7 @@ namespace CoreAI.Mods.WorldPackages
             }
             finally
             {
-                _mutationGate.Release();
+                transaction.Dispose();
             }
         }
 
@@ -714,7 +822,8 @@ namespace CoreAI.Mods.WorldPackages
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await _mutationGate.WaitAsync(cancellationToken);
+            IDisposable transaction = await WorldPackageTransactions.EnterAsync(
+                _transactionRoot, _transactionFileSystem, cancellationToken);
             try
             {
                 string safeSlot = ValidateName(slot, "manual slot");
@@ -783,7 +892,7 @@ namespace CoreAI.Mods.WorldPackages
             }
             finally
             {
-                _mutationGate.Release();
+                transaction.Dispose();
             }
         }
 
@@ -906,7 +1015,8 @@ namespace CoreAI.Mods.WorldPackages
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await _mutationGate.WaitAsync(cancellationToken);
+            IDisposable transaction = await WorldPackageTransactions.EnterAsync(
+                _transactionRoot, _transactionFileSystem, cancellationToken);
             try
             {
                 string path;
@@ -933,7 +1043,7 @@ namespace CoreAI.Mods.WorldPackages
             }
             finally
             {
-                _mutationGate.Release();
+                transaction.Dispose();
             }
         }
 

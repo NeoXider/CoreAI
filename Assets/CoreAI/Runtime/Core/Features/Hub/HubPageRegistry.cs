@@ -23,6 +23,16 @@ namespace CoreAI.Hub
         /// </summary>
         public void Register(string pageId, Func<IHubPage> factory, int order = 0)
         {
+            RegisterOwned(pageId, factory, null, order);
+        }
+
+        /// <summary>
+        /// Registers a factory and transfers its optional registration lifetime to this registry.
+        /// Replacement or removal disposes that lifetime once, outside the registry lock. Page
+        /// lifetimes remain owned by their windows; caller-supplied shared services need no lifetime.
+        /// </summary>
+        public void RegisterOwned(string pageId, Func<IHubPage> factory, IDisposable lifetime, int order = 0)
+        {
             if (string.IsNullOrWhiteSpace(pageId))
             {
                 throw new ArgumentException("pageId required", nameof(pageId));
@@ -33,34 +43,65 @@ namespace CoreAI.Hub
                 throw new ArgumentNullException(nameof(factory));
             }
 
+            IDisposable previousLifetime;
             lock (_lock)
             {
-                _entries[pageId] = new Entry(factory, order);
+                previousLifetime = _entries.TryGetValue(pageId, out Entry previous) ? previous.Lifetime : null;
+                _entries[pageId] = new Entry(factory, order, lifetime);
             }
 
-            PageRegistered?.Invoke(pageId);
+            try
+            {
+                if (!ReferenceEquals(previousLifetime, lifetime))
+                {
+                    previousLifetime?.Dispose();
+                }
+            }
+            finally
+            {
+                PageRegistered?.Invoke(pageId);
+            }
         }
 
         /// <summary>Removes the page registered under <paramref name="pageId"/>.</summary>
         public bool Unregister(string pageId)
+        {
+            return Unregister(pageId, null);
+        }
+
+        /// <summary>
+        /// Removes a registration only if its factory still matches the supplied owner token.
+        /// A null token removes any registration, matching the original overload.
+        /// </summary>
+        public bool Unregister(string pageId, Func<IHubPage> expectedFactory)
         {
             if (string.IsNullOrWhiteSpace(pageId))
             {
                 return false;
             }
 
-            bool removed;
+            Entry removed;
             lock (_lock)
             {
-                removed = _entries.Remove(pageId);
+                if (!_entries.TryGetValue(pageId, out removed) ||
+                    (expectedFactory != null && !ReferenceEquals(removed.Factory, expectedFactory)))
+                {
+                    return false;
+                }
+
+                _entries.Remove(pageId);
             }
 
-            if (removed)
+            try
+            {
+                removed.Lifetime?.Dispose();
+            }
+            finally
             {
                 PageUnregistered?.Invoke(pageId);
             }
 
-            return removed;
+            return true;
         }
 
         /// <summary>Resolves a page factory by id.</summary>
@@ -106,14 +147,16 @@ namespace CoreAI.Hub
 
         private readonly struct Entry
         {
-            public Entry(Func<IHubPage> factory, int order)
+            public Entry(Func<IHubPage> factory, int order, IDisposable lifetime)
             {
                 Factory = factory;
                 Order = order;
+                Lifetime = lifetime;
             }
 
             public Func<IHubPage> Factory { get; }
             public int Order { get; }
+            public IDisposable Lifetime { get; }
         }
     }
 }

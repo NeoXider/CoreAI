@@ -31,14 +31,11 @@ namespace CoreAI.Infrastructure.World
         void StartAutoSave(float intervalSeconds);
 
         /// <summary>
-        /// Reports whether the writes this manager has just performed are covered by durable storage,
-        /// so a caller may claim "saved" only when the platform actually backs that claim. On WebGL the
-        /// answer is <c>false</c> when the page never armed Unity's automatic <c>persistentDataPath</c>
-        /// persistence, because such a write dies with the tab; it is <c>true</c> once the engine owns
-        /// the write. There is no browser completion receipt to wait for and CoreAI no longer pretends
-        /// otherwise — see <see cref="CoreAI.Infrastructure.CoreAiWebGlPersistence"/>. On other
-        /// platforms the file write is already durable. Never throws: a refused or cancelled
-        /// confirmation reports <c>false</c>.
+        /// Observes whether Unity's automatic persistence is armed. This does not observe whether a
+        /// preceding local write or deletion succeeded. Use <see cref="IWorldStateWriteResults"/> for
+        /// a per-operation local outcome. On WebGL, true is an arming observation, not an IndexedDB
+        /// transaction acknowledgement. Other platforms report true without inspecting local I/O.
+        /// A refused or cancelled observation reports false; callback failures are isolated.
         /// </summary>
         void ConfirmDurability(Action<bool> onConfirmed);
     }

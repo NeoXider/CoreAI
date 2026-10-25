@@ -14,9 +14,8 @@ namespace CoreAI.Infrastructure.Llm
     /// Wraps an <see cref="ILlmClient"/> so that a single <see cref="LlmErrorCode.AuthExpired"/>
     /// failure triggers <see cref="ServerManagedAuthorization.Refresher"/> and one retry.
     /// When refresh is missing or unsuccessful, publishes <see cref="LlmAuthExpired"/> on
-    /// <see cref="GlobalMessagePipe"/> so UI can prompt for re-login. Idempotency guarantees
-    /// hold because the inner client preserves the same <c>Idempotency-Key</c> across the
-    /// retry (header derived from <see cref="LlmRequestContextFrame.IdempotencyKey"/>).
+    /// <see cref="GlobalMessagePipe"/> so UI can prompt for re-login. A turn that has already
+    /// executed a tool or emitted visible streaming output is never replayed.
     /// </summary>
     public sealed class RefreshOnUnauthorizedDecorator : ILlmClient, ILlmRequestHeaderScope
     {
@@ -72,10 +71,17 @@ namespace CoreAI.Infrastructure.Llm
                 return result;
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             bool refreshed = await TryRefreshAsync(cancellationToken);
             if (!refreshed)
             {
                 PublishExpiredEvent(request);
+                return result;
+            }
+
+            if (LoggingLlmClientDecorator.HasInvokedToolCalls(result.ExecutedToolCalls) ||
+                request?.ProviderResponseState?.RetrySuppressed == true)
+            {
                 return result;
             }
 
@@ -89,8 +95,8 @@ namespace CoreAI.Infrastructure.Llm
             CancellationToken cancellationToken = default)
         {
             using IDisposable requestHeaders = BeginRequestHeaders(request);
-            bool authExpired = false;
-            bool emittedVisibleText = false;
+            LlmStreamChunk authFailure = null;
+            bool committed = false;
             IAsyncEnumerator<LlmStreamChunk> enumerator =
                 _inner.CompleteStreamingAsync(request, cancellationToken).GetAsyncEnumerator(cancellationToken);
 
@@ -102,14 +108,19 @@ namespace CoreAI.Infrastructure.Llm
                     LlmStreamChunk current = null;
                     try
                     {
-                        // No ConfigureAwait(false): WebGL has no working ThreadPool, and the
-                        // continuation must come back through UnitySynchronizationContext.
                         hasNext = await enumerator.MoveNextAsync();
                         current = hasNext ? enumerator.Current : null;
                     }
                     catch (LlmClientException ex) when (ex.ErrorCode == LlmErrorCode.AuthExpired)
                     {
-                        authExpired = true;
+                        authFailure = new LlmStreamChunk
+                        {
+                            IsDone = true,
+                            Error = ex.Message,
+                            ErrorCode = ex.ErrorCode,
+                            HttpStatus = ex.HttpStatus,
+                            RetryAfterSeconds = ex.RetryAfterSeconds
+                        };
                         hasNext = false;
                     }
 
@@ -118,15 +129,17 @@ namespace CoreAI.Infrastructure.Llm
                         break;
                     }
 
-                    if (current != null && current.IsDone && current.ErrorCode == LlmErrorCode.AuthExpired)
+                    if (current == null)
                     {
-                        authExpired = true;
-                        break;
+                        continue;
                     }
 
-                    if (!string.IsNullOrEmpty(current?.Text))
+                    committed |= !string.IsNullOrEmpty(current.Text) ||
+                                 (current.ExecutedToolCalls != null && current.ExecutedToolCalls.Count > 0);
+                    if (current.ErrorCode == LlmErrorCode.AuthExpired)
                     {
-                        emittedVisibleText = true;
+                        authFailure = current;
+                        break;
                     }
 
                     yield return current;
@@ -137,25 +150,21 @@ namespace CoreAI.Infrastructure.Llm
                 await enumerator.DisposeAsync();
             }
 
-            if (!authExpired)
+            if (authFailure == null)
             {
                 yield break;
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             bool refreshed = await TryRefreshAsync(cancellationToken);
-            if (!refreshed || emittedVisibleText)
+            if (!refreshed || committed || request?.ProviderResponseState?.RetrySuppressed == true)
             {
                 if (!refreshed)
                 {
                     PublishExpiredEvent(request);
                 }
 
-                yield return new LlmStreamChunk
-                {
-                    IsDone = true,
-                    Error = "Auth expired",
-                    ErrorCode = LlmErrorCode.AuthExpired
-                };
+                yield return authFailure;
                 yield break;
             }
 
@@ -177,10 +186,8 @@ namespace CoreAI.Infrastructure.Llm
             {
                 return await refresher.RefreshAsync(cancellationToken);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException)
             {
-                // A cancelled refresh is not a refresh failure; let cancellation propagate instead of
-                // swallowing it into a silent "false" that the caller would treat as "refresh unavailable".
                 throw;
             }
             catch

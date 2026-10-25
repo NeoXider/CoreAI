@@ -95,7 +95,8 @@ namespace CoreAI.Composition
                     Lifetime.Singleton)
                 .As<ICoreAiWorldCommandExecutor>();
 
-            builder.Register(c => new CoreAiComponentCommandExecutor(c.Resolve<IGameLogger>()), Lifetime.Singleton)
+            builder.Register(c => new CoreAiComponentCommandExecutor(c.Resolve<IGameLogger>(),
+                    c.ResolveOrDefault<CoreAiComponentCommandOptions>()), Lifetime.Singleton)
                 .As<ICoreAiComponentCommandExecutor>();
 
             builder.Register(c => new UnityGameConfigStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
@@ -107,6 +108,7 @@ namespace CoreAI.Composition
                         c.ResolveOrDefault<ICoreAISettings>()?.AllowWorldPrimitives ?? true),
                     Lifetime.Singleton)
                 .As<IWorldStateManager>()
+                .As<IWorldStateWriteResults>()
                 .AsSelf();
 
             RegisterAgentVision(builder);

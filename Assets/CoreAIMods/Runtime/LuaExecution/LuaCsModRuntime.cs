@@ -234,6 +234,24 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public const int DefaultMaxEventsDispatchedPerTickGlobal = 256;
 
+        private int _reservedEventInvocationsPerTick = DefaultMaxEventsDispatchedPerTick;
+
+        /// <summary>Event work reserved when queues are nonempty; bounds retain one full event batch and timer batch.</summary>
+        public int ReservedEventInvocationsPerTick
+        {
+            get => _reservedEventInvocationsPerTick;
+            set
+            {
+                if (value < DefaultMaxEventsDispatchedPerTick
+                    || value > DefaultMaxEventsDispatchedPerTickGlobal - DefaultMaxTimersPerMod)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(value), "The event reservation must leave room for complete event and timer batches.");
+                }
+
+                _reservedEventInvocationsPerTick = value;
+            }
+        }
+
         /// <summary>
         /// Default consecutive-error streak (reset by any successful call) at which a mod is
         /// quarantined — suspended from dispatch but kept loaded so it can be inspected and repaired
@@ -565,6 +583,8 @@ namespace CoreAI.Ai.LuaCs
         private readonly IRbxRuntimeObservabilitySink _observability;
         private readonly IExecutionBudget _scriptExecutionBudget;
         private readonly List<Mod> _tickScratch = new();
+        private int _timerStart;
+        private int _eventStart;
         private readonly object _instanceQuotaGate = new();
         private readonly Dictionary<InstanceId, string> _quotaActorByInstanceId = new();
         private readonly Dictionary<string, int> _registeredInstancesByActor =
@@ -1996,7 +2016,8 @@ namespace CoreAI.Ai.LuaCs
                 // keyed by mod id so a downlevel error maps to the right source and throws out of the load,
                 // never a silent raw fallback. mod.Source keeps the ORIGINAL author text so get_source/versions
                 // round-trip the Luau the user wrote.
-                string compileSource = LuauSourceGate.ToLua52(luaCode, modId);
+                string compileSource = LuauSourceGate.ToLua52(luaCode, modId,
+                    (_engine as IScriptGeneralizedIteratorSupport)?.TrustedIteratorResolverName);
                 BindActorAttribution(modId, ownerActorId, ownerHasHostAuthority);
                 rbxLoadCandidate = _rbxApi?.BeginModLoadCandidate(modId);
 
@@ -2507,6 +2528,7 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Makes <paramref name="replacement"/> the loaded run of its mod in place of <paramref name="existing"/>; call under the gate.</summary>
         private void SwapInReplacementLocked(Mod existing, Mod replacement)
         {
+            existing.Removed = true;
             replacement.LoadOrder = existing.LoadOrder;
             _mods[replacement.Id] = replacement;
             int orderIndex = _modsInLoadOrder.IndexOf(existing);
@@ -3234,9 +3256,23 @@ namespace CoreAI.Ai.LuaCs
             int count = _tickScratch.Count;
             int completedThisTick = 0;
             int eventsDeliveredThisTick = 0;
+            bool hasPendingEvents = false;
             for (int i = 0; i < count; i++)
             {
-                Mod mod = _tickScratch[i];
+                Mod candidate = _tickScratch[i];
+                lock (candidate.EventGate)
+                {
+                    hasPendingEvents |= !candidate.Removed && candidate.Pending.Count > 0;
+                }
+            }
+
+            int timerLimit = DefaultMaxEventsDispatchedPerTickGlobal
+                - (hasPendingEvents ? ReservedEventInvocationsPerTick : 0);
+            int timerStart = _timerStart % count;
+            int eventStart = _eventStart % count;
+            for (int i = 0; i < count; i++)
+            {
+                Mod mod = _tickScratch[(timerStart + i) % count];
 
                 // WHY: a handler of this tick can unload a mod of the snapshot (a kick ends the
                 // connection synchronously, and the actor's mods go as soon as the handler returns). A
@@ -3249,7 +3285,7 @@ namespace CoreAI.Ai.LuaCs
 
                 try
                 {
-                    completedThisTick += TickTimers(mod, deltaSeconds, completedThisTick);
+                    completedThisTick += TickTimers(mod, deltaSeconds, completedThisTick, timerLimit);
                 }
                 catch (Exception ex)
                 {
@@ -3262,9 +3298,10 @@ namespace CoreAI.Ai.LuaCs
                 }
             }
 
+            _timerStart = completedThisTick >= timerLimit ? (timerStart + 1) % count : 0;
             for (int i = 0; i < count; i++)
             {
-                Mod mod = _tickScratch[i];
+                Mod mod = _tickScratch[(eventStart + i) % count];
                 if (mod.Removed)
                 {
                     continue;
@@ -3290,6 +3327,17 @@ namespace CoreAI.Ai.LuaCs
                 QuarantineIfExhausted(mod);
             }
 
+            bool pendingAfterDispatch = false;
+            for (int i = 0; i < count; i++)
+            {
+                Mod candidate = _tickScratch[i];
+                lock (candidate.EventGate)
+                {
+                    pendingAfterDispatch |= !candidate.Removed && candidate.Pending.Count > 0;
+                }
+            }
+
+            _eventStart = pendingAfterDispatch ? (eventStart + 1) % count : 0;
             if (_observability != null && completedThisTick > 0)
             {
                 if (eventsDeliveredThisTick > 0)
@@ -3628,6 +3676,7 @@ namespace CoreAI.Ai.LuaCs
                 {
                     for (int index = 0; index < outgoing.Count; index++)
                     {
+                        outgoing[index].Removed = true;
                         DeactivateSubscriptionsLocked(outgoing[index]);
                     }
 
@@ -4005,9 +4054,9 @@ namespace CoreAI.Ai.LuaCs
                 + $"further distinct faults are not logged. Latest: {source}: {description}");
         }
 
-        private int TickTimers(Mod mod, double dt, int alreadyCompletedThisTick)
+        private int TickTimers(Mod mod, double dt, int alreadyCompletedThisTick, int timerLimit)
         {
-            int remaining = DefaultMaxEventsDispatchedPerTickGlobal - alreadyCompletedThisTick;
+            int remaining = timerLimit - alreadyCompletedThisTick;
             int dispatched = 0;
             for (int i = 0; i < mod.Timers.Count && !mod.Removed; i++)
             {

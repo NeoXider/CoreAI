@@ -29,15 +29,17 @@ namespace CoreAI.Net.Mirror.Tests
     public sealed class MirrorBridgeRulesEditModeTests
     {
         private MirrorNetworkBridge _bridge;
+        private List<string> _log;
         private double _now;
 
         [SetUp]
         public void CreateBridge()
         {
             _now = 0d;
+            _log = new List<string>();
             _bridge = new MirrorNetworkBridge(
                 isServer: true, authenticator: null, maxClientRequestsPerSecond: 3,
-                clockSeconds: () => _now);
+                clockSeconds: () => _now, log: _log.Add);
         }
 
         [TearDown]
@@ -263,6 +265,264 @@ namespace CoreAI.Net.Mirror.Tests
             Assert.AreEqual(1, first.Count);
             Assert.AreEqual(1, second.Count, "the nested unregister failed it; the outer loop must not fail it twice");
             CollectionAssert.IsEmpty(_bridge.ActorIds);
+        }
+
+        [Test]
+        public void NET001_Disconnect_PreservesThePeerFailureAfterEverySubscriberAndCleanup()
+        {
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            _bridge.RegisterActor("actor-a");
+            InvalidOperationException peerFailure = new("peer listener failed");
+            List<int> listeners = new();
+            List<int> completions = new();
+            List<int> released = new();
+            List<RbxNetworkResponse> duringDisconnect = new();
+            _bridge.PeerDisconnected += _ =>
+            {
+                listeners.Add(1);
+                _bridge.SendRequest(ServerRequest(), duringDisconnect.Add);
+                Assert.AreEqual(1, duringDisconnect.Count,
+                    "a new request to the disconnecting connection must fail at once");
+                throw peerFailure;
+            };
+            _bridge.PeerDisconnected += _ => listeners.Add(2);
+            _bridge.BindingReleased += released.Add;
+            Action<RbxNetworkResponse> completion = response =>
+            {
+                Assert.IsFalse(response.Succeeded);
+                completions.Add(1);
+                throw new ArgumentException("completion subscriber failed");
+            };
+            completion += response =>
+            {
+                Assert.IsFalse(response.Succeeded);
+                completions.Add(2);
+            };
+            _bridge.SendRequest(ServerRequest(), completion);
+            _bridge.SendRequest(ServerRequest(), _ => completions.Add(3));
+
+            InvalidOperationException observed = Assert.Throws<InvalidOperationException>(() =>
+                _bridge.NotifyDisconnected(11, RbxNetworkDisconnectReason.TransportLost));
+
+            Assert.AreSame(peerFailure, observed);
+            Assert.IsFalse(duringDisconnect[0].Succeeded);
+            CollectionAssert.AreEqual(new[] { 1, 2 }, listeners);
+            CollectionAssert.AreEqual(new[] { 1, 2, 3 }, completions);
+            CollectionAssert.AreEqual(new[] { 11 }, released);
+            Assert.AreEqual(1, _log.Count);
+            StringAssert.Contains("completion subscriber failed", _log[0]);
+            CollectionAssert.IsEmpty(_bridge.ActorIds);
+            _bridge.NotifyDisconnected(11, RbxNetworkDisconnectReason.TransportLost);
+            _bridge.ReceiveServerResponse(11, Answer(1u));
+            _bridge.ReceiveServerResponse(11, Answer(2u));
+            _now = MirrorNetworkBridge.RequestTimeoutSeconds + 1d;
+            _bridge.PumpTimeouts();
+            Assert.AreEqual(2, _bridge.OrphanResponsesDropped);
+            Assert.AreEqual(0, _bridge.TimedOutRequests);
+            Assert.AreEqual(3, completions.Count);
+            Assert.AreEqual(2, listeners.Count);
+            Assert.AreEqual(1, released.Count);
+        }
+
+        [Test]
+        public void NET001_Unregister_ContainsReentrantBindingAndCompletionSubscriberFailures()
+        {
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            _bridge.RegisterActor("actor-a");
+            List<int> released = new();
+            List<int> completions = new();
+            _bridge.BindingReleased += connectionId =>
+            {
+                released.Add(connectionId);
+                _bridge.UnregisterActor("actor-a");
+                _bridge.NotifyDisconnected(connectionId, RbxNetworkDisconnectReason.TransportLost);
+                _bridge.Dispose();
+                throw new InvalidOperationException("binding subscriber failed");
+            };
+            _bridge.BindingReleased += connectionId => released.Add(connectionId);
+            Action<RbxNetworkResponse> completion = response =>
+            {
+                Assert.IsFalse(response.Succeeded);
+                completions.Add(1);
+                _bridge.Dispose();
+                throw new ArgumentException("unregister completion failed");
+            };
+            completion += _ => completions.Add(2);
+            _bridge.SendRequest(ServerRequest(), completion);
+            _bridge.SendRequest(ServerRequest(), _ => completions.Add(3));
+
+            _bridge.UnregisterActor("actor-a");
+
+            CollectionAssert.AreEqual(new[] { 11, 11 }, released,
+                "each binding subscriber runs once even if the first disposes the bridge");
+            CollectionAssert.AreEqual(new[] { 1, 2, 3 }, completions);
+            Assert.AreEqual(2, _log.Count);
+            StringAssert.Contains("unregister completion failed", _log[0]);
+            StringAssert.Contains("binding subscriber failed", _log[1]);
+            CollectionAssert.IsEmpty(_bridge.ActorIds);
+            _bridge.UnregisterActor("actor-a");
+            _bridge.Dispose();
+            _now = MirrorNetworkBridge.RequestTimeoutSeconds + 1d;
+            _bridge.PumpTimeouts();
+            Assert.AreEqual(3, completions.Count);
+            Assert.AreEqual(2, released.Count);
+            Assert.AreEqual(0, _bridge.TimedOutRequests);
+        }
+
+        [Test]
+        public void NET001_BindingRelease_AReplacementKeepsItsRegistrationAndNewRequest()
+        {
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            _bridge.RegisterActor("actor-a");
+            List<int> released = new();
+            List<int> completions = new();
+            List<RbxNetworkResponse> replacementResponses = new();
+            _bridge.BindingReleased += connectionId =>
+            {
+                if (connectionId != 11)
+                {
+                    return;
+                }
+
+                _bridge.BindConnection(12, new RbxNetworkPeer("actor-a", "session-b", "conn-12"));
+                _bridge.RegisterActor("actor-a");
+                _bridge.SendRequest(ServerRequest(), replacementResponses.Add);
+                throw new InvalidOperationException("replacement binding listener failed");
+            };
+            _bridge.BindingReleased += released.Add;
+            _bridge.SendRequest(ServerRequest(), _ =>
+            {
+                completions.Add(1);
+                throw new ArgumentException("old completion failed");
+            });
+            _bridge.SendRequest(ServerRequest(), _ => completions.Add(2));
+
+            _bridge.UnregisterActor("actor-a");
+
+            CollectionAssert.AreEqual(new[] { 1, 2 }, completions);
+            CollectionAssert.AreEqual(new[] { 11 }, released);
+            CollectionAssert.AreEqual(new[] { "actor-a" }, _bridge.ActorIds);
+            CollectionAssert.IsEmpty(replacementResponses);
+            Assert.AreEqual(2, _log.Count);
+            StringAssert.Contains("old completion failed", _log[0]);
+            StringAssert.Contains("replacement binding listener failed", _log[1]);
+            _bridge.ReceiveServerResponse(12, Answer(3u));
+            Assert.AreEqual(1, replacementResponses.Count);
+            Assert.IsTrue(replacementResponses[0].Succeeded);
+            _bridge.NotifyDisconnected(11, RbxNetworkDisconnectReason.TransportLost);
+            Assert.AreEqual(1, released.Count);
+            _bridge.NotifyDisconnected(12, RbxNetworkDisconnectReason.TransportLost);
+            _now = MirrorNetworkBridge.RequestTimeoutSeconds + 1d;
+            _bridge.PumpTimeouts();
+            CollectionAssert.AreEqual(new[] { 11, 12 }, released);
+            CollectionAssert.IsEmpty(_bridge.ActorIds);
+            Assert.AreEqual(1, replacementResponses.Count);
+            Assert.AreEqual(2, completions.Count);
+            Assert.AreEqual(0, _bridge.TimedOutRequests);
+        }
+
+        [TestCase(ClientCleanup.ForgetAdmission)]
+        [TestCase(ClientCleanup.DisconnectedPump)]
+        [TestCase(ClientCleanup.ReplacedConnection)]
+        [TestCase(ClientCleanup.Dispose)]
+        public void NET001_ClientCleanup_FailsEverySubscriberAndRequestDespiteThrowingReentry(
+            ClientCleanup cleanup)
+        {
+            OfflineMirror mirror = new();
+            try
+            {
+                _bridge.Dispose();
+                _bridge = new MirrorNetworkBridge(isServer: false, clockSeconds: () => _now,
+                    log: _log.Add);
+                OfflineMirror.StartClient();
+                Transport.active.OnClientConnected?.Invoke();
+                _bridge.BindAdmittedActor("actor-a");
+                List<int> completions = new();
+                List<RbxNetworkResponse> responses = new();
+                Action<RbxNetworkResponse> completion = response =>
+                {
+                    completions.Add(1);
+                    responses.Add(response);
+                    _bridge.ForgetAdmittedActor();
+                    throw new InvalidOperationException("client cleanup completion failed");
+                };
+                completion += response =>
+                {
+                    completions.Add(2);
+                    responses.Add(response);
+                };
+                RbxNetworkRequestMessage request = new(new InstanceId(3UL),
+                    RbxNetworkDirection.ClientToServer, "actor-a", null, Array.Empty<byte>());
+                _bridge.SendRequest(request, completion);
+                _bridge.SendRequest(request, response =>
+                {
+                    completions.Add(3);
+                    responses.Add(response);
+                });
+
+                switch (cleanup)
+                {
+                    case ClientCleanup.ForgetAdmission:
+                        _bridge.ForgetAdmittedActor();
+                        break;
+                    case ClientCleanup.DisconnectedPump:
+                        Transport.active.OnClientDisconnected?.Invoke();
+                        _bridge.PumpTimeouts();
+                        break;
+                    case ClientCleanup.ReplacedConnection:
+                        OfflineMirror.StopClient();
+                        OfflineMirror.StartClient();
+                        Transport.active.OnClientConnected?.Invoke();
+                        _bridge.PumpTimeouts();
+                        break;
+                    case ClientCleanup.Dispose:
+                        _bridge.Dispose();
+                        break;
+                }
+
+                CollectionAssert.AreEqual(new[] { 1, 2, 3 }, completions);
+                Assert.AreEqual(3, responses.Count);
+                Assert.IsFalse(responses[0].Succeeded);
+                Assert.IsFalse(responses[1].Succeeded);
+                Assert.IsFalse(responses[2].Succeeded);
+                Assert.AreEqual(1, _log.Count);
+                StringAssert.Contains("client cleanup completion failed", _log[0]);
+                _now = MirrorNetworkBridge.RequestTimeoutSeconds + 1d;
+                _bridge.PumpTimeouts();
+                _bridge.ForgetAdmittedActor();
+                _bridge.Dispose();
+                Assert.AreEqual(0, _bridge.TimedOutRequests);
+                Assert.AreEqual(3, completions.Count);
+            }
+            finally
+            {
+                OfflineMirror.RunAll(_bridge.Dispose, mirror.Dispose);
+            }
+        }
+
+        [Test]
+        public void NET001_Timeout_ContainsAThrowingSubscriberAndCompletesEveryExpiredRequest()
+        {
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            List<int> completions = new();
+            Action<RbxNetworkResponse> completion = _ =>
+            {
+                completions.Add(1);
+                throw new InvalidOperationException("timeout completion failed");
+            };
+            completion += _ => completions.Add(2);
+            _bridge.SendRequest(ServerRequest(), completion);
+            _bridge.SendRequest(ServerRequest(), _ => completions.Add(3));
+            _now = MirrorNetworkBridge.RequestTimeoutSeconds + 1d;
+
+            _bridge.PumpTimeouts();
+
+            CollectionAssert.AreEqual(new[] { 1, 2, 3 }, completions);
+            Assert.AreEqual(2, _bridge.TimedOutRequests);
+            Assert.AreEqual(1, _log.Count);
+            StringAssert.Contains("timeout completion failed", _log[0]);
+            _bridge.PumpTimeouts();
+            Assert.AreEqual(3, completions.Count);
         }
 
         [Test]
@@ -982,6 +1242,15 @@ namespace CoreAI.Net.Mirror.Tests
             Assert.AreEqual(2, completed.Count,
                 "nothing pumps a disposed bridge's timeouts, so a request made to it fails now");
             Assert.IsFalse(completed[1].Succeeded);
+        }
+
+        /// <summary>The public client cleanup entry points that fail all outstanding calls.</summary>
+        public enum ClientCleanup
+        {
+            ForgetAdmission,
+            DisconnectedPump,
+            ReplacedConnection,
+            Dispose
         }
 
         private static RbxNetworkRequestMessage ServerRequest()

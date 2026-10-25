@@ -13,6 +13,30 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - Hero retake tooling: `CaptureSavedCastlePrefab_ForReport` accepts the banner header, stats and caption from a UTF-8 text file (`COREAI_BENCHMARK_RECAPTURE_TEXT_FILE`), and the new explicit `CaptureSavedCastleReplay_ForReport` re-renders a hero by replaying the recorded `_g6_replay.lua` (`COREAI_BENCHMARK_RECAPTURE_LUA`) so runtime textures are regenerated without contacting the model.
 - Benchmark PlayMode runner records provider/tool inactivity on live scenario deadlines and treats gaps of at least `COREAI_BENCHMARK_PROVIDER_STALL_SECONDS` (default 120) as retryable Environment stalls.
 
+## [7.54.0] - 2026-10-25
+
+[Acceptance evidence](../../dev-docs/fix-wave-2026-10-24/README.md) records root-accepted source joins, Windows EditMode 7,917 Passed/0 Failed/13 Skipped and final hermetic Windows PlayMode 386 Passed/0 Failed/2 batch EndOfFrame skips, plus portable/Node/metadata receipts. Publication uses the Git tag and [GitHub release](https://github.com/NeoXider/CoreAI/releases/tag/v7.54.0). Exact environmental exceptions, earlier raw negatives and unrun platforms remain explicit.
+
+### Fixed
+
+- Chat/facade/history/clear/stop paths consume admitted actor context and frozen memory scope. Actor/session stop preserves independent logical scopes; factory resolution tracks service lifetime without binding future operations. Hosts retain account and view policy.
+- Explicit facade resolvers stay authoritative; automatic caches follow live scope/container replacement. New play generations retire static subscribers/history. Idle-progress attribution matches admitted actor/trace/role and streaming requests capture admission state.
+- Optional immutable world-operation results distinguish local failure/cancellation from automatic persistence arming; legacy managers remain unconfirmed. Default shared world capture/storage is a local preset requiring host composition for independent worlds.
+- World/component preflight rejects missing parents/cycles and invalid or excessive LineRenderer counts before effects, and preserves cancellation. The default position limit4096 is configurable.
+- Editor setup uses package-aware lookup; StreamingAssets recovery preserves intent and conflicting bytes. Root's index-only Standalone opt-in correction removes unintended Mirror/version/Edgegap defines while preserving intended framework/DoTween symbols; temporary Editor vendor symbols/generated migrations do not ship.
+- HTTP/SSE adapters retain failure/effect metadata, bind one effective tool list and release one lease per admitted operation. Registry admission refuses retired generations; bounded WebGL bridge queues abort overflow explicitly. Node success does not establish player ABI/browser throughput.
+- Audit logging bounds main-thread diagnostics, coordinates canonical paths and retention, and rolls back or quarantines partial append failures. Cross-process/folder ownership remains host-managed.
+- Hub owns page/registry/adapter lifetimes, stale-result fencing, draft conflicts, optional strict-save outcomes and keyboard reopening. Manual EditMode panel owners now clean their actual lifecycle subscriptions without static resets or baseline masking.
+- MCP preserves argument strings/failure envelopes and host-generation lifetime. Mirror isolates lifecycle/completion faults so offline world teardown completes; real-socket/room/load validation remains separate.
+- Benchmark helpers preserve required artifacts and SVG fallback, response-evidence isolation and client-turn timing. Replay and G6 fixtures retain exact evidence, original sixty-part geometry, thresholds and negative controls. No benchmark failure was turned into an environmental exclusion.
+
+### Documentation and verification
+
+- Added [generic multiplayer-session guidance](../../Docs/CoreAI/MULTIPLAYER_SESSIONS.md), including supplied context on later operations after factory resolution and role sharing across players.
+- Portable Core 2,850 Passed/3 NotExecuted, Lua1,932 Passed/41 NotExecuted and analyzer 8 Passed; persistence Node9 PASS checks, SSE ALL PASS, lockstep and tracked-text opt-in passed. Included Editor GPU 10/10, offline Mirror 229/229 with NET001 17/17, and PlayMode G6 34/34 are subsets, not additive totals.
+- Two exact EditMode and two PlayMode environmental exceptions remain in the ledger: missing historical owner data and the vendor FullAccess TMP constructor. Intentionally live benchmarks/recapture are outside the hermetic selection. Earlier Windows runs were mixed and contacted local MiniCPM for structural cost observations; no model-quality acceptance is inferred.
+- The earlier16.295306-second cancellation watchdog timeout is unreproduced; later focused1.065373-second and final full0.214230-second passes do not establish a product/root-cause fix. Phase observability and unchanged budget/watchdog/assertions remain. Built-player/IL2CPP/browser durability/device/real-network/load/performance/live-quality gates require separate evidence.
+
 ## [7.53.0] - 2026-10-16
 
 ### Added

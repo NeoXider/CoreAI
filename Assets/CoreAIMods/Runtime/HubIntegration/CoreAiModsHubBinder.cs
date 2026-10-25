@@ -1,3 +1,4 @@
+using System;
 using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
@@ -39,6 +40,9 @@ namespace CoreAI.Ai.Hub
         private bool allowFullTier;
 
         private HubWorldLoadConfirmationPage _worldLoadConfirmationPage;
+        private HubPageRegistry _registeredRegistry;
+        private Func<IHubPage> _modsFactory;
+        private Func<IHubPage> _worldLoadsFactory;
 
         private void Start()
         {
@@ -47,13 +51,13 @@ namespace CoreAI.Ai.Hub
                 : GetComponent<CoreAiHubWindow>() ?? FindFirstObjectByType<CoreAiHubWindow>();
             if (window == null)
             {
-                return; // no Hub in the scene — nothing to light up
+                return;
             }
 
             CoreAiModsLifetimeScope modsScope = FindFirstObjectByType<CoreAiModsLifetimeScope>();
             if (modsScope == null || modsScope.Container == null)
             {
-                return; // mods module not wired in this scene
+                return;
             }
 
             // WHY: The Hub bootstrap owns the registry (built-in tabs). Add the Mods page to it so the window's
@@ -89,12 +93,14 @@ namespace CoreAI.Ai.Hub
                 : LuaCapabilities.All;
             HubModsPages.Register(registry, runtime, actorContext, sourceStore, grant, allowFullTier,
                 rbxApiAvailable: IsRbxApiWired(container));
+            _registeredRegistry = registry;
+            registry.TryGet(HubModsPages.ModsPageId, out _modsFactory);
 
             IRbxWorldRuntimeService worldRuntimeService =
                 container.ResolveOrDefault<IRbxWorldRuntimeService>();
             if (worldRuntimeService != null)
             {
-                // WHY resolved separately: the startup selection is a player-only surface that no AI
+                // WHY: the startup selection is a player-only surface that no AI
                 // tool receives, so the page gets it from the container rather than through the service.
                 _worldLoadConfirmationPage = HubModsPages.RegisterWorldLoadConfirmation(
                     registry,
@@ -106,6 +112,7 @@ namespace CoreAI.Ai.Hub
                     },
                     actorContext: actorContext,
                     startupSelection: container.ResolveOrDefault<IRbxWorldStartupSelection>());
+                registry.TryGet(HubModsPages.WorldLoadsPageId, out _worldLoadsFactory);
             }
 
             if (window.Registry == null)
@@ -137,8 +144,25 @@ namespace CoreAI.Ai.Hub
 
         private void OnDestroy()
         {
-            _worldLoadConfirmationPage?.OnDestroyed();
+            try
+            {
+                if (_modsFactory != null)
+                {
+                    _registeredRegistry?.Unregister(HubModsPages.ModsPageId, _modsFactory);
+                }
+            }
+            finally
+            {
+                if (_worldLoadsFactory != null)
+                {
+                    _registeredRegistry?.Unregister(HubModsPages.WorldLoadsPageId, _worldLoadsFactory);
+                }
+            }
+
             _worldLoadConfirmationPage = null;
+            _registeredRegistry = null;
+            _modsFactory = null;
+            _worldLoadsFactory = null;
         }
     }
 }

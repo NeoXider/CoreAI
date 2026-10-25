@@ -60,6 +60,15 @@ namespace CoreAI.Ai
     /// </summary>
     public static class CallSkillToolLlmTool
     {
+        /// <summary>Binds declarative memory targets for one admitted role without changing a shared catalog.</summary>
+        public static ILlmTool BindForRole(ILlmTool proxy, IAgentMemoryStore store, string roleId)
+        {
+            if (!(proxy is CallSkillToolProxy skillProxy)) return proxy;
+            if (store == null) throw new ArgumentNullException(nameof(store));
+            if (string.IsNullOrWhiteSpace(roleId)) throw new ArgumentException("An admitted role id is required.", nameof(roleId));
+            return skillProxy.BindForRole(store, roleId.Trim());
+        }
+
         /// <summary>
         /// Creates the <c>call_skill_tool</c> tool.
         /// </summary>
@@ -104,6 +113,8 @@ namespace CoreAI.Ai
             private readonly IReadOnlyCollection<string> _allowedToolNames;
 
             private readonly Func<IReadOnlyList<ILlmTool>> _directToolsProvider;
+            private readonly IAgentMemoryStore _memoryStore;
+            private readonly string _roleId;
 
             // WHY: When the backing list is a live MutableSkillCatalog (skill authoring), the tool map
             // follows the catalog so a tool exposed by a just-authored skill is immediately invocable.
@@ -131,7 +142,9 @@ namespace CoreAI.Ai
             public CallSkillToolProxy(
                 IReadOnlyList<SkillSet> skills,
                 IReadOnlyCollection<string> allowedToolNames,
-                Func<IReadOnlyList<ILlmTool>> directToolsProvider)
+                Func<IReadOnlyList<ILlmTool>> directToolsProvider,
+                IAgentMemoryStore memoryStore = null,
+                string roleId = null)
             {
                 if (skills == null) throw new ArgumentNullException(nameof(skills));
                 _liveCatalog = skills as MutableSkillCatalog;
@@ -139,6 +152,8 @@ namespace CoreAI.Ai
                 SkillSetToolResolver.ValidateCatalog(_skills);
                 _allowedToolNames = allowedToolNames == null ? null : new List<string>(allowedToolNames).AsReadOnly();
                 _directToolsProvider = directToolsProvider;
+                _memoryStore = memoryStore;
+                _roleId = roleId;
                 _toolsByName = _liveCatalog != null ? null : BuildToolMap(_skills, allowedToolNames);
             }
 
@@ -172,6 +187,11 @@ namespace CoreAI.Ai
                 }
             }
 
+            public ILlmTool BindForRole(IAgentMemoryStore store, string roleId)
+            {
+                return new CallSkillToolProxy(_skills, _allowedToolNames, _directToolsProvider, store, roleId);
+            }
+
             public override string Name => "call_skill_tool";
 
             public override string Description =>
@@ -193,7 +213,8 @@ namespace CoreAI.Ai
             public ILlmTool RestrictTo(IReadOnlyCollection<string> allowedToolNames)
             {
                 return new CallSkillToolProxy(_skills,
-                    SkillSetToolResolver.IntersectAllowlist(_allowedToolNames, allowedToolNames), _directToolsProvider);
+                    SkillSetToolResolver.IntersectAllowlist(_allowedToolNames, allowedToolNames), _directToolsProvider,
+                    _memoryStore, _roleId);
             }
 
             public bool TryResolveInvocation(IDictionary<string, object> arguments,
@@ -217,6 +238,7 @@ namespace CoreAI.Ai
                 {
                     descriptor = ResolveDirectTool(trimmed);
                 }
+                descriptor = BindDescriptor(descriptor);
                 if (descriptor == null || !descriptor.CanInvoke)
                 {
                     error = $"Tool '{trimmed}' is unavailable for this skill call.";
@@ -317,7 +339,7 @@ namespace CoreAI.Ai
 
                 foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildToolDescriptors(candidates))
                 {
-                    if (descriptor == null || !descriptor.CanInvoke)
+                    if (descriptor == null)
                     {
                         continue;
                     }
@@ -331,6 +353,17 @@ namespace CoreAI.Ai
                 }
 
                 return null;
+            }
+
+            private SkillToolDescriptor BindDescriptor(SkillToolDescriptor descriptor)
+            {
+                if (descriptor?.SourceTool is CoreAI.AgentMemory.MemoryLlmTool && _memoryStore != null)
+                {
+                    AIFunction function = new MemoryTool(_memoryStore, _roleId).CreateAIFunction();
+                    return new SkillToolDescriptor(descriptor.Skill, descriptor.SourceTool, descriptor.Name,
+                        descriptor.Description, function.JsonSchema.ToString(), null, function);
+                }
+                return descriptor;
             }
 
             public AIFunction CreateAIFunction()
@@ -396,7 +429,8 @@ namespace CoreAI.Ai
                 // WHY: shared instances may belong to several skills, but different bindings must never shadow schemas.
                 if (toolsByName.TryGetValue(descriptor.Name, out SkillToolDescriptor existing))
                 {
-                    if (!ReferenceEquals(existing.SourceTool, descriptor.SourceTool))
+                    if (!ReferenceEquals(SkillSetToolResolver.BindingIdentity(existing.SourceTool),
+                        SkillSetToolResolver.BindingIdentity(descriptor.SourceTool)))
                     {
                         throw new InvalidOperationException($"Skill tool name '{descriptor.Name}' has conflicting bindings.");
                     }

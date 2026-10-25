@@ -71,6 +71,7 @@ namespace CoreAI.Ai
 
         private static int Specificity(string pattern)
         {
+            pattern = pattern?.Trim();
             if (pattern == "*")
             {
                 return 2;

@@ -34,7 +34,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         private static readonly string[] IsolatedEnvVars =
         {
             "COREAI_BENCHMARK_TIMEOUT", "COREAI_BENCHMARK_RETRIES", "COREAI_BENCHMARK_MAX_OUTPUT_TOKENS",
-            "COREAI_BENCHMARK_ROUNDTRIPS", PlayModeOpenAiTestConfig.EnvBaseUrl, PlayModeOpenAiTestConfig.EnvModel,
+            "COREAI_BENCHMARK_ROUNDTRIPS", "COREAI_BENCHMARK_PROVIDER_STALL_SECONDS",
+            "COREAI_BENCHMARK_FREEBUILD_PROMPT", "COREAI_BENCHMARK_FREEBUILD_SUBJECT", "COREAI_BENCHMARK_VISION_MODE",
+            PlayModeOpenAiTestConfig.EnvBaseUrl, PlayModeOpenAiTestConfig.EnvModel,
             PlayModeOpenAiTestConfig.EnvExtraBodyJson, PlayModeOpenAiTestConfig.EnvStreaming,
             PlayModeOpenAiTestConfig.EnvNativeTools, PlayModeOpenAiTestConfig.EnvBenchmarkReasoningEffort
         };
@@ -42,10 +44,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         private readonly Dictionary<string, string> _savedEnv = new();
         private readonly List<UnityEngine.Object> _ownedAssets = new();
         private string _artifactDir;
+        private Stopwatch _softBudgetProbeClock;
 
         [SetUp]
         public void SetUp()
         {
+            _softBudgetProbeClock = TestContext.CurrentContext.Test.Name ==
+                nameof(ProviderIgnoringCancellation_ElapsedSoftBudgetCancelsActiveAttempt)
+                ? Stopwatch.StartNew() : null;
+            TraceSoftBudgetProbe("setup-start");
             foreach (string name in IsolatedEnvVars)
             {
                 _savedEnv[name] = Environment.GetEnvironmentVariable(name);
@@ -53,29 +60,58 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             _artifactDir = Path.Combine(Path.GetTempPath(), "CoreAiParallelBenchmark_" + Path.GetRandomFileName());
+            TraceSoftBudgetProbe("setup-complete");
         }
 
         [TearDown]
         public void TearDown()
         {
-            foreach (KeyValuePair<string, string> saved in _savedEnv)
+            try
             {
-                Environment.SetEnvironmentVariable(saved.Key, saved.Value);
-            }
-
-            foreach (UnityEngine.Object asset in _ownedAssets)
-            {
-                if (asset != null)
+                TraceSoftBudgetProbe("teardown-start");
+                foreach (KeyValuePair<string, string> saved in _savedEnv)
                 {
-                    UnityEngine.Object.DestroyImmediate(asset);
+                    Environment.SetEnvironmentVariable(saved.Key, saved.Value);
+                }
+
+                TraceSoftBudgetProbe("teardown-environment-restored");
+                TraceSoftBudgetProbe("teardown-assets-start count=" + _ownedAssets.Count);
+                foreach (UnityEngine.Object asset in _ownedAssets)
+                {
+                    if (asset != null)
+                    {
+                        TraceSoftBudgetProbe("teardown-destroy-start");
+                        UnityEngine.Object.DestroyImmediate(asset);
+                        TraceSoftBudgetProbe("teardown-destroy-complete");
+                    }
+                }
+
+                _ownedAssets.Clear();
+                TraceSoftBudgetProbe("teardown-assets-complete");
+                TraceSoftBudgetProbe("teardown-progress-start");
+                BenchmarkProgress.EndSession();
+                TraceSoftBudgetProbe("teardown-progress-complete");
+                if (Directory.Exists(_artifactDir))
+                {
+                    TraceSoftBudgetProbe("teardown-temp-delete-start");
+                    Directory.Delete(_artifactDir, true);
+                    TraceSoftBudgetProbe("teardown-temp-delete-complete");
                 }
             }
-
-            _ownedAssets.Clear();
-            BenchmarkProgress.EndSession();
-            if (Directory.Exists(_artifactDir))
+            finally
             {
-                Directory.Delete(_artifactDir, true);
+                TraceSoftBudgetProbe("teardown-complete");
+                _softBudgetProbeClock = null;
+            }
+        }
+
+        private void TraceSoftBudgetProbe(string phase)
+        {
+            Stopwatch clock = _softBudgetProbeClock;
+            if (clock != null)
+            {
+                UnityEngine.Debug.Log($"[SoftBudgetProbe] {phase} elapsedMs={clock.Elapsed.TotalMilliseconds:F3} " +
+                    $"thread={Thread.CurrentThread.ManagedThreadId}");
             }
         }
 
@@ -559,6 +595,140 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         [UnityTest, Timeout(15000)]
+        public IEnumerator CustomPrompt_DeadlineKeepsAttributionAndEvidenceWithoutAnyScore()
+        {
+            Environment.SetEnvironmentVariable("COREAI_BENCHMARK_FREEBUILD_PROMPT", "Build a small lighthouse.");
+            Environment.SetEnvironmentVariable("COREAI_BENCHMARK_PROVIDER_STALL_SECONDS", "0");
+            BenchmarkProgress.BeginSession();
+            foreach (LlmTimeoutKind kind in new[] { LlmTimeoutKind.TotalDeadline, LlmTimeoutKind.ResponseWait })
+            {
+                TypedTimeoutLlmClient client = new(kind);
+                GameBenchmarkScenario custom = GameFreeBuildScenariosG6.All()[0];
+                Assert.IsTrue(custom.ExcludeFromScoring);
+                RunTarget run = MakeRun("alpha", "model", client, new BenchmarkVisualLane(), null, new[] { custom });
+                yield return GameCreationBenchmarkPlayModeTests.RunTargetSuite(run);
+
+                Assert.AreEqual(1, client.Calls);
+                ScenarioResult result = run.Report.Results.Single();
+                Assert.IsTrue(result.ExcludeFromScoring);
+                Assert.AreEqual(kind == LlmTimeoutKind.TotalDeadline ? FailureAttribution.Model : FailureAttribution.Environment,
+                    result.Attribution, result.Failure);
+                Assert.IsNotEmpty(result.Failure);
+                StringAssert.Contains("Build a small lighthouse.", result.SessionTranscript);
+                StringAssert.Contains("CUT:", result.SessionTranscript);
+                Assert.AreEqual(0, run.Report.ScenarioCount);
+                Assert.AreEqual(0, run.Report.ExtremeScenarioCount);
+                Assert.IsEmpty(run.Report.GroupBreakdown());
+                Assert.IsEmpty(run.Report.DimensionBreakdown());
+                Assert.IsTrue(RoleFitness.Evaluate(run.Report).Roles.All(role => !role.Assessed));
+            }
+        }
+
+        [UnityTest, Timeout(15000)]
+        public IEnumerator ProductiveStop_CancelsAndRetainsUnscoredAttemptThenResumeRetriesOnce()
+        {
+            yield return RunProductiveStop(false);
+        }
+
+        [UnityTest, Timeout(15000)]
+        public IEnumerator ProductiveStop_WhenProviderCompletesOnTheSameTickStillSkipsGrading()
+        {
+            yield return RunProductiveStop(true);
+        }
+
+        private IEnumerator RunProductiveStop(bool completeOnStop)
+        {
+            Environment.SetEnvironmentVariable("COREAI_BENCHMARK_RETRIES", "1");
+            BenchmarkProgress.BeginSession();
+            ProbeScenario scenario = new(null, "alpha", 1, true, false, timeoutSeconds: 120, freeBuild: true);
+            ProductiveStopLlmClient client = new(scenario, completeOnStop);
+            RunTarget stopped = MakeRun("alpha", "model", client, new BenchmarkVisualLane(), null, new[] { scenario });
+            BenchmarkRunStore store = new(_artifactDir, "productive-stop");
+            EnableCheckpoint(stopped, store);
+            client.OnStop = stopped.Progress.RequestStop;
+
+            yield return GameCreationBenchmarkPlayModeTests.RunTargetSuite(stopped);
+
+            Assert.AreEqual(2, client.Calls);
+            Assert.AreEqual(2, client.Disposals);
+            Assert.IsTrue(client.Token.IsCancellationRequested);
+            Assert.IsTrue(scenario.Environment.Lua.TryNumber("partial_state", out double value));
+            Assert.AreEqual(7, value, "The interrupted attempt must actually execute a state mutation.");
+            Assert.AreEqual(0, scenario.GradeCalls, "Stop must never invoke the scenario grader.");
+            Assert.IsNull(stopped.VisualLane.Holder, "Stop must release the shared scene lane.");
+            BenchmarkTargetState saved = store.Load("alpha");
+            ScenarioResult partial = saved.Results.Single();
+            Assert.IsTrue(partial.Interrupted);
+            Assert.IsFalse(saved.IsFinalized(scenario.Id, 1));
+            Assert.AreEqual(0, saved.ToReport().ScenarioCount);
+            Assert.AreEqual(1, partial.ToolCalls);
+            Assert.IsEmpty(partial.Checkpoints);
+            StringAssert.Contains("Built partial state", partial.SessionTranscript);
+            StringAssert.Contains("RUN INTERRUPTED", partial.SessionTranscript);
+
+            ProbeLlmClient resumedClient = new("bench-probe-alpha-", 0);
+            RunTarget resumed = MakeRun("alpha", "model", resumedClient, stopped.VisualLane, null, new[] { scenario });
+            EnableCheckpoint(resumed, store, saved);
+            yield return GameCreationBenchmarkPlayModeTests.RunTargetSuite(resumed);
+
+            Assert.AreEqual(1, resumedClient.Calls);
+            Assert.AreEqual(1, scenario.GradeCalls);
+            Assert.AreEqual(1, resumed.Report.Results.Count);
+            Assert.IsFalse(resumed.Report.Results[0].Interrupted);
+            Assert.IsTrue(store.Load("alpha").IsFinalized(scenario.Id, 1));
+        }
+
+        [UnityTest, Timeout(15000)]
+        public IEnumerator RequiredPublicationFailure_FailsSuiteAndRepublishesCheckpointWithoutProviderRerun()
+        {
+            Environment.SetEnvironmentVariable("COREAI_BENCHMARK_RETRIES", "0");
+            BenchmarkProgress.BeginSession();
+            ProbeLlmClient client = new("bench-probe-alpha-", 0);
+            RunTarget failed = MakeRun("alpha", "model", client, new BenchmarkVisualLane(), null, Plain(null, "alpha", 1));
+            BenchmarkRunStore store = new(_artifactDir, "publication-failure");
+            EnableCheckpoint(failed, store);
+            string jsonPath = Path.Combine(_artifactDir, failed.ArtifactStem + ".json");
+            BenchmarkRunStore.AtomicWrite(jsonPath, "previous durable report");
+            int rejectedCommits = 0;
+            failed.RequiredArtifactWriter = (path, content) =>
+            {
+                if (path != jsonPath) BenchmarkRunStore.AtomicWrite(path, content);
+                else BenchmarkRunStore.AtomicWrite(path, content, (temporary, destination) =>
+                {
+                    rejectedCommits++;
+                    throw new IOException("scripted permanent report lock");
+                }, _ => { });
+            };
+            List<string> problems = new();
+            yield return GameCreationBenchmarkPlayModeTests.RunTargets(new[] { failed }, 0, problems);
+
+            Assert.IsNotEmpty(problems, "The suite entry point must receive a failing outcome for required evidence.");
+            Assert.IsTrue(problems.Any(problem => problem.Contains("scripted permanent report lock")));
+            Assert.GreaterOrEqual(rejectedCommits, 4);
+            Assert.AreEqual(1, client.Calls);
+            Assert.AreEqual("previous durable report", File.ReadAllText(jsonPath));
+            BenchmarkTargetState saved = store.Load("alpha");
+            Assert.IsFalse(saved.ReportsWritten);
+            Assert.IsTrue(saved.IsFinalized(failed.Scenarios[0].Id, 1));
+            Assert.IsFalse(File.Exists(store.CompletionPath("alpha")));
+            Assert.IsEmpty(Directory.GetFiles(_artifactDir, "*.tmp-*", SearchOption.AllDirectories));
+
+            ProbeLlmClient unused = new("bench-probe-alpha-", 0, "Provider must not be called during republish");
+            RunTarget resumed = MakeRun("alpha", "model", unused, new BenchmarkVisualLane(), null, failed.Scenarios);
+            EnableCheckpoint(resumed, store, saved);
+            List<string> resumedProblems = new();
+            yield return GameCreationBenchmarkPlayModeTests.RunTargets(new[] { resumed }, 0, resumedProblems);
+
+            Assert.IsEmpty(resumedProblems);
+            Assert.AreEqual(0, unused.Calls);
+            Assert.IsTrue(store.Load("alpha").ReportsWritten);
+            Assert.IsTrue(File.Exists(store.CompletionPath("alpha")));
+            Assert.AreEqual(1, BenchmarkRunStore.ImportReport(File.ReadAllText(jsonPath)).Results.Count);
+            string index = File.ReadAllText(Path.Combine(_artifactDir, "INDEX.md"));
+            Assert.AreEqual(1, index.Split(new[] { "](" + resumed.ArtifactStem + ".md)" }, StringSplitOptions.None).Length - 1);
+        }
+
+        [UnityTest, Timeout(15000)]
         public IEnumerator TypedResponseWait_OnAcceptedProviderStream_IsEnvironmentAndRetried()
         {
             yield return RunTypedTimeoutScenario(LlmTimeoutKind.ResponseWait, FailureAttribution.Environment, 2);
@@ -671,7 +841,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 CollectionAssert.IsEmpty(problems);
                 Assert.AreEqual(1, broken.Calls);
                 Assert.IsTrue(broken.Token.IsCancellationRequested);
-                Assert.AreEqual(0, run.Report.Results.Count, "A Stop-aborted final attempt is not scored.");
+                Assert.AreEqual(1, run.Report.Results.Count, "An interrupted attempt remains evidence.");
+                Assert.IsTrue(run.Report.Results[0].Interrupted);
+                Assert.AreEqual(0, run.Report.ScenarioCount, "A Stop-aborted final attempt is not scored.");
                 Assert.IsTrue(run.BudgetHit);
                 Assert.IsFalse(BenchmarkProgress.Runs()[0].IsActive);
                 Assert.IsTrue(File.Exists(Path.Combine(_artifactDir, run.ArtifactStem + ".json")));
@@ -685,17 +857,34 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         [UnityTest, Timeout(15000)]
         public IEnumerator ProviderIgnoringCancellation_ElapsedSoftBudgetCancelsActiveAttempt()
         {
+            _softBudgetProbeClock ??= Stopwatch.StartNew();
+            TraceSoftBudgetProbe("test-entered");
             Environment.SetEnvironmentVariable("COREAI_BENCHMARK_RETRIES", "3");
             HangingLlmClient broken = new();
             BenchmarkVisualLane lane = new();
             BenchmarkProgress.BeginSession();
+            TraceSoftBudgetProbe("make-run-start");
             RunTarget run = MakeRun("alpha", "model-a", broken, lane, null, Plain(null, "alpha", 2));
+            TraceSoftBudgetProbe("make-run-complete");
             run.ScenarioContext.CancellationGraceSeconds = 0.02;
-            broken.OnCall = () => run.SuiteBudgetSeconds = run.SuiteClock.Elapsed.TotalSeconds;
+            broken.OnCall = () =>
+            {
+                TraceSoftBudgetProbe("provider-entered");
+                run.SuiteBudgetSeconds = run.SuiteClock.Elapsed.TotalSeconds;
+                TraceSoftBudgetProbe("suite-budget-expired");
+            };
+            run.RequiredArtifactWriter = (path, content) =>
+            {
+                TraceSoftBudgetProbe("artifact-start " + Path.GetFileName(path));
+                BenchmarkRunStore.AtomicWrite(path, content);
+                TraceSoftBudgetProbe("artifact-complete " + Path.GetFileName(path));
+            };
             List<string> problems = new();
             try
             {
+                TraceSoftBudgetProbe("run-targets-start");
                 yield return GameCreationBenchmarkPlayModeTests.RunTargets(new[] { run }, 0, problems);
+                TraceSoftBudgetProbe("run-targets-returned");
                 CollectionAssert.IsEmpty(problems);
                 Assert.AreEqual(1, broken.Calls, "The elapsed budget prevents remaining retries.");
                 Assert.IsTrue(broken.Token.IsCancellationRequested);
@@ -703,10 +892,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 Assert.AreEqual(1, run.Report.Results.Count);
                 Assert.IsNull(lane.Holder);
                 Assert.IsFalse(BenchmarkProgress.Runs()[0].IsActive);
+                TraceSoftBudgetProbe("assertions-complete");
             }
             finally
             {
+                TraceSoftBudgetProbe("release-start");
                 broken.Release();
+                TraceSoftBudgetProbe("release-complete");
             }
         }
 
@@ -1318,6 +1510,59 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
         }
 
+        /// <summary>Executes a real Lua state change, then stops during the next client turn.</summary>
+        private sealed class ProductiveStopLlmClient : ILlmClient
+        {
+            private readonly ProbeScenario _scenario;
+            private readonly bool _completeOnStop;
+            public Action OnStop;
+            public int Calls;
+            public int Disposals;
+            public CancellationToken Token;
+
+            public ProductiveStopLlmClient(ProbeScenario scenario, bool completeOnStop)
+            {
+                _scenario = scenario;
+                _completeOnStop = completeOnStop;
+            }
+
+            public Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
+                CancellationToken cancellationToken = default) => throw new InvalidOperationException("Streaming is required.");
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                Calls++;
+                Token = cancellationToken;
+                request.ProviderResponseState.RecordResponse();
+                try
+                {
+                    if (Calls == 1)
+                    {
+                        _scenario.Environment.Lua.DeclareSlot("partial_state");
+                        IAIFunctionLlmTool tool = request.Tools.OfType<IAIFunctionLlmTool>().Single();
+                        object output = await tool.CreateAIFunction().InvokeAsync(new Microsoft.Extensions.AI.AIFunctionArguments
+                        {
+                            ["code"] = "logic_define('partial_state', function(ctx) return 7 end)"
+                        }, cancellationToken);
+                        yield return new LlmStreamChunk
+                        {
+                            Text = "Built partial state", IsDone = true,
+                            ExecutedToolCalls = new[] { new LlmToolCallTrace("execute_lua", true, 1, "native", output?.ToString()) }
+                        };
+                        yield break;
+                    }
+                    OnStop();
+                    if (!_completeOnStop) await Task.Delay(Timeout.Infinite, cancellationToken);
+                    yield return new LlmStreamChunk { Text = "Stopped on this tick", IsDone = true };
+                }
+                finally
+                {
+                    Disposals++;
+                }
+            }
+        }
+
         /// <summary>Produces an accepted-stream delta and a typed deadline without network calls or delays.</summary>
         private sealed class TypedTimeoutLlmClient : ILlmClient
         {
@@ -1559,6 +1804,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             public string Owner { get; }
+            public BenchmarkEnvironment Environment { get; private set; }
+            public int GradeCalls { get; private set; }
             public override string Id => $"probe-{Owner}-{_index}";
             public override string Name => $"Probe {Owner} {_index}";
             public override string Group => _group;
@@ -1572,6 +1819,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             public override void Prepare(BenchmarkEnvironment env)
             {
+                Environment = env;
                 _log?.Begin(this, env);
             }
 
@@ -1585,6 +1833,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
             {
+                GradeCalls++;
                 _log?.End(this, env);
                 ScenarioGrading grading = new();
                 grading.Add("answered", "the model answered", 10, run.Turns >= 1);

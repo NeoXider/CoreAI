@@ -1,0 +1,120 @@
+# Crafting and material shader supplementary audit
+
+- Audited commit: `69d5bcc37502cd4bb464a3bf9ac0c53b1624b804`.
+- Audit dates: 2026-10-23; resumed 2026-10-24.
+- Auditor model: `gpt-6.1-sol`; reasoning effort: `max`.
+- Status: source review complete. Four new P2 findings; no P0, P1 or P3 finding confirmed. Fixes and executable regressions remain unimplemented and unrun.
+- Ownership: this supplement closes the crafting checker/schema internals excluded by report 02 and the material shader math excluded by report 06. Report 06 retains material allocation, cache lifetime and cross-world isolation findings.
+- Authorization: the direct human request for an individual Markdown report overrides the repository's default no-audit-reports rule. This auditor writes this file only; git and shared verification belong to root.
+
+## Goal and contracts
+
+The goal is source coverage of two named gaps, not another repository-wide review. The relevant contracts are order-independent compatibility rules, configurable validators and schema constraints, stable rejection of malformed input, bounded work, finite shader arithmetic, consistent material bindings, URP/player/WebGL behavior and deterministic fallback. `AGENTS.md` and `Docs/ARCHITECTURE_RULES.md` were read. No runtime, shader compilation or visual acceptance is claimed.
+
+## Primary source coverage
+
+All nine C# files under `Assets/CoreAI/Runtime/Core/Features/Crafting/` were read in full: `CompatibilityChecker.cs`, `CompatibilityLlmTool.cs`, `CompatibilityResult.cs`, `CompatibilityRule.cs`, `CompatibilityToolResult.cs`, `ICompatibilityValidator.cs`, `JsonFieldSchema.cs`, `JsonSchemaValidator.cs` and `JsonValidationResult.cs`.
+
+All 13 shader/HLSL files under `Assets/CoreAIMods/Runtime/RbxApi/Unity/Resources/CoreAIRbxMaterials/` were read in full: `RbxTexturedSurface.shader`, `RbxProceduralSurface.shader`, `RbxProceduralTransparent.shader`, `RbxProceduralNeon.shader`, `RbxProceduralFallback.shader`, `RbxProceduralCommon.hlsl`, `RbxNoiseShader.hlsl`, and the six `NoiseShader/` includes (`Common.hlsl`, `Noise1D.hlsl`, `ClassicNoise2D.hlsl`, `ClassicNoise3D.hlsl`, `SimplexNoise2D.hlsl`, `SimplexNoise3D.hlsl`). This covers the authored material modes, filtering, derivative normals, projection selection, render states, shader properties, URP inputs and visible fallback.
+
+The six vendored includes were inspected as source at the audited SHA, not treated as CoreAI-authored kernels. `NoiseShader/UPSTREAM.md` identifies `keijiro/NoiseShader` commit `550100d4a74de1ba90eb1b8e90f25f9dbeec28d2`, records checksums and separates the CoreAI-owned `RbxNoiseShader.hlsl` adapter; the adjacent `LICENSE` preserves the upstream MIT notice. Local SHA-256 values for all six includes and the license match that record. This verifies local record consistency, not equality to a newly fetched upstream tree or legal compliance. Only the local common helper is included by the adapter; the other upstream includes retain their upstream package-root paths and are not on this shader call path.
+
+Dependency provenance matters: committed `Packages/manifest.json` requests URP `17.6.0` and `ProjectSettings/ProjectVersion.txt` identifies Unity `6000.6.0f1`. The available local `Library/PackageCache/com.unity.render-pipelines.universal@3b809f23691d/package.json` instead identifies URP `17.3.0` (local SRP Core is also `17.3.0`). Installed dependency inspection is reported separately from repository source at the audited SHA; no Editor import/package-resolution claim is made.
+
+Targeted integration reads, rather than full audits of these larger files:
+
+- `Assets/CoreAIMods/Runtime/RbxApi/Unity/RbxProceduralMaterialProvider.cs`: definitions, shader loading, shared material property assignment, transparency blend setup and fallback selection; `RbxTextureMaterialProvider.cs`: plain-material resolution, missing-texture fallback and shader property/keyword binding. `PROCEDURAL_MATERIALS.md` and the material sections of `TODO.md` supplied intended projection, fallback and existing verification limits.
+- `Assets/CoreAIMods/Runtime/RbxApi/Binding/InstanceGameObjectBinder.cs`: Size-to-transform scale, wedge geometry/normals and appearance/property-block binding. This supports CSM-002; material cache allocation/lifetime and cross-world isolation remain owned by RBX-003/004 in report 06.
+- `Assets/CoreAiUnity/Tests/EditMode/CompatibilityAndSchemaEditModeTests.cs`: checker and schema tests through the complex-result fixture at line 535; `Assets/CoreAI/Tests/EditMode/CoreAuditFindingsEditModeTests.cs`: uppercase numeric-range regressions; `Assets/CoreAI/Runtime/Core/Features/Benchmarking/BenchmarkJson.cs`: existing date-preserving reader pattern. A targeted Crafting symbol search across CoreAI/Unity found tests and the compatibility wrapper, not a shipped caller that makes `JsonSchemaValidator` a security boundary.
+- `Assets/CoreAIMods/Tests/EditMode/RbxApi/Unity/RbxTexturedShaderMathEditModeTests.cs`: source setup, gradient, face projection, flat checks, helper excerpts and method inventory; `RbxShaderClusterLightLoopEditModeTests.cs` in full; `Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/RbxMaterialCatalogQaEditModeTests.cs`: source-level pow check and inventory of enum/tint/scale tests. Reading tests is not executing them.
+- Local URP `ShaderVariablesFunctions.hlsl`, `Core.hlsl`, `Shaders/LitForwardPass.hlsl`, `Shadows.hlsl` and `Runtime/RendererFeatures/ScreenSpaceShadows.cs`: fog helpers/callers, shadow-coordinate branches and pre-transparent keyword reset only. Local Json.NET package metadata identifies `3.2.2`, synced to Json.NET `13.0.2`, matching `Packages/packages-lock.json:210`. The Json.NET 13.0.2 primary source was inspected for the parser defaults and token conversion used below.
+
+## Confirmed findings
+
+### CSM-001 - P2 - A group can consume a later exact-match ingredient
+
+**New; high confidence from the complete matching path.** Map `IronOre` and `CopperOre` to `Metal`, then add a blocking rule with elements `[Metal, IronOre]`. `Check("IronOre", "CopperOre")` misses the rule and returns the default compatible result; reversing the two ingredients matches and rejects. A valid distinct assignment exists in both orders: CopperOre satisfies Metal and IronOre satisfies IronOre.
+
+- `Assets/CoreAI/Runtime/Core/Features/Crafting/CompatibilityChecker.cs:234` walks rule elements in their configured order. At `:251` it marks the first matching group's ingredient used and never reassigns it. The later exact match at `:244` cannot reclaim that ingredient, so `:262` returns false.
+- The result feeds the real rule selection at `:127`; a missed blocking rule never sets `hasBlocking` at `:146`, and the default score at `:169` reaches an `IsCompatible = true` result at `:203`.
+- The public LLM wrapper calls this same checker at `Assets/CoreAI/Runtime/Core/Features/Crafting/CompatibilityLlmTool.cs:122`. It trims names and requires two ingredients, so neither guard prevents this two-name trigger.
+- Existing order coverage at `Assets/CoreAiUnity/Tests/EditMode/CompatibilityAndSchemaEditModeTests.cs:72` uses two exact names; group coverage at `:148` uses non-overlapping groups. Neither exercises a group overlapping an exact requirement.
+
+**Fix/regression direction:** use a bounded bipartite matching algorithm (or an equivalent correct reassignment algorithm) so each rule requirement receives one distinct ingredient, independent of either input order. Do not replace this with unbounded factorial backtracking. Add both permutations of the blocking example, reversed rule order, repeated group requirements and a genuinely insufficient multiset. Assert identical compatibility, score and reasons through the checker and wrapper. No executable regression was run.
+
+### CSM-002 - P2 - Procedural projection weights use an unscaled mesh normal
+
+**New; high confidence in the coordinate mismatch, with no rendered reproduction.** Select a directional procedural material, for example Brick, on a wedge whose Size has Y:Z ratio 1:2. The shader stretches position into physical object-aligned coordinates but computes projection weights from the original 45-degree mesh normal. It therefore blends the Y and Z patterns equally when the physical face normal should select Y alone. The texture-free provider is a supported runtime path; the trigger also occurs when a textured entry cannot be resolved and falls back to its procedural twin.
+
+- `Assets/CoreAIMods/Runtime/RbxApi/Binding/InstanceGameObjectBinder.cs:1361` applies Size as transform scale; the authored wedge slope normal is `normalize(0,1,1)` at `:1568`. Material lookup and assignment occur at `:1691`.
+- `Assets/CoreAIMods/Runtime/RbxApi/Unity/RbxProceduralMaterialProvider.cs:58` maps Brick to surface mode 10; `:259` binds that mode. `Assets/CoreAIMods/Runtime/RbxApi/Unity/RbxTextureMaterialProvider.cs:156` and `:170` reach the procedural provider; missing required textures are skipped at `:517`.
+- `Assets/CoreAIMods/Runtime/RbxApi/Unity/Resources/CoreAIRbxMaterials/RbxProceduralSurface.shader:96` multiplies position by the object-axis scale, but `:97` merely normalizes the unscaled mesh normal. The fragment passes it into `RbxEvaluateSurface` at `:117`.
+- `Assets/CoreAIMods/Runtime/RbxApi/Unity/Resources/CoreAIRbxMaterials/RbxProceduralCommon.hlsl:129` selects object-aligned coordinates for mode 10. The normal drives `RbxNarrowAxisWeights` at `:138`, then mode 10's brick blend at `:995`. With relative scale `(1,1,2)`, the implemented normal is approximately `(0,.7071,.7071)` and weights are `(0,.5,.5)`; inverse-scale normalization yields `(0,.8944,.4472)` and the configured 0.10 transition yields `(0,1,0)`.
+- The analogous texture shader already applies inverse scale at `Assets/CoreAIMods/Runtime/RbxApi/Unity/Resources/CoreAIRbxMaterials/RbxTexturedSurface.shader:307`, with the same stretched-wedge rationale. Its tests at `Assets/CoreAIMods/Tests/EditMode/RbxApi/Unity/RbxTexturedShaderMathEditModeTests.cs:84` cover a face-UV helper, not the procedural vertex-to-fragment normal path.
+
+**Impact and boundary:** incorrect projection selection can mix incompatible rows/grain and change height-derived relief on stretched wedges or curved surfaces. World lighting's geometric normal is separately transformed correctly at surface shader line 95; this finding concerns the normal used for pattern projection. Axis-aligned box faces, uniform scale and non-directional noise modes do not establish this trigger.
+
+**Fix/regression direction:** transform the projection normal with the inverse transpose of the same scale used by `positionAligned`, retaining a degenerate-scale guard and per-fragment normalization. Add a regression that renders the actual procedural shader on a nonuniform wedge and curved mesh with an independently calculated face/axis oracle; cover identity and rotated transforms, a uniform-scale control and both missing-texture fallback and direct-provider composition. Do not rely solely on a duplicated C# implementation of the shader formula. Shader compilation and captures were not run.
+
+### CSM-003 - P2 - Valid date-formatted JSON strings are rejected as the wrong type
+
+**New; high confidence from the parser-to-type-check path.** Configure `.AddField("when", "string", true)` and validate `{"when":"2026-10-24T12:00:00Z"}`. The quoted JSON string becomes a date token under the parser defaults, so the validator rejects it as `expected string but got Date`. The contract is a JSON string constraint; it declares no date restriction.
+
+- `Assets/CoreAI/Runtime/Core/Features/Crafting/JsonSchemaValidator.cs:90` uses `JObject.Parse` without a date-preserving reader. The token reaches `CheckType` at `:121`; its string branch at `:209` accepts only `JTokenType.String`.
+- In the version matching the local/locked Json.NET dependency, [JObject.Parse](https://github.com/JamesNK/Newtonsoft.Json/blob/13.0.2/Src/Newtonsoft.Json/Linq/JObject.cs#L432) creates a plain `JsonTextReader`; [JsonReader's constructor](https://github.com/JamesNK/Newtonsoft.Json/blob/13.0.2/Src/Newtonsoft.Json/JsonReader.cs#L300) defaults to `DateParseHandling.DateTime`; [JsonTextReader](https://github.com/JamesNK/Newtonsoft.Json/blob/13.0.2/Src/Newtonsoft.Json/JsonTextReader.cs#L187) emits `JsonToken.Date` for a recognized timestamp. This is an inference from that complete source path, not an executed CoreAI probe.
+- Existing valid-string coverage at `Assets/CoreAiUnity/Tests/EditMode/CompatibilityAndSchemaEditModeTests.cs:297` uses `Sword`; it does not preserve the JSON type of date-like strings. `Assets/CoreAI/Runtime/Core/Features/Benchmarking/BenchmarkJson.cs:15` already uses an explicit reader with `DateParseHandling.None` for a different feature.
+
+**Impact and boundary:** a host using this public validator for timestamp-bearing LLM/tool data rejects valid output and may unnecessarily retry or discard it. No current production caller, incident or security-boundary use was established.
+
+**Fix/regression direction:** load with an explicitly configured `JsonTextReader` whose `DateParseHandling` is `None`, preserving the trailing-content checks supplied by the current Parse path. Accept ISO timestamps, offsets and date-like escaped strings as strings; assert the original value/type and exercise allowed-values checks. Numeric/boolean objects must continue failing a string constraint. No executable regression was run.
+
+### CSM-004 - P2 - NaN passes numeric bounds and the integer check
+
+**New; high confidence from parser acceptance and IEEE comparison semantics.** Configure `.AddField("count", "integer", true, 1, 100)` and validate `{"count":NaN}`. The lenient parser accepts this non-JSON literal as a floating token; the integer/range checks add no errors, and `IsValid` becomes true. The same value passes a bounded `number` field. This defeats the validator's advertised type/range guarantees even though the text is malformed JSON.
+
+- `Assets/CoreAI/Runtime/Core/Features/Crafting/JsonSchemaValidator.cs:90` delegates parsing to the defaults described above. The matching [Json.NET 13.0.2 NaN reader](https://github.com/JamesNK/Newtonsoft.Json/blob/13.0.2/Src/Newtonsoft.Json/JsonTextReader.cs#L2402) accepts the literal in normal read mode and emits a float containing `double.NaN`.
+- The number branch at `JsonSchemaValidator.cs:218` checks only token kind. The integer branch at `:231` computes `Math.Abs(d - Math.Floor(d))`; for NaN the result is NaN, so the `> 0.0001` rejection at `:232` is false. Both bounds at `:132` and `:138` are also false for NaN; `:167` consequently marks the result valid. There is no finiteness check in this file.
+- Existing range tests at `Assets/CoreAiUnity/Tests/EditMode/CompatibilityAndSchemaEditModeTests.cs:333` and `:344` use finite values. Integer coverage at `:438` uses 5, 5.0 and 5.7. The uppercase range regression at `Assets/CoreAI/Tests/EditMode/CoreAuditFindingsEditModeTests.cs:513` correctly addresses casing and does not cover non-finite values.
+
+**Impact and boundary:** public validator consumers can receive a successful result with a non-finite value or a non-integer token despite declaring finite numeric bounds. This is separate from a proven downstream state-corruption or security exploit; no such consumer was established. Infinity is likewise not a meaningful integer, but finite-bound comparisons reject it on the bounded side; the concrete two-sided-bound bypass above uses NaN.
+
+**Fix/regression direction:** reject non-finite numeric values before integer arithmetic and range checks, and define whether this API accepts any parser extensions beyond standard JSON. Test NaN, positive/negative Infinity, finite whole floats, finite fractions and both bounds for lowercase/uppercase types; require a stable invalid result and no exception. Keep parsing-resource limits separate from this type/range fix. No executable regression was run.
+
+## Existing limits, rejected candidates and remaining hypotheses
+
+- **Fog depth-space candidate - not counted as a confirmed finding.** The three lit fragments call `ComputeFogFactor` with fragment `SV_POSITION.z`: `Assets/CoreAIMods/Runtime/RbxApi/Unity/Resources/CoreAIRbxMaterials/RbxProceduralSurface.shader:139`, `RbxTexturedSurface.shader:413` and `RbxProceduralTransparent.shader:225`. The local URP 17.3 helper `ShaderLibrary/ShaderVariablesFunctions.hlsl:349` expects clip-space Z and applies `UNITY_Z_0_FAR_FROM_CLIPSPACE`; its Lit pass instead uses `InitializeInputDataFog` with world position, or pre-raster vertex clip Z. The [official current Unity helper source](https://github.com/Unity-Technologies/Graphics/blob/master/Packages/com.unity.render-pipelines.universal/ShaderLibrary/ShaderVariablesFunctions.hlsl) and [Microsoft's SV_Position contract](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-semantics#system-value-semantics) support concern about mixing these spaces. Exact URP 17.6 source was not obtained promptly (the attempted official `6000.6/staging` raw paths returned 404), so cached 17.3 evidence is not silently promoted to proof for the committed 17.6 dependency. Resolve the intended package and compare actual lit materials under linear/exp/exp2 fog, perspective/orthographic cameras and target APIs before acceptance.
+- **Transparent screen-shadow candidate rejected for the inspected standard pipeline.** Omitting `_SURFACE_TYPE_TRANSPARENT` initially looked capable of sampling opaque screen shadows. Local URP 17.3 `Runtime/RendererFeatures/ScreenSpaceShadows.cs:46` schedules its postpass before transparents; `:301` disables the screen-shadow keyword and `:304` restores regular main-light shadow keywords. `ShaderLibrary/Shadows.hlsl:356` then uses the ordinary world-to-shadow branch. No reachable defect in that standard path was established. Custom renderer ordering or URP 17.6 behavior remains unverified, not a finding.
+- The uppercase numeric-type range bug is already fixed at `Assets/CoreAI/Runtime/Core/Features/Crafting/JsonSchemaValidator.cs:119` and covered by `CoreAuditFindingsEditModeTests.cs:513`. It is not counted again. Unknown schema types intentionally pass at `JsonSchemaValidator.cs:275`; nested item schemas, additional-property rejection and full standards compliance are not implemented contracts here, so their absence is not relabeled a new defect.
+- `TODO.md:200` already tracks cylinder texture orientation, material tuning, Glacier grain and unbuilt WebGL shader variants. `TODO.md:207` separately tracks WebGL Metal appearance; this audit did not render or diagnose it. `TODO.md:2233` already identifies the source-only pow lint as inadequate evidence of finite rendered pixels. The binder's partial-transparency limit is also explicit at `Assets/CoreAIMods/Runtime/RbxApi/Binding/InstanceGameObjectBinder.cs:1711`; it is not a new shader finding.
+- Custom validators and mutable rule/schema objects are caller-owned extension points. Null/invalid configuration, non-finite compatibility scores, concurrent mutation, unbounded caller-supplied ingredient/schema counts and allocation/performance policies warrant explicit contract tests before further prioritization. No adversarial large allocation or timing probe was attempted. This source slice establishes no cross-thread safety guarantee.
+- Derivative behavior under divergent branches, very large/degenerate transforms, GPU half precision, signed/negative scale, shader stripping, SRP-version changes and fallback behavior on an unsupported device require compile/render/player evidence. Source guards and bounded octave counts are implementation evidence, not a universal finite-pixel or performance guarantee.
+
+## Checks actually run and limits
+
+Read-only discovery and numbered source inspection used `rg`, `Get-Content` and `Get-ChildItem`. `git rev-parse HEAD` and `git rev-parse origin/main` returned `69d5bcc37502cd4bb464a3bf9ac0c53b1624b804` on resumption. `Get-FileHash -Algorithm SHA256` returned the seven local values recorded in `NoiseShader/UPSTREAM.md`, all matching. Primary web-source inspection verified the versioned Json.NET parser path and consulted current Unity/Microsoft shader contracts; it did not execute those libraries or fetch/install a package. A few discovery searches used nonexistent guessed test/demo directories and printed path errors; subsequent reads used discovered exact paths and no conclusion relies on those failed searches.
+
+Existing shared changes in `PLAN.md`, `dev-docs/README.md`, untracked audit reports and the unrelated ETFX metadata were present; this auditor does not own them. Memory was used to recover the prior audit's process/baseline and unfinished-scope context, then checked against this checkout; it supplied no independent bug evidence. Only this report was written.
+
+Root owns shared build/test verification. Previously reported portable core/Lua/analyzer/chart/Node success is not this auditor's execution and does not demonstrate any new regression above. Report-integrity and whitespace results are recorded in the final handoff after rereading this file.
+
+## NOT RUN
+
+No build/test suite, Unity Editor/MCP, shader compilation, GPU rendering, visual probe, player/WebGL build, device test, performance benchmark, real model request, install or service operation. Root coordinates shared build and test outputs. Source review cannot establish rendered appearance, finite pixels on every GPU or player variant inclusion.
+
+## Recommended next verification - NOT RUN
+
+Add the four finding-specific regressions first. Root can then serially run the existing portable checker/schema baseline with `dotnet test tools/portable/Tests/CoreAI.Portable.Tests.csproj -c Release --filter FullyQualifiedName~CompatibilityAndSchemaEditModeTests`; the expected baseline is zero failed assertions, while the new regressions must first expose the stated defects. Enumerate TRX outcomes rather than treating skips as passes. This command is a proposal, not a receipt.
+
+Shader acceptance separately needs Unity import/compile with the intended URP version, the real procedural nonuniform-scale render regression, fog comparison if that hypothesis is confirmed, actual Forward/Forward+ lighting/shadow checks, and a WebGL/player build plus device/API captures. Exercise missing textures and unmapped material IDs to distinguish a deliberate diagnostic fallback from shader errors. A source-string lint or portable C# math test cannot close those gates.
+
+## Handoff
+
+CHANGED: `dev-docs/audits/2026-10-23/16-crafting-material-shaders.md` only. Source coverage is complete for the assigned nine C# and 13 shader/HLSL files; report 02/06 ownership remains explicit. Count: four unique new P2 findings, zero confirmed P0/P1/P3; fog remains a hypothesis.
+
+VERIFY OUTPUT: final report reread completed. Report-integrity check: four unique CSM finding headings, 23 fully qualified source/line references checked, zero nonexistent paths/out-of-range lines, zero trailing-whitespace lines and zero Cyrillic lines. `git diff --check -- dev-docs/audits/2026-10-23/16-crafting-material-shaders.md` produced no diagnostics; because the report is untracked this is not sufficient by itself. Supplemental `git diff --no-index --check -- NUL dev-docs/audits/2026-10-23/16-crafting-material-shaders.md` returned exit 1 with no whitespace diagnostics, comparing a new file to NUL. Scoped source `git diff --name-only` returned no paths; HEAD remains the audited SHA. Local vendor checksums all match the recorded upstream manifest.
+
+NOT DONE: fixes, executable regressions and every runtime/platform/performance gate listed in NOT RUN. Root retains index, PLAN/TODO reconciliation, shared verification and git ownership.
+
+CONCERNS: local URP 17.3 cache does not establish the committed URP 17.6 semantics. The schema defects concern a public library contract; production security impact was not established. Shader projection impact has source/math evidence, with no rendered reproduction.
+
+QUESTIONS: none.

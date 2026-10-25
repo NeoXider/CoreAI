@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,7 +10,8 @@ namespace CoreAI.Ai
     /// <summary>
     /// Persists per-role summaries with atomic filesystem writes and host-owned durability confirmation.
     /// <para>On desktop, private file work runs off the calling thread. WebGL runs MEMFS work inline
-    /// and awaits the host's IndexedDB flush. Failed writes, deletes, and confirmations throw; missing
+    /// and checks the configured host persistence confirmation or automatic-persistence arming hook.
+    /// No browser flush completion receipt is implied. Failed writes, deletes, and confirmations throw; missing
     /// files read as empty while corrupt or inaccessible files fail strict async reads.</para>
     /// <para>Canonical-path state is shared across store instances. A VFS mutation remains unconfirmed
     /// until its generation is acknowledged, including when a different instance next reads its fold
@@ -22,21 +22,19 @@ namespace CoreAI.Ai
     /// or the requested read still needs async confirmation. Dispose rejects new calls; admitted work
     /// finishes and shared path gates remain valid.</para>
     /// </summary>
-    public sealed class FileConversationSummaryStore : IConversationSummaryStore, IAsyncConversationSummaryStore, IDisposable
+    public sealed class FileConversationSummaryStore : IConversationSummaryStore, IAsyncConversationSummaryStore, ITransactionalConversationSummaryStore, IDisposable
     {
         private static readonly JsonSerializerSettings JsonSettings = new()
         {
             Formatting = Formatting.None
         };
 
-        /// <summary>
-        /// Process-wide mutation gates keyed by each summary file path. Entries are intentionally never
-        /// evicted or disposed: a caller could already hold the instance fetched from this dictionary
-        /// while an eviction hands a second caller a fresh one, silently breaking the mutual exclusion.
-        /// The key set is bounded by the number of distinct roles a host ever creates.
-        /// </summary>
-        private static readonly ConcurrentDictionary<string, PathState> MutationGates =
-            new(Path.DirectorySeparatorChar == '\\' ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        private static readonly SharedPathStateRegistry<PathState> MutationGates =
+            new(state => state.Pending != null);
+        /// <summary>Shared summary states retained by operations, prepared snapshots or pending confirmation.</summary>
+        public static int SharedPathStateCount => MutationGates.Count;
+        /// <summary>Committed summary paths still requiring their configured durability confirmation.</summary>
+        public static int PendingConfirmationCount => MutationGates.CountWhere(state => state.Pending != null);
         private static readonly AsyncLocal<ConfirmationFrame> CurrentConfirmation = new();
 
         private sealed class ConfirmationFrame
@@ -54,6 +52,8 @@ namespace CoreAI.Ai
 
         private sealed class PathState
         {
+            public PathState() { }
+            internal long Revision { get { lock (_stateGate) return _generation; } }
             internal readonly SemaphoreSlim Gate = new(1, 1);
             private readonly object _stateGate = new();
             private long _generation;
@@ -101,6 +101,7 @@ namespace CoreAI.Ai
         private sealed class PersistedDto
         {
             public string Summary { get; set; } = "";
+            public string RoleId { get; set; }
         }
 
         /// <summary>Creates store writing to <paramref name="rootDirectory"/>.</summary>
@@ -170,7 +171,8 @@ namespace CoreAI.Ai
             EnterOperation();
             try
             {
-                PathState state = ForPath(GetPath(roleId));
+                using SharedPathStateRegistry<PathState>.Lease pathLease = AcquirePath(GetPath(roleId));
+                PathState state = pathLease.State;
                 SemaphoreSlim gate = state.Gate;
                 if (!gate.Wait(0))
                 {
@@ -213,11 +215,12 @@ namespace CoreAI.Ai
             {
                 // WHY: awaited with default capture so the logging below runs on the original entry
                 // context; only the private file delegate runs on a worker.
+                using SharedPathStateRegistry<PathState>.Lease readLease = AcquirePath(GetPath(roleId));
                 (string summary, DurabilityRequest pending) = await ReadCommittedAsync(roleId, cancellationToken);
                 if (pending != null)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    await ConfirmPendingAsync(ForPath(GetPath(roleId)), pending);
+                    await ConfirmPendingAsync(readLease.State, pending);
                 }
                 return summary;
             }
@@ -234,7 +237,8 @@ namespace CoreAI.Ai
 
         private async Task<(string Summary, DurabilityRequest Pending)> ReadCommittedAsync(string roleId, CancellationToken cancellationToken)
         {
-            PathState state = ForPath(GetPath(roleId));
+            using SharedPathStateRegistry<PathState>.Lease pathLease = AcquirePath(GetPath(roleId));
+                PathState state = pathLease.State;
             SemaphoreSlim gate = state.Gate;
             await gate.WaitAsync(cancellationToken);
             try
@@ -281,6 +285,7 @@ namespace CoreAI.Ai
         private string ReadSummaryCoreStrict(string roleId)
         {
             string path = GetPath(roleId);
+            EnsureLegacyMigration(roleId);
             ValidateExistingParent(path);
             string json;
             try { json = File.ReadAllText(path); }
@@ -306,6 +311,8 @@ namespace CoreAI.Ai
                 throw new InvalidDataException("[FileConversationSummaryStore] Summary file is corrupt.");
             }
 
+            if (dto.RoleId != null && !string.Equals(dto.RoleId, roleId, StringComparison.Ordinal))
+                throw new InvalidDataException("Summary record identity does not match its requested key.");
             return dto.Summary?.Trim() ?? "";
         }
 
@@ -321,7 +328,8 @@ namespace CoreAI.Ai
             try
             {
                 RequireSynchronousConfirmation();
-                PathState state = ForPath(GetPath(roleId));
+                using SharedPathStateRegistry<PathState>.Lease pathLease = AcquirePath(GetPath(roleId));
+                PathState state = pathLease.State;
                 SemaphoreSlim gate = state.Gate;
                 if (!gate.Wait(0))
                 {
@@ -333,7 +341,9 @@ namespace CoreAI.Ai
                 DurabilityRequest pending;
                 try
                 {
-                    WriteSummaryCore(GetPath(roleId), summary ?? "");
+                    EnsureLegacyMigration(roleId);
+                    _ = ReadSummaryCoreStrict(roleId);
+                    WriteSummaryCore(GetPath(roleId), summary ?? "", roleId);
                     pending = state.RecordMutation(this);
                 }
                 finally
@@ -368,8 +378,9 @@ namespace CoreAI.Ai
                 // WHY: awaited with default capture so durability confirmation and logging below run on
                 // the original entry context outside the file gate.
                 string path = GetPath(roleId);
-                DurabilityRequest pending = await CommitSaveAsync(path, summary ?? "", cancellationToken);
-                await ConfirmPendingAsync(ForPath(path), pending);
+                using SharedPathStateRegistry<PathState>.Lease writeLease = AcquirePath(path);
+                DurabilityRequest pending = await CommitSaveAsync(path, roleId, summary ?? "", cancellationToken);
+                await ConfirmPendingAsync(writeLease.State, pending);
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
@@ -382,9 +393,10 @@ namespace CoreAI.Ai
             }
         }
 
-        private async Task<DurabilityRequest> CommitSaveAsync(string path, string summary, CancellationToken cancellationToken)
+        private async Task<DurabilityRequest> CommitSaveAsync(string path, string roleId, string summary, CancellationToken cancellationToken)
         {
-            PathState state = ForPath(path);
+            using SharedPathStateRegistry<PathState>.Lease pathLease = AcquirePath(path);
+            PathState state = pathLease.State;
             SemaphoreSlim gate = state.Gate;
             await gate.WaitAsync(cancellationToken);
             try
@@ -393,7 +405,9 @@ namespace CoreAI.Ai
                 await RunOffThread(() =>
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    PersistedDto dto = new() { Summary = summary };
+                    EnsureLegacyMigration(roleId);
+                    _ = ReadSummaryCoreStrict(roleId);
+                    PersistedDto dto = new() { Summary = summary, RoleId = roleId };
                     string json = JsonConvert.SerializeObject(dto, JsonSettings);
                     AtomicWriteAllText(path, json, cancellationToken);
                 });
@@ -405,9 +419,9 @@ namespace CoreAI.Ai
             }
         }
 
-        private void WriteSummaryCore(string path, string summary)
+        private void WriteSummaryCore(string path, string summary, string roleId)
         {
-            PersistedDto dto = new() { Summary = summary };
+            PersistedDto dto = new() { Summary = summary, RoleId = roleId };
             string json = JsonConvert.SerializeObject(dto, JsonSettings);
             try
             {
@@ -480,7 +494,8 @@ namespace CoreAI.Ai
             {
                 RequireSynchronousConfirmation();
                 string path = GetPath(roleId);
-                PathState state = ForPath(path);
+                using SharedPathStateRegistry<PathState>.Lease pathLease = AcquirePath(path);
+            PathState state = pathLease.State;
                 SemaphoreSlim gate = state.Gate;
                 if (!gate.Wait(0))
                 {
@@ -492,6 +507,7 @@ namespace CoreAI.Ai
                 DurabilityRequest pending;
                 try
                 {
+                    EnsureLegacyMigration(roleId);
                     DeleteSummaryCore(path);
                     pending = state.RecordMutation(this);
                 }
@@ -528,8 +544,9 @@ namespace CoreAI.Ai
                 // WHY: awaited with default capture so durability confirmation and logging below run on
                 // the original entry context outside the file gate.
                 string path = GetPath(roleId);
-                DurabilityRequest pending = await CommitClearAsync(path, cancellationToken);
-                await ConfirmPendingAsync(ForPath(path), pending);
+                using SharedPathStateRegistry<PathState>.Lease clearLease = AcquirePath(path);
+                DurabilityRequest pending = await CommitClearAsync(path, roleId, cancellationToken);
+                await ConfirmPendingAsync(clearLease.State, pending);
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
@@ -542,9 +559,10 @@ namespace CoreAI.Ai
             }
         }
 
-        private async Task<DurabilityRequest> CommitClearAsync(string path, CancellationToken cancellationToken)
+        private async Task<DurabilityRequest> CommitClearAsync(string path, string roleId, CancellationToken cancellationToken)
         {
-            PathState state = ForPath(path);
+            using SharedPathStateRegistry<PathState>.Lease pathLease = AcquirePath(path);
+            PathState state = pathLease.State;
             SemaphoreSlim gate = state.Gate;
             await gate.WaitAsync(cancellationToken);
             try
@@ -553,6 +571,7 @@ namespace CoreAI.Ai
                 await RunOffThread(() =>
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    EnsureLegacyMigration(roleId);
                     return TryDeleteFile(path);
                 });
                 return state.RecordMutation(this);
@@ -561,6 +580,120 @@ namespace CoreAI.Ai
             {
                 gate.Release();
             }
+        }
+
+        /// <inheritdoc />
+        public ConversationSummaryTransaction OpenSummaryTransaction(string roleId)
+        {
+            EnterOperation();
+            SharedPathStateRegistry<PathState>.Lease lease = null;
+            try
+            {
+                string path = GetPath(roleId);
+                lease = AcquirePath(path);
+                PathState state = lease.State;
+                if (!state.Gate.Wait(0)) throw new InvalidOperationException("Summary file is busy; use asynchronous context preparation.");
+                string summary;
+                long baseline;
+                try
+                {
+                    if (state.Pending != null) throw new InvalidOperationException("Summary durability is unconfirmed; use asynchronous context preparation.");
+                    summary = ReadSummaryCoreStrict(roleId);
+                    baseline = state.Revision;
+                }
+                finally { state.Gate.Release(); }
+                return CreateTransaction(roleId, path, state, baseline, summary, lease);
+            }
+            catch { lease?.Dispose(); throw; }
+            finally { ExitOperation(); }
+        }
+
+        /// <inheritdoc />
+        public async Task<ConversationSummaryTransaction> OpenSummaryTransactionAsync(string roleId, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EnterOperation();
+            SharedPathStateRegistry<PathState>.Lease lease = null;
+            try
+            {
+                string path = GetPath(roleId);
+                lease = AcquirePath(path);
+                PathState state = lease.State;
+                while (true)
+                {
+                    await state.Gate.WaitAsync(cancellationToken);
+                    string summary;
+                    long baseline;
+                    DurabilityRequest pending;
+                    try
+                    {
+                        summary = await RunOffThread(() => ReadSummaryCoreStrict(roleId));
+                        baseline = state.Revision;
+                        pending = state.Pending;
+                    }
+                    finally { state.Gate.Release(); }
+                    if (pending == null) return CreateTransaction(roleId, path, state, baseline, summary, lease);
+                    await ConfirmPendingAsync(state, pending);
+                }
+            }
+            catch { lease?.Dispose(); throw; }
+            finally { ExitOperation(); }
+        }
+
+        private ConversationSummaryTransaction CreateTransaction(string roleId, string path, PathState state,
+            long baseline, string summary, IDisposable lease)
+        {
+            DurabilityRequest ownPending = null;
+            bool Commit(string value)
+            {
+                EnterOperation();
+                try
+                {
+                    RequireSynchronousConfirmation();
+                    if (!state.Gate.Wait(0)) throw new InvalidOperationException("Summary file is busy; use asynchronous context preparation.");
+                    try
+                    {
+                        if (state.Revision != (ownPending?.Generation ?? baseline)) return false;
+                        if (ownPending == null)
+                        {
+                            WriteSummaryCore(path, value, roleId);
+                            ownPending = state.RecordMutation(this);
+                        }
+                    }
+                    finally { state.Gate.Release(); }
+                    ConfirmPendingSync(state, ownPending);
+                    return state.Revision == ownPending.Generation;
+                }
+                finally { ExitOperation(); }
+            }
+
+            async Task<bool> CommitAsync(string value, CancellationToken token)
+            {
+                EnterOperation();
+                try
+                {
+                    await state.Gate.WaitAsync(token);
+                    try
+                    {
+                        if (state.Revision != (ownPending?.Generation ?? baseline)) return false;
+                        if (ownPending == null)
+                        {
+                            await RunOffThread(() =>
+                            {
+                                token.ThrowIfCancellationRequested();
+                                PersistedDto dto = new() { Summary = value, RoleId = roleId };
+                                AtomicWriteAllText(path, JsonConvert.SerializeObject(dto, JsonSettings), token);
+                            });
+                            ownPending = state.RecordMutation(this);
+                        }
+                    }
+                    finally { state.Gate.Release(); }
+                    await ConfirmPendingAsync(state, ownPending);
+                    return state.Revision == ownPending.Generation;
+                }
+                finally { ExitOperation(); }
+            }
+            return new ConversationSummaryTransaction(summary, Commit, CommitAsync, lease);
         }
 
         private bool DeleteSummaryCore(string path)
@@ -613,8 +746,8 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Rejects new operations; accepted operations finish safely. Shared per-path gates are retained
-        /// for the process lifetime and are never disposed, so disposal can never race in-flight waits.
+        /// Rejects new operations; accepted operations finish safely. Shared path leases retain gates
+        /// through active operations, prepared generations, queued waiters and pending confirmation.
         /// </summary>
         public void Dispose()
         {
@@ -656,15 +789,18 @@ namespace CoreAI.Ai
             }
         }
 
-        private static PathState ForPath(string path)
+        private static SharedPathStateRegistry<PathState>.Lease AcquirePath(string path)
         {
-            PathState state = MutationGates.GetOrAdd(path, _ => new PathState());
+            SharedPathStateRegistry<PathState>.Lease lease = MutationGates.Acquire(path);
             for (ConfirmationFrame frame = CurrentConfirmation.Value; frame != null; frame = frame.Previous)
             {
-                if (ReferenceEquals(frame.State, state))
+                if (ReferenceEquals(frame.State, lease.State))
+                {
+                    lease.Dispose();
                     throw new InvalidOperationException("A summary durability callback cannot reenter the same summary file.");
+                }
             }
-            return state;
+            return lease;
         }
 
         private static async Task ConfirmPendingAsync(PathState state, DurabilityRequest pending)
@@ -712,19 +848,19 @@ namespace CoreAI.Ai
         /// </summary>
         internal static string SanitizedFileStem(string roleId)
         {
-            string safe = string.Join("_", roleId.Split(Path.GetInvalidFileNameChars()));
-            if (string.Equals(safe, roleId, StringComparison.Ordinal))
-            {
-                return safe;
-            }
+            return AgentMemoryFileKey.FileStem(roleId);
+        }
 
-            uint hash = 2166136261u;
-            foreach (char c in roleId)
+        private void EnsureLegacyMigration(string roleId)
+        {
+            AgentMemoryFileKey.MigrateLegacy(_dir, roleId, ".json", path =>
             {
-                hash = (hash ^ c) * 16777619u;
-            }
-
-            return $"{safe}_{hash:x8}";
+                PersistedDto dto = JsonConvert.DeserializeObject<PersistedDto>(File.ReadAllText(path), JsonSettings)
+                    ?? throw new InvalidDataException("Legacy summary is corrupt.");
+                if (dto.RoleId != null ? !string.Equals(dto.RoleId, roleId, StringComparison.Ordinal)
+                    : !AgentMemoryFileKey.CanAdoptUntaggedLegacy(roleId, path, ".json"))
+                    throw new InvalidDataException("Legacy summary identity is ambiguous; explicit identity repair is required.");
+            });
         }
 
         private void EnsureDir()

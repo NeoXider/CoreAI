@@ -15,17 +15,40 @@ using UnityEngine;
 
 namespace CoreAI.Infrastructure.Lua
 {
+    /// <summary>A failed strict source mutation; local completion can precede persistence-arm refusal.</summary>
+    public sealed class LuaModSourcePersistenceException : IOException
+    {
+        /// <summary>True when the requested local writes or removal completed before failure.</summary>
+        public bool LocalCommitCompleted { get; }
+
+        public LuaModSourcePersistenceException(bool localCommitCompleted, Exception innerException)
+            : base(localCommitCompleted
+                ? "The mod source operation committed locally, but automatic persistence is not armed. Retry the operation."
+                : "The mod source operation did not complete. Retry the operation.", innerException)
+        {
+            LocalCommitCompleted = localCommitCompleted;
+        }
+    }
+
     /// <summary>
     /// File-backed Lua source store. Every instance sharing a root also shares one fail-fast mutation
-    /// gate; exact world imports are written into an isolated session-version directory and durably
-    /// synced before that directory can become a runtime session's source store.
+    /// gate; exact world imports are written into an isolated session-version directory and their
+    /// persistence hook must accept the write before that directory can become a session's source store.
+    /// Canonical roots retain SHA-256 hex folders. Owned <c>.world-sessions</c> versions reserve
+    /// <c>.source-layout</c>; new versions encode full GUIDs and SHA-256 digests as lowercase Base32.
+    /// Reopening a recognized version validates its marker; marker-free versions retain hex folders.
     /// </summary>
     public sealed class FileLuaModSourceStore
-        : ILuaModSourceStore, IRbxWorldModSourceStore, ILuaModSourceAdmission, IDisposable
+        : ILuaModSourceStore, ILuaModSourceStrictWriter, ILuaModSourceStrictRemover,
+          IRbxWorldModSourceStore, ILuaModSourceAdmission, IDisposable
     {
         private const string ManifestFileName = "manifest.json";
         private const string SourceFileName = "main.lua";
         private const string WorldSessionsDirectoryName = ".world-sessions";
+        private const string SourceLayoutFileName = ".source-layout";
+        private const string CompactSourceLayout = "sha256-base32-v1";
+        private const string LowerBase32Alphabet = "abcdefghijklmnopqrstuvwxyz234567";
+        private const int WindowsMaximumPathLength = 259;
         private const int MaximumRetainedWorldSessionVersions = 3;
 
         private static readonly JsonSerializerSettings JsonSettings = new()
@@ -43,13 +66,15 @@ namespace CoreAI.Infrastructure.Lua
         private readonly RootState _rootState;
         private readonly Func<CancellationToken, UniTask<bool>> _persistenceSyncAsync;
         private readonly bool _useCaseSafeFolderNames;
+        private readonly bool _useCompactFolderNames;
+        internal static Func<bool> PersistenceArmingForTesting;
 
         public FileLuaModSourceStore(
             string rootDirectory = null,
             ILog log = null,
             string storeId = null,
             Func<CancellationToken, UniTask<bool>> persistenceSyncAsync = null)
-            : this(rootDirectory, log, storeId, persistenceSyncAsync, false)
+            : this(rootDirectory, log, storeId, persistenceSyncAsync, true)
         {
         }
 
@@ -58,7 +83,8 @@ namespace CoreAI.Infrastructure.Lua
             ILog log,
             string storeId,
             Func<CancellationToken, UniTask<bool>> persistenceSyncAsync,
-            bool useCaseSafeFolderNames)
+            bool useCaseSafeFolderNames,
+            bool useCompactFolderNames = false)
         {
             string baseDirectory = !string.IsNullOrWhiteSpace(rootDirectory)
                 ? rootDirectory.Trim()
@@ -67,11 +93,22 @@ namespace CoreAI.Infrastructure.Lua
                     CoreAiPersistentPaths.RootFolderName,
                     CoreAiPersistentPaths.ModPackages);
             _dir = Path.GetFullPath(LuaModStoreId.ApplyTo(baseDirectory, storeId));
+            bool ownedVersion = IsWorldSessionDirectory(_dir);
+            bool compactLayoutRequired = useCompactFolderNames
+                || (ownedVersion && new DirectoryInfo(_dir).Name.Length == 26);
+            bool compactLayoutDetected = (useCompactFolderNames || ownedVersion)
+                && ReadCompactSourceLayout(_dir);
+            if (compactLayoutRequired && !compactLayoutDetected)
+            {
+                throw new IOException("The compact Lua mod source layout marker is missing.");
+            }
+
             _log = log;
             _rootState = RootStates.GetOrAdd(_dir, _ => new RootState());
             _persistenceSyncAsync = persistenceSyncAsync
                 ?? (cancellationToken => CoreAiWebGlPersistence.SyncAsync(cancellationToken));
             _useCaseSafeFolderNames = useCaseSafeFolderNames;
+            _useCompactFolderNames = useCompactFolderNames || compactLayoutDetected;
         }
 
         /// <summary>
@@ -87,18 +124,31 @@ namespace CoreAI.Infrastructure.Lua
         /// </summary>
         public void Save(string id, string source, LuaModManifest manifest)
         {
+            SaveCore(id, source, manifest, false);
+        }
+
+        /// <inheritdoc />
+        public void SaveStrict(string id, string source, LuaModManifest manifest)
+        {
+            SaveCore(id, source, manifest, true);
+        }
+
+        private void SaveCore(string id, string source, LuaModManifest manifest, bool strict)
+        {
             string modId = Normalize(id);
             if (modId.Length == 0)
             {
+                if (strict) { throw new ArgumentException("A mod id is required for a strict source save.", nameof(id)); }
                 return;
             }
 
+            bool localCommitCompleted = false;
             EnterRoot("save mod '" + modId + "'");
             try
             {
                 LuaModManifest toWrite = CloneManifest(manifest ?? new LuaModManifest());
                 toWrite.Id = modId;
-                string modDirectory = GetModDirectory(_dir, modId, _useCaseSafeFolderNames);
+                string modDirectory = ResolveModDirectory(modId, forWrite: true);
                 // WHY refused here, where a source is created: an unloaded mod keeps its source, so a
                 // 257th stored id makes every capture of this world throw, which blocks every gated
                 // mutation and every save until a mod is forgotten, and persists across restarts.
@@ -117,14 +167,20 @@ namespace CoreAI.Infrastructure.Lua
                 AtomicWriteAllText(
                     Path.Combine(modDirectory, SourceFileName),
                     source ?? "");
-                CoreAiWebGlPersistence.Sync();
+                localCommitCompleted = true;
+                RequestPersistenceArming();
             }
             catch (RbxWorldPackageFormatLimitException)
             {
                 throw;
             }
+            catch (OperationCanceledException) when (strict)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
+                if (strict) { throw new LuaModSourcePersistenceException(localCommitCompleted, ex); }
                 _log?.Error("[FileLuaModSourceStore] Save failed for " + modId + ": " + ex);
             }
             finally
@@ -151,7 +207,7 @@ namespace CoreAI.Infrastructure.Lua
             try
             {
                 return AdmitsLocked(
-                    GetModDirectory(_dir, modId, _useCaseSafeFolderNames), modId, out refusal);
+                    ResolveModDirectory(modId, forWrite: true), modId, out refusal);
             }
             finally
             {
@@ -172,7 +228,7 @@ namespace CoreAI.Infrastructure.Lua
             EnterRoot("load mod '" + modId + "'");
             try
             {
-                string modDirectory = GetModDirectory(_dir, modId, _useCaseSafeFolderNames);
+                string modDirectory = ResolveModDirectory(modId);
                 string manifestPath = Path.Combine(modDirectory, ManifestFileName);
                 string sourcePath = Path.Combine(modDirectory, SourceFileName);
                 if (!File.Exists(manifestPath) || !File.Exists(sourcePath))
@@ -181,7 +237,7 @@ namespace CoreAI.Infrastructure.Lua
                 }
 
                 LuaModManifest loaded = ReadManifest(manifestPath);
-                if (loaded == null)
+                if (loaded == null || !string.Equals(loaded.Id, modId, StringComparison.Ordinal))
                 {
                     return false;
                 }
@@ -264,14 +320,14 @@ namespace CoreAI.Infrastructure.Lua
             try
             {
                 string manifestPath = Path.Combine(
-                    GetModDirectory(_dir, modId, _useCaseSafeFolderNames), ManifestFileName);
+                    ResolveModDirectory(modId, forWrite: true), ManifestFileName);
                 if (!File.Exists(manifestPath))
                 {
                     return;
                 }
 
                 LuaModManifest manifest = ReadManifest(manifestPath);
-                if (manifest == null)
+                if (manifest == null || !string.Equals(manifest.Id, modId, StringComparison.Ordinal))
                 {
                     return;
                 }
@@ -280,7 +336,7 @@ namespace CoreAI.Infrastructure.Lua
                 AtomicWriteAllText(
                     manifestPath,
                     JsonConvert.SerializeObject(manifest, JsonSettings));
-                CoreAiWebGlPersistence.Sync();
+                RequestPersistenceArming();
             }
             catch (Exception ex)
             {
@@ -295,24 +351,48 @@ namespace CoreAI.Infrastructure.Lua
 
         public void Delete(string id)
         {
+            DeleteCore(id, false);
+        }
+
+        /// <inheritdoc />
+        public void DeleteStrict(string id)
+        {
+            DeleteCore(id, true);
+        }
+
+        private void DeleteCore(string id, bool strict)
+        {
             string modId = Normalize(id);
             if (modId.Length == 0)
             {
+                if (strict) { throw new ArgumentException("A mod id is required for a strict source removal.", nameof(id)); }
                 return;
             }
 
+            bool localCommitCompleted = false;
             EnterRoot("delete mod '" + modId + "'");
             try
             {
-                string modDirectory = GetModDirectory(_dir, modId, _useCaseSafeFolderNames);
+                string modDirectory = ResolveModDirectory(modId, strict);
                 if (Directory.Exists(modDirectory))
                 {
                     Directory.Delete(modDirectory, true);
-                    CoreAiWebGlPersistence.Sync();
+                    localCommitCompleted = true;
+                    RequestPersistenceArming();
                 }
+                else if (strict)
+                {
+                    localCommitCompleted = true;
+                    RequestPersistenceArming();
+                }
+            }
+            catch (OperationCanceledException) when (strict)
+            {
+                throw;
             }
             catch (Exception ex)
             {
+                if (strict) { throw new LuaModSourcePersistenceException(localCommitCompleted, ex); }
                 _log?.Error("[FileLuaModSourceStore] Delete failed for " + modId + ": " + ex);
             }
             finally
@@ -330,56 +410,96 @@ namespace CoreAI.Infrastructure.Lua
                 throw new ArgumentNullException(nameof(mods));
             }
 
-            if (mods.Count > RbxWorldPackageSerializer.MaximumMods)
+            int modCount = mods.Count;
+            if (modCount > RbxWorldPackageSerializer.MaximumMods)
             {
                 throw new RbxWorldPackageFormatLimitException(
-                    "The replacement source set holds " + mods.Count + " mods; a world package holds at most "
+                    "The replacement source set holds " + modCount + " mods; a world package holds at most "
                     + RbxWorldPackageSerializer.MaximumMods + ".");
             }
 
             cancellationToken.ThrowIfCancellationRequested();
             string sessionDirectory = Path.Combine(
-                _dir, WorldSessionsDirectoryName, Guid.NewGuid().ToString("N"));
+                _dir, WorldSessionsDirectoryName, EncodeLowerBase32(Guid.NewGuid().ToByteArray()));
+            EnsureWindowsPathLength(Path.Combine(sessionDirectory, SourceLayoutFileName));
+            List<RbxWorldModSource> stagedMods = new(modCount);
+            HashSet<string> ids = new(StringComparer.Ordinal);
+            for (int index = 0; index < modCount; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                RbxWorldModSource mod = mods[index]
+                    ?? throw new InvalidOperationException(
+                        "The replacement source set contains a nil mod.");
+                LuaModManifest manifest = CloneManifest(mod.Manifest);
+                string modId = Normalize(manifest.Id);
+                if (modId.Length == 0 || !ids.Add(modId))
+                {
+                    throw new InvalidOperationException(
+                        "The replacement source set contains an empty or duplicate mod id.");
+                }
+
+                manifest.Id = modId;
+                EnsureSourcePaths(GetModDirectory(
+                    sessionDirectory, modId, useCaseSafeFolderNames: true, useCompactFolderNames: true),
+                    includeTemporaryPaths: true);
+                stagedMods.Add(new RbxWorldModSource(manifest, mod.Source));
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
             EnterRoot("prepare exact world mod source set");
             _rootState.AsyncMutationPending = true;
+            bool ownsSessionDirectory = false;
             try
             {
+                if (Directory.Exists(sessionDirectory) || File.Exists(sessionDirectory))
+                {
+                    throw new IOException("The exact world source session version already exists; no data was replaced.");
+                }
+
                 CleanupOrphanedSessionVersions(sessionDirectory);
                 Directory.CreateDirectory(sessionDirectory);
-                HashSet<string> ids = new(StringComparer.Ordinal);
-                for (int index = 0; index < mods.Count; index++)
+                using (FileStream marker = new(
+                    Path.Combine(sessionDirectory, SourceLayoutFileName), FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 {
-                    RbxWorldModSource mod = mods[index]
-                        ?? throw new InvalidOperationException(
-                            "The replacement source set contains a nil mod.");
-                    string modId = Normalize(mod.Manifest?.Id);
-                    if (modId.Length == 0 || !ids.Add(modId))
-                    {
-                        throw new InvalidOperationException(
-                            "The replacement source set contains an empty or duplicate mod id.");
-                    }
+                    ownsSessionDirectory = true;
+                    byte[] markerBytes = Encoding.ASCII.GetBytes(CompactSourceLayout);
+                    marker.Write(markerBytes, 0, markerBytes.Length);
+                }
 
+                for (int index = 0; index < stagedMods.Count; index++)
+                {
+                    RbxWorldModSource mod = stagedMods[index];
+                    string modId = mod.Manifest.Id;
                     string modDirectory = GetModDirectory(
                         sessionDirectory,
                         modId,
-                        useCaseSafeFolderNames: true);
+                        useCaseSafeFolderNames: true,
+                        useCompactFolderNames: true);
                     Directory.CreateDirectory(modDirectory);
-                    LuaModManifest manifest = CloneManifest(mod.Manifest);
-                    manifest.Id = modId;
                     File.WriteAllText(
                         Path.Combine(modDirectory, ManifestFileName),
-                        JsonConvert.SerializeObject(manifest, JsonSettings));
+                        JsonConvert.SerializeObject(mod.Manifest, JsonSettings));
                     File.WriteAllText(
                         Path.Combine(modDirectory, SourceFileName),
                         mod.Source ?? "");
                 }
 
-                VerifyExactReplacement(sessionDirectory, mods);
+                VerifyExactReplacement(sessionDirectory, stagedMods);
             }
             catch
             {
-                DeleteDirectory(sessionDirectory);
-                _rootState.AsyncMutationPending = false;
+                try
+                {
+                    if (ownsSessionDirectory)
+                    {
+                        DeleteDirectory(sessionDirectory);
+                    }
+                }
+                finally
+                {
+                    _rootState.AsyncMutationPending = false;
+                }
+
                 throw;
             }
             finally
@@ -445,7 +565,8 @@ namespace CoreAI.Infrastructure.Lua
                 _log,
                 storeId: null,
                 persistenceSyncAsync: _persistenceSyncAsync,
-                useCaseSafeFolderNames: true);
+                useCaseSafeFolderNames: true,
+                useCompactFolderNames: true);
             return new ExactReplacement(this, sessionDirectory, sessionStore);
         }
 
@@ -546,10 +667,56 @@ namespace CoreAI.Infrastructure.Lua
             _rootState.AsyncMutationPending = false;
         }
 
+        private string ResolveModDirectory(
+            string modId, bool requireKnownLegacyIdentity = false, bool forWrite = false)
+        {
+            string destination = GetModDirectory(
+                _dir, modId, _useCaseSafeFolderNames, _useCompactFolderNames);
+            EnsureSourcePaths(destination, includeTemporaryPaths: forWrite);
+            if (Directory.Exists(destination))
+            {
+                LuaModManifest existing = ReadManifest(Path.Combine(destination, ManifestFileName));
+                if (existing == null || !string.Equals(existing.Id, modId, StringComparison.Ordinal))
+                {
+                    throw new IOException("Stored mod manifest does not match the requested identity.");
+                }
+
+                return destination;
+            }
+
+            string legacy = GetModDirectory(_dir, modId, false);
+            if (Directory.Exists(legacy))
+            {
+                LuaModManifest manifest = ReadManifest(Path.Combine(legacy, ManifestFileName));
+                if (manifest == null && requireKnownLegacyIdentity)
+                {
+                    throw new IOException("The legacy mod package identity is unreadable; administrative recovery is required.");
+                }
+
+                if (manifest != null && string.Equals(manifest.Id, modId, StringComparison.Ordinal))
+                {
+                    EnsureWindowsPathLength(legacy);
+                    Directory.Move(legacy, destination);
+                    RequestPersistenceArming();
+                }
+            }
+
+            return destination;
+        }
+
+        private static void RequestPersistenceArming()
+        {
+            if (!(PersistenceArmingForTesting?.Invoke() ?? CoreAiWebGlPersistence.Sync()))
+            {
+                throw new IOException("The mod source change was committed locally, but automatic persistence is not armed.");
+            }
+        }
+
         private static string GetModDirectory(
             string rootDirectory,
             string modId,
-            bool useCaseSafeFolderNames)
+            bool useCaseSafeFolderNames,
+            bool useCompactFolderNames = false)
         {
             string rootFull = Path.GetFullPath(rootDirectory);
             string rootPrefix = rootFull.EndsWith(
@@ -560,7 +727,7 @@ namespace CoreAI.Infrastructure.Lua
                 Path.Combine(
                     rootFull,
                     useCaseSafeFolderNames
-                        ? CaseSafeFolderName(modId)
+                        ? CaseSafeFolderName(modId, useCompactFolderNames)
                         : SanitizedFolderName(modId)));
             if (!fullPath.StartsWith(rootPrefix, StringComparison.Ordinal))
             {
@@ -588,13 +755,18 @@ namespace CoreAI.Infrastructure.Lua
             return safe + "_" + hash.ToString("x8");
         }
 
-        private static string CaseSafeFolderName(string modId)
+        private static string CaseSafeFolderName(string modId, bool useCompactFolderNames)
         {
             byte[] idBytes = Encoding.UTF8.GetBytes(modId);
             byte[] digest;
             using (SHA256 algorithm = SHA256.Create())
             {
                 digest = algorithm.ComputeHash(idBytes);
+            }
+
+            if (useCompactFolderNames)
+            {
+                return "id-" + EncodeLowerBase32(digest);
             }
 
             StringBuilder folderName = new(3 + digest.Length * 2);
@@ -607,6 +779,130 @@ namespace CoreAI.Infrastructure.Lua
             return folderName.ToString();
         }
 
+        private static string EncodeLowerBase32(byte[] bytes)
+        {
+            StringBuilder encoded = new((bytes.Length * 8 + 4) / 5);
+            uint pending = 0;
+            int pendingBits = 0;
+            foreach (byte value in bytes)
+            {
+                pending = (pending << 8) | value;
+                pendingBits += 8;
+                while (pendingBits >= 5)
+                {
+                    pendingBits -= 5;
+                    encoded.Append(LowerBase32Alphabet[(int)((pending >> pendingBits) & 31u)]);
+                }
+
+                pending &= (1u << pendingBits) - 1u;
+            }
+
+            if (pendingBits > 0)
+            {
+                encoded.Append(LowerBase32Alphabet[(int)(pending << (5 - pendingBits))]);
+            }
+
+            return encoded.ToString();
+        }
+
+        private static bool ReadCompactSourceLayout(string directory)
+        {
+            string markerPath = Path.Combine(directory, SourceLayoutFileName);
+            if (Directory.Exists(markerPath))
+            {
+                throw new IOException("The Lua mod source layout marker must be a supported regular file.");
+            }
+
+            try
+            {
+                using FileStream stream = new(markerPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                if (stream.Length != CompactSourceLayout.Length)
+                {
+                    throw new IOException("The Lua mod source layout marker is malformed or unsupported.");
+                }
+
+                foreach (char expected in CompactSourceLayout)
+                {
+                    if (stream.ReadByte() != expected)
+                    {
+                        throw new IOException("The Lua mod source layout marker is malformed or unsupported.");
+                    }
+                }
+
+                if (stream.ReadByte() != -1)
+                {
+                    throw new IOException("The Lua mod source layout marker is malformed or unsupported.");
+                }
+
+                return true;
+            }
+            catch (FileNotFoundException)
+            {
+                return false;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return false;
+            }
+        }
+
+        private static bool IsWorldSessionDirectory(string directory)
+        {
+            DirectoryInfo version = new(directory);
+            DirectoryInfo parent = version.Parent;
+            bool windows = Path.DirectorySeparatorChar == '\\';
+            StringComparison comparison = windows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (parent == null || !string.Equals(parent.Name, WorldSessionsDirectoryName, comparison))
+            {
+                return false;
+            }
+
+            string name = version.Name;
+            if (name.Length == 32 && Guid.TryParseExact(name, "N", out _))
+            {
+                return true;
+            }
+
+            if (name.Length != 26)
+            {
+                return false;
+            }
+
+            int lastValue = -1;
+            foreach (char character in name)
+            {
+                lastValue = LowerBase32Alphabet.IndexOf(windows ? char.ToLowerInvariant(character) : character);
+                if (lastValue < 0)
+                {
+                    return false;
+                }
+            }
+
+            return (lastValue & 3) == 0;
+        }
+
+        private void EnsureSourcePaths(string directory, bool includeTemporaryPaths)
+        {
+            EnsureWindowsPathLength(Path.Combine(directory, ManifestFileName));
+            EnsureWindowsPathLength(Path.Combine(directory, SourceFileName));
+            if (includeTemporaryPaths)
+            {
+                EnsureWindowsPathLength(Path.Combine(directory, ManifestFileName + ".tmp"));
+                EnsureWindowsPathLength(Path.Combine(directory, SourceFileName + ".tmp"));
+            }
+        }
+
+        private void EnsureWindowsPathLength(string path)
+        {
+            if (Path.DirectorySeparatorChar == '\\' && path.Length > WindowsMaximumPathLength)
+            {
+                throw new PathTooLongException(
+                    "The Lua mod source root '" + _dir + "' requires a Windows source path of "
+                    + path.Length + " characters; at most " + WindowsMaximumPathLength
+                    + " are supported. Configure a shorter source root.");
+            }
+        }
+
         private void VerifyExactReplacement(
             string sessionDirectory,
             IReadOnlyList<RbxWorldModSource> expected)
@@ -616,7 +912,8 @@ namespace CoreAI.Infrastructure.Lua
                 _log,
                 storeId: null,
                 persistenceSyncAsync: _persistenceSyncAsync,
-                useCaseSafeFolderNames: true);
+                useCaseSafeFolderNames: true,
+                useCompactFolderNames: true);
             IReadOnlyList<LuaModManifest> actualManifests = verificationStore.List();
             if (actualManifests.Count != expected.Count)
             {
@@ -654,8 +951,10 @@ namespace CoreAI.Infrastructure.Lua
             }
         }
 
-        private static void AtomicWriteAllText(string path, string contents)
+        private void AtomicWriteAllText(string path, string contents)
         {
+            EnsureWindowsPathLength(path);
+            EnsureWindowsPathLength(path + ".tmp");
             string directory = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(directory))
             {
@@ -713,7 +1012,8 @@ namespace CoreAI.Infrastructure.Lua
             for (int index = 0; index < directories.Length; index++)
             {
                 string directory = Path.GetFullPath(directories[index]);
-                if (string.Equals(directory, activeDirectory, StringComparison.Ordinal)
+                if (!IsWorldSessionDirectory(directory)
+                    || string.Equals(directory, activeDirectory, StringComparison.Ordinal)
                     || string.Equals(directory, incomingDirectory, StringComparison.Ordinal))
                 {
                     continue;

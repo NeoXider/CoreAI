@@ -3425,3 +3425,18 @@ Open:
 - [ ] Root + skills owners: integrate async persistence/readiness, preserve both meta tools, prove first-waiter cancellation and replacement recovery, complete independent audit and real Unity/WebGL checks.
 - [ ] Root + typed-chat owner: preserve admitted turn identity and explicit failure/tool metadata through queue/service/panel; update Redo only after verified release.
 - [ ] Root: diagnose the stalled summary Unity run, settle the Mods signal-quota fixture with real event evidence, then rerun the complete release suites against frozen sources.
+
+## CoreAI framework repair and release wave - 2026-10-24
+
+Final acceptance checkpoint2026-10-25. [Evidence/limits](dev-docs/fix-wave-2026-10-24/README.md), [matrix](dev-docs/fix-wave-2026-10-24/module-map.json), [ownership](dev-docs/fix-wave-2026-10-24/FILE_LEASES.md). Earlier human priorities are unchanged. Intake remains91 raw/89 canonical, two aliases and uncounted UH-01; MOD-003 is a documented finite-default configuration limit, not a runtime security fix.
+
+- [x] Root: accept twelve module source joins, audit writer and MD14-19 follow-ups after actual diff review and measured verification; freeze C# and final docs.
+- [x] Host/docs: supplied actor/session/context, durable partitions and per-view ownership guidance; host authentication/lifetimes/independent worlds remain host policy.
+- [x] Root: retain execution/memory/ADV failing-runtime receipts, older diagnostics, exact four environmental case exceptions and raw mixed local-provider runs; no fabricated data, reset-based masking or suppressed framework failures.
+- [x] Root: portable Core2,850 Passed/3 NotExecuted; Lua1,932 Passed/41 NotExecuted; analyzer8 Passed; both Node harnesses, lockstep7.54.0 and index-based positive opt-in passed.
+- [x] Root: selected Windows EditMode7,917 Passed/0 Failed/13 Skipped; final hermetic PlayMode386 Passed/0 Failed/2 batch EndOfFrame skips. Included GPU10, Mirror229/NET00117 and G634 passed; subset counts are not additive.
+- [x] Root: correct two benchmark harness defects and replay/G6 fixture contracts; all five prior cases Passed. Preserve the unreproduced watchdog timeout and later focused/full passes without claiming a product/root-cause fix or weakening its timeout.
+- [x] Root: classify the previously unmarked live local skill-cost test as Benchmark/Explicit/manual-only, exclude it from hermetic selection and retain its raw structural observations without model-quality claims.
+- [x] Root/docs: accept the available measured gates with exact exclusions/skips and unrun built-player/IL2CPP/browser durability/device/real-socket/load/performance/live-quality limits explicit. Separate optional configurations/clean consumer UPM require their own evidence.
+
+Publication uses the Git tag and [GitHub release](https://github.com/NeoXider/CoreAI/releases/tag/v7.54.0); final source/receipts bind to that commit/tag. Root owns publication and the existing human author identity, with no co-author/AI trailers. No self-referential SHA is required inside the release commit.

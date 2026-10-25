@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -12,9 +13,11 @@ using CoreAI.Infrastructure.World;
 using CoreAI.Logging;
 using CoreAI.Messaging;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
+using CoreAI.Mods.WorldPackages;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEngine;
+using Object = UnityEngine.Object;
 using VContainer;
 
 namespace CoreAI.Tests.EditMode
@@ -628,6 +631,91 @@ namespace CoreAI.Tests.EditMode
             }
 
             return false;
+        }
+
+        private sealed class QueuedMutationGate : IConfirmedWorldMutationGate
+        {
+            public readonly TaskCompletionSource<bool> Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public readonly TaskCompletionSource<bool> Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public int Calls;
+            public async Task<TResult> ExecuteAsync<TResult>(string trigger,
+                Func<CancellationToken, Task<TResult>> mutationAsync, CancellationToken cancellationToken)
+            {
+                Calls++;
+                Entered.TrySetResult(true);
+                await Release.Task;
+                return await mutationAsync(CancellationToken.None);
+            }
+        }
+
+        private sealed class CountingIdentityProvider : IActorIdentityProvider
+        {
+            public int Calls;
+            public ActorContext GetActorContext(string roleId)
+            {
+                Calls++;
+                return CoreServicesInstaller.DefaultLocalHostIdentityProvider.GetActorContext(roleId);
+            }
+        }
+
+        [TestCase("load", false)]
+        [TestCase("reload", false)]
+        [TestCase("unload", false)]
+        [TestCase("import", false)]
+        [TestCase("forget", false)]
+        [TestCase("revert", false)]
+        [TestCase("load", true)]
+        [TestCase("reload", true)]
+        [TestCase("unload", true)]
+        [TestCase("import", true)]
+        [TestCase("forget", true)]
+        [TestCase("revert", true)]
+        public void MOD009_PreCanceledMutationsDoNotEnterTheOptionalBackupGateOrChangeRuntime(string action, bool withGate)
+        {
+            MemoryLuaScriptVersionStore versions = new();
+            LuaCsModRuntime runtime = new(versionStore: versions);
+            runtime.LoadMod("original", "return 'baseline'", persistToStore: false);
+            runtime.ReloadMod("original", "return 'original'");
+            JObject bundle = JObject.Parse(runtime.ExportMod("original"));
+            bundle["source"] = "return 'imported'";
+            int runtimeChanges = 0;
+            runtime.ModSourceLoaded += (id, code, caps) => runtimeChanges++;
+            runtime.ModSourceUnloaded += (id, code, caps) => runtimeChanges++;
+            runtime.ModTearingDown += (id, reason) => runtimeChanges++;
+            QueuedMutationGate gate = new();
+            CountingIdentityProvider identity = new();
+            LuaModsLlmTool tool = new(runtime, _settings, NullLog.Instance, LuaCapabilities.All, true,
+                identity, BuiltInAgentRoleIds.Programmer,
+                withGate ? gate : null);
+            using CancellationTokenSource source = new();
+            source.Cancel();
+            string id = action == "load" ? "new-mod" : "original";
+            Assert.CatchAsync<OperationCanceledException>(async () => await tool.ExecuteAsync(action, id,
+                "return 'changed'", bundle: bundle.ToString(), revision: 0, cancellationToken: source.Token));
+            Assert.AreEqual(0, gate.Calls);
+            Assert.AreEqual(0, identity.Calls);
+            Assert.AreEqual(0, runtimeChanges);
+            Assert.AreEqual(1, runtime.ListMods().Count);
+            Assert.AreEqual(2, runtime.ListModVersions("original").Count);
+            Assert.IsTrue(runtime.TryGetModSource("original", out string original));
+            Assert.AreEqual("return 'original'", original);
+        }
+
+        [Test]
+        public async Task MOD009_CancellationWhileQueuedIsRecheckedBeforeDispatchEvenIfGateSuppliesNoToken()
+        {
+            LuaCsModRuntime runtime = new();
+            QueuedMutationGate gate = new();
+            LuaModsLlmTool tool = new(runtime, _settings, NullLog.Instance, LuaCapabilities.All, true,
+                CoreServicesInstaller.DefaultLocalHostIdentityProvider, BuiltInAgentRoleIds.Programmer, gate);
+            using CancellationTokenSource source = new();
+            Task<string> request = tool.ExecuteAsync("load", "new-mod", "return 1", cancellationToken: source.Token);
+            Assert.AreSame(gate.Entered.Task, await Task.WhenAny(gate.Entered.Task, Task.Delay(2000)));
+            source.Cancel();
+            gate.Release.TrySetResult(true);
+            Assert.AreSame(request, await Task.WhenAny(request, Task.Delay(2000)));
+            Assert.CatchAsync<OperationCanceledException>(async () => await request);
+            Assert.AreEqual(0, runtime.ListMods().Count);
         }
     }
 }

@@ -43,6 +43,105 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void ExcludeFolders_UnresolvedConflict_PreservesBothGenerationsAndManifest()
+        {
+            string projectRoot = Path.Combine(_backupRoot, "Project");
+            string source = CreateGuardedFolder(projectRoot, "original");
+            string backupRoot = CoreAIWebGlStreamingAssetsGuard.GetBackupRoot(projectRoot);
+            Assert.AreEqual(1, CoreAIWebGlStreamingAssetsGuard.ExcludeFolders(projectRoot, BuildTarget.WebGL));
+            List<CoreAIWebGlStreamingAssetsGuard.MovedFolderEntry> before =
+                CoreAIWebGlStreamingAssetsGuard.ReadManifestFile(backupRoot);
+            Directory.CreateDirectory(source);
+            File.WriteAllText(Path.Combine(source, "sentinel.txt"), "replacement");
+
+            Assert.Throws<BuildFailedException>(() =>
+                CoreAIWebGlStreamingAssetsGuard.ExcludeFolders(projectRoot, BuildTarget.WebGL));
+
+            Assert.AreEqual("replacement", File.ReadAllText(Path.Combine(source, "sentinel.txt")));
+            Assert.AreEqual("original", File.ReadAllText(Path.Combine(before[0].backupAbsolutePath, "sentinel.txt")));
+            List<CoreAIWebGlStreamingAssetsGuard.MovedFolderEntry> after =
+                CoreAIWebGlStreamingAssetsGuard.ReadManifestFile(backupRoot);
+            Assert.AreEqual(1, after.Count);
+            Assert.AreEqual(before[0].backupAbsolutePath, after[0].backupAbsolutePath);
+        }
+
+        [Test]
+        public void ExcludeFolders_FailureAfterFolderMove_LeavesRecoverableIntentAndMetadata()
+        {
+            string projectRoot = Path.Combine(_backupRoot, "Project");
+            string source = CreateGuardedFolder(projectRoot, "original");
+            File.WriteAllText(source + ".meta", "original metadata");
+            string backupRoot = CoreAIWebGlStreamingAssetsGuard.GetBackupRoot(projectRoot);
+
+            Assert.Throws<IOException>(() => CoreAIWebGlStreamingAssetsGuard.ExcludeFolders(
+                projectRoot, BuildTarget.WebGL, (from, to) => throw new IOException("Injected move interruption.")));
+
+            List<CoreAIWebGlStreamingAssetsGuard.MovedFolderEntry> pending =
+                CoreAIWebGlStreamingAssetsGuard.ReadManifestFile(backupRoot);
+            Assert.AreEqual(1, pending.Count);
+            Assert.IsTrue(Directory.Exists(pending[0].backupAbsolutePath));
+            Assert.AreEqual("WebGL", pending[0].buildTarget);
+            Assert.IsNotEmpty(pending[0].buildId);
+            Assert.AreEqual("original metadata", File.ReadAllText(source + ".meta"));
+
+            CoreAIWebGlStreamingAssetsGuard.RestoreMovedFolders(backupRoot, projectRoot, false, BuildTarget.WebGL);
+            CoreAIWebGlStreamingAssetsGuard.RestoreMovedFolders(backupRoot, projectRoot, false, BuildTarget.WebGL);
+
+            Assert.AreEqual("original", File.ReadAllText(Path.Combine(source, "sentinel.txt")));
+            Assert.AreEqual("original metadata", File.ReadAllText(source + ".meta"));
+            Assert.IsFalse(File.Exists(CoreAIWebGlStreamingAssetsGuard.GetManifestPath(backupRoot)));
+        }
+
+        [Test]
+        public void Restore_MetadataConflict_RetriesMetadataAfterFolderHasReturned()
+        {
+            string projectRoot = Path.Combine(_backupRoot, "Project");
+            string source = CreateGuardedFolder(projectRoot, "original");
+            File.WriteAllText(source + ".meta", "original metadata");
+            string backupRoot = CoreAIWebGlStreamingAssetsGuard.GetBackupRoot(projectRoot);
+            CoreAIWebGlStreamingAssetsGuard.ExcludeFolders(projectRoot, BuildTarget.WebGL);
+            File.WriteAllText(source + ".meta", "replacement metadata");
+
+            CoreAIWebGlStreamingAssetsGuard.RestoreMovedFolders(backupRoot, projectRoot, false, BuildTarget.WebGL);
+            List<CoreAIWebGlStreamingAssetsGuard.MovedFolderEntry> pending =
+                CoreAIWebGlStreamingAssetsGuard.ReadManifestFile(backupRoot);
+            Assert.AreEqual(1, pending.Count);
+            Assert.IsFalse(Directory.Exists(pending[0].backupAbsolutePath));
+            Assert.AreEqual("original metadata", File.ReadAllText(pending[0].backupAbsolutePath + ".meta"));
+            Assert.AreEqual("replacement metadata", File.ReadAllText(source + ".meta"));
+
+            File.Delete(source + ".meta");
+            CoreAIWebGlStreamingAssetsGuard.RestoreMovedFolders(backupRoot, projectRoot, false, BuildTarget.WebGL);
+            Assert.AreEqual("original metadata", File.ReadAllText(source + ".meta"));
+            Assert.AreEqual(0, CoreAIWebGlStreamingAssetsGuard.ReadManifestFile(backupRoot).Count);
+        }
+
+        [Test]
+        public void Restore_DifferentBuildTarget_DoesNotConsumeWebGlJournal()
+        {
+            string projectRoot = Path.Combine(_backupRoot, "Project");
+            string source = CreateGuardedFolder(projectRoot, "original");
+            string backupRoot = CoreAIWebGlStreamingAssetsGuard.GetBackupRoot(projectRoot);
+            CoreAIWebGlStreamingAssetsGuard.ExcludeFolders(projectRoot, BuildTarget.WebGL);
+
+            CoreAIWebGlStreamingAssetsGuard.RestoreMovedFolders(
+                backupRoot, projectRoot, false, BuildTarget.StandaloneWindows64);
+
+            Assert.IsFalse(Directory.Exists(source));
+            Assert.AreEqual(1, CoreAIWebGlStreamingAssetsGuard.ReadManifestFile(backupRoot).Count);
+            CoreAIWebGlStreamingAssetsGuard.RestoreMovedFolders(backupRoot, projectRoot, false, BuildTarget.WebGL);
+            Assert.AreEqual("original", File.ReadAllText(Path.Combine(source, "sentinel.txt")));
+        }
+
+        private static string CreateGuardedFolder(string projectRoot, string content)
+        {
+            string source = Path.Combine(projectRoot, "Assets", "StreamingAssets", "LlamaLib");
+            Directory.CreateDirectory(source);
+            File.WriteAllText(Path.Combine(source, "sentinel.txt"), content);
+            return source;
+        }
+
+        [Test]
         public void Manifest_IsPersistedInsideTheBackupRoot()
         {
             CoreAIWebGlStreamingAssetsGuard.WriteManifestFile(_backupRoot, NewEntries());

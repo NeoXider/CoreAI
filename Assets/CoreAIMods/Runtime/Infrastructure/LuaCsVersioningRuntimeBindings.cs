@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.Authority;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Messaging;
 using CoreAI.Sandbox.LuaCs;
@@ -9,6 +10,13 @@ using static CoreAI.Messaging.AiGameCommandTypeIds;
 
 namespace CoreAI.Ai.LuaCs
 {
+    /// <summary>Host authorization for script writes to a supplied version-store key.</summary>
+    public interface ILuaVersioningWritePolicy
+    {
+        /// <summary>Authorizes one normalized overlay/history key using the supplied mod or actor context.</summary>
+        bool CanWrite(string ownerModId, ActorContext? actorContext, string key, bool luaHistory);
+    }
+
     /// <summary>
     /// Lua-CSharp counterpart of <see cref="CoreAI.Infrastructure.Lua.CoreAiVersioningLuaRuntimeBindings"/>.
     /// </summary>
@@ -18,17 +26,27 @@ namespace CoreAI.Ai.LuaCs
         private readonly IDataOverlayVersionStore _data;
         private readonly IAiGameCommandSink _sink;
         private readonly IDataOverlayPayloadValidator _validator;
+        private readonly ILuaVersioningWritePolicy _writePolicy;
+
+        public LuaCsVersioningRuntimeBindings(ILuaScriptVersionStore luaScriptVersions,
+            IDataOverlayVersionStore dataOverlayVersions, IAiGameCommandSink sink,
+            IDataOverlayPayloadValidator validator)
+            : this(luaScriptVersions, dataOverlayVersions, sink, validator, null)
+        {
+        }
 
         public LuaCsVersioningRuntimeBindings(
             ILuaScriptVersionStore luaScriptVersions,
             IDataOverlayVersionStore dataOverlayVersions,
             IAiGameCommandSink sink,
-            IDataOverlayPayloadValidator validator = null)
+            IDataOverlayPayloadValidator validator = null,
+            ILuaVersioningWritePolicy writePolicy = null)
         {
             _lua = luaScriptVersions ?? new NullLuaScriptVersionStore();
             _data = dataOverlayVersions ?? new NullDataOverlayVersionStore();
             _sink = sink;
             _validator = validator ?? new DefaultDataOverlayPayloadValidator();
+            _writePolicy = writePolicy;
         }
 
         public LuaCsVersioningRuntimeBindings(
@@ -40,15 +58,40 @@ namespace CoreAI.Ai.LuaCs
 
         public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities)
         {
+            Register(registry, capabilities, null, null);
+        }
+
+        /// <summary>Registers read APIs and explicitly authorized, key-scoped WorldEdit writes.</summary>
+        public void Register(IScriptFunctionRegistry registry, LuaCapabilities capabilities,
+            string ownerModId, ActorContext? actorContext)
+        {
             if ((capabilities & LuaCapabilities.Read) == 0)
             {
                 return;
             }
 
-            RegisterGameplayApis(registry);
+            RegisterReadApis(registry);
+            if ((capabilities & LuaCapabilities.WorldEdit) != 0 && _writePolicy != null)
+            {
+                RegisterWriteApis(registry, (key, luaHistory) =>
+                {
+                    if (!_writePolicy.CanWrite(ownerModId, actorContext, key, luaHistory))
+                    {
+                        throw new InvalidOperationException("Version-store write was not authorized for this key.");
+                    }
+                }, false);
+            }
         }
 
+        /// <summary>Registers the trusted host surface, including global resets and baseline overwrite.</summary>
         public void RegisterGameplayApis(IScriptFunctionRegistry registry)
+        {
+            RegisterReadApis(registry);
+            RegisterWriteApis(registry, (key, luaHistory) => { }, true);
+        }
+
+        private void RegisterWriteApis(IScriptFunctionRegistry registry,
+            Action<string, bool> authorize, bool trustedHost)
         {
             registry.Register("coreai_lua_reset", new Action<string>(k =>
             {
@@ -57,10 +100,16 @@ namespace CoreAI.Ai.LuaCs
                     return;
                 }
 
-                _lua.ResetToOriginal(k.ToString().Trim());
+                string key = k.Trim();
+                authorize(key, true);
+                _lua.ResetToOriginal(key);
             }));
 
-            registry.Register("coreai_lua_reset_all", new Action(() => _lua.ResetAllToOriginal()));
+            if (trustedHost)
+            {
+                registry.Register("coreai_lua_reset_all", new Action(() => _lua.ResetAllToOriginal()));
+                registry.Register("coreai_data_reset_all", new Action(() => _data.ResetAllToOriginal()));
+            }
 
             registry.Register("coreai_lua_reset_revision", new Action<string, double>((k, revIndex) =>
             {
@@ -69,24 +118,9 @@ namespace CoreAI.Ai.LuaCs
                     return;
                 }
 
-                _lua.ResetToRevision(k.ToString().Trim(), (int)revIndex);
-            }));
-
-            registry.Register("coreai_lua_get_current", new Func<string, string>(k =>
-            {
-                if (k == null || string.IsNullOrWhiteSpace(k.ToString()))
-                {
-                    return "";
-                }
-
-                string key = k.ToString().Trim();
-                return _lua.TryGetSnapshot(key, out LuaScriptVersionRecord snap) ? snap.CurrentLua ?? "" : "";
-            }));
-
-            registry.Register("coreai_lua_list_keys", new Func<string>(() =>
-            {
-                IReadOnlyList<string> keys = _lua.GetKnownKeys();
-                return keys == null || keys.Count == 0 ? "" : string.Join(",", keys);
+                string key = k.Trim();
+                authorize(key, true);
+                _lua.ResetToRevision(key, (int)revIndex);
             }));
 
             registry.Register("coreai_data_apply", new Action<string, string>((key, payload) =>
@@ -97,6 +131,7 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 string trimmedKey = key.Trim();
+                authorize(trimmedKey, false);
                 string p = payload ?? "";
                 if (!_validator.TryValidate(trimmedKey, p, out string error))
                 {
@@ -107,16 +142,6 @@ namespace CoreAI.Ai.LuaCs
                 PublishDataOverlayApplied(trimmedKey, p);
             }));
 
-            registry.Register("coreai_data_get", new Func<string, string>(key =>
-            {
-                if (key == null || string.IsNullOrWhiteSpace(key))
-                {
-                    return "";
-                }
-
-                return _data.TryGetCurrentPayload(key.ToString().Trim(), out string p) ? p ?? "" : "";
-            }));
-
             registry.Register("coreai_data_seed", new Action<string, string>((key, payload) =>
             {
                 if (string.IsNullOrWhiteSpace(key))
@@ -124,18 +149,21 @@ namespace CoreAI.Ai.LuaCs
                     return;
                 }
 
-                _data.SeedOriginal(key.Trim(), payload ?? "", false);
+                string trimmedKey = key.Trim();
+                authorize(trimmedKey, false);
+                _data.SeedOriginal(trimmedKey, payload ?? "", false);
             }));
 
-            registry.Register("coreai_data_seed_overwrite", new Action<string, string>((key, payload) =>
+            if (trustedHost)
             {
-                if (string.IsNullOrWhiteSpace(key))
+                registry.Register("coreai_data_seed_overwrite", new Action<string, string>((key, payload) =>
                 {
-                    return;
-                }
-
-                _data.SeedOriginal(key.Trim(), payload ?? "", true);
-            }));
+                    if (!string.IsNullOrWhiteSpace(key))
+                    {
+                        _data.SeedOriginal(key.Trim(), payload ?? "", true);
+                    }
+                }));
+            }
 
             registry.Register("coreai_data_reset", new Action<string>(k =>
             {
@@ -144,7 +172,9 @@ namespace CoreAI.Ai.LuaCs
                     return;
                 }
 
-                _data.ResetToOriginal(k.ToString().Trim());
+                string key = k.Trim();
+                authorize(key, false);
+                _data.ResetToOriginal(key);
             }));
 
             registry.Register("coreai_data_reset_revision", new Action<string, double>((k, revIndex) =>
@@ -154,10 +184,22 @@ namespace CoreAI.Ai.LuaCs
                     return;
                 }
 
-                _data.ResetToRevision(k.ToString().Trim(), (int)revIndex);
+                string key = k.Trim();
+                authorize(key, false);
+                _data.ResetToRevision(key, (int)revIndex);
             }));
+        }
 
-            registry.Register("coreai_data_reset_all", new Action(() => _data.ResetAllToOriginal()));
+        private void RegisterReadApis(IScriptFunctionRegistry registry)
+        {
+            registry.Register("coreai_lua_get_current", new Func<string, string>(key =>
+                !string.IsNullOrWhiteSpace(key) && _lua.TryGetSnapshot(key.Trim(), out LuaScriptVersionRecord snapshot)
+                    ? snapshot.CurrentLua ?? "" : ""));
+            registry.Register("coreai_lua_list_keys", new Func<string>(() =>
+                string.Join(",", _lua.GetKnownKeys() ?? Array.Empty<string>())));
+            registry.Register("coreai_data_get", new Func<string, string>(key =>
+                !string.IsNullOrWhiteSpace(key) && _data.TryGetCurrentPayload(key.Trim(), out string payload)
+                    ? payload ?? "" : ""));
 
             registry.Register("coreai_data_list_keys", new Func<string>(() =>
             {

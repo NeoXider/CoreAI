@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -15,7 +14,7 @@ namespace CoreAI.Ai
     /// Adds per-actor fair queueing, concurrency limits, and cancellation scopes around an orchestrator.
     /// </summary>
     public sealed class QueuedAiOrchestrator : IAiOrchestrationService, IAiTaskResultService, IAiActorContextResolver,
-        IScopedAiTaskCancellation, IRoleAiTaskCancellation, IDisposable
+        IScopedAiTaskCancellation, IRoleAiTaskCancellation, IActorAiTaskCancellation, IDisposable
     {
         private readonly IAiOrchestrationService _inner;
         private readonly IAiActorContextResolver _actorContextResolver;
@@ -23,6 +22,8 @@ namespace CoreAI.Ai
         private readonly IAgentMemoryScopeProvider _scopeProvider;
         private readonly int _maxConcurrent;
         private readonly int _maxPending;
+        private readonly int _maxBufferedStreamChunks;
+        private readonly int _maxBufferedStreamBytes;
 
         // WHY: BUG-1 fix: single lock for both queue and scope operations to eliminate deadlock risk.
         // Previously _scopeLock was nested inside _queueLock in some paths but taken independently
@@ -32,6 +33,8 @@ namespace CoreAI.Ai
         private readonly List<StreamWorkItem> _streamPending = new();
         private readonly Dictionary<string, ActorQueueState> _actorQueues = new(StringComparer.Ordinal);
         private readonly Dictionary<string, ScopeEntry> _scopeTokens = new(StringComparer.Ordinal);
+        private readonly HashSet<WorkItem> _workItems = new();
+        private readonly HashSet<StreamWorkItem> _streamWorkItems = new();
         private List<(long ClaimOrdinal, string ActorId)> _admissionClaimsForTests;
 
         // WHY: F-10: cancelled on Dispose() so in-flight work observes teardown even though its own
@@ -48,7 +51,7 @@ namespace CoreAI.Ai
         private int _inFlight;
         private long _fairDispatchOrdinal;
         private long _nextSequence;
-        private bool _disposed;
+        private volatile bool _disposed;
 
         /// <param name="inner">The inner value.</param>
         /// <param name="options">The options value.</param>
@@ -65,6 +68,10 @@ namespace CoreAI.Ai
             _maxConcurrent = max < 1 ? 1 : max;
             int maxPending = options?.MaxPending ?? 64;
             _maxPending = maxPending < 1 ? 1 : maxPending;
+            _maxBufferedStreamChunks = options?.MaxBufferedStreamChunks ?? 64;
+            _maxBufferedStreamBytes = options?.MaxBufferedStreamBytes ?? 1024 * 1024;
+            if (_maxBufferedStreamChunks <= 0) throw new ArgumentOutOfRangeException(nameof(options), "Stream chunk budget must be positive.");
+            if (_maxBufferedStreamBytes <= 0) throw new ArgumentOutOfRangeException(nameof(options), "Stream byte budget must be positive.");
         }
 
         /// <summary>The configured maximum number of concurrent provider calls.</summary>
@@ -107,6 +114,17 @@ namespace CoreAI.Ai
             }
         }
 
+        internal (int BufferedChunks, long BufferedBytes, bool HasOversizedChunk)[] GetStreamingBufferSnapshotsForTests()
+        {
+            lock (_lock)
+            {
+                List<(int BufferedChunks, long BufferedBytes, bool HasOversizedChunk)> snapshots = new();
+                foreach (StreamWorkItem work in _streamWorkItems)
+                    snapshots.Add(work.Queue.Snapshot());
+                return snapshots.ToArray();
+            }
+        }
+
         /// <inheritdoc />
         public ActorContext ResolveActorContext(AiTaskRequest task)
         {
@@ -144,9 +162,11 @@ namespace CoreAI.Ai
 
             AiTaskRequest effectiveTask = task ?? new AiTaskRequest();
             ActorContext? actorContext = CaptureActorContext(effectiveTask);
+            effectiveTask = effectiveTask.Clone();
             WorkItem work = new()
             {
                 Task = effectiveTask,
+                RoleId = NormalizeRoleId(effectiveTask.RoleId),
                 OuterCt = cancellationToken,
                 Tcs = typedResult ? null : new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously),
                 TypedTcs = typedResult ? new TaskCompletionSource<LlmCompletionResult>(TaskCreationOptions.RunContinuationsAsynchronously) : null,
@@ -187,14 +207,16 @@ namespace CoreAI.Ai
                 throw new ObjectDisposedException(nameof(QueuedAiOrchestrator));
             }
 
-            AsyncChunkQueue queue = new();
+            AsyncChunkQueue queue = new(_maxBufferedStreamChunks, _maxBufferedStreamBytes);
             CancellationTokenSource consumerCancellation = new();
             AiTaskRequest effectiveTask = task ?? new AiTaskRequest();
             ActorContext? actorContext = CaptureActorContext(effectiveTask);
+            effectiveTask = effectiveTask.Clone();
 
             StreamWorkItem work = new()
             {
                 Task = effectiveTask,
+                RoleId = NormalizeRoleId(effectiveTask.RoleId),
                 OuterCt = cancellationToken,
                 Queue = queue,
                 ConsumerCancellation = consumerCancellation,
@@ -251,11 +273,11 @@ namespace CoreAI.Ai
             {
                 // WHY: Consumer finished or abandoned enumeration (e.g. broke out of the await foreach without
                 // cancelling its own token). Signal the producer so it stops draining the inner LLM stream
-                // into the unbounded queue instead of running silently to completion. Intentionally not
+                // while waiting for reader capacity instead of running silently to completion. Intentionally not
                 // disposed: a producer that starts after this point still links to its token, and a CTS
                 // with no timer and no allocated WaitHandle is reclaimed by GC once unreferenced. Nothing
                 // disposes consumerCancellation, so Cancel() cannot throw ObjectDisposedException here.
-                consumerCancellation.Cancel();
+                SafeCancel(consumerCancellation);
                 CancelPending(work);
             }
         }
@@ -432,13 +454,13 @@ namespace CoreAI.Ai
                     // when neither the caller nor the cancellation scope token was ever cancelled.
                     linkedCts = CancellationTokenSource.CreateLinkedTokenSource(baseToken, _lifetimeCts.Token);
                     token = linkedCts.Token;
-                    if (token.IsCancellationRequested)
+                    if (token.IsCancellationRequested || w.OuterCt.IsCancellationRequested)
                     {
                         // WHY: Pump already removed the item, so CancelPending can no longer own persistence.
                         // Finish it here before inner starts; if cancellation arrives after this check, inner is
                         // always invoked and owns the normal per-invocation teardown instead.
                         RecordUnstartedTurn(w, "cancelled after queue claim");
-                        w.TrySetCanceled(token);
+                        w.TrySetCanceled(w.OuterCt.IsCancellationRequested ? w.OuterCt : token);
                         return;
                     }
 
@@ -485,7 +507,7 @@ namespace CoreAI.Ai
             finally
             {
                 linkedCts?.Dispose();
-                ReleaseScopeToken(w.ScopeKey, w.ScopeCancellation);
+                ReleaseWork(w);
 
                 lock (_lock)
                 {
@@ -502,6 +524,8 @@ namespace CoreAI.Ai
             w.PendingCancellation.Dispose();
             CancellationTokenSource linkedCts = null;
             CancellationToken token = CancellationToken.None;
+            LlmStreamChunk undeliveredChunk = null;
+            bool terminalWritten = false;
             try
             {
                 using (AiCancellationAttributionContext.Push(w.CancellationAttribution))
@@ -519,22 +543,25 @@ namespace CoreAI.Ai
                         : CancellationTokenSource.CreateLinkedTokenSource(baseToken, _lifetimeCts.Token);
                     token = linkedCts.Token;
 
-                    if (token.IsCancellationRequested)
+                    if (token.IsCancellationRequested || w.OuterCt.IsCancellationRequested)
                     {
                         RecordUnstartedTurn(w, "stream cancelled after queue claim");
-                        w.Queue.Write(new LlmStreamChunk
+                        w.Queue.Complete(new LlmStreamChunk
                         {
                             IsDone = true,
                             Error = "cancelled",
                             ErrorCode = LlmErrorCode.Cancelled
                         });
-                        w.Queue.Complete();
+
                         return;
                     }
 
                     await foreach (LlmStreamChunk chunk in _inner.RunStreamingAsync(w.Task, token))
                     {
-                        w.Queue.Write(chunk);
+                        undeliveredChunk = chunk;
+                        await w.Queue.WriteAsync(chunk, token);
+                        undeliveredChunk = null;
+                        if (chunk?.IsDone == true) terminalWritten = true;
                     }
 
                     w.Queue.Complete();
@@ -543,23 +570,21 @@ namespace CoreAI.Ai
             // WHY: See RunOneAsync - a library timeout stays a timeout, not "the learner stopped the answer".
             catch (Exception ex) when (TryFindLibraryTimeout(ex, token, out LlmOperationTimeoutException timeout))
             {
-                w.Queue.Write(new LlmStreamChunk
+                CompleteStreamFailure(w, new LlmStreamChunk
                 {
                     IsDone = true,
                     Error = timeout.Message,
                     ErrorCode = LlmErrorCode.Timeout
-                });
-                w.Queue.Complete();
+                }, undeliveredChunk, terminalWritten);
             }
             catch (Exception ex) when (IsCancellationLike(ex, token))
             {
-                w.Queue.Write(new LlmStreamChunk
+                CompleteStreamFailure(w, new LlmStreamChunk
                 {
                     IsDone = true,
                     Error = "cancelled",
                     ErrorCode = LlmErrorCode.Cancelled
-                });
-                w.Queue.Complete();
+                }, undeliveredChunk, terminalWritten);
             }
             catch (Exception ex)
             {
@@ -570,13 +595,12 @@ namespace CoreAI.Ai
                 Log.Instance.Error(
                     $"[QueuedAiOrchestrator] Stream for actor '{w.ActorId}' failed: {ex}",
                     LogTag.Llm);
-                w.Queue.Write(DescribeStreamFailure(ex));
-                w.Queue.Complete();
+                CompleteStreamFailure(w, DescribeStreamFailure(ex), undeliveredChunk, terminalWritten);
             }
             finally
             {
                 linkedCts?.Dispose();
-                ReleaseScopeToken(w.ScopeKey, w.ScopeCancellation);
+                ReleaseWork(w);
 
                 lock (_lock)
                 {
@@ -587,9 +611,30 @@ namespace CoreAI.Ai
             }
         }
 
+        private static void CompleteStreamFailure(StreamWorkItem work, LlmStreamChunk failure, LlmStreamChunk undelivered, bool terminalWritten)
+        {
+            if (terminalWritten)
+            {
+                work.Queue.Complete();
+                return;
+            }
+            if (undelivered != null)
+            {
+                // WHY: A write waiting for capacity still owns upstream evidence. Preserve that one
+                // item in the final outcome so cancellation cannot erase an already executed effect.
+                LlmStreamChunk retained = undelivered.WithError(failure.Error, failure.ErrorCode);
+                retained.IsDone = true;
+                retained.HttpStatus = failure.HttpStatus ?? retained.HttpStatus;
+                retained.RetryAfterSeconds = failure.RetryAfterSeconds ?? retained.RetryAfterSeconds;
+                failure = retained;
+            }
+            work.Queue.Complete(failure);
+        }
+
         private sealed class WorkItem
         {
             public AiTaskRequest Task;
+            public string RoleId;
             public CancellationToken OuterCt;
             public TaskCompletionSource<string> Tcs;
             public TaskCompletionSource<LlmCompletionResult> TypedTcs;
@@ -627,6 +672,7 @@ namespace CoreAI.Ai
         private sealed class StreamWorkItem
         {
             public AiTaskRequest Task;
+            public string RoleId;
             public CancellationToken OuterCt;
             public AsyncChunkQueue Queue;
             public int Priority;
@@ -689,7 +735,7 @@ namespace CoreAI.Ai
                 NormalizeRoleId(roleId)));
         }
 
-        /// <summary>Cancels every tracked scope for a role across actor sessions and memory partitions.</summary>
+        /// <summary>Cancels every admitted request for a role across actor sessions and memory partitions.</summary>
         public void CancelRoleTasks(string roleId)
         {
             if (string.IsNullOrWhiteSpace(roleId))
@@ -698,19 +744,52 @@ namespace CoreAI.Ai
             }
 
             string normalizedRoleId = NormalizeRoleId(roleId);
-            List<string> scopeKeys = new();
+            CancelMatchingWork(
+                work => string.Equals(work.RoleId, normalizedRoleId, StringComparison.Ordinal),
+                work => string.Equals(work.RoleId, normalizedRoleId, StringComparison.Ordinal));
+        }
+
+        /// <inheritdoc />
+        public void CancelActorTasks(ActorContext actorContext, string roleId = null)
+        {
+            actorContext.AssertTrusted();
+            string normalizedRoleId = roleId == null ? null : NormalizeRoleId(roleId);
+            bool Matches(ActorContext? candidate, string candidateRole) => candidate.HasValue &&
+                string.Equals(candidate.Value.ActorId, actorContext.ActorId, StringComparison.Ordinal) &&
+                string.Equals(candidate.Value.SessionId, actorContext.SessionId, StringComparison.Ordinal) &&
+                (normalizedRoleId == null || string.Equals(candidateRole, normalizedRoleId, StringComparison.Ordinal));
+            CancelMatchingWork(work => Matches(work.ActorContext, work.RoleId), work => Matches(work.ActorContext, work.RoleId));
+        }
+
+        private void CancelMatchingWork(Func<WorkItem, bool> taskMatch, Func<StreamWorkItem, bool> streamMatch)
+        {
+            List<WorkItem> removedPending;
+            List<StreamWorkItem> removedStreams;
+            HashSet<CancellationTokenSource> toCancel = new();
             lock (_lock)
             {
+                foreach (WorkItem work in _workItems)
+                    if (taskMatch(work)) toCancel.Add(work.ScopeCancellation);
+                foreach (StreamWorkItem work in _streamWorkItems)
+                    if (streamMatch(work)) toCancel.Add(work.ScopeCancellation);
+                removedPending = _pending.FindAll(work => taskMatch(work));
+                removedStreams = _streamPending.FindAll(work => streamMatch(work));
+                _pending.RemoveAll(work => taskMatch(work));
+                _streamPending.RemoveAll(work => streamMatch(work));
+                foreach (WorkItem work in removedPending) RemovePendingActorLocked(work.ActorId);
+                foreach (StreamWorkItem work in removedStreams) RemovePendingActorLocked(work.ActorId);
+                List<string> scopeKeys = new();
                 foreach (KeyValuePair<string, ScopeEntry> pair in _scopeTokens)
-                {
-                    if (string.Equals(pair.Value.RoleId, normalizedRoleId, StringComparison.Ordinal))
-                    {
+                    if (toCancel.Contains(pair.Value.Cancellation))
                         scopeKeys.Add(pair.Key);
-                    }
-                }
+                foreach (string scopeKey in scopeKeys) _scopeTokens.Remove(scopeKey);
             }
-
-            CancelScopeKeys(scopeKeys);
+            try
+            {
+                CancelRemovedPending(removedPending, removedStreams);
+                foreach (CancellationTokenSource cancellation in toCancel) SafeCancel(cancellation);
+            }
+            finally { Pump(); }
         }
 
         private List<string> ResolveCurrentScopeKeys(string cancellationScope, string roleId)
@@ -720,10 +799,11 @@ namespace CoreAI.Ai
             {
                 foreach (KeyValuePair<string, ScopeEntry> pair in _scopeTokens)
                 {
-                    if (string.Equals(
+                    if ((string.Equals(
                             pair.Value.CancellationScope,
                             cancellationScope,
-                            StringComparison.Ordinal) &&
+                            StringComparison.Ordinal) ||
+                         (pair.Value.ActorContext.HasValue && string.Equals(pair.Value.ActorContext.Value.SessionId, cancellationScope, StringComparison.Ordinal))) &&
                         (roleId == null || string.Equals(pair.Value.RoleId, roleId, StringComparison.Ordinal)))
                     {
                         candidates.Add(pair);
@@ -736,17 +816,7 @@ namespace CoreAI.Ai
             {
                 if (pair.Value.ActorContext.HasValue)
                 {
-                    string actorScopeKey = ResolveActorCancellationScopeKey(
-                        pair.Value.ActorContext.Value.SessionId,
-                        pair.Value.RoleId);
-                    if (string.Equals(
-                            pair.Key,
-                            actorScopeKey,
-                            StringComparison.Ordinal))
-                    {
-                        currentScopeKeys.Add(pair.Key);
-                    }
-
+                    currentScopeKeys.Add(pair.Key);
                     continue;
                 }
 
@@ -807,14 +877,12 @@ namespace CoreAI.Ai
                 }
             }
 
-            foreach (CancellationTokenSource cancellation in activeToCancel)
+            try
             {
-                SafeCancel(cancellation);
+                CancelRemovedPending(removedPending, removedStreamPending);
+                foreach (CancellationTokenSource cancellation in activeToCancel) SafeCancel(cancellation);
             }
-
-            CancelRemovedPending(removedPending, removedStreamPending);
-
-            Pump();
+            finally { Pump(); }
         }
 
         private long NextSequence()
@@ -911,6 +979,8 @@ namespace CoreAI.Ai
             List<WorkItem> removedPending = null;
             List<StreamWorkItem> removedStreamPending = null;
             bool rejected = false;
+            bool disposedDuringAdmission = false;
+            bool cancelledDuringAdmission = false;
 
             lock (_lock)
             {
@@ -927,16 +997,18 @@ namespace CoreAI.Ai
                 int replaceableCount = (replaceablePending?.Count ?? 0) +
                                        (replaceableStreamPending?.Count ?? 0);
                 int projectedPending = _pending.Count + _streamPending.Count - replaceableCount;
-                if (projectedPending >= _maxPending)
+                disposedDuringAdmission = _disposed;
+                cancelledDuringAdmission = work.OuterCt.IsCancellationRequested;
+                if (disposedDuringAdmission || cancelledDuringAdmission || projectedPending >= _maxPending)
                 {
                     rejected = true;
                 }
                 else
                 {
+                    work.ScopeCancellation = CancellationTokenSource.CreateLinkedTokenSource(work.OuterCt);
+                    _workItems.Add(work);
                     if (!string.IsNullOrEmpty(scopeKey))
                     {
-                        work.ScopeCancellation = CancellationTokenSource.CreateLinkedTokenSource(work.OuterCt);
-
                         if (_scopeTokens.TryGetValue(scopeKey, out ScopeEntry previous))
                         {
                             previous.CancellationAttribution.MarkReplaced();
@@ -975,16 +1047,20 @@ namespace CoreAI.Ai
             if (rejected)
             {
                 work.PendingCancellation.Dispose();
-                RecordUnstartedTurn(work, "task queue full");
-                work.TrySetException(new AiOrchestrationQueueFullException(work.ActorId, _maxPending));
+                RecordUnstartedTurn(work, disposedDuringAdmission ? "task queue disposed during admission" : cancelledDuringAdmission ? "task cancelled during admission" : "task queue full");
+                if (disposedDuringAdmission) work.TrySetException(new ObjectDisposedException(nameof(QueuedAiOrchestrator)));
+                else if (cancelledDuringAdmission) work.TrySetCanceled(work.OuterCt);
+                else work.TrySetException(new AiOrchestrationQueueFullException(work.ActorId, _maxPending));
                 return;
             }
 
             // WHY: BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose.
-            SafeCancel(activeToCancel);
-            CancelRemovedPending(removedPending, removedStreamPending);
-
-            Pump();
+            try
+            {
+                CancelRemovedPending(removedPending, removedStreamPending);
+                SafeCancel(activeToCancel);
+            }
+            finally { Pump(); }
         }
 
         private void Enqueue(StreamWorkItem work)
@@ -993,13 +1069,13 @@ namespace CoreAI.Ai
             {
                 work.PendingCancellation.Dispose();
                 RecordUnstartedTurn(work, "cancelled before stream admission");
-                work.Queue.Write(new LlmStreamChunk
+                work.Queue.Complete(new LlmStreamChunk
                 {
                     IsDone = true,
                     Error = "cancelled",
                     ErrorCode = LlmErrorCode.Cancelled
                 });
-                work.Queue.Complete();
+
                 return;
             }
 
@@ -1012,6 +1088,8 @@ namespace CoreAI.Ai
             List<WorkItem> removedPending = null;
             List<StreamWorkItem> removedStreamPending = null;
             bool rejected = false;
+            bool disposedDuringAdmission = false;
+            bool cancelledDuringAdmission = false;
 
             lock (_lock)
             {
@@ -1028,16 +1106,18 @@ namespace CoreAI.Ai
                 int replaceableCount = (replaceablePending?.Count ?? 0) +
                                        (replaceableStreamPending?.Count ?? 0);
                 int projectedPending = _pending.Count + _streamPending.Count - replaceableCount;
-                if (projectedPending >= _maxPending)
+                disposedDuringAdmission = _disposed;
+                cancelledDuringAdmission = work.OuterCt.IsCancellationRequested;
+                if (disposedDuringAdmission || cancelledDuringAdmission || projectedPending >= _maxPending)
                 {
                     rejected = true;
                 }
                 else
                 {
+                    work.ScopeCancellation = CancellationTokenSource.CreateLinkedTokenSource(work.OuterCt);
+                    _streamWorkItems.Add(work);
                     if (!string.IsNullOrEmpty(scopeKey))
                     {
-                        work.ScopeCancellation = CancellationTokenSource.CreateLinkedTokenSource(work.OuterCt);
-
                         if (_scopeTokens.TryGetValue(scopeKey, out ScopeEntry previous))
                         {
                             previous.CancellationAttribution.MarkReplaced();
@@ -1076,6 +1156,17 @@ namespace CoreAI.Ai
             if (rejected)
             {
                 work.PendingCancellation.Dispose();
+                if (disposedDuringAdmission || cancelledDuringAdmission)
+                {
+                    RecordUnstartedTurn(work, disposedDuringAdmission ? "stream queue disposed during admission" : "stream cancelled during admission");
+                    work.Queue.Complete(new LlmStreamChunk
+                    {
+                        IsDone = true,
+                        Error = disposedDuringAdmission ? "AI orchestration queue disposed." : "cancelled",
+                        ErrorCode = disposedDuringAdmission ? LlmErrorCode.BackendUnavailable : LlmErrorCode.Cancelled
+                    });
+                    return;
+                }
                 RecordUnstartedTurn(work, "stream queue full");
                 // WHY: The exception text, with its internal actorId and MaxPending, is for the developer
                 // and goes to the log in full; what reaches the learner's chat is only the code and the
@@ -1083,21 +1174,23 @@ namespace CoreAI.Ai
                 AiOrchestrationQueueFullException rejection =
                     new(work.ActorId, _maxPending);
                 Log.Instance.Warn($"[QueuedAiOrchestrator] {rejection.Message}", LogTag.Llm);
-                work.Queue.Write(new LlmStreamChunk
+                work.Queue.Complete(new LlmStreamChunk
                 {
                     IsDone = true,
                     Error = LlmErrorPresentation.ForErrorCode(LlmErrorCode.BackendUnavailable),
                     ErrorCode = LlmErrorCode.BackendUnavailable
                 });
-                work.Queue.Complete();
+
                 return;
             }
 
             // WHY: BUG-2 fix: Cancel outside lock, guarded against concurrent Dispose.
-            SafeCancel(activeToCancel);
-            CancelRemovedPending(removedPending, removedStreamPending);
-
-            Pump();
+            try
+            {
+                CancelRemovedPending(removedPending, removedStreamPending);
+                SafeCancel(activeToCancel);
+            }
+            finally { Pump(); }
         }
 
         private static string ResolveCancellationScopeKey(
@@ -1111,15 +1204,19 @@ namespace CoreAI.Ai
             }
 
             return actorContext.HasValue
-                ? ResolveActorCancellationScopeKey(actorContext.Value.SessionId, task.RoleId)
+                ? ResolveActorCancellationScopeKey(actorContext.Value, task.RoleId, task.CancellationScope)
                 : ResolveLegacyCancellationScopeKey(task.CancellationScope, task.RoleId, memoryScope);
         }
 
-        private static string ResolveActorCancellationScopeKey(string sessionId, string roleId)
+        private static string ResolveActorCancellationScopeKey(ActorContext actor, string roleId, string logicalScope)
         {
-            string normalizedSessionId = sessionId?.Trim() ?? "";
+            string normalizedSessionId = actor.SessionId;
             string normalizedRoleId = NormalizeRoleId(roleId);
-            return normalizedSessionId.Length + ":" + normalizedSessionId + normalizedRoleId;
+            string normalizedScope = logicalScope.Trim();
+            return "actor:" + actor.ActorId.Length + ":" + actor.ActorId +
+                normalizedSessionId.Length + ":" + normalizedSessionId +
+                normalizedRoleId.Length + ":" + normalizedRoleId +
+                normalizedScope.Length + ":" + normalizedScope;
         }
 
         private static string ResolveLegacyCancellationScopeKey(
@@ -1139,10 +1236,10 @@ namespace CoreAI.Ai
             string identityKey = AgentMemoryScopeKey.Resolve(memoryScope, normalizedRole);
             if (string.Equals(identityKey, normalizedRole, StringComparison.Ordinal))
             {
-                return logicalScope; // empty/default identity scope: exact legacy queue semantics
+                return "legacy:" + logicalScope.Length + ":" + logicalScope;
             }
 
-            return logicalScope + "::" + identityKey;
+            return "legacy:" + logicalScope.Length + ":" + logicalScope + identityKey;
         }
 
         private AgentMemoryScope CaptureMemoryScope(string roleId)
@@ -1166,6 +1263,7 @@ namespace CoreAI.Ai
 
             ActorContext trusted = actorContext.Value;
             trusted.AssertTrusted();
+            trusted = AgentMemoryScopeKey.CaptureActorScope(trusted, _scopeProvider, NormalizeRoleId(task.RoleId));
             task.ActorContext = trusted;
             return trusted;
         }
@@ -1185,9 +1283,7 @@ namespace CoreAI.Ai
         {
             return new ScopeEntry
             {
-                CancellationScope = actorContext.HasValue
-                    ? actorContext.Value.SessionId
-                    : task.CancellationScope.Trim(),
+                CancellationScope = task.CancellationScope.Trim(),
                 RoleId = NormalizeRoleId(task.RoleId),
                 ActorContext = actorContext,
                 Cancellation = cancellation,
@@ -1214,7 +1310,7 @@ namespace CoreAI.Ai
 
             if (removed)
             {
-                ReleaseScopeToken(work.ScopeKey, work.ScopeCancellation);
+                ReleaseWork(work);
                 RecordUnstartedTurn(work, "pending task cancelled");
                 work.TrySetCanceled(work.OuterCt);
             }
@@ -1234,15 +1330,15 @@ namespace CoreAI.Ai
 
             if (removed)
             {
-                ReleaseScopeToken(work.ScopeKey, work.ScopeCancellation);
+                ReleaseWork(work);
                 RecordUnstartedTurn(work, "pending stream cancelled");
-                work.Queue.Write(new LlmStreamChunk
+                work.Queue.Complete(new LlmStreamChunk
                 {
                     IsDone = true,
                     Error = "cancelled",
                     ErrorCode = LlmErrorCode.Cancelled
                 });
-                work.Queue.Complete();
+
             }
         }
 
@@ -1255,7 +1351,7 @@ namespace CoreAI.Ai
                 foreach (WorkItem w in removedPending)
                 {
                     w.PendingCancellation.Dispose();
-                    ReleaseScopeToken(w.ScopeKey, w.ScopeCancellation);
+                    ReleaseWork(w);
                     RecordUnstartedTurn(w, "pending scoped task cancelled");
                     w.TrySetCanceled();
                 }
@@ -1266,15 +1362,15 @@ namespace CoreAI.Ai
                 foreach (StreamWorkItem w in removedStreamPending)
                 {
                     w.PendingCancellation.Dispose();
-                    ReleaseScopeToken(w.ScopeKey, w.ScopeCancellation);
+                    ReleaseWork(w);
                     RecordUnstartedTurn(w, "pending scoped stream cancelled");
-                    w.Queue.Write(new LlmStreamChunk
+                    w.Queue.Complete(new LlmStreamChunk
                     {
                         IsDone = true,
                         Error = "cancelled",
                         ErrorCode = LlmErrorCode.Cancelled
                     });
-                    w.Queue.Complete();
+
                 }
             }
         }
@@ -1334,14 +1430,14 @@ namespace CoreAI.Ai
         /// </summary>
         private void ReleaseScopeToken(string scopeKey, CancellationTokenSource scopeCancellation)
         {
-            if (string.IsNullOrEmpty(scopeKey) || scopeCancellation == null)
+            if (scopeCancellation == null)
             {
                 return;
             }
 
             lock (_lock)
             {
-                if (_scopeTokens.TryGetValue(scopeKey, out ScopeEntry current) &&
+                if (!string.IsNullOrEmpty(scopeKey) && _scopeTokens.TryGetValue(scopeKey, out ScopeEntry current) &&
                     ReferenceEquals(current.Cancellation, scopeCancellation))
                 {
                     _scopeTokens.Remove(scopeKey);
@@ -1349,6 +1445,18 @@ namespace CoreAI.Ai
             }
 
             SafeDispose(scopeCancellation);
+        }
+
+        private void ReleaseWork(WorkItem work)
+        {
+            lock (_lock) _workItems.Remove(work);
+            ReleaseScopeToken(work.ScopeKey, work.ScopeCancellation);
+        }
+
+        private void ReleaseWork(StreamWorkItem work)
+        {
+            lock (_lock) _streamWorkItems.Remove(work);
+            ReleaseScopeToken(work.ScopeKey, work.ScopeCancellation);
         }
 
         /// <summary>
@@ -1428,6 +1536,10 @@ namespace CoreAI.Ai
             }
             catch (ObjectDisposedException)
             {
+            }
+            catch (AggregateException ex)
+            {
+                Log.Instance.Warn($"[QueuedAiOrchestrator] Cancellation callback failed after mandatory queue settlement: {ex}", LogTag.Llm);
             }
         }
 
@@ -1510,30 +1622,17 @@ namespace CoreAI.Ai
         /// </summary>
         public void Dispose()
         {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
-
-            // WHY: Unblocks any in-flight RunOneAsync/RunOneStreamingAsync await - both link their token to
-            // this, so an inner provider call that ignores its own caller/scope token still observes
-            // teardown. Their existing IsCancellationLike catch blocks then complete the work item / write
-            // a terminal "cancelled" chunk exactly as they do for a normal cancellation.
-            _lifetimeCts.Cancel();
-
-            List<CancellationTokenSource> scopeTokens;
+            HashSet<CancellationTokenSource> cancellations = new();
             List<WorkItem> drainedPending;
             List<StreamWorkItem> drainedStreamPending;
             lock (_lock)
             {
-                scopeTokens = new List<CancellationTokenSource>();
-                foreach (ScopeEntry entry in _scopeTokens.Values)
-                {
-                    scopeTokens.Add(entry.Cancellation);
-                }
-
+                if (_disposed) return;
+                _disposed = true;
+                foreach (WorkItem work in _workItems) cancellations.Add(work.ScopeCancellation);
+                foreach (StreamWorkItem work in _streamWorkItems) cancellations.Add(work.ScopeCancellation);
+                _workItems.Clear();
+                _streamWorkItems.Clear();
                 _scopeTokens.Clear();
 
                 drainedPending = new List<WorkItem>(_pending);
@@ -1544,11 +1643,12 @@ namespace CoreAI.Ai
                 _actorQueues.Clear();
             }
 
-            // WHY: Pending work never got a chance to run: resolve it now instead of leaving it forever
-            // un-awaited. Scope CTS ownership already moved into `scopeTokens` above.
+            // WHY: Pending callers must settle before invoking replaceable cancellation callbacks,
+            // which may throw or belong to an active client that never cooperates with cancellation.
             foreach (WorkItem w in drainedPending)
             {
                 w.PendingCancellation.Dispose();
+                ReleaseWork(w);
                 RecordUnstartedTurn(w, "task queue disposed");
                 w.TrySetException(new ObjectDisposedException(nameof(QueuedAiOrchestrator)));
             }
@@ -1556,24 +1656,22 @@ namespace CoreAI.Ai
             foreach (StreamWorkItem w in drainedStreamPending)
             {
                 w.PendingCancellation.Dispose();
+                ReleaseWork(w);
                 RecordUnstartedTurn(w, "stream queue disposed");
-                w.Queue.Write(new LlmStreamChunk
+                w.Queue.Complete(new LlmStreamChunk
                 {
                     IsDone = true,
                     Error = "AI orchestration queue disposed.",
                     ErrorCode = LlmErrorCode.BackendUnavailable
                 });
-                w.Queue.Complete();
             }
 
-            foreach (CancellationTokenSource cts in scopeTokens)
-            {
-                SafeDispose(cts);
-            }
+            foreach (CancellationTokenSource cancellation in cancellations) SafeCancel(cancellation);
+            SafeCancel(_lifetimeCts);
         }
 
         /// <summary>
-        /// Minimal single-reader async queue used to bridge streamed chunks between the producer task
+        /// Bounded single-producer, single-reader async queue used to bridge streamed chunks between the producer task
         /// and the consumer's iterator.
         /// <para>
         /// WHY it is its own <see cref="IValueTaskSource{TResult}"/>: parking the reader used to cost a
@@ -1590,72 +1688,188 @@ namespace CoreAI.Ai
         /// inline on the producer's stack where there is no context at all.
         /// </para>
         /// </summary>
-        private sealed class AsyncChunkQueue : IValueTaskSource<bool>, IStreamingChunkSource
+        internal sealed class AsyncChunkQueue : IValueTaskSource<bool>, IStreamingChunkSource
         {
-            private readonly ConcurrentQueue<LlmStreamChunk> _queue = new();
+            private readonly Queue<(LlmStreamChunk Chunk, long Bytes)> _queue = new();
             private readonly object _signalLock = new();
+            private readonly int _maxChunks;
+            private readonly int _maxBytes;
             private ManualResetValueTaskSourceCore<bool> _signal = new() { RunContinuationsAsynchronously = true };
+            private TaskCompletionSource<bool> _spaceAvailable;
+            private TaskCompletionSource<bool> _handoffTaken;
+            private LlmStreamChunk _handoff;
+            private LlmStreamChunk _completionChunk;
+            private long _bufferedBytes;
             private bool _parked;
             private volatile bool _completed;
 
-            public bool IsCompleted => _completed;
-
-            public void Write(LlmStreamChunk chunk)
+            internal AsyncChunkQueue(int maxChunks, int maxBytes)
             {
-                _queue.Enqueue(chunk);
-                FireSignal();
+                if (maxChunks <= 0) throw new ArgumentOutOfRangeException(nameof(maxChunks));
+                if (maxBytes <= 0) throw new ArgumentOutOfRangeException(nameof(maxBytes));
+                _maxChunks = maxChunks;
+                _maxBytes = maxBytes;
             }
 
-            public void Complete()
-            {
-                if (_completed)
-                {
-                    return;
-                }
+            public bool IsCompleted => _completed;
+            internal int BufferedCount { get { lock (_signalLock) return _queue.Count; } }
+            internal long BufferedBytes { get { lock (_signalLock) return _bufferedBytes; } }
 
-                _completed = true;
+            internal (int BufferedChunks, long BufferedBytes, bool HasOversizedChunk) Snapshot()
+            {
+                lock (_signalLock) return (_queue.Count, _bufferedBytes, _handoffTaken != null);
+            }
+
+            internal async ValueTask WriteAsync(LlmStreamChunk chunk, CancellationToken cancellationToken)
+            {
+                long bytes = EstimateBytes(chunk);
+                while (true)
+                {
+                    TaskCompletionSource<bool> wait = null;
+                    TaskCompletionSource<bool> handoff = null;
+                    bool queued = false;
+                    cancellationToken.ThrowIfCancellationRequested();
+                    lock (_signalLock)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (_completed) throw new InvalidOperationException("The stream buffer is already complete.");
+                        if (bytes > _maxBytes && _queue.Count == 0)
+                        {
+                            _handoff = chunk;
+                            handoff = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                            _handoffTaken = handoff;
+                        }
+                        else if (bytes <= _maxBytes && _queue.Count < _maxChunks && _bufferedBytes + bytes <= _maxBytes)
+                        {
+                            _queue.Enqueue((chunk, bytes));
+                            _bufferedBytes += bytes;
+                            queued = true;
+                        }
+                        else
+                        {
+                            _spaceAvailable ??= new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                            wait = _spaceAvailable;
+                        }
+                    }
+                    if (queued)
+                    {
+                        FireSignal();
+                        return;
+                    }
+                    if (handoff != null)
+                    {
+                        FireSignal();
+                        using CancellationTokenRegistration registration = cancellationToken.Register(() => handoff.TrySetCanceled(cancellationToken));
+                        try
+                        {
+                            await handoff.Task;
+                            return;
+                        }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        {
+                            lock (_signalLock)
+                            {
+                                if (!ReferenceEquals(_handoffTaken, handoff)) return;
+                                _handoffTaken = null;
+                                _handoff = null;
+                            }
+                            throw;
+                        }
+                    }
+                    using (cancellationToken.Register(() => wait.TrySetCanceled(cancellationToken)))
+                    {
+                        try { await wait.Task; }
+                        finally
+                        {
+                            lock (_signalLock)
+                                if (ReferenceEquals(_spaceAvailable, wait)) _spaceAvailable = null;
+                        }
+                    }
+                }
+            }
+
+            internal void Complete(LlmStreamChunk terminal = null)
+            {
+                TaskCompletionSource<bool> space;
+                lock (_signalLock)
+                {
+                    if (_completed) return;
+                    _completionChunk = terminal;
+                    _completed = true;
+                    space = _spaceAvailable;
+                    _spaceAvailable = null;
+                }
+                space?.TrySetResult(true);
                 FireSignal();
             }
 
             public List<LlmStreamChunk> DrainSync()
             {
                 List<LlmStreamChunk> result = new();
-                while (_queue.TryDequeue(out LlmStreamChunk chunk))
-                {
-                    result.Add(chunk);
-                }
-
+                while (TryTake(out LlmStreamChunk chunk)) result.Add(chunk);
                 return result;
             }
 
             public bool TryTake(out LlmStreamChunk chunk)
             {
-                return _queue.TryDequeue(out chunk);
+                TaskCompletionSource<bool> space = null;
+                TaskCompletionSource<bool> handoff = null;
+                lock (_signalLock)
+                {
+                    if (_queue.Count > 0)
+                    {
+                        (LlmStreamChunk Chunk, long Bytes) entry = _queue.Dequeue();
+                        chunk = entry.Chunk;
+                        _bufferedBytes -= entry.Bytes;
+                        space = _spaceAvailable;
+                        _spaceAvailable = null;
+                    }
+                    else if (_handoffTaken != null)
+                    {
+                        chunk = _handoff;
+                        _handoff = null;
+                        handoff = _handoffTaken;
+                        _handoffTaken = null;
+                    }
+                    else if (_completionChunk != null)
+                    {
+                        chunk = _completionChunk;
+                        _completionChunk = null;
+                    }
+                    else
+                    {
+                        chunk = null;
+                        return false;
+                    }
+                }
+                space?.TrySetResult(true);
+                handoff?.TrySetResult(true);
+                return true;
             }
 
-            /// <summary>
-            /// Completes as soon as a chunk or the completion flag is observable. The reader re-checks the
-            /// queue afterwards; a completed wait carries no payload of its own.
-            /// </summary>
             public ValueTask<bool> WaitForSignalAsync()
             {
                 lock (_signalLock)
                 {
-                    // WHY: Re-check inside the lock to close the race between Write/Complete and the
-                    // park: a write that landed after the reader's last look would otherwise be
-                    // missed and the reader would park forever.
-                    if (!_queue.IsEmpty || _completed)
-                    {
+                    if (_queue.Count > 0 || _handoffTaken != null || _completionChunk != null || _completed)
                         return new ValueTask<bool>(true);
-                    }
-
-                    // Only the reader resets, only after it consumed the previous wake-up, and only
-                    // under this lock - so a wake fired by a producer can never be reset away.
                     _signal.Reset();
                     _parked = true;
                     return new ValueTask<bool>(this, _signal.Version);
                 }
             }
+
+            private static long EstimateBytes(LlmStreamChunk chunk)
+            {
+                if (chunk == null) return 128;
+                long bytes = 128 + StringBytes(chunk.Text) + StringBytes(chunk.ReasoningText) + StringBytes(chunk.Model) + StringBytes(chunk.Error);
+                if (chunk.ExecutedToolCalls != null)
+                    foreach (LlmToolCallTrace trace in chunk.ExecutedToolCalls)
+                        bytes += 64 + StringBytes(trace.Name) + StringBytes(trace.Source) + StringBytes(trace.Detail);
+                return bytes;
+            }
+
+            private static long StringBytes(string value) => 2L * (value?.Length ?? 0);
 
             private void FireSignal()
             {
@@ -1665,24 +1879,13 @@ namespace CoreAI.Ai
                     wake = _parked;
                     _parked = false;
                 }
-
-                // Nobody parked - writing a chunk costs no allocation at all. At most one producer sees
-                // the parked flag per park, so the source is completed exactly once per wait.
-                if (wake)
-                {
-                    _signal.SetResult(true);
-                }
+                if (wake) _signal.SetResult(true);
             }
 
             bool IValueTaskSource<bool>.GetResult(short token) => _signal.GetResult(token);
-
             ValueTaskSourceStatus IValueTaskSource<bool>.GetStatus(short token) => _signal.GetStatus(token);
-
-            void IValueTaskSource<bool>.OnCompleted(
-                Action<object> continuation, object state, short token, ValueTaskSourceOnCompletedFlags flags)
-            {
+            void IValueTaskSource<bool>.OnCompleted(Action<object> continuation, object state, short token, ValueTaskSourceOnCompletedFlags flags) =>
                 _signal.OnCompleted(continuation, state, token, flags);
-            }
         }
     }
 }

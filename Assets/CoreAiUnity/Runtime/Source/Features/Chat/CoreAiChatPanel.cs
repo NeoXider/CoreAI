@@ -322,6 +322,7 @@ namespace CoreAI.Chat
 
         private CancellationTokenSource _cts;
         private CancellationTokenSource _activeRequestCts;
+        private ActorContext? _activeRequestActor;
 
         /// <summary>On user message sent event.</summary>
         public event Action<string> OnUserMessageSent;
@@ -1163,25 +1164,7 @@ namespace CoreAI.Chat
             {
                 if (!string.IsNullOrEmpty(previousRole))
                 {
-                    try
-                    {
-                        CoreAi.StopAgent(previousRole);
-                    }
-                    catch (Exception facadeEx)
-                    {
-                        // WHY: best-effort stop — the facade may have no live scope during teardown;
-                        // fall back to the chat service, and never let the dropdown handler throw.
-                        try
-                        {
-                            _chatService?.StopAgent(previousRole);
-                        }
-                        catch (Exception serviceEx)
-                        {
-                            Logger.LogWarning(GameLogFeature.Core,
-                                $"[CoreAiChatPanel] StopAgent('{previousRole}') failed during agent switch. " +
-                                $"CoreAi: {facadeEx.Message}; ChatService: {serviceEx.Message}");
-                        }
-                    }
+                    StopActorWork(previousRole);
                 }
 
                 StopActiveGeneration();
@@ -1980,7 +1963,8 @@ namespace CoreAI.Chat
 
             string roleId = ActiveRoleId;
             int max = options.MaxPersistedMessagesForUi;
-            bool ok = _chatService.TryGetPersistedChatHistory(roleId, out ChatMessage[] history, max);
+            ActorContext actor = ResolveActorIdentityProvider().GetActorContext(roleId);
+            bool ok = _chatService.TryGetPersistedChatHistory(roleId, out ChatMessage[] history, max, actor);
             if (!ok)
             {
                 return;
@@ -2451,25 +2435,7 @@ namespace CoreAI.Chat
             string roleId = ActiveRoleId;
             CancellationTokenSource activeRequestCts = _activeRequestCts;
 
-            // WHY: same facade/service fallback chain as StopActiveGeneration - the CoreAi facade may have
-            // no live scope (teardown/tests), so fall back to the chat service rather than leaving the
-            // orchestrator scope's queued work running for this role.
-            try
-            {
-                CoreAi.StopAgent(roleId);
-            }
-            catch (Exception coreAiEx)
-            {
-                try
-                {
-                    _chatService?.StopAgent(roleId);
-                }
-                catch (Exception chatServiceEx)
-                {
-                    Logger.LogWarning(GameLogFeature.Core,
-                        $"[CoreAiChatPanel] AbandonCurrentTurn: StopAgent fallback failed. CoreAi: {coreAiEx.Message}; ChatService: {chatServiceEx.Message}");
-                }
-            }
+            StopActorWork(roleId);
 
             // WHY: cancel the active HTTP/streaming request directly, exactly like StopActiveGeneration.
             // On WebGL, cancellation callbacks can surface browser/JS-side exceptions; abandon must never
@@ -2490,6 +2456,7 @@ namespace CoreAI.Chat
             if (ReferenceEquals(_activeRequestCts, activeRequestCts))
             {
                 _activeRequestCts = null;
+                _activeRequestActor = null;
             }
 
             CancelAndReplaceRootCancellationSource("AbandonCurrentTurn");
@@ -3038,6 +3005,8 @@ namespace CoreAI.Chat
                 _nonStreamAssistantOutputStarted = false;
                 _streamingStartedVisible = false;
                 AiTaskRequest request = BuildAiTaskRequest(userTextForModel, roleId);
+                request.ActorContext = _chatService.BindActorContext(request.ActorContext, roleId);
+                _activeRequestActor = request.ActorContext;
                 if (AiUserMessageBuilder.HasAttachments(attachments))
                 {
                     request.Attachments = attachments;
@@ -3131,6 +3100,7 @@ namespace CoreAI.Chat
                     if (ReferenceEquals(_activeRequestCts, requestCts))
                     {
                         _activeRequestCts = null;
+                        _activeRequestActor = null;
                     }
 
                     requestCts.Dispose();
@@ -4273,22 +4243,7 @@ namespace CoreAI.Chat
                 string roleId = ActiveRoleId;
                 CancellationTokenSource activeRequestCts = _activeRequestCts;
 
-                try
-                {
-                    CoreAi.StopAgent(roleId);
-                }
-                catch (Exception coreAiEx)
-                {
-                    try
-                    {
-                        _chatService?.StopAgent(roleId);
-                    }
-                    catch (Exception chatServiceEx)
-                    {
-                        Logger.LogWarning(GameLogFeature.Core,
-                            $"[CoreAiChatPanel] StopAgent fallback failed. CoreAi: {coreAiEx.Message}; ChatService: {chatServiceEx.Message}");
-                    }
-                }
+                StopActorWork(roleId);
 
                 // WHY: cancel the active HTTP/streaming request. On WebGL, cancellation callbacks can
                 // surface browser/JS-side exceptions; stop must never throw back into the UI loop.
@@ -4300,6 +4255,7 @@ namespace CoreAI.Chat
                         if (ReferenceEquals(_activeRequestCts, activeRequestCts))
                         {
                             _activeRequestCts = null;
+                            _activeRequestActor = null;
                         }
                     }
                     catch (Exception cancelEx)
@@ -4307,6 +4263,7 @@ namespace CoreAI.Chat
                         if (ReferenceEquals(_activeRequestCts, activeRequestCts))
                         {
                             _activeRequestCts = null;
+                            _activeRequestActor = null;
                         }
 
                         Logger.LogWarning(GameLogFeature.Core,
@@ -4316,6 +4273,7 @@ namespace CoreAI.Chat
                 else if (ReferenceEquals(_activeRequestCts, activeRequestCts))
                 {
                     _activeRequestCts = null;
+                    _activeRequestActor = null;
                 }
 
                 CancelAndReplaceRootCancellationSource("StopActiveGeneration");
@@ -5532,18 +5490,22 @@ namespace CoreAI.Chat
                 // away and back would resurrect the cleared conversation.
                 _roleTranscriptCache.Remove(roleId);
 
-                // WHY: the CoreAi facade may have no live scope; fall back to clearing history through
-                // the chat service so the visible transcript and persisted history stay in sync.
+                ActorContext actor = ResolveActorIdentityProvider().GetActorContext(roleId);
                 try
                 {
-                    CoreAi.ClearContext(roleId, clearChatHistory, clearLongTermMemory);
-                }
-                catch
-                {
-                    if (clearChatHistory)
+                    if (_chatService != null)
                     {
-                        _chatService?.ClearHistory(roleId);
+                        _chatService.ClearContext(roleId, clearChatHistory, clearLongTermMemory, actor);
                     }
+                    else
+                    {
+                        CoreAi.ClearContext(roleId, clearChatHistory, clearLongTermMemory, actor);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(GameLogFeature.Core,
+                        $"[CoreAiChatPanel] ClearContext failed: {ex.Message}");
                 }
 
                 if (!string.IsNullOrEmpty(Options.WelcomeMessage))
@@ -5594,6 +5556,28 @@ namespace CoreAI.Chat
         public void StopAgent()
         {
             StopActiveGeneration();
+        }
+
+        private void StopActorWork(string roleId)
+        {
+            try
+            {
+                ActorContext actor = _activeRequestActor ??
+                                     ResolveActorIdentityProvider().GetActorContext(roleId);
+                if (_chatService != null)
+                {
+                    _chatService.StopAgent(roleId, actor);
+                }
+                else
+                {
+                    CoreAi.StopAgent(roleId, actor);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(GameLogFeature.Core,
+                    $"[CoreAiChatPanel] Actor-specific stop failed: {ex.Message}");
+            }
         }
     }
 }

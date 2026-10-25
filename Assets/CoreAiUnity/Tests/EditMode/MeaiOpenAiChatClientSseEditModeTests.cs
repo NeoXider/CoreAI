@@ -1541,6 +1541,62 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("answer", string.Concat(parts));
         }
 
+        [TestCase("{\"secret-provider-token\":")]
+        [TestCase("[\"secret-provider-token\"]")]
+        [TestCase("{\"choices\":[{\"delta\":{\"content\":{\"secret-provider-token\":1}}}]}")]
+        [TestCase("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":{\"secret-provider-token\":1}}}]}}]}")]
+        [TestCase("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":-1,\"function\":{\"name\":\"secret-provider-token\"}}]}}]}")]
+        [TestCase("{\"choices\":[],\"usage\":{\"completion_tokens\":\"secret-provider-token\"}}")]
+        public void GetStreamingResponseAsync_MalformedDataAfterPartialOutput_FailsAndRedacts(string malformed)
+        {
+            AsyncChunkedSseTransport transport = new(new[]
+            {
+                "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+                "data: " + malformed + "\n\n",
+                "data: [DONE]\n\n"
+            });
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+            List<string> parts = new List<string>();
+            LlmClientException failure = Assert.ThrowsAsync<LlmClientException>(async () =>
+            {
+                await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                                   new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+                {
+                    parts.Add(update.Text);
+                }
+            });
+
+            Assert.AreEqual("partial", string.Concat(parts));
+            Assert.AreEqual(LlmErrorCode.ProviderError, failure.ErrorCode);
+            Assert.IsEmpty(failure.ProviderErrorBody);
+            StringAssert.DoesNotContain("secret-provider-token", failure.ToString());
+        }
+
+        [TestCase("answer")]
+        [TestCase("2026-09-08T10:00:00.000Z")]
+        [TestCase("2026-09-08T15:00:00.1234567+05:00")]
+        public async Task GetStreamingResponseAsync_CommentsUsageAndUnknownExtensions_RemainValid(string expectedText)
+        {
+            AsyncChunkedSseTransport transport = new(new[]
+            {
+                ": keep-alive\n\n",
+                "data: {\"vendor_extension\":{\"phase\":\"custom\"}}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":null}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":" + Newtonsoft.Json.JsonConvert.SerializeObject(expectedText) + "}}]}\n\n",
+                "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2,\"total_tokens\":6}}\n\n",
+                "data: [DONE]\n\n"
+            });
+            MeaiOpenAiChatClient client = new(new DoneSentinelSettings(), transport);
+            List<string> parts = new List<string>();
+            await foreach (MEAI.ChatResponseUpdate update in client.GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hi") }))
+            {
+                parts.Add(update.Text);
+            }
+
+            Assert.AreEqual(expectedText, string.Concat(parts));
+        }
+
         [Test]
         public void GetStreamingResponseAsync_ErrorFrame_IsTypedAndRedacted()
         {

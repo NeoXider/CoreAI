@@ -463,6 +463,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             LuaState state = LuaCsScriptState.Unwrap(ownerState);
+            LuaCsSecureEnvironment.InstallTrustedIteratorResolver(state);
             LuaClosure closure = state.Load(source ?? string.Empty, "sandbox_chunk");
             if (resumeBudget != null)
             {
@@ -621,6 +622,22 @@ namespace CoreAI.Ai.LuaCs
 
         internal IScriptState OwnerState => _launch.OwnerState;
 
+        private CancellationTokenSource _lifetimeSource;
+
+        /// <summary>Cancellation of work owned by this exact scheduler thread and generation.</summary>
+        internal CancellationToken LifetimeToken => IsDead
+            ? new CancellationToken(true) : (_lifetimeSource ??= new CancellationTokenSource()).Token;
+
+        private void CancelLifetime()
+        {
+            CancellationTokenSource source = _lifetimeSource;
+            _lifetimeSource = null;
+            if (source == null) { return; }
+            try { source.Cancel(); }
+            catch (AggregateException) { }
+            finally { source.Dispose(); }
+        }
+
         /// <summary>True while this thread's handler runs on a pooled signal runner.</summary>
         internal bool IsSignalRunner => _runner != null;
 
@@ -747,6 +764,7 @@ namespace CoreAI.Ai.LuaCs
             }
             finally
             {
+                if (IsDead) { CancelLifetime(); }
                 _resumeArguments = Array.Empty<object>();
                 _factory.Exit(this, previous);
                 if (observe)
@@ -841,6 +859,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             _killed = true;
+            CancelLifetime();
             _runner?.Disarm();
             _coroutine?.Kill();
         }

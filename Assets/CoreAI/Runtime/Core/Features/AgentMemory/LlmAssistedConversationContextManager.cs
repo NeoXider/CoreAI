@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -79,128 +79,136 @@ namespace CoreAI.Ai
             // the FULL history. Pruning first would drop superseded tool results before they are
             // summarized and they would vanish from every future prompt without a trace. Pruning
             // still applies, but only to the emitted recent tail (prompt-level noise control).
-            string summaryRoleId = roleId;
-            IAsyncConversationSummaryStore asyncStore = DeterministicConversationContextManager.RequireAsyncStore(_summaryStore, ref summaryRoleId);
-            string storedSummary = await asyncStore.LoadSummaryAsync(summaryRoleId, cancellationToken) ?? "";
-            cancellationToken.ThrowIfCancellationRequested();
-            // WHY: The persisted summary carries a machine-only fold marker as its final line; every
-            // snapshot/LLM-facing path must see only the clean prose.
-            string cleanStoredSummary = ConversationFoldMarker.Strip(storedSummary);
-            int budget = ConversationContextBudgetTokens.ResolveHistoryChatBudget(roleConfig, buildArgs);
-            if (history.Length <= DeterministicConversationContextManager.ResolveMessageLimit(roleConfig) &&
-                !ConversationContextBudgetTokens.ShouldPartitionForCompaction(
-                    history,
-                    _estimator,
-                    budget,
-                    buildArgs))
-            {
-                return new ConversationContextSnapshot
-                {
-                    Summary = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs, out int storedDropped),
-                    RecentMessages = PruneIfEnabled(history, buildArgs, out int pruned1),
-                    PrunedMessageCount = pruned1,
-                    WasCompacted = false,
-                    SummaryTokensDropped = storedDropped
-                };
-            }
-
-            (int splitExclusive, List<ChatMessage> recent) =
-                DeterministicConversationContextManager.PartitionHistory(history, _estimator, budget, roleConfig);
-
-            if (splitExclusive <= 0)
-            {
-                string summaryOut = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs, out int summaryDropped);
-                return new ConversationContextSnapshot
-                {
-                    Summary = summaryOut,
-                    RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs, out int pruned2),
-                    PrunedMessageCount = pruned2,
-                    WasCompacted = !string.IsNullOrWhiteSpace(summaryOut),
-                    SummaryTokensDropped = summaryDropped
-                };
-            }
-
-            int foldStart = ConversationBulletSummary.FindFoldStart(
-                storedSummary, history, splitExclusive, out ConversationFoldProbeResult probe);
-            if (probe == ConversationFoldProbeResult.NoMatch)
-            {
-                // WHY: All persisted fold anchors vanished from history (heavy pruning/trimming); folding
-                // from 0 once is the graceful floor, and the marker written below prevents any recurrence.
-                Log.Instance.Warn(
-                    $"[LlmAssistedConversationContextManager] Fold watermark not found in history for role '{roleId}'; re-folding entire prefix once.",
-                    LogTag.Llm);
-            }
-
-            if (foldStart >= splitExclusive)
-            {
-                return new ConversationContextSnapshot
-                {
-                    Summary = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs, out int foldedDropped),
-                    RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs, out int pruned3),
-                    PrunedMessageCount = pruned3,
-                    WasCompacted = true,
-                    SummaryTokensDropped = foldedDropped
-                };
-            }
-
-            string compactedSummary;
-            // WHY a separate fold end: the compactor payload is capped (MaxPayloadChars), and the messages that did
-            // not fit were never summarized. Stamping the fold marker at splitExclusive declared them retold, so a
-            // bounded store could evict them and they were gone for good. Only what the compactor actually received
-            // is marked folded; the rest is folded by the next compaction.
-            int foldedExclusive = splitExclusive;
+            ConversationSummaryTransaction transaction = await ConversationSummaryTransactions.OpenAsync(_summaryStore, roleId, cancellationToken);
+            ConversationContextSnapshot snapshot = null;
+            bool transferred = false;
             try
             {
-                (compactedSummary, foldedExclusive) = await SummarizeViaLlmAsync(
-                    roleId,
-                    cleanStoredSummary,
-                    history,
-                    splitExclusive,
-                    foldStart,
-                    orchestrationTraceId ?? "t",
-                    cancellationToken);
+                string storedSummary = transaction.Summary;
+                cancellationToken.ThrowIfCancellationRequested();
+                // WHY: The persisted summary carries a machine-only fold marker as its final line; every
+                // snapshot/LLM-facing path must see only the clean prose.
+                string cleanStoredSummary = ConversationFoldMarker.Strip(storedSummary);
+                int budget = ConversationContextBudgetTokens.ResolveHistoryChatBudget(roleConfig, buildArgs);
+                if (history.Length <= DeterministicConversationContextManager.ResolveMessageLimit(roleConfig) &&
+                    !ConversationContextBudgetTokens.ShouldPartitionForCompaction(
+                        history,
+                        _estimator,
+                        budget,
+                        buildArgs))
+                {
+                    return new ConversationContextSnapshot
+                    {
+                        Summary = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs, out int storedDropped),
+                        RecentMessages = PruneIfEnabled(history, buildArgs, out int pruned1),
+                        PrunedMessageCount = pruned1,
+                        WasCompacted = false,
+                        SummaryTokensDropped = storedDropped
+                    };
+                }
+
+                (int splitExclusive, List<ChatMessage> recent) =
+                    DeterministicConversationContextManager.PartitionHistory(history, _estimator, budget, roleConfig);
+
+                if (splitExclusive <= 0)
+                {
+                    string summaryOut = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs, out int summaryDropped);
+                    return new ConversationContextSnapshot
+                    {
+                        Summary = summaryOut,
+                        RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs, out int pruned2),
+                        PrunedMessageCount = pruned2,
+                        WasCompacted = !string.IsNullOrWhiteSpace(summaryOut),
+                        SummaryTokensDropped = summaryDropped
+                    };
+                }
+
+                int foldStart = ConversationBulletSummary.FindFoldStart(
+                    storedSummary, history, splitExclusive, out ConversationFoldProbeResult probe);
+                if (probe == ConversationFoldProbeResult.NoMatch)
+                {
+                    // WHY: All persisted fold anchors vanished from history (heavy pruning/trimming); folding
+                    // from 0 once is the graceful floor, and the marker written below prevents any recurrence.
+                    Log.Instance.Warn(
+                        $"[LlmAssistedConversationContextManager] Fold watermark not found in history for role '{roleId}'; re-folding entire prefix once.",
+                        LogTag.Llm);
+                }
+
+                if (foldStart >= splitExclusive)
+                {
+                    return new ConversationContextSnapshot
+                    {
+                        Summary = LimitSummaryIfNeeded(cleanStoredSummary, buildArgs, out int foldedDropped),
+                        RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs, out int pruned3),
+                        PrunedMessageCount = pruned3,
+                        WasCompacted = true,
+                        SummaryTokensDropped = foldedDropped
+                    };
+                }
+
+                string compactedSummary;
+                // WHY a separate fold end: the compactor payload is capped (MaxPayloadChars), and the messages that did
+                // not fit were never summarized. Stamping the fold marker at splitExclusive declared them retold, so a
+                // bounded store could evict them and they were gone for good. Only what the compactor actually received
+                // is marked folded; the rest is folded by the next compaction.
+                int foldedExclusive = splitExclusive;
+                try
+                {
+                    (compactedSummary, foldedExclusive) = await SummarizeViaLlmAsync(
+                        roleId,
+                        cleanStoredSummary,
+                        history,
+                        splitExclusive,
+                        foldStart,
+                        orchestrationTraceId ?? "t",
+                        cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Log.Instance.Warn(
+                        $"[LlmAssistedConversationContextManager] LLM compaction failed; using bullet fallback: {ex.Message}",
+                        LogTag.Llm);
+                    compactedSummary = FormatBulletFallback(roleId, cleanStoredSummary, history, splitExclusive, foldStart);
+                    foldedExclusive = splitExclusive;
+                }
+
+                compactedSummary = ConversationFoldMarker.Strip(compactedSummary);
+                if (string.IsNullOrWhiteSpace(compactedSummary))
+                {
+                    compactedSummary = FormatBulletFallback(roleId, cleanStoredSummary, history, splitExclusive, foldStart);
+                    foldedExclusive = splitExclusive;
+                }
+
+                compactedSummary = LimitSummaryIfNeeded(compactedSummary, buildArgs, out int compactedDropped);
+
+                // WHY: The limiter runs BEFORE stamping so the fold marker (final line of the persisted text)
+                // can never be trimmed away; the snapshot keeps the clean summary without the marker.
+                string persistedSummary = ConversationFoldMarker.Stamp(compactedSummary, history, foldedExclusive);
+
+                snapshot = new()
+                {
+                    Summary = compactedSummary,
+                    RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs, out int pruned4),
+                    PrunedMessageCount = pruned4,
+                    WasCompacted = true,
+                    SummaryTokensDropped = compactedDropped,
+                    DeferredFoldMessageCount = Math.Max(0, splitExclusive - foldedExclusive)
+                };
+
+                cancellationToken.ThrowIfCancellationRequested();
+                snapshot.OwnSummaryLease(transaction);
+                snapshot.CommitSummaryAsync = token => transaction.CommitAsync(persistedSummary, token);
+                transferred = true;
+                if (buildArgs?.DeferSummaryPersistence != true) await snapshot.CommitAsync(cancellationToken);
+
+                return snapshot;
             }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Log.Instance.Warn(
-                    $"[LlmAssistedConversationContextManager] LLM compaction failed; using bullet fallback: {ex.Message}",
-                    LogTag.Llm);
-                compactedSummary = FormatBulletFallback(roleId, cleanStoredSummary, history, splitExclusive, foldStart);
-                foldedExclusive = splitExclusive;
-            }
-
-            compactedSummary = ConversationFoldMarker.Strip(compactedSummary);
-            if (string.IsNullOrWhiteSpace(compactedSummary))
-            {
-                compactedSummary = FormatBulletFallback(roleId, cleanStoredSummary, history, splitExclusive, foldStart);
-                foldedExclusive = splitExclusive;
-            }
-
-            compactedSummary = LimitSummaryIfNeeded(compactedSummary, buildArgs, out int compactedDropped);
-
-            // WHY: The limiter runs BEFORE stamping so the fold marker (final line of the persisted text)
-            // can never be trimmed away; the snapshot keeps the clean summary without the marker.
-            string persistedSummary = ConversationFoldMarker.Stamp(compactedSummary, history, foldedExclusive);
-
-            ConversationContextSnapshot snapshot = new()
-            {
-                Summary = compactedSummary,
-                RecentMessages = PruneIfEnabled(recent.ToArray(), buildArgs, out int pruned4),
-                PrunedMessageCount = pruned4,
-                WasCompacted = true,
-                SummaryTokensDropped = compactedDropped,
-                DeferredFoldMessageCount = Math.Max(0, splitExclusive - foldedExclusive)
-            };
-
-            cancellationToken.ThrowIfCancellationRequested();
-            snapshot.CommitSummaryAsync = token => asyncStore.SaveSummaryAsync(summaryRoleId, persistedSummary, token);
-            if (buildArgs?.DeferSummaryPersistence != true) await snapshot.CommitAsync(cancellationToken);
-
-            return snapshot;
+            catch { snapshot?.Dispose(); throw; }
+            finally { if (!transferred) transaction.Dispose(); }
         }
 
         private static string FormatBulletFallback(
@@ -303,6 +311,8 @@ namespace CoreAI.Ai
 
             /// <summary>Length of the payload that was sent.</summary>
             public int PayloadChars;
+            /// <summary>Prior-summary characters excluded from the bounded auxiliary request.</summary>
+            public int PriorSummaryDroppedChars;
 
             /// <summary>
             /// The first dialogue line alone did not fit <see cref="LlmContextCompactionOptions.MaxPayloadChars"/> and
@@ -313,7 +323,7 @@ namespace CoreAI.Ai
             /// <summary>The log line, or <c>null</c> when the payload went out whole.</summary>
             public string Describe(string roleId, LlmContextCompactionOptions options)
             {
-                if (ClippedMessages <= 0 && DeferredMessages <= 0 && !FirstLineClippedToFit)
+                if (ClippedMessages <= 0 && DeferredMessages <= 0 && !FirstLineClippedToFit && PriorSummaryDroppedChars <= 0)
                 {
                     return null;
                 }
@@ -321,7 +331,7 @@ namespace CoreAI.Ai
                 string line =
                     $"[LlmAssistedConversationContextManager] Compaction payload for role '{roleId}' clipped: " +
                     $"{ClippedMessages} line(s) over MaxPerMessageChars={options.MaxPerMessageChars} lost " +
-                    $"{MessageDroppedChars} chars; payload {PayloadChars} chars sent (MaxPayloadChars={options.MaxPayloadChars})";
+                    $"{MessageDroppedChars} chars; prior summary lost {PriorSummaryDroppedChars} chars; payload {PayloadChars} chars sent (MaxPayloadChars={options.MaxPayloadChars})";
                 if (FirstLineClippedToFit)
                 {
                     line += "; the first line alone exceeded MaxPayloadChars and was sent clipped to fit";
@@ -365,16 +375,29 @@ namespace CoreAI.Ai
             clip = default;
             int maxChars = options.MaxPayloadChars;
             int maxPerMsg = options.MaxPerMessageChars;
-            StringBuilder sb = new(2048);
-            sb.AppendLine("## Prior rolling summary (may be empty — still produce an updated summary)");
-            sb.AppendLine(string.IsNullOrWhiteSpace(priorSummary) ? "(none)" : priorSummary.Trim());
-            sb.AppendLine();
-            sb.AppendLine("## Dialogue lines to fold into the rolling summary (older than the live tail)");
+            string heading = "## Prior rolling summary (may be empty — still produce an updated summary)" + Environment.NewLine;
+            string dialogueHeading = Environment.NewLine + Environment.NewLine +
+                "## Dialogue lines to fold into the rolling summary (older than the live tail)" + Environment.NewLine;
             string footer = Environment.NewLine +
                             "Output a compact updated rolling summary (bullets or short paragraphs). Do not repeat wording unnecessarily." +
                             Environment.NewLine;
 
             int first = Math.Max(0, startInclusive);
+            string summaryText = string.IsNullOrWhiteSpace(priorSummary) ? "(none)" : priorSummary.Trim();
+            if (maxChars > 0)
+            {
+                string firstRole = first < splitExclusive && !string.IsNullOrWhiteSpace(history[first].Role)
+                    ? history[first].Role.Trim() : "unknown";
+                int lineReserve = first < splitExclusive ? firstRole.Length + 4 + Environment.NewLine.Length + 32 : 0;
+                int summaryRoom = maxChars - heading.Length - dialogueHeading.Length - footer.Length - lineReserve;
+                if (summaryRoom < 1)
+                    throw new ArgumentOutOfRangeException(nameof(options.MaxPayloadChars),
+                        "Compaction payload budget cannot fit its framing and one dialogue line.");
+                summaryText = TruncationMarker.ClipToFit(summaryText, summaryRoom, out int priorDropped);
+                clip.PriorSummaryDroppedChars = priorDropped;
+            }
+            StringBuilder sb = new(2048);
+            sb.Append(heading).Append(summaryText).Append(dialogueHeading);
             foldedExclusive = splitExclusive;
             for (int i = first; i < splitExclusive; i++)
             {
@@ -428,8 +451,8 @@ namespace CoreAI.Ai
                     }
                     else
                     {
-                        lineDropped = original.Length;
-                        content = TruncationMarker.Format(lineDropped);
+                        throw new ArgumentOutOfRangeException(nameof(options.MaxPayloadChars),
+                            "Compaction payload budget cannot fit its framing and one dialogue line.");
                     }
                 }
 

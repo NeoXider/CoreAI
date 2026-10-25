@@ -109,7 +109,25 @@ namespace CoreAI.Composition
             }
 
             builder.Register<GameConfigPolicy>(Lifetime.Singleton);
-            builder.Register<AiOrchestrator>(Lifetime.Singleton);
+            builder.Register<AiOrchestrator>(c => new AiOrchestrator(
+                    c.Resolve<IAuthorityHost>(),
+                    c.Resolve<ILlmClient>(),
+                    c.Resolve<IAiGameCommandSink>(),
+                    c.Resolve<ISessionTelemetryProvider>(),
+                    c.Resolve<AiPromptComposer>(),
+                    c.Resolve<IAgentMemoryStore>(),
+                    c.Resolve<AgentMemoryPolicy>(),
+                    c.Resolve<IRoleStructuredResponsePolicy>(),
+                    c.Resolve<IAiOrchestrationMetrics>(),
+                    c.Resolve<ICoreAISettings>(),
+                    c.Resolve<IActorIdentityProvider>(),
+                    c.Resolve<IConversationContextManager>(),
+                    c.Resolve<IAgentTurnTraceSink>(),
+                    c.Resolve<IContextBudgetPolicy>(),
+                    c.Resolve<ITokenEstimator>(),
+                    c.Resolve<IConversationCompactionCoordinator>(),
+                    c.Resolve<IAgentMemoryScopeProvider>()),
+                Lifetime.Singleton);
             builder.Register<IAiOrchestrationService>(c =>
                     new QueuedAiOrchestrator(
                         c.Resolve<AiOrchestrator>(),
@@ -122,12 +140,15 @@ namespace CoreAI.Composition
                     CoreServicesInstaller.DefaultLocalHostIdentityProvider);
             }
 
-            builder.Register<IInGameLlmChatServiceFactory>(c =>
-                    new ActorKeyedInGameLlmChatServiceFactory(
-                        () => new InGameLlmChatService(
-                            c.Resolve<ILlmClient>(),
-                            c.Resolve<IAgentSystemPromptProvider>())),
-                Lifetime.Singleton);
+            if (!builder.Exists(typeof(IInGameLlmChatServiceFactory), true))
+            {
+                builder.Register<IInGameLlmChatServiceFactory>(c =>
+                        new ActorKeyedInGameLlmChatServiceFactory(
+                            () => new InGameLlmChatService(
+                                c.Resolve<ILlmClient>(),
+                                c.Resolve<IAgentSystemPromptProvider>())),
+                    Lifetime.Singleton);
+            }
             builder.Register<IInGameLlmChatService>(c =>
             {
                 ActorContext defaultActor = c.Resolve<IActorIdentityProvider>()

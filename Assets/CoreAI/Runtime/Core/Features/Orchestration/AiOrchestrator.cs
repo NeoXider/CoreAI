@@ -46,6 +46,7 @@ namespace CoreAI.Ai
         private readonly ITokenEstimator _tokenEstimator;
         private readonly IConversationCompactionCoordinator _compactionCoordinator;
         private readonly IActorIdentityProvider _actorIdentityProvider;
+        private readonly IAgentMemoryScopeProvider _scopeProvider;
 
         // WHY: A context limit the backend reported once (llama.cpp "n_ctx") is remembered per route so
         // later turns are budgeted against it up front, instead of paying a refused request every time
@@ -70,7 +71,8 @@ namespace CoreAI.Ai
             IAgentTurnTraceSink traceSink = null,
             IContextBudgetPolicy contextBudgetPolicy = null,
             ITokenEstimator tokenEstimator = null,
-            IConversationCompactionCoordinator compactionCoordinator = null)
+            IConversationCompactionCoordinator compactionCoordinator = null,
+            IAgentMemoryScopeProvider scopeProvider = null)
         {
             _authority = authority;
             _llm = llm;
@@ -90,6 +92,7 @@ namespace CoreAI.Ai
             _compactionCoordinator = compactionCoordinator ?? new DefaultConversationCompactionCoordinator();
             _actorIdentityProvider = actorIdentityProvider ??
                                      throw new ArgumentNullException(nameof(actorIdentityProvider));
+            _scopeProvider = scopeProvider ?? new DefaultAgentMemoryScopeProvider();
         }
 
         /// <inheritdoc />
@@ -326,7 +329,10 @@ namespace CoreAI.Ai
                 return BuildFailureResult("Task is required.", LlmErrorCode.InvalidRequest, null, null);
             }
 
-            ResolveActorContext(task);
+            ActorContext actorContext = AgentMemoryScopeKey.CaptureActorScope(ResolveActorContext(task), _scopeProvider, ResolveRoleId(task));
+            task.ActorContext = actorContext;
+            task = task.Clone();
+            using IDisposable memoryScope = AgentMemoryScopeExecutionContext.Push(actorContext);
 
             if (!_authority.CanRunAiTasks)
             {
@@ -584,27 +590,88 @@ namespace CoreAI.Ai
                 yield break;
             }
 
-            ResolveActorContext(task);
+            ActorContext actorContext = AgentMemoryScopeKey.CaptureActorScope(ResolveActorContext(task), _scopeProvider, ResolveRoleId(task));
+            task.ActorContext = actorContext;
+            task = task.Clone();
 
             StreamingTurnState turn = new();
+            LlmStreamChunk terminal = null;
             try
             {
                 if (!_authority.CanRunAiTasks)
                 {
-                    yield return new LlmStreamChunk { IsDone = true, Error = "authority denied" };
-                    yield break;
+                    terminal = new LlmStreamChunk { IsDone = true, Error = "authority denied", ErrorCode = LlmErrorCode.InvalidRequest };
+                }
+                else
+                {
+                    await foreach (LlmStreamChunk chunk in RunActorScopedStreamingCoreAsync(task, turn, actorContext, cancellationToken))
+                    {
+                        if (chunk?.IsDone == true)
+                        {
+                            terminal = chunk.WithError(chunk.Error, chunk.ErrorCode);
+                            terminal.Text = "";
+                            terminal.ReasoningText = "";
+                            terminal.StartsNewMessage = false;
+                            if (!string.IsNullOrEmpty(chunk.Text) || !string.IsNullOrEmpty(chunk.ReasoningText))
+                            {
+                                yield return new LlmStreamChunk
+                                {
+                                    Text = chunk.Text,
+                                    ReasoningText = chunk.ReasoningText,
+                                    StartsNewMessage = chunk.StartsNewMessage,
+                                    GenerationInProgress = chunk.GenerationInProgress,
+                                    BufferedStreamingNoToolBinding = chunk.BufferedStreamingNoToolBinding,
+                                    BufferedStreamingUseToolProgressHint = chunk.BufferedStreamingUseToolProgressHint
+                                };
+                            }
+                            continue;
+                        }
+
+                        yield return chunk;
+                    }
                 }
 
-                await foreach (LlmStreamChunk chunk in RunStreamingCoreAsync(task, turn, cancellationToken))
-                {
-                    yield return chunk;
-                }
+                // WHY: Consumers may dispose immediately at IsDone; validation, publication and teardown
+                // must finish before that public boundary, including when the backend reports done early.
+                using (AgentMemoryScopeExecutionContext.Push(actorContext))
+                    EnsureUserTurnRecorded(turn.Bundle, task, turn.UserTurn, true);
+                yield return terminal ?? new LlmStreamChunk { IsDone = true };
             }
             finally
             {
                 // WHY: iterator disposal runs this block after error chunks, yield breaks, cancellation and
                 // consumers abandoning enumeration early; the yielding core cannot own universal teardown.
-                EnsureUserTurnRecorded(turn.Bundle, task, turn.UserTurn, true);
+                using (AgentMemoryScopeExecutionContext.Push(actorContext))
+                    EnsureUserTurnRecorded(turn.Bundle, task, turn.UserTurn, true);
+            }
+        }
+
+        private async IAsyncEnumerable<LlmStreamChunk> RunActorScopedStreamingCoreAsync(
+            AiTaskRequest task, StreamingTurnState turn, ActorContext actorContext,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            IAsyncEnumerator<LlmStreamChunk> core = RunStreamingCoreAsync(task, turn, cancellationToken).GetAsyncEnumerator(cancellationToken);
+            try
+            {
+                while (true)
+                {
+                    bool hasNext;
+                    LlmStreamChunk chunk;
+                    // WHY: Each MoveNext starts in its caller's execution context. A lease spanning
+                    // yield return alone cannot keep AsyncLocal memory identity across reader resumes.
+                    using (AgentMemoryScopeExecutionContext.Push(actorContext))
+                    {
+                        hasNext = await core.MoveNextAsync();
+                        chunk = hasNext ? core.Current : null;
+                    }
+                    if (!hasNext) yield break;
+                    yield return chunk;
+                }
+            }
+            finally
+            {
+                using (AgentMemoryScopeExecutionContext.Push(actorContext))
+                    await core.DisposeAsync();
             }
         }
 
@@ -643,7 +710,6 @@ namespace CoreAI.Ai
                 int? terminalHttpStatus = null;
                 int? terminalRetryAfterSeconds = null;
                 IReadOnlyList<LlmToolCallTrace> executedToolCalls = Array.Empty<LlmToolCallTrace>();
-                LlmStreamChunk pendingToolOnlyTerminalChunk = null;
                 int? promptTokens = null;
                 int? lastRoundtripPromptTokens = null;
                 int? completionTokens = null;
@@ -961,7 +1027,6 @@ namespace CoreAI.Ai
                             current.ExecutedToolCalls != null &&
                             current.ExecutedToolCalls.Count > 0)
                         {
-                            pendingToolOnlyTerminalChunk = current;
                             continue;
                         }
 
@@ -1075,7 +1140,13 @@ namespace CoreAI.Ai
                     {
                         _metrics.RecordStructuredRetry(
                             bundle.ActorId, bundle.RoleId, bundle.TraceId, failReason ?? "");
-                        yield return Terminal("structured validation failed: " + (failReason ?? ""), LlmErrorCode.InvalidRequest);
+                        string validationError = "structured validation failed: " + (failReason ?? "");
+                        LlmCompletionResult invalid = BuildFailureResult(validationError, LlmErrorCode.InvalidRequest, null, null);
+                        invalid.Content = content;
+                        invalid.Model = model;
+                        invalid.ExecutedToolCalls = executedToolCalls;
+                        RecordTrace(bundle, invalid, content, validationError);
+                        yield return Terminal(validationError, LlmErrorCode.InvalidRequest);
                         yield break;
                     }
 
@@ -1083,6 +1154,7 @@ namespace CoreAI.Ai
                     {
                         Ok = true,
                         Content = content,
+                        Model = model,
                         PromptTokens = promptTokens,
                         LastRoundtripPromptTokens = lastRoundtripPromptTokens,
                         CompletionTokens = completionTokens, ReasoningTokens = reasoningTokens,
@@ -1139,12 +1211,7 @@ namespace CoreAI.Ai
                     yield break;
                 }
 
-                if (pendingToolOnlyTerminalChunk != null)
-                {
-                    pendingToolOnlyTerminalChunk.Text = "";
-                    yield return pendingToolOnlyTerminalChunk;
-                }
-
+                yield return Terminal(terminalError, terminalErrorCode, terminalHttpStatus, terminalRetryAfterSeconds);
                 yield break;
             }
         }
@@ -1615,6 +1682,8 @@ namespace CoreAI.Ai
             {
                 return (system, null, false, null, resendOfUnansweredUserTurn);
             }
+
+            using ConversationContextSnapshot snapshotLifetime = snapshot;
 
             // This summary describes old messages: preserve it before any provider/tool side effect
             // or bounded history append, even when the forthcoming model request later fails.
@@ -2535,27 +2604,7 @@ namespace CoreAI.Ai
 
         private int EstimateToolsTokens(IReadOnlyList<ILlmTool> tools)
         {
-            if (tools == null || tools.Count == 0)
-            {
-                return 0;
-            }
-
-            int sum = 0;
-            for (int i = 0; i < tools.Count; i++)
-            {
-                ILlmTool tool = tools[i];
-                if (tool == null)
-                {
-                    continue;
-                }
-
-                sum += _tokenEstimator.EstimateText(tool.Name ?? "");
-                sum += _tokenEstimator.EstimateText(tool.Description ?? "");
-                sum += _tokenEstimator.EstimateText(tool.ParametersSchema ?? "");
-                sum += 8;
-            }
-
-            return sum;
+            return DefaultContextBudgetPolicy.EstimateToolsTokens(tools, _tokenEstimator);
         }
 
         /// <summary>Longest tool detail a <see cref="ToolResultMemoryPolicy.Full"/> history entry keeps.</summary>

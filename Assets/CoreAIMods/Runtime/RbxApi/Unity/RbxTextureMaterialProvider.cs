@@ -10,8 +10,8 @@ namespace CoreAI.Mods.Rbx.Rendering
 {
     /// <summary>Runtime catalog provider that overlays textured Rbx materials on the complete
     /// procedural catalog.</summary>
-    public sealed class RbxTextureMaterialProvider : IRbxMaterialProvider<Material>,
-        IRbxMaterialVariantConsumer
+    public sealed class RbxTextureMaterialProvider : IRbxMaterialLeaseProvider<Material>,
+        IRbxMaterialVariantConsumer, IDisposable
     {
         internal const string DefaultCatalogResource =
             "CoreAIRbxTextures/RbxMaterialTextureCatalog";
@@ -65,7 +65,6 @@ namespace CoreAI.Mods.Rbx.Rendering
 
         private static Dictionary<int, Material> _sharedMaterials;
         private static Dictionary<int, RbxMaterialTextureCatalog.Entry> _effectiveEntries;
-        private static Dictionary<RbxMaterialId, VariantMaterialRecord> _variantMaterials;
         private static Shader _sharedShader;
         private static int _sharedMaterialAllocationCount;
         private static float _cachedMetersPerStud;
@@ -78,6 +77,13 @@ namespace CoreAI.Mods.Rbx.Rendering
         private readonly Shader _providedShader;
         private readonly bool _catalogInputsProvided;
         private readonly bool _forceCompatibilityEntries;
+        internal const int MaximumIdleVariantMaterials = 32;
+        private readonly Dictionary<RbxMaterialId, VariantMaterialRecord> _variantMaterials = new();
+        private readonly Dictionary<Material, VariantMaterialRecord> _variantRecords = new();
+        private readonly LinkedList<VariantMaterialRecord> _idleVariants = new();
+        private IRbxMaterialVariantSource _variantSource;
+        private float _variantMetersPerStud;
+        private bool _disposed;
 
         /// <summary>Creates the runtime hybrid provider backed by package and project Resources.</summary>
         public RbxTextureMaterialProvider()
@@ -122,7 +128,26 @@ namespace CoreAI.Mods.Rbx.Rendering
 
         /// <summary>Variant lookup port the binder points at the world's MaterialService;
         /// null renders every part plain.</summary>
-        public IRbxMaterialVariantSource VariantSource { get; set; }
+        public IRbxMaterialVariantSource VariantSource
+        {
+            get => _variantSource;
+            set
+            {
+                ThrowIfDisposed();
+                if (ReferenceEquals(_variantSource, value))
+                {
+                    return;
+                }
+
+                while (_idleVariants.First != null)
+                {
+                    DestroyVariant(_idleVariants.First.Value);
+                }
+
+                _variantMaterials.Clear();
+                _variantSource = value;
+            }
+        }
 
         /// <summary>Canonical ids of the 36 texture sets packaged with CoreAI.</summary>
         internal static IReadOnlyList<RbxMaterialId> TexturedMaterials =>
@@ -136,16 +161,124 @@ namespace CoreAI.Mods.Rbx.Rendering
             return textureAspect / (tileWidthStuds * metersPerStud);
         }
 
-        /// <summary>Resolves a process-wide shared textured or procedural material handle.</summary>
+        /// <summary>Resolves a borrowed handle. Mutable variants belong to this provider and up to
+        /// 32 unused variants are cached; acquire a lease before keeping a handle across lookups.</summary>
         public bool TryGetMaterial(in RbxMaterialId material, out Material visualMaterial)
         {
+            return TryResolveMaterial(in material, false, out visualMaterial);
+        }
+
+        /// <summary>Resolves a material and pins mutable variant storage until release.</summary>
+        public bool TryAcquireMaterial(in RbxMaterialId material, out Material visualMaterial)
+        {
+            return TryResolveMaterial(in material, true, out visualMaterial);
+        }
+
+        private bool TryResolveMaterial(in RbxMaterialId material, bool acquire,
+            out Material visualMaterial)
+        {
+            ThrowIfDisposed();
             EnsureSharedCache();
+            bool found;
             if (material.Variant != null)
             {
-                return TryGetVariantMaterial(in material, out visualMaterial);
+                found = TryGetVariantMaterial(in material, out visualMaterial);
+            }
+            else
+            {
+                found = TryGetPlainMaterial(in material, out visualMaterial);
             }
 
-            return TryGetPlainMaterial(in material, out visualMaterial);
+            if (visualMaterial != null &&
+                _variantRecords.TryGetValue(visualMaterial, out VariantMaterialRecord record))
+            {
+                if (record.IdleNode != null)
+                {
+                    _idleVariants.Remove(record.IdleNode);
+                    record.IdleNode = null;
+                }
+
+                if (acquire)
+                {
+                    record.References++;
+                }
+                else if (record.References == 0)
+                {
+                    record.IdleNode = _idleVariants.AddLast(record);
+                }
+            }
+
+            while (_idleVariants.Count > MaximumIdleVariantMaterials)
+            {
+                DestroyVariant(_idleVariants.First.Value);
+            }
+
+            return found;
+        }
+
+        /// <summary>Releases one renderer reference; the final release destroys its mutable material.</summary>
+        public void ReleaseMaterial(Material visualMaterial)
+        {
+            if (ReferenceEquals(visualMaterial, null) ||
+                !_variantRecords.TryGetValue(visualMaterial, out VariantMaterialRecord record) ||
+                record.References == 0)
+            {
+                return;
+            }
+
+            record.References--;
+            if (record.References == 0)
+            {
+                DestroyVariant(record);
+            }
+        }
+
+        /// <summary>Reclaims every mutable variant owned by this provider. Idempotent.</summary>
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            foreach (VariantMaterialRecord record in _variantRecords.Values)
+            {
+                DestroyMaterial(record.Material);
+            }
+
+            _variantMaterials.Clear();
+            _variantRecords.Clear();
+            _idleVariants.Clear();
+            _variantSource = null;
+        }
+
+        internal int VariantMaterialCount => _variantRecords.Count;
+
+        private void ThrowIfDisposed()
+        {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(RbxTextureMaterialProvider));
+            }
+        }
+
+        private void DestroyVariant(VariantMaterialRecord record)
+        {
+            if (_variantMaterials.TryGetValue(record.Key, out VariantMaterialRecord current) &&
+                ReferenceEquals(record, current))
+            {
+                _variantMaterials.Remove(record.Key);
+            }
+
+            _variantRecords.Remove(record.Material);
+            if (record.IdleNode != null)
+            {
+                _idleVariants.Remove(record.IdleNode);
+                record.IdleNode = null;
+            }
+
+            DestroyMaterial(record.Material);
         }
 
         private bool TryGetPlainMaterial(in RbxMaterialId material, out Material visualMaterial)
@@ -184,11 +317,7 @@ namespace CoreAI.Mods.Rbx.Rendering
             {
                 if (!VariantDataEquals(record.Snapshot, in data))
                 {
-                    // WHY: the entry the record was built from supplies every slot the variant does
-                    // not override, so a variant that repoints its BaseMaterial must re-resolve it.
-                    // Reusing the cached entry left the unoverridden maps on the OLD base material,
-                    // which is exactly what happens when one world reuses a variant name from
-                    // another with a different base.
+                    // WHY: inherited maps must follow a changed BaseMaterial.
                     if (TryResolveVariantBaseEntry(in material, in data,
                             out RbxMaterialTextureCatalog.Entry refreshedEntry))
                     {
@@ -216,9 +345,19 @@ namespace CoreAI.Mods.Rbx.Rendering
                 CreateSharedMaterial(_sharedShader, baseEntry, RbxSpace.MetersPerStud);
             variantMaterial.name =
                 "CoreAiRbxTextureMaterial_" + material.Name + "_" + material.Variant;
-            ApplyVariantOverrides(variantMaterial, baseEntry, in data, material.Variant);
-            _variantMaterials[material] =
-                new VariantMaterialRecord(variantMaterial, baseEntry, data);
+            try
+            {
+                ApplyVariantOverrides(variantMaterial, baseEntry, in data, material.Variant);
+            }
+            catch
+            {
+                DestroyMaterial(variantMaterial);
+                throw;
+            }
+            VariantMaterialRecord created = new(material, variantMaterial, baseEntry, data);
+            _variantMaterials[material] = created;
+            _variantRecords.Add(variantMaterial, created);
+            created.IdleNode = _idleVariants.AddLast(created);
             SyncTextureScaleToSessionScale();
             visualMaterial = variantMaterial;
             return true;
@@ -366,19 +505,25 @@ namespace CoreAI.Mods.Rbx.Rendering
                 left.StudsPerTile == right.StudsPerTile;
         }
 
-        /// <summary>One cached variant shared material with the base entry and data snapshot
-        /// it was built from.</summary>
+        /// <summary>Provider-owned mutable material and renderer reference count.</summary>
         private sealed class VariantMaterialRecord
         {
-            public VariantMaterialRecord(Material material,
+            public VariantMaterialRecord(RbxMaterialId key, Material material,
                 RbxMaterialTextureCatalog.Entry baseEntry, RbxMaterialVariantData snapshot)
             {
+                Key = key;
                 Material = material;
                 BaseEntry = baseEntry;
                 Snapshot = snapshot;
             }
 
             public Material Material { get; }
+
+            public RbxMaterialId Key { get; }
+
+            public int References { get; set; }
+
+            public LinkedListNode<VariantMaterialRecord> IdleNode { get; set; }
 
             public RbxMaterialTextureCatalog.Entry BaseEntry { get; set; }
 
@@ -408,51 +553,44 @@ namespace CoreAI.Mods.Rbx.Rendering
                 }
             }
 
-            if (_variantMaterials != null)
-            {
-                foreach (VariantMaterialRecord record in _variantMaterials.Values)
-                {
-                    DestroyMaterial(record.Material);
-                }
-            }
-
             _sharedMaterials = null;
             _effectiveEntries = null;
-            _variantMaterials = null;
             _sharedShader = null;
             _sharedMaterialAllocationCount = 0;
             _cachedMetersPerStud = 0f;
         }
 
         /// <summary>Resynchronizes stud-authored tile widths after a session-scale change.</summary>
-        private static void SyncTextureScaleToSessionScale()
+        private void SyncTextureScaleToSessionScale()
         {
             float metersPerStud = RbxSpace.MetersPerStud;
-            if (ScaleMath.Approximately(metersPerStud, _cachedMetersPerStud))
+            if (!ScaleMath.Approximately(metersPerStud, _cachedMetersPerStud))
+            {
+                foreach (KeyValuePair<int, Material> pair in _sharedMaterials)
+                {
+                    RbxMaterialTextureCatalog.Entry entry = _effectiveEntries[pair.Key];
+                    float textureAspect = pair.Value.GetFloat(PropertyIds.TextureAspect);
+                    pair.Value.SetFloat(PropertyIds.TextureScale,
+                        ComputeTextureScale(textureAspect, entry.TileWidthStuds, metersPerStud));
+                }
+
+                _cachedMetersPerStud = metersPerStud;
+            }
+
+            if (ScaleMath.Approximately(metersPerStud, _variantMetersPerStud))
             {
                 return;
             }
 
-            foreach (KeyValuePair<int, Material> pair in _sharedMaterials)
+            foreach (VariantMaterialRecord record in _variantRecords.Values)
             {
-                RbxMaterialTextureCatalog.Entry entry = _effectiveEntries[pair.Key];
-                float textureAspect = pair.Value.GetFloat(PropertyIds.TextureAspect);
-                pair.Value.SetFloat(PropertyIds.TextureScale,
-                    ComputeTextureScale(textureAspect, entry.TileWidthStuds, metersPerStud));
+                float textureAspect = record.Material.GetFloat(PropertyIds.TextureAspect);
+                record.Material.SetFloat(PropertyIds.TextureScale,
+                    ComputeTextureScale(textureAspect, record.EffectiveTileWidthStuds,
+                        metersPerStud));
             }
 
-            if (_variantMaterials != null)
-            {
-                foreach (VariantMaterialRecord record in _variantMaterials.Values)
-                {
-                    float textureAspect = record.Material.GetFloat(PropertyIds.TextureAspect);
-                    record.Material.SetFloat(PropertyIds.TextureScale,
-                        ComputeTextureScale(textureAspect, record.EffectiveTileWidthStuds,
-                            metersPerStud));
-                }
-            }
-
-            _cachedMetersPerStud = metersPerStud;
+            _variantMetersPerStud = metersPerStud;
         }
 
         private void EnsureSharedCache()
@@ -468,7 +606,6 @@ namespace CoreAI.Mods.Rbx.Rendering
             Dictionary<int, Material> materials = new(entries.Count);
             _effectiveEntries = entries;
             _sharedMaterials = materials;
-            _variantMaterials = new Dictionary<RbxMaterialId, VariantMaterialRecord>();
 
             if (compatibilityEntries && !AnyTextureAssigned(entries.Values))
             {

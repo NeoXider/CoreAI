@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Chat;
 using CoreAI.Messaging;
 using NUnit.Framework;
@@ -325,13 +326,14 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void StopAgent_WithoutScene_CancelsInjectedOrchestratorScope()
+        public void StopAgent_LegacyOrchestrator_DoesNotInvokeGlobalScopeCancellation()
         {
             FakeAiOrchestrator orchestrator = new("ok");
             CoreAiChatService service = new(orchestrator);
 
             Assert.DoesNotThrow(() => service.StopAgent("Role"));
-            Assert.AreEqual("Role", orchestrator.CancelledScope);
+            Assert.IsNull(orchestrator.CancelledScope,
+                "A user stop must not turn an unsupported actor cancellation into global cancellation.");
         }
 
         // ===================== v1.5.1 — Timeout + Error Propagation =====================
@@ -823,6 +825,92 @@ namespace CoreAI.Tests.EditMode
             }
             finally
             {
+                CoreAiChatService.IdleTimeoutDeadline.SchedulerOverride = null;
+            }
+        }
+
+        [TestCase("actor")]
+        [TestCase("trace")]
+        [TestCase("role")]
+        [TestCase("missing-actor")]
+        [TestCase("missing-trace")]
+        [TestCase("missing-role")]
+        public async Task ToolProgress_FromAnotherTurnCannotExtendTheIdleDeadline(string mismatch)
+        {
+            TimeSpan window = TimeSpan.FromSeconds(1);
+            VirtualIdleClock clock = new();
+            CoreAiChatService.IdleTimeoutDeadline.SchedulerOverride = clock.Schedule;
+            RequestProbeOrchestrator orchestrator = new();
+            IActorIdentityProvider identity = new LocalActorIdentityProvider("actor-a", "connection-a", "",
+                ActorGrantSet.None, AgentMemoryScope.Empty);
+            CoreAiChatService service = new(orchestrator,
+                settings: new StubSettings { LlmRequestTimeoutSecondsOverride = 1f },
+                actorIdentityProvider: identity);
+            AiTaskRequest request = new() { RoleId = "SharedRole", Hint = "stalled", TraceId = "trace-a" };
+            using CancellationTokenSource caller = new();
+            Task<string> turn = service.SendMessageAsync(request, caller.Token);
+            try
+            {
+                await orchestrator.Started;
+                clock.Advance(TimeSpan.FromMilliseconds(500));
+                string actor = mismatch == "actor" ? "actor-b" : mismatch == "missing-actor" ? "" : "actor-a";
+                string trace = mismatch == "trace" ? "trace-b" : mismatch == "missing-trace" ? "" : "trace-a";
+                string role = mismatch == "role" ? "OtherRole" : mismatch == "missing-role" ? "" : "SharedRole";
+                LlmToolCallInfo info = new(trace, role, "tool-call", "mutate", "{}", actor);
+                CoreAi.NotifyToolCallStarted(new LlmToolCallStarted(info));
+                CoreAi.NotifyToolCallCompleted(new LlmToolCallCompleted(info, "{}", 0d));
+                CoreAi.NotifyToolCallFailed(new LlmToolCallFailed(info, "refused", 0d));
+                Assert.AreEqual(window, clock.PendingDeadline,
+                    "Only this admitted actor, trace and role may count as progress for its idle deadline.");
+                clock.Advance(TimeSpan.FromMilliseconds(500));
+                Assert.IsTrue(orchestrator.LastCancellationToken.IsCancellationRequested);
+                Assert.IsFalse(caller.IsCancellationRequested);
+                Assert.IsInstanceOf<LlmOperationTimeoutException>(await CaptureFailureAsync(turn));
+            }
+            finally
+            {
+                caller.Cancel();
+                await CaptureFailureAsync(turn);
+                CoreAiChatService.IdleTimeoutDeadline.SchedulerOverride = null;
+            }
+        }
+
+        [TestCase("started")]
+        [TestCase("completed")]
+        [TestCase("failed")]
+        public async Task ToolProgress_FromTheAdmittedTurnRearmsTheIdleDeadline(string eventKind)
+        {
+            TimeSpan window = TimeSpan.FromSeconds(1);
+            VirtualIdleClock clock = new();
+            CoreAiChatService.IdleTimeoutDeadline.SchedulerOverride = clock.Schedule;
+            RequestProbeOrchestrator orchestrator = new();
+            CoreAiChatService service = new(orchestrator,
+                settings: new StubSettings { LlmRequestTimeoutSecondsOverride = 1f },
+                actorIdentityProvider: new LocalActorIdentityProvider("actor-a", "connection-a", "",
+                    ActorGrantSet.None, AgentMemoryScope.Empty));
+            AiTaskRequest request = new() { RoleId = "SharedRole", Hint = "active", TraceId = " caller-trace " };
+            using CancellationTokenSource caller = new();
+            Task<string> turn = service.SendMessageAsync(request, caller.Token);
+            try
+            {
+                await orchestrator.Started;
+                clock.Advance(TimeSpan.FromMilliseconds(500));
+                LlmToolCallInfo info = new("caller-trace", "SharedRole", "tool-call", "mutate", "{}", "actor-a");
+                if (eventKind == "started") CoreAi.NotifyToolCallStarted(new LlmToolCallStarted(info));
+                else if (eventKind == "completed") CoreAi.NotifyToolCallCompleted(new LlmToolCallCompleted(info, "{}", 0d));
+                else CoreAi.NotifyToolCallFailed(new LlmToolCallFailed(info, "refused", 0d));
+                Assert.AreEqual(clock.Now + window, clock.PendingDeadline);
+                Assert.AreEqual(" caller-trace ", request.TraceId, "An explicit caller trace remains unchanged.");
+                clock.Advance(TimeSpan.FromMilliseconds(500));
+                Assert.IsFalse(orchestrator.LastCancellationToken.IsCancellationRequested);
+                caller.Cancel();
+                Assert.IsInstanceOf<OperationCanceledException>(await CaptureFailureAsync(turn));
+                Assert.IsFalse(orchestrator.LastRequest.DeadlineCancellationToken.IsCancellationRequested);
+            }
+            finally
+            {
+                caller.Cancel();
+                await CaptureFailureAsync(turn);
                 CoreAiChatService.IdleTimeoutDeadline.SchedulerOverride = null;
             }
         }
@@ -1355,11 +1443,12 @@ namespace CoreAI.Tests.EditMode
             {
                 for (int i = 0; i < _gates.Length; i++)
                 {
-                    CoreAi.NotifyToolCallStarted(new LlmToolCallStarted("trace", request.RoleId, $"tool{i}", "{}"));
+                    LlmToolCallInfo info = new(request.TraceId, request.RoleId, $"call{i}", $"tool{i}", "{}",
+                        request.ActorContext.Value.ActorId);
+                    CoreAi.NotifyToolCallStarted(new LlmToolCallStarted(info));
                     StartedSteps = i + 1;
                     await WaitForGateAsync(_gates[i].Task, ct);
-                    CoreAi.NotifyToolCallCompleted(new LlmToolCallCompleted(
-                        "trace", request.RoleId, $"tool{i}", "{}", "{}", 0d));
+                    CoreAi.NotifyToolCallCompleted(new LlmToolCallCompleted(info, "{}", 0d));
                 }
 
                 return "done";

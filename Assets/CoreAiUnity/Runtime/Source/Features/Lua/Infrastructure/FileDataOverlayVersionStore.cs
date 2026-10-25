@@ -8,6 +8,21 @@ using UnityEngine;
 
 namespace CoreAI.Infrastructure.Lua
 {
+    /// <summary>A failed overlay save; local replacement can precede a refused persistence-arm request.</summary>
+    public sealed class DataOverlayPersistenceException : IOException
+    {
+        /// <summary>True when the local file replacement completed before persistence arming failed.</summary>
+        public bool LocalCommitCompleted { get; }
+
+        public DataOverlayPersistenceException(bool localCommitCompleted, Exception innerException)
+            : base(localCommitCompleted
+                ? "Data overlay file was committed locally, but persistence was not armed. Retry the operation."
+                : "Data overlay file was not committed. Retry the operation.", innerException)
+        {
+            LocalCommitCompleted = localCommitCompleted;
+        }
+    }
+
     /// <summary>
     /// Persists data overlay version records to the local file system. History is bounded per key by
     /// <see cref="VersionRetentionPolicy"/> (original + current + last N intermediate revisions + a byte
@@ -22,7 +37,11 @@ namespace CoreAI.Infrastructure.Lua
         private readonly MemoryDataOverlayVersionStore _memory;
         private readonly string _filePath;
         private readonly object _ioLock = new();
+        private readonly int _maxIntermediateRevisions;
+        private readonly long _maxTotalBytes;
+        private bool _pendingConfirmation;
         internal static Action BeforeAtomicReplaceForTesting;
+        internal static Func<bool> PersistenceArmingForTesting;
 
         public FileDataOverlayVersionStore(
             IGameLogger logger,
@@ -31,6 +50,8 @@ namespace CoreAI.Infrastructure.Lua
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _memory = new MemoryDataOverlayVersionStore(maxIntermediateRevisions, maxTotalBytes);
+            _maxIntermediateRevisions = maxIntermediateRevisions;
+            _maxTotalBytes = maxTotalBytes;
             string dir = Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
                 CoreAiPersistentPaths.DataOverlayVersions);
             Directory.CreateDirectory(dir);
@@ -46,6 +67,8 @@ namespace CoreAI.Infrastructure.Lua
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _memory = new MemoryDataOverlayVersionStore(maxIntermediateRevisions, maxTotalBytes);
+            _maxIntermediateRevisions = maxIntermediateRevisions;
+            _maxTotalBytes = maxTotalBytes;
             _filePath = jsonFilePath ?? throw new ArgumentNullException(nameof(jsonFilePath));
             string dir = Path.GetDirectoryName(_filePath);
             if (!string.IsNullOrEmpty(dir))
@@ -58,60 +81,63 @@ namespace CoreAI.Infrastructure.Lua
 
         public bool TryGetSnapshot(string overlayKey, out DataOverlayVersionRecord snapshot)
         {
-            return _memory.TryGetSnapshot(overlayKey, out snapshot);
+            lock (_ioLock) { return _memory.TryGetSnapshot(overlayKey, out snapshot); }
         }
 
         public void RecordSuccessfulApply(string overlayKey, string jsonOrTextPayload)
         {
-            if (_memory.RecordSuccessfulApplyChanged(overlayKey, jsonOrTextPayload))
-            {
-                SaveToDisk();
-            }
+            Mutate(staged => staged.RecordSuccessfulApplyChanged(overlayKey, jsonOrTextPayload));
         }
 
         public void SeedOriginal(string overlayKey, string originalPayload, bool overwriteExistingOriginal = false)
         {
-            if (_memory.SeedOriginalChanged(overlayKey, originalPayload, overwriteExistingOriginal))
-            {
-                SaveToDisk();
-            }
+            Mutate(staged => staged.SeedOriginalChanged(overlayKey, originalPayload, overwriteExistingOriginal));
         }
 
         public void ResetToOriginal(string overlayKey)
         {
-            if (_memory.ResetToOriginalChanged(overlayKey))
-            {
-                SaveToDisk();
-            }
+            Mutate(staged => staged.ResetToOriginalChanged(overlayKey));
         }
 
         public void ResetToRevision(string overlayKey, int revisionIndex)
         {
-            if (_memory.ResetToRevisionChanged(overlayKey, revisionIndex))
-            {
-                SaveToDisk();
-            }
+            Mutate(staged => staged.ResetToRevisionChanged(overlayKey, revisionIndex));
         }
 
         public void ResetAllToOriginal()
         {
-            _memory.ResetAllToOriginal();
-            SaveToDisk();
+            Mutate(staged => { staged.ResetAllToOriginal(); return true; });
         }
 
         public bool TryGetCurrentPayload(string overlayKey, out string currentPayload)
         {
-            return _memory.TryGetCurrentPayload(overlayKey, out currentPayload);
+            lock (_ioLock) { return _memory.TryGetCurrentPayload(overlayKey, out currentPayload); }
         }
 
         public IReadOnlyList<string> GetKnownKeys()
         {
-            return _memory.GetKnownKeys();
+            lock (_ioLock) { return _memory.GetKnownKeys(); }
         }
 
         public string BuildProgrammerPromptSection(string overlayKey)
         {
-            return _memory.BuildProgrammerPromptSection(overlayKey);
+            lock (_ioLock) { return _memory.BuildProgrammerPromptSection(overlayKey); }
+        }
+
+        private void Mutate(Func<MemoryDataOverlayVersionStore, bool> mutation)
+        {
+            lock (_ioLock)
+            {
+                MemoryDataOverlayVersionStore staged = new(_maxIntermediateRevisions, _maxTotalBytes);
+                staged.ImportFromRecords(_memory.ExportAllRecords());
+                if (!mutation(staged) && !_pendingConfirmation)
+                {
+                    return;
+                }
+
+                SaveToDisk(staged);
+                _memory.ImportFromRecords(staged.ExportAllRecords());
+            }
         }
 
         private void LoadFromDisk()
@@ -176,13 +202,14 @@ namespace CoreAI.Infrastructure.Lua
             }
         }
 
-        private void SaveToDisk()
+        private void SaveToDisk(MemoryDataOverlayVersionStore staged)
         {
             lock (_ioLock)
             {
+                bool localCommitCompleted = false;
                 try
                 {
-                    List<DataOverlayVersionRecord> records = _memory.ExportAllRecords();
+                    List<DataOverlayVersionRecord> records = staged.ExportAllRecords();
                     PersistRootDto root = new() { slots = new List<PersistSlotDto>() };
                     for (int i = 0; i < records.Count; i++)
                     {
@@ -213,11 +240,23 @@ namespace CoreAI.Infrastructure.Lua
 
                     string json = JsonUtility.ToJson(root, true);
                     WriteAtomically(_filePath, json);
-                    CoreAiWebGlPersistence.Sync();
+                    localCommitCompleted = true;
+                    _pendingConfirmation = true;
+                    if (!(PersistenceArmingForTesting?.Invoke() ?? CoreAiWebGlPersistence.Sync()))
+                    {
+                        throw new IOException("Automatic persistent-data storage is not armed.");
+                    }
+
+                    _pendingConfirmation = false;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(GameLogFeature.Core, $"Data overlay versions save failed: {ex.Message}");
+                    throw new DataOverlayPersistenceException(localCommitCompleted, ex);
                 }
             }
         }
@@ -225,15 +264,25 @@ namespace CoreAI.Infrastructure.Lua
         private static void WriteAtomically(string path, string contents)
         {
             string tmpPath = path + ".tmp";
-            File.WriteAllText(tmpPath, contents);
-            BeforeAtomicReplaceForTesting?.Invoke();
-            if (File.Exists(path))
+            try
             {
-                File.Replace(tmpPath, path, null);
+                File.WriteAllText(tmpPath, contents);
+                BeforeAtomicReplaceForTesting?.Invoke();
+                if (File.Exists(path))
+                {
+                    File.Replace(tmpPath, path, null);
+                }
+                else
+                {
+                    File.Move(tmpPath, path);
+                }
             }
-            else
+            finally
             {
-                File.Move(tmpPath, path);
+                if (File.Exists(tmpPath))
+                {
+                    File.Delete(tmpPath);
+                }
             }
         }
 

@@ -1515,29 +1515,36 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             ConfirmedWorldMutationGate gate = new(
                 cancellationToken => UniTask.FromResult(payload),
                 store);
-            LuaCsModRuntime runtime = new(versionStore: new MemoryLuaScriptVersionStore());
+            MemorySourceStore sourceStore = new();
+            LuaCsModRuntime runtime = new(
+                sourceStore: sourceStore,
+                versionStore: new MemoryLuaScriptVersionStore());
             LocalActorIdentityProvider identity = new("backup-reload-actor");
             ActorContext actor = identity.GetActorContext(BuiltInAgentRoleIds.Programmer);
             runtime.LoadMod(actor, "stable-mod", "local value = 1", LuaCapabilities.All);
             int originalRevisionCount = runtime.ListModVersions(actor, "stable-mod").Count;
             TestCoreAiSettings settings = new();
             LuaModsLlmTool tool = CreateWorldGatedModsTool(runtime, identity, settings, gate);
+            string[] trackedIds = { "stable-mod" };
+            string before = CaptureManageModsState(runtime, actor, sourceStore, trackedIds);
+            IReadOnlyList<string> manualBefore = store.ListManualSlots();
 
-            JObject result = JObject.Parse(await tool.ExecuteAsync(
+            await AssertManageModsBackupCancellationAsync(tool.ExecuteAsync(
                 "reload",
                 "stable-mod",
-                "local value = 2"));
+                "local value = 2"), "reload cancellation");
 
-            Assert.IsFalse(result.Value<bool>("success"), result.ToString());
             Assert.IsTrue(runtime.TryGetModSource(actor, "stable-mod", out string source));
             Assert.AreEqual("local value = 1", source);
             Assert.AreEqual(
                 originalRevisionCount,
                 runtime.ListModVersions(actor, "stable-mod").Count);
+            Assert.AreEqual(before, CaptureManageModsState(runtime, actor, sourceStore, trackedIds));
             CollectionAssert.AreEqual(
                 new[] { LuaModsLlmTool.ReloadBackupTrigger },
                 store.AutoTriggers);
             Assert.AreEqual(0, store.ManualCalls);
+            CollectionAssert.AreEqual(manualBefore, store.ListManualSlots());
         }
 
         [Test]
@@ -4441,16 +4448,27 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             string before = CaptureManageModsState(runtime, actor, sourceStore, trackedIds);
             IReadOnlyList<string> manualBefore = store.ListManualSlots();
 
-            JObject result = JObject.Parse(await tool.ExecuteAsync(
+            Task<string> operation = tool.ExecuteAsync(
                 action,
                 targetId,
                 code,
                 bundle,
-                revision));
+                revision);
 
-            Assert.IsFalse(
-                result.Value<bool>("success"),
-                action + "/" + failureMode + ": " + result);
+            if (failureMode == BackupFailureMode.Cancellation)
+            {
+                await AssertManageModsBackupCancellationAsync(operation, action + "/" + failureMode);
+            }
+            else
+            {
+                JObject result = JObject.Parse(await operation);
+                Assert.IsFalse(
+                    result.Value<bool>("success"),
+                    action + "/" + failureMode + ": " + result);
+                string expectedFailure = failureMode == BackupFailureMode.FalseResult
+                    ? "Injected durability refusal" : "Injected backup I/O failure";
+                StringAssert.Contains(expectedFailure, result.Value<string>("message"), action + "/" + failureMode);
+            }
             Assert.AreEqual(
                 before,
                 CaptureManageModsState(runtime, actor, sourceStore, trackedIds),
@@ -4467,6 +4485,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 manualBefore,
                 store.ListManualSlots(),
                 action + "/" + failureMode + " changed manual world slots.");
+        }
+
+        private static async Task AssertManageModsBackupCancellationAsync(Task<string> operation, string context)
+        {
+            try
+            {
+                string result = await operation;
+                Assert.Fail(context + " must propagate backup cancellation instead of returning JSON: " + result);
+            }
+            catch (OperationCanceledException exception)
+            {
+                StringAssert.Contains("Injected backup cancellation", exception.Message, context);
+            }
         }
 
         private static UniTask<RbxWorldPackageWriteResult> RejectBackup(

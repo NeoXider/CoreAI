@@ -8,8 +8,8 @@ namespace CoreAI.Ai.Logging
     /// Thread-safe <see cref="ILuaLogService"/> backed by fixed-capacity ring buffers: one per mod id
     /// plus one global buffer spanning all mods. Mods normally append on the main thread (tick-driven),
     /// while streaming/AI consumers may query from background tasks, so every operation is guarded by
-    /// a single lock; appends and queries are O(1)/O(capacity) with no allocations beyond the
-    /// <see cref="LuaLogEntry"/> itself (and the small result list a query builds).
+    /// a single lock. Retained mod ids and text have independent limits; evictions inspect only the
+    /// bounded mod dictionary. Stored/query entries are copied so callers cannot expand retained text.
     /// <para>
     /// Deliberately has zero Unity-console coupling by default. Passing a non-null
     /// <paramref name="mirrorLogger"/> (see constructor) mirrors <see cref="LuaLogLevel.Error"/> and
@@ -31,6 +31,10 @@ namespace CoreAI.Ai.Logging
         private readonly int _perModCapacity;
         private readonly IGameLogger _mirrorLogger;
         private readonly bool _mirrorErrorsToUnityConsole;
+        private readonly int _maximumRetainedModIds;
+        private readonly int _maximumMessageCharacters;
+        private readonly long _maximumRetainedCharacters;
+        private long _retainedCharacters;
         private long _sequence;
 
         /// <inheritdoc />
@@ -38,6 +42,12 @@ namespace CoreAI.Ai.Logging
         // never stall other threads' appends. The cost is best-effort ordering under concurrent
         // appends — consumers order by LuaLogEntry.Sequence, which is assigned under the lock.
         public event Action<LuaLogEntry> EntryAppended;
+
+        public LuaLogService(int perModCapacity, int globalCapacity, IGameLogger mirrorLogger,
+            bool mirrorErrorsToUnityConsole)
+            : this(perModCapacity, globalCapacity, mirrorLogger, mirrorErrorsToUnityConsole, 128, 16384, 4 * 1024 * 1024)
+        {
+        }
 
         /// <param name="perModCapacity">Ring buffer capacity for each mod id.</param>
         /// <param name="globalCapacity">Ring buffer capacity for the cross-mod global view.</param>
@@ -53,7 +63,10 @@ namespace CoreAI.Ai.Logging
             int perModCapacity = DefaultPerModCapacity,
             int globalCapacity = DefaultGlobalCapacity,
             IGameLogger mirrorLogger = null,
-            bool mirrorErrorsToUnityConsole = true)
+            bool mirrorErrorsToUnityConsole = true,
+            int maximumRetainedModIds = 128,
+            int maximumMessageCharacters = 16384,
+            long maximumRetainedCharacters = 4 * 1024 * 1024)
         {
             if (perModCapacity <= 0)
             {
@@ -65,11 +78,25 @@ namespace CoreAI.Ai.Logging
                 throw new ArgumentOutOfRangeException(nameof(globalCapacity));
             }
 
+            if (maximumRetainedModIds <= 0 || maximumMessageCharacters < 16 || maximumRetainedCharacters <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(maximumRetainedModIds), "Log retention limits must be positive; text limits must allow the truncation marker.");
+            }
+
             _perModCapacity = perModCapacity;
             _global = new RingBuffer(globalCapacity);
             _mirrorLogger = mirrorLogger;
             _mirrorErrorsToUnityConsole = mirrorErrorsToUnityConsole;
+            _maximumRetainedModIds = maximumRetainedModIds;
+            _maximumMessageCharacters = maximumMessageCharacters;
+            _maximumRetainedCharacters = maximumRetainedCharacters;
         }
+
+        /// <summary>Current retained per-mod buffer count.</summary>
+        public int RetainedModCount { get { lock (_gate) { return _perMod.Count; } } }
+
+        /// <summary>UTF-16 characters retained across both views; shared entries are counted twice.</summary>
+        public long RetainedCharacters { get { lock (_gate) { return _retainedCharacters; } } }
 
         /// <inheritdoc />
         public void Append(LuaLogEntry entry)
@@ -80,15 +107,27 @@ namespace CoreAI.Ai.Logging
             }
 
             entry.ModId ??= "";
-            entry.Message ??= "";
+            entry.Message = Clamp(entry.Message);
+            entry.ScriptName = entry.ScriptName == null ? null : Clamp(entry.ScriptName);
 
             lock (_gate)
             {
                 entry.Sequence = ++_sequence;
                 entry.UtcTime = DateTime.UtcNow;
 
-                _global.Add(entry);
-                GetOrCreatePerModBufferNoLock(entry.ModId).Add(entry);
+                LuaLogEntry stored = Copy(entry);
+                _retainedCharacters += _global.Add(stored);
+                RingBuffer modBuffer = GetOrCreatePerModBufferNoLock(stored.ModId);
+                _retainedCharacters += modBuffer.Add(stored);
+                while (_retainedCharacters > _maximumRetainedCharacters && _perMod.Count > 0)
+                {
+                    EvictOldestModNoLock();
+                }
+
+                while (_retainedCharacters > _maximumRetainedCharacters)
+                {
+                    _retainedCharacters -= _global.RemoveOldest();
+                }
             }
 
             if (_mirrorErrorsToUnityConsole && _mirrorLogger != null && IsErrorSeverity(entry.Level))
@@ -161,7 +200,7 @@ namespace CoreAI.Ai.Logging
                         continue;
                     }
 
-                    matched.Add(entry);
+                    matched.Add(Copy(entry));
                 }
             }
 
@@ -181,17 +220,16 @@ namespace CoreAI.Ai.Logging
                 if (string.IsNullOrEmpty(modId))
                 {
                     _global.Clear();
-                    foreach (RingBuffer buffer in _perMod.Values)
-                    {
-                        buffer.Clear();
-                    }
+                    _perMod.Clear();
+                    _retainedCharacters = 0;
 
                     return;
                 }
 
                 if (_perMod.TryGetValue(modId, out RingBuffer modBuffer))
                 {
-                    modBuffer.Clear();
+                    _retainedCharacters -= modBuffer.Characters;
+                    _perMod.Remove(modId);
                 }
             }
         }
@@ -200,11 +238,54 @@ namespace CoreAI.Ai.Logging
         {
             if (!_perMod.TryGetValue(modId, out RingBuffer buffer))
             {
+                if (_perMod.Count >= _maximumRetainedModIds)
+                {
+                    EvictOldestModNoLock();
+                }
+
                 buffer = new RingBuffer(_perModCapacity);
                 _perMod[modId] = buffer;
             }
 
             return buffer;
+        }
+
+        private void EvictOldestModNoLock()
+        {
+            string oldest = null;
+            long sequence = long.MaxValue;
+            foreach (KeyValuePair<string, RingBuffer> pair in _perMod)
+            {
+                if (pair.Value.LastSequence < sequence)
+                {
+                    oldest = pair.Key;
+                    sequence = pair.Value.LastSequence;
+                }
+            }
+
+            if (oldest != null)
+            {
+                _retainedCharacters -= _perMod[oldest].Characters;
+                _perMod.Remove(oldest);
+            }
+        }
+
+        private string Clamp(string text)
+        {
+            const string marker = "...[truncated]";
+            text ??= "";
+            return text.Length <= _maximumMessageCharacters
+                ? text : text.Substring(0, _maximumMessageCharacters - marker.Length) + marker;
+        }
+
+        private static LuaLogEntry Copy(LuaLogEntry entry)
+        {
+            return new LuaLogEntry
+            {
+                Sequence = entry.Sequence, UtcTime = entry.UtcTime, GameTime = entry.GameTime,
+                ModId = entry.ModId, Level = entry.Level, Message = entry.Message,
+                ScriptName = entry.ScriptName, Line = entry.Line
+            };
         }
 
         /// <summary>
@@ -216,16 +297,26 @@ namespace CoreAI.Ai.Logging
             private readonly LuaLogEntry[] _items;
             private int _start;
             private int _count;
+            public long Characters { get; private set; }
+            public long LastSequence { get; private set; }
 
             public RingBuffer(int capacity)
             {
                 _items = new LuaLogEntry[capacity];
             }
 
-            public void Add(LuaLogEntry entry)
+            public long Add(LuaLogEntry entry)
             {
+                long before = Characters;
                 int index = (_start + _count) % _items.Length;
+                if (_count == _items.Length)
+                {
+                    Characters -= Size(_items[index]);
+                }
+
                 _items[index] = entry;
+                Characters += Size(entry);
+                LastSequence = entry.Sequence;
                 if (_count == _items.Length)
                 {
                     _start = (_start + 1) % _items.Length;
@@ -234,6 +325,28 @@ namespace CoreAI.Ai.Logging
                 {
                     _count++;
                 }
+
+                return Characters - before;
+            }
+
+            public long RemoveOldest()
+            {
+                if (_count == 0)
+                {
+                    return 0;
+                }
+
+                long removed = Size(_items[_start]);
+                _items[_start] = null;
+                _start = (_start + 1) % _items.Length;
+                _count--;
+                Characters -= removed;
+                return removed;
+            }
+
+            private static long Size(LuaLogEntry entry)
+            {
+                return (long)entry.ModId.Length + entry.Message.Length + (entry.ScriptName?.Length ?? 0);
             }
 
             public void Clear()
@@ -241,6 +354,7 @@ namespace CoreAI.Ai.Logging
                 Array.Clear(_items, 0, _items.Length);
                 _start = 0;
                 _count = 0;
+                Characters = 0;
             }
 
             public IEnumerable<LuaLogEntry> EnumerateOldestFirst()

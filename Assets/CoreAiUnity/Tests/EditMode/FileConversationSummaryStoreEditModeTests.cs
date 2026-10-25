@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -141,7 +141,7 @@ namespace CoreAI.Tests.EditMode
 
                 await Task.WhenAll(tasks);
 
-                string path = Path.Combine(root, role + ".json");
+                string path = Path.Combine(root, AgentMemoryFileKey.FileStem(role) + ".json");
                 Assert.IsTrue(File.Exists(path));
                 Assert.AreEqual(0, Directory.GetFiles(root, "*.tmp").Length, "No leftover tmp files");
 
@@ -215,7 +215,7 @@ namespace CoreAI.Tests.EditMode
                 FileConversationSummaryStore store = new(root, null);
                 await store.SaveSummaryAsync("Role", "old");
 
-                string path = Path.Combine(root, "Role.json");
+                string path = Path.Combine(root, AgentMemoryFileKey.FileStem("Role") + ".json");
                 using (FileStream exclusive = new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
                 {
                     Exception asyncFailure = await CaptureAsync(() => store.SaveSummaryAsync("Role", "new"));
@@ -254,7 +254,7 @@ namespace CoreAI.Tests.EditMode
                 Exception failure = await CaptureAsync(() => store.SaveSummaryAsync("Role", "v"));
                 Assert.That(failure, Is.InstanceOf<IOException>());
 
-                string path = Path.Combine(root, "Role.json");
+                string path = Path.Combine(root, AgentMemoryFileKey.FileStem("Role") + ".json");
                 Assert.IsTrue(File.Exists(path), "VFS write happened; only durability is unconfirmed.");
                 FileConversationSummaryStore reopened = new(root, null);
                 Assert.That(await CaptureAsync(() => reopened.LoadSummaryAsync("Role")), Is.InstanceOf<IOException>(),
@@ -308,7 +308,7 @@ namespace CoreAI.Tests.EditMode
                 await store.SaveSummaryAsync("Role", "old");
                 confirmed = false;
                 Assert.That(await CaptureAsync(() => store.ClearSummaryAsync("Role")), Is.InstanceOf<IOException>());
-                Assert.IsFalse(File.Exists(Path.Combine(root, "Role.json")));
+                Assert.IsFalse(File.Exists(Path.Combine(root, AgentMemoryFileKey.FileStem("Role") + ".json")));
                 FileConversationSummaryStore reopened = new(root);
                 Assert.That(await CaptureAsync(() => reopened.LoadSummaryAsync("Role")), Is.InstanceOf<IOException>());
                 confirmed = true;
@@ -531,7 +531,7 @@ namespace CoreAI.Tests.EditMode
                 await bigSave;
                 Assert.Greater(failFastCount, 0, "Sync path must fail fast instead of blocking on async I/O.");
 
-                string path = Path.Combine(root, "Role.json");
+                string path = Path.Combine(root, AgentMemoryFileKey.FileStem("Role") + ".json");
                 Assert.DoesNotThrow(() => JsonConvert.DeserializeObject<object>(File.ReadAllText(path)));
                 Assert.AreEqual(0, Directory.GetFiles(root, "*.tmp").Length, "No leftover tmp files");
             }

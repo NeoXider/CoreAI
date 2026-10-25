@@ -61,6 +61,29 @@ namespace CoreAI.Tests.EditMode
             AssertUnchanged("for i = 1, 3 do\n  if i == 2 then goto skip end\n  print(i)\n  ::skip::\nend");
         }
 
+        [TestCase("local x = 1\n::again::\nreturn x")]
+        [TestCase("x = 1\n::again::\nreturn x")]
+        [TestCase("repeat tick() until ready\n::again::\nreturn true")]
+        public void PlainLua_LabelsAfterExpressions_RetainStringIdentity(string source)
+        {
+            AssertUnchanged(source);
+        }
+
+        [Test]
+        public void CastOnAdjacentLine_IsStillStripped()
+        {
+            AssertRewrites("local x = 1\n::number\nreturn x", "local x = 1\n\nreturn x");
+        }
+
+        [Test]
+        public void PlainLua_NumericLoopRetainsIdentityWhileGenericLoopIsNormalized()
+        {
+            AssertUnchanged("for index = 1, 3 do print(index) end");
+            DownlevelResult result = ProcessOk("for key, value in pairs({}) do end");
+            Assert.IsTrue(result.Changed);
+            StringAssert.Contains("generalized iteration", DescribeDiagnostics(result));
+        }
+
         [Test]
         public void GeneralizedIteration_InsertsAdapterAndPreservesLineCount()
         {
@@ -271,7 +294,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void CompoundFloorDivide_UsesMathFloor()
         {
-            AssertRewrites("x //= 2", "x = math.floor(x / ( 2))");
+            AssertRewrites("x //= 2", "local __luau_t0 = math.floor;x = __luau_t0(x / ( 2))");
         }
 
         [Test]
@@ -344,11 +367,11 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void ContinueInRepeat_EvaluatesConditionAtContinueSite()
+        public void ContinueInRepeat_JumpsToOriginalCondition()
         {
             AssertRewrites(
                 "repeat continue until done",
-                "while true do local __luau_t0 = false repeat if done then __luau_t0 = true end break if done then __luau_t0 = true end until true if __luau_t0 then break end end");
+                "repeat goto __luau_t0 ::__luau_t0:: until done");
         }
 
         [Test]
@@ -395,7 +418,7 @@ namespace CoreAI.Tests.EditMode
         {
             AssertRewrites(
                 "local m = `Hi {name}!`",
-                "local m = (\"Hi \" .. tostring(name) .. \"!\")");
+                "local __luau_t0 = tostring;local m = (\"Hi \" .. __luau_t0(name) .. \"!\")");
         }
 
         [Test]
@@ -403,7 +426,7 @@ namespace CoreAI.Tests.EditMode
         {
             AssertRewrites(
                 "local m = `{a} and {b}`",
-                "local m = (\"\" .. tostring(a) .. \" and \" .. tostring(b) .. \"\")");
+                "local __luau_t0 = tostring;local m = (\"\" .. __luau_t0(a) .. \" and \" .. __luau_t0(b) .. \"\")");
         }
 
         [Test]
@@ -411,7 +434,7 @@ namespace CoreAI.Tests.EditMode
         {
             AssertRewrites(
                 "local m = `outer {`inner {x}`}!`",
-                "local m = (\"outer \" .. tostring((\"inner \" .. tostring(x) .. \"\")) .. \"!\")");
+                "local __luau_t0 = tostring;local m = (\"outer \" .. __luau_t0((\"inner \" .. __luau_t0(x) .. \"\")) .. \"!\")");
         }
 
         [Test]
@@ -427,7 +450,7 @@ namespace CoreAI.Tests.EditMode
         {
             AssertRewrites(
                 "local m = `sum: {a + b(2)}`",
-                "local m = (\"sum: \" .. tostring(a + b(2)) .. \"\")");
+                "local __luau_t0 = tostring;local m = (\"sum: \" .. __luau_t0(a + b(2)) .. \"\")");
         }
 
         [Test]
@@ -435,7 +458,7 @@ namespace CoreAI.Tests.EditMode
         {
             AssertRewrites(
                 "local m = `{if ok then \"yes\" else \"no\"}`",
-                "local m = (\"\" .. tostring((function() if ok then return (\"yes\") else return (\"no\") end end)()) .. \"\")");
+                "local __luau_t0 = tostring;local m = (\"\" .. __luau_t0((function() if ok then return (\"yes\") else return (\"no\") end end)()) .. \"\")");
         }
 
         [Test]
@@ -443,7 +466,7 @@ namespace CoreAI.Tests.EditMode
         {
             AssertRewrites(
                 "print`score {s}`",
-                "print(\"score \" .. tostring(s) .. \"\")");
+                "local __luau_t0 = tostring;print(\"score \" .. __luau_t0(s) .. \"\")");
         }
 
         // ---------------------------------------------------------------- if expressions
@@ -485,19 +508,19 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void FloorDivision_BecomesMathFloor()
         {
-            AssertRewrites("local h = x // 2", "local h = math.floor(x / 2)");
+            AssertRewrites("local h = x // 2", "local __luau_t0 = math.floor;local h = __luau_t0(x / 2)");
         }
 
         [Test]
         public void FloorDivision_RespectsPrecedence()
         {
-            AssertRewrites("local a = 1 + 7 // 2", "local a = 1 + math.floor(7 / 2)");
+            AssertRewrites("local a = 1 + 7 // 2", "local __luau_t0 = math.floor;local a = 1 + __luau_t0(7 / 2)");
         }
 
         [Test]
         public void FloorDivision_ChainsLeftAssociatively()
         {
-            AssertRewrites("local b = 9 // 2 // 2", "local b = math.floor(math.floor(9 / 2) / 2)");
+            AssertRewrites("local b = 9 // 2 // 2", "local __luau_t0 = math.floor;local b = __luau_t0(__luau_t0(9 / 2) / 2)");
         }
 
         // ---------------------------------------------------------------- number literals
@@ -735,7 +758,10 @@ namespace CoreAI.Tests.EditMode
                 "Source nested 201 levels deep (" + shape + ") must be refused with a nesting error, got: "
                 + DescribeDiagnostics(justPastTheLimit));
 
-            DownlevelResult farPastTheLimit = LuauDownleveler.Process(NestedSource(shape, 100000));
+            string deeplyNested = NestedSource(shape, 100000);
+            LuauDownlevelOptions nestingOptions = new(maxInputCharacters: deeplyNested.Length,
+                maxOutputCharacters: checked(deeplyNested.Length * 2));
+            DownlevelResult farPastTheLimit = LuauDownleveler.Process(deeplyNested, "chunk", nestingOptions);
             Assert.IsTrue(RefusedAsTooDeep(farPastTheLimit),
                 "Source nested 100,000 levels deep (" + shape + ") must be refused, not overflow the stack: "
                 + DescribeDiagnostics(farPastTheLimit));
@@ -770,6 +796,145 @@ namespace CoreAI.Tests.EditMode
         public void ZEscape_StripsFollowingWhitespace()
         {
             AssertRewrites("local s = \"a\\z   b\"", "local s = \"ab\"");
+        }
+
+        [TestCase("\n", "\"")]
+        [TestCase("\r\n", "\"")]
+        [TestCase("\n", "'")]
+        [TestCase("\r\n", "'")]
+        public void ZEscape_ConsumesMultilineWhitespaceAndWarns(string newline, string quote)
+        {
+            DownlevelResult result = ProcessOk("return " + quote + "a\\z" + newline + "  b" + quote);
+            Assert.AreEqual("return " + quote + "ab" + quote, result.LuaSource);
+            bool warned = false;
+            foreach (DownlevelDiagnostic diagnostic in result.Diagnostics)
+            {
+                warned |= diagnostic.Severity == DownlevelSeverity.Warning
+                    && diagnostic.Message.Contains("line numbers shift");
+            }
+
+            Assert.IsTrue(warned);
+        }
+
+        [Test]
+        public void ZEscape_LaterDiagnosticRetainsOriginalPosition()
+        {
+            string source = "local text = \"a\\z\r\n b\"\r\n$";
+            DownlevelResult result = LuauDownleveler.Process(source);
+            Assert.IsTrue(result.HasErrors);
+            Assert.AreSame(source, result.LuaSource);
+            Assert.AreEqual(3, result.Diagnostics[0].Line);
+            Assert.AreEqual(1, result.Diagnostics[0].Column);
+        }
+
+        [TestCase("\\u{100000041}")]
+        [TestCase("\\u{80000000}")]
+        [TestCase("\\u{110000}")]
+        [TestCase("\\u{}")]
+        [TestCase("\\u{41")]
+        [TestCase("\\u{xyz}")]
+        [TestCase("\\u41")]
+        [TestCase("\\u{00000000000000041}")]
+        public void MalformedUnicodeEscape_IsRefusedInOriginalCoordinates(string escape)
+        {
+            string[] quotes = { "\"", "`" };
+            foreach (string quote in quotes)
+            {
+                string source = "\nreturn " + quote + escape + quote;
+                DownlevelResult result = LuauDownleveler.Process(source);
+                Assert.IsTrue(result.HasErrors, source);
+                Assert.IsFalse(result.Changed);
+                Assert.AreSame(source, result.LuaSource);
+                Assert.AreEqual(2, result.Diagnostics[0].Line);
+                Assert.AreEqual(9, result.Diagnostics[0].Column);
+            }
+        }
+
+        [Test]
+        public void UnicodeEscape_RangeAndLeadingZeroBoundariesRemainSupported()
+        {
+            AssertRewrites("return \"\\u{0000000000000041}\"", "return \"\\065\"");
+            AssertRewrites("return \"\\u{10FFFF}\"", "return \"\\244\\143\\191\\191\"");
+            AssertRewrites("return \"\\u{D800}\"", "return \"\\237\\160\\128\"");
+        }
+
+        [TestCase("input")]
+        [TestCase("output")]
+        [TestCase("edits")]
+        [TestCase("work")]
+        public void ConfiguredBudgetRefusal_ReturnsOriginalSourceAndError(string limit)
+        {
+            string source = "local x = 1 x += 2 x += 3 return x";
+            LuauDownlevelOptions options;
+            switch (limit)
+            {
+                case "input":
+                    options = new LuauDownlevelOptions(maxInputCharacters: source.Length - 1);
+                    break;
+                case "output":
+                    options = new LuauDownlevelOptions(maxOutputCharacters: source.Length);
+                    break;
+                case "edits":
+                    options = new LuauDownlevelOptions(maxEdits: 1);
+                    break;
+                default:
+                    options = new LuauDownlevelOptions(maxWorkUnits: source.Length);
+                    break;
+            }
+
+            DownlevelResult refused = LuauDownleveler.Process(source, "budget", options);
+            Assert.IsTrue(refused.HasErrors);
+            Assert.IsFalse(refused.Changed);
+            Assert.AreSame(source, refused.LuaSource);
+            StringAssert.Contains("budget exceeded", DescribeDiagnostics(refused));
+            DownlevelResult allowed = LuauDownleveler.Process(source, "budget", new LuauDownlevelOptions());
+            Assert.IsFalse(allowed.HasErrors);
+            Assert.IsTrue(allowed.Changed);
+        }
+
+        [TestCase(1)]
+        [TestCase(4)]
+        [TestCase(8)]
+        [TestCase(16)]
+        public void NestedRepeatConditionFamily_UsesLinearSpaceAndHonorsOutputBudget(int depth)
+        {
+            string expression = "true";
+            for (int index = 0; index < depth; index++)
+            {
+                expression = "(function() repeat if true then continue end until " + expression
+                    + " return true end)()";
+            }
+
+            string source = "return " + expression;
+            DownlevelResult allowed = ProcessOk(source);
+            Assert.Less(allowed.LuaSource.Length, source.Length * 4);
+            DownlevelResult refused = LuauDownleveler.Process(source, "nested",
+                new LuauDownlevelOptions(maxOutputCharacters: source.Length));
+            Assert.IsTrue(refused.HasErrors);
+            Assert.AreSame(source, refused.LuaSource);
+        }
+
+        [TestCase("resolver();error('injected')")]
+        [TestCase("end")]
+        [TestCase("__luau_t0")]
+        [TestCase("")]
+        public void InvalidTrustedResolverName_IsRefusedWithoutThrowing(string name)
+        {
+            string source = "for key, value in {} do end";
+            DownlevelResult result = LuauDownleveler.Process(source, "resolver",
+                new LuauDownlevelOptions(trustedIteratorResolverName: name));
+            Assert.IsTrue(result.HasErrors);
+            Assert.AreSame(source, result.LuaSource);
+        }
+
+        [Test]
+        public void InvalidBudgetOptions_AreRefusedWithoutThrowing()
+        {
+            string source = "return 1";
+            DownlevelResult result = LuauDownleveler.Process(source, "options",
+                new LuauDownlevelOptions(maxInputCharacters: 0));
+            Assert.IsTrue(result.HasErrors);
+            Assert.AreSame(source, result.LuaSource);
         }
     }
 }

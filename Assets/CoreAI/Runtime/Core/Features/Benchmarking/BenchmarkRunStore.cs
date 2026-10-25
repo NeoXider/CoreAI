@@ -154,6 +154,9 @@ namespace CoreAI.Benchmarking
         public static bool OptionMatches(string key, string current, string saved)
         {
             if (key == "COREAI_BENCHMARK_RETRIES") return true;
+            if (key == "COREAI_BENCHMARK_PROVIDER_STALL_SECONDS")
+                return BenchmarkProviderFailurePolicy.NormalizeStallSeconds(current) ==
+                    BenchmarkProviderFailurePolicy.NormalizeStallSeconds(saved);
             if (key == "COREAI_TEST_STREAMING" || key == "COREAI_TEST_NATIVE_TOOLS")
                 return ProviderFlag(current) == ProviderFlag(saved);
             return string.Equals(current ?? "", saved ?? "", StringComparison.Ordinal);
@@ -219,7 +222,8 @@ namespace CoreAI.Benchmarking
         }
 
         public bool IsFinalized(string id, int repetition) => Results.Any(r =>
-            r.ScenarioId == id && r.Repetition == repetition && r.Attribution != FailureAttribution.Environment);
+            r.ScenarioId == id && r.Repetition == repetition && !r.Interrupted &&
+            r.Attribution != FailureAttribution.Environment);
 
         public void Merge(ScenarioResult result, IReadOnlyList<BenchmarkPlannedScenario> plan)
         {

@@ -141,6 +141,28 @@ The no-per-part-allocation gate warms the cache and lookup path, then resolves t
 before and after the lookup loop. This distinguishes the one shared cache build from per-part native or
 managed allocation.
 
+### Projection verification
+
+The opaque procedural surface computes projection positions in physical object-axis coordinates.
+Its projection normal uses the inverse transpose of that same positive axis scale, guarded against
+degenerate components, and is normalized again after interpolation. The independently transformed
+world normal continues to drive lighting. This keeps a stretched wedge's physical face direction and
+its pattern-plane selection in agreement; uniform scale retains the existing projection.
+
+`RbxProceduralProjectionRenderEditModeTests` renders the production surface shader in a temporary
+preview scene through an SRP render request. It compares a scaled wedge or curved patch against the
+same geometry with scale baked into its vertices and normals derived from geometric tangent cross
+products. Cases cover identity and rotated transforms, a uniform-scale control, the direct procedural
+provider and missing-required-texture fallback. The fixture disables relief to isolate projection,
+requires visible patterned surface pixels, compares their floating-point colors and rejects non-finite
+channels. It restores render targets and destroys its temporary scene, meshes, material and readback
+textures; PNG pairs are written under `CoreAI-ProceduralProjection` in the test runner's work directory.
+
+A null graphics device, unavailable floating-point target or unsupported URP request is an explicit
+ignored test, not rendered acceptance. This regression does not establish fog correctness, full relief
+appearance, target-player shader inclusion or WebGL/device behavior. Those gates require their own
+Unity/player receipts and reviewed captures.
+
 ## Source and licensing
 
 The enum names and values follow the Roblox creator documentation (an offline mirror of the

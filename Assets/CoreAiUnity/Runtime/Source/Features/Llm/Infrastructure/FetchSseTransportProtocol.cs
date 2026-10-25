@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using CoreAI.Ai;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -104,6 +105,16 @@ namespace CoreAI.Infrastructure.Llm
                    string.Equals(message, "canceled", StringComparison.OrdinalIgnoreCase);
         }
 
+        internal static Exception CreateTransportException(string message)
+        {
+            if (IsCancelledMessage(message)) return new OperationCanceledException();
+            if (string.Equals(message, "Timeout", StringComparison.OrdinalIgnoreCase))
+                return new LlmClientException("SSE transport total timeout expired.", LlmErrorCode.Timeout);
+            if (string.Equals(message, "BacklogOverflow", StringComparison.Ordinal))
+                return new LlmClientException("SSE transport buffer capacity exceeded.", LlmErrorCode.BackendUnavailable);
+            return new LlmClientException("SSE browser transport failed.", LlmErrorCode.BackendUnavailable);
+        }
+
         private static string SanitizeHeaderToken(string raw)
         {
             if (string.IsNullOrEmpty(raw))
@@ -112,6 +123,89 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return raw.Replace("\r", "").Replace("\n", "").Trim();
+        }
+    }
+
+    internal sealed class FetchSseBacklog
+    {
+        internal const int DefaultMaxBufferedBytes = 1024 * 1024;
+        internal const int DefaultMaxBufferedChunks = 1024;
+        private readonly object _gate = new object();
+        private readonly Queue<byte[]> _chunks = new Queue<byte[]>();
+        private readonly int _maxBytes;
+        private readonly int _maxChunks;
+        private byte[] _current;
+        private int _position;
+        private int _bufferedBytes;
+        private int _bufferedChunks;
+
+        internal FetchSseBacklog(int maxBytes, int maxChunks)
+        {
+            if (maxBytes <= 0) throw new ArgumentOutOfRangeException(nameof(maxBytes));
+            if (maxChunks <= 0) throw new ArgumentOutOfRangeException(nameof(maxChunks));
+            _maxBytes = maxBytes;
+            _maxChunks = maxChunks;
+        }
+
+        internal int BufferedBytes { get { lock (_gate) return _bufferedBytes; } }
+        internal int BufferedChunks { get { lock (_gate) return _bufferedChunks; } }
+
+        internal bool TryEnqueue(string chunk)
+        {
+            if (string.IsNullOrEmpty(chunk)) return true;
+            lock (_gate)
+            {
+                int byteCount = Encoding.UTF8.GetByteCount(chunk);
+                if (byteCount > _maxBytes - _bufferedBytes || _bufferedChunks >= _maxChunks) return false;
+                _chunks.Enqueue(Encoding.UTF8.GetBytes(chunk));
+                _bufferedBytes += byteCount;
+                _bufferedChunks++;
+                return true;
+            }
+        }
+
+        internal int Read(byte[] buffer, int offset, int count, out int acknowledgedBytes)
+        {
+            if (buffer == null) throw new ArgumentNullException(nameof(buffer));
+            if (offset < 0 || count < 0 || offset > buffer.Length - count)
+                throw new ArgumentOutOfRangeException(nameof(count));
+            acknowledgedBytes = 0;
+            if (count == 0) return 0;
+            lock (_gate)
+            {
+                if (_current == null)
+                {
+                    if (_chunks.Count == 0) return 0;
+                    _current = _chunks.Dequeue();
+                    _position = 0;
+                }
+
+                int copied = Math.Min(count, _current.Length - _position);
+                Array.Copy(_current, _position, buffer, offset, copied);
+                _position += copied;
+                if (_position == _current.Length)
+                {
+                    acknowledgedBytes = _current.Length;
+                    _bufferedBytes -= _current.Length;
+                    _bufferedChunks--;
+                    _current = null;
+                    _position = 0;
+                }
+
+                return copied;
+            }
+        }
+
+        internal void Clear()
+        {
+            lock (_gate)
+            {
+                _chunks.Clear();
+                _current = null;
+                _position = 0;
+                _bufferedBytes = 0;
+                _bufferedChunks = 0;
+            }
         }
     }
 }

@@ -211,6 +211,14 @@ namespace CoreAI.Infrastructure.World
                 return null;
             }
 
+            bool hasParentCommand = !string.IsNullOrWhiteSpace(env.stringValue);
+            Transform resolvedParent = null;
+            if (hasParentCommand && !TryResolveParent(null, env.stringValue, out resolvedParent))
+            {
+                error = LastErrorMessage;
+                return null;
+            }
+
             Vector3 pos = new(env.x, env.y, env.z);
 
             // WHY: The model's explicit coordinates are authoritative by default: adjacent/stacked/on-the-ground
@@ -260,7 +268,10 @@ namespace CoreAI.Infrastructure.World
 
             if (spawned != null)
             {
-                TryParentSpawned(spawned, env.stringValue, env.worldPositionStays);
+                if (hasParentCommand)
+                {
+                    spawned.transform.SetParent(resolvedParent, env.worldPositionStays);
+                }
 
                 if (spawned.GetComponent<WorldObjectComponent>() == null)
                 {
@@ -621,12 +632,19 @@ namespace CoreAI.Infrastructure.World
 
             bool legacySetTransform = string.Equals(env.action, "set_transform", StringComparison.Ordinal);
             bool hasParentCommand = !string.IsNullOrWhiteSpace(env.stringValue);
-            bool useLocalSpace = false;
-            if (hasParentCommand && !env.worldPositionStays)
+            Transform resolvedParent = null;
+            if (hasParentCommand && !TryResolveParent(go, env.stringValue, out resolvedParent))
             {
-                useLocalSpace = TryParentSpawned(go, env.stringValue, false) && go.transform.parent != null;
+                return false;
             }
 
+            if (hasParentCommand)
+            {
+                go.transform.SetParent(resolvedParent, env.worldPositionStays);
+                WorldStateManager.ForgetPendingParent(go);
+            }
+
+            bool useLocalSpace = hasParentCommand && !env.worldPositionStays && resolvedParent != null;
             if (legacySetTransform || (env.hasPosition && !HasAxisPositionFlags(env)))
             {
                 if (useLocalSpace)
@@ -714,37 +732,33 @@ namespace CoreAI.Infrastructure.World
                 go.transform.localScale = ResolveChangeScale(go.transform.localScale, env);
             }
 
-            if (hasParentCommand && env.worldPositionStays)
-            {
-                TryParentSpawned(go, env.stringValue, true);
-            }
-
             return true;
         }
 
-        private bool TryParentSpawned(GameObject child, string parentName, bool worldPositionStays = true)
+        private bool TryResolveParent(GameObject child, string parentName, out Transform resolvedParent)
         {
-            if (child == null || string.IsNullOrWhiteSpace(parentName))
+            resolvedParent = null;
+            string requestedName = (parentName ?? string.Empty).Trim();
+            if (requestedName.Equals("none", StringComparison.OrdinalIgnoreCase))
             {
-                return false;
-            }
-
-            if (parentName.Equals("none", StringComparison.OrdinalIgnoreCase))
-            {
-                child.transform.SetParent(null, worldPositionStays);
-                WorldStateManager.ForgetPendingParent(child);
                 return true;
             }
 
-            if (!ResolveObject(parentName, out GameObject parent))
+            if (!ResolveObject(requestedName, out GameObject parent))
             {
-                _logger.LogWarning(GameLogFeature.MessagePipe,
-                    $"[World] parent: parent not found (name='{parentName}')");
+                LastErrorMessage = $"parent not found: '{requestedName}'.";
+                _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] {LastErrorMessage}");
                 return false;
             }
 
-            child.transform.SetParent(parent.transform, worldPositionStays);
-            WorldStateManager.ForgetPendingParent(child);
+            if (child != null && (parent == child || parent.transform.IsChildOf(child.transform)))
+            {
+                LastErrorMessage = "parent assignment would create a transform cycle.";
+                _logger.LogWarning(GameLogFeature.MessagePipe, $"[World] {LastErrorMessage}");
+                return false;
+            }
+
+            resolvedParent = parent.transform;
             return true;
         }
 

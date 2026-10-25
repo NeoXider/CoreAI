@@ -11,6 +11,13 @@ using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Mcp.Server
 {
+    internal interface IMcpServerTransport : IDisposable
+    {
+        bool IsRunning { get; }
+        string Url { get; }
+        void Start();
+    }
+
     /// <summary>
     /// Localhost-only HTTP transport for the MCP server. Serves a single streamable-HTTP endpoint at
     /// <c>POST /mcp</c> speaking JSON-RPC 2.0, tolerant of the two response framings MCP clients use:
@@ -26,7 +33,7 @@ namespace CoreAI.Mcp.Server
     /// tunnel or reverse proxy.
     /// </para>
     /// </summary>
-    public sealed class McpHttpServer : IDisposable
+    public sealed class McpHttpServer : IDisposable, IMcpServerTransport
     {
         /// <summary>Default hard cap on an accepted request body, in bytes.</summary>
         public const int DefaultMaxRequestBodyBytes = 4 * 1024 * 1024;
@@ -107,6 +114,10 @@ namespace CoreAI.Mcp.Server
         /// <summary>The loopback URL clients connect to.</summary>
         public string Url => $"http://127.0.0.1:{_port}{EndpointPath}";
 
+        internal string ListeningPrefix => GetListeningPrefix(_port);
+
+        internal static string GetListeningPrefix(int port) => $"http://127.0.0.1:{port}/";
+
         /// <summary>True when a bearer token is required on every request.</summary>
         public bool RequiresAuth => _authToken != null;
 
@@ -126,7 +137,7 @@ namespace CoreAI.Mcp.Server
             // does not match a POST to "/mcp" (no trailing slash), which is exactly what MCP clients
             // send. Binding root and routing in the handler accepts "/mcp", "/mcp/", and "/" alike while
             // staying strictly on 127.0.0.1.
-            _listener.Prefixes.Add($"http://127.0.0.1:{_port}/");
+            _listener.Prefixes.Add(ListeningPrefix);
             _listener.Start();
 
             // WHY: a Start() after Stop() would otherwise leak the previous token source.

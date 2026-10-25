@@ -81,6 +81,91 @@ namespace CoreAI.Tests.EditMode
             CollectionAssert.AreEqual(new[] { "chat", "chat" }, registered);
         }
 
+        [Test]
+        public void OwnedRegistration_ReplacementAndRemovalReleaseOnlyTheirOwnLifetimeOnce()
+        {
+            HubPageRegistry registry = new();
+            CountingLifetime first = new();
+            CountingLifetime second = new();
+            Func<IHubPage> firstFactory = () => new TestHubPage("mods", "First", 0);
+            Func<IHubPage> secondFactory = () => new TestHubPage("mods", "Second", 0);
+            registry.RegisterOwned("mods", firstFactory, first);
+            registry.RegisterOwned("mods", secondFactory, second);
+
+            Assert.AreEqual(1, first.Disposals);
+            Assert.AreEqual(0, second.Disposals);
+            Assert.IsFalse(registry.Unregister("mods", firstFactory),
+                "An old binder cannot remove a replacement registration.");
+            Assert.IsTrue(registry.TryGet("mods", out Func<IHubPage> retained));
+            Assert.AreSame(secondFactory, retained);
+            Assert.AreEqual(0, second.Disposals);
+            Assert.IsTrue(registry.Unregister("mods", secondFactory));
+            Assert.IsFalse(registry.Unregister("mods", secondFactory));
+            Assert.AreEqual(1, second.Disposals);
+        }
+
+        [Test]
+        public void OwnedRegistration_TransferringSameLifetimeDoesNotDisposeItPrematurely()
+        {
+            HubPageRegistry registry = new();
+            CountingLifetime lifetime = new();
+            registry.RegisterOwned("mods", () => new TestHubPage("mods", "Old", 0), lifetime);
+            registry.RegisterOwned("mods", () => new TestHubPage("mods", "New", 0), lifetime);
+
+            Assert.AreEqual(0, lifetime.Disposals);
+            registry.Unregister("mods");
+            Assert.AreEqual(1, lifetime.Disposals);
+        }
+
+        [Test]
+        public void OwnedRegistration_DisposalFailureStillPublishesTheReplacementAndRemoval()
+        {
+            HubPageRegistry registry = new();
+            CountingLifetime first = new() { Failure = new InvalidOperationException("dispose refused") };
+            CountingLifetime second = new() { Failure = new InvalidOperationException("dispose refused") };
+            registry.RegisterOwned("mods", () => new TestHubPage("mods", "Old", 0), first);
+            int replacements = 0;
+            int removals = 0;
+            registry.PageRegistered += _ => replacements++;
+            registry.PageUnregistered += _ => removals++;
+            Func<IHubPage> replacement = () => new TestHubPage("mods", "New", 0);
+
+            Assert.Throws<InvalidOperationException>(() => registry.RegisterOwned("mods", replacement, second));
+            Assert.IsTrue(registry.TryGet("mods", out Func<IHubPage> actual));
+            Assert.AreSame(replacement, actual);
+            Assert.AreEqual(1, replacements);
+            Assert.Throws<InvalidOperationException>(() => registry.Unregister("mods", replacement));
+            Assert.AreEqual(1, removals);
+            Assert.IsFalse(registry.TryGet("mods", out _));
+            Assert.AreEqual(1, first.Disposals);
+            Assert.AreEqual(1, second.Disposals);
+        }
+
+        [Test]
+        public void OrdinaryRegistration_DoesNotAcquireOrDisposeThePageInstancesService()
+        {
+            HubPageRegistry registry = new();
+            TestHubPage page = new("shared", "Shared", 0);
+            registry.Register("shared", () => page);
+            registry.Unregister("shared");
+            Assert.AreEqual(0, page.Destructions,
+                "The registry owns explicit registration lifetimes; windows own resolved page lifetimes.");
+        }
+
+        private sealed class CountingLifetime : IDisposable
+        {
+            public int Disposals { get; private set; }
+            public Exception Failure { get; set; }
+            public void Dispose()
+            {
+                Disposals++;
+                if (Failure != null)
+                {
+                    throw Failure;
+                }
+            }
+        }
+
         private sealed class TestHubPage : IHubPage
         {
             public TestHubPage(string pageId, string displayName, int order)
@@ -93,6 +178,7 @@ namespace CoreAI.Tests.EditMode
             public string PageId { get; }
             public string DisplayName { get; }
             public int Order { get; }
+            public int Destructions { get; private set; }
             public Func<object> CreatePageContent => () => new object();
 
             public void OnActivated()
@@ -105,6 +191,7 @@ namespace CoreAI.Tests.EditMode
 
             public void OnDestroyed()
             {
+                Destructions++;
             }
         }
     }

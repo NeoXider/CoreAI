@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Net;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -50,6 +52,37 @@ namespace CoreAI.Mcp.Tests
 
             _host = null;
             _server = null;
+        }
+
+        [TestCase(8590)]
+        [TestCase(49183)]
+        public void BindDenied_GuidanceReservesExactCanonicalListeningPrefix_AndDisposesTransport(int port)
+        {
+            McpToolRegistry registry = new(null);
+            McpRpcDispatcher dispatcher = new(registry, new McpSessionStore(), new InlineMainThreadDispatcher());
+            using McpHttpServer canonical = new(port, dispatcher);
+            BindDeniedTransport denied = new(canonical.Url);
+            LogAssert.Expect(LogType.Error, new Regex(
+                Regex.Escape("netsh http add urlacl url=" + canonical.ListeningPrefix + " user=%USERNAME%") + "$"));
+
+            _server.StartListening(registry, port, (_, _, _) => denied);
+
+            Assert.IsFalse(_server.IsRunning);
+            Assert.IsNull(_server.Registry);
+            Assert.IsNull(_server.AuthToken);
+            Assert.AreEqual(1, denied.DisposeCalls);
+            Assert.AreEqual($"http://127.0.0.1:{port}/", canonical.ListeningPrefix);
+            Assert.AreEqual($"http://127.0.0.1:{port}/mcp", canonical.Url);
+        }
+
+        private sealed class BindDeniedTransport : IMcpServerTransport
+        {
+            public BindDeniedTransport(string url) { Url = url; }
+            public bool IsRunning => false;
+            public string Url { get; }
+            public int DisposeCalls { get; private set; }
+            public void Start() => throw new HttpListenerException(5, "Simulated access denied.");
+            public void Dispose() { DisposeCalls++; }
         }
 
         [Test]

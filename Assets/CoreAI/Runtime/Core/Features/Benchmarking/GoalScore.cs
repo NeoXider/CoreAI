@@ -45,6 +45,15 @@ namespace CoreAI.Benchmarking
     /// <summary>Distinguishes scenario deadlines during a provider response from transport failures.</summary>
     public static class BenchmarkProviderFailurePolicy
     {
+        /// <summary>Normalizes the persisted inactivity ceiling: default 120, disabled at zero, capped at 3600.</summary>
+        public static double NormalizeStallSeconds(string value)
+        {
+            if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out double seconds) ||
+                double.IsNaN(seconds) || double.IsInfinity(seconds)) return 120.0;
+            return Math.Max(0, Math.Min(seconds, 3600));
+        }
+
         /// <summary>A healthy open response consumes the model's scenario budget, even before its first token.</summary>
         public static FailureAttribution ClassifyDeadline(bool scenarioDeadline, bool providerResponseObserved,
             bool transportFailed)

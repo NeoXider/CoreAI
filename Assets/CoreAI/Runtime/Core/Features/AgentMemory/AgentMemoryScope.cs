@@ -48,12 +48,22 @@ namespace CoreAI.Ai
         internal const string ScopedKeyPrefix = "scope-v1-";
         internal const string ActorKeyPrefix = "actor-v1-";
 
+        internal static ActorContext CaptureActorScope(ActorContext actor, IAgentMemoryScopeProvider provider, string roleId)
+        {
+            if (actor.HasBoundMemoryScope) return actor;
+            AgentMemoryScope scope = IsEmptyScope(actor.MemoryScope)
+                ? ScopeFromProvider(provider, NormalizeRoleId(roleId))
+                : actor.MemoryScope;
+            return actor.BindMemoryScope(scope);
+        }
+
         internal static string Resolve(IAgentMemoryScopeProvider scopeProvider, string roleId)
         {
             roleId = NormalizeRoleId(roleId);
             if (AgentMemoryScopeExecutionContext.TryGet(
                     out AgentMemoryScope captured,
-                    out string actorId))
+                    out string actorId,
+                    out bool isBound))
             {
                 if (string.IsNullOrEmpty(actorId))
                 {
@@ -67,7 +77,7 @@ namespace CoreAI.Ai
                 // unscoped bare-role file while hydration and reads outside the turn used the learner's
                 // scope-v1-* file, so a whole lesson fell out of that learner's history and the shared file
                 // silently accumulated every learner's turns. A named actor still wins - see ResolveActorId.
-                if (IsDefaultLocalActor(actorId) && IsEmptyScope(captured))
+                if (!isBound && IsDefaultLocalActor(actorId) && IsEmptyScope(captured))
                 {
                     return ResolveFromProvider(scopeProvider, roleId);
                 }
@@ -76,7 +86,7 @@ namespace CoreAI.Ai
                 // provider when the turn carried none. Otherwise the same class of divergence we fixed
                 // for "local" comes back: inside the turn the key was computed without a scope, outside
                 // it with the provider's scope, and one and the same memory was read under two keys.
-                AgentMemoryScope effectiveScope = IsEmptyScope(captured)
+                AgentMemoryScope effectiveScope = !isBound && IsEmptyScope(captured)
                     ? ScopeFromProvider(scopeProvider, roleId)
                     : captured;
 
@@ -160,10 +170,10 @@ namespace CoreAI.Ai
 
         private static bool IsEmptyScope(AgentMemoryScope scope)
         {
-            return string.IsNullOrWhiteSpace(scope.TenantId) &&
-                   string.IsNullOrWhiteSpace(scope.UserId) &&
-                   string.IsNullOrWhiteSpace(scope.SessionId) &&
-                   string.IsNullOrWhiteSpace(scope.TopicId);
+            return string.IsNullOrEmpty(scope.TenantId) &&
+                   string.IsNullOrEmpty(scope.UserId) &&
+                   string.IsNullOrEmpty(scope.SessionId) &&
+                   string.IsNullOrEmpty(scope.TopicId);
         }
 
         private static string NormalizeRoleId(string roleId)
@@ -172,14 +182,14 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Length-prefixes every trimmed component before hashing, keeping the tuple encoding injective.
+        /// Length-prefixes every exact component before hashing, keeping the tuple encoding injective.
         /// Empty-scope bare-role data is deliberately not folded into this encoding: importing a legacy
         /// role file into a user scope must be an explicit host migration so the first scoped user cannot
         /// accidentally claim data that used to be shared by every user of that role.
         /// </summary>
         private static void AppendCanonicalPart(StringBuilder sb, string value)
         {
-            string raw = value?.Trim() ?? "";
+            string raw = value ?? "";
             sb.Append(raw.Length).Append(':').Append(raw).Append(';');
         }
 
@@ -228,7 +238,7 @@ namespace CoreAI.Ai
         private static string ComputeSha256Hex(string value)
         {
             using SHA256 sha = SHA256.Create();
-            return CoreAI.Audit.AuditHash.ByteArrayToHex(sha.ComputeHash(Encoding.UTF8.GetBytes(value)));
+            return CoreAI.Audit.AuditHash.ByteArrayToHex(sha.ComputeHash(new UTF8Encoding(false, true).GetBytes(value)));
         }
     }
 
@@ -254,6 +264,19 @@ namespace CoreAI.Ai
             return AgentMemoryScopeExecutionContext.Push(actorContext);
         }
 
+        /// <summary>Captures the actor's effective durable scope once for subsequent turns and history operations.</summary>
+        public static ActorContext Bind(ActorContext actorContext, IAgentMemoryScopeProvider scopeProvider, string roleId)
+        {
+            actorContext.AssertTrusted();
+            return AgentMemoryScopeKey.CaptureActorScope(actorContext, scopeProvider, roleId);
+        }
+
+        /// <summary>Enters one immutable actor/provider binding for out-of-turn history operations.</summary>
+        public static IDisposable Enter(ActorContext actorContext, IAgentMemoryScopeProvider scopeProvider, string roleId)
+        {
+            return Enter(Bind(actorContext, scopeProvider, roleId));
+        }
+
         /// <summary>Makes <paramref name="scope"/> current for memory until <c>Dispose()</c> (no actor).</summary>
         public static IDisposable Enter(AgentMemoryScope scope)
         {
@@ -271,7 +294,7 @@ namespace CoreAI.Ai
         internal static IDisposable Push(AgentMemoryScope scope)
         {
             Frame previous = Current.Value;
-            Frame frame = new(scope, "");
+            Frame frame = new(scope, "", true);
             Current.Value = frame;
             return new Lease(frame, previous);
         }
@@ -280,36 +303,45 @@ namespace CoreAI.Ai
         {
             actorContext.AssertTrusted();
             Frame previous = Current.Value;
-            Frame frame = new(actorContext.MemoryScope, actorContext.ActorId);
+            Frame frame = new(actorContext.MemoryScope, actorContext.ActorId, actorContext.HasBoundMemoryScope);
             Current.Value = frame;
             return new Lease(frame, previous);
         }
 
         internal static bool TryGet(out AgentMemoryScope scope, out string actorId)
         {
+            return TryGet(out scope, out actorId, out _);
+        }
+
+        internal static bool TryGet(out AgentMemoryScope scope, out string actorId, out bool isBound)
+        {
             Frame frame = Current.Value;
             if (frame == null)
             {
                 scope = AgentMemoryScope.Empty;
                 actorId = "";
+                isBound = false;
                 return false;
             }
 
             scope = frame.Scope;
             actorId = frame.ActorId;
+            isBound = frame.IsBound;
             return true;
         }
 
         private sealed class Frame
         {
-            internal Frame(AgentMemoryScope scope, string actorId)
+            internal Frame(AgentMemoryScope scope, string actorId, bool isBound)
             {
                 Scope = scope;
                 ActorId = actorId ?? "";
+                IsBound = isBound;
             }
 
             internal AgentMemoryScope Scope { get; }
             internal string ActorId { get; }
+            internal bool IsBound { get; }
         }
 
         private sealed class Lease : IDisposable

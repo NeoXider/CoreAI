@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Authority;
 using CoreAI.Chat;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
@@ -36,13 +37,15 @@ namespace CoreAI
     /// </code>
     /// <para>
     /// Services resolve lazily from the first located <see cref="CoreAILifetimeScope"/>.
-    /// Call <see cref="Invalidate"/> after scene changes or container rebuilds so cached instances are dropped.
+    /// Cached instances retire when the resolved scope disappears or its container changes.
+    /// Use <see cref="Invalidate"/> for other host composition changes that require a fresh resolution.
     /// </para>
     /// </summary>
     public static class CoreAi
     {
         private static readonly object SyncRoot = new();
         private static CoreAILifetimeScope? _scope;
+        private static object? _resolvedContainer;
         private static CoreAiChatService? _chatService;
         private static IAiOrchestrationService? _orchestrator;
         private static Func<IAiOrchestrationService>? _orchestratorResolver;
@@ -78,6 +81,7 @@ namespace CoreAI
             lock (SyncRoot)
             {
                 _scope = null;
+                _resolvedContainer = null;
                 _chatService = null;
                 _orchestrator = null;
                 _orchestratorResolver = null;
@@ -92,7 +96,8 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Overrides orchestrator resolver for tests/CI.
+        /// Overrides orchestrator resolution until <see cref="Invalidate"/> is called.
+        /// Automatic scene-scope changes do not replace the explicit host resolver.
         /// </summary>
         public static void SetResolver(Func<IAiOrchestrationService> resolver)
         {
@@ -103,6 +108,10 @@ namespace CoreAI
 
             lock (SyncRoot)
             {
+                _scope = null;
+                _resolvedContainer = null;
+                _chatService = null;
+                _settings = null;
                 _orchestratorResolver = resolver;
                 _orchestrator = null;
             }
@@ -664,13 +673,8 @@ namespace CoreAI
         {
             lock (SyncRoot)
             {
-                if (_settings != null)
-                {
-                    return _settings;
-                }
-
-                TryResolve(out _, out _, out _settings);
-                return _settings;
+                TryResolve(out _, out _, out ICoreAISettings? settings);
+                return settings;
             }
         }
 
@@ -823,20 +827,29 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Cancels queued and running work for <paramref name="roleId"/> across actor sessions.
-        /// Orchestrators without role cancellation use their legacy scope cancellation capability.
+        /// Requests cancellation of the current actor/session's work for one role.
+        /// Global administrative cancellation remains on the orchestration service's cancellation seams.
         /// </summary>
-        public static void StopAgent(string roleId)
+        public static void StopAgent(string roleId, ActorContext? actorContext = null)
         {
             if (TryGetOrchestrator(out IAiOrchestrationService? orchestrator) && orchestrator != null)
             {
-                if (orchestrator is IRoleAiTaskCancellation roleCancellation)
+                if (orchestrator is IActorAiTaskCancellation actorCancellation)
                 {
-                    roleCancellation.CancelRoleTasks(roleId);
+                    ActorContext? actor = actorContext;
+                    if (actor == null && orchestrator is IAiActorContextResolver resolver)
+                    {
+                        actor = resolver.ResolveActorContext(new AiTaskRequest { RoleId = roleId });
+                    }
+
+                    if (actor != null)
+                    {
+                        actorCancellation.CancelActorTasks(actor.Value, roleId);
+                    }
                 }
                 else
                 {
-                    orchestrator.CancelTasks(roleId);
+                    LogFacadeWarning("[CoreAi] Actor-specific cancellation is unsupported by this orchestrator.");
                 }
             }
         }
@@ -845,7 +858,8 @@ namespace CoreAI
         /// <param name="roleId">Role id.</param>
         /// <param name="clearChatHistory">Drop persisted chat turns.</param>
         /// <param name="clearLongTermMemory">Drop MemoryTool state / saved agent memory.</param>
-        public static void ClearContext(string roleId, bool clearChatHistory = true, bool clearLongTermMemory = true)
+        public static void ClearContext(string roleId, bool clearChatHistory = true, bool clearLongTermMemory = true,
+            ActorContext? actorContext = null)
         {
             lock (SyncRoot)
             {
@@ -858,12 +872,15 @@ namespace CoreAI
                         IConversationSummaryStore? summaryStore = clearChatHistory
                             ? (IConversationSummaryStore)_scope.Container.Resolve(typeof(IConversationSummaryStore))
                             : null;
-                        ClearContextStores(
-                            memStore,
-                            summaryStore,
-                            roleId,
-                            clearChatHistory,
-                            clearLongTermMemory);
+                        IAgentMemoryScopeProvider provider =
+                            (IAgentMemoryScopeProvider)_scope.Container.Resolve(typeof(IAgentMemoryScopeProvider));
+                        ActorContext actor = actorContext ??
+                            ((IActorIdentityProvider)_scope.Container.Resolve(typeof(IActorIdentityProvider)))
+                            .GetActorContext(roleId);
+                        using (AgentMemoryActorScope.Enter(actor, provider, roleId))
+                        {
+                            ClearContextStores(memStore, summaryStore, roleId, clearChatHistory, clearLongTermMemory);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -924,7 +941,15 @@ namespace CoreAI
                 {
                     IAgentMemoryStore memStore =
                         (IAgentMemoryStore)_scope.Container.Resolve(typeof(IAgentMemoryStore));
-                    return AgentSkillInjection.InjectSkillIntoHistory(memStore, roleId, skill, persistToDisk);
+                    IAgentMemoryScopeProvider provider =
+                        (IAgentMemoryScopeProvider)_scope.Container.Resolve(typeof(IAgentMemoryScopeProvider));
+                    ActorContext actor =
+                        ((IActorIdentityProvider)_scope.Container.Resolve(typeof(IActorIdentityProvider)))
+                        .GetActorContext(roleId);
+                    using (AgentMemoryActorScope.Enter(actor, provider, roleId))
+                    {
+                        return AgentSkillInjection.InjectSkillIntoHistory(memStore, roleId, skill, persistToDisk);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -938,19 +963,14 @@ namespace CoreAI
         {
             lock (SyncRoot)
             {
-                if (_chatService != null)
-                {
-                    return _chatService;
-                }
-
-                if (!TryResolve(out _chatService, out _, out _settings) || _chatService == null)
+                if (!TryResolve(out CoreAiChatService? chatService, out _, out _) || chatService == null)
                 {
                     throw new InvalidOperationException(
                         "CoreAi: CoreAILifetimeScope was not found or ILlmClient is not registered. " +
                         "Add CoreAILifetimeScope to the scene or call CoreAi.Invalidate() after changing scenes.");
                 }
 
-                return _chatService;
+                return chatService;
             }
         }
 
@@ -978,19 +998,14 @@ namespace CoreAI
         {
             lock (SyncRoot)
             {
-                if (_orchestrator != null)
-                {
-                    return _orchestrator;
-                }
-
-                if (!TryResolve(out _, out _orchestrator, out _settings) || _orchestrator == null)
+                if (!TryResolve(out _, out IAiOrchestrationService? orchestrator, out _) || orchestrator == null)
                 {
                     throw new InvalidOperationException(
                         "CoreAi: IAiOrchestrationService is not registered on CoreAILifetimeScope. " +
                         "Ensure builder.RegisterCorePortable() runs inside Configure().");
                 }
 
-                return _orchestrator;
+                return orchestrator;
             }
         }
 
@@ -1013,30 +1028,33 @@ namespace CoreAI
                 {
                     LogFacadeWarning($"[CoreAi] Resolve orchestrator from custom resolver failed: {ex.Message}");
                 }
+
+                chatService = _chatService;
+                settings = _settings;
+                _orchestrator = orchestrator;
+                return chatService != null || orchestrator != null;
             }
 
             if (_scope == null || _scope.Container == null)
             {
-                if (_orchestratorResolver != null && orchestrator != null)
-                {
-                    chatService = null;
-                    _orchestrator = orchestrator;
-                    return true;
-                }
-
+                _chatService = null;
+                _orchestrator = null;
+                _settings = null;
+                _resolvedContainer = null;
                 _scope = UnityEngine.Object.FindAnyObjectByType<CoreAILifetimeScope>(FindObjectsInactive.Include);
             }
 
             if (_scope == null || _scope.Container == null)
             {
-                if (_orchestratorResolver != null && orchestrator != null)
-                {
-                    chatService = null;
-                    _orchestrator = orchestrator;
-                    return true;
-                }
-
                 return false;
+            }
+
+            if (!ReferenceEquals(_resolvedContainer, _scope.Container))
+            {
+                _chatService = null;
+                _orchestrator = null;
+                _settings = null;
+                _resolvedContainer = _scope.Container;
             }
 
             try
@@ -1059,7 +1077,7 @@ namespace CoreAI
 
             if (_chatService == null)
             {
-                _chatService = CoreAiChatService.TryCreateFromScene();
+                _chatService = CoreAiChatService.TryCreateFromScope(_scope);
             }
 
             chatService = _chatService;
@@ -1150,6 +1168,17 @@ namespace CoreAI
             // Invalidate() does not clobber a live entry-point owner or persistent subscribers.
             CoreAIGameEntryPoint.ResetStaticState();
             CoreAiEvents.ClearAll();
+            lock (ToolCallSyncRoot)
+            {
+                OnToolCallRecord = null;
+                OnToolExecuted = null;
+                OnToolCallStarted = null;
+                OnToolCallCompleted = null;
+                OnToolCallFailed = null;
+                ToolCallHistory.Clear();
+            }
+
+            CoreAiBackend.ResetStaticState();
             CoreAiRoutingUi.Controller = null;
             TruncationMarker.ResetLogOnce();
         }

@@ -55,7 +55,9 @@ namespace CoreAI.Mcp.Tools
                 .ExecuteAsync(modId, level, since, max, cancellationToken)
                 .ConfigureAwait(false);
 
-            return new McpToolResult(new[] { McpContent.CreateText(json) });
+            JToken success = JObject.Parse(json)["success"];
+            bool isError = success?.Type == JTokenType.Boolean && !success.Value<bool>();
+            return new McpToolResult(new[] { McpContent.CreateText(json) }, isError);
         }
     }
 }

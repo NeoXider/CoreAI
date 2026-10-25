@@ -25,6 +25,8 @@ namespace CoreAI.Benchmarking
         /// <summary>Exact scene heading shared by writing and legacy evidence recovery.</summary>
         public static string SceneHeading(ScenarioResult result)
         {
+            if (result.Interrupted || result.ExcludeFromScoring)
+                return $"### {result.Group} \u00b7 {result.ScenarioName}{RepetitionLabel(result)} \u2014 {Verdict(result)}";
             string verdict = result.Classification switch
             {
                 BenchmarkClassification.Pass => "\u2705 PASS",
@@ -99,10 +101,10 @@ namespace CoreAI.Benchmarking
             }
 
             sb.AppendLine($"- **Cost of run:** {report.TotalTokens} tokens " +
-                          $"({report.TotalCompletionTokens} generated) · {F(report.GenerationTokensPerSecond)} tok/s provider-call " +
-                          $"(prefill+decode; effective {F(report.EffectiveTokensPerSecond)} across the agentic session) · " +
+                          $"({report.TotalCompletionTokens} generated) · {F(report.ClientTurnTokensPerSecond)} tok/s client-turn (includes internal tools) " +
+                          $"(effective {F(report.EffectiveTokensPerSecond)} across the agentic session) · " +
                           $"${F(report.TotalCostUsd)} · {F(report.TotalLatencyMs / 1000.0)} s total");
-            // WHY: Speed is a REPORTED metric (see provider-call/effective tok/s above), never a score — a faster
+            // WHY: Speed is a REPORTED metric (see client-turn/effective tok/s above), never a score — a faster
             // model must not look "smarter". The bonus rewards correctness only.
             sb.AppendLine($"- **Model setup:** backend `{m.Backend}` · native-tools {m.NativeToolCalling} · " +
                           $"streaming {m.Streaming} · temperature {(m.Temperature.HasValue ? F(m.Temperature.Value) : "provider default")} · " +
@@ -809,7 +811,7 @@ namespace CoreAI.Benchmarking
         private static string SpeedFooter(BenchmarkReport report)
         {
             return $"{N0(report.TotalTokens)} tokens ({N0(report.TotalCompletionTokens)} generated) · " +
-                   $"{F1(report.GenerationTokensPerSecond)} tok/s · {Duration(report.TotalLatencyMs)} · " +
+                   $"{F1(report.ClientTurnTokensPerSecond)} tok/s client-turn · {Duration(report.TotalLatencyMs)} · " +
                    $"{report.TotalToolCalls} tool calls, {report.TotalFailedToolCalls} failed · " +
                    "speed is reported, never scored";
         }
@@ -954,6 +956,7 @@ namespace CoreAI.Benchmarking
             sb.Append(Num("repetitions", m.Repetitions)).Append(',');
             sb.Append(Str("unityVersion", m.UnityVersion)).Append(',');
             sb.Append(Str("suiteVersion", m.SuiteVersion)).Append(',');
+            sb.Append(m.ProviderStallSeconds.HasValue ? Num("providerStallSeconds", m.ProviderStallSeconds.Value) : "\"providerStallSeconds\":null").Append(',');
             sb.Append(Bool("resumed", m.Resumed)).Append(',');
             sb.Append(Num("segmentCount", m.Segments.Count)).Append(',');
             sb.Append(Num("totalWallSeconds", m.TotalWallSeconds)).Append(',');
@@ -974,6 +977,8 @@ namespace CoreAI.Benchmarking
             sb.Append(Num("totalCompletionTokens", report.TotalCompletionTokens)).Append(',');
             sb.Append(Num("totalGenerationMs", report.TotalGenerationMs)).Append(',');
             sb.Append(Num("generationTokensPerSecond", report.GenerationTokensPerSecond)).Append(',');
+            sb.Append(Num("totalClientTurnMs", report.TotalClientTurnMs)).Append(',');
+            sb.Append(Num("clientTurnTokensPerSecond", report.ClientTurnTokensPerSecond)).Append(',');
             sb.Append(Num("totalCostUsd", report.TotalCostUsd)).Append(',');
             sb.Append(Num("totalLatencyMs", report.TotalLatencyMs)).Append(',');
             sb.Append(Num("meanEfficiencyBonus", report.MeanEfficiencyBonus)).Append(',');
@@ -1090,6 +1095,8 @@ namespace CoreAI.Benchmarking
                 sb.Append(Num("repetition", r.Repetition)).Append(',');
                 sb.Append(Str("classification", r.Classification.ToString())).Append(',');
                 sb.Append(Str("attribution", r.Attribution.ToString())).Append(',');
+                sb.Append(Bool("excludeFromScoring", r.ExcludeFromScoring)).Append(',');
+                sb.Append(Bool("interrupted", r.Interrupted)).Append(',');
                 sb.Append(Num("base", r.Score.Base)).Append(',');
                 sb.Append(Num("bonus", r.Score.Bonus)).Append(',');
                 sb.Append(Num("total", r.Score.Total)).Append(',');
@@ -1100,6 +1107,7 @@ namespace CoreAI.Benchmarking
                 sb.Append(Num("promptTokens", r.PromptTokens)).Append(',');
                 sb.Append(Num("completionTokens", r.CompletionTokens)).Append(',');
                 sb.Append(Num("generationMs", r.GenerationMs)).Append(',');
+                sb.Append(Num("clientTurnMs", r.ClientTurnMs)).Append(',');
                 sb.Append(Num("latencyMs", r.LatencyMs)).Append(',');
                 sb.Append(Num("costUsd", r.CostUsd)).Append(',');
                 sb.Append(Bool("costKnown", r.CostKnown)).Append(',');
@@ -1136,6 +1144,8 @@ namespace CoreAI.Benchmarking
 
         private static string Verdict(ScenarioResult r)
         {
+            if (r.Interrupted) return "INTERRUPTED (not scored)";
+            if (r.ExcludeFromScoring || r.Attribution == FailureAttribution.NotGraded) return "NOT GRADED";
             return VerdictText(r.Classification);
         }
 
@@ -1240,8 +1250,7 @@ namespace CoreAI.Benchmarking
             foreach (GroupScore g in groups)
             {
                 string extreme = g.HasExtreme
-                    ? $"{F(g.ExtremeMeanBase)} · {VerdictText(ClassifyMean(g.ExtremeMeanBase))}" +
-                      (g.ExtremeCount > 1 ? $" ({g.ExtremePassCount}/{g.ExtremeCount} pass)" : string.Empty)
+                    ? $"{F(g.ExtremeMeanBase)} ({g.ExtremePassCount}/{g.ExtremeCount} pass)"
                     : "—";
                 sb.AppendLine($"| {g.Group} | {BenchmarkInfo.TitleFor(g.Group)} | {g.Count} | {F(g.MeanBase)} | " +
                               $"{g.PassCount}/{g.Count} | {extreme} |");
@@ -1274,18 +1283,6 @@ namespace CoreAI.Benchmarking
                 sb.AppendLine($"| {s.Group} | {s.Name} | {F(s.MeanBase)} | {VerdictText(s.Classification)} | " +
                               $"{s.Repetitions} | {F(s.Spread)} |");
             }
-        }
-
-        private static BenchmarkClassification ClassifyMean(double meanBase)
-        {
-            if (meanBase >= GoalScore.PassBase)
-            {
-                return BenchmarkClassification.Pass;
-            }
-
-            return meanBase >= GoalScore.PartialBase
-                ? BenchmarkClassification.Partial
-                : BenchmarkClassification.Fail;
         }
 
         private static string DimShort(BenchmarkDimension d)

@@ -25,8 +25,8 @@ namespace CoreAI.Editor
         private const string DemoConfigPath = "Assets/CoreAiUnity/Scenes/CoreAiChatConfig_Demo.asset";
         private const string DemoPanelSettingsPath = "Assets/CoreAiUnity/Scenes/CoreAiChatPanelSettings_Demo.asset";
 
-        private const string UxmlPath = "Assets/CoreAiUnity/Runtime/Source/Features/Chat/UI/CoreAiChat.uxml";
-        private const string UssPath = "Assets/CoreAiUnity/Runtime/Source/Features/Chat/UI/CoreAiChat.uss";
+        internal const string ChatUxmlGuid = "c56ffd49a798940449e9f69ecf685e16";
+        internal const string ChatUssGuid = "54e4e52b0db8c294fb66ec9495faa77f";
 
         private const string SettingsRoot = "Assets/CoreAiUnity/Settings";
         private const string LogSettingsPath = SettingsRoot + "/GameLogSettings.asset";
@@ -174,12 +174,14 @@ namespace CoreAI.Editor
             GameObject uiGo = new("CoreAiChatUI");
             UIDocument doc = uiGo.AddComponent<UIDocument>();
 
-            VisualTreeAsset uxml = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(UxmlPath);
-            StyleSheet uss = AssetDatabase.LoadAssetAtPath<StyleSheet>(UssPath);
+            string uxmlPath = AssetDatabase.GUIDToAssetPath(ChatUxmlGuid);
+            string ussPath = AssetDatabase.GUIDToAssetPath(ChatUssGuid);
+            VisualTreeAsset uxml = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(uxmlPath);
+            StyleSheet uss = AssetDatabase.LoadAssetAtPath<StyleSheet>(ussPath);
 
             if (uxml == null)
             {
-                CoreAIEditorLog.LogWarning($"Chat UXML not found: {UxmlPath}");
+                CoreAIEditorLog.LogWarning($"Chat UXML not found for GUID: {ChatUxmlGuid}");
             }
             else
             {

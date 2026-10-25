@@ -57,6 +57,7 @@ namespace CoreAI.Ai
             bool replace_all = false,
             CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (_settings?.LogToolCalls ?? CoreAISettings.LogToolCalls)
             {
                 Log.Instance.Info($"[Tool Call] memory: action={action}", LogTag.Memory);
@@ -146,6 +147,10 @@ namespace CoreAI.Ai
                                 $"Unknown action: '{action}'. Valid actions: read, write, append, clear, str_replace, insert, delete, rename"
                         });
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {

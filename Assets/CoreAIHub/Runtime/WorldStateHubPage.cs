@@ -13,17 +13,17 @@ namespace CoreAI.Hub.UI
         /// <summary>Prefix of the saved-state line asserted by the G11 §6.5 browser run.</summary>
         internal const string SavedStatePrefix = "Has saved state: ";
 
-        /// <summary>Shown while the browser has been asked to flush but has not answered yet.</summary>
+        /// <summary>Shown while a local storage operation is running. The legacy member name is retained.</summary>
         public const string FlushPendingText =
-            "Browser storage: flushing — not durable yet.";
+            "Local storage: operation in progress.";
 
-        /// <summary>Shown once the browser's syncfs callback reported success.</summary>
+        /// <summary>Shown after local success when Unity automatic persistence is armed.</summary>
         public const string FlushConfirmedText =
-            "Browser storage: flush confirmed — this state survives a reload.";
+            "Local storage operation completed; automatic persistence is armed. Browser completion is not confirmed.";
 
-        /// <summary>Shown when the browser's syncfs callback reported a failure.</summary>
+        /// <summary>Shown when local success or automatic persistence cannot be confirmed.</summary>
         public const string FlushUnconfirmedText =
-            "Browser storage: flush NOT confirmed — this change may not survive a reload.";
+            "Storage operation unconfirmed; automatic persistence may be unavailable.";
 
         private readonly IWorldStateManager _manager;
 
@@ -33,10 +33,8 @@ namespace CoreAI.Hub.UI
         private Button _saveButton;
         private bool _subscribed;
 
-        // WHY: G11 §6.5 / W3.5 — "Has saved state" must never flip on IDBFS request issuance, only
-        // once the browser's FS.syncfs completion callback answers. While this is true the status
-        // label keeps its last confirmed value.
         private bool _flushPending;
+        private bool _destroyed;
 
         public WorldStateHubPage(IWorldStateManager manager,
             string pageId = DefaultPageId,
@@ -143,6 +141,7 @@ namespace CoreAI.Hub.UI
 
         public override void OnDestroyed()
         {
+            _destroyed = true;
             if (_subscribed && _manager != null)
             {
                 _manager.StateReset -= OnStateReset;
@@ -152,28 +151,54 @@ namespace CoreAI.Hub.UI
 
         private void OnResetClicked()
         {
-            if (_manager == null || _flushPending)
-            {
-                return;
-            }
-
-            // WHY: BeginFlush before Reset — Reset raises StateReset synchronously, and the handler
-            // would otherwise publish "No" before the browser deleted anything durably.
-            BeginFlush();
-            _manager.Reset();
-            _manager.ConfirmDurability(OnDurabilityConfirmed);
+            WriteState(true);
         }
 
         private void OnSaveClicked()
         {
-            if (_manager == null || _flushPending)
+            WriteState(false);
+        }
+
+        private void WriteState(bool reset)
+        {
+            if (_manager == null || _flushPending || _destroyed)
             {
                 return;
             }
 
             BeginFlush();
-            _manager.Save();
-            _manager.ConfirmDurability(OnDurabilityConfirmed);
+            WorldStateWriteResult result;
+            try
+            {
+                if (_manager is IWorldStateWriteResults results)
+                {
+                    result = reset ? results.ResetWithResult() : results.SaveWithResult();
+                }
+                else
+                {
+                    if (reset)
+                    {
+                        _manager.Reset();
+                    }
+                    else
+                    {
+                        _manager.Save();
+                    }
+
+                    result = new WorldStateWriteResult(WorldStateWriteStatus.Unsupported,
+                        error: "This manager supplies no per-operation storage result.");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                result = new WorldStateWriteResult(WorldStateWriteStatus.Cancelled);
+            }
+            catch (Exception ex)
+            {
+                result = new WorldStateWriteResult(WorldStateWriteStatus.Failed, error: ex.Message);
+            }
+
+            CompleteWrite(result);
         }
 
         private void BeginFlush()
@@ -187,14 +212,24 @@ namespace CoreAI.Hub.UI
             }
         }
 
-        private void OnDurabilityConfirmed(bool durable)
+        private void CompleteWrite(WorldStateWriteResult result)
         {
             _flushPending = false;
+            if (_destroyed)
+            {
+                return;
+            }
+
             _saveButton?.SetEnabled(true);
             _resetButton?.SetEnabled(true);
             if (_durabilityLabel != null)
             {
-                _durabilityLabel.text = durable ? FlushConfirmedText : FlushUnconfirmedText;
+                _durabilityLabel.text = result.IsConfirmed ? FlushConfirmedText
+                    : result.LocalOperationSucceeded
+                        ? "Local storage operation completed; automatic persistence is NOT armed."
+                        : result.Status == WorldStateWriteStatus.Cancelled
+                            ? "Local storage operation cancelled; completion is unconfirmed."
+                            : FlushUnconfirmedText + (string.IsNullOrEmpty(result.Error) ? "" : " " + result.Error);
             }
 
             RefreshStatus();
@@ -206,9 +241,8 @@ namespace CoreAI.Hub.UI
         }
 
         /// <summary>
-        /// Status-text policy. While a browser flush is in flight the label must keep its last
-        /// confirmed text: G11 §6.5 and MVP2.5 gate W3.5 fail a page that reports a durable save at
-        /// IDBFS request-issuance time, before the <c>FS.syncfs</c> completion callback answers.
+        /// Retains the previous local-state inventory while a storage operation is running.
+        /// Inventory describes file presence, not browser transaction completion.
         /// </summary>
         internal static string ComposeStatusText(
             bool flushPending,

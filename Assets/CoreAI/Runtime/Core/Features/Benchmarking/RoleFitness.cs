@@ -121,7 +121,7 @@ namespace CoreAI.Benchmarking
                 sig[Key(d.Dimension)] = d.Score;
             }
 
-            double tps = report.GenerationTokensPerSecond;
+            double tps = report.GradedClientTurnTokensPerSecond;
             if (tps > 0)
             {
                 sig[Speed] = Clamp(tps / SpeedTargetTokensPerSecond * 100.0, 0, 100);

@@ -108,6 +108,8 @@ namespace CoreAI.Hub.UI
         private CancellationTokenSource _routingCts;
         private CancellationTokenSource _pageCts;
         private bool _pageDestroyed;
+        private int _endpointEditorVersion;
+        private bool _endpointBusy;
         private LlmExecutionMode _liveMode = LlmExecutionMode.Auto;
         private string _editingEndpointId = "";
         private bool _clearSessionKey;
@@ -156,6 +158,7 @@ namespace CoreAI.Hub.UI
         /// <inheritdoc />
         public override void OnDestroyed()
         {
+            _pageDestroyed = true;
             CoreAiRoutingUi.ControllerChanged -= HandleRoutingControllerChanged;
             AttachRoutingController(null);
             try
@@ -571,6 +574,10 @@ namespace CoreAI.Hub.UI
             _endpointOperationStatus = HubPageWidgets.MakeNote("");
             _endpointOperationStatus.name = "coreai-endpoint-operation-status";
             endpointGroup.Add(_endpointOperationStatus);
+            endpointGroup.RegisterCallback<ChangeEvent<string>>(_ => _endpointEditorVersion++);
+            endpointGroup.RegisterCallback<ChangeEvent<int>>(_ => _endpointEditorVersion++);
+            endpointGroup.RegisterCallback<ChangeEvent<float>>(_ => _endpointEditorVersion++);
+            endpointGroup.RegisterCallback<ChangeEvent<bool>>(_ => _endpointEditorVersion++);
             body.Add(endpointGroup);
 
             VisualElement routingGroup = MakeGroup("Agent routing");
@@ -613,7 +620,7 @@ namespace CoreAI.Hub.UI
         {
             DispatchToUi(() =>
             {
-                if (_routingControllerOverride == null)
+                if (!_pageDestroyed && _routingControllerOverride == null)
                 {
                     AttachRoutingController(CoreAiRoutingUi.Controller);
                     RefreshEndpointManagement();
@@ -633,6 +640,7 @@ namespace CoreAI.Hub.UI
                 _routingController.Changed -= HandleRoutingChanged;
             }
 
+            InvalidateEndpointEditor();
             _routingController = controller;
             if (_routingController != null)
             {
@@ -647,6 +655,11 @@ namespace CoreAI.Hub.UI
 
         private void DispatchToUi(Action action)
         {
+            if (_pageDestroyed)
+            {
+                return;
+            }
+
             SynchronizationContext context = _uiSynchronizationContext;
             if (context == null)
             {
@@ -655,16 +668,25 @@ namespace CoreAI.Hub.UI
 
             if (ReferenceEquals(context, SynchronizationContext.Current))
             {
-                action();
+                if (!_pageDestroyed)
+                {
+                    action();
+                }
                 return;
             }
 
-            context.Post(_ => action(), null);
+            context.Post(_ =>
+            {
+                if (!_pageDestroyed)
+                {
+                    action();
+                }
+            }, null);
         }
 
         private void RefreshEndpointManagement()
         {
-            if (_endpointListContainer == null)
+            if (_pageDestroyed || _endpointListContainer == null)
             {
                 return;
             }
@@ -696,7 +718,7 @@ namespace CoreAI.Hub.UI
 
             _routingProfile.choices = profileLabels;
             bool available = _routingController != null;
-            _endpointSaveButton?.SetEnabled(available);
+            SetEndpointBusy(_endpointBusy);
             _routingProfile.SetEnabled(available);
             _endpointInventoryStatus.text = available
                 ? endpoints == null || endpoints.Count == 0
@@ -789,6 +811,7 @@ namespace CoreAI.Hub.UI
                 LlmEndpointDescriptor endpoint = snapshot?.Descriptor;
                 if (endpoint != null && string.Equals(endpoint.EndpointId, id, StringComparison.Ordinal))
                 {
+                    InvalidateEndpointEditor();
                     _editingEndpointId = endpoint.EndpointId;
                     _endpointId.SetValueWithoutNotify(endpoint.EndpointId);
                     _endpointId.SetEnabled(false);
@@ -839,6 +862,7 @@ namespace CoreAI.Hub.UI
 
         private void ClearEndpointEditor()
         {
+            InvalidateEndpointEditor();
             _editingEndpointId = "";
             _endpointId.SetValueWithoutNotify("");
             _endpointId.SetEnabled(true);
@@ -874,7 +898,7 @@ namespace CoreAI.Hub.UI
 
         private async void SaveEndpoint()
         {
-            if (_routingController == null)
+            if (_pageDestroyed || _routingController == null || _endpointBusy)
             {
                 return;
             }
@@ -901,31 +925,17 @@ namespace CoreAI.Hub.UI
                 return;
             }
 
+            ICoreAiRoutingUiController controller = _routingController;
+            int editorVersion = _endpointEditorVersion;
+            CancellationTokenSource operationCts = CancellationTokenSource.CreateLinkedTokenSource(PageToken());
+            _routingCts = operationCts;
             SetEndpointBusy(true);
             _endpointOperationStatus.text = endpoint.Active || endpoint.KeepWarm
                 ? "Saving and waiting for readiness…"
                 : "Saving endpoint…";
             try
             {
-                CancellationTokenSource previousCts = _routingCts;
-                try
-                {
-                    previousCts?.Cancel();
-                }
-                catch (ObjectDisposedException)
-                {
-                }
-
-                _routingCts = new CancellationTokenSource();
-                try
-                {
-                    previousCts?.Dispose();
-                }
-                catch (ObjectDisposedException)
-                {
-                }
-
-                CancellationToken cancellationToken = _routingCts.Token;
+                CancellationToken cancellationToken = operationCts.Token;
                 string enteredKey = _endpointSessionKey.value ?? "";
                 string sessionKey = string.IsNullOrEmpty(_editingEndpointId)
                     ? enteredKey
@@ -934,38 +944,79 @@ namespace CoreAI.Hub.UI
                         : string.IsNullOrEmpty(enteredKey)
                             ? null
                             : enteredKey;
-                CoreAiRoutingUiResult result = await _routingController.SaveEndpointAsync(
+                CoreAiRoutingUiResult result = await controller.SaveEndpointAsync(
                     endpoint,
                     sessionKey,
                     cancellationToken);
-                _endpointSessionKey.SetValueWithoutNotify("");
-                _clearSessionKey = false;
-                _editingEndpointId = endpoint.EndpointId;
+                if (!CanApplyEndpointResult(controller, editorVersion, operationCts) ||
+                    cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
                 RefreshEndpointManagement();
-                LoadEndpointById(endpoint.EndpointId);
+                if (result.SaveStatus != CoreAiRoutingUiSaveStatus.NotSaved)
+                {
+                    _endpointSessionKey.SetValueWithoutNotify("");
+                    _clearSessionKey = false;
+                    _editingEndpointId = endpoint.EndpointId;
+                    LoadEndpointById(endpoint.EndpointId);
+                }
+
                 _endpointOperationStatus.text = string.IsNullOrEmpty(result.Message)
-                    ? result.Endpoint == null
-                        ? "Endpoint saved."
-                        : "Endpoint saved — " + result.Endpoint.State + "."
+                    ? result.SaveStatus == CoreAiRoutingUiSaveStatus.NotSaved
+                        ? "Endpoint was not saved. Your draft is preserved."
+                        : result.Endpoint == null
+                            ? "Endpoint saved."
+                            : "Endpoint saved — " + result.Endpoint.State + "."
                     : result.Message;
             }
             catch (OperationCanceledException)
             {
-                _endpointOperationStatus.text = "Endpoint operation cancelled.";
+                if (CanApplyEndpointResult(controller, editorVersion, operationCts))
+                {
+                    _endpointOperationStatus.text = "Endpoint operation cancelled. Your draft is preserved.";
+                }
             }
             catch (Exception ex)
             {
-                _endpointOperationStatus.text = "Could not save the endpoint: " + ex.Message;
+                if (CanApplyEndpointResult(controller, editorVersion, operationCts))
+                {
+                    _endpointOperationStatus.text = "Could not save the endpoint: " + ex.Message;
+                }
             }
             finally
             {
-                SetEndpointBusy(false);
+                if (ReferenceEquals(_routingCts, operationCts))
+                {
+                    _routingCts = null;
+                    SetEndpointBusy(false);
+                }
+
+                operationCts.Dispose();
             }
+        }
+
+        private bool CanApplyEndpointResult(ICoreAiRoutingUiController controller, int version,
+            CancellationTokenSource operation)
+        {
+            return !_pageDestroyed && version == _endpointEditorVersion &&
+                ReferenceEquals(controller, _routingController) && ReferenceEquals(operation, _routingCts);
+        }
+
+        private void InvalidateEndpointEditor()
+        {
+            _endpointEditorVersion++;
+            CancellationTokenSource previous = _routingCts;
+            _routingCts = null;
+            SetEndpointBusy(false);
+            previous?.Cancel();
         }
 
         private async void RemoveEndpointRow(string endpointId, string displayName, Button rowButton)
         {
-            if (_routingController == null || string.IsNullOrEmpty(endpointId) || rowButton == null)
+            if (_pageDestroyed || _endpointBusy || _routingController == null ||
+                string.IsNullOrEmpty(endpointId) || rowButton == null)
             {
                 return;
             }
@@ -985,10 +1036,20 @@ namespace CoreAI.Hub.UI
             }
 
             ResetRemoveConfirm();
+            ICoreAiRoutingUiController controller = _routingController;
+            int editorVersion = _endpointEditorVersion;
+            CancellationTokenSource operationCts = CancellationTokenSource.CreateLinkedTokenSource(PageToken());
+            _routingCts = operationCts;
             SetEndpointBusy(true);
             try
             {
-                CoreAiRoutingUiResult result = await _routingController.RemoveEndpointAsync(endpointId, PageToken());
+                CoreAiRoutingUiResult result = await controller.RemoveEndpointAsync(endpointId, operationCts.Token);
+                if (!CanApplyEndpointResult(controller, editorVersion, operationCts) ||
+                    operationCts.IsCancellationRequested)
+                {
+                    return;
+                }
+
                 if (result.Ok && string.Equals(_editingEndpointId, endpointId, StringComparison.Ordinal))
                 {
                     ClearEndpointEditor();
@@ -999,15 +1060,27 @@ namespace CoreAI.Hub.UI
             }
             catch (OperationCanceledException)
             {
-                _endpointOperationStatus.text = "Endpoint removal cancelled.";
+                if (CanApplyEndpointResult(controller, editorVersion, operationCts))
+                {
+                    _endpointOperationStatus.text = "Endpoint removal cancelled.";
+                }
             }
             catch (Exception ex)
             {
-                _endpointOperationStatus.text = "Could not remove '" + displayName + "': " + ex.Message;
+                if (CanApplyEndpointResult(controller, editorVersion, operationCts))
+                {
+                    _endpointOperationStatus.text = "Could not remove '" + displayName + "': " + ex.Message;
+                }
             }
             finally
             {
-                SetEndpointBusy(false);
+                if (ReferenceEquals(_routingCts, operationCts))
+                {
+                    _routingCts = null;
+                    SetEndpointBusy(false);
+                }
+
+                operationCts.Dispose();
             }
         }
 
@@ -1202,7 +1275,8 @@ namespace CoreAI.Hub.UI
             SetVisible(_endpointOverrideMaxTokens, http || local);
             SetVisible(_endpointMaxTokens, http || local);
             _endpointKeepWarm?.SetEnabled(kind != LlmEndpointKind.Offline);
-            _endpointSaveButton?.SetEnabled(_routingController != null && (!local || localAvailable));
+            _endpointSaveButton?.SetEnabled(!_pageDestroyed && !_endpointBusy &&
+                _routingController != null && (!local || localAvailable));
             if (local && !localAvailable && _endpointOperationStatus != null)
             {
                 _endpointOperationStatus.text =
@@ -1212,13 +1286,15 @@ namespace CoreAI.Hub.UI
 
         private void SetEndpointBusy(bool busy)
         {
+            _endpointBusy = busy;
             bool local = LabelKind(_endpointKind?.value) == LlmEndpointKind.LlmUnity;
             bool localAvailable = LocalModelPlatformSupport.IsSupported(_runtimePlatform);
-            _endpointSaveButton?.SetEnabled(!busy && _routingController != null && (!local || localAvailable));
+            _endpointSaveButton?.SetEnabled(!_pageDestroyed && !busy && _routingController != null && (!local || localAvailable));
         }
 
         private void ClearSessionKey()
         {
+            _endpointEditorVersion++;
             _endpointSessionKey.SetValueWithoutNotify("");
             _clearSessionKey = true;
             _endpointOperationStatus.text = "Session key will be cleared when this endpoint is saved.";

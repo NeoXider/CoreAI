@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -927,16 +927,6 @@ namespace CoreAI.Ai
                 tools.Add(readSkillTool);
                 tools.Add(callSkillTool);
             }
-            else if (!tools.Exists(IsSkillProxy))
-            {
-                foreach (ILlmTool existing in policy.SnapshotCustomToolsForPreparation(RoleId))
-                {
-                    if (IsSkillProxy(existing))
-                    {
-                        tools.Add(existing);
-                    }
-                }
-            }
 
             if (manageSkillsTool != null)
             {
@@ -980,10 +970,7 @@ namespace CoreAI.Ai
             Dictionary<string, ILlmTool> toolsByName = new(StringComparer.OrdinalIgnoreCase);
             foreach (ILlmTool tool in Tools)
             {
-                if (tool != null && !string.IsNullOrWhiteSpace(tool.Name))
-                {
-                    toolsByName[tool.Name] = tool;
-                }
+                AddAuthorableTool(toolsByName, tool);
             }
 
             if (Skills != null)
@@ -997,10 +984,7 @@ namespace CoreAI.Ai
 
                     foreach (ILlmTool tool in skill.Tools)
                     {
-                        if (tool != null && !string.IsNullOrWhiteSpace(tool.Name))
-                        {
-                            toolsByName[tool.Name] = tool;
-                        }
+                        AddAuthorableTool(toolsByName, tool);
                     }
                 }
             }
@@ -1015,6 +999,19 @@ namespace CoreAI.Ai
                 resolver,
                 RequireKnownSkillTools,
                 AsyncMarshaler ?? PassThroughLlmAsyncMarshaler.Instance);
+        }
+
+        private static void AddAuthorableTool(Dictionary<string, ILlmTool> toolsByName, ILlmTool tool)
+        {
+            if (tool == null) return;
+            foreach (string name in SkillSetToolResolver.GetCallableToolNames(tool))
+            {
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                ILlmTool binding = tool is IAIFunctionsLlmTool functions
+                    ? SkillSetToolResolver.RestrictToAllowedFunctions(functions, new HashSet<string>(StringComparer.Ordinal) { name })
+                    : tool;
+                if (binding != null) toolsByName[name] = binding;
+            }
         }
 
         private static bool IsSkillProxy(ILlmTool tool)

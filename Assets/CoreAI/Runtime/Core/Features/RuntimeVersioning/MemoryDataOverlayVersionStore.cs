@@ -137,7 +137,7 @@ namespace CoreAI.Ai
                     return true;
                 }
 
-                if (overwriteExistingOriginal || string.IsNullOrEmpty(slot.OriginalPayload))
+                if (overwriteExistingOriginal || slot.History.Count == 0)
                 {
                     slot.OriginalPayload = seed;
                     slot.CurrentPayload = seed;
@@ -168,7 +168,7 @@ namespace CoreAI.Ai
             long now = DateTime.UtcNow.Ticks;
             lock (_lock)
             {
-                if (!_slots.TryGetValue(key, out Slot slot) || string.IsNullOrEmpty(slot.OriginalPayload))
+                if (!_slots.TryGetValue(key, out Slot slot) || slot.History.Count == 0)
                 {
                     return false;
                 }
@@ -208,8 +208,7 @@ namespace CoreAI.Ai
                     return false;
                 }
 
-                // Revision indices are stable sequence numbers, not positions: after retention eviction the
-                // requested index may no longer sit at slot.History[revisionIndex], so it must be searched.
+                // WHY: Retention preserves revision indices, so an index can differ from its list position.
                 int pos = -1;
                 for (int i = 0; i < slot.History.Count; i++)
                 {
@@ -348,7 +347,7 @@ namespace CoreAI.Ai
                             slot.History.Add(r.History[i]);
                         }
                     }
-                    else if (!string.IsNullOrEmpty(slot.CurrentPayload))
+                    else
                     {
                         slot.History.Add(new LuaScriptRevision(0, slot.CurrentPayload, DateTime.UtcNow.Ticks));
                     }

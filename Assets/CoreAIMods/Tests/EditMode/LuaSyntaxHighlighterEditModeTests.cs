@@ -1,8 +1,10 @@
 #if COREAI_HAS_HUB
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using CoreAI.Ai;
 using CoreAI.Ai.Hub;
+using CoreAI.Infrastructure.Lua;
 using NUnit.Framework;
 using UnityEngine.UIElements;
 
@@ -104,6 +106,14 @@ namespace CoreAI.Tests.EditMode
             public int ListModsCalls;
             public int ErrorEntryReads;
             public int ReportReads;
+            public Dictionary<string, string> Sources { get; } = new(StringComparer.Ordinal);
+            public HubModPersistenceStatus SavePersistenceStatus = HubModPersistenceStatus.Saved;
+            public bool MutateBeforeSaveFailure;
+            public Exception SaveFailure;
+            public bool ThrowOnRead;
+            public bool DeleteResult;
+            public int DeleteCalls;
+            public Exception DeleteFailure;
 
             public bool IsSupported => true;
 
@@ -129,8 +139,12 @@ namespace CoreAI.Tests.EditMode
 
             public bool TryGetSource(string id, out string source)
             {
-                source = "";
-                return false;
+                if (ThrowOnRead)
+                {
+                    throw new InvalidOperationException("read refused");
+                }
+
+                return Sources.TryGetValue(id, out source);
             }
 
             public bool IsLoaded(string id)
@@ -146,10 +160,21 @@ namespace CoreAI.Tests.EditMode
 
             public HubModSaveResult SaveOrReload(string id, string code, ModReloadMode mode)
             {
+                if (SaveFailure != null)
+                {
+                    if (MutateBeforeSaveFailure)
+                    {
+                        Sources[id] = code;
+                    }
+
+                    throw SaveFailure;
+                }
+
                 SaveModes.Add(mode);
+                Sources[id] = code;
                 return new HubModSaveResult(id, true, mode, mode == ModReloadMode.KeepObjects
                     ? new ModReloadReport(id, mode, 0, 126, 0)
-                    : new ModReloadReport(id, mode, 126, 0, 0));
+                    : new ModReloadReport(id, mode, 126, 0, 0), SavePersistenceStatus, "storage refused");
             }
 
             public string NewModTemplate => HubModTemplates.Legacy;
@@ -164,7 +189,13 @@ namespace CoreAI.Tests.EditMode
 
             public bool Delete(string id)
             {
-                return false;
+                DeleteCalls++;
+                if (DeleteFailure != null)
+                {
+                    throw DeleteFailure;
+                }
+
+                return DeleteResult;
             }
 
             public IReadOnlyList<LuaScriptRevision> ListModVersions(string id)
@@ -320,6 +351,7 @@ namespace CoreAI.Tests.EditMode
         public void ModEditor_KeepObjectsToggle_DefaultsOff_PicksTheReloadMode_AndTheStatusSaysWhatWasCleaned()
         {
             CountingHubModService service = new();
+            service.Sources["castle"] = "local x = 1";
             MemoryEditorPreferences preferences = new();
             HubModEditorPage editor = new(service, "castle", "local x = 1", null, preferences);
             UnityEngine.UIElements.VisualElement root = editor.Build();
@@ -347,6 +379,8 @@ namespace CoreAI.Tests.EditMode
         public void ModEditor_KeepObjectsToggle_IsOneHubPreference_ReadByEveryEditorAndWrittenOnChange()
         {
             CountingHubModService service = new();
+            service.Sources["first"] = "local x = 1";
+            service.Sources["second"] = "local x = 2";
             MemoryEditorPreferences preferences = new();
             HubModEditorPage first = new(service, "first", "local x = 1", null, preferences);
             first.Build();
@@ -362,6 +396,239 @@ namespace CoreAI.Tests.EditMode
             second.Save();
 
             Assert.AreEqual(ModReloadMode.KeepObjects, service.SaveModes[0]);
+        }
+
+        [Test]
+        public void ModEditor_ExternalEditsRequireAnExplicitOverwriteOfTheLatestReviewedSource()
+        {
+            CountingHubModService service = new();
+            service.Sources["edit"] = "local original = 1";
+            HubModEditorPage editor = new(service, "edit", null, null, new MemoryEditorPreferences());
+            VisualElement root = editor.Build();
+            root.Q<TextField>("coreai-hub-mod-code").value = "local draft = 2";
+            service.Sources["edit"] = "local external = 3";
+
+            editor.Save();
+
+            Assert.AreEqual(0, service.SaveModes.Count);
+            Assert.AreEqual("local external = 3", service.Sources["edit"]);
+            Assert.AreEqual("local draft = 2", editor.DraftSource);
+            Assert.IsTrue(editor.IsDirty);
+            StringAssert.Contains("changed outside", root.Q<Label>(HubModEditorPage.StatusLabelName).text);
+            service.Sources["edit"] = "local newer = 4";
+            Invoke(editor, "SaveCore", true);
+            Assert.AreEqual(0, service.SaveModes.Count,
+                "An overwrite decision cannot approve a version that changed again after the warning.");
+            Assert.AreEqual("local newer = 4", service.Sources["edit"]);
+            Invoke(editor, "SaveCore", true);
+            Assert.AreEqual("local draft = 2", service.Sources["edit"]);
+            Assert.AreEqual(1, service.SaveModes.Count);
+            Assert.IsFalse(editor.IsDirty);
+        }
+
+        [Test]
+        public void ModEditor_TwoEditorsCannotSilentlyReplaceEachOthersSavedDraft()
+        {
+            CountingHubModService service = new();
+            service.Sources["shared"] = "local original = 1";
+            HubModEditorPage first = new(service, "shared", null, null, new MemoryEditorPreferences());
+            HubModEditorPage second = new(service, "shared", null, null, new MemoryEditorPreferences());
+            first.Build().Q<TextField>("coreai-hub-mod-code").value = "local first = 2";
+            second.Build().Q<TextField>("coreai-hub-mod-code").value = "local second = 3";
+
+            first.Save();
+            second.Save();
+
+            Assert.AreEqual("local first = 2", service.Sources["shared"]);
+            Assert.AreEqual("local second = 3", second.DraftSource);
+            Assert.AreEqual(1, service.SaveModes.Count);
+        }
+
+        [TestCase(HubModPersistenceStatus.Failed)]
+        [TestCase(HubModPersistenceStatus.Unconfirmed)]
+        public void ModEditor_FailedOrUnconfirmedPersistenceKeepsTheDraftAndBackGuard_AndCanRetryItsOwnLiveChange(
+            HubModPersistenceStatus persistenceStatus)
+        {
+            CountingHubModService service = new() { SavePersistenceStatus = persistenceStatus };
+            service.Sources["retry"] = "local previous = 1";
+            int closes = 0;
+            HubModEditorPage editor = new(service, "retry", null, () => closes++, new MemoryEditorPreferences());
+            VisualElement root = editor.Build();
+            root.Q<TextField>("coreai-hub-mod-code").value = "local retry = 2";
+
+            editor.Save();
+            Invoke(editor, "Close");
+
+            Assert.AreEqual(0, closes);
+            Assert.IsTrue(editor.IsDirty);
+            Assert.AreEqual("local retry = 2", editor.DraftSource);
+            Assert.AreEqual(DisplayStyle.Flex, root.Q<Button>("coreai-hub-mod-discard").style.display.value);
+            service.SavePersistenceStatus = HubModPersistenceStatus.Saved;
+            editor.Save();
+            Assert.AreEqual(2, service.SaveModes.Count, "The retry must not conflict with its own previous live execution.");
+            Assert.IsFalse(editor.IsDirty);
+            Invoke(editor, "Close");
+            Assert.AreEqual(1, closes);
+        }
+
+        [TestCase(HubModPersistenceStatus.Failed)]
+        [TestCase(HubModPersistenceStatus.Unconfirmed)]
+        public void ModEditor_UnacknowledgedSaveOfUnchangedSourceStillKeepsTheDraftDirty(
+            HubModPersistenceStatus persistenceStatus)
+        {
+            CountingHubModService service = new() { SavePersistenceStatus = persistenceStatus };
+            service.Sources["same"] = "local x = 1";
+            int closes = 0;
+            HubModEditorPage editor = new(service, "same", null, () => closes++, new MemoryEditorPreferences());
+            editor.Build();
+            Assert.IsFalse(editor.IsDirty);
+
+            editor.Save();
+            Invoke(editor, "Close");
+
+            Assert.IsTrue(editor.IsDirty);
+            Assert.AreEqual(0, closes);
+            Assert.AreEqual("local x = 1", editor.DraftSource);
+            service.SavePersistenceStatus = HubModPersistenceStatus.Saved;
+            editor.Save();
+            Assert.IsFalse(editor.IsDirty);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ModEditor_ThrownOrCancelledSavePreservesTheBufferAndUnsavedCloseGuard(bool cancelled)
+        {
+            CountingHubModService service = new()
+            {
+                SaveFailure = cancelled ? new OperationCanceledException() : new InvalidOperationException("write refused")
+            };
+            service.Sources["edit"] = "local original = 1";
+            int closes = 0;
+            HubModEditorPage editor = new(service, "edit", null, () => closes++, new MemoryEditorPreferences());
+            editor.Build().Q<TextField>("coreai-hub-mod-code").value = "local draft = 2";
+            editor.Save();
+            Invoke(editor, "Close");
+            Assert.AreEqual("local draft = 2", editor.DraftSource);
+            Assert.IsTrue(editor.IsDirty);
+            Assert.AreEqual(0, closes);
+            Assert.AreEqual("local original = 1", service.Sources["edit"]);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ModEditor_ThrownOrCancelledSaveAfterLiveMutationCanRetryWithoutAnOverwritePrompt(bool cancelled)
+        {
+            CountingHubModService service = new()
+            {
+                SaveFailure = cancelled ? new OperationCanceledException() : new InvalidOperationException("write refused"),
+                MutateBeforeSaveFailure = true
+            };
+            service.Sources["retry"] = "local original = 1";
+            HubModEditorPage editor = new(service, "retry", null, null, new MemoryEditorPreferences());
+            VisualElement root = editor.Build();
+            root.Q<TextField>("coreai-hub-mod-code").value = "local draft = 2";
+            editor.Save();
+            Assert.IsTrue(editor.IsDirty);
+            Assert.AreEqual("local draft = 2", service.Sources["retry"]);
+
+            service.SaveFailure = null;
+            editor.Save();
+
+            Assert.IsFalse(editor.IsDirty);
+            Assert.AreEqual(1, service.SaveModes.Count);
+            StringAssert.DoesNotContain("changed outside", root.Q<Label>(HubModEditorPage.StatusLabelName).text);
+        }
+
+        [Test]
+        public void ModEditor_UnreadableExistingSourceNeverOpensAnEmptyBuffer()
+        {
+            CountingHubModService service = new() { ThrowOnRead = true };
+            Assert.Throws<InvalidOperationException>(() => new HubModEditorPage(service, "existing", null, null));
+            Assert.AreEqual(0, service.SaveModes.Count);
+            service.ThrowOnRead = false;
+            Assert.Throws<InvalidOperationException>(() => new HubModEditorPage(service, "missing", null, null));
+        }
+
+        [Test]
+        public void ModsPage_DeactivationPreservesTheDraftButDestructionFencesItsSaveCallbacks()
+        {
+            CountingHubModService service = new();
+            service.Sources["edit"] = "local original = 1";
+            HubModsPage page = new(service, 300, null, new MemoryEditorPreferences());
+            VisualElement root = (VisualElement)page.CreatePageContent();
+            Invoke(page, "OpenEditEditor", "edit");
+            HubModEditorPage editor = (HubModEditorPage)typeof(HubModsPage)
+                .GetField("_editor", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(page);
+            root.Q<TextField>("coreai-hub-mod-code").value = "local preserved = 2";
+
+            page.OnDeactivated();
+            page.OnActivated();
+            Assert.AreEqual("local preserved = 2", editor.DraftSource);
+            page.OnDestroyed();
+            editor.Save();
+            Invoke(page, "DeleteMod", "edit");
+
+            Assert.AreEqual(0, service.SaveModes.Count);
+            Assert.AreEqual(0, service.DeleteCalls);
+            Assert.AreEqual("local original = 1", service.Sources["edit"]);
+        }
+
+        [Test]
+        public void ModsPage_FalseDeleteResultIsVisibleAndQueuedRefreshCannotReviveDestroyedViews()
+        {
+            CountingHubModService service = new();
+            List<Action> queued = new();
+            HubModsPage page = new(service, 300, queued.Add);
+            page.CreatePageContent();
+            Invoke(page, "DeleteMod", "noisy");
+            Label status = (Label)typeof(HubModsPage).GetField("_status", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(page);
+            StringAssert.Contains("not confirmed", status.text);
+            service.RaiseModsChanged();
+            Assert.AreEqual(1, queued.Count);
+            int reads = service.ListModsCalls;
+            page.OnDestroyed();
+            queued[0]();
+            service.RaiseModsChanged();
+            Assert.AreEqual(reads, service.ListModsCalls);
+            Assert.AreEqual(1, queued.Count);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ModsPage_DeletionCancellationAndLocalCommitArmingFailureHaveDistinctOutcomes(bool cancelled)
+        {
+            CountingHubModService service = new()
+            {
+                DeleteFailure = cancelled ? (Exception)new OperationCanceledException()
+                    : new LuaModSourcePersistenceException(true, new InvalidOperationException("arming refused"))
+            };
+            HubModsPage page = new(service, 300, null, new MemoryEditorPreferences());
+            VisualElement root = (VisualElement)page.CreatePageContent();
+            try
+            {
+                Invoke(page, "DeleteMod", "removed");
+                Label status = (Label)typeof(HubModsPage).GetField("_status", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(page);
+                StringAssert.Contains(cancelled ? "cancelled" : "Deleted 'removed' locally", status.text);
+                if (!cancelled)
+                {
+                    StringAssert.Contains("NOT armed", status.text);
+                }
+
+                Assert.AreEqual(1, service.DeleteCalls);
+            }
+            finally
+            {
+                page.OnDestroyed();
+            }
+        }
+
+        private static void Invoke(object target, string method, params object[] arguments)
+        {
+            MethodInfo member = target.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(member, method);
+            member.Invoke(target, arguments);
         }
 
         [Test]

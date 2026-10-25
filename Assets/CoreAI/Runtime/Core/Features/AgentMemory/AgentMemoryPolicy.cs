@@ -74,6 +74,10 @@ namespace CoreAI.Ai
                 {
                     _roleSkillCatalogs[roleId] = prepared.LiveCatalog;
                 }
+                else
+                {
+                    _roleSkillCatalogs.Remove(roleId);
+                }
 
                 if (prepared.Tools == null || prepared.Tools.Count == 0)
                 {
@@ -108,6 +112,10 @@ namespace CoreAI.Ai
                 {
                     _overrideUniversalPrefix.Add(roleId);
                 }
+                else
+                {
+                    _overrideUniversalPrefix.Remove(roleId);
+                }
 
                 if (prepared.StreamingOverride.HasValue)
                 {
@@ -121,6 +129,10 @@ namespace CoreAI.Ai
                 if (!string.IsNullOrWhiteSpace(prepared.AdditionalPrompt))
                 {
                     _additionalSystemPrompts[roleId] = prepared.AdditionalPrompt.Trim();
+                }
+                else
+                {
+                    _additionalSystemPrompts.Remove(roleId);
                 }
             }
         }

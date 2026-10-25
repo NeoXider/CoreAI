@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -41,6 +42,7 @@ namespace CoreAI.Tests.EditMode
         [TearDown]
         public void TearDown()
         {
+            FileLuaModSourceStore.PersistenceArmingForTesting = null;
             _store = null;
             SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
 
@@ -66,6 +68,199 @@ namespace CoreAI.Tests.EditMode
                 Capabilities = LuaCapabilities.Read.ToString(),
                 Active = active
             };
+        }
+
+        private sealed class PersistenceLog : CoreAI.Logging.ILog
+        {
+            public readonly List<string> Errors = new();
+            public void Debug(string message, string tag = null) { }
+            public void Info(string message, string tag = null) { }
+            public void Warn(string message, string tag = null) { }
+            public void Error(string message, string tag = null) => Errors.Add(message);
+        }
+
+        [Test]
+        public void MOD002_StrictSourceSaveReportsArmingFailureAndAnIdenticalRetryRearms()
+        {
+            FileLuaModSourceStore.PersistenceArmingForTesting = () => false;
+            ILuaModSourceStrictWriter strict = _store;
+            LuaModSourcePersistenceException error = Assert.Throws<LuaModSourcePersistenceException>(() =>
+                strict.SaveStrict("mod", "return 1", Manifest("mod")));
+            Assert.IsTrue(error.LocalCommitCompleted);
+            Assert.IsTrue(_store.TryLoad("mod", out string local, out _));
+            Assert.AreEqual("return 1", local);
+            int confirmations = 0;
+            FileLuaModSourceStore.PersistenceArmingForTesting = () => { confirmations++; return true; };
+            strict.SaveStrict("mod", "return 1", Manifest("mod"));
+            Assert.AreEqual(1, confirmations);
+            using FileLuaModSourceStore reopened = new(_root);
+            Assert.IsTrue(reopened.TryLoad("mod", out string persisted, out _));
+            Assert.AreEqual("return 1", persisted);
+        }
+
+        [Test]
+        public void MOD002_StrictSourceSaveReportsIncompleteLocalWriteAndRemainsRetryable()
+        {
+            ILuaModSourceStrictWriter strict = _store;
+            strict.SaveStrict("mod", "return 1", Manifest("mod"));
+            string sourcePath = Directory.GetFiles(_root, "main.lua", SearchOption.AllDirectories)[0];
+            Directory.CreateDirectory(sourcePath + ".tmp");
+            LuaModSourcePersistenceException error = Assert.Throws<LuaModSourcePersistenceException>(() =>
+                strict.SaveStrict("mod", "return 2", Manifest("mod")));
+            Assert.IsFalse(error.LocalCommitCompleted);
+            Assert.IsTrue(_store.TryLoad("mod", out string previous, out _));
+            Assert.AreEqual("return 1", previous);
+            Directory.Delete(sourcePath + ".tmp");
+            strict.SaveStrict("mod", "return 2", Manifest("mod"));
+            Assert.IsTrue(_store.TryLoad("mod", out string retried, out _));
+            Assert.AreEqual("return 2", retried);
+        }
+
+        [Test]
+        public void HUB003_StrictSourceRemovalReportsArmingFailureAndAbsentRetryRearms()
+        {
+            _store.SaveStrict("mod", "return 1", Manifest("mod"));
+            FileLuaModSourceStore.PersistenceArmingForTesting = () => false;
+            ILuaModSourceStrictRemover strict = _store;
+            LuaModSourcePersistenceException failure = Assert.Throws<LuaModSourcePersistenceException>(() =>
+                strict.DeleteStrict("mod"));
+            Assert.IsTrue(failure.LocalCommitCompleted);
+            Assert.IsFalse(_store.TryLoad("mod", out _, out _));
+            int armingRequests = 0;
+            FileLuaModSourceStore.PersistenceArmingForTesting = () => { armingRequests++; return true; };
+
+            strict.DeleteStrict("mod");
+
+            Assert.AreEqual(1, armingRequests, "An already absent local package still needs the refused arming retried.");
+            using FileLuaModSourceStore reopened = new(_root);
+            Assert.IsFalse(reopened.TryLoad("mod", out _, out _));
+        }
+
+        [Test]
+        public void HUB003_StrictSourceRemovalPreservesUnreadableIdentityEvidenceUntilRecovery()
+        {
+            _store.SaveStrict("mod", "return 1", Manifest("mod"));
+            string manifestPath = Directory.GetFiles(_root, "manifest.json", SearchOption.AllDirectories)[0];
+            string manifest = File.ReadAllText(manifestPath);
+            File.WriteAllText(manifestPath, "{");
+            LuaModSourcePersistenceException failure = Assert.Throws<LuaModSourcePersistenceException>(() =>
+                _store.DeleteStrict("mod"));
+            Assert.IsFalse(failure.LocalCommitCompleted);
+            Assert.AreEqual("{", File.ReadAllText(manifestPath));
+            File.WriteAllText(manifestPath, manifest);
+
+            _store.DeleteStrict("mod");
+
+            Assert.IsFalse(_store.TryLoad("mod", out _, out _));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void HUB003_StrictSourceMutationCancellationPropagatesAndRetryRearms(bool remove)
+        {
+            _store.SaveStrict("mod", "return 1", Manifest("mod"));
+            FileLuaModSourceStore.PersistenceArmingForTesting = () => throw new OperationCanceledException();
+            Assert.Throws<OperationCanceledException>(() =>
+            {
+                if (remove) { _store.DeleteStrict("mod"); }
+                else { _store.SaveStrict("mod", "return 2", Manifest("mod")); }
+            });
+            int armingRequests = 0;
+            FileLuaModSourceStore.PersistenceArmingForTesting = () => { armingRequests++; return true; };
+
+            if (remove) { _store.DeleteStrict("mod"); }
+            else { _store.SaveStrict("mod", "return 2", Manifest("mod")); }
+
+            Assert.AreEqual(1, armingRequests);
+            Assert.AreEqual(!remove, _store.TryLoad("mod", out _, out _));
+        }
+
+        [Test]
+        public void MOD002_BestEffortSourceMutationsLogRefusedArmingAfterLocalCommit()
+        {
+            PersistenceLog log = new();
+            _store.Dispose();
+            _store = new FileLuaModSourceStore(_root, log);
+            FileLuaModSourceStore.PersistenceArmingForTesting = () => false;
+            _store.Save("mod", "return 1", Manifest("mod"));
+            _store.SetActive("mod", false);
+            _store.Delete("mod");
+            Assert.AreEqual(3, log.Errors.Count);
+            foreach (string message in log.Errors) { StringAssert.Contains("committed locally", message); }
+            Assert.IsFalse(_store.TryLoad("mod", out _, out _));
+        }
+
+        [Test]
+        public void MOD008_OrdinarySourceStoreIsolatesLegacySanitizerAndCaseCollisions()
+        {
+            string[] ids = { "a/b", "a_b_3a8e75c1", "Case", "case" };
+            for (int i = 0; i < ids.Length; i++) { _store.Save(ids[i], "return " + i, Manifest(ids[i])); }
+            _store = new FileLuaModSourceStore(_root);
+            for (int i = 0; i < ids.Length; i++)
+            {
+                Assert.IsTrue(_store.TryLoad(ids[i], out string source, out LuaModManifest manifest));
+                Assert.AreEqual(ids[i], manifest.Id);
+                Assert.AreEqual("return " + i, source);
+            }
+
+            _store.SetActive(ids[0], false);
+            Assert.IsTrue(_store.TryLoad(ids[1], out _, out LuaModManifest other));
+            Assert.IsTrue(other.Active);
+            _store.Delete(ids[1]);
+            Assert.IsTrue(_store.TryLoad(ids[0], out _, out LuaModManifest retained));
+            Assert.IsFalse(retained.Active);
+            Assert.IsFalse(_store.TryLoad(ids[1], out _, out _));
+            Assert.AreEqual(3, _store.List().Count);
+        }
+
+        [Test]
+        public void MOD008_LegacySourceMigrationRequiresExactManifestIdentity()
+        {
+            string legacy = Path.Combine(_root, "a_b_3a8e75c1");
+            Directory.CreateDirectory(legacy);
+            File.WriteAllText(Path.Combine(legacy, "manifest.json"), "{\"Id\":\"a/b\",\"Active\":true}");
+            File.WriteAllText(Path.Combine(legacy, "main.lua"), "return 'legacy'");
+            Assert.IsFalse(_store.TryLoad("a_b_3a8e75c1", out _, out _));
+            _store.Delete("a_b_3a8e75c1");
+            Assert.IsTrue(Directory.Exists(legacy));
+            Assert.IsTrue(_store.TryLoad("a/b", out string source, out LuaModManifest manifest));
+            Assert.AreEqual("return 'legacy'", source);
+            Assert.AreEqual("a/b", manifest.Id);
+            Assert.IsFalse(Directory.Exists(legacy));
+            _store.Save("a_b_3a8e75c1", "return 'separate'", Manifest("a_b_3a8e75c1"));
+            Assert.IsTrue(_store.TryLoad("a/b", out string original, out _));
+            Assert.AreEqual(source, original);
+        }
+
+        [Test]
+        public void MOD008_StoreNamespacesAreCaseSafeAndLegacyMigrationNeverMerges()
+        {
+            string[] ids = { "a/b", "a_b_3a8e75c1", "Case", "case" };
+            for (int i = 0; i < ids.Length; i++)
+            {
+                using FileLuaModSourceStore store = new(_root, storeId: ids[i]);
+                store.Save("same", "return " + i, Manifest("same"));
+            }
+            for (int i = 0; i < ids.Length; i++)
+            {
+                using FileLuaModSourceStore store = new(_root, storeId: ids[i]);
+                Assert.IsTrue(store.TryLoad("same", out string source, out _));
+                Assert.AreEqual("return " + i, source);
+            }
+
+            string legacy = Path.Combine(_root, "Stores", "legacy");
+            Directory.CreateDirectory(legacy);
+            File.WriteAllText(Path.Combine(legacy, "evidence.txt"), "legacy namespace");
+            Assert.IsFalse(LuaModStoreId.TryMigrateLegacy(_root, "legacy", (id, path) => false));
+            Assert.IsTrue(Directory.Exists(legacy));
+            Assert.IsTrue(LuaModStoreId.TryMigrateLegacy(_root, "legacy", (id, path) => id == "legacy"));
+            string destination = LuaModStoreId.ApplyTo(_root, "legacy");
+            Assert.AreEqual("legacy namespace", File.ReadAllText(Path.Combine(destination, "evidence.txt")));
+            Directory.CreateDirectory(legacy);
+            File.WriteAllText(Path.Combine(legacy, "evidence.txt"), "do not overwrite");
+            Assert.IsFalse(LuaModStoreId.TryMigrateLegacy(_root, "legacy", (id, path) => true));
+            Assert.AreEqual("legacy namespace", File.ReadAllText(Path.Combine(destination, "evidence.txt")));
+            Assert.AreEqual("do not overwrite", File.ReadAllText(Path.Combine(legacy, "evidence.txt")));
         }
 
         [Test]
@@ -165,9 +360,9 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(storeA.TryLoad("mod", out string source, out _));
             Assert.AreEqual("local a = 1", source);
 
-            Assert.IsTrue(Directory.Exists(Path.Combine(_root, "Stores", "demo-a")),
+            Assert.IsTrue(Directory.Exists(LuaModStoreId.ApplyTo(_root, "demo-a")),
                 "Each store id must persist its packages in its own subdirectory.");
-            Assert.IsFalse(Directory.Exists(Path.Combine(_root, "Stores", "demo-b", "mod")));
+            Assert.IsFalse(Directory.Exists(LuaModStoreId.ApplyTo(_root, "demo-b")));
         }
 
         [Test]
@@ -180,8 +375,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(_store.TryLoad("mod", out string source, out _),
                 "An id-less store must read what another id-less store on the same root wrote.");
             Assert.AreEqual("local x = 1", source);
-            Assert.IsTrue(Directory.Exists(Path.Combine(_root, "mod")),
-                "An empty store id must keep today's shared root layout unchanged.");
+            Assert.AreEqual(1, Directory.GetDirectories(_root).Length,
+                "An empty store id keeps packages directly under the shared root.");
         }
 
         [Test]
@@ -522,7 +717,14 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(admission.CanAdmit("mod000", out string existing), "a stored id is always kept");
             Assert.AreEqual("", existing);
 
-            _store.Delete("broken");
+            LuaModSourcePersistenceException deletion = Assert.Throws<LuaModSourcePersistenceException>(() =>
+                _store.DeleteStrict("broken"));
+            Assert.IsFalse(deletion.LocalCommitCompleted);
+            string corruptDirectory = Path.Combine(_root, "broken");
+            Assert.AreEqual("{ not json", File.ReadAllText(Path.Combine(corruptDirectory, "manifest.json")));
+            Assert.AreEqual("return 0", File.ReadAllText(Path.Combine(corruptDirectory, "main.lua")));
+            Assert.IsFalse(admission.CanAdmit("newcomer", out _), "Unreadable identity evidence still occupies admission.");
+            Directory.Delete(corruptDirectory, true);
             Assert.IsTrue(admission.CanAdmit("newcomer", out _), "a freed folder makes room");
             _store.Save("newcomer", "return 'x'", Manifest("newcomer"));
             Assert.IsTrue(_store.TryLoad("newcomer", out _, out _));

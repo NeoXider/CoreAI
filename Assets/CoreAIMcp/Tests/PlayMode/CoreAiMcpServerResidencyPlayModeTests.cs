@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -42,6 +43,7 @@ namespace CoreAI.Mcp.Tests
 
         private GameObject _host;
         private CoreAiMcpServer _server;
+        private CoreAiMcpServer _automaticTestHost;
         private string _previousDynamic;
 
         [UnitySetUp]
@@ -57,8 +59,22 @@ namespace CoreAI.Mcp.Tests
         [UnityTearDown]
         public IEnumerator TearDown()
         {
+            int unreleasedBodies = 0;
             Environment.SetEnvironmentVariable(
                 McpToolResidencyPolicies.DynamicVariableName, _previousDynamic);
+            if (_automaticTestHost != null)
+            {
+                _automaticTestHost.StopListening();
+                double deadline = Time.realtimeSinceStartupAsDouble + 5;
+                while (_automaticTestHost != null && _automaticTestHost.AdmittedMainThreadCalls != 0 &&
+                       Time.realtimeSinceStartupAsDouble < deadline) yield return null;
+                if (_automaticTestHost != null)
+                {
+                    unreleasedBodies = _automaticTestHost.AdmittedMainThreadCalls;
+                    UnityEngine.Object.DestroyImmediate(_automaticTestHost.gameObject);
+                }
+            }
+            _automaticTestHost = null;
             if (_host != null)
             {
                 UnityEngine.Object.DestroyImmediate(_host);
@@ -66,6 +82,8 @@ namespace CoreAI.Mcp.Tests
 
             _host = null;
             _server = null;
+            Assert.AreEqual(0, unreleasedBodies,
+                "The static lifecycle fixture must release every body before destroying its own host.");
             yield return null;
         }
 
@@ -301,6 +319,333 @@ namespace CoreAI.Mcp.Tests
             }
             finally { tool.Release.TrySetResult(true); }
             yield return AwaitLiveRequest(ObserveClosedTransportAsync(request));
+        }
+
+        [UnityTest]
+        public IEnumerator StaticRestart_RetainsCancellationIgnoringBodyAndRecoversCapacityExactlyOnce()
+        {
+            RequireIsolatedStaticHost();
+            List<InMemoryTransport> transports = new();
+            LifetimeTool tool = new(true);
+            CoreAiMcpServer original = StartOwnedStatic(new McpToolRegistry(new[] { tool }), transports);
+            original.MainThreadTimeoutSeconds = 0;
+            Task<McpDispatchResult> running = transports[0].Dispatch(CallRequest(tool.Name, new JObject()));
+            try
+            {
+                yield return AwaitLiveRequest(tool.Started.Task);
+                Task<int> queuedAtStop = original.RunOnMainThreadAsync(() => Task.FromResult(-1));
+                for (int cycle = 0; cycle < 3; cycle++)
+                {
+                    CoreAiMcpServer.StopServer();
+                    Assert.AreEqual(1, original.AdmittedMainThreadCalls);
+                    Assert.IsFalse(running.IsCompleted, "Cancellation must not fake completion of an ignoring body.");
+                    if (cycle == 0)
+                    {
+                        yield return AwaitLiveRequest(tool.Cancelled.Task);
+                        Assert.IsTrue(queuedAtStop.IsFaulted);
+                        Assert.IsInstanceOf<OperationCanceledException>(queuedAtStop.Exception.InnerException);
+                    }
+                    RuntimeStageTool next = new("next", "available");
+                    Assert.AreSame(original, StartOwnedStatic(new McpToolRegistry(new[] { next }), transports));
+                    AssertAutomaticHostCount(1);
+                    Task<McpDispatchResult> unrelated = transports[transports.Count - 1]
+                        .Dispatch(CallRequest(next.Name, new JObject()));
+                    yield return AwaitLiveRequest(unrelated);
+                    Assert.AreEqual("available", (string)unrelated.Result.Response["result"]["content"][0]["text"]);
+                    Assert.AreEqual(1, original.AdmittedMainThreadCalls);
+                }
+
+                List<Task<int>> firstWave = QueueImmediateCalls(original, CoreAiMcpServer.MainThreadCallCapacity - 1);
+                Assert.AreEqual(CoreAiMcpServer.MainThreadCallCapacity, original.AdmittedMainThreadCalls);
+                AssertCapacityRejects(original);
+                original.PumpMainThreadQueue(TimeSpan.MaxValue);
+                yield return AwaitLiveRequest(Task.WhenAll(firstWave));
+                Assert.AreEqual(1, original.AdmittedMainThreadCalls);
+
+                tool.Release.TrySetResult(true);
+                yield return AwaitLiveRequest(running);
+                Assert.AreEqual("finished", (string)running.Result.Response["result"]["content"][0]["text"]);
+                Assert.AreEqual(0, original.AdmittedMainThreadCalls);
+                List<Task<int>> recoveredWave = QueueImmediateCalls(original, CoreAiMcpServer.MainThreadCallCapacity);
+                AssertCapacityRejects(original);
+                original.PumpMainThreadQueue(TimeSpan.MaxValue);
+                yield return AwaitLiveRequest(Task.WhenAll(recoveredWave));
+                original.PumpMainThreadQueue(TimeSpan.MaxValue);
+                Assert.AreEqual(0, original.AdmittedMainThreadCalls,
+                    "Actual completion must return exactly one lease, without over-releasing admission.");
+                CoreAiMcpServer.StopServer();
+                yield return AwaitAutomaticHostRetired();
+                Assert.IsTrue(transports.All(transport => transport.DisposeCalls == 1));
+            }
+            finally
+            {
+                tool.Release.TrySetResult(true);
+                if (_automaticTestHost != null) _automaticTestHost.StopListening();
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator StaticIdleCycles_RetireAutomaticHostsAndPreserveSceneOwnedHost()
+        {
+            RequireIsolatedStaticHost();
+            List<InMemoryTransport> transports = new();
+            McpToolRegistry registry = new(new[] { new RuntimeStageTool("stage", "available") });
+            InMemoryTransport sceneTransport = null;
+            _server.StartListening(registry, 8590, (listenPort, dispatcher, _) =>
+                sceneTransport = new InMemoryTransport(listenPort, dispatcher));
+            Assert.AreSame(_server, CoreAiMcpServer.StartServer(8590, registry, (_, _, _) =>
+                throw new InvalidOperationException("A running scene host must be reused.")));
+            CoreAiMcpServer.StopServer();
+            yield return null;
+            yield return null;
+            Assert.IsTrue(_server != null, "Static stop must not destroy a scene-owned host.");
+            Assert.AreEqual(1, sceneTransport.DisposeCalls);
+            AssertAutomaticHostCount(0);
+
+            for (int cycle = 0; cycle < 3; cycle++)
+            {
+                CoreAiMcpServer first = StartOwnedStatic(registry, transports);
+                Assert.AreSame(first, CoreAiMcpServer.StartServer(8590));
+                Assert.AreSame(first, StartOwnedStatic(registry, transports));
+                CoreAiMcpServer.StopServer();
+                CoreAiMcpServer.StopServer();
+                Assert.AreSame(first, StartOwnedStatic(registry, transports));
+                AssertAutomaticHostCount(1);
+                Assert.IsTrue(first.IsRunning);
+                CoreAiMcpServer.StopServer();
+                yield return AwaitAutomaticHostRetired();
+            }
+            Assert.AreEqual(6, transports.Count, "Running starts are idempotent; stopped starts create one new transport.");
+            Assert.IsTrue(transports.All(transport => transport.DisposeCalls == 1));
+            Assert.IsTrue(_server != null);
+        }
+
+        [UnityTest]
+        public IEnumerator StaticStop_ReentrantCancellationRestartPreservesNewGenerationAndQueue()
+        {
+            RequireIsolatedStaticHost();
+            List<InMemoryTransport> transports = new();
+            CoreAiMcpServer original = StartOwnedStatic(new McpToolRegistry(null), transports);
+            McpToolRegistry replacement = new(new[] { new RuntimeStageTool("next", "restarted") });
+            CoreAiMcpServer restarted = null;
+            Task<McpDispatchResult> nextRequest = null;
+            using CancellationTokenRegistration callback = transports[0].LifetimeToken.Register(() =>
+            {
+                CoreAiMcpServer.StopServer();
+                restarted = StartOwnedStatic(replacement, transports);
+                nextRequest = transports[transports.Count - 1].Dispatch(CallRequest("next", new JObject()));
+            });
+
+            CoreAiMcpServer.StopServer();
+
+            Assert.AreSame(original, restarted);
+            Assert.IsTrue(restarted.IsRunning);
+            Assert.AreSame(replacement, restarted.Registry);
+            Assert.AreEqual(restarted.AuthToken, CoreAiMcpServer.ActiveAuthToken);
+            Assert.AreEqual(1, transports[0].DisposeCalls);
+            Assert.AreEqual(0, transports[1].DisposeCalls);
+            Assert.IsNotNull(nextRequest);
+            yield return AwaitLiveRequest(nextRequest);
+            Assert.AreEqual("restarted", (string)nextRequest.Result.Response["result"]["content"][0]["text"]);
+            Assert.AreEqual(0, restarted.AdmittedMainThreadCalls);
+            AssertAutomaticHostCount(1);
+            CoreAiMcpServer.StopServer();
+            yield return AwaitAutomaticHostRetired();
+            Assert.IsTrue(transports.All(transport => transport.DisposeCalls == 1));
+        }
+
+        [UnityTest]
+        public IEnumerator StaticStop_DisposeFailureStillClearsStoppedGenerationAndRetainsRunningLease()
+        {
+            RequireIsolatedStaticHost();
+            List<InMemoryTransport> transports = new();
+            CoreAiMcpServer original = StartOwnedStatic(new McpToolRegistry(null), transports);
+            original.MainThreadTimeoutSeconds = 0;
+            TaskCompletionSource<int> release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            Task<int> running = original.RunOnMainThreadAsync(() => release.Task);
+            original.PumpMainThreadQueue(TimeSpan.MaxValue);
+            Task<int> queued = original.RunOnMainThreadAsync(() => Task.FromResult(-1));
+            transports[0].DisposeFailure = new InvalidOperationException("simulated stop failure");
+            try
+            {
+                Assert.Throws<InvalidOperationException>(() => CoreAiMcpServer.StopServer());
+                Assert.IsFalse(original.IsRunning);
+                Assert.IsNull(original.Registry);
+                Assert.IsNull(original.AuthToken);
+                Assert.IsNull(CoreAiMcpServer.ActiveAuthToken);
+                Assert.IsTrue(queued.IsFaulted);
+                Assert.IsInstanceOf<OperationCanceledException>(queued.Exception.InnerException);
+                Assert.IsFalse(running.IsCompleted);
+                Assert.AreEqual(1, original.AdmittedMainThreadCalls);
+                Assert.AreSame(original, StartOwnedStatic(new McpToolRegistry(null), transports));
+                Assert.IsTrue(original.IsRunning);
+                Assert.AreEqual(1, original.AdmittedMainThreadCalls);
+                release.TrySetResult(7);
+                yield return AwaitLiveRequest(running);
+                Assert.AreEqual(7, running.Result);
+                Assert.AreEqual(0, original.AdmittedMainThreadCalls);
+                CoreAiMcpServer.StopServer();
+                yield return AwaitAutomaticHostRetired();
+                Assert.IsTrue(transports.All(transport => transport.DisposeCalls == 1));
+            }
+            finally { release.TrySetResult(0); }
+        }
+
+        [UnityTest]
+        public IEnumerator StaticStart_ObsoleteFailureCannotDisposeRestartedGenerationOrChangeItsQueue()
+        {
+            RequireIsolatedStaticHost();
+            List<InMemoryTransport> transports = new();
+            McpToolRegistry replacement = new(new[] { new RuntimeStageTool("next", "replacement") });
+            CoreAiMcpServer restarted = null;
+            Task<McpDispatchResult> nextRequest = null;
+            LogAssert.Expect(LogType.Error, new Regex(
+                @"Failed to start on port 8590: obsolete start failure\. .*url=http://127\.0\.0\.1:8590/ user=%USERNAME%$"));
+            _automaticTestHost = CoreAiMcpServer.StartServer(8590, new McpToolRegistry(null), (port, dispatcher, _) =>
+            {
+                InMemoryTransport obsolete = new(port, dispatcher)
+                {
+                    StartFailure = new InvalidOperationException("obsolete start failure")
+                };
+                transports.Add(obsolete);
+                obsolete.Starting = () =>
+                {
+                    CoreAiMcpServer.StopServer();
+                    restarted = StartOwnedStatic(replacement, transports, 8591);
+                    nextRequest = transports[transports.Count - 1].Dispatch(CallRequest("next", new JObject()));
+                };
+                return obsolete;
+            });
+
+            Assert.AreSame(_automaticTestHost, restarted);
+            Assert.IsTrue(restarted.IsRunning);
+            Assert.AreEqual("http://127.0.0.1:8591/mcp", restarted.Url);
+            Assert.AreSame(replacement, restarted.Registry);
+            Assert.AreEqual(restarted.AuthToken, CoreAiMcpServer.ActiveAuthToken);
+            Assert.AreEqual(1, transports[0].DisposeCalls);
+            Assert.AreEqual(0, transports[1].DisposeCalls);
+            Assert.IsNotNull(nextRequest);
+            yield return AwaitLiveRequest(nextRequest);
+            Assert.AreEqual("replacement", (string)nextRequest.Result.Response["result"]["content"][0]["text"]);
+            CoreAiMcpServer.StopServer();
+            yield return AwaitAutomaticHostRetired();
+            Assert.IsTrue(transports.All(transport => transport.DisposeCalls == 1));
+        }
+
+        [UnityTest]
+        public IEnumerator StaticStart_FailedAttemptsReuseThenRetireAutomaticHostAndDisposeTransports()
+        {
+            RequireIsolatedStaticHost();
+            List<InMemoryTransport> transports = new();
+            CoreAiMcpServer first = null;
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                LogAssert.Expect(LogType.Error, new Regex(@"Failed to start on port 8590: simulated bind failure\. "));
+                _automaticTestHost = CoreAiMcpServer.StartServer(8590, new McpToolRegistry(null), (port, dispatcher, _) =>
+                {
+                    InMemoryTransport failed = new(port, dispatcher)
+                    {
+                        StartFailure = new InvalidOperationException("simulated bind failure")
+                    };
+                    transports.Add(failed);
+                    return failed;
+                });
+                if (attempt == 0) first = _automaticTestHost;
+                Assert.AreSame(first, _automaticTestHost);
+                Assert.IsFalse(_automaticTestHost.IsRunning);
+                Assert.IsNull(_automaticTestHost.Registry);
+                Assert.IsNull(CoreAiMcpServer.ActiveAuthToken);
+                AssertAutomaticHostCount(1);
+            }
+            Assert.IsTrue(transports.All(transport => transport.DisposeCalls == 1));
+            yield return AwaitAutomaticHostRetired();
+        }
+
+        private void RequireIsolatedStaticHost()
+        {
+            CoreAiMcpServer[] existing = UnityEngine.Object.FindObjectsByType<CoreAiMcpServer>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+            if (existing.Any(instance => instance != _server))
+                Assert.Ignore("Static MCP lifecycle checks require isolation from preexisting host instances.");
+        }
+
+        private CoreAiMcpServer StartOwnedStatic(McpToolRegistry registry, List<InMemoryTransport> transports, int port = 8590)
+        {
+            _automaticTestHost = CoreAiMcpServer.StartServer(port, registry, (listenPort, dispatcher, _) =>
+            {
+                InMemoryTransport transport = new(listenPort, dispatcher);
+                transports.Add(transport);
+                return transport;
+            });
+            return _automaticTestHost;
+        }
+
+        private static void AssertAutomaticHostCount(int expected)
+        {
+            CoreAiMcpServer[] hosts = UnityEngine.Object.FindObjectsByType<CoreAiMcpServer>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+            Assert.AreEqual(expected, hosts.Count(instance => instance.gameObject.name == "CoreAI_McpServer"),
+                "Static lifecycle must keep the automatically owned persistent host count bounded.");
+        }
+
+        private IEnumerator AwaitAutomaticHostRetired()
+        {
+            double deadline = Time.realtimeSinceStartupAsDouble + 5;
+            while (_automaticTestHost != null && Time.realtimeSinceStartupAsDouble < deadline) yield return null;
+            Assert.IsTrue(_automaticTestHost == null, "A stopped and drained automatic host must be destroyed.");
+            AssertAutomaticHostCount(0);
+        }
+
+        private static List<Task<int>> QueueImmediateCalls(CoreAiMcpServer host, int count)
+        {
+            List<Task<int>> pending = new();
+            for (int index = 0; index < count; index++)
+            {
+                int value = index;
+                pending.Add(host.RunOnMainThreadAsync(() => Task.FromResult(value)));
+            }
+            return pending;
+        }
+
+        private static void AssertCapacityRejects(CoreAiMcpServer host)
+        {
+            Task<int> rejected = host.RunOnMainThreadAsync(() => Task.FromResult(-1));
+            Assert.IsTrue(rejected.IsFaulted);
+            Assert.IsInstanceOf<InvalidOperationException>(rejected.Exception.InnerException);
+        }
+
+        private sealed class InMemoryTransport : IMcpServerTransport
+        {
+            private readonly McpRpcDispatcher _dispatcher;
+            private readonly CancellationTokenSource _lifetime = new();
+            public InMemoryTransport(int port, McpRpcDispatcher dispatcher)
+            {
+                _dispatcher = dispatcher;
+                Url = $"http://127.0.0.1:{port}/mcp";
+                LifetimeToken = _lifetime.Token;
+            }
+            public bool IsRunning { get; private set; }
+            public string Url { get; }
+            public CancellationToken LifetimeToken { get; }
+            public int DisposeCalls { get; private set; }
+            public Exception DisposeFailure { get; set; }
+            public Exception StartFailure { get; set; }
+            public Action Starting { get; set; }
+            public void Start()
+            {
+                IsRunning = true;
+                Starting?.Invoke();
+                if (StartFailure != null) throw StartFailure;
+            }
+            public Task<McpDispatchResult> Dispatch(JObject request) => _dispatcher.DispatchAsync(request, LifetimeToken);
+            public void Dispose()
+            {
+                DisposeCalls++;
+                IsRunning = false;
+                try { _lifetime.Cancel(); }
+                finally { _lifetime.Dispose(); }
+                if (DisposeFailure != null) throw DisposeFailure;
+            }
         }
 
         private IEnumerator AwaitAdmissionsReleased()

@@ -18,6 +18,7 @@ namespace CoreAI.Infrastructure.World
             public Func<GameObject, Component> Get;
             public Func<GameObject, Component> Add;
             public Dictionary<string, Action<Component, CoreAiComponentCommandEnvelope>> Setters;
+            public Func<CoreAiComponentCommandEnvelope, CoreAiComponentCommandOptions, string> Validate;
         }
 
         public static bool TryGet(string typeName, out Entry entry)
@@ -50,7 +51,49 @@ namespace CoreAI.Infrastructure.World
                 new Dictionary<string, Action<Component, CoreAiComponentCommandEnvelope>>(StringComparer.Ordinal),
                 "particles", "particle system");
 
+            entries["linerenderer"].Validate = ValidateLineRenderer;
+            entries["light"].Validate = ValidateLight;
             return entries;
+        }
+
+        private static string ValidateLineRenderer(
+            CoreAiComponentCommandEnvelope env,
+            CoreAiComponentCommandOptions options)
+        {
+            if (Normalize(env.propertyName) != "positioncount")
+            {
+                return null;
+            }
+
+            float count = env.floatValue;
+            if (float.IsNaN(count) || float.IsInfinity(count) || count < 0f ||
+                count > options.MaxLineRendererPositions || (double)count > int.MaxValue ||
+                Math.Truncate((double)count) != count)
+            {
+                return $"positionCount must be a finite integer between 0 and {options.MaxLineRendererPositions}.";
+            }
+
+            return null;
+        }
+
+        private static string ValidateLight(
+            CoreAiComponentCommandEnvelope env,
+            CoreAiComponentCommandOptions options)
+        {
+            string property = Normalize(env.propertyName);
+            if (property == "type" &&
+                (!Enum.TryParse(env.stringValue, true, out LightType lightType) ||
+                 !Enum.IsDefined(typeof(LightType), lightType)))
+            {
+                return "Light type is invalid.";
+            }
+
+            if (property == "color" && !ColorUtility.TryParseHtmlString(env.stringValue, out _))
+            {
+                return "Light color must be a valid HTML color.";
+            }
+
+            return null;
         }
 
         private static void Register<T>(

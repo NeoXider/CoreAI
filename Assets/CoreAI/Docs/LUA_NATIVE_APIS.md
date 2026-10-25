@@ -76,8 +76,15 @@ WebGL-specific switch). Prefer registering explicit typed APIs over the Full tie
 - CoreAI targets **Lua 5.2**: the bundled VM parses Lua 5.2 source. Luau-only constructs — type
   annotations, compound assignments (`+=`), `continue`, string interpolation, if-expressions, floor
   division `//`, Luau-only number literals — are rewritten to Lua 5.2 equivalents by the
-  `LuauDownleveler` preprocessor before compilation (default-on; plain Lua 5.2 passes through
-  byte-identically), so mod authors can write Roblox-style Luau.
+  `LuauDownleveler` preprocessor before compilation (default-on), so mod authors can write the
+  supported Roblox-style Luau subset. Source requiring no edits retains its original string identity;
+  generic-for loops are normalized through the iterator adapter even in already-valid Lua 5.2.
+  Preprocessing has configurable input/output/edit/work limits through `LuauDownlevelOptions`;
+  refusal returns the original source and an Error. The original repeat/until condition is evaluated
+  once in its original lexical scope after continue, and generated primitives use chunk-level captures.
+  Protected-metatable generalized iteration requires a trusted host iterator resolver; the standalone
+  public-getmetatable fallback cannot provide that parity. See the
+  [downlevel module contract](../../CoreAIMods/Runtime/LuauDownlevel/README.md) for options and limitations.
 - A curated subset of the standard library is exposed (`string`, `math`, `table`, `coroutine`, bitwise,
   …); `io`/`os`/`debug`/`package` are withheld from the secured environment (the Rbx API re-adds a
   two-member `os` with `os.time`/`os.clock`).

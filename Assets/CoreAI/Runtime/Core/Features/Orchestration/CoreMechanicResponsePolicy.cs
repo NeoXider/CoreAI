@@ -1,5 +1,7 @@
 ﻿namespace CoreAI.Ai
 {
+    using System.Text.Json;
+
     /// <summary>
     /// Structured-response policy for core mechanic roles.
     /// </summary>
@@ -14,38 +16,17 @@
         /// <inheritdoc />
         public bool TryValidate(string roleId, string rawContent, out string failureReason)
         {
-            if (string.IsNullOrWhiteSpace(rawContent))
+            if (!StructuredResponseJson.TryParseObject(rawContent, out JsonDocument document, out failureReason))
             {
-                failureReason = "Response is empty or whitespace.";
                 return false;
             }
-
-            string trimmed = rawContent.Trim();
-
-            if (!trimmed.StartsWith("{") || !trimmed.EndsWith("}"))
+            using (document)
             {
-                int jsonStart = trimmed.IndexOf('{');
-                int jsonEnd = trimmed.LastIndexOf('}');
-
-                if (jsonStart >= 0 && jsonEnd > jsonStart)
+                if (!StructuredResponseJson.ContainsProperty(document.RootElement, property => property.Value.ValueKind == JsonValueKind.Number))
                 {
-                    trimmed = trimmed.Substring(jsonStart, jsonEnd - jsonStart + 1);
-                }
-                else
-                {
-                    failureReason = "Expected JSON object with game mechanics parameters. Got plain text.";
+                    failureReason = "JSON must contain at least one numeric field for game mechanics. No numbers found.";
                     return false;
                 }
-            }
-
-            bool hasNumeric = System.Text.RegularExpressions.Regex.IsMatch(
-                trimmed,
-                @"""[^""]+""\s*:\s*\d+\.?\d*");
-
-            if (!hasNumeric)
-            {
-                failureReason = "JSON must contain at least one numeric field for game mechanics. No numbers found.";
-                return false;
             }
 
             failureReason = "";

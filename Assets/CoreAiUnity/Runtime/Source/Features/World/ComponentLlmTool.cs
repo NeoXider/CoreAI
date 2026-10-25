@@ -208,6 +208,10 @@ namespace CoreAI.Infrastructure.Llm
                         : $"Failed to execute component command '{action}'",
                     action);
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 if (_settings.LogToolCallResults)

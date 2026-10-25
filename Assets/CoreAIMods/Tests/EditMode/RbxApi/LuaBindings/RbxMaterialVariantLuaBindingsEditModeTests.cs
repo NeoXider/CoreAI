@@ -276,5 +276,39 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.IsFalse(source.TryGetVariant(null, out _), "null name reports false");
             Assert.IsFalse(source.TryGetVariant(string.Empty, out _), "empty name reports false");
         }
+
+        [Test]
+        public void RBX005_LuaHierarchyClonePreservesCustomPropertiesWithIndependentSignals()
+        {
+            using LuaCsRbxApiBindings bindings = new();
+            MemoryStore store = new();
+            LuaCsModStack stack = BuildStack(bindings, store);
+            stack.Runtime.LoadMod("clone-contract", @"
+                local folder = Instance.new('Folder', workspace)
+                local detector = Instance.new('ClickDetector', folder)
+                detector.MaxActivationDistance = 8
+                local variant = Instance.new('MaterialVariant', folder)
+                variant.BaseMaterial = Enum.Material.Brick
+                variant.ColorMap = 'color'
+                variant.NormalMap = 'normal'
+                variant.RoughnessMap = 'roughness'
+                variant.MetalnessMap = 'metalness'
+                variant.StudsPerTile = 4
+                variant.Changed:Connect(function() store_set('source-handler', 'fired') end)
+                local clone = folder:Clone()
+                local d = clone:FindFirstChild('ClickDetector')
+                local v = clone:FindFirstChild('MaterialVariant')
+                assert(clone.Parent == nil and clone ~= folder and d ~= detector and v ~= variant)
+                assert(d.MaxActivationDistance == 8)
+                assert(v.BaseMaterial == Enum.Material.Brick and v.ColorMap == 'color')
+                assert(v.NormalMap == 'normal' and v.RoughnessMap == 'roughness')
+                assert(v.MetalnessMap == 'metalness' and v.StudsPerTile == 4)
+                v.ColorMap = 'clone-only'
+                assert(variant.ColorMap == 'color')
+                store_set('passed', 'true')");
+            bindings.Scheduler.Advance(0d);
+            Assert.AreEqual("true", store.Get("clone-contract", "passed"));
+            Assert.AreEqual("", store.Get("clone-contract", "source-handler"));
+        }
     }
 }

@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
@@ -24,10 +23,11 @@ namespace CoreAI.Ai.LuaCs
     /// Outbound methods always pass host policy, baseline safety, and per-actor rate checks before
     /// the transport. Production defaults to deny-all policy plus a loudly refusing transport.
     /// </summary>
-    internal sealed class LuaCsRbxHttpServiceAdapter
+    internal sealed class LuaCsRbxHttpServiceAdapter : IDisposable
     {
         internal const int DefaultRequestsPerWindow = 60;
         internal const double DefaultRateWindowSeconds = 60d;
+        internal const int DefaultMaximumOutstandingRequests = 64;
 
         private const string BridgeSource = @"
             local prepare = task._prepareHttpRequest
@@ -55,20 +55,29 @@ namespace CoreAI.Ai.LuaCs
                 end,
             }";
 
-        private sealed class PendingHttpCompletion
+        private sealed class PendingRequest : IDisposable
         {
-            public PendingHttpCompletion(RbxScriptSignal signal, bool succeeded, LuaValue value)
+            public PendingRequest(long id, RbxScriptSignal signal, CancellationToken lifetime)
             {
+                Id = id;
                 Signal = signal;
-                Succeeded = succeeded;
-                Value = value;
+                Source = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
+                Token = Source.Token;
             }
 
+            public long Id { get; }
             public RbxScriptSignal Signal { get; }
-
-            public bool Succeeded { get; }
-
-            public LuaValue Value { get; }
+            public CancellationTokenSource Source { get; }
+            public CancellationToken Token { get; }
+            public bool Completed;
+            public bool Succeeded;
+            public LuaValue Value;
+            public Task Work = Task.CompletedTask;
+            private int _disposed;
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) == 0) { Source.Dispose(); }
+            }
         }
 
         private readonly LuaCsRbxApiBindings _bindings;
@@ -78,7 +87,11 @@ namespace CoreAI.Ai.LuaCs
         private readonly IRbxHttpDestinationResolver _resolver;
         private readonly RbxHttpActorRateLimiter _rateLimiter;
         private readonly Func<double> _clock;
-        private readonly ConcurrentQueue<PendingHttpCompletion> _pendingCompletions = new();
+        private readonly object _gate = new();
+        private readonly Dictionary<long, PendingRequest> _requests = new();
+        private readonly ILuaCsRuntimeLifetimeHost _lifetimeHost;
+        private readonly int _maximumOutstandingRequests;
+        private volatile bool _disposed;
         private long _requestGeneration;
 
         public LuaCsRbxHttpServiceAdapter(LuaCsRbxApiBindings bindings,
@@ -86,9 +99,13 @@ namespace CoreAI.Ai.LuaCs
             IRbxHttpDestinationResolver resolver = null,
             int requestsPerWindow = DefaultRequestsPerWindow,
             double rateWindowSeconds = DefaultRateWindowSeconds,
-            Func<double> monotonicClock = null)
+            Func<double> monotonicClock = null,
+            int maximumOutstandingRequests = DefaultMaximumOutstandingRequests)
         {
+            if (maximumOutstandingRequests <= 0) { throw new ArgumentOutOfRangeException(nameof(maximumOutstandingRequests)); }
             _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
+            _lifetimeHost = (object)bindings as ILuaCsRuntimeLifetimeHost;
+            _maximumOutstandingRequests = maximumOutstandingRequests;
             _policy = policy ?? RbxDenyAllHttpRequestPolicy.Instance;
             _transport = transport ?? RbxRefusingHttpTransport.Instance;
             _resolver = resolver ?? RbxRefusingHttpDestinationResolver.Instance;
@@ -96,6 +113,28 @@ namespace CoreAI.Ai.LuaCs
             _rateLimiter = new RbxHttpActorRateLimiter(
                 requestsPerWindow, rateWindowSeconds, _clock);
             _bindings.Scheduler.PhaseReached += DrainPendingCompletions;
+            _lifetimeHost?.RegisterRuntimeLifetime(this);
+        }
+
+        public void Dispose()
+        {
+            List<PendingRequest> outgoing;
+            lock (_gate)
+            {
+                if (_disposed) { return; }
+                _disposed = true;
+                outgoing = new List<PendingRequest>(_requests.Values);
+                _requests.Clear();
+            }
+
+            _bindings.Scheduler.PhaseReached -= DrainPendingCompletions;
+            foreach (PendingRequest request in outgoing)
+            {
+                try { request.Source.Cancel(); }
+                catch (AggregateException) { }
+                catch (ObjectDisposedException) { }
+                finally { request.Dispose(); }
+            }
         }
 
         public void Register(IScriptFunctionRegistry registry)
@@ -251,6 +290,12 @@ namespace CoreAI.Ai.LuaCs
                 return new LuaValue(refusal.Message);
             }
 
+            CancellationToken lifetime = _lifetimeHost?.CurrentScriptLifetimeToken ?? new CancellationToken(true);
+            if (!lifetime.CanBeCanceled || lifetime.IsCancellationRequested)
+            {
+                return new LuaValue("HttpService requires a live scheduler thread and the host lifetime bridge.");
+            }
+
             long generation = Interlocked.Increment(ref _requestGeneration);
             RbxScriptSignal responseSignal = new(
                 "HttpService." + operation + ".Response[" + generation + "]");
@@ -259,9 +304,34 @@ namespace CoreAI.Ai.LuaCs
             // WHY: each request gets one fresh signal/generation. Its existing signal:Wait bridge
             // performs ScheduleSignalWait/ResumeSignalWait, and late completions cannot target a
             // later wait because no response signal is ever reused.
-            _ = ResolveAndSendAsync(approved, operation, responseSignal, actorId);
+            PendingRequest pending = new(generation, responseSignal, lifetime);
+            lock (_gate)
+            {
+                RemoveCanceledRequestsLocked();
+                if (_disposed || _requests.Count >= _maximumOutstandingRequests || pending.Token.IsCancellationRequested)
+                {
+                    pending.Dispose();
+                    return new LuaValue("HttpService outstanding-request capacity was reached or its lifetime ended.");
+                }
+
+                _requests.Add(generation, pending);
+            }
+
+            pending.Work = ResolveAndSendAsync(approved, operation, pending, actorId);
             return wrappedSignal;
         }
+
+        internal Task CurrentWorkForTesting()
+        {
+            lock (_gate)
+            {
+                List<Task> work = new();
+                foreach (PendingRequest request in _requests.Values) { work.Add(request.Work); }
+                return Task.WhenAll(work);
+            }
+        }
+
+        internal int OutstandingRequestsForTesting { get { lock (_gate) { return _requests.Count; } } }
 
         private RbxHttpRequest BuildRequest(string operation, LuaFunctionExecutionContext ctx)
         {
@@ -377,10 +447,12 @@ namespace CoreAI.Ai.LuaCs
         }
 
         private async Task ResolveAndSendAsync(RbxHttpRequest approved, string operation,
-            RbxScriptSignal responseSignal, string actorId)
+            PendingRequest pending, string actorId)
         {
             try
             {
+                CancellationToken token = pending.Token;
+                token.ThrowIfCancellationRequested();
                 IReadOnlyList<IPAddress> addresses;
                 if (IPAddress.TryParse(approved.Uri.Host.Trim('[', ']'),
                         out IPAddress literalAddress))
@@ -390,15 +462,16 @@ namespace CoreAI.Ai.LuaCs
                 else
                 {
                     Task<IReadOnlyList<IPAddress>> resolveTask = _resolver.ResolveAsync(
-                        approved.Uri.DnsSafeHost, CancellationToken.None);
+                        approved.Uri.DnsSafeHost, token);
                     if (resolveTask == null)
                     {
                         throw new InvalidOperationException("the host resolver returned no task");
                     }
 
-                    addresses = await resolveTask;
+                    addresses = await AwaitRequestAsync(resolveTask, token);
                 }
 
+                token.ThrowIfCancellationRequested();
                 if (addresses == null || addresses.Count == 0)
                 {
                     throw new InvalidOperationException(
@@ -415,14 +488,16 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 RbxValidatedHttpDestination destination = new(approved, addresses[0]);
+                token.ThrowIfCancellationRequested();
                 Task<RbxHttpResponse> sendTask = _transport.SendAsync(
-                    destination, CancellationToken.None);
+                    destination, token);
                 if (sendTask == null)
                 {
                     throw new InvalidOperationException("the host transport returned no task");
                 }
 
-                RbxHttpResponse response = await sendTask;
+                RbxHttpResponse response = await AwaitRequestAsync(sendTask, token);
+                token.ThrowIfCancellationRequested();
                 if (response == null)
                 {
                     throw new InvalidOperationException("the host transport returned no response");
@@ -443,38 +518,114 @@ namespace CoreAI.Ai.LuaCs
                 LuaValue value = operation == "RequestAsync"
                     ? new LuaValue(BuildResponseTable(response))
                     : new LuaValue(response.Body);
-                _pendingCompletions.Enqueue(
-                    new PendingHttpCompletion(responseSignal, true, value));
+                Complete(pending, true, value);
+            }
+            catch (OperationCanceledException ex)
+            {
+                if (pending.Token.IsCancellationRequested) { Remove(pending); }
+                else { Complete(pending, false, new LuaValue("HttpService host operation was canceled: " + ex.Message)); }
             }
             catch (Exception ex)
             {
-                EnqueueTransportFailure(responseSignal, actorId, ex);
+                string reason = string.IsNullOrWhiteSpace(ex.Message) ? ex.GetType().Name : ex.Message;
+                Complete(pending, false, new LuaValue("HttpService transport refused or failed actor '"
+                    + actorId + "': " + reason));
             }
         }
 
-        private void EnqueueTransportFailure(RbxScriptSignal responseSignal,
-            string actorId, Exception exception)
+        private static async Task<T> AwaitRequestAsync<T>(Task<T> operation, CancellationToken token)
         {
-            string reason = string.IsNullOrWhiteSpace(exception?.Message)
-                ? exception?.GetType().Name ?? "unknown transport failure"
-                : exception.Message;
-            EnqueueFailure(responseSignal, new RbxError(
-                RbxErrorCode.BadArgument,
-                "HttpService transport refused or failed actor '" + actorId + "': " + reason,
-                "install a host-controlled safe transport or handle the refusal with pcall"));
+            if (token.IsCancellationRequested)
+            {
+                _ = ObserveLateCompletionAsync(operation);
+                throw new OperationCanceledException(token);
+            }
+#if UNITY_WEBGL && !UNITY_EDITOR
+            TaskCompletionSource<bool> canceled = new();
+#else
+            TaskCompletionSource<bool> canceled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+#endif
+            using (token.Register(() => canceled.TrySetResult(true)))
+            {
+                if (await Task.WhenAny(operation, canceled.Task) != operation || token.IsCancellationRequested)
+                {
+                    _ = ObserveLateCompletionAsync(operation);
+                    throw new OperationCanceledException(token);
+                }
+
+                return await operation;
+            }
         }
 
-        private void EnqueueFailure(RbxScriptSignal responseSignal, RbxError error)
+        private static async Task ObserveLateCompletionAsync<T>(Task<T> operation)
         {
-            _pendingCompletions.Enqueue(new PendingHttpCompletion(
-                responseSignal, false, new LuaValue(error.Message)));
+            try { await operation; }
+            catch (Exception) { }
+        }
+
+        private void Complete(PendingRequest pending, bool succeeded, LuaValue value)
+        {
+            lock (_gate)
+            {
+                if (_disposed || pending.Token.IsCancellationRequested || !_requests.ContainsKey(pending.Id))
+                {
+                    _requests.Remove(pending.Id);
+                    pending.Dispose();
+                    return;
+                }
+
+                pending.Succeeded = succeeded;
+                pending.Value = value;
+                pending.Completed = true;
+            }
+        }
+
+        private void Remove(PendingRequest pending)
+        {
+            lock (_gate) { _requests.Remove(pending.Id); }
+            pending.Dispose();
+        }
+
+        private void RemoveCanceledRequestsLocked()
+        {
+            List<PendingRequest> canceled = new();
+            foreach (PendingRequest request in _requests.Values)
+            {
+                if (request.Token.IsCancellationRequested) { canceled.Add(request); }
+            }
+
+            foreach (PendingRequest request in canceled)
+            {
+                _requests.Remove(request.Id);
+                request.Dispose();
+            }
         }
 
         private void DrainPendingCompletions(SchedulerPhase phase, double deltaSeconds)
         {
-            while (_pendingCompletions.TryDequeue(out PendingHttpCompletion completion))
+            List<PendingRequest> completed = new();
+            lock (_gate)
             {
-                completion.Signal.Fire(completion.Succeeded, completion.Value);
+                RemoveCanceledRequestsLocked();
+                if (_disposed) { return; }
+                foreach (PendingRequest request in _requests.Values)
+                {
+                    if (request.Completed) { completed.Add(request); }
+                }
+
+                foreach (PendingRequest request in completed) { _requests.Remove(request.Id); }
+            }
+
+            foreach (PendingRequest completion in completed)
+            {
+                try
+                {
+                    if (!completion.Token.IsCancellationRequested && !_disposed)
+                    {
+                        completion.Signal.Fire(completion.Succeeded, completion.Value);
+                    }
+                }
+                finally { completion.Dispose(); }
             }
         }
 

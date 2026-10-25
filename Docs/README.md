@@ -10,10 +10,13 @@ Each package keeps its own deep index; this page points you to the right one bef
 you spend time reading the wrong folder. Developer material (plans, backlog, release
 process, research notes) is kept apart in [`dev-docs/`](../dev-docs/README.md).
 
+[7.54.0 acceptance evidence](../dev-docs/fix-wave-2026-10-24/README.md) records passing selected Windows EditMode/hermetic PlayMode and portable checks, exact exceptions, raw historical negatives and unrun platform/quality limits. Publication uses the [Git tag and GitHub release](https://github.com/NeoXider/CoreAI/releases/tag/v7.54.0).
+
 ## Start Here
 
 | Area | Entry Point | Use When |
 |---|---|---|
+| Supplied multiplayer sessions | [MULTIPLAYER_SESSIONS.md](CoreAI/MULTIPLAYER_SESSIONS.md) | You need trusted per-operation actor context, persistence partitions, actor-specific stop, chat-service ownership or host integration limits. |
 | CoreAI Unity package | [Assets/CoreAiUnity/Docs/DOCS_INDEX.md](../Assets/CoreAiUnity/Docs/DOCS_INDEX.md) | You need setup, chat UI, streaming, settings, architecture, tests, or Unity integration docs. |
 | Portable CoreAI package | [Assets/CoreAI/Docs/README.md](../Assets/CoreAI/Docs/README.md) | You need host-agnostic contracts: agents, tools, routing, MEAI, Lua sandbox, and tool-calling rules. |
 | CoreAI Mods (Lua, optional) | [Assets/CoreAIMods/README.md](../Assets/CoreAIMods/README.md) · [INSTALL.md §3](../INSTALL.md#3-mods-module-lua) | You need the `com.neoxider.coreaimods` package: Lua sandbox, `execute_lua`/`manage_mods` tools, mod runtime, Roblox-style world API. |

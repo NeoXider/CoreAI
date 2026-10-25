@@ -180,8 +180,9 @@ namespace CoreAI.Infrastructure.Llm
                 request.TraceId,
                 EnsureIdempotencyKey(request),
                 request.ActorId);
+            IReadOnlyList<ILlmTool> invocationTools = BuildInvocationTools(request.Tools, roleId);
             List<MEAI.AIFunction> aiTools = request.ForcedToolMode == LlmToolChoiceMode.None
-                ? new List<MEAI.AIFunction>() : BuildAIFunctions(request.Tools, roleId);
+                ? new List<MEAI.AIFunction>() : BuildAIFunctions(invocationTools, roleId);
             string bindingError = RequiredToolBindingError(request, aiTools);
             if (bindingError != null)
             {
@@ -198,7 +199,7 @@ namespace CoreAI.Infrastructure.Llm
             bool allowDuplicates = request.AllowDuplicateToolCalls ?? _settings.AllowDuplicateToolCalls;
             bool allowTextShapedToolCalls = InterpretsProseAsToolCalls(request);
             SmartToolCallingChatClient functionClient = new(_innerClient, Log.Instance, _settings, allowDuplicates,
-                request.Tools, roleId, _settings.MaxToolCallRetries, request.TraceId,
+                invocationTools, roleId, _settings.MaxToolCallRetries, request.TraceId,
                 MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance,
                 request.MaxToolCallRoundtrips, request.ActorId, allowTextShapedToolCalls);
 
@@ -548,8 +549,9 @@ namespace CoreAI.Infrastructure.Llm
             List<MEAI.ChatMessage> chatMessages = BuildMeaiChatMessages(request);
             HashSet<string>? liftedCameraCallIds = null;
 
+            IReadOnlyList<ILlmTool> invocationTools = BuildInvocationTools(request.Tools, roleId);
             List<MEAI.AIFunction> aiTools = request.ForcedToolMode == LlmToolChoiceMode.None
-                ? new List<MEAI.AIFunction>() : BuildAIFunctions(request.Tools, roleId);
+                ? new List<MEAI.AIFunction>() : BuildAIFunctions(invocationTools, roleId);
             string bindingError = RequiredToolBindingError(request, aiTools);
             if (bindingError != null)
             {
@@ -607,15 +609,15 @@ namespace CoreAI.Infrastructure.Llm
                 return visibleChunk;
             }
 
-            if (aiTools.Count == 0 && (request.Tools?.Count ?? 0) > 0)
+            if (aiTools.Count == 0 && invocationTools.Count > 0)
             {
                 _logger.LogWarning(GameLogFeature.Llm,
-                    $"MeaiLlmClient: Streaming role='{roleId}' requested {request.Tools?.Count ?? 0} tool(s) but 0 AIFunction(s) were bound. " +
+                    $"MeaiLlmClient: Streaming role='{roleId}' requested {invocationTools.Count} tool(s) but 0 AIFunction(s) were bound. " +
                     "Tool calls will be stripped from output without execution. Verify tool registration.");
             }
 
             bool allowDuplicates = request.AllowDuplicateToolCalls ?? _settings.AllowDuplicateToolCalls;
-            ToolExecutionPolicy policy = new(Log.Instance, _settings, request.Tools, allowDuplicates,
+            ToolExecutionPolicy policy = new(Log.Instance, _settings, invocationTools, allowDuplicates,
                 roleId, _settings.MaxToolCallRetries, request.TraceId,
                 MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance,
                 request.ActorId);
@@ -878,7 +880,7 @@ namespace CoreAI.Infrastructure.Llm
                 // assembly), and the mid-stream failure handler below must know whether any call
                 // may already have mutated the world.
                 int chunkCount = 0;
-                bool toolsDeclared = (request.Tools?.Count ?? 0) > 0;
+                bool toolsDeclared = invocationTools.Count > 0;
                 bool unboundToolsRequested = toolsDeclared && aiTools.Count == 0;
                 // WHY: failed local binding does not change the endpoint protocol or authorize parsing prose.
                 bool interpretProseAsToolCalls = toolsDeclared && InterpretsProseAsToolCalls(request);
@@ -1545,7 +1547,7 @@ namespace CoreAI.Infrastructure.Llm
                 // finish typing, not a call - the most expensive possible way to be wrong about prose.
                 if (interpretProseAsToolCalls && TryBuildMalformedTextToolCall(
                         visibleText,
-                        request.Tools,
+                        invocationTools,
                         aiTools,
                         out MEAI.FunctionCallContent malformedToolCall,
                         out string malformedCleanedText,
@@ -3001,6 +3003,20 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             return clone;
+        }
+
+        private IReadOnlyList<ILlmTool> BuildInvocationTools(IReadOnlyList<ILlmTool>? tools, string roleId)
+        {
+            if (tools == null || tools.Count == 0) return Array.Empty<ILlmTool>();
+            List<ILlmTool> bound = new List<ILlmTool>(tools.Count);
+            foreach (ILlmTool tool in tools)
+            {
+                bound.Add(_memoryStore == null
+                    ? tool
+                    : CallSkillToolLlmTool.BindForRole(tool, _memoryStore, roleId));
+            }
+
+            return bound.AsReadOnly();
         }
 
         internal List<MEAI.AIFunction> BuildAIFunctions(IReadOnlyList<ILlmTool>? tools, string roleId)

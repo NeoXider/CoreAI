@@ -31,14 +31,16 @@ namespace CoreAI.Infrastructure.Luau
     internal sealed class LuauLexer
     {
         private readonly string _s;
+        private readonly DownlevelBudget _budget;
         private int _p;
         private int _line;
         private int _lineStart;
         private int _interpolationDepth;
 
-        public LuauLexer(string source)
+        public LuauLexer(string source, DownlevelBudget budget)
         {
             _s = source ?? "";
+            _budget = budget;
             _p = 0;
             _line = 1;
             _lineStart = 0;
@@ -72,6 +74,7 @@ namespace CoreAI.Infrastructure.Luau
             int start = _p;
             int line = _line;
             int col = _p - _lineStart + 1;
+            _budget.Spend(1, line, col);
             if (_p >= _s.Length)
             {
                 return Make(LuauTokenKind.Eof, "<eof>", start, start, line, col);
@@ -85,7 +88,7 @@ namespace CoreAI.Infrastructure.Luau
                     _p++;
                 }
 
-                return Make(LuauTokenKind.Name, _s.Substring(start, _p - start), start, _p, line, col);
+                return Make(LuauTokenKind.Name, ReadText(start, _p, line, col), start, _p, line, col);
             }
 
             if (char.IsDigit(c) || (c == '.' && _p + 1 < _s.Length && char.IsDigit(_s[_p + 1])))
@@ -96,9 +99,9 @@ namespace CoreAI.Infrastructure.Luau
             if (c == '"' || c == '\'')
             {
                 LexQuotedString(c);
-                string text = _s.Substring(start, _p - start);
+                string text = ReadText(start, _p, line, col);
                 LuauToken tok = Make(LuauTokenKind.String, text, start, _p, line, col);
-                tok.StringRewrite = ConvertLuauStringEscapes(text);
+                tok.StringRewrite = ConvertLuauStringEscapes(text, _budget);
                 return tok;
             }
 
@@ -108,7 +111,7 @@ namespace CoreAI.Infrastructure.Luau
                 if (level >= 0)
                 {
                     SkipLongBracket(level, "long string");
-                    return Make(LuauTokenKind.String, _s.Substring(start, _p - start), start, _p, line, col);
+                    return Make(LuauTokenKind.String, ReadText(start, _p, line, col), start, _p, line, col);
                 }
             }
 
@@ -130,6 +133,13 @@ namespace CoreAI.Infrastructure.Luau
         private static LuauToken Make(LuauTokenKind kind, string text, int start, int end, int line, int col)
         {
             return new LuauToken { Kind = kind, Text = text, Start = start, End = end, Line = line, Column = col };
+        }
+
+        private string ReadText(int start, int end, int line, int column)
+        {
+            _budget.Spend(end - start, line, column);
+            _budget.CheckTextLength(end - start, line, column);
+            return _s.Substring(start, end - start);
         }
 
         private void SkipTrivia()
@@ -246,26 +256,14 @@ namespace CoreAI.Infrastructure.Luau
                 }
 
                 char c = _s[_p];
-                if (c == '\n')
+                if (c == '\n' || c == '\r')
                 {
                     throw new LuauDownlevelException("unfinished string", line, col);
                 }
 
                 if (c == '\\')
                 {
-                    _p++;
-                    if (_p >= _s.Length)
-                    {
-                        throw new LuauDownlevelException("unfinished string", line, col);
-                    }
-
-                    if (_s[_p] == '\n')
-                    {
-                        _line++;
-                        _lineStart = _p + 1;
-                    }
-
-                    _p++;
+                    SkipStringEscape(line, col);
                 }
                 else if (c == quote)
                 {
@@ -276,6 +274,51 @@ namespace CoreAI.Infrastructure.Luau
                 {
                     _p++;
                 }
+            }
+        }
+
+        private void SkipStringEscape(int stringLine, int stringColumn)
+        {
+            int start = _p;
+            int line = _line;
+            int column = _p - _lineStart + 1;
+            _p++;
+            if (_p >= _s.Length)
+            {
+                throw new LuauDownlevelException("unfinished string", stringLine, stringColumn);
+            }
+
+            if (_s[_p] == 'u')
+            {
+                ReadUnicodeEscape(_s, start, _s.Length, out int end, line, column);
+                _p = end;
+            }
+            else if (_s[_p] == 'z')
+            {
+                _p++;
+                while (_p < _s.Length && IsLuaWhitespace(_s[_p]))
+                {
+                    ConsumeEscapedCharacter();
+                }
+            }
+            else
+            {
+                ConsumeEscapedCharacter();
+            }
+        }
+
+        private void ConsumeEscapedCharacter()
+        {
+            char character = _s[_p++];
+            if (character == '\r' && _p < _s.Length && _s[_p] == '\n')
+            {
+                _p++;
+            }
+
+            if (character == '\r' || character == '\n')
+            {
+                _line++;
+                _lineStart = _p;
             }
         }
 
@@ -362,7 +405,7 @@ namespace CoreAI.Infrastructure.Luau
                 }
             }
 
-            string text = _s.Substring(start, _p - start);
+            string text = ReadText(start, _p, line, col);
             LuauToken tok = Make(LuauTokenKind.Number, text, start, _p, line, col);
             if (isBinary)
             {
@@ -429,19 +472,13 @@ namespace CoreAI.Infrastructure.Luau
 
                 if (c == '\\')
                 {
-                    _p++;
-                    if (_p >= _s.Length)
-                    {
-                        throw new LuauDownlevelException("unfinished interpolated string", line, col);
-                    }
-
-                    _p++;
+                    SkipStringEscape(line, col);
                 }
                 else if (c == '`')
                 {
                     parts.Add(new LuauInterpPart { IsExpr = false, Start = textStart, End = _p });
                     _p++;
-                    LuauToken tok = Make(LuauTokenKind.InterpString, _s.Substring(start, _p - start), start, _p, line,
+                    LuauToken tok = Make(LuauTokenKind.InterpString, ReadText(start, _p, line, col), start, _p, line,
                         col);
                     tok.InterpParts = parts;
                     return tok;
@@ -561,11 +598,12 @@ namespace CoreAI.Infrastructure.Luau
         /// Rewrites the Luau-only escapes a quoted string may carry into Lua 5.2 spellings:
         /// <c>\u{XXXX}</c> becomes the code point's UTF-8 bytes as zero-padded <c>\ddd</c> decimal
         /// escapes and <c>\z</c> (plus the whitespace it swallows) is removed. Returns the full
-        /// rewritten literal (quotes included) or null when nothing had to change; malformed
-        /// <c>\u{...}</c> is left verbatim for the VM to reject.
+        /// rewritten literal (quotes included) or null when nothing had to change. Unicode escapes
+        /// are validated during lexing before this conversion.
         /// </summary>
-        private static string ConvertLuauStringEscapes(string text)
+        internal static string ConvertLuauStringEscapes(string text, DownlevelBudget budget)
         {
+            budget.Spend(text.Length);
             if (text.IndexOf('\\') < 0)
             {
                 return null;
@@ -578,6 +616,11 @@ namespace CoreAI.Infrastructure.Luau
                 char c = text[i];
                 if (c != '\\' || i + 1 >= text.Length)
                 {
+                    if (sb != null)
+                    {
+                        budget.CheckTextLength(sb.Length + 1L);
+                    }
+
                     sb?.Append(c);
                     i++;
                     continue;
@@ -599,33 +642,66 @@ namespace CoreAI.Infrastructure.Luau
 
                 if (n == 'u' && i + 2 < text.Length && text[i + 2] == '{')
                 {
-                    int j = i + 3;
-                    int cp = 0;
-                    int digits = 0;
-                    while (j < text.Length && Uri.IsHexDigit(text[j]))
-                    {
-                        cp = (cp << 4) + HexValue(text[j]);
-                        digits++;
-                        j++;
-                    }
-
-                    if (digits > 0 && j < text.Length && text[j] == '}' && cp <= 0x10FFFF)
-                    {
-                        sb ??= new StringBuilder(text.Length + 8).Append(text, 0, i);
-                        AppendUtf8DecimalEscapes(sb, cp);
-                        i = j + 1;
-                        continue;
-                    }
+                    int cp = ReadUnicodeEscape(text, i, text.Length, out int end, 1, 1);
+                    int bytes = cp <= 0x7F ? 1 : cp <= 0x7FF ? 2 : cp <= 0xFFFF ? 3 : 4;
+                    budget.CheckTextLength((sb?.Length ?? i) + 4L * bytes);
+                    sb ??= new StringBuilder(text.Length).Append(text, 0, i);
+                    AppendUtf8DecimalEscapes(sb, cp);
+                    i = end;
+                    continue;
                 }
 
-                sb?.Append(c).Append(n);
+                if (sb != null)
+                {
+                    budget.CheckTextLength(sb.Length + 2L);
+                    sb.Append(c).Append(n);
+                }
                 i += 2;
+            }
+
+            if (sb != null)
+            {
+                budget.Spend(sb.Length);
             }
 
             return sb?.ToString();
         }
 
-        private static bool IsLuaWhitespace(char c)
+        internal static int ReadUnicodeEscape(string text, int start, int limit, out int end, int line, int column)
+        {
+            int index = start + 2;
+            if (index >= limit || text[index] != '{')
+            {
+                throw new LuauDownlevelException("malformed Unicode escape", line, column);
+            }
+
+            index++;
+            int codePoint = 0;
+            int digits = 0;
+            while (index < limit && Uri.IsHexDigit(text[index]))
+            {
+                int digit = HexValue(text[index]);
+                if (digits >= 16 || codePoint > (0x10FFFF - digit) / 16)
+                {
+                    throw new LuauDownlevelException("Unicode escape exceeds the supported code-point range", line,
+                        column);
+                }
+
+                codePoint = codePoint * 16 + digit;
+                digits++;
+                index++;
+            }
+
+            if (digits == 0 || index >= limit || text[index] != '}')
+            {
+                throw new LuauDownlevelException("malformed Unicode escape", line, column);
+            }
+
+            end = index + 1;
+            return codePoint;
+        }
+
+        internal static bool IsLuaWhitespace(char c)
         {
             return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
         }

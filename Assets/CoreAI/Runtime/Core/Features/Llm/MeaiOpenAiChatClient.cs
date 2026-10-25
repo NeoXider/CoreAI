@@ -2026,11 +2026,14 @@ namespace CoreAI.Infrastructure.Llm
             JObject root;
             try
             {
-                root = JObject.Parse(json);
+                using StringReader source = new(json);
+                using JsonTextReader reader = new(source) { DateParseHandling = DateParseHandling.None };
+                root = JObject.Load(reader);
+                while (reader.Read()) { }
             }
-            catch
+            catch (JsonException)
             {
-                return null;
+                throw MalformedSsePayload();
             }
 
             if (root["error"] != null || root["error_code"] != null)
@@ -2045,6 +2048,7 @@ namespace CoreAI.Infrastructure.Llm
                 throw new LlmClientException("LLM streaming response reported an upstream error.", code, status);
             }
 
+            ValidateSsePayload(root);
             accumulator.LatchWireId(root["id"]?.ToString());
             string finishValue = (root["choices"] as JArray)?.First?["finish_reason"]?.ToString();
             MEAI.ChatResponseUpdate update = ExtractDeltaUpdateCore(root, accumulator);
@@ -2176,9 +2180,78 @@ namespace CoreAI.Infrastructure.Llm
 
                 return TryParseStreamingUsageChunk(obj) ?? TryParseGenerationProgressChunk(obj);
             }
-            catch
+            catch (Exception ex) when (ex is JsonException || ex is ArgumentException ||
+                                       ex is InvalidOperationException || ex is FormatException ||
+                                       ex is OverflowException)
             {
-                return null;
+                throw MalformedSsePayload();
+            }
+        }
+
+        private static LlmClientException MalformedSsePayload()
+        {
+            return new LlmClientException("LLM streaming response contained a malformed data payload.",
+                LlmErrorCode.ProviderError);
+        }
+
+        private static bool HasSseValue(JToken token)
+        {
+            return token != null && token.Type != JTokenType.Null;
+        }
+
+        private static void RequireSseType(JToken token, JTokenType type)
+        {
+            if (HasSseValue(token) && token.Type != type)
+            {
+                throw MalformedSsePayload();
+            }
+        }
+
+        private static void ValidateSsePayload(JObject root)
+        {
+            RequireSseType(root["choices"], JTokenType.Array);
+            RequireSseType(root["usage"], JTokenType.Object);
+            if (root["usage"] is JObject usage)
+            {
+                foreach (string counter in new[] { "prompt_tokens", "completion_tokens", "total_tokens" })
+                {
+                    RequireSseType(usage[counter], JTokenType.Integer);
+                    if (HasSseValue(usage[counter]) &&
+                        (!int.TryParse(usage[counter].ToString(), out int value) || value < 0))
+                    {
+                        throw MalformedSsePayload();
+                    }
+                }
+            }
+
+            if (root["choices"] is not JArray choices) return;
+            foreach (JToken choice in choices)
+            {
+                if (choice is not JObject) throw MalformedSsePayload();
+                RequireSseType(choice["finish_reason"], JTokenType.String);
+                RequireSseType(choice["text"], JTokenType.String);
+                RequireSseType(choice["delta"], JTokenType.Object);
+                if (HasSseValue(choice["message"]) && choice["message"].Type != JTokenType.String &&
+                    choice["message"].Type != JTokenType.Object) throw MalformedSsePayload();
+                if (choice["delta"] is not JObject delta) continue;
+                RequireSseType(delta["content"], JTokenType.String);
+                RequireSseType(delta["tool_calls"], JTokenType.Array);
+                if (delta["tool_calls"] is not JArray toolCalls) continue;
+                foreach (JToken toolCall in toolCalls)
+                {
+                    if (toolCall is not JObject) throw MalformedSsePayload();
+                    RequireSseType(toolCall["index"], JTokenType.Integer);
+                    if (HasSseValue(toolCall["index"]) &&
+                        (!int.TryParse(toolCall["index"].ToString(), out int index) || index < 0))
+                        throw MalformedSsePayload();
+                    RequireSseType(toolCall["id"], JTokenType.String);
+                    RequireSseType(toolCall["function"], JTokenType.Object);
+                    if (toolCall["function"] is JObject function)
+                    {
+                        RequireSseType(function["name"], JTokenType.String);
+                        RequireSseType(function["arguments"], JTokenType.String);
+                    }
+                }
             }
         }
 

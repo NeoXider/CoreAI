@@ -17,6 +17,40 @@ namespace CoreAI.Tests.EditMode
             _composite = new CompositeRoleStructuredResponsePolicy();
         }
 
+        [TestCase("Creator", "{not json}")]
+        [TestCase("Creator", "{'command': 1}")]
+        [TestCase("Creator", "{command: 1}")]
+        [TestCase("Creator", "{\"command\": 1,}")]
+        [TestCase("CoreMechanicAI", "{\"gravity\": NaN}")]
+        [TestCase("Creator", "{\"command\": 1 garbage}")]
+        [TestCase("Creator", "{\"command\": 1} trailing")]
+        [TestCase("Creator", "{\"command\": 1}{\"command\": 2}")]
+        [TestCase("Creator", "```json\n{\"command\": 1}\n``` trailing")]
+        [TestCase("CoreMechanicAI", "{\"damage\": 1 garbage}")]
+        [TestCase("Analyzer", "{\"metric\": broken}")]
+        [TestCase("Analyzer", "{\"description\": \"metric\"}")]
+        [TestCase("Analyzer", "{\"description\": \"status\"}")]
+        public void StructuredPolicy_MalformedOrMisleadingContent_IsRejected(string roleId, string content)
+        {
+            Assert.IsFalse(_composite.TryValidate(roleId, content, out string reason), reason);
+        }
+
+        [TestCase("-9.81")]
+        [TestCase("0")]
+        [TestCase("-2e-3")]
+        public void CoreMechanic_ValidNumericJson_IsAccepted(string numericLiteral)
+        {
+            Assert.IsTrue(_composite.TryValidate("CoreMechanicAI", "{\"gravity\": " + numericLiteral + "}", out string reason), reason);
+        }
+
+        [TestCase("Creator", "{\"command\": \"a } and \\\"quoted\\\" { value\"}")]
+        [TestCase("Creator", "Here is the command:\n{\"command\": \"a } value\"}")]
+        [TestCase("Analyzer", "```json\n{\"metrics\": {\"value\": -1}}\n```")]
+        public void StructuredPolicy_ValidObjectWithSupportedWrapper_IsAccepted(string roleId, string content)
+        {
+            Assert.IsTrue(_composite.TryValidate(roleId, content, out string reason), reason);
+        }
+
         #region ProgrammerResponsePolicy Tests
 
         [Test]

@@ -1,4 +1,6 @@
 using System.IO;
+using System;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace CoreAI.Infrastructure.Lua
@@ -6,7 +8,7 @@ namespace CoreAI.Infrastructure.Lua
     /// <summary>
     /// Maps an optional store id (a composition-level namespace) onto a file store's root directory.
     /// An empty id keeps the shared default root unchanged — the main game's persisted mods stay
-    /// exactly where they are today. A non-empty id resolves to a <c>Stores/&lt;sanitizedId&gt;</c>
+    /// exactly where they are today. A non-empty id resolves to a <c>Stores/id-&lt;sha256&gt;</c>
     /// subdirectory, so compositions with different ids (e.g. demo scenes with different Lua tiers)
     /// persist and rehydrate fully isolated mod sets.
     /// </summary>
@@ -26,14 +28,49 @@ namespace CoreAI.Infrastructure.Lua
                 return rootDirectory;
             }
 
-            return Path.Combine(rootDirectory, StoresFolderName, SanitizedFolderName(id));
+            byte[] digest;
+            using (SHA256 algorithm = SHA256.Create())
+            {
+                digest = algorithm.ComputeHash(Encoding.UTF8.GetBytes(id));
+            }
+
+            StringBuilder name = new("id-");
+            foreach (byte value in digest)
+            {
+                name.Append(value.ToString("x2"));
+            }
+
+            return Path.Combine(rootDirectory, StoresFolderName, name.ToString());
+        }
+
+        /// <summary>Migrates a legacy namespace only after the host proves its exact identity; never merges or overwrites.</summary>
+        public static bool TryMigrateLegacy(string rootDirectory, string storeId,
+            Func<string, string, bool> verifyIdentity)
+        {
+            string id = storeId?.Trim();
+            if (string.IsNullOrEmpty(id) || verifyIdentity == null)
+            {
+                return false;
+            }
+
+            string destination = Path.GetFullPath(ApplyTo(rootDirectory, id));
+            string legacy = Path.GetFullPath(Path.Combine(rootDirectory, StoresFolderName, SanitizedFolderName(id)));
+            if (!Directory.Exists(legacy) || Directory.Exists(destination) || !verifyIdentity(id, legacy))
+            {
+                return false;
+            }
+
+            Directory.Move(legacy, destination);
+            if (!CoreAiWebGlPersistence.Sync())
+            {
+                throw new IOException("Legacy namespace was moved locally, but automatic persistence is not armed.");
+            }
+
+            return true;
         }
 
         /// <summary>
-        /// Maps a raw store id to a unique, traversal-safe folder name. Characters outside
-        /// <c>[A-Za-z0-9_-]</c> (which excludes dots and separators, so <c>..</c> cannot escape the
-        /// root) are replaced with <c>_</c>; when the replacement changed anything a short hash of
-        /// the raw id is appended so distinct ids cannot collide on the same folder.
+        /// Computes the legacy lossy name for explicitly verified migrations only.
         /// </summary>
         private static string SanitizedFolderName(string storeId)
         {

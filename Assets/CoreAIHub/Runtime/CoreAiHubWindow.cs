@@ -87,10 +87,13 @@ namespace CoreAI.Hub.UI
         private bool _missingRootWarned;
 
         private readonly Dictionary<string, IHubPage> _pages = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Func<IHubPage>> _pageFactories = new(StringComparer.Ordinal);
         private readonly Dictionary<string, VisualElement> _pageContent = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Button> _tabButtons = new(StringComparer.Ordinal);
 
         private string _activePageId;
+        private string _resumePageId;
+        private int _viewGeneration;
 
         /// <summary>
         /// The page registry this window renders. Setting a new registry rewires event
@@ -107,6 +110,10 @@ namespace CoreAI.Hub.UI
                 }
 
                 UnsubscribeRegistry();
+                _viewGeneration++;
+                string preferredPageId = _activePageId ?? _resumePageId;
+                DestroyAllPages();
+                _resumePageId = preferredPageId;
                 _registry = value;
                 if (isActiveAndEnabled)
                 {
@@ -146,13 +153,18 @@ namespace CoreAI.Hub.UI
         protected virtual void OnDisable()
         {
             UnsubscribeRegistry();
-            DestroyAllPages();
+            _viewGeneration++;
+            _resumePageId = _activePageId ?? _resumePageId;
+            DeactivateActivePage();
+            _activePageId = null;
             TeardownUi();
         }
 
         protected virtual void OnDestroy()
         {
             UnsubscribeRegistry();
+            _viewGeneration++;
+            DestroyAllPages();
         }
 
         private void Update()
@@ -200,6 +212,7 @@ namespace CoreAI.Hub.UI
             }
 
             Unwire();
+            _viewGeneration++;
 
             if (shellUxml == null)
             {
@@ -231,9 +244,8 @@ namespace CoreAI.Hub.UI
             if (_collapseButton != null)
             {
                 _collapseButton.clicked += ToggleCollapsed;
-                // WHY: it is a pointer affordance only — a focusable Button fires clicked on the Space/Enter
-                // NavigationSubmit, so once it held focus the game's Space (jump/action) collapsed the Hub.
-                _collapseButton.focusable = false;
+                _collapseButton.focusable = true;
+                _collapseButton.RegisterCallback<PointerUpEvent>(OnNavigationPointerUp);
             }
 
             _root.RegisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
@@ -260,8 +272,21 @@ namespace CoreAI.Hub.UI
         /// <summary>Hides the tabs + content when collapsed (leaving the toggle), restores them when expanded.</summary>
         public void SetCollapsed(bool collapsed)
         {
+            if (_collapsed == collapsed)
+            {
+                return;
+            }
+
             _collapsed = collapsed;
             ApplyCollapsedState();
+            if (collapsed)
+            {
+                _collapseButton?.Focus();
+            }
+            else if (_activePageId != null && _tabButtons.TryGetValue(_activePageId, out Button activeTab))
+            {
+                activeTab.Focus();
+            }
         }
 
         private void ApplyCollapsedState()
@@ -276,6 +301,7 @@ namespace CoreAI.Hub.UI
             if (_collapseButton != null)
             {
                 _collapseButton.text = _collapsed ? "+" : "–";
+                _collapseButton.tooltip = _collapsed ? "Expand CoreAI Hub" : "Collapse CoreAI Hub";
             }
         }
 
@@ -307,12 +333,74 @@ namespace CoreAI.Hub.UI
 
         private void OnRootKeyDown(KeyDownEvent evt)
         {
+            Button focusedTab = evt.target as Button;
+            if (focusedTab != null && focusedTab.parent == _tabBar &&
+                (evt.keyCode == KeyCode.LeftArrow || evt.keyCode == KeyCode.RightArrow ||
+                 evt.keyCode == KeyCode.Home || evt.keyCode == KeyCode.End) && IsHubInputAllowedNow())
+            {
+                MoveTabFocus(focusedTab, evt.keyCode == KeyCode.Home ? int.MinValue
+                    : evt.keyCode == KeyCode.End ? int.MaxValue : evt.keyCode == KeyCode.LeftArrow ? -1 : 1);
+                evt.PreventDefault();
+                evt.StopPropagation();
+                return;
+            }
+
             if (evt.keyCode != KeyCode.Escape && evt.character != (char)27)
             {
                 return;
             }
 
+            if (!_uiReady || _collapsed || !IsHubInputAllowedNow())
+            {
+                return;
+            }
+
             HandleEscapeRequested();
+            evt.PreventDefault();
+            evt.StopPropagation();
+        }
+
+        private void OnTabNavigationMove(NavigationMoveEvent evt)
+        {
+            if (!IsHubInputAllowedNow() || evt.currentTarget is not Button tab ||
+                (evt.direction != NavigationMoveEvent.Direction.Left &&
+                 evt.direction != NavigationMoveEvent.Direction.Right))
+            {
+                return;
+            }
+
+            MoveTabFocus(tab, evt.direction == NavigationMoveEvent.Direction.Left ? -1 : 1);
+            evt.PreventDefault();
+            evt.StopPropagation();
+        }
+
+        private void MoveTabFocus(Button current, int direction)
+        {
+            List<Button> tabs = new(_tabButtons.Values);
+            int index = tabs.IndexOf(current);
+            if (index < 0 || tabs.Count == 0)
+            {
+                return;
+            }
+
+            int next = direction == int.MinValue ? 0 : direction == int.MaxValue ? tabs.Count - 1
+                : (index + direction + tabs.Count) % tabs.Count;
+            Button target = tabs[next];
+            foreach (KeyValuePair<string, Button> entry in _tabButtons)
+            {
+                if (ReferenceEquals(entry.Value, target))
+                {
+                    ActivatePage(entry.Key);
+                    target.Focus();
+                    break;
+                }
+            }
+        }
+
+        private void OnNavigationPointerUp(PointerUpEvent evt)
+        {
+            // WHY: pointer selection must not leave a navigation button armed for gameplay Space.
+            (evt.currentTarget as Button)?.Blur();
         }
 
         /// <summary>
@@ -385,6 +473,7 @@ namespace CoreAI.Hub.UI
             if (_collapseButton != null)
             {
                 _collapseButton.clicked -= ToggleCollapsed;
+                _collapseButton.UnregisterCallback<PointerUpEvent>(OnNavigationPointerUp);
             }
 
             _root?.UnregisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
@@ -403,8 +492,6 @@ namespace CoreAI.Hub.UI
             _root?.RemoveFromHierarchy();
             Unwire();
 
-            _pageContent.Clear();
-            _activePageId = null;
             _boundUiRoot = null;
         }
 
@@ -437,25 +524,13 @@ namespace CoreAI.Hub.UI
                 return;
             }
 
-            // WHY: registry events may arrive off the UI thread; marshal the rebuild onto the panel's
-            // scheduler so VisualElement mutations always run on the main thread.
+            HubPageRegistry registry = _registry;
+            int generation = _viewGeneration;
             _root.schedule.Execute(() =>
             {
-                // WHY: a re-registered id may point to a NEW factory (e.g. a DI binder upgrading a
-                // page with a live source after the DI-free bootstrap registered it with null). Drop
-                // the cached instance for a still-present id so the new factory builds it next activation.
-                if (pageId != null && _registry != null && _registry.TryGet(pageId, out _))
+                if (!_uiReady || generation != _viewGeneration || !ReferenceEquals(registry, _registry))
                 {
-                    bool wasActive = string.Equals(pageId, _activePageId, StringComparison.Ordinal);
-                    DestroyPage(pageId);
-                    if (wasActive)
-                    {
-                        // WHY: re-activate the same id from the new factory instead of clearing it —
-                        // clearing dropped the user onto the first tab whenever a page they were on
-                        // got re-registered.
-                        _activePageId = null;
-                        ActivatePage(pageId);
-                    }
+                    return;
                 }
 
                 RebuildTabs();
@@ -486,7 +561,10 @@ namespace CoreAI.Hub.UI
                     name = "coreai-hub-tab-" + pageId
                 };
                 tab.AddToClassList(TabClassName);
-                tab.focusable = false;
+                tab.focusable = true;
+                tab.tooltip = "Open " + displayName;
+                tab.RegisterCallback<PointerUpEvent>(OnNavigationPointerUp);
+                tab.RegisterCallback<NavigationMoveEvent>(OnTabNavigationMove);
                 _tabBar.Add(tab);
                 _tabButtons[pageId] = tab;
             }
@@ -506,7 +584,9 @@ namespace CoreAI.Hub.UI
             }
             else
             {
-                ActivatePage(pages[0].pageId);
+                ActivatePage(_resumePageId != null && _tabButtons.ContainsKey(_resumePageId)
+                    ? _resumePageId : pages[0].pageId);
+                _resumePageId = null;
             }
         }
 
@@ -521,7 +601,10 @@ namespace CoreAI.Hub.UI
             List<string> stale = null;
             foreach (KeyValuePair<string, IHubPage> kvp in _pages)
             {
-                if (!present.Contains(kvp.Key))
+                if (!present.Contains(kvp.Key) || _registry == null ||
+                    !_registry.TryGet(kvp.Key, out Func<IHubPage> factory) ||
+                    !_pageFactories.TryGetValue(kvp.Key, out Func<IHubPage> cachedFactory) ||
+                    !ReferenceEquals(factory, cachedFactory))
                 {
                     (stale ??= new List<string>()).Add(kvp.Key);
                 }
@@ -534,9 +617,11 @@ namespace CoreAI.Hub.UI
 
             foreach (string pageId in stale)
             {
+                bool wasActive = string.Equals(pageId, _activePageId, StringComparison.Ordinal);
                 DestroyPage(pageId);
-                if (string.Equals(pageId, _activePageId, StringComparison.Ordinal))
+                if (wasActive)
                 {
+                    _resumePageId = pageId;
                     _activePageId = null;
                 }
             }
@@ -557,6 +642,7 @@ namespace CoreAI.Hub.UI
                     if (page != null)
                     {
                         _pages[pageId] = page;
+                        _pageFactories[pageId] = factory;
                         return string.IsNullOrEmpty(page.DisplayName) ? pageId : page.DisplayName;
                     }
                 }
@@ -677,6 +763,7 @@ namespace CoreAI.Hub.UI
                 if (page != null)
                 {
                     _pages[pageId] = page;
+                    _pageFactories[pageId] = factory;
                 }
 
                 return page;
@@ -777,6 +864,7 @@ namespace CoreAI.Hub.UI
             }
 
             _pages.Clear();
+            _pageFactories.Clear();
             _pageContent.Clear();
             _activePageId = null;
         }
@@ -808,10 +896,28 @@ namespace CoreAI.Hub.UI
             }
 
             _pages.Remove(pageId);
+            _pageFactories.Remove(pageId);
             if (_pageContent.TryGetValue(pageId, out VisualElement content))
             {
                 content?.RemoveFromHierarchy();
                 _pageContent.Remove(pageId);
+            }
+        }
+
+        private void DeactivateActivePage()
+        {
+            if (_activePageId == null || !_pages.TryGetValue(_activePageId, out IHubPage page))
+            {
+                return;
+            }
+
+            try
+            {
+                page.OnDeactivated();
+            }
+            catch (Exception ex)
+            {
+                Logging.Log.Instance.Error($"[CoreAiHubWindow] Page '{_activePageId}' deactivation threw: {ex}");
             }
         }
     }

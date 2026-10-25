@@ -81,7 +81,8 @@ namespace CoreAI.Ai
             return Math.Min(quarter, maxContext / 2);
         }
 
-        private static int EstimateToolsTokens(IReadOnlyList<ILlmTool> tools, ITokenEstimator estimator)
+        /// <summary>Estimates the expanded callable schemas of an already request-filtered tool list.</summary>
+        public static int EstimateToolsTokens(IReadOnlyList<ILlmTool> tools, ITokenEstimator estimator)
         {
             if (tools == null || tools.Count == 0)
             {
@@ -89,17 +90,12 @@ namespace CoreAI.Ai
             }
 
             int sum = 0;
-            for (int i = 0; i < tools.Count; i++)
+            estimator ??= new HeuristicTokenEstimator();
+            foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildToolDescriptors(tools))
             {
-                ILlmTool t = tools[i];
-                if (t == null)
-                {
-                    continue;
-                }
-
-                sum += estimator.EstimateText(t.Name ?? "");
-                sum += estimator.EstimateText(t.Description ?? "");
-                sum += estimator.EstimateText(t.ParametersSchema ?? "");
+                sum += estimator.EstimateText(descriptor.Name ?? "");
+                sum += estimator.EstimateText(descriptor.Description ?? "");
+                sum += estimator.EstimateText(descriptor.ParametersSchema ?? "");
                 sum += 8;
             }
 

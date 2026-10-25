@@ -43,6 +43,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// <summary>Artifact directory; null is the project's TestResults/CoreAI/Benchmarks.</summary>
             public string ArtifactDirectory;
 
+            /// <summary>Optional required-artifact writer for deterministic publication fault tests.</summary>
+            public Action<string, string> RequiredArtifactWriter;
+
             public ILlmClient Client;
             public ICoreAISettings Settings;
             public ITokenCounter TokenCounter;
@@ -120,7 +123,8 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 ReasoningEffort = reasoningEffort ?? "",
                 Repetitions = repetitions,
                 UnityVersion = Application.unityVersion,
-                SuiteVersion = SuiteVersion
+                SuiteVersion = SuiteVersion,
+                ProviderStallSeconds = ResolveProviderStallSeconds()
             };
         }
 
@@ -146,6 +150,14 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         /// </summary>
         internal static IEnumerator RunTargetSuite(TargetSuiteRun run)
         {
+            run.ScenarioContext ??= new ScenarioRunContext();
+            Func<bool> previousCancel = run.ScenarioContext.ShouldCancel;
+            Func<bool> previousStop = run.ScenarioContext.OperatorStopRequested;
+            run.ScenarioContext.OperatorStopRequested = () => run.Progress.StopRequested ||
+                (previousStop?.Invoke() ?? false);
+            run.ScenarioContext.ShouldCancel = () => run.ScenarioContext.OperatorStopRequested() ||
+                run.SuiteClock.Elapsed.TotalSeconds >= run.SuiteBudgetSeconds ||
+                (previousCancel?.Invoke() ?? false);
             List<PlannedRep> pending = new();
             foreach (GameBenchmarkScenario scenario in run.Scenarios)
             {
@@ -228,6 +240,12 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                             run.DisplayName, timeout, r => attemptResult = r, run.ScenarioContext);
                         captured = attemptResult;
 
+                        if (captured?.Interrupted == true)
+                        {
+                            run.BudgetHit = true;
+                            break;
+                        }
+
                         bool hardFailure = captured != null &&
                                            BenchmarkProviderFailurePolicy.ShouldRetry(captured.Attribution, captured.Failure);
                         if (!hardFailure)
@@ -285,8 +303,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                             SaveCheckpoint(run);
                         }
                         else run.Report.Add(captured);
-                        run.Progress.CompleteScenario(ProgressLine(captured),
-                            Stars(BenchmarkInfo.DifficultyFor(current.Group)));
+                        if (!captured.Interrupted)
+                            run.Progress.CompleteScenario(ProgressLine(captured),
+                                Stars(BenchmarkInfo.DifficultyFor(current.Group)));
+                        else run.Progress.SetStatus(ProgressLine(captured));
                     }
                     else
                     {
@@ -407,9 +427,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             SaveCheckpoint(run, segmentFinished: true);
             byte[] modelCardPng = null;
             yield return CaptureReportModelCard(run.Report, run.VisualLane, png => modelCardPng = png);
-            run.ArtifactPath = WriteArtifacts(run.Report, modelCardPng, run.ArtifactStem, run.ArtifactDirectory);
-            if (run.ArtifactPath != "(not written)")
-                SaveCheckpoint(run, run.Plan == null || run.Plan.All(p => run.Checkpoint.IsFinalized(p.Id, p.Repetition)), true);
+            run.ArtifactPath = WriteArtifacts(run.Report, modelCardPng, run.ArtifactStem, run.ArtifactDirectory,
+                run.RequiredArtifactWriter);
+            SaveCheckpoint(run, run.Plan == null || run.Plan.All(p => run.Checkpoint.IsFinalized(p.Id, p.Repetition)), true);
             BenchmarkReport report = run.Report;
             Debug.Log($"{run.LogPrefix} ===== TARGET COMPLETE =====\n" +
                       $"Suite base score: {report.SuiteBaseScore:0.#}/100 (mean bonus {report.MeanBonus:0.#})\n" +
@@ -432,10 +452,6 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 TargetSuiteRun target = run;
                 target.ScenarioContext ??= new ScenarioRunContext();
-                Func<bool> previousCancel = target.ScenarioContext.ShouldCancel;
-                target.ScenarioContext.ShouldCancel = () => target.Progress.StopRequested ||
-                    target.SuiteClock.Elapsed.TotalSeconds >= target.SuiteBudgetSeconds ||
-                    (previousCancel?.Invoke() ?? false);
                 routines.Add(() => RunAndFinishTarget(target));
             }
 
@@ -446,8 +462,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // WHY: a logged error fails the test at once; the other targets must finish and write first.
                 Debug.LogWarning($"{failed.LogPrefix} harness fault, writing a partial report: {ex}");
                 failed.Progress.End();
-                failed.ArtifactPath = WriteArtifacts(failed.Report, null, failed.ArtifactStem,
-                    failed.ArtifactDirectory);
+                try
+                {
+                    failed.ArtifactPath = WriteArtifacts(failed.Report, null, failed.ArtifactStem,
+                        failed.ArtifactDirectory, failed.RequiredArtifactWriter);
+                }
+                catch (Exception publicationError)
+                {
+                    problems.Add($"{failed.DisplayName}: required artifact publication failed: {publicationError.Message}");
+                }
             }, index =>
             {
                 TargetSuiteRun target = runs[index];

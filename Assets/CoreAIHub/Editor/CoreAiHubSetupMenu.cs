@@ -1,4 +1,5 @@
 using System;
+using CoreAI.Chat;
 using CoreAI.Hub.UI;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -9,70 +10,84 @@ namespace CoreAI.Hub.UI.Editor
 {
     /// <summary>
     /// <c>CoreAI → Setup → Add Hub</c>: drops the CoreAI Hub window into the open scene. On first use it
-    /// also authors the reusable module prefab (<c>Assets/CoreAIHub/Runtime/CoreAiHub.prefab</c>) so the Hub
-    /// package ships a ready prefab; later invocations just instance it. If the Lua mods module
+    /// authors a project-owned prefab under <c>Assets/CoreAIGenerated/Hub</c>. Package resources are
+    /// resolved from their installed package paths, or their source layout under Assets. If the Lua mods module
     /// (<c>com.neoxider.coreaimods</c>) is installed, the Mods tab is lit up by adding its
     /// <c>CoreAiModsHubBinder</c> to the instance — features light up when packages appear.
     /// </summary>
     public static class CoreAiHubSetupMenu
     {
-        private const string PrefabPath = "Assets/CoreAIHub/Runtime/CoreAiHub.prefab";
-        private const string PanelSettingsPath = "Assets/CoreAIHub/Runtime/CoreAiHubPanelSettings.asset";
-        private const string ChatUxmlPath = "Assets/CoreAiUnity/Runtime/Source/Features/Chat/UI/CoreAiChat.uxml";
-        private const string ChatUssPath = "Assets/CoreAiUnity/Runtime/Source/Features/Chat/UI/CoreAiChat.uss";
+        private const string PrefabPath = "Assets/CoreAIGenerated/Hub/CoreAiHub.prefab";
         private const string ModsBinderType = "CoreAI.Ai.Hub.CoreAiModsHubBinder, CoreAI.Mods.Hub";
 
         [MenuItem("CoreAI/Setup/Add Hub", priority = 12)]
         public static void AddHub()
         {
-            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
-            if (prefab == null)
+            GameObject authored = null;
+            try
             {
-                GameObject authored = BuildHub();
-                prefab = PrefabUtility.SaveAsPrefabAsset(authored, PrefabPath);
-                UnityEngine.Object.DestroyImmediate(authored);
-                Debug.Log($"[CoreAI] Authored the Hub module prefab at {PrefabPath}.");
+                GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
+                if (prefab == null)
+                {
+                    EnsureGeneratedFolder();
+                    authored = BuildHub();
+                    prefab = PrefabUtility.SaveAsPrefabAsset(authored, PrefabPath);
+                    if (prefab == null)
+                    {
+                        throw new InvalidOperationException("Could not save the generated Hub prefab at " + PrefabPath + ".");
+                    }
+
+                    Debug.Log($"[CoreAI] Authored the Hub module prefab at {PrefabPath}.");
+                }
+
+                GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
+                if (instance == null)
+                {
+                    throw new InvalidOperationException("Could not instantiate the Hub prefab.");
+                }
+
+                Undo.RegisterCreatedObjectUndo(instance, "Add CoreAI Hub");
+                // WHY: the optional Mods assembly cannot be a dependency of the Hub package.
+                Type modsBinder = Type.GetType(ModsBinderType);
+                if (modsBinder != null && instance.GetComponent(modsBinder) == null)
+                {
+                    instance.AddComponent(modsBinder);
+                }
+
+                Selection.activeGameObject = instance;
+                EditorSceneManager.MarkSceneDirty(instance.scene);
+                Debug.Log("[CoreAI] Added CoreAI Hub to the scene. Make sure the scene has a CoreAILifetimeScope " +
+                          "(and, for the Mods tab, a CoreAiModsLifetimeScope child).");
             }
-
-            GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
-
-            // Light up the Mods tab when the Lua mods module is present (its component lives in the optional
-            // CoreAI.Mods.Hub assembly, which the Hub package does not reference, so resolve it by name).
-            Type modsBinder = Type.GetType(ModsBinderType);
-            if (modsBinder != null && instance.GetComponent(modsBinder) == null)
+            catch (Exception ex)
             {
-                instance.AddComponent(modsBinder);
+                Debug.LogError("[CoreAI] Could not add Hub: " + ex.Message);
             }
-
-            Undo.RegisterCreatedObjectUndo(instance, "Add CoreAI Hub");
-            Selection.activeGameObject = instance;
-            EditorSceneManager.MarkSceneDirty(instance.scene);
-            Debug.Log("[CoreAI] Added CoreAI Hub to the scene. Make sure the scene has a CoreAILifetimeScope " +
-                      "(and, for the Mods tab, a CoreAiModsLifetimeScope child).");
+            finally
+            {
+                if (authored != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(authored);
+                }
+            }
         }
 
         private static GameObject BuildHub()
         {
+            PanelSettings panel = LoadRequired<PanelSettings>(typeof(CoreAiHubWindow),
+                "Assets/CoreAIHub", "Runtime/CoreAiHubPanelSettings.asset");
+            VisualTreeAsset shell = LoadRequired<VisualTreeAsset>(typeof(CoreAiHubWindow),
+                "Assets/CoreAIHub", "Runtime/CoreAiHub.uxml");
+            VisualTreeAsset chatUxml = LoadRequired<VisualTreeAsset>(typeof(CoreAiChatPanel),
+                "Assets/CoreAiUnity", "Runtime/Source/Features/Chat/UI/CoreAiChat.uxml");
+            StyleSheet chatUss = LoadRequired<StyleSheet>(typeof(CoreAiChatPanel),
+                "Assets/CoreAiUnity", "Runtime/Source/Features/Chat/UI/CoreAiChat.uss");
             GameObject go = new("CoreAiHub");
 
             UIDocument document = go.AddComponent<UIDocument>();
-            // Dedicated Hub PanelSettings so the Hub renders on its own panel and never contends with the
-            // embedded chat's UIDocument (sharing one PanelSettings orphaned the Hub root — the flicker bug).
-            PanelSettings panel = AssetDatabase.LoadAssetAtPath<PanelSettings>(PanelSettingsPath);
-            if (panel == null)
-            {
-                Debug.LogError(
-                    $"[CoreAI] Missing {PanelSettingsPath}. The Hub needs its own PanelSettings — assign one " +
-                    "to the CoreAiHub UIDocument by hand. Any other project PanelSettings may be the " +
-                    "embedded chat's, and sharing one panel orphans the Hub root.");
-            }
-
             document.panelSettings = panel;
 
             CoreAiHubWindow window = go.AddComponent<CoreAiHubWindow>();
-            // Assign the shell UXML (the window builds its structure from it, not from C#).
-            VisualTreeAsset shell =
-                AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/CoreAIHub/Runtime/CoreAiHub.uxml");
             SerializedObject wso = new(window);
             SerializedProperty shellProp = wso.FindProperty("shellUxml");
             if (shellProp != null && shell != null)
@@ -81,12 +96,8 @@ namespace CoreAI.Hub.UI.Editor
                 wso.ApplyModifiedPropertiesWithoutUndo();
             }
 
-            // The built-in About/Chat/Settings/Statistics tabs come from this bootstrap; wire the chat UXML so
-            // the Chat tab embeds the real CoreAiChatPanel instead of showing a setup note.
             CoreAiHubDemo bootstrap = go.AddComponent<CoreAiHubDemo>();
             SerializedObject so = new(bootstrap);
-            VisualTreeAsset chatUxml = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(ChatUxmlPath);
-            StyleSheet chatUss = AssetDatabase.LoadAssetAtPath<StyleSheet>(ChatUssPath);
             if (chatUxml != null)
             {
                 so.FindProperty("chatTemplate").objectReferenceValue = chatUxml;
@@ -99,6 +110,43 @@ namespace CoreAI.Hub.UI.Editor
 
             so.ApplyModifiedPropertiesWithoutUndo();
             return go;
+        }
+
+        private static T LoadRequired<T>(Type assemblyOwner, string sourceRoot, string relativePath)
+            where T : UnityEngine.Object
+        {
+            UnityEditor.PackageManager.PackageInfo package =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(assemblyOwner.Assembly);
+            string path = ResolveSourcePath(package?.assetPath, sourceRoot, relativePath);
+            T asset = AssetDatabase.LoadAssetAtPath<T>(path);
+            if (asset == null)
+            {
+                throw new InvalidOperationException("Missing required Hub resource: " + path + ".");
+            }
+
+            return asset;
+        }
+
+        internal static string ResolveSourcePath(string packageAssetPath, string sourceRoot, string relativePath)
+        {
+            string root = string.IsNullOrEmpty(packageAssetPath) ? sourceRoot : packageAssetPath;
+            return root.TrimEnd('/', '\\') + "/" + relativePath.TrimStart('/', '\\');
+        }
+
+        private static void EnsureGeneratedFolder()
+        {
+            string parent = "Assets";
+            foreach (string segment in new[] { "CoreAIGenerated", "Hub" })
+            {
+                string path = parent + "/" + segment;
+                if (!AssetDatabase.IsValidFolder(path) &&
+                    string.IsNullOrEmpty(AssetDatabase.CreateFolder(parent, segment)))
+                {
+                    throw new InvalidOperationException("Could not create the generated Hub folder: " + path + ".");
+                }
+
+                parent = path;
+            }
         }
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using CoreAI.Hub;
+using CoreAI.Infrastructure.Lua;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -29,12 +30,14 @@ namespace CoreAI.Ai.Hub
         private VisualElement _root;
         private VisualElement _listRoot;
         private VisualElement _editorRoot;
+        private HubModEditorPage _editor;
         private ScrollView _treeScroll;
         private Label _status;
         private TextField _searchField;
         private string _search = "";
         private bool _subscribed;
         private bool _editorOpen;
+        private bool _destroyed;
         private int _refreshQueued;
 
         // WHY: ListMods() re-parses every mod's @coreai header, so results are cached here and only
@@ -98,6 +101,10 @@ namespace CoreAI.Ai.Hub
         /// <inheritdoc />
         public void OnDestroyed()
         {
+            _destroyed = true;
+            _editor?.OnDestroyed();
+            _root?.SetEnabled(false);
+            _searchDebounce?.Pause();
             Unsubscribe();
         }
 
@@ -172,7 +179,7 @@ namespace CoreAI.Ai.Hub
         /// external change (ModsChanged); the search box itself only calls <see cref="RenderTree"/>.</summary>
         private void RefreshList()
         {
-            if (_root == null)
+            if (_root == null || _destroyed)
             {
                 return;
             }
@@ -385,6 +392,11 @@ namespace CoreAI.Ai.Hub
 
         private void ToggleMod(string id, bool enable)
         {
+            if (_destroyed)
+            {
+                return;
+            }
+
             try
             {
                 if (enable)
@@ -398,6 +410,10 @@ namespace CoreAI.Ai.Hub
                     SetStatus($"Disabled '{id}'.", false);
                 }
             }
+            catch (OperationCanceledException)
+            {
+                SetStatus($"Toggle of '{id}' cancelled; live state may already have changed.", true);
+            }
             catch (Exception ex)
             {
                 SetStatus($"Failed to toggle '{id}': {ex.Message}", true);
@@ -408,10 +424,24 @@ namespace CoreAI.Ai.Hub
 
         private void DeleteMod(string id)
         {
+            if (_destroyed)
+            {
+                return;
+            }
+
             try
             {
-                _service.Delete(id);
-                SetStatus($"Deleted '{id}'.", false);
+                bool deleted = _service.Delete(id);
+                SetStatus(deleted ? $"Deleted '{id}'." : $"Deletion of '{id}' was not confirmed. Retry after recovery.",
+                    !deleted);
+            }
+            catch (OperationCanceledException)
+            {
+                SetStatus($"Deletion of '{id}' cancelled; live state may already have changed.", true);
+            }
+            catch (LuaModSourcePersistenceException ex) when (ex.LocalCommitCompleted)
+            {
+                SetStatus($"Deleted '{id}' locally, but automatic persistence is NOT armed. Retry the deletion.", true);
             }
             catch (Exception ex)
             {
@@ -423,6 +453,11 @@ namespace CoreAI.Ai.Hub
 
         private void ApplyUpdate(string id)
         {
+            if (_destroyed)
+            {
+                return;
+            }
+
             try
             {
                 if (_service.ApplyBundledUpdate(id))
@@ -464,6 +499,11 @@ namespace CoreAI.Ai.Hub
 
         private void ImportFromClipboard()
         {
+            if (_destroyed)
+            {
+                return;
+            }
+
             string clip = GUIUtility.systemCopyBuffer ?? "";
             if (string.IsNullOrWhiteSpace(clip))
             {
@@ -504,7 +544,14 @@ namespace CoreAI.Ai.Hub
 
         private void OpenEditEditor(string id)
         {
-            OpenEditor(new HubModEditorPage(_service, id, null, CloseEditor, _editorPreferences));
+            try
+            {
+                OpenEditor(new HubModEditorPage(_service, id, null, CloseEditor, _editorPreferences));
+            }
+            catch (Exception ex)
+            {
+                SetStatus("Could not open the mod source: " + ex.Message, true);
+            }
         }
 
         private void PasteFromClipboard()
@@ -521,11 +568,13 @@ namespace CoreAI.Ai.Hub
 
         private void OpenEditor(HubModEditorPage editor)
         {
-            if (_editorRoot == null)
+            if (_destroyed || _editorRoot == null)
             {
                 return;
             }
 
+            _editor?.OnDestroyed();
+            _editor = editor;
             _editorRoot.Clear();
             _editorRoot.Add(editor.Build());
             _editorRoot.style.display = DisplayStyle.Flex;
@@ -535,11 +584,13 @@ namespace CoreAI.Ai.Hub
 
         private void CloseEditor()
         {
-            if (_editorRoot == null)
+            if (_destroyed || _editorRoot == null)
             {
                 return;
             }
 
+            _editor?.OnDestroyed();
+            _editor = null;
             _editorRoot.Clear();
             _editorRoot.style.display = DisplayStyle.None;
             _listRoot.style.display = DisplayStyle.Flex;
@@ -550,7 +601,7 @@ namespace CoreAI.Ai.Hub
         private void OnModsChanged()
         {
             // WHY: Only refresh the list when it is the visible view; the editor manages its own state.
-            if (_editorOpen || _root == null)
+            if (_destroyed || _editorOpen || _root == null)
             {
                 return;
             }
@@ -581,7 +632,7 @@ namespace CoreAI.Ai.Hub
             Interlocked.Exchange(ref _refreshQueued, 0);
 
             // WHY re-checked: the editor may have opened after the change was queued; closing it refreshes.
-            if (_editorOpen)
+            if (_editorOpen || _destroyed)
             {
                 return;
             }
@@ -591,7 +642,7 @@ namespace CoreAI.Ai.Hub
 
         private void Subscribe()
         {
-            if (_subscribed)
+            if (_destroyed || _subscribed)
             {
                 return;
             }

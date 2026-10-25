@@ -1,5 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Text;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
@@ -7,6 +9,7 @@ using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
+using Mirror;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -37,6 +40,7 @@ namespace CoreAI.Net.Mirror.Tests
         private InstanceRegistry _registry;
         private LuaCsRbxApiBindings _bindings;
         private List<string> _worldLog;
+        private List<string> _bridgeLog;
         private double _now;
 
         [SetUp]
@@ -47,7 +51,9 @@ namespace CoreAI.Net.Mirror.Tests
             _go = new GameObject("CoreAI_MirrorKick");
             _authenticator = _go.AddComponent<CoreAiMirrorAuthenticator>();
             _authenticator.Configure(new TokenProvider(Credential), WorldId);
-            _server = new MirrorNetworkBridge(isServer: true, _authenticator, clockSeconds: () => _now);
+            _bridgeLog = new List<string>();
+            _server = new MirrorNetworkBridge(isServer: true, _authenticator, clockSeconds: () => _now,
+                log: _bridgeLog.Add);
             _worldLog = new List<string>();
             _registry = new InstanceRegistry(
                 worldAclVersion: InstanceRegistry.CurrentWorldAclVersion, worldId: WorldId);
@@ -121,6 +127,295 @@ namespace CoreAI.Net.Mirror.Tests
             _bindings.Scheduler.Advance(0d);
 
             Assert.AreEqual(1, removing.Count, "the transport's own report of the drop finds nothing left to tear down");
+        }
+
+        [TestCase(false, false)]
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        public void NET001_TransportDrop_ThrowingCompletionDoesNotSkipWorldCleanup(
+            bool unregisterInCompletion, bool disposeInCompletion)
+        {
+            RbxPlayer player = Admit(Connection);
+            string actorId = player.NetworkActorId;
+            RbxRemoteEvent remote = (RbxRemoteEvent)_registry.Create("RemoteEvent");
+            remote.AttachScheduler(_bindings.Scheduler);
+            RbxScriptConnection signalConnection = remote.GetOnClientEvent(actorId)
+                .Connect((Action<object[]>)(_ => { }));
+            RecordingChatFactory chatFactory = new();
+            _bindings.AttachChatFactory(chatFactory);
+            List<object[]> removing = new();
+            _bindings.Players.PlayerRemoving.Connect((Action<object[]>)removing.Add);
+            List<int> released = new();
+            _server.BindingReleased += released.Add;
+            int disconnected = 0;
+            _server.PeerDisconnected += _ => disconnected++;
+            List<int> completed = new();
+            List<RbxNetworkResponse> responses = new();
+            RbxNetworkRequestMessage request = new(remote.Id, RbxNetworkDirection.ServerToClient,
+                null, actorId, Array.Empty<byte>());
+            _server.SendRequest(request, response =>
+            {
+                completed.Add(1);
+                responses.Add(response);
+                if (unregisterInCompletion)
+                {
+                    _server.UnregisterActor(actorId);
+                }
+
+                if (disposeInCompletion)
+                {
+                    _server.Dispose();
+                }
+
+                throw new InvalidOperationException("first pending completion failed");
+            });
+            _server.SendRequest(request, response =>
+            {
+                completed.Add(2);
+                responses.Add(response);
+            });
+            Assert.AreEqual(2, PrivateMapCount(_server, "_pending"));
+            Assert.AreEqual(1, _sessionHost.LiveSessionCount);
+            Assert.IsTrue(signalConnection.Connected);
+            Action<NetworkConnectionToClient> onDisconnected = connection =>
+                _server.NotifyDisconnected(connection.connectionId, RbxNetworkDisconnectReason.TransportLost);
+            NetworkServer.OnDisconnectedEvent += onDisconnected;
+            try
+            {
+                Assert.DoesNotThrow(() => OfflineMirror.DropServerConnection(Connection),
+                    "a pending completion must not abort the transport tick or world cleanup");
+                _bindings.Scheduler.Advance(0d);
+
+                CollectionAssert.AreEqual(new[] { 1, 2 }, completed,
+                    "both pending completions must be attempted once, in request order");
+                Assert.IsFalse(responses[0].Succeeded);
+                Assert.IsFalse(responses[1].Succeeded);
+                Assert.AreEqual(1, _bridgeLog.Count);
+                StringAssert.Contains("first pending completion failed", _bridgeLog[0]);
+                Assert.AreEqual(1, disconnected);
+                CollectionAssert.AreEqual(new[] { Connection }, released);
+                Assert.AreEqual(1, removing.Count);
+                Assert.AreSame(player, removing[0][0]);
+                Assert.IsTrue(player.IsDestroyed);
+                CollectionAssert.IsEmpty(_bindings.Players.GetPlayers());
+                Assert.IsFalse(signalConnection.Connected);
+                Assert.AreEqual(0, remote.ClientSignalCount);
+                CollectionAssert.AreEqual(new[] { actorId }, chatFactory.ReleasedActors);
+                AssertNoSessionState(actorId);
+                CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests,
+                    "a reported transport drop must not schedule another disconnect");
+
+                _server.NotifyDisconnected(Connection, RbxNetworkDisconnectReason.TransportLost);
+                _now = MirrorNetworkBridge.RequestTimeoutSeconds + 1d;
+                _server.PumpTimeouts();
+                _bindings.Scheduler.Advance(0d);
+
+                CollectionAssert.AreEqual(new[] { 1, 2 }, completed);
+                Assert.AreEqual(0, _server.TimedOutRequests);
+                Assert.AreEqual(1, disconnected);
+                Assert.AreEqual(1, removing.Count);
+                Assert.AreEqual(1, released.Count);
+                Assert.AreEqual(1, chatFactory.ReleasedActors.Count);
+                AssertNoSessionState(actorId);
+            }
+            finally
+            {
+                NetworkServer.OnDisconnectedEvent -= onDisconnected;
+            }
+        }
+
+        [TestCase(DisconnectReentry.None)]
+        [TestCase(DisconnectReentry.Notify)]
+        [TestCase(DisconnectReentry.Unregister)]
+        [TestCase(DisconnectReentry.Disconnect)]
+        [TestCase(DisconnectReentry.Dispose)]
+        public void NET001_ThrowingPeerListeners_StillDisconnectTheActualWorldBeforeErrorsSurface(
+            DisconnectReentry reentry)
+        {
+            _sessionHost.Dispose();
+            InvalidOperationException first = new("first peer listener failed");
+            ArgumentException last = new("last peer listener failed");
+            string actorId = null;
+            int attempted = 0;
+            _server.PeerDisconnected += _ =>
+            {
+                attempted++;
+                switch (reentry)
+                {
+                    case DisconnectReentry.Notify:
+                        _server.NotifyDisconnected(Connection, RbxNetworkDisconnectReason.ServerClosed);
+                        break;
+                    case DisconnectReentry.Unregister:
+                        _server.UnregisterActor(actorId);
+                        break;
+                    case DisconnectReentry.Disconnect:
+                        _server.DisconnectActor(actorId);
+                        break;
+                    case DisconnectReentry.Dispose:
+                        _server.Dispose();
+                        break;
+                }
+
+                throw first;
+            };
+            _sessionHost = new CoreAiMirrorSessionHost(_server,
+                context => _bindings.ConnectActor(context) != null,
+                context => _bindings.DisconnectActor(context));
+            _bindings.Players.IdentitySource = _sessionHost;
+            _server.PeerDisconnected += _ =>
+            {
+                attempted++;
+                throw last;
+            };
+            RbxPlayer player = Admit(Connection);
+            actorId = player.NetworkActorId;
+            List<object[]> removing = new();
+            _bindings.Players.PlayerRemoving.Connect((Action<object[]>)removing.Add);
+            List<int> released = new();
+            _server.BindingReleased += released.Add;
+
+            AggregateException failure = Assert.Throws<AggregateException>(() =>
+                _server.NotifyDisconnected(Connection, RbxNetworkDisconnectReason.TransportLost));
+            _bindings.Scheduler.Advance(0d);
+
+            CollectionAssert.AreEqual(new Exception[] { first, last }, failure.InnerExceptions,
+                "every listener failure must remain observable after cleanup");
+            Assert.AreEqual(2, attempted);
+            Assert.AreEqual(1, removing.Count);
+            CollectionAssert.AreEqual(new[] { Connection }, released,
+                "reentrant cleanup must retain the binding observer snapshot exactly once");
+            Assert.IsTrue(player.IsDestroyed);
+            CollectionAssert.IsEmpty(_bindings.Players.GetPlayers());
+            AssertNoSessionState(actorId);
+            Assert.DoesNotThrow(() => _server.NotifyDisconnected(Connection,
+                RbxNetworkDisconnectReason.TransportLost));
+            Assert.AreEqual(2, attempted);
+            Assert.AreEqual(1, released.Count);
+            Assert.AreEqual(1, removing.Count);
+        }
+
+        [Test]
+        public void Disconnect_ReentrantDispose_PreservesReplacementAdmissionOnAReusedConnectionId()
+        {
+            _sessionHost.Dispose();
+            ActorAdmissionResult replacement = null;
+            _server.PeerDisconnected += _ =>
+            {
+                _server.Dispose();
+                Assert.IsTrue(NetworkServer.RemoveConnection(Connection));
+                OfflineMirror.AdmitServerConnection(Connection);
+                replacement = _authenticator.Decide(Connection, "replacement",
+                    Encoding.UTF8.GetBytes(Credential));
+            };
+            _sessionHost = new CoreAiMirrorSessionHost(_server,
+                context => _bindings.ConnectActor(context) != null,
+                context => _bindings.DisconnectActor(context));
+            _bindings.Players.IdentitySource = _sessionHost;
+            RbxPlayer player = Admit(Connection);
+            string actorId = player.NetworkActorId;
+            ActorAdmissionResult original = _authenticator.ResultFor(Connection);
+            _authenticator.Configure(new FixedAdmissionProvider(original), WorldId);
+            NetworkConnectionToClient originalConnection = NetworkServer.connections[Connection];
+            List<object[]> removing = new();
+            _bindings.Players.PlayerRemoving.Connect((Action<object[]>)removing.Add);
+
+            _server.NotifyDisconnected(Connection, RbxNetworkDisconnectReason.TransportLost);
+            _bindings.Scheduler.Advance(0d);
+
+            Assert.AreSame(original, replacement,
+                "a host provider may reuse its immutable admission result for a new transport peer");
+            Assert.AreNotSame(originalConnection, NetworkServer.connections[Connection]);
+            Assert.AreSame(replacement, _authenticator.ResultFor(Connection),
+                "the departed peer must not forget an admission held by a new connection object");
+            Assert.AreEqual(1, removing.Count);
+            Assert.AreSame(player, removing[0][0]);
+            Assert.IsTrue(player.IsDestroyed);
+            CollectionAssert.IsEmpty(_bindings.Players.GetPlayers());
+            Assert.AreEqual(0, _sessionHost.LiveSessionCount);
+            Assert.IsFalse(_sessionHost.TryGetIdentity(actorId, out _, out _, out _));
+            CollectionAssert.IsEmpty(_server.ActorIds);
+            CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests);
+
+            _server.NotifyDisconnected(Connection, RbxNetworkDisconnectReason.TransportLost);
+            Assert.AreSame(replacement, _authenticator.ResultFor(Connection));
+            Assert.AreEqual(1, removing.Count);
+        }
+
+        [Test]
+        public void NET001_ThrowingCompletionThatAdmitsAReplacement_PreservesTheNewWorldSession()
+        {
+            _authenticator.Configure(new DurableProvider("durable-actor"), WorldId);
+            RbxPlayer leaving = Admit(Connection);
+            string actorId = leaving.NetworkActorId;
+            RbxRemoteEvent remote = (RbxRemoteEvent)_registry.Create("RemoteEvent");
+            List<object[]> removing = new();
+            _bindings.Players.PlayerRemoving.Connect((Action<object[]>)removing.Add);
+            List<int> released = new();
+            _server.BindingReleased += released.Add;
+            RbxPlayer replacement = null;
+            int first = 0;
+            int second = 0;
+            List<RbxNetworkResponse> replacementResponses = new();
+            RbxNetworkRequestMessage request = new(remote.Id, RbxNetworkDirection.ServerToClient,
+                null, actorId, Array.Empty<byte>());
+            _server.SendRequest(request, _ =>
+            {
+                first++;
+                replacement = Admit(Connection + 1);
+                _server.SendRequest(request, replacementResponses.Add);
+                throw new InvalidOperationException("replacement completion failed");
+            });
+            _server.SendRequest(request, _ => second++);
+
+            _server.NotifyDisconnected(Connection, RbxNetworkDisconnectReason.TransportLost);
+            _bindings.Scheduler.Advance(0d);
+
+            Assert.AreEqual(1, first);
+            Assert.AreEqual(1, second);
+            Assert.AreEqual(1, _bridgeLog.Count);
+            StringAssert.Contains("replacement completion failed", _bridgeLog[0]);
+            Assert.IsTrue(leaving.IsDestroyed);
+            Assert.IsNotNull(replacement);
+            Assert.AreNotSame(leaving, replacement,
+                "the old Player must finish teardown before a completion can admit the replacement");
+            Assert.IsFalse(replacement.IsDestroyed);
+            CollectionAssert.AreEqual(new[] { replacement }, _bindings.Players.GetPlayers());
+            Assert.AreEqual(1, removing.Count);
+            Assert.AreSame(leaving, removing[0][0]);
+            Assert.IsFalse(_sessionHost.HasLiveSession(Connection));
+            Assert.IsTrue(_sessionHost.HasLiveSession(Connection + 1));
+            Assert.AreEqual(1, _sessionHost.LiveSessionCount);
+            Assert.IsTrue(_sessionHost.TryGetIdentity(actorId, out _, out _, out _));
+            Assert.IsNull(_authenticator.ResultFor(Connection));
+            Assert.IsNotNull(_authenticator.ResultFor(Connection + 1));
+            CollectionAssert.AreEqual(new[] { Connection }, released);
+            Assert.AreEqual(1, PrivateMapCount(_server, "_pending"),
+                "the old disconnect must not fail the replacement connection's new request");
+            CollectionAssert.IsEmpty(replacementResponses);
+
+            _server.ReceiveServerResponse(Connection + 1, new CoreAiRemoteResponseMessage
+            {
+                CorrelationId = 3u,
+                Success = true,
+                Payload = Array.Empty<byte>(),
+                ErrorCode = "",
+                ErrorMessage = ""
+            });
+            Assert.AreEqual(1, replacementResponses.Count);
+            Assert.IsTrue(replacementResponses[0].Succeeded);
+            _server.NotifyDisconnected(Connection, RbxNetworkDisconnectReason.TransportLost);
+            Assert.IsFalse(replacement.IsDestroyed);
+            _server.NotifyDisconnected(Connection + 1, RbxNetworkDisconnectReason.TransportLost);
+            _bindings.Scheduler.Advance(0d);
+            _now = MirrorNetworkBridge.RequestTimeoutSeconds + 1d;
+            _server.PumpTimeouts();
+
+            CollectionAssert.AreEqual(new[] { Connection, Connection + 1 }, released);
+            Assert.AreEqual(2, removing.Count);
+            Assert.IsTrue(replacement.IsDestroyed);
+            Assert.AreEqual(1, replacementResponses.Count);
+            Assert.AreEqual(0, _server.TimedOutRequests);
+            AssertNoSessionState(actorId);
         }
 
         [Test]
@@ -350,6 +645,64 @@ namespace CoreAI.Net.Mirror.Tests
             CollectionAssert.IsEmpty(_bindings.Players.GetPlayers());
             Assert.AreEqual(0, _sessionHost.LiveSessionCount);
             CollectionAssert.IsEmpty(_server.ActorIds);
+        }
+
+        /// <summary>Cleanup reentered by the first peer listener before the session host runs.</summary>
+        public enum DisconnectReentry
+        {
+            None,
+            Notify,
+            Unregister,
+            Disconnect,
+            Dispose
+        }
+
+        private void AssertNoSessionState(string actorId)
+        {
+            Assert.AreEqual(0, _sessionHost.LiveSessionCount);
+            Assert.IsFalse(_sessionHost.TryGetIdentity(actorId, out _, out _, out _));
+            Assert.IsNull(_authenticator.ResultFor(Connection));
+            CollectionAssert.IsEmpty(_server.ActorIds);
+            Assert.AreEqual(0, PrivateMapCount(_sessionHost, "_identitiesByActor"));
+            Assert.AreEqual(0, PrivateMapCount(_sessionHost, "_actorsByConnection"));
+            Assert.AreEqual(0, PrivateMapCount(_server, "_connectionsByActor"));
+            Assert.AreEqual(0, PrivateMapCount(_server, "_peersByConnection"));
+            Assert.AreEqual(0, PrivateMapCount(_server, "_joining"));
+            Assert.AreEqual(0, PrivateMapCount(_server, "_pending"));
+        }
+
+        private static int PrivateMapCount(object owner, string name)
+        {
+            FieldInfo field = owner.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(field, "the cleanup assertion must inspect the owned state: " + name);
+            IDictionary map = field.GetValue(owner) as IDictionary;
+            Assert.IsNotNull(map, "the cleanup assertion requires a dictionary: " + name);
+            return map.Count;
+        }
+
+        private sealed class FixedAdmissionProvider : IActorAdmissionProvider
+        {
+            private readonly ActorAdmissionResult _admission;
+
+            public FixedAdmissionProvider(ActorAdmissionResult admission)
+            {
+                _admission = admission;
+            }
+
+            public ActorAdmissionResult TryAdmit(in ActorCredential credential, string worldId) => _admission;
+        }
+
+        private sealed class RecordingChatFactory : IInGameLlmChatServiceFactory
+        {
+            public List<string> ReleasedActors { get; } = new();
+
+            public IInGameLlmChatService Resolve(ActorContext actorContext) => null;
+
+            public bool ReleaseActor(ActorContext actorContext)
+            {
+                ReleasedActors.Add(actorContext.ActorId);
+                return true;
+            }
         }
 
         /// <summary>

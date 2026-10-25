@@ -85,4 +85,14 @@ namespace CoreAI.Mods.Rbx.Datatypes
         /// null renders every part plain.</summary>
         IRbxMaterialVariantSource VariantSource { get; set; }
     }
+
+    /// <summary>Optional ownership seam for providers with evictable native materials.</summary>
+    public interface IRbxMaterialLeaseProvider<TMaterial> : IRbxMaterialProvider<TMaterial>
+    {
+        /// <summary>Acquires a handle that remains valid until the matching release or provider disposal.</summary>
+        bool TryAcquireMaterial(in RbxMaterialId material, out TMaterial visualMaterial);
+
+        /// <summary>Releases one acquired handle; immutable catalog handles may require no work.</summary>
+        void ReleaseMaterial(TMaterial visualMaterial);
+    }
 }

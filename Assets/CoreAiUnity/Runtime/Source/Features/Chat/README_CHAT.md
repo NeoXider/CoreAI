@@ -79,14 +79,21 @@ The panel is **not** hardwired to a single teaching or player role. Routing uses
 
 The stock request (`BuildAiTaskRequest`, and the string overloads of `CoreAiChatService`) carries the
 actor context that the scene's `IActorIdentityProvider` returns for the role and sets
-`CancellationScope` to that actor's session id. `QueuedAiOrchestrator` keys queued and running work by
-session and role: a new turn replaces the same session's earlier turn for that role, and a Teacher turn
-for student B (another session) does not stop student A's concurrent Teacher turn. To stop one actor's
-turn from code, call `IScopedAiTaskCancellation.CancelTasks(sessionId, roleId)` on the orchestrator
-(`QueuedAiOrchestrator` implements it). `CoreAi.StopAgent(roleId)` and
-`CoreAiChatService.StopAgent(roleId)` cancel every queued or running turn for that role across sessions,
-using the optional `IRoleAiTaskCancellation` interface implemented by `QueuedAiOrchestrator`.
-The panel's own Stop cancels the token of the request it owns.
+`CancellationScope` to that actor's connection session id. `QueuedAiOrchestrator` isolates admitted
+work by actor, connection and role; roles may be shared by different players. To stop one connection,
+call `IActorAiTaskCancellation.CancelActorTasks(actorContext, roleId)` on the orchestrator. Omitting
+the role cancels that connection's roles together, including work with an empty logical scope.
+`CoreAi.StopAgent(roleId, actorContext)` and `CoreAiChatService.StopAgent(roleId, actorContext)` use
+that actor-specific capability; they do not fall back to global cancellation on a custom orchestrator
+that lacks it. The panel retains the admitted actor for Stop and also cancels its owned request token.
+Global scope/role cancellation remains an administrative orchestration operation.
+
+The host owns account/connection transitions and presentation lifetime. Recreate a panel at an
+ownership transition or explicitly retire every cached role before admitting the next owner's work.
+`ClearChat(false, false)` clears the active role's view without deleting persisted history or memory;
+it does not reset every role cache. `ActorContext.SessionId` is a connection cancellation identity;
+`AgentMemoryScope.SessionId` is a separate opaque persistence partition chosen by the game. See the
+repository guide `Docs/CoreAI/MULTIPLAYER_SESSIONS.md` for composition and cleanup examples.
 
 **What you do as a host game**
 

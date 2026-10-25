@@ -1411,7 +1411,7 @@ namespace CoreAI.Tests.EditMode
             box.Add(Ellipsis(Muted(
                 $"{s.TotalTokens} tokens ({(s.TotalCompletionTokens > 0 ? s.TotalCompletionTokens + " gen" : "gen n/a")})  " +
                 $"{FormatDuration(s.TotalLatencyMs)}  " +
-                $"{(s.TotalCompletionTokens > 0 ? $"{Inv(s.TokensPerSecond)} tok/s generation" : "tok/s n/a (older report)")}")));
+                $"{(s.TotalCompletionTokens > 0 ? $"{Inv(s.TokensPerSecond)} tok/s client-turn" : "tok/s n/a (older report)")}")));
             box.Add(SceneThumbnails(entry));
             return box;
         }

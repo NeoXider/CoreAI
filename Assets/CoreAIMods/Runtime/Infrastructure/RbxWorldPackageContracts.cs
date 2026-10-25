@@ -3542,7 +3542,8 @@ namespace CoreAI.Mods.WorldPackages
         /// facade. Before this, only a change made through the shared gate reached the startup
         /// selection, and a player's own Hub edits on the startup world were lost at restart.
         /// </remarks>
-        private sealed class SessionSourceStore : ILuaModSourceStore, ILuaModSourceAdmission
+        private sealed class SessionSourceStore : ILuaModSourceStore, ILuaModSourceAdmission,
+            ILuaModSourceStrictWriter, ILuaModSourceStrictRemover
         {
             private readonly RbxWorldRuntimeSessionController _owner;
             private readonly ILuaModSourceStore _inner;
@@ -3558,6 +3559,24 @@ namespace CoreAI.Mods.WorldPackages
                 try
                 {
                     _inner.Save(id, source, manifest);
+                }
+                finally
+                {
+                    _owner.OnSessionSourcesChanged(this);
+                }
+            }
+
+            public void SaveStrict(string id, string source, LuaModManifest manifest)
+            {
+                if (!(_inner is ILuaModSourceStrictWriter strictWriter))
+                {
+                    throw new NotSupportedException(
+                        "The current world source store has no strict save acknowledgment.");
+                }
+
+                try
+                {
+                    strictWriter.SaveStrict(id, source, manifest);
                 }
                 finally
                 {
@@ -3592,6 +3611,24 @@ namespace CoreAI.Mods.WorldPackages
                 try
                 {
                     _inner.Delete(id);
+                }
+                finally
+                {
+                    _owner.OnSessionSourcesChanged(this);
+                }
+            }
+
+            public void DeleteStrict(string id)
+            {
+                if (!(_inner is ILuaModSourceStrictRemover strictRemover))
+                {
+                    throw new NotSupportedException(
+                        "The current world source store has no strict removal acknowledgment.");
+                }
+
+                try
+                {
+                    strictRemover.DeleteStrict(id);
                 }
                 finally
                 {
@@ -4167,7 +4204,8 @@ namespace CoreAI.Mods.WorldPackages
             }
         }
 
-        private sealed class ActiveLuaModSourceStore : ILuaModSourceStore
+        private sealed class ActiveLuaModSourceStore : ILuaModSourceStore,
+            ILuaModSourceStrictWriter, ILuaModSourceStrictRemover
         {
             private readonly RbxWorldRuntimeSessionController _owner;
 
@@ -4181,6 +4219,17 @@ namespace CoreAI.Mods.WorldPackages
             public void Save(string id, string source, LuaModManifest manifest)
             {
                 Inner.Save(id, source, manifest);
+            }
+
+            public void SaveStrict(string id, string source, LuaModManifest manifest)
+            {
+                if (!(Inner is ILuaModSourceStrictWriter strictWriter))
+                {
+                    throw new NotSupportedException(
+                        "The current world source store has no strict save acknowledgment.");
+                }
+
+                strictWriter.SaveStrict(id, source, manifest);
             }
 
             public bool TryLoad(string id, out string source, out LuaModManifest manifest)
@@ -4201,6 +4250,17 @@ namespace CoreAI.Mods.WorldPackages
             public void Delete(string id)
             {
                 Inner.Delete(id);
+            }
+
+            public void DeleteStrict(string id)
+            {
+                if (!(Inner is ILuaModSourceStrictRemover strictRemover))
+                {
+                    throw new NotSupportedException(
+                        "The current world source store has no strict removal acknowledgment.");
+                }
+
+                strictRemover.DeleteStrict(id);
             }
         }
 

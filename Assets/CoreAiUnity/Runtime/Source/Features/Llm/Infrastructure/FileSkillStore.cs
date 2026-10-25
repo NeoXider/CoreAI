@@ -1,5 +1,4 @@
-using System;
-using System.Collections.Concurrent;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -36,12 +35,15 @@ namespace CoreAI.Infrastructure.Llm
             ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         private static readonly StringComparison PathComparison = Path.DirectorySeparatorChar == '\\'
             ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        // WHY: never evict a live path gate; a waiter may still hold its instance.
-        private static readonly ConcurrentDictionary<string, DirectoryState> MutationLocks = new(PathComparer);
+        private static readonly SharedPathStateRegistry<DirectoryState> MutationLocks =
+            new(state => state.PendingConfirmation != null);
+        /// <summary>Directory states retained by live stores, admitted operations or unresolved confirmations.</summary>
+        public static int SharedDirectoryStateCount => MutationLocks.Count;
         /// <summary>Maximum encoded size of one persisted skill document; oversized input fails without truncation.</summary>
         public const int MaxRecordBytes = 1024 * 1024;
         private sealed class DirectoryState
         {
+            public DirectoryState() { }
             internal readonly SemaphoreSlim Gate = new(1, 1);
             internal Func<Task> PendingConfirmation;
             internal long Generation;
@@ -55,6 +57,12 @@ namespace CoreAI.Infrastructure.Llm
         }
         private static readonly AsyncLocal<DirectoryState> Confirming = new();
         private readonly DirectoryState _state;
+        private readonly SharedPathStateRegistry<DirectoryState>.Lease _stateLease;
+        private readonly object _lifeLock = new();
+        private int _activeOperations;
+        private bool _leaseReleased;
+        /// <summary>Whether an already committed directory mutation still requires its configured confirmation.</summary>
+        public bool HasPendingDurabilityConfirmation => Volatile.Read(ref _state.PendingConfirmation) != null;
         private readonly ILlmAsyncMarshaler _host;
         private readonly Func<CancellationToken, Task<bool>> _confirm;
         private readonly bool _customConfirmation;
@@ -72,7 +80,8 @@ namespace CoreAI.Infrastructure.Llm
                     CoreAiPersistentPaths.Skills));
             if (_dir.Length > Path.GetPathRoot(_dir).Length)
                 _dir = _dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            _state = MutationLocks.GetOrAdd(_dir, _ => new DirectoryState());
+            _stateLease = MutationLocks.Acquire(_dir);
+            _state = _stateLease.State;
             _gate = _state.Gate;
             _log = log;
             _host = host ?? UnityMainThreadLlmAsyncMarshaler.Instance;
@@ -105,6 +114,9 @@ namespace CoreAI.Infrastructure.Llm
             Action<TResult> publish)
         {
             ThrowIfDisposed();
+            if (_customConfirmation)
+                throw new NotSupportedException(
+                    "Synchronous skill mutation cannot confirm asynchronous durability; use MutateAndPublishAsync.");
             if (mutator == null) throw new ArgumentNullException(nameof(mutator));
             string skillId = Normalize(id);
             if (skillId.Length == 0) throw new ArgumentException("Skill id must not be empty.", nameof(id));
@@ -148,7 +160,7 @@ namespace CoreAI.Infrastructure.Llm
             }
             finally
             {
-                _gate.Release();
+                ExitSync();
             }
         }
 
@@ -191,7 +203,7 @@ namespace CoreAI.Infrastructure.Llm
             }
             finally
             {
-                _gate.Release();
+                ExitSync();
             }
         }
 
@@ -229,7 +241,7 @@ namespace CoreAI.Infrastructure.Llm
                 records.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.Id, right.Id));
                 return records.AsReadOnly();
             }
-            finally { _gate.Release(); }
+            finally { ExitSync(); }
         }
 
         private string[] GetRecordPaths()
@@ -392,22 +404,26 @@ namespace CoreAI.Infrastructure.Llm
         {
             SkillStoreCallbackContext.ThrowIfActive();
             ThrowIfConfirming();
-            if (gate.Wait(0)) return;
+            EnterOperation();
+            try
+            {
+                if (gate.Wait(0)) return;
 #if UNITY_WEBGL && !UNITY_EDITOR
-            // A WebGL player has ONE thread. Parking it parks the code that would release the gate, so
-            // the wait could never end: a busy store answers immediately and the caller retries.
-            throw new InvalidOperationException("Skill store is busy; retry after the current operation.");
-#else
-            // An ASYNCHRONOUS holder releases the gate from a continuation, and that continuation may be
-            // owed to the very thread a wait here would park (an await in this file captures the caller's
-            // SynchronizationContext). That is refused, not awaited - it is the deadlock
-            // FileAgentMemoryStore still carries, and FileSkillStoreAsyncEditModeTests pins the refusal
-            // ("WithoutBlockingSyncCaller"). A SYNCHRONOUS holder releases on its own thread, so waiting
-            // it out is safe and is the whole point of a store that serializes.
-            if (Volatile.Read(ref _state.AsyncUsers) > 0)
                 throw new InvalidOperationException("Skill store is busy; retry after the current operation.");
-            gate.Wait();
+#else
+                // WHY: a queued asynchronous owner may need this calling thread to release its gate.
+                if (Volatile.Read(ref _state.AsyncUsers) > 0)
+                    throw new InvalidOperationException("Skill store is busy; retry after the current operation.");
+                gate.Wait();
 #endif
+            }
+            catch { ExitOperation(); throw; }
+        }
+
+        private void ExitSync()
+        {
+            _gate.Release();
+            ExitOperation();
         }
 
         /// <summary>
@@ -418,6 +434,7 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         private async Task<AsyncLease> EnterAsync(CancellationToken cancellationToken)
         {
+            EnterOperation();
             Interlocked.Increment(ref _state.AsyncUsers);
             try
             {
@@ -426,6 +443,7 @@ namespace CoreAI.Infrastructure.Llm
             catch
             {
                 Interlocked.Decrement(ref _state.AsyncUsers);
+                ExitOperation();
                 throw;
             }
 
@@ -441,6 +459,7 @@ namespace CoreAI.Infrastructure.Llm
             {
                 _store._gate.Release();
                 Interlocked.Decrement(ref _store._state.AsyncUsers);
+                _store.ExitOperation();
             }
         }
 
@@ -637,10 +656,35 @@ namespace CoreAI.Infrastructure.Llm
 
         private void ThrowIfDisposed()
         {
-            if (_disposed) throw new ObjectDisposedException(nameof(FileSkillStore));
+            lock (_lifeLock)
+                if (_disposed) throw new ObjectDisposedException(nameof(FileSkillStore));
         }
 
-        public void Dispose() => _disposed = true;
+        private void EnterOperation()
+        {
+            lock (_lifeLock)
+            {
+                if (_disposed) throw new ObjectDisposedException(nameof(FileSkillStore));
+                _activeOperations++;
+            }
+        }
+        private void ExitOperation()
+        {
+            lock (_lifeLock)
+            {
+                _activeOperations--;
+                ReleaseStateIfIdle();
+            }
+        }
+        private void ReleaseStateIfIdle()
+        {
+            if (_disposed && _activeOperations == 0 && !_leaseReleased)
+            { _leaseReleased = true; _stateLease.Dispose(); }
+        }
+        public void Dispose()
+        {
+            lock (_lifeLock) { _disposed = true; ReleaseStateIfIdle(); }
+        }
         private static string Normalize(string value) => (value ?? "").Trim();
     }
 }

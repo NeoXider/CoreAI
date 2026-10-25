@@ -172,6 +172,71 @@ namespace CoreAI.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator SaveLoad_ScaledHierarchyWithReversedRows_PreservesPoseAcrossTwoRoundTrips()
+        {
+            string[] names = { "ScaleRoot", "ScaleChild", "ScaleGrandchild" };
+            GameObject[] objects = new GameObject[3];
+            Vector3[] localScales =
+            {
+                new Vector3(2f, 3f, 4f), new Vector3(1.25f, 0.75f, 2f), new Vector3(0.5f, 1.5f, 0.8f)
+            };
+            Vector3[] positions = new Vector3[3];
+            Quaternion[] rotations = new Quaternion[3];
+            for (int i = 0; i < objects.Length; i++)
+            {
+                objects[i] = CoreAiPrimitiveFactory.Create("cube");
+                objects[i].name = names[i];
+                Tag(objects[i], "cube");
+                if (i > 0)
+                {
+                    objects[i].transform.SetParent(objects[i - 1].transform, false);
+                }
+
+                objects[i].transform.localPosition = new Vector3(i + 1f, 0.5f * i, -i);
+                objects[i].transform.localRotation = Quaternion.Euler(13f * i, 22f + i * 7f, 9f * i);
+                objects[i].transform.localScale = localScales[i];
+                positions[i] = objects[i].transform.position;
+                rotations[i] = objects[i].transform.rotation;
+            }
+
+            WorldStateManager manager = new WorldStateManager(GameLoggerUnscopedFallback.Instance);
+            try
+            {
+                for (int round = 0; round < 2; round++)
+                {
+                    Assert.IsTrue(manager.SaveWithResult().LocalOperationSucceeded);
+                    Newtonsoft.Json.Linq.JObject snapshot =
+                        Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(_saveFilePath));
+                    Newtonsoft.Json.Linq.JArray rows = (Newtonsoft.Json.Linq.JArray)snapshot["objects"];
+                    Newtonsoft.Json.Linq.JArray reversed = new Newtonsoft.Json.Linq.JArray();
+                    for (int i = rows.Count - 1; i >= 0; i--)
+                    {
+                        reversed.Add(rows[i].DeepClone());
+                    }
+
+                    snapshot["objects"] = reversed;
+                    File.WriteAllText(_saveFilePath, snapshot.ToString());
+                    Assert.IsTrue(manager.TryLoad());
+                    yield return null;
+
+                    for (int i = 0; i < names.Length; i++)
+                    {
+                        GameObject loaded = GameObject.Find(names[i]);
+                        Assert.IsNotNull(loaded);
+                        Assert.That(Vector3.Distance(localScales[i], loaded.transform.localScale), Is.LessThan(0.0001f));
+                        Assert.That(Vector3.Distance(positions[i], loaded.transform.position), Is.LessThan(0.0001f));
+                        Assert.That(Quaternion.Angle(rotations[i], loaded.transform.rotation), Is.LessThan(0.01f));
+                        Assert.AreEqual(i == 0 ? null : names[i - 1], loaded.transform.parent?.name);
+                    }
+                }
+            }
+            finally
+            {
+                manager.Dispose();
+            }
+        }
+
+        [UnityTest]
         public IEnumerator Save_ThenLoad_RestoresTransformsAndExplicitColors()
         {
             // Coloured primitive.

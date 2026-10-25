@@ -2,6 +2,7 @@
 #if COREAI_LLM && !UNITY_WEBGL
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
@@ -43,8 +44,13 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             "    names[inst.Name] = true\n" +
             "    mats[(string.gsub(tostring(inst.Material), '^Enum%.%w+%.', ''))] = true\n" +
             "    shapes[(string.gsub(tostring(inst.Shape), '^Enum%.%w+%.', ''))] = true\n" +
-            "    local p = inst.Position\n" +
-            "    if math.abs(p.X) > 64 or math.abs(p.Z) > 64 or p.Y < -8 or p.Y > 96 then\n" +
+            "    local x,y,z,r00,r01,r02,r10,r11,r12,r20,r21,r22 = inst.CFrame:GetComponents()\n" +
+            "    local s = inst.Size * 0.5\n" +
+            "    local hx = math.abs(r00)*s.X + math.abs(r01)*s.Y + math.abs(r02)*s.Z\n" +
+            "    local hy = math.abs(r10)*s.X + math.abs(r11)*s.Y + math.abs(r12)*s.Z\n" +
+            "    local hz = math.abs(r20)*s.X + math.abs(r21)*s.Y + math.abs(r22)*s.Z\n" +
+            "    local tolerance = 0.001\n" +
+            "    if math.abs(x)+hx > 64+tolerance or math.abs(z)+hz > 64+tolerance or y-hy < -tolerance or y+hy > 96+tolerance then\n" +
             "      out = out + 1\n" +
             "    end\n" +
             "  end\n" +
@@ -178,7 +184,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         /// <summary>
-        /// Runs a read-only Lua chunk against the built world and returns its printed output, for graders
+        /// Runs a read-only Lua chunk against the built world and returns its first return-value summary, for graders
         /// that need more than <see cref="Measure"/> (per-part geometry, materials by role).
         /// </summary>
         public bool TryEvaluateLua(string lua, out string output)
@@ -191,6 +197,35 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             output = task.Result.Output ?? "";
+            return true;
+        }
+
+        /// <summary>
+        /// Replays independently compiled calls in recorded order, retaining partial mutations and failures.
+        /// Older single-chunk replay scripts remain supported through the original executor.
+        /// </summary>
+        public bool TryReplayLua(string script, out string output)
+        {
+            if (script == null || !script.StartsWith(GameCreationBenchmarkHarness.ScenarioToolCallObserver.ReplayPrefix,
+                    StringComparison.Ordinal)) return TryEvaluateLua(script, out output);
+            int start = script.IndexOf('{');
+            int end = script.LastIndexOf('}');
+            JObject replay = JObject.Parse(script.Substring(start, end - start + 1));
+            JArray chunks = replay["chunks"] as JArray ?? throw new ArgumentException("Replay chunks are missing.", nameof(script));
+            StringBuilder evidence = new();
+            for (int i = 0; i < chunks.Count; i++)
+            {
+                Task<LuaTool.LuaResult> task = _stack.ToolExecutor.ExecuteAsync((string)chunks[i], _actor,
+                    CancellationToken.None);
+                if (!task.IsCompleted)
+                {
+                    output = evidence + $"G6 chunk {i + 1} did not finish synchronously.";
+                    return false;
+                }
+                LuaTool.LuaResult result = task.GetAwaiter().GetResult();
+                evidence.AppendLine(result.Success ? result.Output : $"G6 chunk {i + 1} failed: {result.Error}");
+            }
+            output = evidence.ToString();
             return true;
         }
 

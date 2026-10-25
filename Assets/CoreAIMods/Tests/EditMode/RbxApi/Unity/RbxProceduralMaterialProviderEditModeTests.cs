@@ -300,7 +300,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
             StringAssert.Contains("RbxBlendGroundPattern(position, weights", commonSource);
             StringAssert.Contains("RbxBlendFabricPattern(position, weights, weave, weaveVisibility)",
                 commonSource);
-            StringAssert.Contains("input.positionOS.xyz * RbxObjectAxisScale()", surfaceSource);
+            StringAssert.Contains("input.positionOS.xyz * objectAxisScale", surfaceSource);
+            StringAssert.Contains("input.normalOS / max(objectAxisScale, 0.00001)", surfaceSource);
             StringAssert.Contains("RbxUsesObjectAlignedProjection(materialMode)", surfaceSource);
             StringAssert.Contains(
                 "return materialMode == 3 || materialMode == 4 || materialMode == 5 || materialMode == 8 ||",

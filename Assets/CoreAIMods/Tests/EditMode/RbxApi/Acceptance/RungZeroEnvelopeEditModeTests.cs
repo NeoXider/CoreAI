@@ -222,6 +222,130 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public async Task RBX007_ExplicitEnvelopeRejectsTweenCreationForAnotherTargetBeforeAllocation()
+        {
+            using ProductionHarness harness = new();
+            ActorContext actor = harness.Actor("tween-envelope");
+            harness.Stack.Runtime.LoadMod(actor, "tween-envelope-setup", @"
+                local a = Instance.new('Part', workspace)
+                a.Name = 'EnvelopeA'
+                local b = Instance.new('Part', workspace)
+                b.Name = 'EnvelopeB'", persistToStore: false);
+            RbxInstance first = harness.Registry.WorldRoot.FindFirstChild("EnvelopeA");
+            RbxInstance second = harness.Registry.WorldRoot.FindFirstChild("EnvelopeB");
+            RbxTweenService service = (RbxTweenService)harness.Game.GetService("TweenService");
+            int before = service.LiveTweenCount;
+            string code = @"
+                local b = workspace:FindFirstChild('EnvelopeB')
+                local tween = game:GetService('TweenService'):Create(
+                    b, TweenInfo.new(1), {Transparency = 1})
+                return tween.ClassName";
+            MutationEnvelope wrong = new(actor.ActorId, first.Id, "wrong-tween-create",
+                harness.Registry.GetRecord(first.Id).Revision);
+
+            LuaTool.LuaResult refused = await harness.Stack.ToolExecutor.ExecuteAsync(
+                code, actor, wrong, CancellationToken.None);
+
+            Assert.IsFalse(refused.Success);
+            StringAssert.Contains("targets instance id", refused.Error);
+            Assert.AreEqual(before, service.LiveTweenCount);
+            harness.Bindings.Scheduler.Advance(0.1d);
+            Assert.AreEqual(0f, harness.Bindings.PartSink.GetPartPropertiesOrDefault(second.Id).Transparency);
+            MutationEnvelope correct = new(actor.ActorId, second.Id, "correct-tween-create",
+                harness.Registry.GetRecord(second.Id).Revision);
+            LuaTool.LuaResult accepted = await harness.Stack.ToolExecutor.ExecuteAsync(
+                code, actor, correct, CancellationToken.None);
+            LuaTool.LuaResult replay = await harness.Stack.ToolExecutor.ExecuteAsync(
+                code, actor, correct, CancellationToken.None);
+            Assert.IsTrue(accepted.Success, accepted.Error);
+            Assert.IsTrue(replay.Success, replay.Error);
+            Assert.AreEqual("Tween", accepted.Output);
+            Assert.AreEqual(accepted.Output, replay.Output);
+            Assert.AreEqual(before + 1, service.LiveTweenCount);
+        }
+
+        [TestCase("Play")]
+        [TestCase("Pause")]
+        [TestCase("Cancel")]
+        public async Task RBX007_ControlEnvelopeNamesTheTweenTargetAndPreservesReplay(string method)
+        {
+            using ProductionHarness harness = new();
+            ActorContext actor = harness.Actor("tween-control");
+            harness.Stack.Runtime.LoadMod(actor, "tween-control-setup", @"
+                local a = Instance.new('Part', workspace)
+                a.Name = 'ControlA'
+                local b = Instance.new('Part', workspace)
+                b.Name = 'ControlB'
+                local tween = game:GetService('TweenService'):Create(
+                    b, TweenInfo.new(10), {Transparency = 1})
+                local ref = Instance.new('ObjectValue', workspace)
+                ref.Name = 'ControlTween'
+                ref.Value = tween", persistToStore: false);
+            RbxInstance first = harness.Registry.WorldRoot.FindFirstChild("ControlA");
+            RbxInstance second = harness.Registry.WorldRoot.FindFirstChild("ControlB");
+            RbxTween tween = (RbxTween)((RbxObjectValue)harness.Registry.WorldRoot
+                .FindFirstChild("ControlTween")).Value;
+            if (method != "Play")
+            {
+                tween.Play();
+                harness.Bindings.Scheduler.Advance(0.1d);
+            }
+
+            RbxTweenPlaybackState previous = tween.PlaybackState;
+            float priorTransparency = harness.Bindings.PartSink
+                .GetPartPropertiesOrDefault(second.Id).Transparency;
+            string code = "local tween = workspace:FindFirstChild('ControlTween').Value "
+                + "tween:" + method + "() return tween.PlaybackState.Name";
+            MutationEnvelope wrong = new(actor.ActorId, first.Id, "wrong-control-" + method,
+                harness.Registry.GetRecord(first.Id).Revision);
+            LuaTool.LuaResult refused = await harness.Stack.ToolExecutor.ExecuteAsync(
+                code, actor, wrong, CancellationToken.None);
+            Assert.IsFalse(refused.Success);
+            StringAssert.Contains("targets instance id", refused.Error);
+            Assert.AreEqual(previous, tween.PlaybackState);
+            Assert.AreEqual(priorTransparency, harness.Bindings.PartSink
+                .GetPartPropertiesOrDefault(second.Id).Transparency);
+            MutationEnvelope correct = new(actor.ActorId, second.Id, "correct-control-" + method,
+                harness.Registry.GetRecord(second.Id).Revision);
+            LuaTool.LuaResult accepted = await harness.Stack.ToolExecutor.ExecuteAsync(
+                code, actor, correct, CancellationToken.None);
+            int operations = harness.Registry.RetainedMutationOperationCount;
+            LuaTool.LuaResult replay = await harness.Stack.ToolExecutor.ExecuteAsync(
+                code, actor, correct, CancellationToken.None);
+            Assert.IsTrue(accepted.Success, accepted.Error);
+            Assert.IsTrue(replay.Success, replay.Error);
+            Assert.AreEqual(accepted.Output, replay.Output);
+            Assert.AreEqual(operations, harness.Registry.RetainedMutationOperationCount);
+            RbxTweenPlaybackState expected = method == "Play" ? RbxTweenPlaybackState.Playing
+                : method == "Pause" ? RbxTweenPlaybackState.Paused : RbxTweenPlaybackState.Cancelled;
+            Assert.AreEqual(expected, tween.PlaybackState);
+        }
+
+        [Test]
+        public void RBX008_RejectedOutboundExpansionNeverReachesTheBridge()
+        {
+            ForgingNetworkBridge bridge = new();
+            using ProductionHarness harness = new(bridge);
+            int sent = 0;
+            bridge.EventReceived += _ => sent++;
+            harness.LoadServerMod("oversize-remote", @"
+                local remote = Instance.new('RemoteEvent', workspace)
+                local shared = string.rep('x', 4096)
+                local payload = {}
+                for index = 1, 256 do payload[index] = shared end
+                local ok, err = pcall(function() remote:FireAllClients(payload) end)
+                store_set('result', tostring(ok) .. '|' .. tostring(err))");
+            Assert.AreEqual(0, sent);
+            string result = harness.Store.Get("oversize-remote", "result");
+            StringAssert.StartsWith("false|", result);
+            StringAssert.Contains("PAYLOAD_TOO_LARGE", result);
+            harness.LoadServerMod("valid-remote", @"
+                local remote = Instance.new('RemoteEvent', workspace)
+                remote:FireAllClients('valid')");
+            Assert.AreEqual(1, sent);
+        }
+
+        [Test]
         public void NetworkCodec_FrozenPayloadCap_IsCheckedBeforeDecode()
         {
             InstanceRegistry registry = new InstanceRegistry();

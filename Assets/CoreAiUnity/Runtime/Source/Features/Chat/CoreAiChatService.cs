@@ -31,6 +31,7 @@ namespace CoreAI.Chat
         private readonly ILlmClient _llmClient;
         private readonly Vision.IAgentCameraService _cameraService;
         private readonly IActorIdentityProvider _actorIdentityProvider;
+        private readonly IAgentMemoryScopeProvider _scopeProvider;
 
         public CoreAiChatService(
             IAiOrchestrationService orchestrator,
@@ -40,7 +41,8 @@ namespace CoreAI.Chat
             IGameLogger logger = null,
             ILlmClient llmClient = null,
             Vision.IAgentCameraService cameraService = null,
-            IActorIdentityProvider actorIdentityProvider = null)
+            IActorIdentityProvider actorIdentityProvider = null,
+            IAgentMemoryScopeProvider scopeProvider = null)
         {
             _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
             _memoryPolicy = memoryPolicy;
@@ -51,6 +53,7 @@ namespace CoreAI.Chat
             _cameraService = cameraService;
             _actorIdentityProvider = actorIdentityProvider ??
                                      CoreServicesInstaller.DefaultLocalHostIdentityProvider;
+            _scopeProvider = scopeProvider ?? new DefaultAgentMemoryScopeProvider();
         }
 
         /// <summary>
@@ -60,6 +63,11 @@ namespace CoreAI.Chat
         {
             CoreAILifetimeScope scope =
                 UnityEngine.Object.FindAnyObjectByType<CoreAILifetimeScope>(FindObjectsInactive.Include);
+            return TryCreateFromScope(scope);
+        }
+
+        internal static CoreAiChatService TryCreateFromScope(CoreAILifetimeScope scope)
+        {
             if (scope?.Container == null)
             {
                 return null;
@@ -71,12 +79,24 @@ namespace CoreAI.Chat
                     (IAiOrchestrationService)scope.Container.Resolve(typeof(IAiOrchestrationService));
                 IActorIdentityProvider actorIdentityProvider =
                     (IActorIdentityProvider)scope.Container.Resolve(typeof(IActorIdentityProvider));
+                IAgentMemoryScopeProvider scopeProvider = null;
                 AgentMemoryPolicy policy = null;
                 ICoreAISettings settings = null;
                 IAgentMemoryStore memStore = null;
                 IGameLogger logger = null;
                 ILlmClient llmClient = null;
                 Vision.IAgentCameraService cameraService = null;
+
+                try
+                {
+                    scopeProvider =
+                        (IAgentMemoryScopeProvider)scope.Container.Resolve(typeof(IAgentMemoryScopeProvider));
+                }
+                catch (Exception ex)
+                {
+                    GameLoggerUnscopedFallback.Instance.LogDebug(GameLogFeature.Core,
+                        $"[CoreAiChatService] Resolve IAgentMemoryScopeProvider (optional): {ex.Message}");
+                }
 
                 try
                 {
@@ -145,7 +165,7 @@ namespace CoreAI.Chat
 
                 return new CoreAiChatService(
                     orchestrator, policy, settings, memStore, logger, llmClient, cameraService,
-                    actorIdentityProvider);
+                    actorIdentityProvider, scopeProvider);
             }
             catch (Exception ex)
             {
@@ -194,7 +214,7 @@ namespace CoreAI.Chat
         /// The deadline is an IDLE/no-progress budget, not a whole-turn one: a turn is
         /// LLM -> tool calls -> LLM -> ... and durations of successive steps must not accumulate into a
         /// single cancellation. Every <see cref="CoreAi.OnToolCallStarted"/>/<see cref="CoreAi.OnToolCallCompleted"/>
-        /// for <paramref name="request"/>'s <c>RoleId</c> re-arms the deadline, so a turn with many quick
+        /// matching <paramref name="request"/>'s admitted actor, trace and role re-arms the deadline, so a turn with many quick
         /// tool calls keeps running as long as each individual step stays under
         /// <see cref="ICoreAISettings.LlmRequestTimeoutSeconds"/>; only a real stall still times out.
         /// </para>
@@ -249,6 +269,11 @@ namespace CoreAI.Chat
                 throw new ArgumentNullException(nameof(request));
             }
 
+            BindRequestActor(request);
+            string admittedActorId = request.ActorContext.Value.ActorId;
+            string admittedTraceId = request.TraceId.Trim();
+            string admittedRoleId = string.IsNullOrWhiteSpace(request.RoleId)
+                ? BuiltInAgentRoleIds.Creator : request.RoleId.Trim();
             // WHY the caller's token alone goes into CallerCancellationToken: the orchestrator attributes a cancelled
             // turn by asking "did the caller stop it?" first (AiCancellationAttributionContext.Resolve), so a host
             // deadline merged into that token was counted as a user cancellation in the metrics. The idle deadline and
@@ -279,33 +304,32 @@ namespace CoreAI.Chat
                     effectiveCt = timeoutCts.Token;
                     deadline = new IdleTimeoutDeadline(idleCts, timeoutSec);
 
-                    // WHY: a tool-call for THIS turn's role is progress and re-arms the idle deadline. A
-                    // start, a finish AND a failure all count — a tool that fails right before a long LLM
-                    // step is still activity, not a stall. The role match is lenient on an absent event
-                    // role so an unattributed event never falsely lets the turn time out.
-                    bool Matches(string evtRoleId)
+                    // WHY: global events can belong to another actor or turn using the same role.
+                    // Capture admission metadata so caller mutation cannot redirect deadline progress.
+                    bool Matches(LlmToolCallInfo info)
                     {
-                        return string.IsNullOrWhiteSpace(evtRoleId) ||
-                               string.Equals(evtRoleId, request.RoleId, StringComparison.Ordinal);
+                        return string.Equals(info.ActorId, admittedActorId, StringComparison.Ordinal) &&
+                               string.Equals(info.TraceId, admittedTraceId, StringComparison.Ordinal) &&
+                               string.Equals(info.RoleId, admittedRoleId, StringComparison.Ordinal);
                     }
 
                     onToolStarted = evt =>
                     {
-                        if (Matches(evt.RoleId))
+                        if (Matches(evt.Info))
                         {
                             deadline.Rearm();
                         }
                     };
                     onToolCompleted = evt =>
                     {
-                        if (Matches(evt.RoleId))
+                        if (Matches(evt.Info))
                         {
                             deadline.Rearm();
                         }
                     };
                     onToolFailed = evt =>
                     {
-                        if (Matches(evt.RoleId))
+                        if (Matches(evt.Info))
                         {
                             deadline.Rearm();
                         }
@@ -415,7 +439,7 @@ namespace CoreAI.Chat
             string roleId,
             IReadOnlyList<AiAttachment> attachments = null)
         {
-            ActorContext actorContext = _actorIdentityProvider.GetActorContext(roleId);
+            ActorContext actorContext = BindActorContext(_actorIdentityProvider.GetActorContext(roleId), roleId);
             return new AiTaskRequest
             {
                 RoleId = roleId,
@@ -444,8 +468,7 @@ namespace CoreAI.Chat
             AiTaskRequest request,
             CancellationToken ct = default)
         {
-            // WHY not an iterator itself: the three-token overload carries [EnumeratorCancellation], so a token
-            // handed to WithCancellation still merges into the same caller token this forwards.
+            // WHY: Actor/scope admission happens before enumeration; the private iterator merges its enumerator token.
             return SendMessageStreamingAsync(request, ct, CancellationToken.None);
         }
 
@@ -453,7 +476,21 @@ namespace CoreAI.Chat
         /// <see cref="SendMessageStreamingAsync(AiTaskRequest, CancellationToken)"/> with a separate host deadline; see
         /// <see cref="SendMessageAsync(AiTaskRequest, CancellationToken, CancellationToken)"/>.
         /// </summary>
-        public async IAsyncEnumerable<LlmStreamChunk> SendMessageStreamingAsync(
+        public IAsyncEnumerable<LlmStreamChunk> SendMessageStreamingAsync(
+            AiTaskRequest request,
+            CancellationToken ct,
+            CancellationToken deadlineToken)
+        {
+            if (request == null)
+            {
+                throw new ArgumentNullException(nameof(request));
+            }
+
+            BindRequestActor(request);
+            return SendMessageStreamingCoreAsync(request.Clone(), ct, deadlineToken);
+        }
+
+        private async IAsyncEnumerable<LlmStreamChunk> SendMessageStreamingCoreAsync(
             AiTaskRequest request,
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken ct,
@@ -575,13 +612,24 @@ namespace CoreAI.Chat
         /// <summary>Clears the stored chat history for the selected agent role.</summary>
         public void ClearHistory(string roleId)
         {
-            _memoryStore?.ClearChatHistory(roleId);
+            ClearContext(roleId, true, false);
+        }
+
+        /// <summary>Clears selected actor-owned memory without changing another actor's context.</summary>
+        public void ClearContext(string roleId, bool clearChatHistory, bool clearLongTermMemory,
+            ActorContext? actorContext = null)
+        {
+            using (AgentMemoryActorScope.Enter(ResolveActor(actorContext, roleId), _scopeProvider, roleId))
+            {
+                CoreAi.ClearContextStores(_memoryStore, null, roleId, clearChatHistory, clearLongTermMemory);
+            }
         }
 
         /// <summary>
         /// Attempts to get persisted chat history and returns whether the operation succeeded.
         /// </summary>
-        public bool TryGetPersistedChatHistory(string roleId, out Ai.ChatMessage[] messages, int maxMessages = 0)
+        public bool TryGetPersistedChatHistory(string roleId, out Ai.ChatMessage[] messages, int maxMessages = 0,
+            ActorContext? actorContext = null)
         {
             messages = Array.Empty<Ai.ChatMessage>();
             if (_memoryStore == null || string.IsNullOrWhiteSpace(roleId))
@@ -589,7 +637,11 @@ namespace CoreAI.Chat
                 return false;
             }
 
-            Ai.ChatMessage[] raw = _memoryStore.GetChatHistory(roleId.Trim(), maxMessages);
+            Ai.ChatMessage[] raw;
+            using (AgentMemoryActorScope.Enter(ResolveActor(actorContext, roleId), _scopeProvider, roleId))
+            {
+                raw = _memoryStore.GetChatHistory(roleId.Trim(), maxMessages);
+            }
             if (raw == null || raw.Length == 0)
             {
                 return false;
@@ -600,16 +652,33 @@ namespace CoreAI.Chat
         }
 
         /// <summary>Requests cancellation of active work for the selected agent role.</summary>
-        public void StopAgent(string roleId)
+        public void StopAgent(string roleId, ActorContext? actorContext = null)
         {
-            if (_orchestrator is IRoleAiTaskCancellation roleCancellation)
+            if (_orchestrator is IActorAiTaskCancellation actorCancellation)
             {
-                roleCancellation.CancelRoleTasks(roleId);
+                actorCancellation.CancelActorTasks(ResolveActor(actorContext, roleId), roleId);
             }
             else
             {
-                _orchestrator.CancelTasks(roleId);
+                _logger?.LogWarning(GameLogFeature.Core,
+                    "[CoreAiChatService] Actor-specific cancellation is unsupported by this orchestrator.");
             }
+        }
+
+        internal ActorContext BindActorContext(ActorContext? actorContext, string roleId)
+        {
+            return AgentMemoryActorScope.Bind(ResolveActor(actorContext, roleId), _scopeProvider, roleId);
+        }
+
+        private ActorContext ResolveActor(ActorContext? actorContext, string roleId)
+        {
+            return actorContext ?? _actorIdentityProvider.GetActorContext(roleId);
+        }
+
+        private void BindRequestActor(AiTaskRequest request)
+        {
+            request.ActorContext = BindActorContext(request.ActorContext, request.RoleId);
+            if (string.IsNullOrWhiteSpace(request.TraceId)) request.TraceId = Guid.NewGuid().ToString("N");
         }
 
 #if UNITY_WEBGL && !UNITY_EDITOR

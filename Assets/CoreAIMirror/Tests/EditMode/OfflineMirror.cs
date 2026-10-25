@@ -96,6 +96,11 @@ namespace CoreAI.Net.Mirror.Tests
     /// (both queues here are lossless), and time — the authenticator's admission deadline runs on
     /// its own injected clock and is pumped by the fixture, never by this harness.
     /// </para>
+    /// <para>
+    /// With WebGL selected in the Editor, Mirror still registers its server handlers but forces
+    /// its capacity to zero. This in-memory fixture restores its offline capacity after Listen;
+    /// it does not exercise a listening server socket in a WebGL player.
+    /// </para>
     /// </remarks>
     internal sealed class OfflineMirror : IDisposable
     {
@@ -123,11 +128,14 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         private const int MaxLoopbackRounds = 8;
+        private const int ServerConnectionCapacity = 4;
         private static readonly MethodInfo FlushConnection = typeof(NetworkConnection).GetMethod(
             "Update", BindingFlags.NonPublic | BindingFlags.Instance);
 
         private readonly GameObject _go;
         private readonly Transport _previousTransport;
+        private readonly bool _previousServerListen;
+        private readonly int _previousServerMaxConnections;
         private readonly SilentTransport _transport;
 
         public OfflineMirror(bool loopback = false)
@@ -135,6 +143,8 @@ namespace CoreAI.Net.Mirror.Tests
             EnsureWireCodecs();
             _go = new GameObject("CoreAI_OfflineMirror");
             _previousTransport = Transport.active;
+            _previousServerListen = NetworkServer.listen;
+            _previousServerMaxConnections = NetworkServer.maxConnections;
             _transport = _go.AddComponent<SilentTransport>();
             _transport.Loopback = loopback;
             Transport.active = _transport;
@@ -256,8 +266,25 @@ namespace CoreAI.Net.Mirror.Tests
 
         public static void StartServer()
         {
-            NetworkServer.Listen(4);
+            string beforeListen = ServerState();
+            // WHY: NetworkManager normally enables listening; Mirror otherwise admits zero peers.
+            NetworkServer.listen = true;
+            NetworkServer.Listen(ServerConnectionCapacity);
+            string afterListen = ServerState();
+#if UNITY_EDITOR && UNITY_WEBGL
+            // WHY: Mirror's WebGL compile-time guard zeros capacity even in the in-memory Editor fixture.
+            NetworkServer.maxConnections = ServerConnectionCapacity;
+#endif
+            Assert.IsTrue(NetworkServer.active && NetworkServer.listen
+                          && NetworkServer.maxConnections == ServerConnectionCapacity,
+                "Offline Mirror startup failed. Before Listen: " + beforeListen
+                + "; after vendor Listen: " + afterListen + "; fixture: " + ServerState()
+                + "; Mirror.Utils.IsWebGL=" + Utils.IsWebGL);
         }
+
+        private static string ServerState() =>
+            "listen=" + NetworkServer.listen + ", maxConnections=" + NetworkServer.maxConnections
+            + ", active=" + NetworkServer.active;
 
         public static void StopServer()
         {
@@ -365,6 +392,8 @@ namespace CoreAI.Net.Mirror.Tests
             RunAll(
                 NetworkServer.Shutdown,
                 NetworkClient.Shutdown,
+                () => NetworkServer.listen = _previousServerListen,
+                () => NetworkServer.maxConnections = _previousServerMaxConnections,
                 () => Transport.active = _previousTransport,
                 () => UnityEngine.Object.DestroyImmediate(_go));
         }

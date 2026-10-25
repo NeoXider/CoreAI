@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
 using CoreAI.Infrastructure.Lua;
@@ -17,6 +18,8 @@ namespace CoreAI.Ai.Hub
         private readonly ILuaModSourceStore _store;
         private readonly LuaCapabilities _grant;
         private readonly bool _allowFull;
+        private readonly ConcurrentDictionary<string, (string Source, HubModSaveResult Result)> _pendingSaves =
+            new(StringComparer.Ordinal);
 
         /// <param name="store">Package store (source + manifest). Null falls back to no persistence.</param>
         /// <param name="grant">Capability ceiling applied to every mod loaded through the UI.</param>
@@ -122,6 +125,18 @@ namespace CoreAI.Ai.Hub
             LogsChanged?.Invoke();
         }
 
+        /// <summary>Invalidates a retained live save receipt after an observed runtime mutation.</summary>
+        protected void InvalidatePendingSave(string modId)
+        {
+            _pendingSaves.TryRemove(modId, out _);
+        }
+
+        /// <summary>Releases retained retry sources when an adapter ends its lifetime.</summary>
+        protected void ClearPendingSaves()
+        {
+            _pendingSaves.Clear();
+        }
+
         /// <inheritdoc />
         public IReadOnlyList<HubModRecord> ListMods()
         {
@@ -215,7 +230,12 @@ namespace CoreAI.Ai.Hub
         /// <inheritdoc />
         public void SaveOrReload(string id, string code)
         {
-            SaveOrReload(id, code, ModReloadMode.CleanStartupObjects);
+            HubModSaveResult result = SaveOrReload(id, code, ModReloadMode.CleanStartupObjects);
+            if (result.PersistenceStatus == HubModPersistenceStatus.Failed ||
+                result.PersistenceStatus == HubModPersistenceStatus.Unconfirmed)
+            {
+                throw new InvalidOperationException(result.Describe());
+            }
         }
 
         /// <inheritdoc />
@@ -234,65 +254,85 @@ namespace CoreAI.Ai.Hub
 
             LuaCapabilities caps = EffectiveCapabilities(code);
             HubModSaveResult result;
-            if (IsLoaded(modId))
+            if (_pendingSaves.TryGetValue(modId, out (string Source, HubModSaveResult Result) pending) &&
+                string.Equals(pending.Source, code, StringComparison.Ordinal) && IsLoaded(modId) &&
+                TryGetLiveSource(modId, out string liveSource) &&
+                string.Equals(liveSource, code, StringComparison.Ordinal))
+            {
+                result = pending.Result;
+            }
+            else if (IsLoaded(modId))
             {
                 ModReloadReport report = RuntimeReload(modId, code, mode);
-                result = new HubModSaveResult(modId, true, mode, report);
+                result = new HubModSaveResult(modId, true, mode, report, HubModPersistenceStatus.Unconfirmed);
             }
             else
             {
                 RuntimeLoad(modId, code, caps);
-                result = new HubModSaveResult(modId, false, mode, null);
+                result = new HubModSaveResult(modId, false, mode, null, HubModPersistenceStatus.Unconfirmed);
             }
 
-            Persist(modId, code, caps, true);
-            RaiseChanged();
-            return result;
+            _pendingSaves[modId] = (code, result);
+            try
+            {
+                HubModPersistenceStatus status = Persist(modId, code, caps, true);
+                if (status == HubModPersistenceStatus.Saved || status == HubModPersistenceStatus.NotConfigured)
+                {
+                    _pendingSaves.TryRemove(modId, out _);
+                }
+
+                return new HubModSaveResult(modId, result.Reloaded, result.Mode, result.Reload, status,
+                    status == HubModPersistenceStatus.Unconfirmed
+                        ? "The source store has no strict save acknowledgment. Your draft is preserved."
+                        : "");
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (LuaModSourcePersistenceException ex)
+            {
+                return new HubModSaveResult(modId, result.Reloaded, result.Mode, result.Reload,
+                    HubModPersistenceStatus.Failed, ex.Message, ex.LocalCommitCompleted);
+            }
+            catch (Exception ex)
+            {
+                return new HubModSaveResult(modId, result.Reloaded, result.Mode, result.Reload,
+                    HubModPersistenceStatus.Failed, ex.Message);
+            }
+            finally
+            {
+                RaiseChanged();
+            }
         }
 
         /// <inheritdoc />
         public void Enable(string id)
         {
             string modId = (id ?? "").Trim();
-            if (modId.Length == 0 || IsLoaded(modId))
+            if (modId.Length == 0)
             {
                 return;
             }
 
-            if (_store == null || !_store.TryLoad(modId, out string source, out _) ||
-                string.IsNullOrWhiteSpace(source))
+            if (!IsLoaded(modId))
             {
-                throw new InvalidOperationException($"Mod '{modId}' has no stored source to enable.");
+                if (_store == null || !_store.TryLoad(modId, out string source, out _) ||
+                    string.IsNullOrWhiteSpace(source))
+                {
+                    throw new InvalidOperationException($"Mod '{modId}' has no stored source to enable.");
+                }
+
+                RuntimeLoad(modId, source, EffectiveCapabilities(source));
             }
 
-            RuntimeLoad(modId, source, EffectiveCapabilities(source));
-            SafeSetActive(modId, true);
-            ClearSuspension(modId);
-            RaiseChanged();
-        }
-
-        /// <summary>
-        /// Clears <see cref="LuaModManifest.SuspendedAfterBudgetTrips"/> once the player started a suspended
-        /// mod by hand. The runtime's own persist already writes a fresh manifest when it persists loads;
-        /// this covers a composition whose runtime does not. Best-effort like every store write here.
-        /// </summary>
-        private void ClearSuspension(string modId)
-        {
             try
             {
-                if (_store != null
-                    && _store.TryLoad(modId, out string source, out LuaModManifest manifest)
-                    && manifest != null
-                    && manifest.SuspendedAfterBudgetTrips)
-                {
-                    manifest.SuspendedAfterBudgetTrips = false;
-                    manifest.Active = true;
-                    _store.Save(modId, source, manifest);
-                }
+                SafeSetActive(modId, true);
             }
-            catch
+            finally
             {
-                // WHY: Best-effort: the mod is already running; the marker only labels it in the list.
+                RaiseChanged();
             }
         }
 
@@ -306,8 +346,15 @@ namespace CoreAI.Ai.Hub
             }
 
             RuntimeUnload(modId);
-            SafeSetActive(modId, false);
-            RaiseChanged();
+            _pendingSaves.TryRemove(modId, out _);
+            try
+            {
+                SafeSetActive(modId, false);
+            }
+            finally
+            {
+                RaiseChanged();
+            }
         }
 
         /// <inheritdoc />
@@ -320,16 +367,27 @@ namespace CoreAI.Ai.Hub
             }
 
             RuntimeUnload(modId);
+            _pendingSaves.TryRemove(modId, out _);
             try
             {
-                _store?.Delete(modId);
-            }
-            catch
-            {
-            }
+                if (_store == null)
+                {
+                    return true;
+                }
 
-            RaiseChanged();
-            return true;
+                if (_store is ILuaModSourceStrictRemover strictRemover)
+                {
+                    strictRemover.DeleteStrict(modId);
+                    return true;
+                }
+
+                _store.Delete(modId);
+                return false;
+            }
+            finally
+            {
+                RaiseChanged();
+            }
         }
 
         /// <inheritdoc />
@@ -427,11 +485,11 @@ namespace CoreAI.Ai.Hub
         /// Writes source + a header-derived manifest to the store, preserving bundling markers and the
         /// mod's <see cref="LuaModManifest.LoadOrder"/>.
         /// </summary>
-        private void Persist(string modId, string code, LuaCapabilities caps, bool active)
+        private HubModPersistenceStatus Persist(string modId, string code, LuaCapabilities caps, bool active)
         {
             if (_store == null)
             {
-                return;
+                return HubModPersistenceStatus.NotConfigured;
             }
 
             LuaModHeader header = LuaModHeader.Parse(code, modId);
@@ -453,34 +511,28 @@ namespace CoreAI.Ai.Hub
             // order so the edit does not move it in the restart order. The runtime load/reload that ran
             // just before normally wrote that order already (stamped on a first load, kept on a reload);
             // a mod this store has never held is a first load and gets the next order.
-            try
+            if (_store.TryLoad(modId, out _, out LuaModManifest existing) && existing != null)
             {
-                if (_store.TryLoad(modId, out _, out LuaModManifest existing) && existing != null)
-                {
-                    manifest.Origin = existing.Origin;
-                    manifest.SeededVersion = existing.SeededVersion;
-                    manifest.SeededHash = existing.SeededHash;
-                    manifest.Entry = string.IsNullOrEmpty(existing.Entry) ? manifest.Entry : existing.Entry;
-                    manifest.OwnerActorId = existing.OwnerActorId ?? "";
-                    manifest.LoadOrder = existing.LoadOrder;
-                }
-                else
-                {
-                    manifest.LoadOrder = LuaModManifest.NextLoadOrder(_store);
-                }
+                manifest.Origin = existing.Origin;
+                manifest.SeededVersion = existing.SeededVersion;
+                manifest.SeededHash = existing.SeededHash;
+                manifest.Entry = string.IsNullOrEmpty(existing.Entry) ? manifest.Entry : existing.Entry;
+                manifest.OwnerActorId = existing.OwnerActorId ?? "";
+                manifest.LoadOrder = existing.LoadOrder;
             }
-            catch
+            else
             {
+                manifest.LoadOrder = LuaModManifest.NextLoadOrder(_store);
             }
 
-            try
+            if (_store is ILuaModSourceStrictWriter strictWriter)
             {
-                _store.Save(modId, code, manifest);
+                strictWriter.SaveStrict(modId, code, manifest);
+                return HubModPersistenceStatus.Saved;
             }
-            catch
-            {
-                // WHY: Best-effort persistence; the mod is already loaded in the runtime.
-            }
+
+            _store.Save(modId, code, manifest);
+            return HubModPersistenceStatus.Unconfirmed;
         }
 
         /// <summary>Fills empty display fields from the mod's <c>@coreai</c> header (parsed from its source).</summary>
@@ -574,26 +626,72 @@ namespace CoreAI.Ai.Hub
                 return Array.Empty<LuaModManifest>();
             }
 
-            try
-            {
-                return _store.List() ?? Array.Empty<LuaModManifest>();
-            }
-            catch
-            {
-                return Array.Empty<LuaModManifest>();
-            }
+            return _store.List() ?? throw new InvalidOperationException("The source store returned no mod inventory.");
         }
 
         private void SafeSetActive(string modId, bool active)
         {
+            if (_store == null)
+            {
+                return;
+            }
+
             try
             {
-                _store?.SetActive(modId, active);
+                if (_store is ILuaModSourceStrictWriter strictWriter)
+                {
+                    if (!_store.TryLoad(modId, out string source, out LuaModManifest stored) || stored == null)
+                    {
+                        throw new InvalidOperationException("The stored source and manifest could not be read.");
+                    }
+
+                    LuaModManifest manifest = CopyManifest(stored);
+                    manifest.Active = active;
+                    if (active)
+                    {
+                        manifest.SuspendedAfterBudgetTrips = false;
+                    }
+
+                    strictWriter.SaveStrict(modId, source, manifest);
+                    return;
+                }
+
+                _store.SetActive(modId, active);
+                throw new NotSupportedException("The source store has no strict save acknowledgment; persistence remains unconfirmed.");
             }
-            catch
+            catch (OperationCanceledException)
             {
-                // WHY: Best-effort: dormant/active flag is a convenience, not correctness-critical.
+                throw;
             }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("The live mod state changed, but its stored active state was not confirmed: " +
+                    ex.Message, ex);
+            }
+        }
+
+        private static LuaModManifest CopyManifest(LuaModManifest source)
+        {
+            return new LuaModManifest
+            {
+                Id = source.Id,
+                Name = source.Name,
+                Description = source.Description,
+                Version = source.Version,
+                Category = source.Category,
+                Tags = source.Tags,
+                Origin = source.Origin,
+                SeededVersion = source.SeededVersion,
+                SeededHash = source.SeededHash,
+                Author = source.Author,
+                OwnerActorId = source.OwnerActorId,
+                Capabilities = source.Capabilities,
+                Active = source.Active,
+                UpdateAvailable = source.UpdateAvailable,
+                Entry = source.Entry,
+                LoadOrder = source.LoadOrder,
+                SuspendedAfterBudgetTrips = source.SuspendedAfterBudgetTrips
+            };
         }
 
         /// <summary>Category used for grouping/sorting; blank categories bucket under a stable default.</summary>

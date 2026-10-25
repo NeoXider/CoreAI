@@ -42,6 +42,63 @@ namespace CoreAI.Tests.EditMode
             Func<int, CancellationToken, Task> publish = null, CancellationToken token = default)
             => store.MutateAndPublishAsync(record.Id, _ => SkillStoreMutation<int>.SaveRecord(record, 1), publish,
                 host ?? PassThroughLlmAsyncMarshaler.Instance, token);
+
+        [TestCase("create", false)]
+        [TestCase("create", true)]
+        [TestCase("update", false)]
+        [TestCase("update", true)]
+        [TestCase("delete", false)]
+        [TestCase("delete", true)]
+        public async Task SynchronousAuthoring_CustomAsyncConfirmation_RejectsBeforeEffects(string action, bool pending)
+        {
+            bool seed = true;
+            int confirmations = 0;
+            TaskCompletionSource<bool> confirmation = new();
+            using FileSkillStore store = new(_root, host: PassThroughLlmAsyncMarshaler.Instance,
+                confirmDurabilityAsync: _ =>
+                {
+                    confirmations++;
+                    return seed ? Task.FromResult(true) : pending ? confirmation.Task : Task.FromResult(false);
+                });
+            await Save(store, Record("original"));
+            MutableSkillCatalog catalog = new();
+            SkillAuthoringCoordinator coordinator = new(catalog, store, null, _ => null);
+            await coordinator.RehydrateFromStoreAsync();
+            seed = false;
+            int before = confirmations;
+            Assert.Throws<NotSupportedException>(() =>
+            {
+                if (action == "create") coordinator.Create("new", "d", "new body", Array.Empty<string>());
+                else if (action == "update") coordinator.Update("Skill", null, "replacement", null);
+                else coordinator.Delete("Skill");
+            });
+            Assert.AreEqual(before, confirmations, "The rejected operation must not start confirmation or commit.");
+            Assert.IsNull(catalog.Get("new"));
+            Assert.AreEqual("original", catalog.Get("Skill").Instructions);
+            Assert.AreEqual("original", (await store.LoadAsync("Skill")).Instructions);
+            Assert.IsNull(await store.LoadAsync("new"));
+        }
+
+        [Test]
+        public async Task DirectoryState_DisposalWithQueuedPeer_RetainsGateAndReleasesAfterSettlement()
+        {
+            int before = FileSkillStore.SharedDirectoryStateCount;
+            TaskCompletionSource<bool> entered = new();
+            TaskCompletionSource<bool> release = new();
+            FileSkillStore first = new(_root, host: PassThroughLlmAsyncMarshaler.Instance,
+                confirmDurabilityAsync: async _ => { entered.TrySetResult(true); return await release.Task; });
+            FileSkillStore peer = new(_root, host: PassThroughLlmAsyncMarshaler.Instance);
+            Task write = Save(first, Record());
+            await Entered(entered.Task);
+            Task<SkillRecord> queued = peer.LoadAsync("Skill");
+            first.Dispose();
+            Assert.IsFalse(queued.IsCompleted);
+            release.SetResult(true);
+            await write;
+            Assert.AreEqual("main", (await queued).Instructions);
+            peer.Dispose();
+            Assert.LessOrEqual(FileSkillStore.SharedDirectoryStateCount, before);
+        }
         private static async Task Entered(Task signal)
         { Assert.AreSame(signal, await Task.WhenAny(signal, Task.Delay(5000)), "The controlled boundary must be reached."); await signal; }
 

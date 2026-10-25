@@ -1,11 +1,19 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CoreAI.Ai.Logging;
+using CoreAI.Infrastructure.Llm;
+using CoreAI.Infrastructure.Logging;
+using CoreAI.Infrastructure.World;
 using CoreAI.Mcp.Protocol;
 using CoreAI.Mcp.Server;
 using CoreAI.Mcp.Tools;
+using CoreAI.Messaging;
 using NUnit.Framework;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using UnityEngine;
 
 namespace CoreAI.Mcp.Tests
 {
@@ -125,6 +133,180 @@ namespace CoreAI.Mcp.Tests
             JObject callResult = (JObject)result.Response["result"];
             Assert.IsFalse(callResult["isError"]!.Value<bool>());
             Assert.AreEqual("echo_tool:hi", callResult["content"]![0]!["text"]!.ToString());
+        }
+
+        [TestCase(false, "chatty", true)]
+        [TestCase(true, "chatty", true)]
+        [TestCase(false, "print", false)]
+        [TestCase(true, "print", false)]
+        public async Task LogAdapter_DirectAndBroker_MapInnerFailureWithoutChangingContent(
+            bool throughBroker, string level, bool isError)
+        {
+            CountingLogService logs = new();
+            GetModLogsMcpTool tool = new(logs);
+            string expected = isError
+                ? JsonConvert.SerializeObject(new
+                {
+                    success = false,
+                    message = "Unknown level 'chatty'. Valid: print, warn, error, runtime_error."
+                })
+                : JsonConvert.SerializeObject(new { success = true, count = 0, logs = "" });
+
+            McpDispatchResult dispatched = await DispatchAdapter(tool, throughBroker,
+                new JObject { ["level"] = level }, CancellationToken.None);
+
+            AssertAdapterContent(dispatched, expected, isError);
+            Assert.AreEqual(isError ? 0 : 1, logs.Queries,
+                "An invalid level must be rejected before querying the log service.");
+        }
+
+        [TestCase(false, "missing-action")]
+        [TestCase(true, "missing-action")]
+        [TestCase(false, "unknown-action")]
+        [TestCase(true, "unknown-action")]
+        [TestCase(false, "missing-parameter")]
+        [TestCase(true, "missing-parameter")]
+        [TestCase(false, "refused")]
+        [TestCase(true, "refused")]
+        [TestCase(false, "success")]
+        [TestCase(true, "success")]
+        public async Task WorldAdapter_DirectAndBroker_MapInnerFailureWithoutChangingContent(
+            bool throughBroker, string scenario)
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                string action = scenario == "missing-action" ? null : scenario == "unknown-action" ? "invalid_action" : "spawn";
+                string prefab = scenario == "missing-parameter" ? null : "cube";
+                bool success = scenario == "success";
+                CountingWorldExecutor executor = new() { Accept = success };
+                WorldLlmTool inner = new(executor, settings, new NullGameLogger());
+                WorldLlmTool expectedInner = new(new CountingWorldExecutor { Accept = success }, settings, new NullGameLogger());
+                string expected = action == null
+                    ? "world_command: 'action' is required."
+                    : await expectedInner.ExecuteAsync(action, prefabKey: prefab, targetName: "test_object");
+                JObject arguments = new() { ["prefabKey"] = prefab, ["targetName"] = "test_object" };
+                if (action != null) arguments["action"] = action;
+
+                McpDispatchResult dispatched = await DispatchAdapter(new WorldCommandMcpTool(inner), throughBroker,
+                    arguments, CancellationToken.None);
+
+                AssertAdapterContent(dispatched, expected, !success);
+                Assert.AreEqual(scenario == "success" || scenario == "refused" ? 1 : 0, executor.Invocations,
+                    "Parameter rejection must not invoke the world executor.");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(settings); }
+        }
+
+        [TestCase(false, true)]
+        [TestCase(true, true)]
+        [TestCase(false, false)]
+        [TestCase(true, false)]
+        public async Task LogAdapter_QueryCancellationAndFailure_KeepDistinctProtocolMeaning(
+            bool throughBroker, bool cancelled)
+        {
+            CountingLogService logs = new()
+            {
+                Failure = cancelled
+                    ? new OperationCanceledException("log query cancelled")
+                    : new InvalidOperationException("log query failed")
+            };
+            McpDispatchResult dispatched = await DispatchAdapter(new GetModLogsMcpTool(logs), throughBroker,
+                new JObject(), CancellationToken.None);
+
+            Assert.AreEqual(1, logs.Queries);
+            if (cancelled)
+            {
+                Assert.IsNull(dispatched.Response["result"]);
+                Assert.AreEqual(JsonRpcErrorCodes.InternalError, (int)dispatched.Response["error"]["code"]);
+                StringAssert.Contains("cancelled", (string)dispatched.Response["error"]["message"]);
+            }
+            else
+            {
+                Assert.IsNull(dispatched.Response["error"]);
+                Assert.IsTrue((bool)dispatched.Response["result"]["isError"]);
+                StringAssert.Contains("log query failed", (string)dispatched.Response["result"]["content"][0]["text"]);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task WorldAdapter_CancelledBeforeAdmission_DoesNotInvokeExecutor(bool throughBroker)
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            try
+            {
+                CountingWorldExecutor executor = new();
+                WorldCommandMcpTool tool = new(new WorldLlmTool(executor, settings, new NullGameLogger()));
+                using CancellationTokenSource cancellation = new();
+                cancellation.Cancel();
+                McpDispatchResult dispatched = await DispatchAdapter(tool, throughBroker,
+                    new JObject { ["action"] = "spawn", ["prefabKey"] = "cube", ["targetName"] = "cancelled" },
+                    cancellation.Token);
+
+                Assert.AreEqual(0, executor.Invocations);
+                Assert.IsNull(dispatched.Response["result"]);
+                Assert.AreEqual(JsonRpcErrorCodes.InternalError, (int)dispatched.Response["error"]["code"]);
+                StringAssert.Contains("cancelled", (string)dispatched.Response["error"]["message"]);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(settings); }
+        }
+
+        private static Task<McpDispatchResult> DispatchAdapter(IMcpTool tool, bool throughBroker,
+            JObject arguments, CancellationToken cancellationToken)
+        {
+            McpToolRegistry registry = new(new[] { tool }, null, true);
+            McpRpcDispatcher dispatcher = new(registry, new McpSessionStore(), new InlineMainThreadDispatcher());
+            JObject parameters = new() { ["name"] = tool.Name, ["arguments"] = arguments };
+            if (throughBroker)
+                parameters = new JObject
+                {
+                    ["name"] = CoreAiToolsBrokerMcpTool.ToolName,
+                    ["arguments"] = new JObject
+                    {
+                        ["action"] = "call", ["tool"] = tool.Name,
+                        ["arguments_json"] = arguments.ToString(Formatting.None)
+                    }
+                };
+            return dispatcher.DispatchAsync(Request(McpMethods.ToolsCall, 1, parameters), cancellationToken);
+        }
+
+        private static void AssertAdapterContent(McpDispatchResult dispatched, string expected, bool isError)
+        {
+            Assert.IsNull(dispatched.Response["error"]);
+            JObject result = (JObject)dispatched.Response["result"];
+            Assert.AreEqual(isError, (bool)result["isError"]);
+            Assert.AreEqual(1, ((JArray)result["content"]).Count);
+            Assert.AreEqual("text", (string)result["content"][0]["type"]);
+            Assert.AreEqual(expected, (string)result["content"][0]["text"]);
+        }
+
+        private sealed class CountingLogService : ILuaLogService
+        {
+            public int Queries { get; private set; }
+            public Exception Failure { get; set; }
+            public event Action<LuaLogEntry> EntryAppended { add { } remove { } }
+            public void Append(LuaLogEntry entry) => throw new NotSupportedException();
+            public void Clear(string modId = null) => throw new NotSupportedException();
+            public IReadOnlyList<LuaLogEntry> Query(LuaLogQuery query)
+            {
+                Queries++;
+                if (Failure != null) throw Failure;
+                return Array.Empty<LuaLogEntry>();
+            }
+        }
+
+        private sealed class CountingWorldExecutor : ICoreAiWorldCommandExecutor
+        {
+            public bool Accept { get; set; }
+            public int Invocations { get; private set; }
+            public string[] LastListedAnimations => Array.Empty<string>();
+            public List<Dictionary<string, object>> LastListedObjects => new();
+            public bool TryExecute(ApplyAiGameCommand command)
+            {
+                Invocations++;
+                return Accept;
+            }
         }
 
         [Test]

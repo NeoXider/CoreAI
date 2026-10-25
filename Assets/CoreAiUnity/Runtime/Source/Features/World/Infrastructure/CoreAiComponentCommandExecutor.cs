@@ -10,10 +10,12 @@ namespace CoreAI.Infrastructure.World
     public sealed class CoreAiComponentCommandExecutor : ICoreAiComponentCommandExecutor
     {
         private readonly IGameLogger _logger;
+        private readonly CoreAiComponentCommandOptions _options;
 
-        public CoreAiComponentCommandExecutor(IGameLogger logger)
+        public CoreAiComponentCommandExecutor(IGameLogger logger, CoreAiComponentCommandOptions options = null)
         {
             _logger = logger;
+            _options = options ?? new CoreAiComponentCommandOptions();
         }
 
         public bool TryExecute(ApplyAiGameCommand cmd)
@@ -138,6 +140,13 @@ namespace CoreAI.Infrastructure.World
             {
                 _logger.LogWarning(GameLogFeature.MessagePipe,
                     $"[Component] set: unsupported property '{env.propertyName}' for '{env.componentType}'");
+                return false;
+            }
+
+            string validationError = entry.Validate?.Invoke(env, _options);
+            if (!string.IsNullOrEmpty(validationError))
+            {
+                _logger.LogWarning(GameLogFeature.MessagePipe, $"[Component] set: {validationError}");
                 return false;
             }
 

@@ -3,6 +3,13 @@ using System.Threading.Tasks;
 
 namespace CoreAI.Scripting
 {
+    /// <summary>Optional trusted generalized-iteration resolver installed by a script backend.</summary>
+    public interface IScriptGeneralizedIteratorSupport
+    {
+        /// <summary>Reserved global installed by the backend and captured before script execution.</summary>
+        string TrustedIteratorResolverName { get; }
+    }
+
     /// <summary>
     /// Factory/facade for one embedded script VM. This is the single seam a future second engine
     /// reimplements: everything above it (mod runtime, gameplay binders, tool executors) depends only on

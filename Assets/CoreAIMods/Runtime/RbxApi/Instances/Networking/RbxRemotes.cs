@@ -16,7 +16,7 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             : base(descriptor)
         {
             Reliability = reliability;
-            OnServerEvent = new RbxScriptSignal(descriptor.Name + ".OnServerEvent");
+            OnServerEvent = GetOrCreateSignal("OnServerEvent");
         }
 
         public RbxNetworkReliability Reliability { get; }
@@ -25,6 +25,7 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
 
         public RbxScriptSignal GetOnClientEvent(string actorId)
         {
+            ThrowIfDestroyed("OnClientEvent");
             string actor = RequireActorId(actorId);
             if (!_clientSignals.TryGetValue(actor, out RbxScriptSignal signal))
             {
@@ -112,6 +113,18 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         public bool HasActor(string actorId)
         {
             return _clientSignals.ContainsKey(RequireActorId(actorId));
+        }
+
+        /// <summary>Releases actor signals independently of subscriptions and actor disconnects.</summary>
+        protected override void DisconnectCustomSignals()
+        {
+            foreach (RbxScriptSignal signal in _clientSignals.Values)
+            {
+                signal.DisconnectAll();
+            }
+
+            _clientSignals.Clear();
+            _scheduler = null;
         }
 
         private static INetworkBridge RequireBridge(INetworkBridge bridge)

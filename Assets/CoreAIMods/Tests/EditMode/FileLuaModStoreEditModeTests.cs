@@ -1,4 +1,5 @@
 using System.IO;
+using System.Collections.Generic;
 using CoreAI.Infrastructure.Lua;
 using NUnit.Framework;
 
@@ -20,6 +21,7 @@ namespace CoreAI.Tests.EditMode
         [TearDown]
         public void TearDown()
         {
+            FileLuaModStore.PersistenceArmingForTesting = null;
             _store?.Dispose();
             _store = null;
 
@@ -34,6 +36,30 @@ namespace CoreAI.Tests.EditMode
             {
                 /* best effort */
             }
+        }
+
+        [Test]
+        public void MOD002_BestEffortDataMutationsLogRefusedArmingAndKeepLocalChanges()
+        {
+            PersistenceLog log = new();
+            _store.Dispose();
+            _store = new FileLuaModStore(_root, log);
+            FileLuaModStore.PersistenceArmingForTesting = () => false;
+            _store.Set("mod", "key", "value");
+            Assert.AreEqual("value", _store.Get("mod", "key"));
+            _store.Clear("mod");
+            Assert.AreEqual("", _store.Get("mod", "key"));
+            Assert.AreEqual(2, log.Errors.Count);
+            foreach (string message in log.Errors) { StringAssert.Contains("committed locally", message); }
+        }
+
+        private sealed class PersistenceLog : CoreAI.Logging.ILog
+        {
+            public readonly List<string> Errors = new();
+            public void Debug(string message, string tag = null) { }
+            public void Info(string message, string tag = null) { }
+            public void Warn(string message, string tag = null) { }
+            public void Error(string message, string tag = null) => Errors.Add(message);
         }
 
         [Test]
@@ -149,12 +175,17 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void FileLuaModStore_LegacyFileIsClaimedByOneExactIdAndMigratedToHash()
+        public void FileLuaModStore_LegacyFileRequiresVerifiedIdentityBeforeMigration()
         {
             File.WriteAllText(
                 Path.Combine(_root, "Case.json"),
                 "{\"shared\":\"legacy\"}");
 
+            Assert.AreEqual("", _store.Get("Case", "shared"));
+            Assert.IsTrue(File.Exists(Path.Combine(_root, "Case.json")));
+            _store.Dispose();
+            _store = new FileLuaModStore(_root, null, null, legacyIdentityVerifier:
+                (id, path) => id == "Case" && Path.GetFileName(path) == "Case.json");
             Assert.AreEqual("legacy", _store.Get("Case", "shared"));
             Assert.AreEqual("", _store.Get("case", "shared"));
             string[] migratedFiles = Directory.GetFiles(_root, "*.json");
@@ -165,6 +196,22 @@ namespace CoreAI.Tests.EditMode
             _store = new FileLuaModStore(_root);
             Assert.AreEqual("legacy", _store.Get("Case", "shared"));
             Assert.AreEqual("", _store.Get("case", "shared"));
+        }
+
+        [Test]
+        public void MOD008_KeyValueStoreNamespacesIsolateSanitizerAndCaseCollisions()
+        {
+            string[] ids = { "a/b", "a_b_3a8e75c1", "Case", "case" };
+            for (int i = 0; i < ids.Length; i++)
+            {
+                using FileLuaModStore store = new(_root, storeId: ids[i]);
+                store.Set("same", "key", "value-" + i);
+            }
+            for (int i = 0; i < ids.Length; i++)
+            {
+                using FileLuaModStore reopened = new(_root, storeId: ids[i]);
+                Assert.AreEqual("value-" + i, reopened.Get("same", "key"));
+            }
         }
 
         [Test]
@@ -184,8 +231,8 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreEqual("from-a", storeA.Get("mod", "key"),
                     "A write under one store id must not leak into another store id.");
 
-                string dirA = Path.Combine(_root, "Stores", "demo-a");
-                string dirB = Path.Combine(_root, "Stores", "demo-b");
+                string dirA = LuaModStoreId.ApplyTo(_root, "demo-a");
+                string dirB = LuaModStoreId.ApplyTo(_root, "demo-b");
                 Assert.AreEqual(1, Directory.GetFiles(dirA, "*.json").Length,
                     "Each store id must persist its files in its own subdirectory.");
                 Assert.AreEqual(1, Directory.GetFiles(dirB, "*.json").Length);

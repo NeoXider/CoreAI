@@ -153,6 +153,7 @@ namespace CoreAI.Ai
 
         /// <summary>The allowed function names, in the wrapped tool's order.</summary>
         public IReadOnlyList<string> CallableNames { get; }
+        internal ILlmTool BindingIdentity => _inner is AllowlistedFunctionsLlmTool narrowed ? narrowed.BindingIdentity : _inner;
 
         public string Name => _inner.Name;
         public string Description => _inner.Description;
@@ -221,12 +222,17 @@ namespace CoreAI.Ai
             foreach (SkillToolDescriptor descriptor in BuildDescriptors(skills))
             {
                 if (bindings.TryGetValue(descriptor.Name, out ILlmTool existing) &&
-                    !ReferenceEquals(existing, descriptor.SourceTool))
+                    !ReferenceEquals(BindingIdentity(existing), BindingIdentity(descriptor.SourceTool)))
                 {
                     throw new ArgumentException($"Skill tool name '{descriptor.Name}' has conflicting bindings.", nameof(skills));
                 }
                 bindings[descriptor.Name] = descriptor.SourceTool;
             }
+        }
+
+        internal static ILlmTool BindingIdentity(ILlmTool tool)
+        {
+            return tool is AllowlistedFunctionsLlmTool narrowed ? narrowed.BindingIdentity : tool;
         }
 
         public static IReadOnlyList<SkillToolDescriptor> BuildDescriptors(IReadOnlyList<SkillSet> skills)

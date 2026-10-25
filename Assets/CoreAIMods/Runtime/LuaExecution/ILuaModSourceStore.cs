@@ -3,6 +3,28 @@ using System.Collections.Generic;
 namespace CoreAI.Ai
 {
     /// <summary>
+    /// Optional source-save contract for callers that need an observable persistence failure.
+    /// A return confirms local source/manifest installation and automatic persistence arming;
+    /// it does not confirm completion of a browser durability operation. Failures propagate.
+    /// </summary>
+    public interface ILuaModSourceStrictWriter
+    {
+        /// <summary>Saves source and manifest, throwing if local installation or persistence arming fails.</summary>
+        void SaveStrict(string id, string source, LuaModManifest manifest);
+    }
+
+    /// <summary>
+    /// Optional source-removal contract acknowledging local absence and automatic persistence arming.
+    /// An already absent package still requests arming so a refused prior removal can be retried.
+    /// No return from this contract confirms completion of a browser durability operation.
+    /// </summary>
+    public interface ILuaModSourceStrictRemover
+    {
+        /// <summary>Removes a package, throwing if local removal or persistence arming fails.</summary>
+        void DeleteStrict(string id);
+    }
+
+    /// <summary>
     /// Persists a Lua mod's <em>source</em> plus its <see cref="LuaModManifest"/> so mods survive a
     /// restart and can be shared between hosts. This is deliberately separate from
     /// <see cref="ILuaModStore"/>: that interface is the per-mod runtime key/value scratch space

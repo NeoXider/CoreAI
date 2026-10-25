@@ -343,6 +343,17 @@ and only after a successful write updates the `MutableSkillCatalog`. A create, u
 delete error keeps the previous skill in the catalog; a disk error is never reported as a successful publication.
 `NullSkillStore` deliberately keeps skills in the current process only.
 
+Authored tool allowlists use the callable names advertised to the model. A multi-function wrapper
+named `scene_tool` may expose `find_objects` and `get_hierarchy`; authoring a skill with only
+`find_objects` retains that function alone through editing and rehydration. It does not grant its sibling.
+Editing a host-registered wrapper skill's instructions preserves its existing callable allowlist.
+
+A custom LLM adapter binds declarative memory targets for the admitted role with
+`CallSkillToolLlmTool.BindForRole(proxy, memoryStore, roleId)`. Build one invocation-local effective
+tool list and use it for both execution policy and native function expansion. The returned proxy keeps
+the catalog and restrictions; it never changes shared skill objects. The role comes from the admitted
+request, not from model arguments. Other callable targets keep their original bindings and metadata.
+
 `SkillRecord.Sections` preserves the skill structure: the first document is the complete main file,
 the rest are addressable references. Legacy JSON without `Sections` stays single-file and uses
 `Instructions`. On `Update`, `instructions: null` keeps all documents; a non-empty
@@ -356,6 +367,18 @@ across different skills in one directory; separate directories are independent. 
 a trailing path separator do not create a second lock. Do not access one
 store via different file symlinks/aliases or from several processes at once: this synchronous adapter provides no
 inter-process lock.
+
+Directory state is leased by live stores and admitted operations, including queued waiters. Disposal
+rejects new operations and lets admitted work settle before releasing the lease. Completed, disposed
+directories without pending confirmation leave the shared registry; `SharedDirectoryStateCount` and
+`HasPendingDurabilityConfirmation` expose the retained state.
+
+When `confirmDurabilityAsync` is supplied, synchronous mutation APIs reject create/update/delete
+with `NotSupportedException` before writing or publishing. Use the asynchronous coordinator/store APIs
+to await that hook. A rejected synchronous call has no committed effect to replay. Engine-owned WebGL
+persistence without a custom asynchronous hook continues to support synchronous writes; its receipt
+means automatic persistence is armed. A failed confirmation after an asynchronous commit retains the
+explicit committed/unconfirmed outcome and must be reconciled before retrying a mutation.
 
 A skill's logical name is case-insensitive on Windows, Linux/Android, and WebGL. A new path looks like
 `skill-v2-<SHA-256>.json`, where the hash is computed over the strict UTF-8 bytes of the originally persisted `Id.Trim()`.
@@ -809,6 +832,25 @@ AgentConfig analyzer = new AgentBuilder("BackgroundAnalyzer")
 
 ## Memory vs chat history
 
+The admitted actor's effective memory scope is immutable for the whole turn. A nonempty actor scope
+wins; otherwise the host provider is consulted once. An empty provider result is captured too, so
+changing learners while a request is queued or awaiting a tool cannot move its storage partition.
+Scope components keep their exact values; case and leading/trailing whitespace remain distinct.
+
+For out-of-turn history operations, bind the same trusted, host-issued actor and reuse it:
+
+```csharp
+ActorContext boundActor = AgentMemoryActorScope.Bind(issuedActor, scopeProvider, roleId);
+using (AgentMemoryActorScope.Enter(boundActor))
+{
+    ChatMessage[] history = memoryStore.GetChatHistory(roleId);
+}
+```
+
+The provider-aware `Enter(issuedActor, scopeProvider, roleId)` overload captures a binding for one
+operation. Keep the bound actor when several operations must address the admitted turn's exact
+partition. These APIs preserve principal identity and grants; the host owns authentication and session policy.
+
 ### Memory — persistent memory
 
 **What it is:** Long-term agent memory. Persists across sessions.
@@ -879,6 +921,37 @@ Request 2: "What was the forest about?"
 ```
 
 **Authoritative docs (Unity integration):** see package **[MemorySystem.md](../../CoreAiUnity/Docs/MemorySystem.md)** (architecture) and **[README_CHAT.md](../../CoreAiUnity/Runtime/Source/Features/Chat/README_CHAT.md)** (UI restore, `Load Persisted Chat On Startup`). For custom backends (PlayerPrefs, cloud), see **[MEMORY_STORE_CUSTOM_BACKENDS.md](../../CoreAiUnity/Docs/MEMORY_STORE_CUSTOM_BACKENDS.md)**.
+
+File-backed memory, conversation and summary names use `key-v2-<full SHA-256>` stems for every logical
+storage key. Case-only role differences and former sanitized-name aliases remain separate on Windows.
+Legacy migration validates a stored identity, or an exact unambiguous legacy filename, and retains the
+original bytes in a `.legacy` backup. Ambiguous aliases and corrupt embedded history/version JSON are
+refused before replacement. Back up and repair their identity explicitly rather than choosing an owner
+automatically. File aliases, symlinks and concurrent processes require host-owned coordination.
+
+`FileAgentMemoryStore` retains at most `maxResidentHistories` partitions per instance (default 128).
+It evicts fully persisted partitions and reloads them when needed. Transient or failed-write data is
+preserved; if it occupies the capacity, accessing another partition fails until one is persisted or
+cleared. `ResidentHistoryCount`, `MaxResidentHistories` and `SharedPathStateCount` expose this policy.
+Disposal releases resident caches after admitted operations settle. Shared state has a finite admission
+limit and counts active owners, queued waiters and unresolved effects, so historic scope churn cannot
+retain an unlimited set of gates.
+
+Built-in memory and file summary stores implement `ITransactionalConversationSummaryStore`.
+Context preparation captures a generation, releases storage locks, and later compares that generation
+before saving. A reset or newer summary invalidates an old snapshot; committing it throws and the
+caller must rebuild context. No storage lock spans the auxiliary model call. Third-party stores may
+implement this optional capability with `ConversationSummaryTransaction`; the legacy summary
+interfaces remain supported but do not provide cross-request compare-and-save/reset guarantees.
+`ConversationContextSnapshot` implements `IDisposable`: dispose an abandoned deferred snapshot to
+release its captured generation immediately. Preparation errors release untransferred generations
+before escaping. Cancellation or a failed commit retains the prepared generation for an honest retry
+until the snapshot is explicitly discarded. Disposal rejects later commits and preserves `Summary`,
+`RecentMessages` and the other projection properties. If a commit was already admitted, disposal
+requests cleanup after it settles; await that commit for its actual effect/confirmation result.
+The built-in orchestrator owns this disposal around context preparation and commit.
+Compaction payload limits include framing, the prior summary and closing instructions; a budget too
+small for framing and one dialogue line is rejected before an auxiliary request is sent.
 
 ---
 

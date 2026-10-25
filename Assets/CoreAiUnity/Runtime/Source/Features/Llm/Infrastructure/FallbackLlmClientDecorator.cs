@@ -214,6 +214,11 @@ namespace CoreAI.Infrastructure.Llm
                     }
 
                     LlmStreamChunk chunk = enumerator.Current;
+                    if (chunk == null)
+                    {
+                        continue;
+                    }
+
                     if (request?.ProviderResponseState?.RetrySuppressed == true)
                     {
                         yield return chunk;
@@ -223,9 +228,10 @@ namespace CoreAI.Infrastructure.Llm
                     // already fired; a run on the secondary would execute it a second time. The check comes
                     // before the error code rather than after it: otherwise it rests on the chunk's producer
                     // having left ErrorCode = None - on somebody else's omission, not on a contract.
-                    if (!string.IsNullOrEmpty(chunk.Error) &&
+                    if ((chunk.ErrorCode != LlmErrorCode.None || !string.IsNullOrEmpty(chunk.Error)) &&
                         IsRetryableError(chunk.ErrorCode) &&
-                        !HasExecutedToolCalls(chunk))
+                        !HasExecutedToolCalls(chunk) &&
+                        string.IsNullOrEmpty(chunk.Text))
                     {
                         _logger.Warn(
                             $"[Fallback] Primary streaming error chunk ({chunk.ErrorCode}), falling back to secondary.",
@@ -293,6 +299,7 @@ namespace CoreAI.Infrastructure.Llm
         private static bool IsCommittingChunk(LlmStreamChunk chunk)
         {
             return !string.IsNullOrEmpty(chunk.Text) ||
+                   chunk.ErrorCode != LlmErrorCode.None ||
                    !string.IsNullOrEmpty(chunk.Error) ||
                    HasExecutedToolCalls(chunk);
         }
