@@ -419,6 +419,95 @@ namespace CoreAI.Tests.EditMode
             });
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void EndpointSave_FoldoutToggleDuringPendingSave_KeepsReceiptAndClearsAcceptedKey(bool toggleFoldout)
+        {
+            WithoutSynchronizationContext(() =>
+            {
+                FakeRoutingController controller = new();
+                controller.Add("alpha", "Alpha");
+                TaskCompletionSource<CoreAiRoutingUiResult> completion = new();
+                controller.SaveHandler = (_, __, ___) => completion.Task;
+                HubSettingsPage page = Own(new HubSettingsPage(_settings, routingController: controller));
+                EndpointEditorHostWindow window = ScriptableObject.CreateInstance<EndpointEditorHostWindow>();
+                try
+                {
+                    window.Show();
+                    window.rootVisualElement.Add((VisualElement)page.CreatePageContent());
+                    Invoke(page, "LoadEndpointById", "alpha");
+                    Text(page, "_endpointSessionKey").value = "accepted-key";
+
+                    Invoke(page, "SaveEndpoint");
+
+                    if (toggleFoldout)
+                    {
+                        Foldout advanced = (Foldout)Field(page, "_endpointAdvanced").GetValue(page);
+                        advanced.value = !advanced.value;
+                    }
+
+                    completion.SetResult(new CoreAiRoutingUiResult(true));
+
+                    Label status = (Label)Field(page, "_endpointOperationStatus").GetValue(page);
+                    Assert.IsTrue(status.text.Contains("saved", StringComparison.OrdinalIgnoreCase) ||
+                        status.text.Contains("ready", StringComparison.OrdinalIgnoreCase) ||
+                        status.text.Contains("Endpoint", StringComparison.OrdinalIgnoreCase),
+                        "Successful completion should settle the operation status. Actual: " + status.text);
+                    Assert.AreEqual("", Text(page, "_endpointSessionKey").value,
+                        "An accepted session key must be cleared after a successful save.");
+                    Assert.IsTrue(((Button)Field(page, "_endpointSaveButton").GetValue(page)).enabledSelf,
+                        "Save must be re-enabled once the async operation ends.");
+                }
+                finally
+                {
+                    UnityEngine.Object.DestroyImmediate(window);
+                    page.OnDestroyed();
+                }
+            });
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void EndpointSave_RealDescriptorEditDuringPendingSave_StillInvalidatesReceipt(bool editBoolean)
+        {
+            WithoutSynchronizationContext(() =>
+            {
+                FakeRoutingController controller = new();
+                controller.Add("alpha", "Alpha");
+                TaskCompletionSource<CoreAiRoutingUiResult> completion = new();
+                controller.SaveHandler = (_, __, ___) => completion.Task;
+                HubSettingsPage page = Own(new HubSettingsPage(_settings, routingController: controller));
+                EndpointEditorHostWindow window = ScriptableObject.CreateInstance<EndpointEditorHostWindow>();
+                try
+                {
+                    window.Show();
+                    window.rootVisualElement.Add((VisualElement)page.CreatePageContent());
+                    Invoke(page, "LoadEndpointById", "alpha");
+                    Text(page, "_endpointSessionKey").value = "accepted-key";
+
+                    Invoke(page, "SaveEndpoint");
+
+                    Toggle active = (Toggle)Field(page, "_endpointActive").GetValue(page);
+                    bool originalActive = active.value;
+                    if (editBoolean) { active.value = !originalActive; }
+                    else { Text(page, "_endpointName").value = "edited-during-wait"; }
+
+                    completion.SetResult(new CoreAiRoutingUiResult(true));
+
+                    Assert.AreEqual(editBoolean ? "Alpha" : "edited-during-wait", Text(page, "_endpointName").value,
+                        "A real descriptor edit must keep the draft intact.");
+                    Assert.AreEqual(editBoolean ? !originalActive : originalActive, active.value);
+                    Assert.AreEqual("accepted-key", Text(page, "_endpointSessionKey").value,
+                        "An invalidated receipt must not clear the accepted key.");
+                }
+                finally
+                {
+                    UnityEngine.Object.DestroyImmediate(window);
+                    page.OnDestroyed();
+                }
+            });
+        }
+
         [Test]
         public void EndpointSave_DestroyedViewCancelsAndIgnoresALateSuccessfulCompletion()
         {

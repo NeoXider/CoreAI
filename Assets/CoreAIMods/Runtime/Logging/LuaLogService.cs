@@ -274,8 +274,21 @@ namespace CoreAI.Ai.Logging
         {
             const string marker = "...[truncated]";
             text ??= "";
-            return text.Length <= _maximumMessageCharacters
-                ? text : text.Substring(0, _maximumMessageCharacters - marker.Length) + marker;
+            if (text.Length <= _maximumMessageCharacters)
+            {
+                return text;
+            }
+
+            int prefixLength = _maximumMessageCharacters - marker.Length;
+            // WHY: do not split a valid UTF-16 surrogate pair at the truncation boundary.
+            if (prefixLength > 0 && prefixLength < text.Length &&
+                char.IsHighSurrogate(text[prefixLength - 1]) &&
+                char.IsLowSurrogate(text[prefixLength]))
+            {
+                prefixLength--;
+            }
+
+            return text.Substring(0, prefixLength) + marker;
         }
 
         private static LuaLogEntry Copy(LuaLogEntry entry)

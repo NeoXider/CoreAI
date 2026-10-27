@@ -18,7 +18,7 @@ namespace CoreAI.Ai.Hub
     /// UI or the AI's manage_mods tool) and via a manual Refresh button. Content is built lazily in
     /// <see cref="CreatePageContent"/>; everything is retained-mode (no OnGUI).
     /// </summary>
-    public sealed class HubModsPage : IHubPage
+    public sealed class HubModsPage : IHubPage, IHubEscapeHandler
     {
         /// <summary>Default registry id for the Mods page.</summary>
         public const string DefaultPageId = "coreai.hub.mods";
@@ -84,6 +84,9 @@ namespace CoreAI.Ai.Hub
 
         /// <inheritdoc />
         public Func<object> CreatePageContent => Build;
+
+        /// <inheritdoc />
+        public bool TryHandleEscape() => !_destroyed && _editorOpen && (_editor?.TryHandleEscape() ?? false);
 
         /// <inheritdoc />
         public void OnActivated()

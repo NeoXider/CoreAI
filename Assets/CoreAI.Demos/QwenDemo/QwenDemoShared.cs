@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Composition;
 using CoreAI.Infrastructure.Llm;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -322,7 +323,7 @@ namespace CoreAI.Demos.QwenDemo
         }
     }
 
-    /// <summary>Waits for both the native LLMUnity host and its OpenAI-compatible HTTP socket.</summary>
+    /// <summary>Waits for the scene's selected backend without requiring a native host for HTTP.</summary>
     public static class QwenDemoReadiness
     {
         /// <summary>
@@ -342,20 +343,27 @@ namespace CoreAI.Demos.QwenDemo
             float timeoutSeconds = 120f,
             CancellationToken cancellationToken = default)
         {
-            // WHY: in the browser the local GGUF backend cannot exist. Without this early exit the demo
-            // polls for the whole timeout and then reports a misleading "did not become ready" message
-            // instead of the documented browser limitation.
-            string platformLimitation = GetPlatformLimitation();
-            if (platformLimitation != null)
-            {
-                return platformLimitation;
-            }
-
             float startedAt = Time.realtimeSinceStartup;
             while (Time.realtimeSinceStartup - startedAt < Mathf.Max(1f, timeoutSeconds))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                object llm = FindLlmHost();
+                CoreAILifetimeScope scope = UnityEngine.Object.FindFirstObjectByType<CoreAILifetimeScope>();
+                if (scope == null || scope.Container == null)
+                {
+                    await Task.Delay(100, cancellationToken);
+                    continue;
+                }
+
+                string configuredError = EvaluateBackendReadiness(
+                    scope.Settings, true, Application.platform, out bool requiresNativeHost);
+                if (configuredError != null || !requiresNativeHost)
+                {
+                    // WHY: the real HTTP turn owns provider readiness/errors; repeatedly probing /models
+                    // here would reject completion-only gateways and still prove no tool execution.
+                    return configuredError;
+                }
+
+                object llm = FindLlmHost(scope.Settings);
                 if (llm != null)
                 {
                     if (Read<bool>(llm, "failed"))
@@ -374,10 +382,63 @@ namespace CoreAI.Demos.QwenDemo
                 await Task.Delay(200, cancellationToken);
             }
 
-            return $"LLMUnity did not become ready within {timeoutSeconds:0} seconds.";
+            return $"The scene's selected LLM backend did not become ready within {timeoutSeconds:0} seconds.";
         }
 
-        private static object FindLlmHost()
+        /// <summary>Classifies readiness before any native host lookup or HTTP probe is attempted.</summary>
+        public static string EvaluateBackendReadiness(
+            CoreAISettingsAsset settings,
+            bool scopeReady,
+            RuntimePlatform platform,
+            out bool requiresNativeHost)
+        {
+            requiresNativeHost = false;
+            if (settings == null)
+            {
+                return "The scene's CoreAI settings are missing.";
+            }
+
+            if (!scopeReady)
+            {
+                return "The scene's CoreAI lifetime scope is not ready.";
+            }
+
+            if (settings.UseOffline)
+            {
+                return "The scene is configured for Offline mode; select a live HTTP or local backend.";
+            }
+
+            if (settings.UseHttpApi)
+            {
+                if (!Uri.TryCreate(settings.ApiBaseUrl, UriKind.Absolute, out Uri endpoint) ||
+                    (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
+                {
+                    return "The scene's HTTP backend requires a valid http(s) endpoint.";
+                }
+
+                if (!settings.UseServerManagedApi && string.IsNullOrWhiteSpace(settings.ModelName))
+                {
+                    return "The scene's HTTP backend requires a model id.";
+                }
+
+                return null;
+            }
+
+            if (!settings.UseLlmUnity)
+            {
+                return "The scene has no supported live LLM backend selected.";
+            }
+
+            if (!LocalModelPlatformSupport.IsSupported(platform))
+            {
+                return LocalModelPlatformSupport.GetUnavailableMessage(platform);
+            }
+
+            requiresNativeHost = true;
+            return null;
+        }
+
+        private static object FindLlmHost(CoreAISettingsAsset settings)
         {
             Type llmType = null;
             foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
@@ -394,21 +455,16 @@ namespace CoreAI.Demos.QwenDemo
                 return null;
             }
 
-            object fallback = null;
             foreach (UnityEngine.Object candidate in Resources.FindObjectsOfTypeAll(llmType))
             {
-                if (candidate is Component component && component.gameObject.scene.isLoaded)
+                if (candidate is Component component && component.gameObject.scene.isLoaded &&
+                    Read<int>(candidate, "port") == settings.LlmUnityServerPort)
                 {
-                    fallback ??= candidate;
-                    string model = Read<string>(candidate, "model") ?? "";
-                    if (model.IndexOf("Qwen3.5-0.8B", StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        return candidate;
-                    }
+                    return candidate;
                 }
             }
 
-            return fallback;
+            return null;
         }
 
         private static T Read<T>(object source, string memberName)

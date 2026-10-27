@@ -1,10 +1,28 @@
 # Changelog
 
-## [Unreleased]
+## [7.55.0] - 2026-10-27
+
+Candidate on `demo`; publication and the remaining manual acceptance gates are tracked in the [verification report](../../dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md).
 
 ### Added
 
+- Portable Gateway Client with scoped authentication, quota checks and optional usage reporting, plus a standalone .NET usage example and Unity composition adapters.
+- Reusable code-editing contracts and bounded document history. The runtime mod editor defaults to Lua, keeps independent language buffers and exposes Python as an unsupported execution stub.
+- Eight opt-in Lua examples covering animation, waypoints, tweens, collectible respawn, saved score, round state, bounded conveyor work and incremental maze search.
+- Per-invocation Lua startup limits and cancellation, including dispatch through a retained runtime facade after world replacement. Later mod resumes retain the host's normal execution policy.
 - Benchmark live-stream stall detection: scenario and total deadlines measure the gap since the last provider/tool activity; gaps of at least `COREAI_BENCHMARK_PROVIDER_STALL_SECONDS` (default 120) are recorded as Environment stalls, reported with the elapsed gap and retried.
+
+### Fixed
+
+- Source and memory migration preserve scoped ownership, strict persistence capability truth, UTF-8 identity validation and first-install source transactions.
+- Streaming queue writes with available capacity avoid per-chunk closure and async-frame allocations while retaining cancellable backpressure and oversized-chunk handoff.
+- Lua lowering preserves reserved environment semantics and resolves floor helpers lazily; reentrant Rbx material teardown releases acquired ownership once.
+- Hub binders, Escape handling, settings save receipts, MCP listener shutdown, stale Mirror session release and per-turn benchmark inactivity have targeted regression coverage.
+
+### Changed
+
+- Updated compatible Unity automation and managed dependencies; retained the documented Unity/MEAI/System.Text.Json compatibility ceilings.
+- Published real-provider PlayMode acceptance uses explicit OpenRouter configuration and isolated production file stores; manual input, rendering and built-player coverage remain separate gates.
 
 ## [7.54.0] - 2026-10-25
 

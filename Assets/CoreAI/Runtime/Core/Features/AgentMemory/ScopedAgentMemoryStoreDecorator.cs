@@ -17,7 +17,7 @@ namespace CoreAI.Ai
     /// </para>
     /// </summary>
     public sealed class ScopedAgentMemoryStoreDecorator : IAgentMemoryStore, IAgentMemoryLoadDiagnostics,
-        IAtomicAgentMemoryStore
+        IAtomicAgentMemoryStore, IAgentMemoryScopeProvider
     {
         private readonly IAgentMemoryStore _inner;
         private readonly IAgentMemoryScopeProvider _scopeProvider;
@@ -43,6 +43,13 @@ namespace CoreAI.Ai
             _inner = inner ?? new NullAgentMemoryStore();
             _scopeProvider = scopeProvider ?? new DefaultAgentMemoryScopeProvider();
             _conversationSummaries = conversationSummaries;
+        }
+
+        /// <inheritdoc />
+        public AgentMemoryScope GetScope(string roleId)
+        {
+            string normalizedRole = string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.Creator : roleId.Trim();
+            return _scopeProvider.GetScope(normalizedRole);
         }
 
         /// <inheritdoc />

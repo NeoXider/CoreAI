@@ -174,10 +174,10 @@ namespace CoreAI.Demos
             _mods.AddModSourceUnloadedListener(_actorContext, OnModSourceUnloaded);
 
             AutoloadSavedMods();
-            RecomputeModLists();
             _status = _autoloadedCount == 0
                 ? "Mods-chat persistence ready. Load mods with manage_mods from the chat."
                 : $"Mods-chat persistence ready. Autoloaded {_autoloadedCount} saved mod(s).";
+            RecomputeModLists();
         }
 
         private void OnDestroy()
@@ -280,13 +280,6 @@ namespace CoreAI.Demos
 
         private void OnModSourceLoaded(string modId, string source, LuaCapabilities capabilities)
         {
-            // Autoloading recomputes once, after the whole batch, in Start(); recomputing per mod
-            // here would be O(n^2) over the saved-mod count at scene start.
-            if (!_isAutoloading)
-            {
-                RecomputeModLists();
-            }
-
             if (_isAutoloading || _versions == null || string.IsNullOrWhiteSpace(modId))
             {
                 return;
@@ -303,15 +296,11 @@ namespace CoreAI.Demos
             _versions.RecordSuccessfulExecution(key, source ?? "");
             SetActiveFlag(modId, true);
             _status = $"Saved mod '{modId}' for next scene start.";
+            RecomputeModLists();
         }
 
         private void OnModSourceUnloaded(string modId, string source, LuaCapabilities capabilities)
         {
-            if (!_isAutoloading)
-            {
-                RecomputeModLists();
-            }
-
             if (_isAutoloading || _versions == null || string.IsNullOrWhiteSpace(modId))
             {
                 return;
@@ -322,6 +311,7 @@ namespace CoreAI.Demos
             _versions.RecordSuccessfulExecution(key, source ?? "");
             SetActiveFlag(modId, false);
             _status = $"Deactivated mod '{modId}'. It remains available for activation.";
+            RecomputeModLists();
         }
 
         private string MakeModKey(string modId)
@@ -566,6 +556,7 @@ namespace CoreAI.Demos
 
             _cachedInactiveMods = GetInactiveSavedMods();
             _cachedInactiveCount = _cachedInactiveMods.Count;
+            RefreshPanel();
         }
 
         private List<ModDescriptor> GetInactiveSavedMods()

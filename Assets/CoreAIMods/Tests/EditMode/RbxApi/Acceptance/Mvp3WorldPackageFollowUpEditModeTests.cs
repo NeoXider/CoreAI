@@ -6,6 +6,9 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
+#if COREAI_HAS_HUB
+using CoreAI.Ai.Hub;
+#endif
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Composition;
@@ -474,6 +477,90 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.IsFalse(kept.Active);
             Assert.AreEqual(1, controller.SourceStore.List().Count);
         }
+
+#if COREAI_HAS_HUB
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task WorldSourceFacade_HubUsesLegacyMutationsWithoutAcknowledgingPersistence(
+            bool publishReplacement)
+        {
+            DelegateModSourceStore sources = new();
+            using RbxWorldRuntimeSessionController controller = CreateController(
+                CreateHeadlessHost(), NewSafetyAutosaveStore(), sources);
+            ActorContext actor = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+            ILuaModSourceStore facade = controller.SourceStore;
+            using LuaCsModRuntimeHubService service = new(
+                controller.Runtime, actor, facade, rbxApiAvailable: true);
+
+            if (publishReplacement)
+            {
+                LuaCsModRuntime previousRuntime = controller.CurrentConcreteRuntime;
+                RbxWorldLoadResult replacement = await controller.LoadConfirmedAsync(
+                    CreateMinimalPayload(CapturedAtUtc), CancellationToken.None);
+                Assert.IsTrue(replacement.Success, replacement.Error);
+                Assert.AreNotSame(previousRuntime, controller.CurrentConcreteRuntime,
+                    "The replacement case must publish a new live runtime and session source wrapper.");
+                Assert.AreSame(facade, controller.SourceStore,
+                    "The existing Hub consumer must retain the stable active-source facade after publication.");
+            }
+
+            ILuaModSourceStrictCapabilities capabilities = facade as ILuaModSourceStrictCapabilities;
+            Assert.IsNotNull(capabilities);
+            Assert.IsFalse(capabilities.SupportsStrictSave);
+            Assert.IsFalse(capabilities.SupportsStrictDelete);
+
+            const string id = "legacy-hub";
+            const string initialCode = "local version = 1";
+            int savesBefore = sources.SaveCalls;
+            HubModSaveResult first = service.SaveOrReload(id, initialCode, ModReloadMode.KeepObjects);
+
+            Assert.AreEqual(HubModPersistenceStatus.Unconfirmed, first.PersistenceStatus);
+            Assert.IsFalse(first.LocalCommitCompleted);
+            Assert.IsTrue(service.IsLoaded(id));
+            Assert.Greater(sources.SaveCalls, savesBefore,
+                "The real Hub save must reach the legacy backend through the world facade.");
+            Assert.IsTrue(sources.TryLoad(id, out string initiallyStored, out _));
+            Assert.AreEqual(initialCode, initiallyStored);
+
+            const string editedCode = "local version = 2";
+            savesBefore = sources.SaveCalls;
+            HubModSaveResult edited = service.SaveOrReload(id, editedCode, ModReloadMode.KeepObjects);
+
+            Assert.IsTrue(edited.Reloaded);
+            Assert.AreEqual(HubModPersistenceStatus.Unconfirmed, edited.PersistenceStatus);
+            Assert.IsFalse(edited.LocalCommitCompleted);
+            Assert.Greater(sources.SaveCalls, savesBefore);
+            Assert.IsTrue(sources.TryLoad(id, out string editedStored, out _));
+            Assert.AreEqual(editedCode, editedStored);
+            Assert.IsTrue(controller.Runtime.TryGetModSource(actor, id, out string editedLive));
+            Assert.AreEqual(editedCode, editedLive);
+
+            int activeChangesBefore = sources.SetActiveCalls;
+            InvalidOperationException disable = Assert.Throws<InvalidOperationException>(() => service.Disable(id));
+            Assert.IsFalse(service.IsLoaded(id));
+            Assert.Greater(sources.SetActiveCalls, activeChangesBefore,
+                "The unconfirmed active-state operation must still reach the legacy backend.");
+            StringAssert.Contains("not confirmed", disable.Message);
+
+            activeChangesBefore = sources.SetActiveCalls;
+            InvalidOperationException enable = Assert.Throws<InvalidOperationException>(() => service.Enable(id));
+            Assert.IsTrue(service.IsLoaded(id));
+            Assert.Greater(sources.SetActiveCalls, activeChangesBefore);
+            StringAssert.Contains("not confirmed", enable.Message);
+
+            int deletesBefore = sources.DeleteCalls;
+            bool deleteConfirmed = service.Delete(id);
+
+            Assert.IsFalse(deleteConfirmed,
+                "A successful legacy deletion must remain unconfirmed rather than claiming strict persistence.");
+            Assert.AreEqual(deletesBefore + 1, sources.DeleteCalls);
+            Assert.IsFalse(service.IsLoaded(id));
+            Assert.IsFalse(sources.TryLoad(id, out _, out _),
+                "The stored package must actually be removed even though its persistence is unconfirmed.");
+            Assert.IsFalse(facade.TryLoad(id, out _, out _));
+        }
+#endif
 
         [Test]
         public async Task ExactReplacement_CompactIdentitiesSurviveReopenCaptureAndStartupRestore()
@@ -1036,6 +1123,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             public int DeleteCalls { get; private set; }
 
+            public int SetActiveCalls { get; private set; }
+
             public void Save(string id, string source, LuaModManifest manifest)
             {
                 _sources[id] = new RbxWorldModSource(manifest, source);
@@ -1069,6 +1158,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             public void SetActive(string id, bool active)
             {
+                SetActiveCalls++;
             }
 
             public void Delete(string id)

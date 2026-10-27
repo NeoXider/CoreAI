@@ -183,6 +183,91 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
         }
 
         [Test]
+        public void RBX003_ActiveAppearanceReplacementKeepsExactlyOneLease()
+        {
+            using CallbackLeaseProvider provider = new(_provider.FallbackMaterial);
+            using (BoundWorld world = new(provider, null))
+            {
+                RbxInstance part = world.Part(null);
+                Renderer renderer = world.Renderer(part);
+                Material previous = renderer.sharedMaterial;
+                int acquiredBefore = provider.Acquired;
+                Assert.AreEqual(1, provider.Active);
+
+                world.Binder.SetColor(part.Id, new RbxColor3(0.25f, 0.5f, 0.75f));
+
+                Assert.AreEqual(acquiredBefore + 1, provider.Acquired);
+                Assert.AreEqual(provider.Acquired - 1, provider.Released);
+                Assert.AreEqual(1, provider.Active);
+                Assert.AreEqual(0, provider.UnexpectedReleases);
+                Assert.IsTrue(previous == null, "The replaced native material must be released.");
+                Assert.AreSame(provider.LastAcquired, renderer.sharedMaterial);
+                Assert.IsTrue(renderer.sharedMaterial != null);
+            }
+
+            AssertAllLeasesReleased(provider);
+        }
+
+        [Test]
+        public void RBX003_TeardownDuringAcquireReleasesReturningLeaseImmediately()
+        {
+            using CallbackLeaseProvider provider = new(_provider.FallbackMaterial);
+            using (BoundWorld world = new(provider, null))
+            {
+                RbxInstance part = world.Part(null);
+                Renderer renderer = world.Renderer(part);
+                int acquiredBefore = provider.Acquired;
+                Assert.AreEqual(1, provider.Active);
+                provider.OnAcquire = world.Binder.BeginHostTeardown;
+
+                Assert.DoesNotThrow(() =>
+                    world.Binder.SetColor(part.Id, new RbxColor3(0.25f, 0.5f, 0.75f)));
+
+                Assert.AreEqual(acquiredBefore + 1, provider.Acquired);
+                AssertAllLeasesReleased(provider);
+                Assert.IsNull(renderer.sharedMaterial,
+                    "A returning acquisition must not publish a material after host teardown.");
+
+                world.Binder.SetMaterialVariant(part.Id, "RetiredWorld");
+                Assert.AreEqual(acquiredBefore + 1, provider.Acquired,
+                    "A retired binder must not acquire another material on a later appearance write.");
+                world.Binder.BeginHostTeardown();
+                world.Game.Destroy();
+                AssertAllLeasesReleased(provider);
+            }
+
+            AssertAllLeasesReleased(provider);
+        }
+
+        [Test]
+        public void RBX003_DestroyDuringAcquireReleasesRemovedBindingsReturningLease()
+        {
+            using CallbackLeaseProvider provider = new(_provider.FallbackMaterial);
+            using (BoundWorld world = new(provider, null))
+            {
+                RbxInstance part = world.Part(null);
+                int acquiredBefore = provider.Acquired;
+                Assert.AreEqual(1, provider.Active);
+                provider.OnAcquire = part.Destroy;
+
+                Assert.DoesNotThrow(() =>
+                    world.Binder.SetColor(part.Id, new RbxColor3(0.25f, 0.5f, 0.75f)));
+
+                Assert.AreEqual(acquiredBefore + 1, provider.Acquired);
+                Assert.IsTrue(part.IsDestroyed);
+                Assert.IsFalse(world.Binder.TryGetBoundObject(part.Id, out _));
+                AssertAllLeasesReleased(provider);
+
+                part.Destroy();
+                world.Binder.BeginHostTeardown();
+                world.Game.Destroy();
+                AssertAllLeasesReleased(provider);
+            }
+
+            AssertAllLeasesReleased(provider);
+        }
+
+        [Test]
         public void RBX003_ThrowingTextureLoaderDoesNotLeakAnUnpublishedVariant()
         {
             using RbxTextureMaterialProvider provider = new(path =>
@@ -243,6 +328,17 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
             }
         }
 
+        private static void AssertAllLeasesReleased(CallbackLeaseProvider provider)
+        {
+            Assert.AreEqual(0, provider.Active, "No acquired native handle may remain retained.");
+            Assert.AreEqual(provider.Acquired, provider.Released,
+                "Every acquired handle must have exactly one matching release.");
+            Assert.AreEqual(0, provider.UnexpectedReleases,
+                "Cleanup must not release the same handle twice or release an unknown handle.");
+            Assert.AreEqual(0, provider.DisposeCalls,
+                "The binder must release its leases without disposing the injected provider.");
+        }
+
         private Texture2D LoadTexture(string path)
         {
             if (!_textures.TryGetValue(path, out Texture2D texture))
@@ -267,6 +363,66 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
             public bool TryGetVariant(string name, out RbxMaterialVariantData data)
             {
                 return _variants.TryGetValue(name, out data);
+            }
+        }
+
+        private sealed class CallbackLeaseProvider : IRbxMaterialLeaseProvider<Material>, IDisposable
+        {
+            private readonly HashSet<Material> _active = new();
+
+            public CallbackLeaseProvider(Material fallback)
+            {
+                FallbackMaterial = fallback;
+            }
+
+            public Material FallbackMaterial { get; }
+            public Material LastAcquired { get; private set; }
+            public int Acquired { get; private set; }
+            public int Released { get; private set; }
+            public int Active => _active.Count;
+            public int UnexpectedReleases { get; private set; }
+            public int DisposeCalls { get; private set; }
+            public Action OnAcquire { get; set; }
+
+            public bool TryGetMaterial(in RbxMaterialId id, out Material material)
+            {
+                material = FallbackMaterial;
+                return true;
+            }
+
+            public bool TryAcquireMaterial(in RbxMaterialId id, out Material material)
+            {
+                material = new Material(FallbackMaterial) { name = "RbxReentrantLease" + Acquired };
+                LastAcquired = material;
+                _active.Add(material);
+                Acquired++;
+                Action callback = OnAcquire;
+                OnAcquire = null;
+                callback?.Invoke();
+                return true;
+            }
+
+            public void ReleaseMaterial(Material material)
+            {
+                if (!_active.Remove(material))
+                {
+                    UnexpectedReleases++;
+                    return;
+                }
+
+                Released++;
+                Object.DestroyImmediate(material);
+            }
+
+            public void Dispose()
+            {
+                DisposeCalls++;
+                foreach (Material material in _active)
+                {
+                    Object.DestroyImmediate(material);
+                }
+
+                _active.Clear();
             }
         }
 

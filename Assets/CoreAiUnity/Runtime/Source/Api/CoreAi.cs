@@ -830,7 +830,12 @@ namespace CoreAI
         /// Requests cancellation of the current actor/session's work for one role.
         /// Global administrative cancellation remains on the orchestration service's cancellation seams.
         /// </summary>
-        public static void StopAgent(string roleId, ActorContext? actorContext = null)
+        public static void StopAgent(string roleId)
+        {
+            StopAgent(roleId, null);
+        }
+
+        public static void StopAgent(string roleId, ActorContext? actorContext)
         {
             if (TryGetOrchestrator(out IAiOrchestrationService? orchestrator) && orchestrator != null)
             {
@@ -858,8 +863,19 @@ namespace CoreAI
         /// <param name="roleId">Role id.</param>
         /// <param name="clearChatHistory">Drop persisted chat turns.</param>
         /// <param name="clearLongTermMemory">Drop MemoryTool state / saved agent memory.</param>
-        public static void ClearContext(string roleId, bool clearChatHistory = true, bool clearLongTermMemory = true,
-            ActorContext? actorContext = null)
+        public static void ClearContext(string roleId, bool clearChatHistory = true, bool clearLongTermMemory = true)
+        {
+            ClearContext(roleId, clearChatHistory, clearLongTermMemory, null);
+        }
+
+        public static void ClearContext(string roleId, bool clearChatHistory, bool clearLongTermMemory,
+            ActorContext? actorContext)
+        {
+            ClearContextForActor(roleId, actorContext, clearChatHistory, clearLongTermMemory);
+        }
+
+        public static void ClearContextForActor(string roleId, ActorContext? actorContext = null,
+            bool clearChatHistory = true, bool clearLongTermMemory = true)
         {
             lock (SyncRoot)
             {

@@ -31,7 +31,10 @@ namespace CoreAI.Infrastructure.Lua
             byte[] digest;
             using (SHA256 algorithm = SHA256.Create())
             {
-                digest = algorithm.ComputeHash(Encoding.UTF8.GetBytes(id));
+                // WHY: unpaired UTF-16 surrogates must be rejected before any I/O. The permissive
+                // UTF-8 encoder replaces them with the same replacement bytes, which would alias
+                // distinct malformed ids; the strict encoder throws instead.
+                digest = algorithm.ComputeHash(new UTF8Encoding(false, true).GetBytes(id));
             }
 
             StringBuilder name = new("id-");

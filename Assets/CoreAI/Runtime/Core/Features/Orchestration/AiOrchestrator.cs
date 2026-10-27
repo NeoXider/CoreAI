@@ -20,7 +20,8 @@ namespace CoreAI.Ai
     /// Orchestration pipeline: prompts, memory, <see cref="ILlmClient"/> invocation,
     /// optional structured-output retry via <see cref="IRoleStructuredResponsePolicy"/>, command publication.
     /// </summary>
-    public sealed class AiOrchestrator : IAiOrchestrationService, IAiTaskResultService, IAiActorContextResolver, IUnstartedAiTurnRecorder
+    public sealed class AiOrchestrator : IAiOrchestrationService, IAiTaskResultService, IAiActorContextResolver,
+        IUnstartedAiTurnRecorder, IAgentMemoryScopeProviderSource
     {
         /// <summary>
         /// Legacy sentinel for "no history cap". The orchestrator no longer uses it: even with
@@ -71,8 +72,32 @@ namespace CoreAI.Ai
             IAgentTurnTraceSink traceSink = null,
             IContextBudgetPolicy contextBudgetPolicy = null,
             ITokenEstimator tokenEstimator = null,
-            IConversationCompactionCoordinator compactionCoordinator = null,
-            IAgentMemoryScopeProvider scopeProvider = null)
+            IConversationCompactionCoordinator compactionCoordinator = null)
+            : this(authority, llm, commandSink, telemetry, promptComposer, memoryStore, memoryPolicy,
+                structuredPolicy, metrics, settings, actorIdentityProvider, contextManager, traceSink,
+                contextBudgetPolicy, tokenEstimator, compactionCoordinator, null)
+        {
+        }
+
+        /// <summary>Constructs orchestrator dependencies with an explicit admission scope provider.</summary>
+        public AiOrchestrator(
+            IAuthorityHost authority,
+            ILlmClient llm,
+            IAiGameCommandSink commandSink,
+            ISessionTelemetryProvider telemetry,
+            AiPromptComposer promptComposer,
+            IAgentMemoryStore memoryStore,
+            AgentMemoryPolicy memoryPolicy,
+            IRoleStructuredResponsePolicy structuredPolicy,
+            IAiOrchestrationMetrics metrics,
+            ICoreAISettings settings,
+            IActorIdentityProvider actorIdentityProvider,
+            IConversationContextManager contextManager,
+            IAgentTurnTraceSink traceSink,
+            IContextBudgetPolicy contextBudgetPolicy,
+            ITokenEstimator tokenEstimator,
+            IConversationCompactionCoordinator compactionCoordinator,
+            IAgentMemoryScopeProvider scopeProvider)
         {
             _authority = authority;
             _llm = llm;
@@ -92,7 +117,39 @@ namespace CoreAI.Ai
             _compactionCoordinator = compactionCoordinator ?? new DefaultConversationCompactionCoordinator();
             _actorIdentityProvider = actorIdentityProvider ??
                                      throw new ArgumentNullException(nameof(actorIdentityProvider));
-            _scopeProvider = scopeProvider ?? new DefaultAgentMemoryScopeProvider();
+            _scopeProvider = scopeProvider ?? AgentMemoryScopeKey.ResolveKnownProvider(memoryStore);
+        }
+
+        /// <summary>Constructs a scoped orchestrator while retaining convenient optional policy dependencies.</summary>
+        public static AiOrchestrator CreateWithMemoryScope(
+            IAuthorityHost authority,
+            ILlmClient llm,
+            IAiGameCommandSink commandSink,
+            ISessionTelemetryProvider telemetry,
+            AiPromptComposer promptComposer,
+            IAgentMemoryStore memoryStore,
+            AgentMemoryPolicy memoryPolicy,
+            IRoleStructuredResponsePolicy structuredPolicy,
+            IAiOrchestrationMetrics metrics,
+            ICoreAISettings settings,
+            IActorIdentityProvider actorIdentityProvider,
+            IAgentMemoryScopeProvider scopeProvider,
+            IConversationContextManager contextManager = null,
+            IAgentTurnTraceSink traceSink = null,
+            IContextBudgetPolicy contextBudgetPolicy = null,
+            ITokenEstimator tokenEstimator = null,
+            IConversationCompactionCoordinator compactionCoordinator = null)
+        {
+            return new AiOrchestrator(authority, llm, commandSink, telemetry, promptComposer, memoryStore,
+                memoryPolicy, structuredPolicy, metrics, settings, actorIdentityProvider, contextManager,
+                traceSink, contextBudgetPolicy, tokenEstimator, compactionCoordinator, scopeProvider);
+        }
+
+        /// <inheritdoc />
+        public bool TryGetMemoryScopeProvider(out IAgentMemoryScopeProvider provider)
+        {
+            provider = _scopeProvider;
+            return provider != null;
         }
 
         /// <inheritdoc />
@@ -329,7 +386,7 @@ namespace CoreAI.Ai
                 return BuildFailureResult("Task is required.", LlmErrorCode.InvalidRequest, null, null);
             }
 
-            ActorContext actorContext = AgentMemoryScopeKey.CaptureActorScope(ResolveActorContext(task), _scopeProvider, ResolveRoleId(task));
+            ActorContext actorContext = AgentMemoryScopeKey.CaptureKnownActorScope(ResolveActorContext(task), _scopeProvider, ResolveRoleId(task));
             task.ActorContext = actorContext;
             task = task.Clone();
             using IDisposable memoryScope = AgentMemoryScopeExecutionContext.Push(actorContext);
@@ -590,7 +647,7 @@ namespace CoreAI.Ai
                 yield break;
             }
 
-            ActorContext actorContext = AgentMemoryScopeKey.CaptureActorScope(ResolveActorContext(task), _scopeProvider, ResolveRoleId(task));
+            ActorContext actorContext = AgentMemoryScopeKey.CaptureKnownActorScope(ResolveActorContext(task), _scopeProvider, ResolveRoleId(task));
             task.ActorContext = actorContext;
             task = task.Clone();
 

@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using Cysharp.Threading.Tasks;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Infrastructure.Llm.Gateway;
 using Newtonsoft.Json;
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL && COREAI_LLM
 using LLMUnity;
@@ -37,6 +38,7 @@ namespace CoreAI.Infrastructure.Llm
         private readonly ILlmEndpointRegistryStore _persistenceStore;
         private readonly ILlmEndpointClientFactory _endpointClientFactory;
         private readonly ILlmEndpointSecretProvider _secretProvider;
+        private readonly IUnityGatewayClientBinding _gatewayBinding;
         private readonly object _gate = new();
         private readonly object _persistenceGate = new();
         private ILlmClient _legacyFallback = new StubLlmClient();
@@ -71,6 +73,14 @@ namespace CoreAI.Infrastructure.Llm
             public Func<Task> ReleaseOwnedHostAsync;
             public int ReleaseRequested;
             public Task HostReleaseTask;
+        }
+
+        private sealed class OwnedHostRelease
+        {
+            public RuntimeEndpoint Endpoint;
+            public ILlmClient Client;
+            public Task Activation;
+            public TaskCompletionSource<bool> Completion;
         }
 
         private sealed class RoutingUnavailableClient : ILlmClient
@@ -285,31 +295,51 @@ namespace CoreAI.Infrastructure.Llm
         public void Dispose()
         {
             RuntimeEndpoint[] endpoints;
-            lock (_gate)
+            CancellationTokenSource[] cancellations;
+            OwnedHostRelease[] releases;
+            ILlmClient[] ownedCandidates = null;
+            try
             {
-                if (_disposed)
+                lock (_gate)
                 {
-                    return;
+                    if (_disposed) return;
+                    _disposed = true;
+                    endpoints = _runtimeEndpoints.Values.Concat(_pendingEndpoints.Values).Distinct().ToArray();
+                    ownedCandidates = _byProfileId.Values.Concat(new[] { _legacyFallback })
+                        .Concat(endpoints.Select(endpoint => endpoint.Client)).Distinct().ToArray();
+                    _byProfileId.Clear();
+                    _legacyFallback = new StubLlmClient();
+                    cancellations = endpoints.Select(endpoint => endpoint.ActivationCancellation)
+                        .Where(cancellation => cancellation != null).Distinct().ToArray();
+                    releases = endpoints.Select(PublishOwnedHostReleaseLocked).Where(work => work != null).ToArray();
+                    foreach (RuntimeEndpoint endpoint in endpoints)
+                    {
+                        endpoint.ActivationCancellation = null;
+                    }
+                    _pendingEndpoints.Clear();
                 }
 
-                _disposed = true;
-                endpoints = _runtimeEndpoints.Values.Concat(_pendingEndpoints.Values).Distinct().ToArray();
-                foreach (RuntimeEndpoint endpoint in endpoints)
+                // WHY: A replaceable activation's cancellation callback can throw or reenter the registry.
+                // Publish every release first, then settle each callback outside the mutation lock.
+                foreach (CancellationTokenSource cancellation in cancellations)
                 {
-                    endpoint.ActivationCancellation?.Cancel();
-                    endpoint.ActivationCancellation?.Dispose();
-                    endpoint.ActivationCancellation = null;
+                    try { CancelAndDisposeActivation(cancellation); }
+                    catch (Exception)
+                    {
+                        try { _logger.LogWarning(GameLogFeature.Llm, "Endpoint activation cancellation cleanup failed."); }
+                        catch { }
+                    }
                 }
-
-                _pendingEndpoints.Clear();
+                foreach (OwnedHostRelease release in releases) ExecuteOwnedHostRelease(release);
             }
-
-            foreach (RuntimeEndpoint endpoint in endpoints)
+            finally
             {
-                RequestOwnedHostRelease(endpoint);
+                if (ownedCandidates != null)
+                {
+                    foreach (ILlmClient client in ownedCandidates) RetireOwnedGatewayClient(client);
+                    Changed = null;
+                }
             }
-
-            Changed = null;
         }
 
         /// <summary>Throws when the registry scope has been disposed.</summary>
@@ -332,6 +362,15 @@ namespace CoreAI.Infrastructure.Llm
             ILlmEndpointRegistryStore persistenceStore = null,
             ILlmEndpointClientFactory endpointClientFactory = null,
             ILlmEndpointSecretProvider secretProvider = null)
+            : this(logger, settings, memoryStore, persistenceStore, endpointClientFactory, secretProvider, null)
+        {
+        }
+
+        /// <summary>Creates a registry with optional scope-owned server-managed client construction.</summary>
+        internal LlmClientRegistry(IGameLogger logger, ICoreAISettings settings,
+            IAgentMemoryStore memoryStore, ILlmEndpointRegistryStore persistenceStore,
+            ILlmEndpointClientFactory endpointClientFactory, ILlmEndpointSecretProvider secretProvider,
+            IUnityGatewayClientBinding gatewayBinding)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -340,6 +379,7 @@ namespace CoreAI.Infrastructure.Llm
             _endpointClientFactory =
                 endpointClientFactory ?? new LlmEndpointClientFactory(settings, logger, memoryStore);
             _secretProvider = secretProvider ?? new EnvironmentSecretProvider();
+            _gatewayBinding = gatewayBinding;
             RestoreRuntimeState();
         }
 
@@ -347,12 +387,27 @@ namespace CoreAI.Infrastructure.Llm
         public void SetLegacyFallback(ILlmClient legacy)
         {
             ThrowIfDisposed();
+            ILlmClient retired;
             lock (_gate)
             {
+                if (_disposed) throw new ObjectDisposedException(nameof(LlmClientRegistry));
+                retired = _legacyFallback;
                 _legacyFallback = legacy ?? new StubLlmClient();
                 _legacyFallbackMode = _settings is CoreAISettingsAsset unitySettings
                     ? unitySettings.ExecutionMode
                     : LlmExecutionMode.Auto;
+            }
+            if (!ReferenceEquals(retired, legacy)) RetireOwnedGatewayClient(retired);
+        }
+
+        private void RetireOwnedGatewayClient(ILlmClient client)
+        {
+            if (client is not IOwnedGatewayClient owned || !owned.OwnsGatewayResources) return;
+            try { owned.Dispose(); }
+            catch (Exception)
+            {
+                try { _logger.LogWarning(GameLogFeature.Llm, "Owned gateway retirement cleanup failed."); }
+                catch { }
             }
         }
 
@@ -374,59 +429,66 @@ namespace CoreAI.Infrastructure.Llm
             bool enableRouting = true)
         {
             ThrowIfDisposed();
-            lock (_gate)
+            List<ILlmClient> retired = new List<ILlmClient>();
+            try
             {
-                if (!enableRouting || routeTable == null)
+                lock (_gate)
                 {
-                    _useManifestRouting = false;
-                    _byProfileId.Clear();
-                    _contextByProfileId.Clear();
-                    _maxOutputTokensByProfileId.Clear();
-                    _modeByProfileId.Clear();
-                    _routeResolver = new LlmRouteResolver(new LlmRouteTable());
-                    return;
-                }
-
-                _useManifestRouting = true;
-                IReadOnlyList<string> validationErrors = routeTable.Validate();
-                foreach (string error in validationErrors)
-                {
-                    _logger.LogWarning(GameLogFeature.Llm, "LlmRoutingManifest: " + error);
-                }
-
-                _routeResolver = new LlmRouteResolver(routeTable);
-                _maxOutputTokensByProfileId = routeTable.ProfilesById().ToDictionary(
-                    pair => pair.Key, pair => pair.Value.MaxOutputTokens, StringComparer.Ordinal);
-                Dictionary<string, ILlmClient> newClients = new(StringComparer.Ordinal);
-                Dictionary<string, int> newContexts = new(StringComparer.Ordinal);
-                Dictionary<string, LlmExecutionMode> newModes = new(StringComparer.Ordinal);
-                foreach (LlmBackendProfileEntry p in profiles ?? Array.Empty<LlmBackendProfileEntry>())
-                {
-                    if (string.IsNullOrWhiteSpace(p?.profileId))
+                    if (_disposed) throw new ObjectDisposedException(nameof(LlmClientRegistry));
+                    if (!enableRouting || routeTable == null)
                     {
-                        continue;
+                        _useManifestRouting = false;
+                        retired.AddRange(_byProfileId.Values);
+                        _byProfileId.Clear();
+                        _contextByProfileId.Clear();
+                        _maxOutputTokensByProfileId.Clear();
+                        _modeByProfileId.Clear();
+                        _routeResolver = new LlmRouteResolver(new LlmRouteTable());
+                        return;
                     }
 
-                    string id = p.profileId.Trim();
-                    if (newClients.ContainsKey(id))
+                    _useManifestRouting = true;
+                    IReadOnlyList<string> validationErrors = routeTable.Validate();
+                    foreach (string error in validationErrors)
+                        _logger.LogWarning(GameLogFeature.Llm, "LlmRoutingManifest: " + error);
+
+                    _routeResolver = new LlmRouteResolver(routeTable);
+                    _maxOutputTokensByProfileId = routeTable.ProfilesById().ToDictionary(
+                        pair => pair.Key, pair => pair.Value.MaxOutputTokens, StringComparer.Ordinal);
+                    Dictionary<string, ILlmClient> newClients = new Dictionary<string, ILlmClient>(StringComparer.Ordinal);
+                    Dictionary<string, int> newContexts = new Dictionary<string, int>(StringComparer.Ordinal);
+                    Dictionary<string, LlmExecutionMode> newModes = new Dictionary<string, LlmExecutionMode>(StringComparer.Ordinal);
+                    try
                     {
-                        continue;
+                        foreach (LlmBackendProfileEntry profile in profiles ?? Array.Empty<LlmBackendProfileEntry>())
+                        {
+                            if (string.IsNullOrWhiteSpace(profile?.profileId)) continue;
+                            string id = profile.profileId.Trim();
+                            if (newClients.ContainsKey(id)) continue;
+                            ILlmClient client = BuildProfileClient(profile);
+                            if (client == null) continue;
+                            newClients[id] = client;
+                            newContexts[id] = profile.contextWindowTokens < 256
+                                ? CoreAISettings.DefaultContextWindowTokens : profile.contextWindowTokens;
+                            newModes[id] = ResolveProfileMode(profile);
+                        }
+                    }
+                    catch
+                    {
+                        retired.AddRange(newClients.Values);
+                        throw;
                     }
 
-                    ILlmClient c = BuildProfileClient(p);
-                    if (c != null)
-                    {
-                        newClients[id] = c;
-                        newContexts[id] = p.contextWindowTokens < 256
-                            ? CoreAISettings.DefaultContextWindowTokens
-                            : p.contextWindowTokens;
-                        newModes[id] = ResolveProfileMode(p);
-                    }
+                    HashSet<ILlmClient> retained = new HashSet<ILlmClient>(newClients.Values);
+                    retired.AddRange(_byProfileId.Values.Where(previous => !retained.Contains(previous)));
+                    _byProfileId = newClients;
+                    _contextByProfileId = newContexts;
+                    _modeByProfileId = newModes;
                 }
-
-                _byProfileId = newClients;
-                _contextByProfileId = newContexts;
-                _modeByProfileId = newModes;
+            }
+            finally
+            {
+                foreach (ILlmClient client in retired.Distinct()) RetireOwnedGatewayClient(client);
             }
         }
 
@@ -867,6 +929,10 @@ namespace CoreAI.Infrastructure.Llm
             RuntimeEndpoint pendingRelease = null;
             Task<LlmEndpointSnapshot> activationToAwait;
             LlmEndpointSnapshot immediateSnapshot;
+            OwnedHostRelease releaseWork;
+            OwnedHostRelease pendingReleaseWork;
+            CancellationTokenSource releaseCancellation = null;
+            CancellationTokenSource pendingCancellation = null;
             lock (_gate)
             {
                 string id = endpointId?.Trim() ?? "";
@@ -881,12 +947,14 @@ namespace CoreAI.Infrastructure.Llm
                 {
                     if (_pendingEndpoints.TryGetValue(id, out RuntimeEndpoint pending))
                     {
-                        pending.ActivationCancellation?.Cancel();
+                        pendingCancellation = pending.ActivationCancellation;
+                        pending.ActivationCancellation = null;
                         _pendingEndpoints.Remove(id);
                         pendingRelease = pending;
                     }
 
-                    runtime.ActivationCancellation?.Cancel();
+                    releaseCancellation = runtime.ActivationCancellation;
+                    runtime.ActivationCancellation = null;
                     runtime.State = LlmEndpointLifecycleState.Inactive;
                     runtime.Error = "";
                     release = runtime;
@@ -901,14 +969,25 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 // WHY: publish retirement before reactivation can reuse this mutable endpoint.
-                RequestOwnedHostRelease(pendingRelease);
-                RequestOwnedHostRelease(release);
+                pendingReleaseWork = PublishOwnedHostReleaseLocked(pendingRelease);
+                releaseWork = PublishOwnedHostReleaseLocked(release);
 
                 // WHY: snapshot under the lock — see AddOrUpdateEndpointAsync.
                 activationToAwait = runtime.ActivationTask != null && !runtime.ActivationTask.IsCompleted
                     ? runtime.ActivationTask
                     : null;
                 immediateSnapshot = activationToAwait == null ? ToSnapshot(runtime) : null;
+            }
+
+            try
+            {
+                try { CancelAndDisposeActivation(pendingCancellation); }
+                finally { CancelAndDisposeActivation(releaseCancellation); }
+            }
+            finally
+            {
+                ExecuteOwnedHostRelease(pendingReleaseWork);
+                ExecuteOwnedHostRelease(releaseWork);
             }
 
             SaveRuntimeState();
@@ -1305,6 +1384,7 @@ namespace CoreAI.Infrastructure.Llm
 
             RuntimeEndpoint replacedGeneration = null;
             bool releaseActivation = false;
+            ILlmClient unpublishedClient = null;
             LlmEndpointSnapshot snapshot;
             lock (_gate)
             {
@@ -1319,7 +1399,7 @@ namespace CoreAI.Infrastructure.Llm
                     releaseActivation = true;
                     snapshot = ToSnapshot(runtime);
                 }
-                else if (failure is OperationCanceledException ||
+                else if (_disposed || cancellationToken.IsCancellationRequested || failure is OperationCanceledException ||
                          (!runtime.Descriptor.Active && !runtime.Descriptor.KeepWarm))
                 {
                     runtime.State = LlmEndpointLifecycleState.Inactive;
@@ -1360,8 +1440,11 @@ namespace CoreAI.Infrastructure.Llm
 
                     snapshot = ToSnapshot(runtime);
                 }
+
+                if (releaseActivation) unpublishedClient = activation?.Client;
             }
 
+            RetireOwnedGatewayClient(unpublishedClient);
             if (releaseActivation)
             {
                 RequestOwnedHostRelease(runtime);
@@ -1380,36 +1463,56 @@ namespace CoreAI.Infrastructure.Llm
 
         private void RequestOwnedHostRelease(RuntimeEndpoint runtime)
         {
-            if (runtime == null)
-            {
-                return;
-            }
-
-            TaskCompletionSource<bool> completion;
-            // WHY: publish before invoking the host callback, which can reenter activation synchronously.
+            OwnedHostRelease work;
             lock (_gate)
             {
-                if (runtime.ReleaseRequested != 0) return;
-                runtime.ReleaseRequested = 1;
-                completion = new TaskCompletionSource<bool>();
-                runtime.HostReleaseTask = completion.Task;
+                work = PublishOwnedHostReleaseLocked(runtime);
             }
-            _ = CompleteOwnedHostReleaseAsync(runtime, completion);
+            ExecuteOwnedHostRelease(work);
         }
 
-        private async Task CompleteOwnedHostReleaseAsync(RuntimeEndpoint runtime, TaskCompletionSource<bool> completion)
+        private OwnedHostRelease PublishOwnedHostReleaseLocked(RuntimeEndpoint runtime)
+        {
+            if (runtime == null || runtime.ReleaseRequested != 0) return null;
+            runtime.ReleaseRequested = 1;
+            TaskCompletionSource<bool> completion = new TaskCompletionSource<bool>();
+            runtime.HostReleaseTask = completion.Task;
+            return new OwnedHostRelease
+            {
+                // WHY: reactivation can replace ActivationTask after publication; release must await its retired generation.
+                Endpoint = runtime, Client = runtime.Client,
+                Activation = runtime.ActivationTask, Completion = completion
+            };
+        }
+
+        private void ExecuteOwnedHostRelease(OwnedHostRelease work)
+        {
+            if (work == null) return;
+            RetireOwnedGatewayClient(work.Client);
+            _ = CompleteOwnedHostReleaseAsync(work);
+        }
+
+        private static void CancelAndDisposeActivation(CancellationTokenSource cancellation)
+        {
+            if (cancellation == null) return;
+            try { cancellation.Cancel(); }
+            finally { cancellation.Dispose(); }
+        }
+
+        private async Task CompleteOwnedHostReleaseAsync(OwnedHostRelease work)
         {
             try
             {
-                await ReleaseOwnedHostAfterDrainAsync(runtime);
-                completion.TrySetResult(true);
+                await ReleaseOwnedHostAfterDrainAsync(work);
+                work.Completion.TrySetResult(true);
             }
-            catch (Exception ex) { completion.TrySetException(ex); }
+            catch (Exception ex) { work.Completion.TrySetException(ex); }
         }
 
-        private async Task ReleaseOwnedHostAfterDrainAsync(RuntimeEndpoint runtime)
+        private async Task ReleaseOwnedHostAfterDrainAsync(OwnedHostRelease work)
         {
-            Task activation = runtime.ActivationTask;
+            RuntimeEndpoint runtime = work.Endpoint;
+            Task activation = work.Activation;
             if (runtime.ReleaseOwnedHostAsync == null && activation != null && !activation.IsCompleted)
             {
                 try
@@ -1425,6 +1528,7 @@ namespace CoreAI.Infrastructure.Llm
             // waiting, and on WebGL that wait never ends (no threads, no timers), so HostReleaseTask never
             // completes and the next activation — which awaits it — leaves the endpoint in WaitingForHttp
             // forever.
+            RetireOwnedGatewayClient(runtime.Client);
             Func<Task> release = Interlocked.Exchange(ref runtime.ReleaseOwnedHostAsync, null);
             if (release == null)
             {
@@ -1709,9 +1813,14 @@ namespace CoreAI.Infrastructure.Llm
                     }
 
                     ILlmClient http = mode == LlmExecutionMode.ServerManagedApi
-                        ? (ILlmClient)new RefreshOnUnauthorizedDecorator(
-                            new ServerManagedLlmClient(p.httpSettings, _settings, _logger, _memoryStore))
+                        ? _gatewayBinding != null
+                            ? new ServerManagedLlmClient(p.httpSettings, _settings, _logger, _memoryStore,
+                                _gatewayBinding, p.profileId)
+                            : (ILlmClient)new RefreshOnUnauthorizedDecorator(
+                                new ServerManagedLlmClient(p.httpSettings, _settings, _logger, _memoryStore))
                         : new OpenAiChatLlmClient(p.httpSettings, _settings, _logger, supportsNativeToolCalling: true, memoryStore: _memoryStore);
+                    if (http is IOwnedGatewayClient owned && owned.OwnsGatewayResources)
+                        http = new OwnedGatewayClientChain(http, owned);
                     if (mode != LlmExecutionMode.ClientLimited)
                     {
                         return http;

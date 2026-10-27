@@ -5,6 +5,7 @@ using CoreAI.Chat;
 using CoreAI.Infrastructure.Ai;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Llm;
+using CoreAI.Infrastructure.Llm.Gateway;
 using CoreAI.Logging;
 using CoreAI.Messaging;
 using MessagePipe;
@@ -36,7 +37,8 @@ namespace CoreAI.Composition
             IContainerBuilder builder,
             CoreAISettingsAsset settings,
             LlmRoutingManifest routingManifest,
-            RuntimePlatform platform)
+            RuntimePlatform platform,
+            ILlmEndpointRegistryStore endpointRegistryStore = null)
         {
             float llmTimeout = settings != null ? settings.LlmRequestTimeoutSeconds : 15f;
             ILlmAsyncMarshaler asyncMarshaler = UnityMainThreadLlmAsyncMarshaler.Instance;
@@ -67,34 +69,49 @@ namespace CoreAI.Composition
 #else
                     ILlmEndpointReadinessProbe readinessProbe = c.Resolve<ILlmEndpointReadinessProbe>();
 #endif
+                    c.TryResolve(out IUnityGatewayClientBinding gatewayBinding);
                     LlmClientRegistry reg = new(
                         c.Resolve<IGameLogger>(),
                         settings,
                         c.Resolve<IAgentMemoryStore>(),
-                        new FileLlmEndpointRegistryStore(),
+                        endpointRegistryStore ?? (c.TryResolve(out ILlmEndpointRegistryStore configuredRegistryStore)
+                            ? configuredRegistryStore
+                            : new FileLlmEndpointRegistryStore()),
                         new LlmEndpointClientFactory(
                             settings,
                             c.Resolve<IGameLogger>(),
                             c.Resolve<IAgentMemoryStore>(),
-                            readinessProbe));
-                    ILlmAgentProvider agentProvider = null;
-#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
-                    if (ShouldRegisterLocalModelProvider(platform))
+                            readinessProbe),
+                        null,
+                        gatewayBinding);
+                    try
                     {
-                        agentProvider = c.Resolve<ILlmAgentProvider>();
-                    }
+                        ILlmAgentProvider agentProvider = null;
+#if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
+                        if (ShouldRegisterLocalModelProvider(platform))
+                        {
+                            agentProvider = c.Resolve<ILlmAgentProvider>();
+                        }
 #endif
-                    ILlmClient primaryClient = BuildRoutedPrimaryClientForPlatform(
-                        settings,
-                        c.Resolve<IGameLogger>(),
-                        c.Resolve<IAgentMemoryStore>(),
-                        agentProvider,
-                        c.Resolve<ILog>(),
-                        platform);
+                        ILlmClient primaryClient = BuildRoutedPrimaryClientForPlatform(
+                            settings,
+                            c.Resolve<IGameLogger>(),
+                            c.Resolve<IAgentMemoryStore>(),
+                            agentProvider,
+                            c.Resolve<ILog>(),
+                            platform,
+                            gatewayBinding);
 
-                    reg.SetLegacyFallback(primaryClient);
-                    reg.ApplyManifest(routingManifest);
-                    return reg;
+                        reg.SetLegacyFallback(primaryClient);
+                        reg.ApplyManifest(routingManifest);
+                        return reg;
+                    }
+                    catch
+                    {
+                        try { reg.Dispose(); }
+                        catch { }
+                        throw;
+                    }
                 }, Lifetime.Singleton)
                 .As<ILlmClientRegistry>()
                 .As<ILlmRoutingController>()
@@ -188,7 +205,8 @@ namespace CoreAI.Composition
             IGameLogger logger,
             IAgentMemoryStore memoryStore,
             ILlmAgentProvider agentProvider,
-            ILog log)
+            ILog log,
+            IUnityGatewayClientBinding gatewayBinding = null)
         {
             return BuildRoutedPrimaryClientForPlatform(
                 settings,
@@ -196,7 +214,8 @@ namespace CoreAI.Composition
                 memoryStore,
                 agentProvider,
                 log,
-                Application.platform);
+                Application.platform,
+                gatewayBinding);
         }
 
         internal static ILlmClient BuildRoutedPrimaryClientForPlatform(
@@ -205,22 +224,40 @@ namespace CoreAI.Composition
             IAgentMemoryStore memoryStore,
             ILlmAgentProvider agentProvider,
             ILog log,
-            RuntimePlatform platform)
+            RuntimePlatform platform,
+            IUnityGatewayClientBinding gatewayBinding = null)
         {
             ILlmClient primaryClient = ResolveLlmClientForPlatform(
                 settings,
                 logger,
                 memoryStore,
                 agentProvider,
-                platform);
+                platform,
+                gatewayBinding);
+
+            IOwnedGatewayClient ownedGateway = primaryClient as IOwnedGatewayClient;
 
             if (settings != null && settings.HasValidFallbackBackend)
             {
-                ILlmClient secondaryClient = BuildSecondaryHttpClient(settings, memoryStore);
-                primaryClient = new FallbackLlmClientDecorator(primaryClient, secondaryClient, log);
+                try
+                {
+                    ILlmClient secondaryClient = BuildSecondaryHttpClient(settings, memoryStore);
+                    primaryClient = new FallbackLlmClientDecorator(primaryClient, secondaryClient, log);
+                }
+                catch
+                {
+                    if (ownedGateway?.OwnsGatewayResources == true) ownedGateway.Dispose();
+                    throw;
+                }
             }
 
+#if COREAI_LLM
+            return ownedGateway?.OwnsGatewayResources == true
+                ? new OwnedGatewayClientChain(primaryClient, ownedGateway)
+                : primaryClient;
+#else
             return primaryClient;
+#endif
         }
 
         /// <summary>
@@ -245,7 +282,8 @@ namespace CoreAI.Composition
             IGameLogger logger,
             IAgentMemoryStore memoryStore,
             ILlmAgentProvider agentProvider,
-            RuntimePlatform platform)
+            RuntimePlatform platform,
+            IUnityGatewayClientBinding gatewayBinding = null)
         {
             if (!LocalModelPlatformSupport.IsSupported(platform))
             {
@@ -253,7 +291,7 @@ namespace CoreAI.Composition
                     settings != null ? settings.ExecutionMode : LlmExecutionMode.Auto;
                 if (IsHttpMode(unsupportedMode))
                 {
-                    return BuildHttpClient(settings, unsupportedMode, memoryStore);
+                    return BuildHttpClient(settings, unsupportedMode, memoryStore, gatewayBinding);
                 }
 
                 if (unsupportedMode == LlmExecutionMode.Offline)
@@ -285,7 +323,7 @@ namespace CoreAI.Composition
                     case LlmExecutionMode.ClientOwnedApi:
                     case LlmExecutionMode.ClientLimited:
                     case LlmExecutionMode.ServerManagedApi:
-                        return BuildHttpClient(settings, settings.ExecutionMode, memoryStore);
+                        return BuildHttpClient(settings, settings.ExecutionMode, memoryStore, gatewayBinding);
                     case LlmExecutionMode.Offline:
                         return BuildOfflineClient(settings);
                     case LlmExecutionMode.Auto:
@@ -377,13 +415,18 @@ namespace CoreAI.Composition
         }
 
         internal static ILlmClient BuildHttpClient(CoreAISettingsAsset settings, LlmExecutionMode mode,
-            IAgentMemoryStore memoryStore = null)
+            IAgentMemoryStore memoryStore = null, IUnityGatewayClientBinding gatewayBinding = null)
         {
 #if !COREAI_LLM
             return new StubLlmClient();
 #else
             if (mode == LlmExecutionMode.ServerManagedApi)
             {
+                if (gatewayBinding != null)
+                {
+                    return new ServerManagedLlmClient(new ServerManagedCoreSettingsAdapter(settings),
+                        settings, GameLoggerUnscopedFallback.Instance, memoryStore, gatewayBinding);
+                }
                 ILlmClient serverClient = new ServerManagedLlmClient(
                     new ServerManagedCoreSettingsAdapter(settings),
                     settings,

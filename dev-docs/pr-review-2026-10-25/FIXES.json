@@ -1,0 +1,2899 @@
+{
+  "schemaVersion": 1,
+  "reviewDate": "2026-10-25",
+  "trackingUpdatedOn": "2026-10-27",
+  "baseline": "69d5bcc37502cd4bb464a3bf9ac0c53b1624b804",
+  "reviewHead": "bc3fd74f0a889bfe1b1e7babc6bc02ed48a7c05e",
+  "branch": "demo",
+  "objective": "Adjudicate source findings, repair confirmed defects, add meaningful regressions and documentation, complete demo-first QA, push demo, then promote to main after demo QA.",
+  "publicationConstraints": {
+    "demoFirst": true,
+    "promoteMainAfterDemoQa": true,
+    "updateMainBeforeDemoQa": false,
+    "createTag": false,
+    "createRelease": false,
+    "coauthorOrAiTrailers": false,
+    "note": "Demo-first: push demo only after verified fixes/docs; promote to main only after all demo scenes are checked/fixed and demo QA passes. Historical constraints preserved in historicalPublicationConstraints."
+  },
+  "reviewSummary": {
+    "reports": 14,
+    "sourceFindings": 21,
+    "P1": 1,
+    "P2": 17,
+    "P3": 3,
+    "zeroFindingGroups": [
+      "13"
+    ],
+    "group08Status": "artifact_source_review_accepted_pending_root_readback"
+  },
+  "rootExecution": {
+    "status": "native_fulleditmode2_zero_failure_pending_api_hermetic_and_explicit_root_acceptance",
+    "preparedFixturesImported": 3,
+    "authoredCaseInventory": 36,
+    "caseInventoryIsExecutionProof": false,
+    "note": "All21 original IDs remain;48 exact saved passing methods plus19 finding-sets observed green within failed fullEditMode1. Seven additional confirmed source findings have reviewed fixes. Guards/fixture corrections are separate compatibility work. No root accepted-green status is inferred before explicit root decision/current runtime gates.",
+    "codeRepairsAcceptedGreen": 0,
+    "initialRegressionReceipt": "artifacts/pr-review-20261025/initial-regression-red3-receipt.json",
+    "initialRegressionSummary": "36 authored/executed initial rows: 28 Failed / 8 Passed; red1/red2 failed compilation. Later green targeted rows are not a new initial-red inventory.",
+    "reconciledBy": {
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "max",
+      "date": "2026-10-27"
+    }
+  },
+  "proofLimits": "Saved source-scoped, portable and native selections establish only their recorded outcomes. Root final adjudication, current integrated Unity rerun, manual demo/input/visual checks, OpenRouter real-API PlayMode and player/IL2CPP/WebGL/device/network gates stay separate. PR-14-001 is documentation-only and has no direct runtime test row.",
+  "todoHistoryPrefix": {
+    "byteLength": 330319,
+    "sha256": "11c3a64daa8bff9fbd1eaf4c1717faebe33bfaad9efbe14d374a430b4816f470",
+    "preservedAfterAppend": false
+  },
+  "immutableInventory": {
+    "files": 309,
+    "groups": 14,
+    "sha256": "713b257947258a69264465d806ba435166f47c93c6998defe5ab14f6e20168fc",
+    "algorithm": "SHA-256 of ordered immutable group/path/churn and per-file ownership/kind/churn/report data; reviewer/status recovery metadata excluded."
+  },
+  "records": [
+    {
+      "id": "PR-EXEC-001",
+      "priority": "P1",
+      "title": "Preserve scoped memory when the new constructor argument is omitted",
+      "group": "01",
+      "report": "dev-docs/pr-review-2026-10-25/01-execution.md",
+      "module": "Execution",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAI/Runtime/Core/Features/Orchestration/AiOrchestrator.cs",
+          "line": 332
+        },
+        {
+          "path": "Assets/CoreAI/Runtime/Core/Features/AgentMemory/AgentMemoryScope.cs",
+          "line": 69
+        },
+        {
+          "path": "Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs",
+          "line": 56
+        }
+      ],
+      "acceptance": "Old direct constructor composition with a scoped store preserves seeded history in task/stream and chat paths when the new provider argument is omitted; a second scope stays isolated and the raw role key remains empty.",
+      "proofPlan": [
+        "Use real scoped in-memory stores, stable nonempty providers and fake LLMs; omit only the newly added argument in task and streaming cases.",
+        "Retain explicit bound-empty and supplied-provider cases; verify prompt history plus durable append partitions."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAI/Runtime/Core/Features/Orchestration/AiOrchestrator.cs",
+        "Assets/CoreAI/Runtime/Core/Features/AgentMemory/AgentMemoryScope.cs",
+        "Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 11
+          },
+          "establishes": "Scoped manual core/chat, queue discovery and opaque-store controls; fake provider/store boundaries.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAI/Runtime/Core/Features/Orchestration/AiOrchestrator.cs": "7c992fa8a3607b36b6f14fde0aff9e4c97dc27772070ef7233ba60062ebd8092",
+        "Assets/CoreAI/Runtime/Core/Features/AgentMemory/AgentMemoryScope.cs": "1ab4d1256d6fe68cd7167a1e42ce20a72a3d608879a075f326171b71dcb35d92",
+        "Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs": "ef811640918f3815d37bdb35e3c637ad6758c78a6cc1a274a767838e5e95a393"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewCompositionEditModeTests.EXEC001_ActorlessUnknownQueuePreservesLegacyMemoryResolution",
+          "passedCases": 2
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewCompositionEditModeTests.EXEC001_ChatWithoutStoreCapturesInnerBeforeDeferredStream",
+          "passedCases": 2
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewCompositionEditModeTests.EXEC001_ManualChat_OmittedScopeProviderRetainsStoreAndCoreScope",
+          "passedCases": 2
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewCompositionEditModeTests.EXEC001_ManualCore_OmittedScopeProviderRetainsScopedHistory",
+          "passedCases": 2
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewCompositionEditModeTests.EXEC001_OpaqueChatStoreSuppressesUnrelatedInnerProvider",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewCompositionEditModeTests.EXEC001_QueueDiscoversInnerScopeBeforeWaiting",
+          "passedCases": 2
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 11,
+        "outcomes": {
+          "Passed": 11
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 11,
+          "outcomes": {
+            "Passed": 11
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-MEM-001",
+      "priority": "P2",
+      "title": "Read-triggered key migration bypasses configured persistence confirmation",
+      "group": "02",
+      "report": "dev-docs/pr-review-2026-10-25/02-memory-skills.md",
+      "module": "Memory, tools and skills",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAI/Runtime/Core/Features/AgentMemory/FileConversationSummaryStore.cs",
+          "line": 288
+        },
+        {
+          "path": "Assets/CoreAI/Runtime/Core/Features/AgentMemory/AgentMemoryFileKey.cs",
+          "line": 71
+        },
+        {
+          "path": "Assets/CoreAiUnity/Runtime/Source/Features/AgentMemory/Infrastructure/FileAgentMemoryStore.cs",
+          "line": 424
+        }
+      ],
+      "acceptance": "Read-triggered migration confirms observed copy/retirement effects through existing store ports outside locks, preserves pending failures and bytes, and adds no hook call to an unchanged canonical read.",
+      "proofPlan": [
+        "Seed unambiguous legacy summary/memory/history files; exercise true, false, pending and throwing hooks plus partial copy/retire failures.",
+        "Verify sync best-effort versus strict async behavior, peer confirmation retry without byte replay, CAS generations, cancellation and disposal."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAI/Runtime/Core/Features/AgentMemory/FileConversationSummaryStore.cs",
+        "Assets/CoreAI/Runtime/Core/Features/AgentMemory/AgentMemoryFileKey.cs",
+        "Assets/CoreAiUnity/Runtime/Source/Features/AgentMemory/Infrastructure/FileAgentMemoryStore.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 7
+          },
+          "establishes": "Read-triggered confirmation, no-op canonical read and migration failure controls.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAI/Runtime/Core/Features/AgentMemory/FileConversationSummaryStore.cs": "eb637f83ce3fa57e99b0fa93504263273babbf5a9931461bcdef037d3be0b2ce",
+        "Assets/CoreAI/Runtime/Core/Features/AgentMemory/AgentMemoryFileKey.cs": "af245658570dc5a2e99fbb093cf4c004c9c039773299b273868cbaec5d6a6f40",
+        "Assets/CoreAiUnity/Runtime/Source/Features/AgentMemory/Infrastructure/FileAgentMemoryStore.cs": "75073acc6f9695c1bf027785dfc6ae2e22971b3aeef165934435e8785eca0c69"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.FileAgentMemoryStoreEditModeTests.AsyncMigration_PrimaryStorageFailureSurvivesConfirmationFailure",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.FileAgentMemoryStoreEditModeTests.ClearAfterPartialLegacyMigration_DoesNotResurrectLegacyHistory",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.FileConversationSummaryStoreEditModeTests.SyncRead_AsyncOnlyConfirmation_RefusesMigrationBeforeAnyEffect",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.FileConversationSummaryStoreEditModeTests.SyncRead_LegacyMigration_ConfirmsThroughTheSyncPortBeforeReturning",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewPersistenceEditModeTests.MEM001_CanonicalReadDoesNotInventAWriteReceipt",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewPersistenceEditModeTests.MEM001_ReadMigrationWaitsForReceiptAndRetainsRefusedGeneration",
+          "passedCases": 2
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 7,
+        "outcomes": {
+          "Passed": 7
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 7,
+          "outcomes": {
+            "Passed": 7
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-MEM-002",
+      "priority": "P2",
+      "title": "The admitted memory binding leaves `read_skill` reporting the callable target as unavailable",
+      "group": "02",
+      "report": "dev-docs/pr-review-2026-10-25/02-memory-skills.md",
+      "module": "Memory, tools and skills",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAI/Runtime/Core/Features/Llm/CallSkillToolLlmTool.cs",
+          "line": 65
+        },
+        {
+          "path": "Assets/CoreAI/Runtime/Core/Features/Llm/ReadSkillLlmTool.cs",
+          "line": 221
+        },
+        {
+          "path": "Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiLlmClient.cs",
+          "line": 3008
+        }
+      ],
+      "acceptance": "The same admitted effective tool list reports memory availability/schema consistently with actual invocation, while unbound catalogs and denied targets remain unchanged.",
+      "proofPlan": [
+        "Pair read_skill and call_skill_tool for two isolated role/store bindings; assert invocable metadata matches resolved memory calls and the original catalog remains unbound.",
+        "Retain allowlist denial, live-catalog updates and native/text execution paths."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAI/Runtime/Core/Features/Llm/CallSkillToolLlmTool.cs",
+        "Assets/CoreAI/Runtime/Core/Features/Llm/ReadSkillLlmTool.cs",
+        "Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiLlmClient.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 2
+          },
+          "establishes": "Independent request-bound discovery/invocation plus denied-target control.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAI/Runtime/Core/Features/Llm/CallSkillToolLlmTool.cs": "c4643d1e0d75b8866ebc97c4239a8c78d85caa1148c5bcd986747a897033f1bb",
+        "Assets/CoreAI/Runtime/Core/Features/Llm/ReadSkillLlmTool.cs": "d05e99277d1b3601f4fdc109e65f235a4ad4d8be460a41ca736ff971ff0fb47d",
+        "Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiLlmClient.cs": "a9cf87b9a1ef0844b963e0b1aa412d414b6713312d071c65b64e3978884cac17"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewToolBindingEditModeTests.MEM002_DeniedTargetRemainsUnavailableForDiscoveryAndInvocation",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewToolBindingEditModeTests.MEM002_DiscoveryAndInvocationAgreeForIndependentRequestBindings",
+          "passedCases": 1
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 2,
+        "outcomes": {
+          "Passed": 2
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 2,
+          "outcomes": {
+            "Passed": 2
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-LLM-001",
+      "priority": "P2",
+      "title": "Apply disabled-tool mode before binding skill proxies",
+      "group": "03",
+      "report": "dev-docs/pr-review-2026-10-25/03-providers.md",
+      "module": "Providers",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiLlmClient.cs",
+          "line": 183
+        },
+        {
+          "path": "Assets/CoreAI/Runtime/Core/Features/Llm/CallSkillToolLlmTool.cs",
+          "line": 64
+        }
+      ],
+      "acceptance": "ForcedToolMode.None makes one plain provider request with the default empty role and performs no skill binding, nested factory work or tool execution in either completion mode.",
+      "proofPlan": [
+        "Supply a memory store and a skill proxy with counting factories; reset counts after proxy construction and test native/text plus completion/streaming.",
+        "Repeat with a valid role and retain enabled-tool effective-list behavior."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiLlmClient.cs",
+        "Assets/CoreAI/Runtime/Core/Features/Llm/CallSkillToolLlmTool.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 8
+          },
+          "establishes": "Eight combinations of native/text, completion/stream and empty/Teacher role; no skill factory binding.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiLlmClient.cs": "a9cf87b9a1ef0844b963e0b1aa412d414b6713312d071c65b64e3978884cac17",
+        "Assets/CoreAI/Runtime/Core/Features/Llm/CallSkillToolLlmTool.cs": "c4643d1e0d75b8866ebc97c4239a8c78d85caa1148c5bcd986747a897033f1bb"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewToolBindingEditModeTests.LLM001_NoneModeDoesNotBindUnusedSkillFactories",
+          "passedCases": 8
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 8,
+        "outcomes": {
+          "Passed": 8
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 8,
+          "outcomes": {
+            "Passed": 8
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-HOST-001",
+      "priority": "P2",
+      "title": "Retain existing public signatures when adding actor-aware calls",
+      "group": "04",
+      "report": "dev-docs/pr-review-2026-10-25/04-unity-host.md",
+      "module": "Unity host and API",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAiUnity/Runtime/Source/Api/CoreAi.cs",
+          "line": 833
+        },
+        {
+          "path": "Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs",
+          "line": 631
+        },
+        {
+          "path": "Assets/CoreAiUnity/Runtime/Source/Features/World/Infrastructure/CoreAiComponentCommandExecutor.cs",
+          "line": 15
+        }
+      ],
+      "acceptance": "Legacy public method-group and exact-reflection method/constructor signatures remain usable without ambiguous optional overloads, while actor-aware calls retain their isolation semantics.",
+      "proofPlan": [
+        "Compile old delegate assignments and assert exact previous reflected signatures, then invoke them using fake services.",
+        "Preserve actor-aware overload coverage; use the limited overload-language probe only as design evidence, not a product regression pass."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAiUnity/Runtime/Source/Api/CoreAi.cs",
+        "Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs",
+        "Assets/CoreAiUnity/Runtime/Source/Features/World/Infrastructure/CoreAiComponentCommandExecutor.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "path": "artifacts/pr-review-20261025/optional-overload-probe.txt",
+          "kind": "limited_csharp_language_probe",
+          "establishes": "A toy old/new optional-overload design produces CS0121 ambiguity.",
+          "doesNotEstablish": "Compilation or execution of the corrected CoreAI public API or its full regression fixtures."
+        },
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 8
+          },
+          "establishes": "Exact legacy constructors, reflection methods and delegate assignments.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAiUnity/Runtime/Source/Api/CoreAi.cs": "ab966eb004cc8364d0dfa50bb187c2bb22d9991372fbcd33159bd10813afc505",
+        "Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs": "ef811640918f3815d37bdb35e3c637ad6758c78a6cc1a274a767838e5e95a393",
+        "Assets/CoreAiUnity/Runtime/Source/Features/World/Infrastructure/CoreAiComponentCommandExecutor.cs": "82f0bd1872900626b6e53a4c28abfb85eafba77504245e72fd8bc1c004b8d3f9"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewCompositionEditModeTests.HOST001_LegacyConstructorAritiesRemainAvailable",
+          "passedCases": 3
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewCompositionEditModeTests.HOST001_LegacyHistoryReflectionSignatureStillReturnsHistory",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewCompositionEditModeTests.HOST001_LegacyMethodsRemainExactAndDelegateBindable",
+          "passedCases": 4
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 8,
+        "outcomes": {
+          "Passed": 8
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 8,
+          "outcomes": {
+            "Passed": 8
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-HOST-002",
+      "priority": "P2",
+      "title": "Match progress using the explicit trace actually propagated to custom orchestrators",
+      "group": "04",
+      "report": "dev-docs/pr-review-2026-10-25/04-unity-host.md",
+      "module": "Unity host and API",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs",
+          "line": 274
+        }
+      ],
+      "acceptance": "An explicit opaque trace propagated unchanged by a custom orchestrator rearms only its own idle deadline, including surrounding whitespace; foreign actor/trace/role events remain excluded.",
+      "proofPlan": [
+        "Use the controlled idle clock and publish lifecycle events from the actual received request.TraceId with padded and unpadded values.",
+        "Retain foreign-identity and unrelated-progress negative controls."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 7
+          },
+          "establishes": "Caller/canonical trace correlation and actor/role/trace isolation.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs": "ef811640918f3815d37bdb35e3c637ad6758c78a6cc1a274a767838e5e95a393"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewCompositionEditModeTests.HOST002_ForeignProgressCannotRearmTheTurn",
+          "passedCases": 3
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewCompositionEditModeTests.HOST002_ProducerForwardedTraceRearmsItsOwnTurn",
+          "passedCases": 4
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 7,
+        "outcomes": {
+          "Passed": 7
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 7,
+          "outcomes": {
+            "Passed": 7
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-AUD-001",
+      "priority": "P2",
+      "title": "Strict audit encoding rejects a normal diagnostic snapshot and repeatedly requeues its whole batch",
+      "group": "05",
+      "report": "dev-docs/pr-review-2026-10-25/05-audit-log.md",
+      "module": "Audit and log retention",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAiUnity/Runtime/Source/Features/Audit/AuditLogWriter.cs",
+          "line": 889
+        },
+        {
+          "path": "Assets/CoreAI/Runtime/Core/Features/Llm/ToolExecutionPolicy.cs",
+          "line": 1334
+        }
+      ],
+      "acceptance": "A valid tool result cut at the later diagnostic boundary cannot keep healthy accepted audit records requeueing; persisted bytes and hash preimages remain consistent.",
+      "proofPlan": [
+        "Drive the real policy/publisher/interceptor path with a surrogate-pair boundary, surround it with healthy records, and verify one valid chain across retry and disposal flush.",
+        "Compare the actual Unity Mono baseline and strict behavior; retain rollback/quarantine fault cases."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAiUnity/Runtime/Source/Features/Audit/AuditLogWriter.cs",
+        "Assets/CoreAI/Runtime/Core/Features/Llm/ToolExecutionPolicy.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "path": "artifacts/pr-review-20261025/audit-surrogate-mono-comparison.txt",
+          "kind": "limited_runtime_primitive_probe",
+          "establishes": "Same Unity Mono process: baseline replacement writer succeeds and explicit strict writer throws on the serialized diagnostic boundary value.",
+          "doesNotEstablish": "Full AuditLogWriter/interceptor retry, disposal or platform regression passes."
+        },
+        {
+          "path": "artifacts/pr-review-20261025/audit-surrogate-serializer-probe.json",
+          "kind": "limited_serializer_encoder_probe",
+          "establishes": "Installed Newtonsoft retains the truncated lone surrogate and explicit strict UTF-8 rejects it.",
+          "doesNotEstablish": "Complete audit writer or Mods/native function behavior."
+        },
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 2
+          },
+          "establishes": "Post-marshal snapshot flush/disposal in synchronous and asynchronous paths.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAiUnity/Runtime/Source/Features/Audit/AuditLogWriter.cs": "bc1a8add5d13ffc3ca9ebb78eb729fe09345329bfe92e28a2b46d1e226778073",
+        "Assets/CoreAI/Runtime/Core/Features/Llm/ToolExecutionPolicy.cs": "ebabdb4d003afd0688de4d0c073c1c81b4ea54164e875270cf5d7188968d5a21"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewPersistenceEditModeTests.AUD001_ValidPostMarshalToolSnapshotDoesNotPoisonFlushOrDisposal",
+          "passedCases": 2
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 2,
+        "outcomes": {
+          "Passed": 2
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 2,
+          "outcomes": {
+            "Passed": 2
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-AUD-002",
+      "priority": "P3",
+      "title": "New Mods log clipping splits valid Unicode surrogate pairs",
+      "group": "05",
+      "report": "dev-docs/pr-review-2026-10-25/05-audit-log.md",
+      "module": "Audit and log retention",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAIMods/Runtime/Logging/LuaLogService.cs",
+          "line": 278
+        }
+      ],
+      "acceptance": "Clipped message and script-name query output remains well-formed Unicode within the configured cap and includes the truncation marker.",
+      "proofPlan": [
+        "Use valid supplementary characters straddling the retained prefix in both fields; retain ASCII and complete-pair controls.",
+        "Strictly encode direct formatter/tool output and preserve identity, character-budget and copy-isolation assertions."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAIMods/Runtime/Logging/LuaLogService.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 3
+          },
+          "establishes": "Split surrogate, intact pair and ASCII clipping through log/tool surfaces.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAIMods/Runtime/Logging/LuaLogService.cs": "548173b1d16d6dd9685d35074a69d79d9742f6cf60c7ae1457914048d7d909e5"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.PrReviewPersistenceEditModeTests.AUD002_LogClippingPreservesUnicodeInMessageScriptAndToolSurface",
+          "passedCases": 3
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 3,
+        "outcomes": {
+          "Passed": 3
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 3,
+          "outcomes": {
+            "Passed": 3
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-MODS-001",
+      "priority": "P2",
+      "title": "Preserve the legacy backend path through world source facades",
+      "group": "06",
+      "report": "dev-docs/pr-review-2026-10-25/06-mods.md",
+      "module": "Mods and stores",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAIMods/Runtime/Infrastructure/RbxWorldPackageContracts.cs",
+          "line": 4207
+        },
+        {
+          "path": "Assets/CoreAIMods/Runtime/HubIntegration/HubModServiceBase.cs",
+          "line": 378
+        }
+      ],
+      "acceptance": "World source facades keep a legacy backend's real Hub save/delete path reachable and unconfirmed; strict-capable backends retain truthful acknowledgements.",
+      "proofPlan": [
+        "Compose the real controller and Hub service with a legacy source store, save/edit/delete through the consumer, and assert backend effects plus unconfirmed results.",
+        "Repeat for active and replaced sessions and strict stores, retaining direct strict-refusal and failure/retry controls."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAIMods/Runtime/Infrastructure/RbxWorldPackageContracts.cs",
+        "Assets/CoreAIMods/Runtime/HubIntegration/HubModServiceBase.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 2
+          },
+          "establishes": "Legacy facade mutation success remains distinct from persistence acknowledgment.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAIMods/Runtime/Infrastructure/RbxWorldPackageContracts.cs": "ee69a15c2aaed5768da37ec31f623a96a99cac23cc0e5cbc4fd40bf16d1e99bf",
+        "Assets/CoreAIMods/Runtime/HubIntegration/HubModServiceBase.cs": "4393d93bf3622ce59b516b3c255b9d116ee4589787e1a1bbb3456ee886014980"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.RbxApi.Acceptance.Mvp3WorldPackageFollowUpEditModeTests.WorldSourceFacade_HubUsesLegacyMutationsWithoutAcknowledgingPersistence",
+          "passedCases": 2
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 2,
+        "outcomes": {
+          "Passed": 2
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 2,
+          "outcomes": {
+            "Passed": 2
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-MODS-002",
+      "priority": "P2",
+      "title": "Keep a failed first canonical source save retryable",
+      "group": "06",
+      "report": "dev-docs/pr-review-2026-10-25/06-mods.md",
+      "module": "Mods and stores",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAIMods/Runtime/Infrastructure/FileLuaModSourceStore.cs",
+          "line": 679
+        }
+      ],
+      "acceptance": "A first canonical save that fails after owned directory creation can succeed on identical retry after the fault clears without weakening corrupt/foreign identity preservation.",
+      "proofPlan": [
+        "Inject a fault immediately before first manifest installation, clear it, retry and verify exact source/manifest plus strict acknowledgement.",
+        "Seed separate corrupt/mismatched evidence and assert it remains unchanged."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAIMods/Runtime/Infrastructure/FileLuaModSourceStore.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 2
+          },
+          "establishes": "Retry after first-save manifest failure plus corrupt-identity preservation.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAIMods/Runtime/Infrastructure/FileLuaModSourceStore.cs": "22d9b9fad9756a750a6f6f19273cab8c45a7cf9bcaad8e726119b6c28424b3f5"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.FileLuaModSourceStoreEditModeTests.FirstCanonicalSave_PreservesExistingCorruptIdentityEvidence",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.FileLuaModSourceStoreEditModeTests.FirstCanonicalSave_TransientManifestFailureDoesNotPoisonItsRetry",
+          "passedCases": 1
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 2,
+        "outcomes": {
+          "Passed": 2
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 2,
+          "outcomes": {
+            "Passed": 2
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-MODS-003",
+      "priority": "P2",
+      "title": "Reject malformed UTF-16 before deriving a namespace digest",
+      "group": "06",
+      "report": "dev-docs/pr-review-2026-10-25/06-mods.md",
+      "module": "Mods and stores",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAIMods/Runtime/Infrastructure/LuaModStoreId.cs",
+          "line": 34
+        }
+      ],
+      "acceptance": "Distinct malformed UTF-16 namespace identifiers are rejected before I/O instead of colliding through replacement encoding; valid supplementary identities remain supported.",
+      "proofPlan": [
+        "Compare distinct unpaired-surrogate ApplyTo inputs and same-mod KV namespace stores; require rejection before directory creation.",
+        "Retain valid supplementary-character, sanitizer and case-isolation controls."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAIMods/Runtime/Infrastructure/LuaModStoreId.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 2
+          },
+          "establishes": "Malformed identity rejection before I/O plus valid supplementary digest control.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAIMods/Runtime/Infrastructure/LuaModStoreId.cs": "15ad91debe3412825b5b69e481d9a630e1ecb0e7eedd166628e6f2a9769c7dc8"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.FileLuaModStoreEditModeTests.StoreNamespace_MalformedUtf16IsRejectedBeforeStorageChanges",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.FileLuaModStoreEditModeTests.StoreNamespace_ValidSupplementaryIdentifierPreservesItsPublishedDigest",
+          "passedCases": 1
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 2,
+        "outcomes": {
+          "Passed": 2
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 2,
+          "outcomes": {
+            "Passed": 2
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-RBX-001",
+      "priority": "P2",
+      "title": "Refuse a material acquisition that returns after host teardown",
+      "group": "07",
+      "report": "dev-docs/pr-review-2026-10-25/07-rbx-api.md",
+      "module": "Rbx API",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAIMods/Runtime/RbxApi/Binding/InstanceGameObjectBinder.cs",
+          "line": 1772
+        }
+      ],
+      "acceptance": "An injected material acquisition returning after reentrant BeginHostTeardown releases its handle once and cannot republish a lease into the retired binder.",
+      "proofPlan": [
+        "Extend the real BoundWorld lease provider with an OnAcquire teardown callback; assert balanced acquisitions/releases immediately, after repeated teardown and after cleanup.",
+        "Retain normal replacement and throwing/reentrant-release controls."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAIMods/Runtime/RbxApi/Binding/InstanceGameObjectBinder.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 1
+          },
+          "establishes": "Reentrant host teardown during actual binder material acquisition.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAIMods/Runtime/RbxApi/Binding/InstanceGameObjectBinder.cs": "f9af29aa86816fa5d1732321c0fea28c2c08a3f86578d6328ff9e21e97276f55"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.RbxApi.Unity.RbxMaterialLifetimeRegressionTests.RBX003_TeardownDuringAcquireReleasesReturningLeaseImmediately",
+          "passedCases": 1
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 1,
+        "outcomes": {
+          "Passed": 1
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 1,
+          "outcomes": {
+            "Passed": 1
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-08-001",
+      "priority": "P3",
+      "title": "Accepted resolver name `_ENV` captures the environment instead of the callable",
+      "group": "08",
+      "report": "dev-docs/pr-review-2026-10-25/08-luau.md",
+      "module": "Luau downlevel",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAIMods/Runtime/LuauDownlevel/DownlevelResult.cs",
+          "line": 142
+        },
+        {
+          "path": "Assets/CoreAIMods/Runtime/LuauDownlevel/LuauRewriteParser.cs",
+          "line": 702
+        }
+      ],
+      "acceptance": "The configurable resolver name _ENV is either rejected before execution with preserved source/error or resolves the explicitly installed global callable according to a documented contract.",
+      "proofPlan": [
+        "Use hostSetup to install the _ENV-key resolver and transform a direct-table sum, or verify explicit validation rejection if that repair is chosen.",
+        "Retain ordinary replaceable-resolver and protected-metatable cases."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAIMods/Runtime/LuauDownlevel/DownlevelResult.cs",
+        "Assets/CoreAIMods/Runtime/LuauDownlevel/LuauRewriteParser.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/completion-20261027/core-final/core-final1.trx",
+          "outcomes": {
+            "Passed": 5
+          },
+          "establishes": "Five invalid resolver names include _ENV. This finding is in portable Core/Luau, not the 500-case Unity selection.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAIMods/Runtime/LuauDownlevel/DownlevelResult.cs": "b3c89986792b3f5880df295d2d5d6370ab3ff309a928e7c6c4471407dc6107c5",
+        "Assets/CoreAIMods/Runtime/LuauDownlevel/LuauRewriteParser.cs": "47b5e1323ece0faeaf564226f6331b9240a49dd3ac24c1e1504bc5723dc1ef83"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/completion-20261027/core-final/core-final1.trx",
+          "test": "InvalidTrustedResolverName_IsRefusedWithoutThrowing",
+          "passedCases": 5
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 5,
+        "outcomes": {
+          "Passed": 5
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 5,
+          "outcomes": {
+            "Passed": 5
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-08-002",
+      "priority": "P2",
+      "title": "Eager floor capture fails even when the division is never evaluated",
+      "group": "08",
+      "report": "dev-docs/pr-review-2026-10-25/08-luau.md",
+      "module": "Luau downlevel",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAIMods/Runtime/LuauDownlevel/LuauRewriteParser.cs",
+          "line": 818
+        }
+      ],
+      "acceptance": "Unused nested floor division does not eagerly access a missing or fallible math.floor; lazy error behavior and lexical hygiene both survive.",
+      "proofPlan": [
+        "Run hostSetup math=nil followed by an unused function containing floor division and require return 42 through both execution helper and reused script engine.",
+        "Retain ordinary, compound and nested shadowing regressions."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAIMods/Runtime/LuauDownlevel/LuauRewriteParser.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/editor-integration-20261026/lua-full-results1/lua-editor-full1.trx",
+          "outcomes": {
+            "Passed": 3
+          },
+          "establishes": "Executable Lua unused-operation/lazy-error/evaluation-order controls; portable Lua evidence.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAIMods/Runtime/LuauDownlevel/LuauRewriteParser.cs": "47b5e1323ece0faeaf564226f6331b9240a49dd3ac24c1e1504bc5723dc1ef83"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/editor-integration-20261026/lua-full-results1/lua-editor-full1.trx",
+          "test": "FloorDivision_MissingMathErrorsAtOperation",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/editor-integration-20261026/lua-full-results1/lua-editor-full1.trx",
+          "test": "FloorDivision_ObtainsFunctionBeforeOperandEffects",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/editor-integration-20261026/lua-full-results1/lua-editor-full1.trx",
+          "test": "FloorDivision_UnusedOperationDoesNotRequireMath",
+          "passedCases": 1
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 3,
+        "outcomes": {
+          "Passed": 3
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 3,
+          "outcomes": {
+            "Passed": 3
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-09-001",
+      "priority": "P2",
+      "title": "Preserve the World-page binder when generating the setup prefab",
+      "group": "09",
+      "report": "dev-docs/pr-review-2026-10-25/09-hub.md",
+      "module": "Hub/UI",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAIHub/Editor/CoreAiHubSetupMenu.cs",
+          "line": 20
+        }
+      ],
+      "acceptance": "The setup-generated Hub retains the optional WorldStateHubBinder and World page when a world manager is present, without making the optional module mandatory.",
+      "proofPlan": [
+        "Generate the first Hub prefab in an isolated Editor fixture with Mods and a fake world manager; assert binder and registered World page.",
+        "Repeat without the optional module and retain shipped-prefab/path tests."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAIHub/Editor/CoreAiHubSetupMenu.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-editor-source-batch1.xml",
+          "outcomes": {
+            "Passed": 1
+          },
+          "establishes": "Latest source adds the optional WorldStateHubBinder assertion. Earlier focused5 version asserted only base components. Does not assert page registration with a fake world manager.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAIHub/Editor/CoreAiHubSetupMenu.cs": "08fe61071c1e835afb54ef548a73e560e6a2fca268a4d741c51882ddfa70e4a8"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-editor-source-batch1.xml",
+          "test": "CoreAI.Tests.EditMode.HubContractRegressionTests.Setup_BuildHub_ComposesTheCoreRuntimeComponents",
+          "passedCases": 1
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 1,
+        "outcomes": {
+          "Passed": 1
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 1,
+          "outcomes": {
+            "Passed": 1
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-09-002",
+      "priority": "P2",
+      "title": "Consume Escape only when the Hub actually handles it",
+      "group": "09",
+      "report": "dev-docs/pr-review-2026-10-25/09-hub.md",
+      "module": "Hub/UI",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAIHub/Runtime/CoreAiHubWindow.cs",
+          "line": 358
+        }
+      ],
+      "acceptance": "Escape propagates when collapse is disabled and no page handles it, while actual collapse or handled-page actions still consume the event.",
+      "proofPlan": [
+        "Use a real attached panel with a focusable custom-page child and parent callbacks; test opt-out/unhandled propagation.",
+        "Retain collapse-enabled and true IHubEscapeHandler positive controls."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAIHub/Runtime/CoreAiHubWindow.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 4
+          },
+          "establishes": "Handler return/collapse controls and attached-panel opt-out. Full ancestor bubbling acceptance still needs root readback.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAIHub/Runtime/CoreAiHubWindow.cs": "35c52c96178c30ccf98280613f0e94a149eb347997fcf7b920f0384989616c1f"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.CoreAiHubWindowEscapeEditModeTests.HandleEscapeRequested_CollapseOccurs_IsConsumed",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.CoreAiHubWindowEscapeEditModeTests.HandleEscapeRequested_EscapeCollapsesDisabled_DoesNotCollapseHub",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.CoreAiHubWindowEscapeEditModeTests.HandleEscapeRequested_PageHandlerReturnsTrue_IsConsumedEvenWhenCollapseDisabled",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.HubContractRegressionTests.Window_EscapeOptOut_DoesNotCollapseAndKeepsFocus",
+          "passedCases": 1
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 4,
+        "outcomes": {
+          "Passed": 4
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 4,
+          "outcomes": {
+            "Passed": 4
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-09-003",
+      "priority": "P3",
+      "title": "Do not invalidate a pending save when the Advanced foldout opens",
+      "group": "09",
+      "report": "dev-docs/pr-review-2026-10-25/09-hub.md",
+      "module": "Hub/UI",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAIHub/Runtime/HubSettingsPage.cs",
+          "line": 580
+        }
+      ],
+      "acceptance": "Toggling Advanced presentation alone does not invalidate a matching pending endpoint save receipt or retain an accepted key; actual descriptor edits remain protected.",
+      "proofPlan": [
+        "Save through a controllable readiness task on an attached panel, toggle the actual foldout, then complete SavedAndReady and assert status/key/button updates.",
+        "Pair with a real endpoint-data edit during the wait."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAIHub/Runtime/HubSettingsPage.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 4
+          },
+          "establishes": "Presentation toggles preserve pending receipt; real edits invalidate it.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAIHub/Runtime/HubSettingsPage.cs": "80c2a7ad38fa6014b019329cb712f26d0003a79a12eef5014c46c7e79b0827ec"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.HubSettingsRegressionEditModeTests.EndpointSave_FoldoutToggleDuringPendingSave_KeepsReceiptAndClearsAcceptedKey",
+          "passedCases": 2
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Tests.EditMode.HubSettingsRegressionEditModeTests.EndpointSave_RealDescriptorEditDuringPendingSave_StillInvalidatesReceipt",
+          "passedCases": 2
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 4,
+        "outcomes": {
+          "Passed": 4
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 4,
+          "outcomes": {
+            "Passed": 4
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-MCP-001",
+      "priority": "P2",
+      "title": "Reentrant restart binds before the stopped HTTP listener releases its prefix",
+      "group": "10",
+      "report": "dev-docs/pr-review-2026-10-25/10-mcp.md",
+      "module": "MCP",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAIMcp/Runtime/Server/CoreAiMcpServer.cs",
+          "line": 415
+        },
+        {
+          "path": "Assets/CoreAIMcp/Runtime/Server/McpHttpServer.cs",
+          "line": 161
+        }
+      ],
+      "acceptance": "A cancellation callback can restart the automatic real HTTP server on the same released prefix without the old stop destroying the replacement queue/listener.",
+      "proofPlan": [
+        "Use an isolated real loopback port, cooperative tool and synchronous lifetime-token restart callback; stop and assert running replacement plus fresh authenticated initialize/tool calls.",
+        "Retain generation detachment and existing in-memory lifecycle tests; a changed port is not a valid substitute."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAIMcp/Runtime/Server/CoreAiMcpServer.cs",
+        "Assets/CoreAIMcp/Runtime/Server/McpHttpServer.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 2
+          },
+          "establishes": "Real same-prefix HTTP replacement. Direct transport fixture does not itself assert automatic component queue plus authenticated replacement tool call.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAIMcp/Runtime/Server/CoreAiMcpServer.cs": "436d20de9e5fd68c27af7b8f3a8809cbe65a1206f8c8209309c1f521372c4793",
+        "Assets/CoreAIMcp/Runtime/Server/McpHttpServer.cs": "f9dd633bdbc233c25da651f39b8893a352c3939d579e104a99c77551c52653c4"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Mcp.Tests.McpHttpServerIntegrationEditModeTests.Start_AfterStop_RebindsLoopbackPrefix_AndServes",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Mcp.Tests.McpHttpServerIntegrationEditModeTests.Stop_ReentrantCancellationCallback_ReleasesPrefixBeforeCallback_AndReplacementServes",
+          "passedCases": 1
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 2,
+        "outcomes": {
+          "Passed": 2
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 2,
+          "outcomes": {
+            "Passed": 2
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-NET-001",
+      "priority": "P2",
+      "title": "A delayed old-ID binding notification removes a replacement session",
+      "group": "11",
+      "report": "dev-docs/pr-review-2026-10-25/11-mirror.md",
+      "module": "Mirror",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAIMirror/Runtime/MirrorNetworkBridge.cs",
+          "line": 986
+        },
+        {
+          "path": "Assets/CoreAIMirror/Runtime/CoreAiMirrorSessionHost.cs",
+          "line": 248
+        }
+      ],
+      "acceptance": "A delayed old connection-ID release cannot remove a new trusted session admitted on that reused ID; replacement requests and later exactly-once world/resource cleanup survive.",
+      "proofPlan": [
+        "Use the real world/session OfflineMirror fixture with a later peer listener that replaces the transport object and admits a fresh session at the same ID.",
+        "Assert old/new player, identity, pending requests, signals and chat cleanup independently; include teardown-generation reentry controls."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAIMirror/Runtime/MirrorNetworkBridge.cs",
+        "Assets/CoreAIMirror/Runtime/CoreAiMirrorSessionHost.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "outcomes": {
+            "Passed": 9
+          },
+          "establishes": "Generation-aware offline bridge/session fixtures; real world/player/resource/chat teardown and live transport remain separate acceptance.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAIMirror/Runtime/MirrorNetworkBridge.cs": "dd37e04b1ce5a6fe76434666f967d00d7db947e7401a5fd17814f4a3a1b9492e",
+        "Assets/CoreAIMirror/Runtime/CoreAiMirrorSessionHost.cs": "0fa494da2af3a56783e189219ab2756ab017e7af89bf8095cd7f445d960a8afd"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Net.Mirror.Tests.MirrorBridgeRulesEditModeTests.NET001_BindingRelease_CapturedCompanionSurvivesLegacyDisposalAndFailures",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Net.Mirror.Tests.MirrorBridgeRulesEditModeTests.NET001_Disconnect_IdenticalPeerReplacementKeepsItsGenerationAndRequests",
+          "passedCases": 2
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Net.Mirror.Tests.MirrorBridgeRulesEditModeTests.NET001_Disconnect_ReentrantReplacementReleaseNotifiesBothGenerations",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Net.Mirror.Tests.MirrorSessionHostEditModeTests.PeerDisconnect_ReusedOverrideReplacementSurvivesBothListenerOrders",
+          "passedCases": 4
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+          "test": "CoreAI.Net.Mirror.Tests.MirrorSessionHostEditModeTests.PeerDisconnect_SameIdReplacement_SurvivesDelayedBindingRelease",
+          "passedCases": 1
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 9,
+        "outcomes": {
+          "Passed": 9
+        },
+        "methodsNotInThisSelection": [],
+        "scope": "Every mapped EditMode method is present and Passed in zero-failure full2; root final acceptance still pending explicit decision."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 9,
+          "outcomes": {
+            "Passed": 9
+          },
+          "methodsNotInThisSelection": [],
+          "scope": "Every mapped EditMode method is present and all observed rows Passed; containing full selection FAILED14 and root final acceptance remains pending."
+        }
+      ]
+    },
+    {
+      "id": "PR-BENCH-001",
+      "priority": "P2",
+      "title": "Resetting turn activity makes a fresh continuation inherit the scenario's inactivity age",
+      "group": "12",
+      "report": "dev-docs/pr-review-2026-10-25/12-benchmark.md",
+      "module": "Benchmark",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks/GameCreationBenchmarkHarness.cs",
+          "line": 501
+        }
+      ],
+      "acceptance": "A fresh accepted continuation uses a turn-local inactivity age instead of prior scenario/tool age, retaining Model deadline attribution below the configured stall threshold.",
+      "proofPlan": [
+        "Use a controlled two-turn timeline: early first-turn tool and late activity, then a quiet continuation shorter than the stall threshold at the model deadline; assert Model/no environment retry.",
+        "Add a genuinely over-threshold continuation and sealed/late-callback controls without a long real-provider run."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks/GameCreationBenchmarkHarness.cs"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "named_regressions_passed_in_saved_receipt",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "saved_regression_receipt",
+          "path": "artifacts/pr-review-20261025/unity-repair-play1.xml",
+          "outcomes": {
+            "Passed": 2
+          },
+          "establishes": "Controlled continuation timing below/above threshold. Benchmark fixture green; containing PlayMode selection has an unrelated failure.",
+          "doesNotEstablish": "Final root acceptance, current full-suite green, manual input/visual, live provider or built-player acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks/GameCreationBenchmarkHarness.cs": "2c35b89d864fee5a62cb4512f3429cba4f0e50dc1e75d699753e2f3e41a85098"
+      },
+      "regressionMap": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-play1.xml",
+          "test": "CoreAI.Tests.PlayMode.Benchmarks.GameCreationBenchmarkPlayModeTests.ProviderInactivityGap_FreshQuietContinuationUsesCurrentTurnStart",
+          "passedCases": 1
+        },
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-repair-play1.xml",
+          "test": "CoreAI.Tests.PlayMode.Benchmarks.GameCreationBenchmarkPlayModeTests.ProviderInactivityGap_QuietContinuationBeyondThresholdIsEnvironment",
+          "passedCases": 1
+        }
+      ],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "observedRows": 0,
+        "outcomes": {},
+        "methodsNotInThisSelection": [
+          "ProviderInactivityGap_FreshQuietContinuationUsesCurrentTurnStart",
+          "ProviderInactivityGap_QuietContinuationBeyondThresholdIsEnvironment"
+        ],
+        "scope": "Benchmark methods are PlayMode-only; current hermetic receipt pending."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "observedRows": 0,
+          "outcomes": {},
+          "methodsNotInThisSelection": [
+            "ProviderInactivityGap_FreshQuietContinuationUsesCurrentTurnStart",
+            "ProviderInactivityGap_QuietContinuationBeyondThresholdIsEnvironment"
+          ],
+          "scope": "Benchmark regressions are PlayMode-only and expected outside EditMode."
+        }
+      ]
+    },
+    {
+      "id": "PR-14-001",
+      "priority": "P2",
+      "title": "Distinguish the factory's legacy chat interface from the actor-aware chat service",
+      "group": "14",
+      "report": "dev-docs/pr-review-2026-10-25/14-docs-packages.md",
+      "module": "Documentation",
+      "sourceAnchors": [
+        {
+          "path": "Assets/CoreAiUnity/README.md",
+          "line": 14
+        },
+        {
+          "path": "Docs/CoreAI/MULTIPLAYER_SESSIONS.md",
+          "line": 91
+        }
+      ],
+      "acceptance": "Entry-point/session guidance distinguishes factory-returned legacy IInGameLlmChatService from actor-aware CoreAiChatService and uses only supported public operations or an explicit host adapter.",
+      "proofPlan": [
+        "Prepare and compile two truthful host examples: legacy factory chat with supported methods/caller token, and orchestration chat with explicit actor request/history/clear/stop.",
+        "Check the documentation against those examples without expanding public APIs merely to justify inaccurate prose."
+      ],
+      "sourcePaths": [
+        "Assets/CoreAiUnity/README.md",
+        "Docs/CoreAI/MULTIPLAYER_SESSIONS.md"
+      ],
+      "sourceReviewStatus": "repair_source_reviewed_pending_root_adjudication",
+      "rootStatus": "awaiting_root_final_acceptance",
+      "implementationStatus": "implemented_in_working_tree",
+      "regressionStatus": "documentation_reviewed_no_direct_runtime_case",
+      "closureStatus": "repaired_pending_root_acceptance",
+      "evidence": [
+        {
+          "kind": "documentation_reconciliation",
+          "paths": [
+            "Assets/CoreAiUnity/README.md",
+            "Docs/CoreAI/MULTIPLAYER_SESSIONS.md",
+            "Assets/CoreAiUnity/Tests/EditMode/MultiplayerDocumentationCompileExamples.cs"
+          ],
+          "establishes": "Usage guidance separates legacy factory chat from actor-aware orchestration; two matching compile examples exist in the Unity EditMode assembly.",
+          "doesNotEstablish": "No direct PR-14 runtime case; no claim that 500 tests include a PR-14 runtime test or that source review alone is final root acceptance."
+        }
+      ],
+      "currentSourceSha256": {
+        "Assets/CoreAiUnity/README.md": "ef0b3fe943b2b878b27d01a9fa3829438ba254babbcd6245d7a0a3a7453e86fa",
+        "Docs/CoreAI/MULTIPLAYER_SESSIONS.md": "fb54fc8446500d2cf02737a520123ba19804cecc7a4cfcceb87ab300af56d03a"
+      },
+      "regressionMap": [],
+      "latestFullEditModeObservation": {
+        "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+        "scope": "Documentation/compile examples, no direct runtime case."
+      },
+      "integratedEditModeHistory": [
+        {
+          "receipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+          "scope": "Documentation-only; no direct runtime case. Compile examples remain part of the compiled test assembly."
+        }
+      ]
+    }
+  ],
+  "trackingModel": {
+    "model": "opencode/beam-free",
+    "effortRequested": "max",
+    "effectiveModelSideEffort": "unknown"
+  },
+  "expandedDemoAcceptanceGate": {
+    "status": "pending",
+    "supersedes": "prior exclusion of demo/vendor repairs",
+    "requirements": [
+      "Manual PlayMode exercised across all demo scenes; defects fixed",
+      "Agent-driven mod create/edit exercised; defects fixed",
+      "Integrated regression receipt green",
+      "Demo branch pushed only after verified fixes and documentation",
+      "Promotion to main only after demo push",
+      "Published v7.54.0 preserved; no tag mutation"
+    ]
+  },
+  "acceptedFindingsCount": 21,
+  "acceptedFindingIds": [
+    "PR-EXEC-001",
+    "PR-MEM-001",
+    "PR-MEM-002",
+    "PR-LLM-001",
+    "PR-HOST-001",
+    "PR-HOST-002",
+    "PR-AUD-001",
+    "PR-AUD-002",
+    "PR-MODS-001",
+    "PR-MODS-002",
+    "PR-MODS-003",
+    "PR-RBX-001",
+    "PR-08-001",
+    "PR-08-002",
+    "PR-09-001",
+    "PR-09-002",
+    "PR-09-003",
+    "PR-MCP-001",
+    "PR-NET-001",
+    "PR-BENCH-001",
+    "PR-14-001"
+  ],
+  "historicalPublicationConstraints": {
+    "pushOnlyBranch": "demo",
+    "updateMain": false,
+    "createTag": false,
+    "createRelease": false,
+    "coauthorOrAiTrailers": false
+  },
+  "historicalRepairTracking": {
+    "trackingUpdatedOn": "2026-10-26",
+    "rootExecution": {
+      "status": "source_repairs_and_saved_regressions_reconciled_pending_root_acceptance",
+      "preparedFixturesImported": 3,
+      "authoredCaseInventory": 36,
+      "caseInventoryIsExecutionProof": false,
+      "note": "All 21 accepted finding IDs are preserved. Implemented source and named saved regressions are recorded below; no final root acceptance or current full Unity green is inferred. Original red aliases/counts remain historical evidence.",
+      "codeRepairsAcceptedGreen": 0,
+      "initialRegressionReceipt": "artifacts/pr-review-20261025/initial-regression-red3-receipt.json",
+      "initialRegressionSummary": "36 authored/executed initial rows: 28 Failed / 8 Passed; red1/red2 failed compilation. Later green targeted rows are not a new initial-red inventory.",
+      "reconciledBy": {
+        "model": "gpt-6.1-sol",
+        "reasoningEffort": "max",
+        "date": "2026-10-27"
+      }
+    },
+    "proofLimits": "Source findings and limited primitive/language probes do not close fixes. Product regressions, integrated checks and publication remain pending root evidence.",
+    "trackingModel": {
+      "model": "opencode/beam-free",
+      "effortRequested": "max",
+      "effectiveModelSideEffort": "unknown"
+    }
+  },
+  "savedReceiptInventory": [
+    {
+      "path": "artifacts/pr-review-20261025/unity-repair-focused5.xml",
+      "caseRows": 500,
+      "outcomes": {
+        "Passed": 500
+      },
+      "sha256": "adaf52a54dcc9d59f76bfb0cfdc4a7f6bfa8b23d1ceccea93a79cce40c06b526"
+    },
+    {
+      "path": "artifacts/pr-review-20261025/unity-editor-source-batch1.xml",
+      "caseRows": 57,
+      "outcomes": {
+        "Passed": 56,
+        "Failed": 1
+      },
+      "sha256": "687b1fed3c3e21ab43ea560b6f17f2ada5f96029ce08545522fa75a4cd1531a5"
+    },
+    {
+      "path": "artifacts/pr-review-20261025/unity-repair-play1.xml",
+      "caseRows": 393,
+      "outcomes": {
+        "Passed": 390,
+        "Skipped": 2,
+        "Failed": 1
+      },
+      "sha256": "ac2cc111a5966556c5a4c8a53cc89ec5b1fc2ff005565c847dd840d50452ed23"
+    },
+    {
+      "path": "artifacts/pr-review-20261025/unity-repair-console-play2.xml",
+      "caseRows": 2,
+      "outcomes": {
+        "Passed": 2
+      },
+      "sha256": "cc9c80e84867f31bd82350f3ae9f7639b85f724023985d820f31106ae1de8cc6"
+    },
+    {
+      "path": "artifacts/completion-20261027/core-final/core-final1.trx",
+      "caseRows": 2957,
+      "outcomes": {
+        "Passed": 2954,
+        "NotExecuted": 3
+      },
+      "sha256": "adc00ed346778dd8112627a3034f2b8aa086db7694c77cab14c9f531ed95ad59"
+    },
+    {
+      "path": "artifacts/editor-integration-20261026/lua-full-results1/lua-editor-full1.trx",
+      "caseRows": 2003,
+      "outcomes": {
+        "Passed": 1962,
+        "NotExecuted": 41
+      },
+      "sha256": "ca7aaee122a3d0dc17a9b1f71f99b551792fcb8933c5a3a6d38449b184d76168"
+    },
+    {
+      "path": "artifacts/completion-20261027/core-perf/core-perf-green-debug1.trx",
+      "caseRows": 111,
+      "outcomes": {
+        "Passed": 111
+      },
+      "sha256": "48b8d0a3e5b7de297432da8f17d3be1a9bc381afc8a6195ae0297ce3fdf8f409"
+    },
+    {
+      "path": "artifacts/completion-20261027/core-perf/core-perf-green-release1.trx",
+      "caseRows": 111,
+      "outcomes": {
+        "Passed": 111
+      },
+      "sha256": "f32b642d803e3eb25c99cc9b13cd2cf7f4877372a0e9c8148404eb99d93bb2fe"
+    },
+    {
+      "path": "artifacts/completion-20261027/core-results/core-completion1.trx",
+      "caseRows": 2955,
+      "outcomes": {
+        "Passed": 2951,
+        "Failed": 1,
+        "NotExecuted": 3
+      },
+      "sha256": "72a6056df367a7f35a89984c71f10eda10082bf4ca50c141b4f945f7f4f6a965"
+    },
+    {
+      "path": "artifacts/pr-review-20261025/initial-regression-red3.xml",
+      "caseRows": 36,
+      "outcomes": {
+        "Failed": 28,
+        "Passed": 8
+      },
+      "sha256": "5d6fa61b57c8849d1c6fc3148089abd91af75e258c91d7a412fb94b4ca30a73b"
+    },
+    {
+      "path": "artifacts/pr-review-20261025/unity-completion-focused2.xml",
+      "caseRows": 99,
+      "outcomes": {
+        "Passed": 92,
+        "Skipped": 4,
+        "Failed": 3
+      },
+      "sha256": "0d2a554a20629c1dfcb0c5e01cf8ec60220e85a41bdcf09aa95df03f88426060"
+    },
+    {
+      "path": "artifacts/pr-review-20261025/unity-openrouter-direct1.xml",
+      "caseRows": 1,
+      "outcomes": {
+        "Passed": 1
+      },
+      "sha256": "edde6235510d60c8373e8b26831e09931b2861b6b5bc061a815bcf6d1c2e2d05"
+    },
+    {
+      "path": "artifacts/pr-review-20261025/unity-live-storage1.xml",
+      "caseRows": 1,
+      "outcomes": {
+        "Passed": 1
+      },
+      "sha256": "653531e798fbc72f21d7e8c74a21fe61d27c876149de151e13cba243672d4bd4"
+    },
+    {
+      "path": "artifacts/pr-review-20261025/unity-openrouter-hub2.xml",
+      "caseRows": 1,
+      "outcomes": {
+        "Passed": 1
+      },
+      "sha256": "883f69aa39508be2e7a9b21bcd99f13fd23b09b5020a8c180c234ae26f6c1166"
+    },
+    {
+      "path": "artifacts/pr-review-20261025/unity-openrouter-demos1.xml",
+      "caseRows": 18,
+      "outcomes": {
+        "Failed": 5,
+        "Passed": 11,
+        "Skipped": 2
+      },
+      "sha256": "b4d78fc2324d8d450645d5b11be6dddcaed55ae6bde6d878a1cd81f9d3ce3f59"
+    },
+    {
+      "path": "artifacts/pr-review-20261025/unity-openrouter-repair1.xml",
+      "caseRows": 5,
+      "outcomes": {
+        "Failed": 2,
+        "Passed": 3
+      },
+      "sha256": "077f3f6ce5188d521c8b107a385d91cb297cc849e7ca10fc227ba6ab3865f284"
+    },
+    {
+      "path": "artifacts/pr-review-20261025/unity-completion-focused3.xml",
+      "caseRows": 154,
+      "outcomes": {
+        "Passed": 145,
+        "Skipped": 4,
+        "Failed": 5
+      },
+      "sha256": "e52499ea383dd8949572f86d5db2e25d0dbc6e03aab368c9423fb34d18ff3dc9"
+    },
+    {
+      "path": "artifacts/completion-20261027/core-final/core-final2.trx",
+      "caseRows": 2957,
+      "outcomes": {
+        "Passed": 2954,
+        "NotExecuted": 3
+      },
+      "sha256": "a5c1faa98ce4d603ec69e93a5db69f1d79d8f8ce2fbc55fafe48679d79e722c4"
+    },
+    {
+      "path": "artifacts/completion-20261027/lua-final/lua-final2.trx",
+      "caseRows": 2003,
+      "outcomes": {
+        "Passed": 1962,
+        "NotExecuted": 41
+      },
+      "sha256": "0501d8ae861034635b53b06892f5924e04975f2eaeb6a1dc4cfde13f86cf60b2"
+    },
+    {
+      "path": "artifacts/completion-20261027/analyzers-final/analyzers-final1.trx",
+      "caseRows": 8,
+      "outcomes": {
+        "Passed": 8
+      },
+      "sha256": "06e9435da37805be300f854b7729ac4ff24a9004e817dada863e3b39e5d2e61e"
+    },
+    {
+      "path": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+      "caseRows": 8268,
+      "outcomes": {
+        "Passed": 8239,
+        "Skipped": 15,
+        "Failed": 14
+      },
+      "sha256": "8cf7604bae0df28feab0c50a6d828b0d5c34a4b544cf342a4d08c107624ff604"
+    },
+    {
+      "path": "artifacts/completion-20261027/core-final/core-final3.trx",
+      "caseRows": 2957,
+      "outcomes": {
+        "Passed": 2954,
+        "NotExecuted": 3
+      },
+      "sha256": "c8f078e7e65e2df957ace74b726bfde27ca12e98334dc303c8e5c1a2c2e6285c"
+    },
+    {
+      "path": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+      "caseRows": 8273,
+      "outcomes": {
+        "Passed": 8258,
+        "Skipped": 15
+      },
+      "sha256": "58cb5a2ae7bed90ebd0df627e6e4a901cfb58d149b1b973642ebb66a75d28725"
+    }
+  ],
+  "newFeatureGates": {
+    "codeEditor": "Full2 native EditMode8273=8258Passed15Skipped0Failed; UI20/20, typing2/2, grouped-Hub/language4/4, HubSave22/22, realVM adapter22/22, sync guard3/3 and WebGL primitive guard10/10Passed. No CU/browser/player/manual acceptance inferred.",
+    "gatewayClient": "Latest portable Core3=2954P3NotExecuted0F; prior named native composition cleanup passes retained. HttpClient transport now entirely excluded from WebGL player under source-approved guard correction; full2/browser/player gates separate.",
+    "luaExamplesAndBindings": "Eight opt-in examples and ModdableUnits provider integration exist; latest native ModdableUnitsGameplayBindings fixture 13/13 Passed. Actual scene wiring, interactive behavior and real model create/edit still require their own native/live/manual evidence.",
+    "dependencies": "Manifest/lock and restored managed DLL readback show applied versions; early integration receipt JSON still records pre-restore pending state. Preserve ABI ceilings and use later compile/runtime evidence.",
+    "npcSystem": "Cancelled; ignored staging is not an installed feature.",
+    "publication": "Root owns version/changelog/PLAN/Git. Demo/main/release have not been published; required native/UI/live/manual acceptance still pending. Published7.54.0 remains immutable.",
+    "activeWorldInvocationBudget": "Latest native focused2: ActiveWorldInvocationBudgetEditModeTests 9/9 Passed and CodeEditorRuntimeEditModeTests 18/18 Passed; 27 scoped native facade/adapter cases green. Containing 99-case selection is 92 Passed / 3 Failed / 4 Skipped.",
+    "qwenReadiness": "QwenDemoReadinessBackendEditModeTests 10/10 Passed in native focused2; configuration classifier tests, not a real HTTP/provider/browser scene turn."
+  },
+  "latestNativeFocused": {
+    "path": "artifacts/pr-review-20261025/unity-completion-focused3.xml",
+    "caseRows": 154,
+    "outcomes": {
+      "Passed": 145,
+      "Skipped": 4,
+      "Failed": 5
+    },
+    "sha256": "e52499ea383dd8949572f86d5db2e25d0dbc6e03aab368c9423fb34d18ff3dc9",
+    "failedTests": [
+      "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests.ActualGroupedModsHub_EscapeDismissesCompletionBeforeCollapsing",
+      "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests.ActualGroupedModsHub_EscapeDismissesGoto_LogsAndDestroyedPagesRemainUnhandled",
+      "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.CompletionKeyPair_DoesNotSuppressTabAfterDocumentOrPanelChange",
+      "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeBrackets_AndCompletionUseBoundedPopup",
+      "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.ProgrammaticSelectionAfterLayout_DoesNotOverrideFollowingNativeNavigation"
+    ],
+    "uiTypingSelection": {
+      "caseRows": 20,
+      "outcomes": {
+        "Passed": 17,
+        "Failed": 3
+      },
+      "tests": [
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.AutoCloseTracker_ValidatesInsertionHintsAndPreservesLegacyChanges",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.CompletionKeyPair_DoesNotSuppressTabAfterDocumentOrPanelChange",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Failed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.DetachReattachAndDispose_InvalidatePendingDocumentWork",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.DocumentReplacement_InvalidatesUnfocusedSelectionRequest",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.HighlightEventsRemainSiblingsAndCannotReplaceRawSource",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.LanguageDropdown_PreservesSeparateDraftSelectionAndUndo",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.LargeSource_UsesBoundedPlainTextAndRestoresDecoration",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeBrackets_AndCompletionUseBoundedPopup",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Failed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeEnter_UsesLuaIndentAndSingleUndoRedo",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeOppositeQuotesAndBrackets_StayLiteralInsideStrings",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeQuoteClosers_SkipTrackedSingleAndDoubleQuotes",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeQuoteEscapes_InsertOddBackslashQuotesAndSkipEvenBackslashClosers",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeTab_AndLuaLineCommentAreReversible",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeTrackedParenthesisAfterQuoteCloser_UsesCurrentCodeContext",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeTrackedQuotesMovedIntoComments_RemainLiteral",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeTrackedQuotesMovedIntoLuaLongLiterals_RemainLiteral",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.ProgrammaticSelectionAfterLayout_DoesNotOverrideFollowingNativeNavigation",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Failed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.UnfocusedSelectionAfterReattach_PreservesRangeAndDropdownFocus",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.HubModEditorTypingRegressionTests.AttachedPaste_UnicodeMarkupAndBoundedLargeDraftStayRawWithoutExecution",
+          "fixture": "CoreAI.Tests.EditMode.HubModEditorTypingRegressionTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.HubModEditorTypingRegressionTests.AttachedTyping_AndCaretKeepRawLuaAndNeverRunOrPersist",
+          "fixture": "CoreAI.Tests.EditMode.HubModEditorTypingRegressionTests",
+          "outcome": "Passed"
+        }
+      ]
+    },
+    "groupedHubAndLanguageSelection": {
+      "caseRows": 4,
+      "outcomes": {
+        "Failed": 2,
+        "Passed": 2
+      },
+      "tests": [
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests.ActualGroupedModsHub_EscapeDismissesCompletionBeforeCollapsing",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests",
+          "outcome": "Failed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests.ActualGroupedModsHub_EscapeDismissesGoto_LogsAndDestroyedPagesRemainUnhandled",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests",
+          "outcome": "Failed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests.NativeLuaEnter_InsideLongStringPreservesLiteralAndSingleUndoRedo",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests.NativePairs_UseLuaLengthOperatorAndRetainPythonCommentPolicy",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests",
+          "outcome": "Passed"
+        }
+      ]
+    },
+    "scope": "Native focused3 FAILED: 145 Passed / 5 Failed / 4 Skipped; selected UI/typing leg20=17P3F; separate language/actual-grouped-Hub leg4=2P2F. Compilation reached tests. No full native/UI pass is inferred.",
+    "supersededByFullEditModeReceipt": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml"
+  },
+  "nativeFocusedHistory": [
+    {
+      "path": "artifacts/pr-review-20261025/unity-completion-focused2.xml",
+      "caseRows": 99,
+      "outcomes": {
+        "Passed": 92,
+        "Skipped": 4,
+        "Failed": 3
+      },
+      "sha256": "0d2a554a20629c1dfcb0c5e01cf8ec60220e85a41bdcf09aa95df03f88426060",
+      "processExitCode": 2,
+      "failedTests": [
+        "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.CompletionKeyPair_DoesNotSuppressTabAfterDocumentOrPanelChange",
+        "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.DetachReattachAndDispose_InvalidatePendingDocumentWork",
+        "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeBrackets_AndCompletionUseBoundedPopup"
+      ],
+      "passedFixtureCases": {
+        "CodeEditorContractsEditModeTests": 11,
+        "ActiveWorldInvocationBudgetEditModeTests": 9,
+        "CodeEditorRuntimeEditModeTests": 18,
+        "HubModEditorTypingRegressionTests": 2,
+        "ModdableUnitsGameplayBindingsEditModeTests": 13,
+        "QwenDemoReadinessBackendEditModeTests": 10,
+        "CoreHotPathAuditEditModeTests": 22,
+        "CodeEditorUiEditModeTests": 7
+      },
+      "skippedCases": 4,
+      "skipReason": "Native allocation accounting is asserted on the portable .NET leg; all four are explicitly Skipped, not Passed.",
+      "interpretation": "Native compilation reached tests. Focused selection FAILED with three editor input/focus/closer failures; passing subfixtures do not establish full current Unity green."
+    }
+  ],
+  "latestCorePortable": {
+    "path": "artifacts/completion-20261027/core-final/core-final3.trx",
+    "caseRows": 2957,
+    "outcomes": {
+      "Passed": 2954,
+      "NotExecuted": 3
+    },
+    "sha256": "c8f078e7e65e2df957ace74b726bfde27ca12e98334dc303c8e5c1a2c2e6285c",
+    "scope": "Actual source-final Core3 TRX:2954 Passed/3 NotExecuted/0 Failed. Native, WebGL and production/player gates separate."
+  },
+  "promotedSourceRepairSnapshot": {
+    "receipt": "artifacts/completion-20261027/editor-promotion.json",
+    "receiptSha256": "da9e0dbf3a4d6a854c5f95450410ab2295c8e2543770887bc140ec845aa3fb57",
+    "approvedManifestSha256": "0562cb77c0e29c90f097785cdf841c29d129af134750e8dd3bb6c4894e1f12a1",
+    "paths": 12,
+    "sourceReview": "dev-docs/completion-2026-10-27/CANDIDATE_REVIEW.md",
+    "readback": "All twelve paths matched at the initial promotion readback. Three later follow-up editor/test corrections now differ; the promotion manifest is historical and does not certify those new bytes.",
+    "acceptance": "Source fixes implemented and peer-reviewed; runtime/native/root acceptance is separate.",
+    "followUpChangesPendingDeltaReviewAndExecution": [
+      {
+        "path": "Assets/CoreAIMods/Runtime/HubIntegration/CodeEditing/CodeEditorView.cs",
+        "promotionSha256": "1c28689e0279ce3537484cc3b68c4d93238aba47a85a392dbe6de417b5120b35",
+        "currentReadbackSha256": "e9b7de6ffe692f654435fa079570e35061d9360b18f929f5f6f52cd865649d01"
+      },
+      {
+        "path": "Assets/CoreAIMods/Tests/EditMode/CodeEditorLanguageAndHubNativeEditModeTests.cs",
+        "promotionSha256": "b8924168128607c2b0a23958cc46cd4e3880a287fce0080ecf22020864a660bc",
+        "currentReadbackSha256": "822fb14b923857393c3efb196efc14f54fd6e35520e2bf4ab7db6ae7e232f9dc"
+      },
+      {
+        "path": "Assets/CoreAIMods/Tests/EditMode/CodeEditorUiEditModeTests.cs",
+        "promotionSha256": "0d18e2476d434dbcd7916f082fb1ad1553b434cddb325114bb004d0b00f6dc07",
+        "currentReadbackSha256": "aa831f0dccac72d83651df41c8a3584b62715cb1aa633ca9a98a266bbffd71ab"
+      }
+    ],
+    "followUpStatus": "Later editor/manager and guard/fixture deltas are independently source-approved in FINAL_SOURCE_REVIEW.md; original promotion hashes remain historical; current runtime/full2 acceptance pending."
+  },
+  "additionalSourceReviewFindings": [
+    {
+      "id": "UNITY-REVIEW-001",
+      "priority": "P2",
+      "origin": "pre-existing in touched registry disposal",
+      "implementationStatus": "source_fix_promoted_from_peer_approved_manifest",
+      "rootStatus": "pending_native_and_final_root_acceptance",
+      "receipt": "artifacts/pr-review-20261025/unity-completion-focused3.xml",
+      "testRows": [
+        {
+          "name": "CoreAI.Tests.EditMode.GatewayClientCompositionEditModeTests.RegistryDisposal_ThrowingActivationCallbackCannotSkipOtherCancellationsOrOwnedHostReleases",
+          "fixture": "CoreAI.Tests.EditMode.GatewayClientCompositionEditModeTests",
+          "outcome": "Passed"
+        }
+      ],
+      "scope": "Owned-host cancellation/release case Passed in focused3; final root acceptance pending.",
+      "currentNativeReceipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+      "nativeScope": "Applicable native regressions and guards Passed in full2; final root acceptance remains pending."
+    },
+    {
+      "id": "HUB-REVIEW-001",
+      "priority": "P2",
+      "origin": "actual editor/Hub integration",
+      "implementationStatus": "source_fix_promoted_from_peer_approved_manifest",
+      "rootStatus": "pending_native_and_final_root_acceptance",
+      "receipt": "artifacts/pr-review-20261025/unity-completion-focused3.xml",
+      "testRows": [
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests.ActualGroupedModsHub_EscapeDismissesCompletionBeforeCollapsing",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests",
+          "outcome": "Failed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests.ActualGroupedModsHub_EscapeDismissesGoto_LogsAndDestroyedPagesRemainUnhandled",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests",
+          "outcome": "Failed"
+        }
+      ],
+      "scope": "Two actual grouped-Hub cases Failed during setup with null editor source element; no successful dismissal/collapse assertion yet.",
+      "currentNativeReceipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+      "nativeScope": "Applicable native regressions and guards Passed in full2; final root acceptance remains pending."
+    },
+    {
+      "id": "EDITOR-REVIEW-001",
+      "priority": "P2",
+      "origin": "Lua Enter lexical context",
+      "implementationStatus": "source_fix_promoted_from_peer_approved_manifest",
+      "rootStatus": "pending_native_and_final_root_acceptance",
+      "receipt": "artifacts/pr-review-20261025/unity-completion-focused3.xml",
+      "testRows": [
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests.NativeLuaEnter_InsideLongStringPreservesLiteralAndSingleUndoRedo",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests",
+          "outcome": "Passed"
+        }
+      ],
+      "scope": "Native long-string Enter case and fifteen language-policy cases Passed in focused3; full editor gate remains failed.",
+      "currentNativeReceipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+      "nativeScope": "Applicable native regressions and guards Passed in full2; final root acceptance remains pending."
+    },
+    {
+      "id": "EDITOR-REVIEW-002",
+      "priority": "P3",
+      "origin": "Lua length-operator pairing context",
+      "implementationStatus": "source_fix_promoted_from_peer_approved_manifest",
+      "rootStatus": "pending_native_and_final_root_acceptance",
+      "receipt": "artifacts/pr-review-20261025/unity-completion-focused3.xml",
+      "testRows": [
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests.NativePairs_UseLuaLengthOperatorAndRetainPythonCommentPolicy",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorLanguageAndHubNativeEditModeTests",
+          "outcome": "Passed"
+        }
+      ],
+      "scope": "Native Lua/Python insertion case Passed in focused3; full editor gate remains failed.",
+      "currentNativeReceipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+      "nativeScope": "Applicable native regressions and guards Passed in full2; final root acceptance remains pending."
+    },
+    {
+      "id": "CANDIDATE-REVIEW-001",
+      "priority": "P2",
+      "origin": "remaining frozen-source quote type-over; not merge-introduced",
+      "implementationStatus": "source_fix_promoted_from_peer_approved_manifest",
+      "rootStatus": "pending_native_and_final_root_acceptance",
+      "receipt": "artifacts/pr-review-20261025/unity-completion-focused3.xml",
+      "testRows": [
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.AutoCloseTracker_ValidatesInsertionHintsAndPreservesLegacyChanges",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeOppositeQuotesAndBrackets_StayLiteralInsideStrings",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeQuoteClosers_SkipTrackedSingleAndDoubleQuotes",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeQuoteEscapes_InsertOddBackslashQuotesAndSkipEvenBackslashClosers",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeTrackedParenthesisAfterQuoteCloser_UsesCurrentCodeContext",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeTrackedQuotesMovedIntoComments_RemainLiteral",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        },
+        {
+          "name": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.NativeTrackedQuotesMovedIntoLuaLongLiterals_RemainLiteral",
+          "fixture": "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests",
+          "outcome": "Passed"
+        }
+      ],
+      "scope": "Quote/tracker fix is in the promoted manifest. Six quote/parenthesis/literal controls and the pure validated-insertion tracker case Passed; no overall native/UI green.",
+      "currentNativeReceipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+      "nativeScope": "Applicable native regressions and guards Passed in full2; final root acceptance remains pending."
+    },
+    {
+      "id": "EDITOR-REVIEW-003",
+      "priority": "P2",
+      "origin": "stale completion acceptance swallowed Tab/Enter after source/caret change",
+      "implementationStatus": "source_fix_present_and_independently_approved",
+      "rootStatus": "pending_current_runtime_and_final_root_acceptance",
+      "sourceReview": "dev-docs/completion-2026-10-27/FINAL_SOURCE_REVIEW.md",
+      "scope": "Source-approved completion acceptance result/fallback fix. Full1 native production behavior reaches Tab; two failed literal padding expectations are fixture defects corrected after full1, not new current runtime bugs.",
+      "currentNativeReceipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+      "nativeScope": "Applicable native regressions and guards Passed in full2; final root acceptance remains pending."
+    },
+    {
+      "id": "DEMO-REVIEW-001",
+      "priority": "P2",
+      "origin": "manager source-event/cache changes did not repaint actual rows",
+      "implementationStatus": "source_fix_present_and_independently_approved",
+      "rootStatus": "pending_current_runtime_and_final_root_acceptance",
+      "sourceReview": "dev-docs/completion-2026-10-27/FINAL_SOURCE_REVIEW.md",
+      "scope": "Source-approved event-driven repaint ordering. Current real Demo05/model-authoring rerun pending; prior failed real receipt remains negative history.",
+      "currentNativeReceipt": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+      "nativeScope": "Applicable editor/Hub/registry/source guard fixtures are all Passed in full2. Actual Demo05/model-authoring remains a separate pending PlayMode gate."
+    }
+  ],
+  "openRouterRuntimeEvidence": {
+    "providerPolicy": "All real API PlayMode calls use OpenRouter. No local inference or fallback may satisfy this gate.",
+    "receipts": [
+      {
+        "path": "artifacts/pr-review-20261025/unity-openrouter-direct1.xml",
+        "caseRows": 1,
+        "outcomes": {
+          "Passed": 1
+        },
+        "sha256": "edde6235510d60c8373e8b26831e09931b2861b6b5bc061a815bcf6d1c2e2d05",
+        "tests": [
+          {
+            "name": "CoreAI.Tests.PlayMode.MeaiLlmClientPlayModeTests.MeaiLlmClient_CreateHttp_ShouldCreateAndConnect",
+            "fixture": "CoreAI.Tests.PlayMode.MeaiLlmClientPlayModeTests",
+            "outcome": "Passed"
+          }
+        ]
+      },
+      {
+        "path": "artifacts/pr-review-20261025/unity-live-storage1.xml",
+        "caseRows": 1,
+        "outcomes": {
+          "Passed": 1
+        },
+        "sha256": "653531e798fbc72f21d7e8c74a21fe61d27c876149de151e13cba243672d4bd4",
+        "tests": [
+          {
+            "name": "CoreAI.Tests.PlayMode.PublishedDemoStorageRegistrationPlayModeTests.ExactSlotReplacement_PreservesFileStoreContractAndSingleton_WithoutOpeningDefaultStore",
+            "fixture": "CoreAI.Tests.PlayMode.PublishedDemoStorageRegistrationPlayModeTests",
+            "outcome": "Passed"
+          }
+        ]
+      },
+      {
+        "path": "artifacts/pr-review-20261025/unity-openrouter-hub2.xml",
+        "caseRows": 1,
+        "outcomes": {
+          "Passed": 1
+        },
+        "sha256": "883f69aa39508be2e7a9b21bcd99f13fd23b09b5020a8c180c234ae26f6c1166",
+        "tests": [
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo03_Hub_LiveChatStatisticsModsAndTranscript",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          }
+        ]
+      },
+      {
+        "path": "artifacts/pr-review-20261025/unity-openrouter-demos1.xml",
+        "caseRows": 18,
+        "outcomes": {
+          "Failed": 5,
+          "Passed": 11,
+          "Skipped": 2
+        },
+        "sha256": "b4d78fc2324d8d450645d5b11be6dddcaed55ae6bde6d878a1cd81f9d3ce3f59",
+        "tests": [
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiEditorSaveLivePlayModeTests.ActualProgrammer_ModelCreatesThenEditsOwnedMod_WithSavedSourceAndObservableLuaEffects",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiEditorSaveLivePlayModeTests",
+            "outcome": "Failed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo01_FullAccess_SelfTestTetrisAndLiveChat",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Failed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo02_GameplayServices_TourContactGravityAndLiveHost",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Failed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo03_Hub_LiveChatStatisticsModsAndTranscript",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo04_LiveMechanics_OwnedRuleChangesRealBattleAndRestores",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo05_ModsChat_ManagerDeactivatesAndActivatesOnlyOwnedMod",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Failed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo06_WaveAutoBattler_RealTicksReachOwnedObserver",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo07_LuaMods_ShippedEventAndOverrideUseActualButtons",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Failed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo08_MiniRpg_LiveChatAndManagerReturnToCamera",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Skipped"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo09_ModdableUnits_UniqueUnitsFightAndLiveHostResponds",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo10_MultiplayerFoundation_ProofAndPrivateLiveActorChat",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo11_OnlineAuthority_GrantRevokeAndLiveHost",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo12_ProceduralMaterials_SelectionViewSweepAndLiveHost",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Skipped"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo13_QwenGenie_HttpWishExecutesGoldToolAndSpendsCharge",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo14_QwenSpellcraft_HttpCastExecutesToolAndSpendsMana",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo15_Skills_RealModelCraftsAndAttacksThroughDemoAgent",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo16_WorldCommands_ActualSpawnDestroyAndLiveHost",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo17_StandaloneChat_RealTypedResultAndReopen",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          }
+        ]
+      },
+      {
+        "path": "artifacts/pr-review-20261025/unity-openrouter-repair1.xml",
+        "caseRows": 5,
+        "outcomes": {
+          "Failed": 2,
+          "Passed": 3
+        },
+        "sha256": "077f3f6ce5188d521c8b107a385d91cb297cc849e7ca10fc227ba6ab3865f284",
+        "tests": [
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiEditorSaveLivePlayModeTests.ActualProgrammer_ModelCreatesThenEditsOwnedMod_WithSavedSourceAndObservableLuaEffects",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiEditorSaveLivePlayModeTests",
+            "outcome": "Failed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo01_FullAccess_SelfTestTetrisAndLiveChat",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo02_GameplayServices_TourContactGravityAndLiveHost",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo05_ModsChat_ManagerDeactivatesAndActivatesOnlyOwnedMod",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Failed"
+          },
+          {
+            "name": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests.Demo07_LuaMods_ShippedEventAndOverrideUseActualButtons",
+            "fixture": "CoreAI.Tests.PlayMode.CoreAiPublishedDemosLivePlayModeTests",
+            "outcome": "Passed"
+          }
+        ]
+      }
+    ],
+    "currentLimits": "The initial18-case demo/model-authoring selection is11P5F2Skipped. Repair1 is3P2F; still failing actual model create/edit tool-discovery and ModsChat F9-manager row lookup. Three previously path-blocked scene cases pass after removal of redundant QA-only namespace; production path guards remain unchanged. Individual later positives do not rewrite the initial negative selection.",
+    "storageIsolation": "The helper isolates several exact public VContainer registration slots under a GUID-owned root, but the earlier runs did not isolate WorldStateManager. Its autosave overwrote the pre-existing default world_state.json; previous bytes are not recovered. Do not rerun until the manager is isolated before initialization. Earlier PostProcessScene/pre-Awake isolation plan was superseded.",
+    "independentPasses": "direct1=actual Meai HTTP client1/1P; live-storage1=genuine file-store singleton registration1/1P; hub2=actual Hub scene Chat/Statistics/Mods1/1P. These do not certify editor input or all scenes."
+  },
+  "interactiveAcceptance": {
+    "computerUse": "Unavailable in both root host and separate Codex CLI host; required Node REPL/Computer Use APIs absent. No alternative UI helper workaround was used.",
+    "capabilityReport": "C:/AI/work/coreai-completion-20261027/COMPUTER_CAPABILITY.md",
+    "miniRpgMovement": "User-deferred; NUnit Ignore remains explicit partial, not Passed.",
+    "proceduralMaterialsVisual": "User-deferred; NUnit Ignore remains explicit partial, not Passed.",
+    "codeEditorComputerUse": "Not performed/unknown. Native automated fixtures are separate from Computer Use.",
+    "publication": "No Git publication occurred. Main/release remain pending required native/UI/visual acceptance and root decision."
+  },
+  "latestLuaPortable": {
+    "path": "artifacts/completion-20261027/lua-final/lua-final2.trx",
+    "caseRows": 2003,
+    "outcomes": {
+      "Passed": 1962,
+      "NotExecuted": 41
+    },
+    "sha256": "0501d8ae861034635b53b06892f5924e04975f2eaeb6a1dc4cfde13f86cf60b2",
+    "scope": "Saved current portable Lua run; NotExecuted exclusions remain. Native/editor/player gates separate."
+  },
+  "latestAnalyzers": {
+    "path": "artifacts/completion-20261027/analyzers-final/analyzers-final1.trx",
+    "caseRows": 8,
+    "outcomes": {
+      "Passed": 8
+    },
+    "sha256": "06e9435da37805be300f854b7729ac4ff24a9004e817dada863e3b39e5d2e61e",
+    "scope": "Saved analyzer test run; not Unity scene or runtime acceptance."
+  },
+  "candidateVersion": {
+    "version": "7.55.0",
+    "branch": "demo",
+    "state": "candidate_only_not_published",
+    "rootAction": "Root ran python tools/bump_version.py 7.55.0. Readback confirms seven manifests/internal pins, McpServerInfo.Version, ROADMAP and DeveloperGuide footer.",
+    "publishedReference": "7.54.0 / bc3fd74f remains historical published baseline. No main promotion, new tag or release is established by this version bump."
+  },
+  "otherVerification": {
+    "pythonBenchmarkChart": {
+      "path": "artifacts/completion-20261027/benchmark-chart-final1.log",
+      "sha256": "bedf7dd2474d85ac8ac58773616aa9f6cdcaf75d50d477bf4cbe2dace11b76ae",
+      "observed": "6 named tests; Ran 6 tests; OK. Root reports exit 0."
+    },
+    "rawPositiveOptIn": {
+      "path": "artifacts/completion-20261027/positive-module-working1.log",
+      "sha256": "4164a9bbeb7f7e43ff6473714499ff77059108ab32f69073b700563a9a05a603",
+      "observed": "FAILED on non-UTF8 ignored Mirror-source scratch; clean final-tree export run pending."
+    },
+    "cleanPositiveOptIn": "Pending root run of unchanged tools/check_positive_module_opt_in.py against a curated clean final-tree export containing intended new files and intended baseline ProjectSettings. No threshold/tool exclusion change authorized or claimed.",
+    "fetchSseNode": {
+      "path": "artifacts/completion-20261027/fetch-sse-node-final1.log",
+      "sha256": "a97dffaf0f779dbef4c7c0a0b7ca444943881950d4b2bf72610101223482e418",
+      "observed": "ALL PASS",
+      "rootReportedExitCode": 0,
+      "scope": "Node source harness only; no browser/player proof."
+    },
+    "persistenceNode": {
+      "path": "artifacts/completion-20261027/persist-node-final1.log",
+      "sha256": "7872032b51eb1caee9a7fe539f240f4cad514a829f011a19e21f43038b8377e2",
+      "observed": "All 9 listed checks PASS",
+      "rootReportedExitCode": 0,
+      "scope": "Node source harness only; no browser/player proof."
+    },
+    "positiveModuleClean1": {
+      "path": "artifacts/completion-20261027/positive-module-clean1.log",
+      "sha256": "a4cce8b4ba565f64103b0a3141cc49d326fb5a137f1adc7a9efe696793ed1dda",
+      "observed": "PASS on root curated staged export1 before latest corrections; index833eafd...; final export refresh pending."
+    },
+    "versionClean1": {
+      "path": "artifacts/completion-20261027/version-clean1.log",
+      "sha256": "379caf840b1d9508685486475ab1216fc10e73ba8be53436d2cc67b6ba4e6595",
+      "observed": "Seven manifests and MCP const7.55.0 in export1; predates latest correction wave."
+    },
+    "consoleExampleFinal2": {
+      "path": "artifacts/completion-20261027/console-example-final2.log",
+      "sha256": "3c5eb08ead9f19b0d2227e409d5c931d3ca7f581ce36adc5baea3a059926d25f",
+      "observed": "Actual restore/build succeeded with zero warnings/errors; root reports exit0. Prior no-restore log used stale MEAI10.9 assets, not a product-source defect."
+    },
+    "consoleExampleFinal1": {
+      "path": "artifacts/completion-20261027/console-example-final1.log",
+      "sha256": "7e86b444645b8977d4f1edea45104c9974e297582f2d3e36bd8fcaeeb9f6cd5f",
+      "observed": "Negative stale no-restore assets/build history retained; not final product compilation."
+    },
+    "stagedSecretsFinal1": {
+      "path": "artifacts/completion-20261027/staged-secrets-final1.json",
+      "sha256": "e4d692936fd53f3d24ded61dc4f3c8f7ceae1dca95b6560dc96a025a7b841451",
+      "observed": "411 paths scanned, zero credential-pattern paths; staged snapshot before latest corrections."
+    }
+  },
+  "latestFullEditMode": {
+    "path": "artifacts/pr-review-20261025/unity-completion-edit-final2.xml",
+    "caseRows": 8273,
+    "outcomes": {
+      "Passed": 8258,
+      "Skipped": 15
+    },
+    "sha256": "58cb5a2ae7bed90ebd0df627e6e4a901cfb58d149b1b973642ebb66a75d28725",
+    "rootResultAttribute": "Skipped:Ignored",
+    "processExitCode": 0,
+    "fixtures": {
+      "CodeEditorUiEditModeTests": {
+        "caseRows": 20,
+        "outcomes": {
+          "Passed": 20
+        }
+      },
+      "CodeEditorLanguageAndHubNativeEditModeTests": {
+        "caseRows": 4,
+        "outcomes": {
+          "Passed": 4
+        }
+      },
+      "HubModEditorTypingRegressionTests": {
+        "caseRows": 2,
+        "outcomes": {
+          "Passed": 2
+        }
+      },
+      "HubModPagesRefreshEditModeTests": {
+        "caseRows": 22,
+        "outcomes": {
+          "Passed": 22
+        }
+      },
+      "CodeEditorRuntimeEditModeTests": {
+        "caseRows": 22,
+        "outcomes": {
+          "Passed": 22
+        }
+      },
+      "SynchronousAsyncAssertionDeadlockGuardEditModeTests": {
+        "caseRows": 3,
+        "outcomes": {
+          "Passed": 3
+        }
+      },
+      "WebGlUnsafeAsyncPrimitivesEditModeTests": {
+        "caseRows": 10,
+        "outcomes": {
+          "Passed": 10
+        }
+      },
+      "GatewayClientCompositionEditModeTests": {
+        "caseRows": 28,
+        "outcomes": {
+          "Passed": 28
+        }
+      }
+    },
+    "skippedTests": [
+      {
+        "test": "CoreAI.Core.Tests.EditMode.CoreHotPathAuditEditModeTests.QueuedOrchestrator_ParkedReader_AddsNoHeapTrafficPerChunk",
+        "reason": "Allocation accounting is asserted on the portable .NET leg of the suite."
+      },
+      {
+        "test": "CoreAI.Core.Tests.EditMode.CoreHotPathAuditEditModeTests.QueueWriter_AvailableCapacity_AllocatesNothingPerChunk(False)",
+        "reason": "Allocation accounting is asserted on the portable .NET leg of the suite."
+      },
+      {
+        "test": "CoreAI.Core.Tests.EditMode.CoreHotPathAuditEditModeTests.QueueWriter_AvailableCapacity_AllocatesNothingPerChunk(True)",
+        "reason": "Allocation accounting is asserted on the portable .NET leg of the suite."
+      },
+      {
+        "test": "CoreAI.Core.Tests.EditMode.CoreHotPathAuditEditModeTests.TimeoutDecorator_AsynchronousChunks_AddNoHeapTrafficPerChunk",
+        "reason": "Allocation accounting is asserted on the portable .NET leg of the suite."
+      },
+      {
+        "test": "CoreAI.Tests.EditMode.RbxApi.LiveCheck.RbxApi4BLiveCheckEditModeTests.Folder_Loot_With_Three_Coins",
+        "reason": "Live LM Studio 4B check — run manually; requires a local OpenAI-compatible endpoint."
+      },
+      {
+        "test": "CoreAI.Tests.EditMode.RbxApi.LiveCheck.RbxApi4BLiveCheckEditModeTests.Part_Door_Tagged_Interactive",
+        "reason": "Live LM Studio 4B check — run manually; requires a local OpenAI-compatible endpoint."
+      },
+      {
+        "test": "CoreAI.Tests.EditMode.RbxApi.LiveCheck.RbxApi4BLiveCheckEditModeTests.Report_Workspace_FullName_And_Neon_Value",
+        "reason": "Live LM Studio 4B check — run manually; requires a local OpenAI-compatible endpoint."
+      },
+      {
+        "test": "CoreAI.Tests.EditMode.RbxApi.Replication.GuardedReplicationFilterEditModeTests.TheMemberTranscription_MatchesTheLocalMirror_WhenItIsOnDisk",
+        "reason": "no local Roblox docs mirror on this machine; set ROBLOX_DOCS_MIRROR to its checkout root"
+      },
+      {
+        "test": "CoreAI.Tests.EditMode.RbxApi.Replication.GuardedReplicationFilterEditModeTests.TheMirrorTranscription_MatchesTheLocalMirror_WhenItIsOnDisk",
+        "reason": "no local Roblox docs mirror on this machine; set ROBLOX_DOCS_MIRROR to its checkout root"
+      },
+      {
+        "test": "CoreAI.Tests.EditMode.AiAttachmentEditModeTests.Allocation_PromptOnly_IsExactlyTheLegacyMessage",
+        "reason": "This runtime does not report per-thread allocations."
+      },
+      {
+        "test": "CoreAI.Tests.EditMode.AiAttachmentEditModeTests.Allocation_RepeatedRequestsOfOneTurn_DoNotReencodeTheImages",
+        "reason": "This runtime does not report per-thread allocations."
+      },
+      {
+        "test": "CoreAI.Tests.EditMode.AiAttachmentEditModeTests.Allocation_SeveralImages_NeverCopyTheImageBytes",
+        "reason": "This runtime does not report per-thread allocations."
+      },
+      {
+        "test": "CoreAI.Tests.EditMode.AiAttachmentEditModeTests.Allocation_TextFiles_AreWrittenOnceIntoTheFinalString",
+        "reason": "This runtime does not report per-thread allocations."
+      },
+      {
+        "test": "CoreAI.Tests.EditMode.AiAttachmentEditModeTests.Allocation_WireImagePart_IsOneDataUrlString",
+        "reason": "This runtime does not report per-thread allocations."
+      },
+      {
+        "test": "CoreAI.Tests.EditMode.SmartToolCallingChatClientEditModeTests.Allocation_LiftingATypedImage_NeverCopiesOrEncodesIt",
+        "reason": "This runtime does not report per-thread allocations."
+      }
+    ],
+    "skipGroups": {
+      "allocationAccountingUnavailableOrPortableOnly": 10,
+      "legacyLocal4BExplicitChecksExcludedUnderOpenRouterOnlyPolicy": 3,
+      "optionalLocalRobloxDocsMirrorAbsent": 2
+    },
+    "scope": "Source-final EditMode selection has zero Failed; all15 skips remain explicit. This is not built-player/browser/live-provider/manual proof or an automatic root acceptance decision."
+  },
+  "finalSourceDeltaApproval": {
+    "report": "dev-docs/completion-2026-10-27/FINAL_SOURCE_REVIEW.md",
+    "sourceFindingsTotal": 7,
+    "sourceHashesReadBack": [
+      {
+        "path": "Assets/CoreAIMods/Runtime/HubIntegration/CodeEditing/CodeEditorView.cs",
+        "sha256": "e9b7de6ffe692f654435fa079570e35061d9360b18f929f5f6f52cd865649d01"
+      },
+      {
+        "path": "Assets/CoreAIMods/Tests/EditMode/CodeEditorUiEditModeTests.cs",
+        "sha256": "69c6fa34c9489aaf71fc603ff2cc26b8acf901273197dceeb2f3f699e402bd6c"
+      },
+      {
+        "path": "Assets/CoreAIMods/Tests/EditMode/CodeEditorLanguageAndHubNativeEditModeTests.cs",
+        "sha256": "822fb14b923857393c3efb196efc14f54fd6e35520e2bf4ab7db6ae7e232f9dc"
+      },
+      {
+        "path": "Assets/CoreAI.Demos/LiveMechanicsMods/Scripts/LiveMechanicsModsChatPersistenceController.cs",
+        "sha256": "498b81a5b016d962e1b633f3c66c672286acb589066bbaf1051d80cac62abe6c"
+      },
+      {
+        "path": "Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/CoreAiEditorSaveLivePlayModeTests.cs",
+        "sha256": "cd24e58183778e51be1835a4f6da7473fb9813f0b53ba2b84cd7b0f5445c0cc6"
+      },
+      {
+        "path": "Assets/CoreAiUnity/Tests/PlayMode/LlmVerification/CoreAiPublishedDemosLivePlayModeTests.cs",
+        "sha256": "e23cc23163ac4e6a8634831db5382b280e0c7226c89f3fd1db197978e9fe7b97"
+      },
+      {
+        "path": "Assets/CoreAI/Runtime/Core/Features/Llm/Gateway/HttpClientGatewayTransport.cs",
+        "sha256": "9e09c16ed70d1b242fe3528adf8e2aeb30aa86b811bd8c8ce278d47a3977e21f"
+      },
+      {
+        "path": "Assets/CoreAI/Tests/EditMode/CodeEditorContractsEditModeTests.cs",
+        "sha256": "5a20627b0a047abb23c2336678c36b7fdc9f6ed3c2cf40a616fe265099c5e7a8"
+      },
+      {
+        "path": "Assets/CoreAIMods/Runtime/HubIntegration/HubModEditorPage.cs",
+        "sha256": "fc5f6c284ed1f178fdcbef6974c1df2d64056acc7f191481c751fbe214aec137"
+      },
+      {
+        "path": "Assets/CoreAIMods/Runtime/HubIntegration/CodeEditing/LuaCodePlaygroundRuntime.cs",
+        "sha256": "81c0b38bca083f66369aba12257438e080e814c36d05b120c78949d538f342ff"
+      },
+      {
+        "path": "Assets/CoreAIMods/Tests/EditMode/LuaSyntaxHighlighterEditModeTests.cs",
+        "sha256": "13bb274fbd8edf7ff5aa69a51776758489a50ca4e225e2ac432e6192a1af7e63"
+      },
+      {
+        "path": "Assets/CoreAIMods/Tests/EditMode/CodeEditorRuntimeEditModeTests.cs",
+        "sha256": "9fa855747727f463fc294017f744180fc0aaa4932bfac03f55cc610e84a954bd"
+      }
+    ],
+    "scope": "Independent source-only approval includes the two new runtime findings and seven-file guard/fixture correction wave. Root acceptance and full2/runtime results pending."
+  },
+  "guardAndFixtureCorrections": {
+    "reports": [
+      "dev-docs/completion-2026-10-27/WEBGL_GUARDS.md",
+      "dev-docs/completion-2026-10-27/HUB_SAVE_GUARDS.md"
+    ],
+    "sourceOnly": "HttpClient transport fully excluded from WebGL player; concrete synchronous Lua Run extracted, RunAsync compatibility retained; Hub uses Run; test context detached locally; positive save fakes explicitly budget-capable with real unsupported legacy negative; literal independent next-tab-stop expectations corrected. No guard exclusion/threshold change. Not counted as extra runtime findings."
+  },
+  "fullEditModeHistory": [
+    {
+      "path": "artifacts/pr-review-20261025/unity-completion-edit-final1.xml",
+      "caseRows": 8268,
+      "outcomes": {
+        "Passed": 8239,
+        "Skipped": 15,
+        "Failed": 14
+      },
+      "sha256": "8cf7604bae0df28feab0c50a6d828b0d5c34a4b544cf342a4d08c107624ff604",
+      "failedTests": [
+        "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.CompletionKeyPair_DoesNotSuppressTabAfterDocumentOrPanelChange",
+        "CoreAI.Tests.EditMode.CodeEditorUiEditModeTests.ExplicitSelection_ClosesOldCompletionBeforeNativeTab",
+        "CoreAI.Tests.EditMode.HubModPagesRefreshEditModeTests.ModEditor_ExternalEditsRequireAnExplicitOverwriteOfTheLatestReviewedSource",
+        "CoreAI.Tests.EditMode.HubModPagesRefreshEditModeTests.ModEditor_FailedOrUnconfirmedPersistenceKeepsTheDraftAndBackGuard_AndCanRetryItsOwnLiveChange(Failed)",
+        "CoreAI.Tests.EditMode.HubModPagesRefreshEditModeTests.ModEditor_FailedOrUnconfirmedPersistenceKeepsTheDraftAndBackGuard_AndCanRetryItsOwnLiveChange(Unconfirmed)",
+        "CoreAI.Tests.EditMode.HubModPagesRefreshEditModeTests.ModEditor_KeepObjectsToggle_DefaultsOff_PicksTheReloadMode_AndTheStatusSaysWhatWasCleaned",
+        "CoreAI.Tests.EditMode.HubModPagesRefreshEditModeTests.ModEditor_KeepObjectsToggle_IsOneHubPreference_ReadByEveryEditorAndWrittenOnChange",
+        "CoreAI.Tests.EditMode.HubModPagesRefreshEditModeTests.ModEditor_ThrownOrCancelledSaveAfterLiveMutationCanRetryWithoutAnOverwritePrompt(False)",
+        "CoreAI.Tests.EditMode.HubModPagesRefreshEditModeTests.ModEditor_ThrownOrCancelledSaveAfterLiveMutationCanRetryWithoutAnOverwritePrompt(True)",
+        "CoreAI.Tests.EditMode.HubModPagesRefreshEditModeTests.ModEditor_TwoEditorsCannotSilentlyReplaceEachOthersSavedDraft",
+        "CoreAI.Tests.EditMode.HubModPagesRefreshEditModeTests.ModEditor_UnacknowledgedSaveOfUnchangedSourceStillKeepsTheDraftDirty(Failed)",
+        "CoreAI.Tests.EditMode.HubModPagesRefreshEditModeTests.ModEditor_UnacknowledgedSaveOfUnchangedSourceStillKeepsTheDraftDirty(Unconfirmed)",
+        "CoreAI.Tests.EditMode.SynchronousAsyncAssertionDeadlockGuardEditModeTests.TestsUsingThrowsAsyncOrCatchAsync_HaveALocalSynchronizationContextDetach",
+        "CoreAI.Tests.EditMode.WebGlUnsafeAsyncPrimitivesEditModeTests.WebGlReachableCode_DoesNotUseAsyncPrimitivesThatAreDeadInWebGl"
+      ],
+      "uiFixture": {
+        "caseRows": 20,
+        "Passed": 18,
+        "Failed": 2
+      },
+      "groupedHubFixture": {
+        "caseRows": 4,
+        "Passed": 4
+      },
+      "typingFixture": {
+        "caseRows": 2,
+        "Passed": 2
+      },
+      "failureAdjudication": {
+        "incorrectTabFixtureExpectations": 2,
+        "legacyPositiveHubSaveFixturesWithoutBudgetCapability": 10,
+        "sourceGuards": 2
+      },
+      "sourceCorrectionScope": "All fourteen explained/corrected at source; independent final correction-wave approval recorded. These are not fourteen new runtime bugs. FullEditMode2 pending; never relabel full1 green."
+    }
+  ]
+}

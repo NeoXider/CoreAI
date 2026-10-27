@@ -21,6 +21,15 @@ namespace CoreAI.Ai.LuaCs
             bool bindInitialArguments = true, IExecutionBudget resumeBudget = null,
             bool propagateOriginalException = false, bool recyclable = false,
             bool resumableByHandle = false)
+            : this(ownerState, callable, bindInitialArguments, resumeBudget,
+                propagateOriginalException, recyclable, resumableByHandle, CancellationToken.None, null)
+        {
+        }
+
+        internal LuaCsRbxSchedulerCallable(IScriptState ownerState, object callable,
+            bool bindInitialArguments, IExecutionBudget resumeBudget,
+            bool propagateOriginalException, bool recyclable,
+            bool resumableByHandle, CancellationToken initialResumeCancellation, IExecutionBudget initialResumeBudget)
         {
             OwnerState = ownerState ?? throw new ArgumentNullException(nameof(ownerState));
             Callable = callable ?? throw new ArgumentNullException(nameof(callable));
@@ -29,6 +38,25 @@ namespace CoreAI.Ai.LuaCs
             PropagateOriginalException = propagateOriginalException;
             Recyclable = recyclable;
             ResumableByHandle = resumableByHandle;
+            _initialResumeCancellation = initialResumeCancellation;
+            _initialResumeBudget = initialResumeBudget;
+        }
+
+        private CancellationToken _initialResumeCancellation;
+        private IExecutionBudget _initialResumeBudget;
+
+        internal IExecutionBudget TakeInitialResumeBudget()
+        {
+            IExecutionBudget budget = _initialResumeBudget;
+            _initialResumeBudget = null;
+            return budget;
+        }
+
+        internal CancellationToken TakeInitialResumeCancellation()
+        {
+            CancellationToken token = _initialResumeCancellation;
+            _initialResumeCancellation = CancellationToken.None;
+            return token;
         }
 
         public IScriptState OwnerState { get; }
@@ -457,6 +485,19 @@ namespace CoreAI.Ai.LuaCs
         internal object CaptureChunk(IScriptState ownerState, string source,
             IExecutionBudget resumeBudget)
         {
+            return CaptureChunk(ownerState, source, resumeBudget, CancellationToken.None);
+        }
+
+        internal object CaptureChunk(IScriptState ownerState, string source,
+            IExecutionBudget resumeBudget, CancellationToken cancellationToken)
+        {
+            return CaptureChunk(ownerState, source, resumeBudget, cancellationToken, null);
+        }
+
+        internal object CaptureChunk(IScriptState ownerState, string source,
+            IExecutionBudget resumeBudget, CancellationToken cancellationToken, IExecutionBudget initialResumeBudget)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             if (ownerState == null)
             {
                 throw new ArgumentNullException(nameof(ownerState));
@@ -472,7 +513,8 @@ namespace CoreAI.Ai.LuaCs
             }
 
             return new LuaCsRbxSchedulerCallable(
-                ownerState, new LuaValue(closure), false, resumeBudget, true);
+                ownerState, new LuaValue(closure), false, resumeBudget, true, false, false,
+                cancellationToken, initialResumeBudget);
         }
 
         internal void PrepareWaitBindings(IScriptState ownerState)
@@ -690,6 +732,9 @@ namespace CoreAI.Ai.LuaCs
             }
 
             bool isInitialResume = _runner != null ? !_runnerArmed : _coroutine == null;
+            _resumeCancellation = isInitialResume
+                ? _launch.TakeInitialResumeCancellation() : CancellationToken.None;
+            _resumeBudgetOverride = isInitialResume ? _launch.TakeInitialResumeBudget() : null;
             // WHY only after a native yield: a scheduler wait reads its resume values through the
             // bridge's own hook, so handing them to coroutine.yield as well would only cost a copy.
             bool resumeValuesToYield = _parkedByNativeYield && !isInitialResume && _runner == null;
@@ -764,6 +809,8 @@ namespace CoreAI.Ai.LuaCs
             }
             finally
             {
+                _resumeCancellation = CancellationToken.None;
+                _resumeBudgetOverride = null;
                 if (IsDead) { CancelLifetime(); }
                 _resumeArguments = Array.Empty<object>();
                 _factory.Exit(this, previous);
@@ -779,8 +826,14 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        private CancellationToken _resumeCancellation;
+        private IExecutionBudget _resumeBudgetOverride;
+
         private ScriptResumeResult ResumeCore()
         {
+            if (_coroutine is LuaCsScriptCoroutine luaCoroutine)
+                return luaCoroutine.ResumeWithLimits(_resumeCancellation, _resumeBudgetOverride);
+            _resumeCancellation.ThrowIfCancellationRequested();
             return _coroutine.Resume();
         }
 

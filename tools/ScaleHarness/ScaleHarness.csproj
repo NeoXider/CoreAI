@@ -72,7 +72,7 @@
       <Private>true</Private>
     </Reference>
     <Reference Include="Microsoft.Bcl.TimeProvider">
-      <HintPath>../../Assets/Packages/Microsoft.Bcl.TimeProvider.8.0.0/lib/netstandard2.0/Microsoft.Bcl.TimeProvider.dll</HintPath>
+      <HintPath>../../Assets/Packages/Microsoft.Bcl.TimeProvider.8.0.1/lib/netstandard2.0/Microsoft.Bcl.TimeProvider.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Newtonsoft.Json">

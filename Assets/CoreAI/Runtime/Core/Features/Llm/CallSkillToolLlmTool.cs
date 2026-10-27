@@ -63,10 +63,103 @@ namespace CoreAI.Ai
         /// <summary>Binds declarative memory targets for one admitted role without changing a shared catalog.</summary>
         public static ILlmTool BindForRole(ILlmTool proxy, IAgentMemoryStore store, string roleId)
         {
-            if (!(proxy is CallSkillToolProxy skillProxy)) return proxy;
-            if (store == null) throw new ArgumentNullException(nameof(store));
-            if (string.IsNullOrWhiteSpace(roleId)) throw new ArgumentException("An admitted role id is required.", nameof(roleId));
-            return skillProxy.BindForRole(store, roleId.Trim());
+            if (!(proxy is CallSkillToolProxy) && !ReadSkillLlmTool.IsReadSkillProxy(proxy)) return proxy;
+            return BindProxy(proxy, new RoleBinding(store, roleId));
+        }
+
+        /// <summary>Binds one invocation's discovery and invocation proxies to the same role-local descriptors.</summary>
+        public static IReadOnlyList<ILlmTool> BindToolsForRole(IReadOnlyList<ILlmTool> tools,
+            IAgentMemoryStore store, string roleId)
+        {
+            if (tools == null || tools.Count == 0) return Array.Empty<ILlmTool>();
+            List<ILlmTool> bound = new(tools.Count);
+            RoleBinding binding = null;
+            foreach (ILlmTool tool in tools)
+            {
+                if (tool is CallSkillToolProxy || ReadSkillLlmTool.IsReadSkillProxy(tool))
+                {
+                    binding ??= new RoleBinding(store, roleId);
+                    bound.Add(BindProxy(tool, binding));
+                }
+                else
+                {
+                    bound.Add(tool);
+                }
+            }
+
+            return bound.AsReadOnly();
+        }
+
+        private static ILlmTool BindProxy(ILlmTool proxy, RoleBinding binding)
+        {
+            if (proxy is CallSkillToolProxy skillProxy)
+            {
+                binding.RequireRole();
+                return skillProxy.BindForRole(binding);
+            }
+
+            return ReadSkillLlmTool.BindForRole(proxy, binding);
+        }
+
+        /// <summary>Invocation-owned descriptor snapshots shared by paired skill proxies.</summary>
+        internal sealed class RoleBinding
+        {
+            private readonly IAgentMemoryStore _store;
+            private readonly string _roleId;
+            private readonly object _gate = new();
+            private readonly Dictionary<SkillSet, IReadOnlyList<SkillToolDescriptor>> _descriptors = new();
+            private AIFunction _memoryFunction;
+
+            internal RoleBinding(IAgentMemoryStore store, string roleId)
+            {
+                _store = store ?? throw new ArgumentNullException(nameof(store));
+                _roleId = roleId?.Trim();
+            }
+
+            internal void RequireRole()
+            {
+                if (string.IsNullOrWhiteSpace(_roleId))
+                    throw new ArgumentException("An admitted role id is required.", "roleId");
+            }
+
+            internal IReadOnlyList<SkillToolDescriptor> GetDescriptors(SkillSet skill)
+            {
+                if (skill == null) return Array.Empty<SkillToolDescriptor>();
+                lock (_gate)
+                {
+                    if (_descriptors.TryGetValue(skill, out IReadOnlyList<SkillToolDescriptor> cached)) return cached;
+                    List<SkillToolDescriptor> bound = new();
+                    foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildDescriptors(skill))
+                    {
+                        bound.Add(BindDescriptor(descriptor));
+                    }
+
+                    IReadOnlyList<SkillToolDescriptor> snapshot = bound.AsReadOnly();
+                    _descriptors.Add(skill, snapshot);
+                    return snapshot;
+                }
+            }
+
+            internal IEnumerable<SkillToolDescriptor> GetCatalogDescriptors(IReadOnlyList<SkillSet> skills)
+            {
+                foreach (SkillSet skill in skills)
+                {
+                    foreach (SkillToolDescriptor descriptor in GetDescriptors(skill)) yield return descriptor;
+                }
+            }
+
+            internal SkillToolDescriptor BindDescriptor(SkillToolDescriptor descriptor)
+            {
+                if (!(descriptor?.SourceTool is CoreAI.AgentMemory.MemoryLlmTool)) return descriptor;
+                lock (_gate)
+                {
+                    RequireRole();
+                    _memoryFunction ??= new MemoryTool(_store, _roleId).CreateAIFunction();
+                    if (ReferenceEquals(descriptor.Function, _memoryFunction)) return descriptor;
+                    return new SkillToolDescriptor(descriptor.Skill, descriptor.SourceTool, descriptor.Name,
+                        descriptor.Description, _memoryFunction.JsonSchema.ToString(), null, _memoryFunction);
+                }
+            }
         }
 
         /// <summary>
@@ -113,8 +206,8 @@ namespace CoreAI.Ai
             private readonly IReadOnlyCollection<string> _allowedToolNames;
 
             private readonly Func<IReadOnlyList<ILlmTool>> _directToolsProvider;
-            private readonly IAgentMemoryStore _memoryStore;
-            private readonly string _roleId;
+            private readonly RoleBinding _roleBinding;
+            private AIFunction _function;
 
             // WHY: When the backing list is a live MutableSkillCatalog (skill authoring), the tool map
             // follows the catalog so a tool exposed by a just-authored skill is immediately invocable.
@@ -143,18 +236,16 @@ namespace CoreAI.Ai
                 IReadOnlyList<SkillSet> skills,
                 IReadOnlyCollection<string> allowedToolNames,
                 Func<IReadOnlyList<ILlmTool>> directToolsProvider,
-                IAgentMemoryStore memoryStore = null,
-                string roleId = null)
+                RoleBinding roleBinding = null)
             {
                 if (skills == null) throw new ArgumentNullException(nameof(skills));
                 _liveCatalog = skills as MutableSkillCatalog;
                 _skills = _liveCatalog ?? (IReadOnlyList<SkillSet>)new List<SkillSet>(skills).AsReadOnly();
-                SkillSetToolResolver.ValidateCatalog(_skills);
+                if (roleBinding == null) SkillSetToolResolver.ValidateCatalog(_skills);
                 _allowedToolNames = allowedToolNames == null ? null : new List<string>(allowedToolNames).AsReadOnly();
                 _directToolsProvider = directToolsProvider;
-                _memoryStore = memoryStore;
-                _roleId = roleId;
-                _toolsByName = _liveCatalog != null ? null : BuildToolMap(_skills, allowedToolNames);
+                _roleBinding = roleBinding;
+                _toolsByName = _liveCatalog != null ? null : BuildToolMap(_skills, allowedToolNames, roleBinding);
             }
 
             private Dictionary<string, SkillToolDescriptor> ResolveToolMap()
@@ -181,15 +272,15 @@ namespace CoreAI.Ai
                         return cached.Map;
                     }
 
-                    Dictionary<string, SkillToolDescriptor> map = BuildToolMap(_skills, _allowedToolNames);
+                    Dictionary<string, SkillToolDescriptor> map = BuildToolMap(_skills, _allowedToolNames, _roleBinding);
                     Volatile.Write(ref _liveMap, new LiveToolMap(version, map));
                     return map;
                 }
             }
 
-            public ILlmTool BindForRole(IAgentMemoryStore store, string roleId)
+            public ILlmTool BindForRole(RoleBinding binding)
             {
-                return new CallSkillToolProxy(_skills, _allowedToolNames, _directToolsProvider, store, roleId);
+                return new CallSkillToolProxy(_skills, _allowedToolNames, _directToolsProvider, binding);
             }
 
             public override string Name => "call_skill_tool";
@@ -214,7 +305,7 @@ namespace CoreAI.Ai
             {
                 return new CallSkillToolProxy(_skills,
                     SkillSetToolResolver.IntersectAllowlist(_allowedToolNames, allowedToolNames), _directToolsProvider,
-                    _memoryStore, _roleId);
+                    _roleBinding);
             }
 
             public bool TryResolveInvocation(IDictionary<string, object> arguments,
@@ -238,7 +329,7 @@ namespace CoreAI.Ai
                 {
                     descriptor = ResolveDirectTool(trimmed);
                 }
-                descriptor = BindDescriptor(descriptor);
+                descriptor = _roleBinding?.BindDescriptor(descriptor) ?? descriptor;
                 if (descriptor == null || !descriptor.CanInvoke)
                 {
                     error = $"Tool '{trimmed}' is unavailable for this skill call.";
@@ -355,20 +446,9 @@ namespace CoreAI.Ai
                 return null;
             }
 
-            private SkillToolDescriptor BindDescriptor(SkillToolDescriptor descriptor)
-            {
-                if (descriptor?.SourceTool is CoreAI.AgentMemory.MemoryLlmTool && _memoryStore != null)
-                {
-                    AIFunction function = new MemoryTool(_memoryStore, _roleId).CreateAIFunction();
-                    return new SkillToolDescriptor(descriptor.Skill, descriptor.SourceTool, descriptor.Name,
-                        descriptor.Description, function.JsonSchema.ToString(), null, function);
-                }
-                return descriptor;
-            }
-
             public AIFunction CreateAIFunction()
             {
-                return AIFunctionFactory.Create(
+                return _function ??= AIFunctionFactory.Create(
                     (Func<string, string, CancellationToken, Task<string>>)ExecuteAsync,
                     new AIFunctionFactoryOptions
                     {
@@ -411,10 +491,14 @@ namespace CoreAI.Ai
 
         private static Dictionary<string, SkillToolDescriptor> BuildToolMap(
             IReadOnlyList<SkillSet> skills,
-            IReadOnlyCollection<string> allowedToolNames)
+            IReadOnlyCollection<string> allowedToolNames,
+            RoleBinding roleBinding = null)
         {
             Dictionary<string, SkillToolDescriptor> toolsByName = new(StringComparer.OrdinalIgnoreCase);
-            foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildDescriptors(skills))
+            IEnumerable<SkillToolDescriptor> descriptors = roleBinding == null
+                ? SkillSetToolResolver.BuildDescriptors(skills)
+                : roleBinding.GetCatalogDescriptors(skills);
+            foreach (SkillToolDescriptor descriptor in descriptors)
             {
                 if (descriptor == null || string.IsNullOrWhiteSpace(descriptor.Name))
                 {

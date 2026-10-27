@@ -872,6 +872,51 @@ namespace CoreAI.Tests.EditMode.Audit
         }
 #endif
 
+        [Test]
+        public void UnpairedSurrogateDiagnostic_DoesNotPoisonFlush()
+        {
+            AuditLogWriter writer = CreateWriter(QuietOptions());
+            string poisonResult = "prefix" + "\ud83d" + "suffix";
+            AuditEntry poison = AuditEntry.ForToolCall(0, "surrogate", "actor", "model", "prompt", "tool", "{}",
+                "allowed", "ok", poisonResult, 1);
+            writer.Record(poison);
+            writer.Record(Entry("healthy"));
+            writer.FlushForTesting();
+            List<AuditEntry> persisted = AuditLogVerifier.ReadAll(writer.FilePath);
+            CollectionAssert.AreEqual(new[] { "surrogate", "healthy" },
+                persisted.Select(entry => entry.TraceId).ToArray());
+            Assert.IsTrue(IsWellFormedUnicode(persisted.First(entry => entry.TraceId == "surrogate").ResultDetail));
+            AssertVerified(writer.FilePath);
+        }
+
+        private static bool IsWellFormedUnicode(string text)
+        {
+            if (text == null)
+            {
+                return true;
+            }
+
+            for (int index = 0; index < text.Length; index++)
+            {
+                if (char.IsLowSurrogate(text[index]))
+                {
+                    return false;
+                }
+
+                if (!char.IsHighSurrogate(text[index]))
+                {
+                    continue;
+                }
+
+                if (index + 1 >= text.Length || !char.IsLowSurrogate(text[++index]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         private AuditLogWriter CreateWriter(AuditLogWriterOptions options)
         {
             AuditLogWriter writer = new(_folder, options);

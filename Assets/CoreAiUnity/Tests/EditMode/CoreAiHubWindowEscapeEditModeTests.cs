@@ -163,9 +163,87 @@ namespace CoreAI.Tests.EditMode
                 SetPrivateField(window, "_uiReady", true);
                 SetPrivateField(window, "_collapsed", false);
 
-                InvokePrivate(window, "HandleEscapeRequested");
+                bool handled = InvokePrivate<bool>(window, "HandleEscapeRequested");
 
+                Assert.IsFalse(handled, "Unhandled Escape with collapse disabled must not be consumed.");
                 Assert.IsFalse(GetPrivateField<bool>(window, "_collapsed"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void HandleEscapeRequested_PageHandlerReturnsTrue_IsConsumedEvenWhenCollapseDisabled()
+        {
+            GameObject go = new("CoreAiHubWindow_HandleEscapeRequested_PageHandlesDisabled_Test");
+            try
+            {
+                go.AddComponent<UIDocument>();
+                CoreAiHubWindow window = go.AddComponent<CoreAiHubWindow>();
+                FakeEscapeHandlerPage page = new(true);
+                RegisterActivePage(window, page);
+                SetPrivateField(window, "requireVisibleCursor", false);
+                SetPrivateField(window, "escapeCollapses", false);
+                SetPrivateField(window, "_uiReady", true);
+                SetPrivateField(window, "_collapsed", false);
+
+                bool handled = InvokePrivate<bool>(window, "HandleEscapeRequested");
+
+                Assert.IsTrue(handled, "A page that handles Escape consumes it.");
+                Assert.IsTrue(page.WasCalled);
+                Assert.IsFalse(GetPrivateField<bool>(window, "_collapsed"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void HandleEscapeRequested_CollapseOccurs_IsConsumed()
+        {
+            GameObject go = new("CoreAiHubWindow_HandleEscapeRequested_CollapseConsumed_Test");
+            try
+            {
+                go.AddComponent<UIDocument>();
+                CoreAiHubWindow window = go.AddComponent<CoreAiHubWindow>();
+                RegisterActivePage(window, new PlainPage());
+                SetPrivateField(window, "requireVisibleCursor", false);
+                SetPrivateField(window, "escapeCollapses", true);
+                SetPrivateField(window, "_uiReady", true);
+                SetPrivateField(window, "_collapsed", false);
+
+                bool handled = InvokePrivate<bool>(window, "HandleEscapeRequested");
+
+                Assert.IsTrue(handled, "An actual collapse consumes Escape.");
+                Assert.IsTrue(GetPrivateField<bool>(window, "_collapsed"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void HandleEscapeRequested_NoHandlerAndCollapseEnabled_UnhandledReturnsFalse()
+        {
+            // Sanity: when collapse is disabled and there is no handler, the result is false.
+            GameObject go = new("CoreAiHubWindow_HandleEscapeRequested_NoHandlerDisabled_Test");
+            try
+            {
+                go.AddComponent<UIDocument>();
+                CoreAiHubWindow window = go.AddComponent<CoreAiHubWindow>();
+                RegisterActivePage(window, new PlainPage());
+                SetPrivateField(window, "requireVisibleCursor", false);
+                SetPrivateField(window, "escapeCollapses", false);
+                SetPrivateField(window, "_uiReady", true);
+                SetPrivateField(window, "_collapsed", false);
+
+                bool handled = InvokePrivate<bool>(window, "HandleEscapeRequested");
+
+                Assert.IsFalse(handled);
             }
             finally
             {

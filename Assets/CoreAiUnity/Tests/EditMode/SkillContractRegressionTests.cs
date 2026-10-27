@@ -82,6 +82,89 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task BoundSkillProxies_ShareOneDescriptorFactoryPerRoleBinding()
+        {
+            CountingBindingTool tool = new CountingBindingTool("first binding");
+            SkillSet[] catalog = { new SkillSet("tracked", "Tracked skill", "Use the tracked tool.", tool) };
+            ILlmTool[] original = { ReadSkillLlmTool.Create(catalog), CallSkillToolLlmTool.Create(catalog) };
+            tool.FactoryCalls = 0;
+            IReadOnlyList<ILlmTool> first = CallSkillToolLlmTool.BindToolsForRole(original,
+                new InMemoryAgentMemoryStore(), "first");
+            Assert.AreEqual(1, tool.FactoryCalls,
+                "Paired discovery and invocation must reuse the same invocation-owned descriptors.");
+            JObject discovery = await ReadSkill(first[0], "tracked");
+            Assert.IsTrue(discovery.Value<bool>("success"));
+            Assert.IsTrue(discovery["tools"].Single().Value<bool>("invocable"));
+            Assert.AreEqual("first binding", discovery["tools"].Single().Value<string>("description"));
+            Assert.IsTrue(((IResolvedLlmToolCallProvider)first[1]).TryResolveInvocation(Call("tracked_tool", "{}"),
+                out ResolvedLlmToolInvocation invocation, out string error), error);
+            Assert.AreEqual("first binding", (await invocation.InvokeAsync(CancellationToken.None)).ToString());
+            await ReadSkill(first[0], "tracked");
+            Assert.AreEqual(1, tool.FactoryCalls);
+            IAIFunctionLlmTool callProxy = (IAIFunctionLlmTool)first[1];
+            Assert.AreSame(callProxy.CreateAIFunction(), callProxy.CreateAIFunction(),
+                "Repeated exposure of one invocation proxy must reuse its root function.");
+
+            ILlmTool deniedRead = ((ISkillSetMetaLlmTool)first[0]).RestrictTo(new[] { "other" });
+            ILlmTool deniedCall = ((ISkillSetMetaLlmTool)first[1]).RestrictTo(new[] { "other" });
+            Assert.IsFalse((await ReadSkill(deniedRead, "tracked")).Value<bool>("success"));
+            Assert.IsFalse(((IResolvedLlmToolCallProvider)deniedCall).TryResolveInvocation(
+                Call("tracked_tool", "{}"), out _, out _));
+            Assert.AreEqual(1, tool.FactoryCalls, "Restricting a bound proxy must retain its descriptor cache.");
+
+            IReadOnlyList<ILlmTool> second = CallSkillToolLlmTool.BindToolsForRole(original,
+                new InMemoryAgentMemoryStore(), "second");
+            Assert.AreEqual(2, tool.FactoryCalls, "Another admitted role owns a separate descriptor binding.");
+            Assert.IsTrue((await ReadSkill(second[0], "tracked")).Value<bool>("success"));
+            Assert.AreEqual(2, tool.FactoryCalls);
+            Assert.AreEqual(1, tool.BodyCalls);
+        }
+
+        [Test]
+        public async Task BoundLiveSkillProxies_RefreshReplacementAndRemovalWhileKeepingCapturedInvocations()
+        {
+            CountingBindingTool originalTool = new CountingBindingTool("original body");
+            MutableSkillCatalog catalog = new MutableSkillCatalog(new[]
+                { new SkillSet("tracked", "Tracked skill", "Original instructions", originalTool) });
+            ILlmTool[] original = { ReadSkillLlmTool.Create(catalog), CallSkillToolLlmTool.Create(catalog) };
+            IReadOnlyList<ILlmTool> bound = CallSkillToolLlmTool.BindToolsForRole(original,
+                new InMemoryAgentMemoryStore(), "role");
+            originalTool.FactoryCalls = 0;
+            JObject before = await ReadSkill(bound[0], "tracked");
+            Assert.AreEqual("Original instructions", before.Value<string>("instructions"));
+            IResolvedLlmToolCallProvider resolver = (IResolvedLlmToolCallProvider)bound[1];
+            Assert.IsTrue(resolver.TryResolveInvocation(Call("tracked_tool", "{}"),
+                out ResolvedLlmToolInvocation capturedOriginal, out string originalError), originalError);
+            Assert.AreEqual(1, originalTool.FactoryCalls);
+
+            CountingBindingTool replacement = new CountingBindingTool("replacement body");
+            catalog.AddOrReplace(new SkillSet("tracked", "Tracked skill", "Replacement instructions", replacement));
+            replacement.FactoryCalls = 0;
+            JObject after = await ReadSkill(bound[0], "tracked");
+            Assert.AreEqual("Replacement instructions", after.Value<string>("instructions"));
+            Assert.AreEqual("replacement body", after["tools"].Single().Value<string>("description"));
+            Assert.IsTrue(resolver.TryResolveInvocation(Call("tracked_tool", "{}"),
+                out ResolvedLlmToolInvocation capturedReplacement, out string replacementError), replacementError);
+            Assert.AreEqual(1, replacement.FactoryCalls);
+            Assert.AreEqual("original body", (await capturedOriginal.InvokeAsync(CancellationToken.None)).ToString());
+            Assert.AreEqual("replacement body", (await capturedReplacement.InvokeAsync(CancellationToken.None)).ToString());
+            Assert.AreEqual(1, originalTool.BodyCalls);
+            Assert.AreEqual(1, replacement.BodyCalls);
+
+            Assert.IsTrue(catalog.Remove("tracked"));
+            Assert.IsFalse((await ReadSkill(bound[0], "tracked")).Value<bool>("success"));
+            Assert.IsFalse(resolver.TryResolveInvocation(Call("tracked_tool", "{}"), out _, out _));
+            using CancellationTokenSource cancelled = new CancellationTokenSource();
+            cancelled.Cancel();
+            Assert.CatchAsync<OperationCanceledException>(async () => { await capturedReplacement.InvokeAsync(cancelled.Token); });
+            Assert.AreEqual(1, replacement.BodyCalls, "A cancelled captured call must not enter the removed tool's body.");
+            Assert.AreEqual("replacement body", (await capturedReplacement.InvokeAsync(CancellationToken.None)).ToString());
+            Assert.AreEqual(2, replacement.BodyCalls);
+            Assert.AreEqual(1, replacement.FactoryCalls);
+            Assert.AreEqual(1, originalTool.FactoryCalls);
+        }
+
+        [Test]
         public void ContextBudget_ExpandedSchemas_CountsEveryFunctionAndOnlyAllowedBindings()
         {
             FunctionPair wrapper = new();
@@ -121,6 +204,29 @@ namespace CoreAI.Tests.EditMode
 
         private static IDictionary<string, object> Call(string name, string json) => new Dictionary<string, object>
         { ["tool_name"] = name, ["arguments_json"] = json };
+        private static async Task<JObject> ReadSkill(ILlmTool proxy, string skillName)
+        {
+            AIFunctionArguments arguments = new AIFunctionArguments(new Dictionary<string, object> { ["skill_name"] = skillName });
+            object result = await ((IAIFunctionLlmTool)proxy).CreateAIFunction().InvokeAsync(arguments, CancellationToken.None);
+            return JObject.Parse(result.ToString());
+        }
+        private sealed class CountingBindingTool : LlmToolBase, IAIFunctionLlmTool
+        {
+            private readonly string _result;
+            internal int FactoryCalls;
+            internal int BodyCalls;
+            internal CountingBindingTool(string result) { _result = result; }
+            public override string Name => "tracked_tool";
+            public override string Description => "A counted skill binding.";
+            public override string ParametersSchema => "{}";
+            public AIFunction CreateAIFunction()
+            {
+                FactoryCalls++;
+                return AIFunctionFactory.Create((Func<string>)Invoke,
+                    new AIFunctionFactoryOptions { Name = Name, Description = _result });
+            }
+            private string Invoke() { BodyCalls++; return _result; }
+        }
         private sealed class CharEstimator : ITokenEstimator { public int EstimateText(string text) => text?.Length ?? 0; }
         private sealed class Prompts : IAgentSystemPromptProvider
         { public bool TryGetSystemPrompt(string roleId, out string prompt) { prompt = "Base prompt"; return true; } }

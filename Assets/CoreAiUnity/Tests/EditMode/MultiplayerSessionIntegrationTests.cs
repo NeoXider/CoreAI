@@ -53,10 +53,10 @@ namespace CoreAI.Tests.EditMode
             BlockingOrchestrator inner = new BlockingOrchestrator(memory);
             using QueuedAiOrchestrator queue = new QueuedAiOrchestrator(inner,
                 new AiOrchestrationQueueOptions { MaxConcurrent = 2 }, provider);
-            CoreAiChatService serviceA = new CoreAiChatService(queue, memoryStore: memory,
-                actorIdentityProvider: identityA, scopeProvider: provider);
-            CoreAiChatService serviceB = new CoreAiChatService(queue, memoryStore: memory,
-                actorIdentityProvider: identityB, scopeProvider: provider);
+            CoreAiChatService serviceA = new CoreAiChatService(queue, null, null, memory, null, null, null,
+                identityA, provider);
+            CoreAiChatService serviceB = new CoreAiChatService(queue, null, null, memory, null, null, null,
+                identityB, provider);
             AiTaskRequest requestA = new AiTaskRequest
             {
                 RoleId = Role, Hint = "a history", CancellationScope = "",
@@ -79,9 +79,9 @@ namespace CoreAI.Tests.EditMode
                 Assert.AreEqual(0, inner.GlobalCancellationCalls);
 
                 serviceA.ClearContext(Role, true, false, requestA.ActorContext);
-                Assert.IsFalse(serviceA.TryGetPersistedChatHistory(Role, out _, actorContext: requestA.ActorContext));
+                Assert.IsFalse(serviceA.TryGetPersistedChatHistory(Role, out _, maxMessages: 0, actorContext: requestA.ActorContext));
                 Assert.IsTrue(serviceB.TryGetPersistedChatHistory(Role, out ChatMessage[] history,
-                    actorContext: requestB.ActorContext));
+                    maxMessages: 0, actorContext: requestB.ActorContext));
                 Assert.AreEqual("b history", history[0].Content);
 
                 inner.Release.TrySetResult(true);
@@ -110,8 +110,8 @@ namespace CoreAI.Tests.EditMode
             RecordingOrchestrator inner = new RecordingOrchestrator(memory);
             using QueuedAiOrchestrator queue = new QueuedAiOrchestrator(inner,
                 new AiOrchestrationQueueOptions { MaxConcurrent = 1 }, provider);
-            CoreAiChatService service = new CoreAiChatService(queue, memoryStore: memory,
-                actorIdentityProvider: identity, scopeProvider: provider);
+            CoreAiChatService service = new CoreAiChatService(queue, null, null, memory, null, null, null,
+                identity, provider);
             AiTaskRequest request = service.CreateTaskRequest("frozen history", Role);
             int callsAtAdmission = provider.Calls;
             provider.Current = new AgentMemoryScope("tenant", "", "episode-b", "");
@@ -119,9 +119,9 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("done", await service.SendMessageAsync(request));
             Assert.AreEqual(callsAtAdmission, provider.Calls, "A bound empty snapshot must not reread mutable provider state.");
             Assert.IsTrue(service.TryGetPersistedChatHistory(Role, out ChatMessage[] admitted,
-                actorContext: request.ActorContext));
+                maxMessages: 0, actorContext: request.ActorContext));
             Assert.AreEqual("frozen history", admitted[0].Content);
-            Assert.IsFalse(service.TryGetPersistedChatHistory(Role, out _, actorContext: identity.GetActorContext(Role)),
+            Assert.IsFalse(service.TryGetPersistedChatHistory(Role, out _, maxMessages: 0, actorContext: identity.GetActorContext(Role)),
                 "A fresh provider-selected partition must not read an earlier admitted partition.");
         }
 
@@ -138,8 +138,8 @@ namespace CoreAI.Tests.EditMode
             RecordingOrchestrator inner = new RecordingOrchestrator(memory);
             using QueuedAiOrchestrator queue = new QueuedAiOrchestrator(inner,
                 new AiOrchestrationQueueOptions { MaxConcurrent = 1 }, provider);
-            CoreAiChatService service = new CoreAiChatService(queue, memoryStore: memory,
-                actorIdentityProvider: identity, scopeProvider: provider);
+            CoreAiChatService service = new CoreAiChatService(queue, null, null, memory, null, null, null,
+                identity, provider);
             AiTaskRequest request = new AiTaskRequest
             {
                 RoleId = Role, Hint = "stream history", ActorContext = identity.GetActorContext(Role)
@@ -158,9 +158,9 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(callsAtAdmission, provider.Calls);
             Assert.IsTrue(service.TryGetPersistedChatHistory(Role, out ChatMessage[] history,
-                actorContext: admittedActor));
+                maxMessages: 0, actorContext: admittedActor));
             Assert.AreEqual("stream history", history[0].Content);
-            Assert.IsFalse(service.TryGetPersistedChatHistory(Role, out _, actorContext: request.ActorContext),
+            Assert.IsFalse(service.TryGetPersistedChatHistory(Role, out _, maxMessages: 0, actorContext: request.ActorContext),
                 "Mutating the caller request cannot replace the already admitted actor or payload.");
         }
 
@@ -178,14 +178,14 @@ namespace CoreAI.Tests.EditMode
                 memory.AppendChatMessage(Role, "user", "a");
             using (AgentMemoryActorScope.Enter(actorB, provider, Role))
                 memory.AppendChatMessage(Role, "user", "b");
-            CoreAiChatService service = new CoreAiChatService(new RecordingOrchestrator(memory),
-                memoryStore: memory, actorIdentityProvider: first, scopeProvider: provider);
+            CoreAiChatService service = new CoreAiChatService(new RecordingOrchestrator(memory), null, null, memory,
+                null, null, null, first, provider);
 
-            Assert.IsTrue(service.TryGetPersistedChatHistory(Role, out ChatMessage[] visible, actorContext: actorB));
+            Assert.IsTrue(service.TryGetPersistedChatHistory(Role, out ChatMessage[] visible, maxMessages: 0, actorContext: actorB));
             Assert.AreEqual("b", visible[0].Content);
             service.ClearContext(Role, true, false, actorB);
-            Assert.IsFalse(service.TryGetPersistedChatHistory(Role, out _, actorContext: actorB));
-            Assert.IsTrue(service.TryGetPersistedChatHistory(Role, out ChatMessage[] retained, actorContext: actorA));
+            Assert.IsFalse(service.TryGetPersistedChatHistory(Role, out _, maxMessages: 0, actorContext: actorB));
+            Assert.IsTrue(service.TryGetPersistedChatHistory(Role, out ChatMessage[] retained, maxMessages: 0, actorContext: actorA));
             Assert.AreEqual("a", retained[0].Content);
         }
 

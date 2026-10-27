@@ -664,6 +664,81 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         [Test]
+        public async Task ProviderInactivityGap_FreshQuietContinuationUsesCurrentTurnStart()
+        {
+            DateTime baseTime = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            double nowMs = 0;
+            Func<double> clock = () => nowMs;
+            Func<DateTime> utcNow = () => baseTime.AddMilliseconds(nowMs);
+
+            ResponseEvidenceLlm provider = new() { OpenResponse = true, FirstChunk = new LlmStreamChunk { Text = "progress" } };
+            SessionCapturingLlmClient capture = new(provider, clock, utcNow);
+
+            nowMs = 0;
+            await foreach (LlmStreamChunk chunk in capture.CompleteStreamingAsync(new LlmCompletionRequest())) { }
+
+            nowMs = 520000;
+            provider.FirstChunk = new LlmStreamChunk();
+            provider.OpenResponse = true;
+            IAsyncEnumerator<LlmStreamChunk> continuation = capture.CompleteStreamingAsync(new LlmCompletionRequest()).GetAsyncEnumerator();
+            Assert.IsTrue(await continuation.MoveNextAsync());
+            DateTime continuationStart = capture.CurrentTurnStartedUtc.Value;
+
+            nowMs = 570000;
+            DateTime scenarioEnd = utcNow();
+            capture.Seal();
+            provider.LastState.RecordResponse();
+            provider.LastState.RecordTimeout(LlmTimeoutKind.ResponseWait);
+
+            double gap = GameCreationBenchmarkHarness.ProviderActivityGapSeconds(
+                scenarioEnd, 570, capture.LastProviderActivityUtc, null, capture.CurrentTurnStartedUtc);
+            Assert.Less(gap, 120.0);
+            Assert.IsFalse(BenchmarkProviderFailurePolicy.IsProviderStall(gap, 120.0));
+            Assert.AreEqual(FailureAttribution.Model,
+                BenchmarkProviderFailurePolicy.ClassifyDeadline(true, true, false, capture.ProviderResponseObserved, false, gap, 120.0));
+            Assert.IsFalse(BenchmarkProviderFailurePolicy.ShouldRetry(FailureAttribution.Model, "deadline"));
+            Assert.AreEqual(continuationStart, capture.CurrentTurnStartedUtc);
+            Assert.IsNull(capture.LastProviderActivityUtc);
+
+            await continuation.DisposeAsync();
+        }
+
+        [Test]
+        public async Task ProviderInactivityGap_QuietContinuationBeyondThresholdIsEnvironment()
+        {
+            DateTime baseTime = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            double nowMs = 0;
+            Func<double> clock = () => nowMs;
+            Func<DateTime> utcNow = () => baseTime.AddMilliseconds(nowMs);
+
+            ResponseEvidenceLlm provider = new() { OpenResponse = true, FirstChunk = new LlmStreamChunk { Text = "progress" } };
+            SessionCapturingLlmClient capture = new(provider, clock, utcNow);
+
+            nowMs = 0;
+            await foreach (LlmStreamChunk chunk in capture.CompleteStreamingAsync(new LlmCompletionRequest())) { }
+
+            nowMs = 520000;
+            provider.FirstChunk = new LlmStreamChunk();
+            provider.OpenResponse = true;
+            IAsyncEnumerator<LlmStreamChunk> continuation = capture.CompleteStreamingAsync(new LlmCompletionRequest()).GetAsyncEnumerator();
+            Assert.IsTrue(await continuation.MoveNextAsync());
+
+            nowMs = 700000;
+            DateTime scenarioEnd = utcNow();
+            capture.Seal();
+
+            double gap = GameCreationBenchmarkHarness.ProviderActivityGapSeconds(
+                scenarioEnd, 700, capture.LastProviderActivityUtc, null, capture.CurrentTurnStartedUtc);
+            Assert.GreaterOrEqual(gap, 120.0);
+            Assert.IsTrue(BenchmarkProviderFailurePolicy.IsProviderStall(gap, 120.0));
+            Assert.AreEqual(FailureAttribution.Environment,
+                BenchmarkProviderFailurePolicy.ClassifyDeadline(true, true, false, capture.ProviderResponseObserved, false, gap, 120.0));
+            Assert.IsTrue(BenchmarkProviderFailurePolicy.ShouldRetry(FailureAttribution.Environment, "provider stream stalled"));
+
+            await continuation.DisposeAsync();
+        }
+
+        [Test]
         public void ProviderFailure_RawTransportFaultsAreEnvironmentFailures()
         {
             Assert.AreEqual(FailureAttribution.Environment, ClassifyException(new System.IO.IOException("connection reset")));

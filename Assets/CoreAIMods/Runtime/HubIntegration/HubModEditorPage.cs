@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.CodeEditing;
+using CoreAI.Ai.Hub.CodeEditing;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -73,7 +75,8 @@ namespace CoreAI.Ai.Hub
 
         private TextField _codeField;
         private Toggle _keepObjectsToggle;
-        private Label _highlightOverlay;
+        private CodeEditorSurface _editor;
+        private EventCallback<ChangeEvent<bool>> _onKeepObjectsChanged;
         private Label _status;
         private Label _diagnostics;
         private VisualElement _headerBox;
@@ -92,12 +95,26 @@ namespace CoreAI.Ai.Hub
         private bool _conflictExists;
         private Button _overwriteButton;
         private Button _discardButton;
+        private Button _saveButton;
+        private LuaCodePlaygroundRuntime _activeRuntime;
 
         /// <summary>The current unsaved buffer, available to a host before ending this view lifetime.</summary>
-        public string DraftSource => _codeField?.value ?? _initialSource;
+        public string DraftSource => _editor?.LuaDraft ?? _initialSource;
+
+        /// <summary>The active document language; Lua remains the default.</summary>
+        public string SelectedLanguage => _editor?.Document.LanguageId ?? "lua";
+
+        /// <summary>The most recent explicit execution outcome.</summary>
+        public CodeRunResult LastRunResult { get; private set; }
+
+        /// <summary>Selects an installed editing language without executing or saving a draft.</summary>
+        public void SelectLanguage(string languageId) => _editor?.SelectLanguage(languageId);
+
+        /// <summary>Dismisses editor transients without closing the draft or changing Hub policy.</summary>
+        public bool TryHandleEscape() => !_destroyed && (_editor?.TryHandleEscape() ?? false);
 
         /// <summary>Whether the buffer has changes or its last save remains unacknowledged.</summary>
-        public bool IsDirty => _saveUnconfirmed || !string.Equals(DraftSource, _baseSource, StringComparison.Ordinal);
+        public bool IsDirty => _saveUnconfirmed || (_editor?.HasPythonDraftChanges ?? false) || !string.Equals(DraftSource, _baseSource, StringComparison.Ordinal);
 
         /// <param name="service">CRUD surface used to load/save/validate the mod.</param>
         /// <param name="modId">Existing mod id to edit; null/empty for a new or pasted mod.</param>
@@ -154,7 +171,13 @@ namespace CoreAI.Ai.Hub
         /// <summary>Ends this editor lifetime without authorizing any further source mutation.</summary>
         internal void OnDestroyed()
         {
+            if (_destroyed) return;
             _destroyed = true;
+            _activeRuntime?.Dispose();
+            if (_editor != null) _editor.LanguageChanged -= OnLanguageChanged;
+            _editor?.Dispose();
+            if (_keepObjectsToggle != null && _onKeepObjectsChanged != null)
+                _keepObjectsToggle.UnregisterValueChangedCallback(_onKeepObjectsChanged);
             _builtRoot?.SetEnabled(false);
         }
 
@@ -202,7 +225,9 @@ namespace CoreAI.Ai.Hub
             actions.style.flexWrap = Wrap.Wrap;
             actions.style.marginBottom = 4f;
             actions.style.flexShrink = 0f;
-            actions.Add(HubModWidgets.MakeButton("Save & run", Save));
+            _saveButton = HubModWidgets.MakeButton("Save & run", Save);
+            _saveButton.name = "coreai-hub-mod-save-run";
+            actions.Add(_saveButton);
             actions.Add(HubModWidgets.MakeButton("Copy", Copy));
             actions.Add(HubModWidgets.MakeButton("Paste", Paste));
             actions.Add(HubModWidgets.MakeButton("Refresh diagnostics", RefreshDiagnostics));
@@ -229,7 +254,11 @@ namespace CoreAI.Ai.Hub
             _keepObjectsToggle.style.flexShrink = 0f;
             _keepObjectsToggle.style.marginBottom = 4f;
             HubModWidgets.StyleToggleLabel(_keepObjectsToggle);
-            _keepObjectsToggle.RegisterValueChangedCallback(evt => OnKeepObjectsToggled(evt.newValue));
+            _onKeepObjectsChanged = evt =>
+            {
+                if (!_destroyed && ReferenceEquals(evt.target, _keepObjectsToggle)) OnKeepObjectsToggled(evt.newValue);
+            };
+            _keepObjectsToggle.RegisterValueChangedCallback(_onKeepObjectsChanged);
             root.Add(_keepObjectsToggle);
 
             _historyBox = HubModWidgets.MakePanel();
@@ -237,17 +266,10 @@ namespace CoreAI.Ai.Hub
             _historyBox.style.display = DisplayStyle.None;
             root.Add(_historyBox);
 
-            _codeField = new TextField { name = "coreai-hub-mod-code", multiline = true };
-            _codeField.value = _initialSource;
-            _codeField.style.flexGrow = 0f;
-            _codeField.style.minHeight = 280f;
-            _codeField.style.whiteSpace = WhiteSpace.Normal;
-            _codeField.style.marginTop = 6f;
-            _codeField.style.marginBottom = 6f;
-            HubModWidgets.StyleCodeField(_codeField);
-            BuildHighlightOverlay();
-
-            root.Add(_codeField);
+            _editor = new CodeEditorSurface(string.IsNullOrEmpty(_modId) ? "new-mod" : _modId, _initialSource);
+            _codeField = _editor.TextField;
+            _editor.LanguageChanged += OnLanguageChanged;
+            root.Add(_editor.Root);
 
             _status = HubModWidgets.MakeStatus();
             _status.name = StatusLabelName;
@@ -263,67 +285,23 @@ namespace CoreAI.Ai.Hub
             return scroll;
         }
 
-        /// <summary>
-        /// Adds a Lua-highlighted rich-text overlay on top of the code field's input area. UI Toolkit's
-        /// editable TextField cannot render rich text itself, so the raw input glyphs are made
-        /// transparent (caret and selection stay visible via <see cref="TextField.textSelection"/>) and a
-        /// picking-ignored Label child paints the same text through
-        /// <see cref="LuaSyntaxHighlighter.Highlight"/>. Typing still goes into <see cref="_codeField"/>;
-        /// the overlay re-renders on every value change.
-        /// </summary>
-        private void BuildHighlightOverlay()
+        private void OnLanguageChanged()
         {
-            VisualElement input = _codeField.Q("unity-text-input");
-            if (input == null)
-            {
-                // WHY: no known Unity version lacks this element, but if it is ever renamed the editor
-                // must degrade to a plain (uncolored) yet fully working field rather than a blank one.
-                return;
-            }
+            bool lua = SelectedLanguage == "lua";
+            _keepObjectsToggle?.SetEnabled(lua);
+            _saveButton?.SetEnabled(lua && !_saving);
+            if (_overwriteButton != null) _overwriteButton.style.display = DisplayStyle.None;
+            SetStatus(lua ? "Lua draft restored. Save & run executes only this Lua draft."
+                : "Python editing only. Execution and Save & run are unavailable; the Lua draft is preserved.", false);
+        }
 
-            Color codeTextColor = new(0.86f, 0.93f, 0.86f, 1f);
-
-            _highlightOverlay = new Label
-            {
-                name = "coreai-hub-mod-code-highlight",
-                enableRichText = true,
-                pickingMode = PickingMode.Ignore
-            };
-            _highlightOverlay.style.position = Position.Absolute;
-            // WHY: UI Toolkit positions absolute children against the parent's padding box, not its
-            // content box, so a zero inset ignores the input's own left/top padding (see
-            // HubModWidgets.StyleCodeField). Matching that padding here lines the overlay text up with
-            // where the real (transparent) glyphs would render.
-            _highlightOverlay.style.left = 0f;
-            _highlightOverlay.style.top = 0f;
-            _highlightOverlay.style.right = 0f;
-            _highlightOverlay.style.bottom = 0f;
-            _highlightOverlay.style.marginLeft = 0f;
-            _highlightOverlay.style.marginRight = 0f;
-            _highlightOverlay.style.marginTop = 0f;
-            _highlightOverlay.style.marginBottom = 0f;
-            _highlightOverlay.style.paddingLeft = 10f;
-            _highlightOverlay.style.paddingRight = 10f;
-            _highlightOverlay.style.paddingTop = 8f;
-            _highlightOverlay.style.paddingBottom = 8f;
-            _highlightOverlay.style.whiteSpace = WhiteSpace.Normal;
-            _highlightOverlay.style.unityTextAlign = TextAnchor.UpperLeft;
-            _highlightOverlay.style.color = codeTextColor;
-            // TODO: if the input ever scrolls internally (it normally auto-grows inside the page's
-            // ScrollView instead), the overlay does not track that inner scroll offset; typing
-            // correctness is prioritized over pixel-perfect alignment in that edge case.
-            input.Add(_highlightOverlay);
-
-            // WHY: hide only the raw glyphs — the overlay repaints them colored in the same spots; the
-            // caret/selection would inherit the transparent color, so they are re-pinned explicitly.
-            input.style.color = new Color(0f, 0f, 0f, 0f);
-            _codeField.textSelection.cursorColor = codeTextColor;
-            _codeField.textSelection.selectionColor =
-                new Color(HubModWidgets.Accent.r, HubModWidgets.Accent.g, HubModWidgets.Accent.b, 0.35f);
-
-            _highlightOverlay.text = LuaSyntaxHighlighter.Highlight(_codeField.value);
-            _codeField.RegisterValueChangedCallback(evt =>
-                _highlightOverlay.text = LuaSyntaxHighlighter.Highlight(evt.newValue));
+        private bool RequireLuaAction()
+        {
+            if (SelectedLanguage == "lua") return true;
+            LastRunResult = new CodeRunResult(CodeRunStatus.Unsupported,
+                "Python execution is not supported. No code was run or saved.");
+            SetStatus(LastRunResult.Message, true);
+            return false;
         }
 
         /// <summary>Records the toggle's new state as the Hub-wide preference.</summary>
@@ -336,13 +314,7 @@ namespace CoreAI.Ai.Hub
         /// The "Save &amp; run" action: persists and (re)runs the mod in the mode the toggle shows and says
         /// in the status line what the reload did with the previous run's objects.
         /// </summary>
-        /// <remarks>
-        /// WHY it blocks for as long as it does: the mod's main chunk runs synchronously on this click, as
-        /// it always has, until it first yields or ends, bounded by the runtime's handler budget (10 s by
-        /// default); taking the previous run's objects out and destroying them afterwards is a walk over
-        /// that run's own objects. Nothing here waits on a thread or a task, so the WebGL page behaves the
-        /// same.
-        /// </remarks>
+        /// <remarks>The explicit invocation uses a short per-call budget on the caller thread.</remarks>
         internal void Save()
         {
             SaveCore(false);
@@ -355,7 +327,15 @@ namespace CoreAI.Ai.Hub
                 return;
             }
 
-            string code = _codeField.value ?? "";
+            if (!RequireLuaAction()) return;
+            if (_service is not IBudgetedHubModService)
+            {
+                LastRunResult = new CodeRunResult(CodeRunStatus.Unsupported,
+                    "The configured service does not support bounded editor execution. No code was run or saved.");
+                SetStatus(LastRunResult.Message, true);
+                return;
+            }
+            string code = DraftSource ?? "";
             string id = _isNew && string.IsNullOrEmpty(_savedId) ? ParseId(code) : _savedId;
             if (string.IsNullOrWhiteSpace(id))
             {
@@ -364,6 +344,9 @@ namespace CoreAI.Ai.Hub
             }
 
             bool keepObjects = _keepObjectsToggle?.value ?? _preferences.KeepObjectsOnSave;
+            _editor.CaptureCurrent();
+            CodeRunRequest request = null;
+            _saving = true;
             try
             {
                 bool exists = _service.TryGetSource(id, out string currentSource);
@@ -373,6 +356,8 @@ namespace CoreAI.Ai.Hub
                     string.Equals(currentSource, _conflictSource, StringComparison.Ordinal));
                 if (!sameBase && !reviewedOverwrite)
                 {
+                    LastRunResult = new CodeRunResult(CodeRunStatus.Conflict,
+                        "The source changed outside this editor. Your draft is preserved.");
                     _conflictSource = currentSource;
                     _conflictExists = exists;
                     _overwriteButton.style.display = DisplayStyle.Flex;
@@ -380,12 +365,39 @@ namespace CoreAI.Ai.Hub
                     return;
                 }
 
-                _saving = true;
-                HubModSaveResult result = _service.SaveOrReload(
-                    id, code, keepObjects ? ModReloadMode.KeepObjects : ModReloadMode.CleanStartupObjects);
-                bool saved = result != null && result.PersistenceStatus == HubModPersistenceStatus.Saved;
+                request = new CodeRunRequest(_editor.Document.DocumentId, "lua", _editor.Document.Revision,
+                    id, code, CodeRunOperation.SaveAndRun, 100, 500_000,
+                    new CodeSourceExpectation(exists, currentSource));
+                _activeRuntime = new LuaCodePlaygroundRuntime(_service,
+                    keepObjects ? ModReloadMode.KeepObjects : ModReloadMode.CleanStartupObjects);
+                _activeRuntime.Initialize();
+                _editor.View.SetEditable(false);
+                _editor.LanguageDropdown.SetEnabled(false);
+                _saveButton.SetEnabled(false);
+                CodeRunResult result = _activeRuntime.Run(request);
+                _editor.CaptureCurrent();
+                if (_destroyed || !result.Matches(request) ||
+                    !_editor.Document.Matches(request.DocumentId, request.LanguageId, request.Revision))
+                {
+                    _saveUnconfirmed = true;
+                    return;
+                }
+                LastRunResult = result;
+                if (result.Status == CodeRunStatus.Conflict)
+                {
+                    _conflictExists = _service.TryGetSource(id, out _conflictSource);
+                    _overwriteButton.style.display = DisplayStyle.Flex;
+                    SetStatus(result.Message + " Review the current version before overwriting it.", true);
+                    return;
+                }
+                if (result.Status == CodeRunStatus.Unsupported)
+                {
+                    SetStatus(result.Message, true);
+                    return;
+                }
+                bool saved = result.Persisted;
                 _saveUnconfirmed = !saved;
-                SetStatus(result?.Describe() ?? "The service returned no save result. Your draft is preserved.", !saved);
+                SetStatus(result.Message, !saved);
                 if (saved)
                 {
                     _baseSource = code;
@@ -407,22 +419,39 @@ namespace CoreAI.Ai.Hub
 
                 RefreshHeaderBox(code);
                 RefreshDiagnostics();
+                if (result.Diagnostics.Count > 0) _editor.View.ShowError(result.Diagnostics[0]);
             }
             catch (OperationCanceledException)
             {
                 _saveUnconfirmed = true;
                 CaptureOwnLiveSource(id, code);
-                SetStatus("Save cancelled. Your draft is preserved; live state may already have changed.", true);
+                LastRunResult = new CodeRunResult(request, CodeRunStatus.Cancelled,
+                    "Save cancelled. Your draft is preserved; live state may already have changed.");
+                SetStatus(LastRunResult.Message, true);
+            }
+            catch (NotSupportedException ex)
+            {
+                LastRunResult = new CodeRunResult(request, CodeRunStatus.Unsupported, ex.Message);
+                SetStatus(LastRunResult.Message, true);
             }
             catch (Exception ex)
             {
+                LastRunResult = new CodeRunResult(request, CodeRunStatus.Failed, ex.Message);
                 _saveUnconfirmed = true;
                 CaptureOwnLiveSource(id, code);
                 SetStatus($"Save failed: {ex.Message}", true);
             }
             finally
             {
+                _activeRuntime?.Dispose();
+                _activeRuntime = null;
                 _saving = false;
+                if (!_destroyed)
+                {
+                    _editor.View.SetEditable(true);
+                    _editor.LanguageDropdown.SetEnabled(true);
+                    _saveButton.SetEnabled(SelectedLanguage == "lua");
+                }
             }
         }
 
@@ -446,12 +475,14 @@ namespace CoreAI.Ai.Hub
 
         private void Copy()
         {
+            if (_destroyed) return;
             GUIUtility.systemCopyBuffer = _codeField.value ?? "";
             SetStatus("Copied source to clipboard.", false);
         }
 
         private void Paste()
         {
+            if (_destroyed) return;
             string clip = GUIUtility.systemCopyBuffer ?? "";
             if (string.IsNullOrWhiteSpace(clip))
             {
@@ -459,14 +490,20 @@ namespace CoreAI.Ai.Hub
                 return;
             }
 
-            _codeField.value = clip;
-            RefreshHeaderBox(clip);
+            string normalized = CodeEditorTextUtility.NormalizeEditorText(clip);
+            if (normalized.Length > CodeEditorLimits.MaximumDocumentCharacters)
+            {
+                SetStatus("The clipboard exceeds the editor source limit. The current draft is preserved.", true);
+                return;
+            }
+            _editor.View.ReplaceTextUndoable(normalized);
+            if (SelectedLanguage == "lua") RefreshHeaderBox(normalized);
             SetStatus("Pasted clipboard into the editor. Review, then Save & run.", false);
         }
 
         private void RefreshDiagnostics()
         {
-            string id = _isNew ? ParseId(_codeField?.value ?? "") : _modId;
+            string id = _isNew ? ParseId(DraftSource ?? "") : _modId;
             if (string.IsNullOrWhiteSpace(id))
             {
                 _diagnostics.text = "";
@@ -494,7 +531,7 @@ namespace CoreAI.Ai.Hub
         private void RefreshHistory()
         {
             _historyBox.Clear();
-            string id = _isNew ? ParseId(_codeField?.value ?? "") : _modId;
+            string id = _isNew ? ParseId(DraftSource ?? "") : _modId;
             if (string.IsNullOrWhiteSpace(id))
             {
                 _historyBox.Add(HubModWidgets.MakeNote("Save the mod first to track revision history."));
@@ -555,6 +592,7 @@ namespace CoreAI.Ai.Hub
 
         private void Revert(string id, int revisionIndex)
         {
+            if (!RequireLuaAction()) return;
             if (_destroyed)
             {
                 return;
@@ -568,7 +606,7 @@ namespace CoreAI.Ai.Hub
                     return;
                 }
 
-                _codeField.value = restored;
+                _editor.View.ReplaceTextUndoable(restored);
                 _expectedExists = true;
                 _expectedSource = restored;
                 RefreshHeaderBox(restored);

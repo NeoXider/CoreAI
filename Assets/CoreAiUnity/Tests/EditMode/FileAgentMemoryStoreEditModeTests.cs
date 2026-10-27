@@ -199,6 +199,292 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(onCallerContext, "Host callbacks must retain the async caller's context.");
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void SyncHistoryTrim_DisposeRetainsAdmittedOperationUntilCallbackReturns(bool transcript)
+        {
+            FileAgentMemoryStore store = NewStore(null, 1, 1);
+            Action<string> append = transcript
+                ? content => store.AppendTranscriptEntry(_roleId,
+                    new ConversationEntry { Kind = ConversationEntryKind.ToolResult, Key = "tool", Content = content })
+                : content => store.AppendChatMessage(_roleId, "user", content);
+            append("before");
+            int notifications = 0;
+            int residentDuringDispose = -1;
+            bool callReturned = false;
+            bool callbackBeforeReturn = false;
+            bool newCallRejected = false;
+            bool gatesFree = false;
+            Exception callbackFailure = null;
+            Task<string> reentrantRead = null;
+            store.HistoryTrimmed += _ =>
+            {
+                try
+                {
+                    notifications++;
+                    callbackBeforeReturn = !callReturned;
+                    reentrantRead = Task.Run(() => transcript
+                        ? store.GetTranscriptEntries(_roleId, 0).Single().Content
+                        : store.GetChatHistory(_roleId).Single().Content);
+                    gatesFree = reentrantRead.Wait(TimeSpan.FromSeconds(5));
+                    store.Dispose();
+                    store.Dispose();
+                    residentDuringDispose = store.ResidentHistoryCount;
+                    try { store.GetChatHistory(_roleId); }
+                    catch (ObjectDisposedException) { newCallRejected = true; }
+                }
+                catch (Exception ex) { callbackFailure = ex; }
+            };
+            try
+            {
+                append("after");
+                callReturned = true;
+            }
+            finally
+            {
+                store.Dispose();
+                if (reentrantRead != null && !reentrantRead.IsCompleted)
+                    reentrantRead.Wait(TimeSpan.FromSeconds(5));
+            }
+
+            Assert.IsNull(callbackFailure);
+            Assert.AreEqual(1, notifications);
+            Assert.IsTrue(callbackBeforeReturn);
+            Assert.IsTrue(gatesFree, "Both instance and shared path gates must be free during a trim callback.");
+            Assert.IsTrue(reentrantRead.IsCompletedSuccessfully);
+            Assert.AreEqual("after", reentrantRead.GetAwaiter().GetResult());
+            Assert.AreEqual(1, residentDuringDispose,
+                "Dispose must retain the admitted synchronous append's resident ownership until its callback returns.");
+            Assert.IsTrue(newCallRejected);
+            Assert.AreEqual(0, store.ResidentHistoryCount);
+        }
+
+        [Test]
+        public async Task AsyncHistoryTrim_DisposeRetainsAdmittedCallbackAndResidentLease()
+        {
+            FileAgentMemoryStore store = NewStore(null, 1, 1);
+            store.AppendChatMessage(_roleId, "user", "before");
+            HeldSynchronizationContext context = new();
+            int notifications = 0;
+            bool onCallerContext = false;
+            store.HistoryTrimmed += trimmed =>
+            {
+                notifications++;
+                onCallerContext = ReferenceEquals(context, SynchronizationContext.Current);
+                Assert.AreEqual(1, trimmed.DroppedChatMessages);
+                Assert.AreEqual(1, trimmed.RetainedChatMessages);
+            };
+            TaskCompletionSource<bool> entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            using ManualResetEventSlim release = new(false);
+            Task blocker = Task.Run(() => store.MutateAsync(_roleId, state =>
+            {
+                entered.TrySetResult(true);
+                if (!release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("The fixture did not release the initial mutation.");
+                return true;
+            }));
+            Task append = null;
+            Task peerRead = null;
+            try
+            {
+                Assert.AreSame(entered.Task, await Task.WhenAny(entered.Task, Task.Delay(5000)));
+                SynchronizationContext original = SynchronizationContext.Current;
+                try
+                {
+                    SynchronizationContext.SetSynchronizationContext(context);
+                    append = store.AppendChatMessageAsync(_roleId, "user", "after");
+                }
+                finally
+                {
+                    SynchronizationContext.SetSynchronizationContext(original);
+                    release.Set();
+                }
+                await blocker;
+                Assert.AreSame(context.FirstPost.Task, await Task.WhenAny(context.FirstPost.Task, Task.Delay(5000)));
+                Assert.IsFalse(append.IsCompleted);
+                Assert.AreEqual(1, store.ResidentHistoryCount);
+                store.Dispose();
+                Assert.AreEqual(1, store.ResidentHistoryCount,
+                    "An admitted append still owns its resident partition while its caller-context notification is pending.");
+                Assert.Throws<ObjectDisposedException>(() => store.GetChatHistory(_roleId));
+                peerRead = Task.Run(() =>
+                {
+                    using FileAgentMemoryStore peer = NewStore(null, 1, 1);
+                    Assert.AreEqual("after", peer.GetChatHistory(_roleId).Single().Content);
+                });
+                Assert.AreSame(peerRead, await Task.WhenAny(peerRead, Task.Delay(5000)),
+                    "Retaining operation ownership must not keep the shared storage gate locked.");
+                await peerRead;
+                Assert.IsFalse(append.IsCompleted);
+            }
+            finally
+            {
+                release.Set();
+                context.ReleaseCallbacks();
+                await blocker;
+                if (append != null) await append;
+                if (peerRead != null) await peerRead;
+                store.Dispose();
+            }
+            Assert.IsTrue(onCallerContext);
+            Assert.AreEqual(1, notifications);
+            Assert.AreEqual(0, store.ResidentHistoryCount, "Resources are released when the admitted append settles.");
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AsyncHistoryTrim_RefusedArmingNotifiesAndAllowsReentryBeforeIOException(bool throwingHandler)
+        {
+            bool armed = false;
+            int confirmations = 0;
+            List<string> order = new();
+            using FileAgentMemoryStore store = new(null, _root, 1, 1, 128, token =>
+            {
+                Assert.IsFalse(token.CanBeCanceled, "A completed write must confirm independently of caller cancellation.");
+                confirmations++;
+                order.Add("confirmation");
+                return Task.FromResult(armed);
+            });
+            store.AppendChatMessage(_roleId, "user", "before");
+            int notifications = 0;
+            SynchronizationContext callerContext = SynchronizationContext.Current;
+            bool onCallerContext = false;
+            int dropped = -1;
+            int retained = -1;
+            string reenteredHistory = null;
+            Exception reentryFailure = null;
+            store.HistoryTrimmed += trimmed =>
+            {
+                order.Add("trim");
+                notifications++;
+                onCallerContext = ReferenceEquals(callerContext, SynchronizationContext.Current);
+                dropped = trimmed.DroppedChatMessages;
+                retained = trimmed.RetainedChatMessages;
+                try { reenteredHistory = store.GetChatHistory(_roleId).Single().Content; }
+                catch (Exception ex) { reentryFailure = ex; }
+                if (throwingHandler) throw new InvalidOperationException("Controlled callback failure after notification.");
+            };
+
+            IOException refused = await CaptureExceptionAsync<IOException>(() =>
+                store.AppendChatMessageAsync(_roleId, "user", "after"));
+
+            StringAssert.Contains("no durable storage armed", refused.Message);
+            CollectionAssert.AreEqual(new[] { "trim", "confirmation" }, order);
+            Assert.AreEqual(1, notifications);
+            Assert.IsTrue(onCallerContext);
+            Assert.AreEqual(1, dropped);
+            Assert.AreEqual(1, retained);
+            Assert.IsNull(reentryFailure);
+            Assert.AreEqual("after", reenteredHistory,
+                "A real trim callback must reenter the store after both storage gates are released.");
+            Assert.AreEqual(1, confirmations);
+            Assert.AreEqual(1, File.ReadLines(HistoryPath).Count(line => JObject.Parse(line).Value<string>("c") == "after"));
+            armed = true;
+            await store.SaveAsync(_roleId, new AgentMemoryState { Memory = "confirmed later" });
+            Assert.AreEqual(2, confirmations);
+            Assert.AreEqual(1, notifications, "Confirming a later write must not replay the completed trim.");
+            using FileAgentMemoryStore peer = NewStore(null, 1, 1);
+            Assert.AreEqual("after", peer.GetChatHistory(_roleId).Single().Content);
+            Assert.AreEqual(1, File.ReadLines(HistoryPath).Count(line => JObject.Parse(line).Value<string>("c") == "after"));
+        }
+
+        [Test]
+        public async Task AsyncHistoryTrim_HandlerFailureStillSettlesTheCompletedWrite()
+        {
+            int confirmations = 0;
+            using FileAgentMemoryStore store = new(null, _root, 1, 1, 128, token =>
+            {
+                confirmations++;
+                return Task.FromResult(true);
+            });
+            store.AppendChatMessage(_roleId, "user", "before");
+            InvalidOperationException handlerFailure = new("Controlled trim callback failure.");
+            store.HistoryTrimmed += _ => throw handlerFailure;
+
+            InvalidOperationException observed = await CaptureExceptionAsync<InvalidOperationException>(() =>
+                store.AppendChatMessageAsync(_roleId, "user", "after"));
+
+            Assert.AreSame(handlerFailure, observed);
+            Assert.AreEqual(1, confirmations, "A failed host callback must not skip confirmation of an actual write.");
+            Assert.AreEqual("after", store.GetChatHistory(_roleId).Single().Content);
+            using FileAgentMemoryStore peer = NewStore(null, 1, 1);
+            Assert.AreEqual("after", peer.GetChatHistory(_roleId).Single().Content);
+        }
+
+        [Test]
+        public async Task AsyncMigration_PrimaryStorageFailureSurvivesConfirmationFailure()
+        {
+            const string original = "{\"memory\":\"legacy fact\"}";
+            File.WriteAllText(LegacyMemoryPath, original);
+            Directory.CreateDirectory(LegacyMemoryPath + ".legacy");
+            IOException confirmationFailure = new("Controlled confirmation failure.");
+            int confirmations = 0;
+            bool confirmationCanBeCancelled = true;
+            using FileAgentMemoryStore store = new(null, _root, 500, 2000, 128, token =>
+            {
+                confirmations++;
+                confirmationCanBeCancelled = token.CanBeCanceled;
+                return Task.FromException<bool>(confirmationFailure);
+            });
+
+            Exception observed = await CaptureExceptionAsync<Exception>(() =>
+                store.SaveAsync(_roleId, new AgentMemoryState { Memory = "replacement" }));
+
+            Assert.IsTrue(observed is IOException || observed is UnauthorizedAccessException);
+            Assert.AreNotSame(confirmationFailure, observed,
+                "Confirmation must run for the successful copy while the original retirement I/O error remains primary.");
+            Assert.AreEqual(1, confirmations);
+            Assert.IsFalse(confirmationCanBeCancelled);
+            Assert.AreEqual(original, File.ReadAllText(MemoryPath));
+            Assert.AreEqual(original, File.ReadAllText(LegacyMemoryPath));
+            Assert.IsTrue(Directory.Exists(LegacyMemoryPath + ".legacy"));
+            Directory.Delete(LegacyMemoryPath + ".legacy");
+            using FileAgentMemoryStore peer = NewStore();
+            AgentMemoryState recovered = await peer.TryLoadAsync(_roleId);
+            Assert.AreEqual("legacy fact", recovered.Memory);
+            Assert.AreEqual(original, File.ReadAllText(LegacyMemoryPath + ".legacy"));
+        }
+
+        [Test]
+        public async Task AsyncSave_PendingConfirmationRetainsOperationAfterReleasingBothGates()
+        {
+            TaskCompletionSource<bool> entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource<bool> confirmation = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            FileAgentMemoryStore store = new(null, _root, 500, 2000, 128, token =>
+            {
+                Assert.IsFalse(token.CanBeCanceled);
+                entered.TrySetResult(true);
+                return confirmation.Task;
+            });
+            store.AppendChatMessage(_roleId, "user", "retained");
+            Task save = store.SaveAsync(_roleId, new AgentMemoryState { Memory = "saved" });
+            Task peerRead = null;
+            try
+            {
+                Assert.AreSame(entered.Task, await Task.WhenAny(entered.Task, Task.Delay(5000)));
+                Assert.IsFalse(save.IsCompleted);
+                peerRead = Task.Run(() =>
+                {
+                    using FileAgentMemoryStore peer = NewStore();
+                    Assert.IsTrue(peer.TryLoad(_roleId, out AgentMemoryState state));
+                    Assert.AreEqual("saved", state.Memory);
+                });
+                Assert.AreSame(peerRead, await Task.WhenAny(peerRead, Task.Delay(5000)));
+                await peerRead;
+                store.Dispose();
+                Assert.AreEqual(1, store.ResidentHistoryCount);
+                Assert.IsFalse(save.IsCompleted);
+                Assert.Throws<ObjectDisposedException>(() => store.TryLoad(_roleId, out _));
+            }
+            finally
+            {
+                confirmation.TrySetResult(true);
+                await save;
+                if (peerRead != null) await peerRead;
+                store.Dispose();
+            }
+            Assert.AreEqual(0, store.ResidentHistoryCount);
+        }
+
         private sealed class HeldSynchronizationContext : SynchronizationContext
         {
             private readonly object _gate = new();
@@ -647,6 +933,62 @@ namespace CoreAI.Tests.EditMode
             FileAgentMemoryStore reloaded = NewStore();
             Assert.AreEqual(2, reloaded.GetChatHistory(_roleId).Length);
             Assert.AreEqual(3, reloaded.GetTranscriptEntries(_roleId, 0).Count);
+        }
+
+        [Test]
+        public async Task TryLoadAsync_LegacyV1Document_MigratesConversationAndMemory()
+        {
+            LegacyPersisted legacy = new()
+            {
+                memory = "legacy memory",
+                chatHistoryJson = JsonUtility.ToJson(new LegacyChatWrapper
+                {
+                    Items = new[] { new ChatMessage { Role = "user", Content = "legacy turn", Timestamp = 1 } }
+                })
+            };
+            File.WriteAllText(LegacyMemoryPath, JsonUtility.ToJson(legacy));
+            byte[] originalBytes = File.ReadAllBytes(LegacyMemoryPath);
+
+            using FileAgentMemoryStore store = NewStore();
+            AgentMemoryState state = await store.TryLoadAsync(_roleId);
+
+            Assert.IsNotNull(state);
+            Assert.AreEqual("legacy memory", state.Memory);
+            Assert.AreEqual("legacy turn", NewStore().GetChatHistory(_roleId).Single().Content);
+            Assert.IsTrue(File.Exists(HistoryPath));
+            Assert.IsFalse(File.Exists(LegacyMemoryPath));
+            CollectionAssert.AreEqual(originalBytes, File.ReadAllBytes(LegacyMemoryPath + ".legacy"),
+                "Read-triggered migration must retain the exact original bytes.");
+            LegacyPersisted rewritten = JsonUtility.FromJson<LegacyPersisted>(File.ReadAllText(MemoryPath));
+            Assert.IsTrue(string.IsNullOrEmpty(rewritten.chatHistoryJson), "Migrated history must not stay embedded.");
+        }
+
+        [Test]
+        public void SessionOnlyAppend_OnLegacyV1Document_MigratesFilesAndKeepsTheNewRowTransient()
+        {
+            LegacyPersisted legacy = new()
+            {
+                memory = "legacy memory",
+                chatHistoryJson = JsonUtility.ToJson(new LegacyChatWrapper
+                {
+                    Items = new[] { new ChatMessage { Role = "user", Content = "legacy turn", Timestamp = 1 } }
+                })
+            };
+            File.WriteAllText(LegacyMemoryPath, JsonUtility.ToJson(legacy));
+            byte[] originalBytes = File.ReadAllBytes(LegacyMemoryPath);
+
+            using FileAgentMemoryStore store = NewStore();
+            store.AppendChatMessage(_roleId, "assistant", "session turn", false);
+
+            CollectionAssert.AreEqual(new[] { "legacy turn", "session turn" },
+                store.GetChatHistory(_roleId).Select(message => message.Content).ToArray());
+            string history = File.ReadAllText(HistoryPath);
+            StringAssert.Contains("legacy turn", history);
+            Assert.That(history, Does.Not.Contain("session turn"),
+                "A transient append must not make its own row durable, even when the migration itself is.");
+            Assert.IsFalse(File.Exists(LegacyMemoryPath));
+            CollectionAssert.AreEqual(originalBytes, File.ReadAllBytes(LegacyMemoryPath + ".legacy"),
+                "The legacy source backup remains available.");
         }
 
         [TestCase(false, "")]

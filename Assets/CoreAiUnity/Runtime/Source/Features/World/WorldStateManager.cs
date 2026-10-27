@@ -153,6 +153,9 @@ namespace CoreAI.Infrastructure.World
 
         public bool HasSavedState => File.Exists(_saveFilePath);
 
+        /// <summary>The snapshot path selected before startup restoration and auto-save.</summary>
+        public string SaveFilePath => _saveFilePath;
+
         public event Action StateReset;
 
         public bool WorldRestoreCompleted { get; private set; }
@@ -172,6 +175,40 @@ namespace CoreAI.Infrastructure.World
                 CoreAiPersistentPaths.RootFolderName,
                 CoreAiPersistentPaths.WorldState,
                 SaveFileName);
+        }
+
+        /// <summary>
+        /// Creates a manager whose restoration, auto-save and reset operations use the supplied
+        /// absolute snapshot path. Hosts can isolate worlds before <see cref="Initialize"/> runs.
+        /// Relative paths and traversal segments are rejected to avoid writing outside a host's selected directory.
+        /// </summary>
+        public WorldStateManager(
+            IGameLogger logger,
+            ICoreAiPrefabRegistry prefabRegistry,
+            bool allowPrimitives,
+            string saveFilePath)
+            : this(logger, prefabRegistry, allowPrimitives)
+        {
+            if (string.IsNullOrWhiteSpace(saveFilePath) || !Path.IsPathFullyQualified(saveFilePath))
+            {
+                throw new ArgumentException("The world snapshot path must be an absolute file path.", nameof(saveFilePath));
+            }
+
+            string[] segments = saveFilePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            foreach (string segment in segments)
+            {
+                if (segment == "." || segment == "..")
+                {
+                    throw new ArgumentException("The world snapshot path must not contain traversal segments.", nameof(saveFilePath));
+                }
+            }
+
+            if (string.IsNullOrEmpty(Path.GetFileName(saveFilePath)))
+            {
+                throw new ArgumentException("The world snapshot path must name a file.", nameof(saveFilePath));
+            }
+
+            _saveFilePath = Path.GetFullPath(saveFilePath);
         }
 
         public void Initialize()

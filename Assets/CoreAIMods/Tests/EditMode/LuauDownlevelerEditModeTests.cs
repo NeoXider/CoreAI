@@ -294,7 +294,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void CompoundFloorDivide_UsesMathFloor()
         {
-            AssertRewrites("x //= 2", "local __luau_t0 = math.floor;x = __luau_t0(x / ( 2))");
+            AssertRewrites("x //= 2", "local __luau_t0 = _ENV; local __luau_t1 = function() return __luau_t0.math.floor end;x = __luau_t1()(x / ( 2))");
         }
 
         [Test]
@@ -508,19 +508,19 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void FloorDivision_BecomesMathFloor()
         {
-            AssertRewrites("local h = x // 2", "local __luau_t0 = math.floor;local h = __luau_t0(x / 2)");
+            AssertRewrites("local h = x // 2", "local __luau_t0 = _ENV; local __luau_t1 = function() return __luau_t0.math.floor end;local h = __luau_t1()(x / 2)");
         }
 
         [Test]
         public void FloorDivision_RespectsPrecedence()
         {
-            AssertRewrites("local a = 1 + 7 // 2", "local __luau_t0 = math.floor;local a = 1 + __luau_t0(7 / 2)");
+            AssertRewrites("local a = 1 + 7 // 2", "local __luau_t0 = _ENV; local __luau_t1 = function() return __luau_t0.math.floor end;local a = 1 + __luau_t1()(7 / 2)");
         }
 
         [Test]
         public void FloorDivision_ChainsLeftAssociatively()
         {
-            AssertRewrites("local b = 9 // 2 // 2", "local __luau_t0 = math.floor;local b = __luau_t0(__luau_t0(9 / 2) / 2)");
+            AssertRewrites("local b = 9 // 2 // 2", "local __luau_t0 = _ENV; local __luau_t1 = function() return __luau_t0.math.floor end;local b = __luau_t1()(__luau_t1()(9 / 2) / 2)");
         }
 
         // ---------------------------------------------------------------- number literals
@@ -917,6 +917,7 @@ namespace CoreAI.Tests.EditMode
         [TestCase("resolver();error('injected')")]
         [TestCase("end")]
         [TestCase("__luau_t0")]
+        [TestCase("_ENV")]
         [TestCase("")]
         public void InvalidTrustedResolverName_IsRefusedWithoutThrowing(string name)
         {

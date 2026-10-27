@@ -38,8 +38,8 @@
     <Reference Include="Lua">
       <HintPath>$(RepoRoot)/Assets/CoreAIMods/Plugins/Lua.dll</HintPath>
     </Reference>
-    <PackageReference Include="UniTask" Version="2.5.10" />
-    <PackageReference Include="Microsoft.Bcl.TimeProvider" Version="8.0.0" />
+    <PackageReference Include="UniTask" Version="2.5.11" />
+    <PackageReference Include="Microsoft.Bcl.TimeProvider" Version="8.0.1" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="NUnit" Version="3.14.0" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
@@ -68,6 +68,8 @@
   <ItemGroup>
     <Compile Include="$(TestsRoot)/BundledLuaSamplesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/BundledLuaSamplesEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/BundledModSeederEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/BundledModSeederEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/AdditionalBundledLuaSamplesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/AdditionalBundledLuaSamplesEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/LuaModInvocationLimitsEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaModInvocationLimitsEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/CoreAiChatExamplesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/CoreAiChatExamplesEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/DemoModProductionSurfaceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/DemoModProductionSurfaceEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/FileLuaModSourceStoreEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/FileLuaModSourceStoreEditModeTests.cs" />

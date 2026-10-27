@@ -41,6 +41,6 @@
   <ItemGroup>
     <ProjectReference Include="$(PortableRoot)/CoreAI.Core.csproj" />
     <ProjectReference Include="../UnityEngine/UnityEngine.csproj" />
-    <PackageReference Include="UniTask" Version="2.5.10" />
+    <PackageReference Include="UniTask" Version="2.5.11" />
   </ItemGroup>
 </Project>

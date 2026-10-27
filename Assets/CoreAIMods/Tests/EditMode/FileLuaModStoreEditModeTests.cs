@@ -1,5 +1,6 @@
 using System.IO;
 using System.Collections.Generic;
+using System.Text;
 using CoreAI.Infrastructure.Lua;
 using NUnit.Framework;
 
@@ -36,6 +37,45 @@ namespace CoreAI.Tests.EditMode
             {
                 /* best effort */
             }
+        }
+
+        [Test]
+        public void StoreNamespace_MalformedUtf16IsRejectedBeforeStorageChanges()
+        {
+            const string replacementId = "tenant-\uFFFD";
+            using FileLuaModStore replacement = new(_root, storeId: replacementId);
+            replacement.Set("mod", "key", "original");
+            string[] before = Directory.GetFileSystemEntries(_root, "*", SearchOption.AllDirectories);
+            string[] invalidIds = { "tenant-\uD800", "tenant-\uD801", "tenant-\uDC00" };
+
+            foreach (string invalidId in invalidIds)
+            {
+                Assert.Throws<EncoderFallbackException>(() => LuaModStoreId.ApplyTo(_root, invalidId));
+                Assert.Throws<EncoderFallbackException>(() => new FileLuaModStore(_root, storeId: invalidId));
+                Assert.Throws<EncoderFallbackException>(() => new FileLuaModSourceStore(_root, storeId: invalidId));
+                Assert.Throws<EncoderFallbackException>(() =>
+                    LuaModStoreId.TryMigrateLegacy(_root, invalidId, (_, _) => true));
+            }
+
+            CollectionAssert.AreEquivalent(before,
+                Directory.GetFileSystemEntries(_root, "*", SearchOption.AllDirectories));
+            Assert.AreEqual("original", replacement.Get("mod", "key"));
+        }
+
+        [Test]
+        public void StoreNamespace_ValidSupplementaryIdentifierPreservesItsPublishedDigest()
+        {
+            const string id = "tenant-\uD83D\uDE00";
+            string expected = Path.Combine(_root, "Stores",
+                "id-73aad52b6b4992a247bd37e0c6041a3a461d9e2f957a708dea63ec3110457b49");
+            Assert.AreEqual(expected, LuaModStoreId.ApplyTo(_root, id));
+            using (FileLuaModStore writer = new(_root, storeId: id))
+            {
+                writer.Set("mod", "key", "supplementary");
+            }
+            using FileLuaModStore reopened = new(_root, storeId: id);
+            Assert.AreEqual("supplementary", reopened.Get("mod", "key"));
+            Assert.IsTrue(Directory.Exists(expected));
         }
 
         [Test]

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using Lua;
@@ -43,6 +44,12 @@ namespace CoreAI.Scripting.LuaCs
         /// <inheritdoc />
         public ScriptResumeResult Resume(params object[] args)
         {
+            return ResumeWithLimits(CancellationToken.None, null, args);
+        }
+
+        /// <summary>Applies a budget and cancellation only to this resume.</summary>
+        internal ScriptResumeResult ResumeWithLimits(CancellationToken cancellationToken, IExecutionBudget resumeBudget, params object[] args)
+        {
             args ??= Array.Empty<object>();
             LuaValue[] luaArgs = new LuaValue[args.Length];
             for (int i = 0; i < args.Length; i++)
@@ -50,7 +57,7 @@ namespace CoreAI.Scripting.LuaCs
                 luaArgs[i] = LuaCsValueMarshaller.Unbox(args[i]);
             }
 
-            _handle.Resume(luaArgs);
+            _handle.ResumeWithLimits(cancellationToken, resumeBudget, luaArgs);
 
             IReadOnlyList<LuaValue> values = _handle.LastValues;
             object[] boxed = new object[values.Count];

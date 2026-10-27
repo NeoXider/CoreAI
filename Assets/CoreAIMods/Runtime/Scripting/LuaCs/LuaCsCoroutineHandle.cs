@@ -1,4 +1,5 @@
 using System;
+using CoreAI.Scripting;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -290,6 +291,13 @@ namespace CoreAI.Sandbox.LuaCs
         /// </summary>
         public LuaValue[] Resume(params LuaValue[] args)
         {
+            return ResumeWithLimits(CancellationToken.None, null, args);
+        }
+
+        /// <summary>Applies an optional immutable budget to this resume without changing later resumes.</summary>
+        internal LuaValue[] ResumeWithLimits(CancellationToken cancellationToken, IExecutionBudget resumeBudget, params LuaValue[] args)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             // WHY the innermost run executing on this OS thread (see LuaCsGuardedRun): a task.spawn that runs this
             // thread at once runs it inside that run, whose hook cannot fire until it returns; a resume the scheduler
             // drives from its own frame finds none and keeps the full per-resume budget.
@@ -340,8 +348,10 @@ namespace CoreAI.Sandbox.LuaCs
             // LuaCsCoroutineBudgetSettings is exactly the object ScriptContext:SetTimeout mutates, and a
             // long-lived pooled handle (a signal runner serving every Heartbeat fire) must pick up that
             // change on its very next resume — not only on a freshly constructed handle.
-            int budgetPerResume = _liveResumeBudget?.BudgetPerResume ?? _budgetPerResume;
-            int resumeTimeoutMs = _liveResumeBudget?.ResumeTimeoutMs ?? _resumeTimeoutMs;
+            int budgetPerResume = resumeBudget == null
+                ? _liveResumeBudget?.BudgetPerResume ?? _budgetPerResume
+                : (int)Math.Min(resumeBudget.MaxSteps, int.MaxValue);
+            int resumeTimeoutMs = resumeBudget?.TimeoutMs ?? _liveResumeBudget?.ResumeTimeoutMs ?? _resumeTimeoutMs;
             long lifetimeRemaining = HasLifetimeCap
                 ? Math.Max(0L, _totalLifetimeSteps - _consumedSteps)
                 : UnlimitedLifetimeSteps;
@@ -349,6 +359,8 @@ namespace CoreAI.Sandbox.LuaCs
                 _maxAllocatedBytes, enclosing, _coroutine);
 
             int count = 0;
+            CancellationTokenRegistration cancellationRegistration = cancellationToken.Register(
+                CancelResumeFromCaller, _cts);
             try
             {
                 _coroutine.SetHook(_hook.Function, string.Empty, 1);
@@ -363,6 +375,7 @@ namespace CoreAI.Sandbox.LuaCs
             }
             finally
             {
+                cancellationRegistration.Dispose();
                 _hook.End();
                 try
                 {
@@ -389,6 +402,12 @@ namespace CoreAI.Sandbox.LuaCs
 
             CaptureResults(count);
             return _lastValues;
+        }
+
+        private static void CancelResumeFromCaller(object source)
+        {
+            try { ((CancellationTokenSource)source).Cancel(); }
+            catch (Exception) { }
         }
 
         // WHY the thread is marked Dead by hand: a protected Lua-CSharp resume marks a thread Dead only for an
@@ -793,7 +812,15 @@ namespace CoreAI.Sandbox.LuaCs
             /// <inheritdoc />
             protected override LuaCsHostFunctionException CreateOwnTrip(LuaCsGuardTripKind kind, LuaState where)
             {
-                return CreatePendingBudgetTrip(where, OwnTripMessage(kind));
+                string message = OwnTripMessage(kind);
+                Exception cause = kind == LuaCsGuardTripKind.Timeout
+                    ? new TimeoutException(message)
+                    : kind == LuaCsGuardTripKind.Memory
+                        ? new LuaMemoryBudgetException(message)
+                        : new LuaStepBudgetException(message);
+                // WHY: callers classify scheduler and direct-VM budget failures by cause type,
+                // while the existing Lua error object retains its exact text and author line.
+                return new LuaCsHostFunctionException(null, message + DescribeCurrentLine(where), cause);
             }
 
             /// <inheritdoc />

@@ -304,6 +304,8 @@ namespace CoreAI.Net.Mirror
             "the actor's session was replaced by a newer connection for the same actor";
 
         private readonly Dictionary<int, RbxNetworkPeer> _peersByConnection = new();
+        private readonly Dictionary<int, long> _bindingGenerations = new();
+        private long _lastBindingGeneration;
         private readonly Dictionary<string, int> _connectionsByActor = new(StringComparer.Ordinal);
         private readonly Dictionary<uint, PendingRequest> _pending = new();
         private readonly List<string> _actorOrder = new();
@@ -312,7 +314,7 @@ namespace CoreAI.Net.Mirror
         private readonly HashSet<int> _acknowledged = new();
         private readonly List<OwedDrop> _owedDrops = new();
         private readonly HashSet<int> _tearingDown = new();
-        private readonly HashSet<int> _notifyingDisconnect = new();
+        private readonly Dictionary<int, long> _notifyingDisconnect = new();
         private readonly List<HeldSend> _heldUntilAdmitted = new();
         private readonly RbxNetworkRateLimiter _rateLimiter;
         private readonly Func<double> _clockSeconds;
@@ -685,6 +687,12 @@ namespace CoreAI.Net.Mirror
         internal event Action<int> BindingReleased;
 
         /// <summary>
+        /// Generation-aware companion to <see cref="BindingReleased"/>: carries the departing peer
+        /// and its opaque binding generation independently of caller-supplied session values.
+        /// </summary>
+        internal event Action<int, RbxNetworkPeer, long> BindingReleasedWithPeer;
+
+        /// <summary>
         /// On a client, raised when the server says why it is about to close this connection — a
         /// kick, with the kick's message, or a newer session of the same player. The drop follows;
         /// a host that shows the player why subscribes here or reads <see cref="LastDisconnectNotice"/>.
@@ -763,7 +771,10 @@ namespace CoreAI.Net.Mirror
                 Supersede(older, connectionId, peer.ActorId);
             }
 
+            long generation = checked(_lastBindingGeneration + 1);
+            _lastBindingGeneration = generation;
             _peersByConnection[connectionId] = peer;
+            _bindingGenerations[connectionId] = generation;
             _connectionsByActor[peer.ActorId] = connectionId;
             if (awaitClientReady && !_acknowledged.Contains(connectionId)
                                  && !_joining.ContainsKey(connectionId))
@@ -922,6 +933,18 @@ namespace CoreAI.Net.Mirror
             _tearingDown.Remove(connectionId);
         }
 
+        /// <summary>Current opaque binding generation, or zero when the connection is unbound.</summary>
+        internal long GetBindingGeneration(int connectionId)
+        {
+            return _bindingGenerations.TryGetValue(connectionId, out long generation) ? generation : 0;
+        }
+
+        /// <summary>Generation captured before callbacks for an active disconnect notification.</summary>
+        internal bool TryGetDisconnectGeneration(int connectionId, out long generation)
+        {
+            return _notifyingDisconnect.TryGetValue(connectionId, out generation);
+        }
+
         /// <summary>Reports a transport-level disconnect so the world can tear the actor down.</summary>
         /// <remarks>
         /// WHY keyed by the connection and released here too: the teardown listener may be absent
@@ -936,17 +959,20 @@ namespace CoreAI.Net.Mirror
         public void NotifyDisconnected(int connectionId, RbxNetworkDisconnectReason reason)
         {
             if (!_peersByConnection.TryGetValue(connectionId, out RbxNetworkPeer peer)
-                || !_notifyingDisconnect.Add(connectionId))
+                || _notifyingDisconnect.ContainsKey(connectionId))
             {
                 return;
             }
 
+            long generation = GetBindingGeneration(connectionId);
+            _notifyingDisconnect.Add(connectionId, generation);
             bool marked = BeginTeardown(connectionId);
             ActorAdmissionResult admission = _authenticator?.ResultFor(connectionId);
             NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient connection);
             // WHY: the world's unregister runs before Player removal. Completions must wait for both.
             List<PendingRequest> pending = TakePendingRequests(FindPendingFor(connectionId));
             Action<int> bindingReleased = BindingReleased;
+            Action<int, RbxNetworkPeer, long> bindingReleasedWithPeer = BindingReleasedWithPeer;
             List<Exception> failures = null;
             try
             {
@@ -963,8 +989,7 @@ namespace CoreAI.Net.Mirror
                 {
                     try
                     {
-                        if (_peersByConnection.TryGetValue(connectionId, out RbxNetworkPeer still)
-                            && SamePeer(still, peer))
+                        if (GetBindingGeneration(connectionId) == generation)
                         {
                             ReleaseConnection(connectionId, PeerDisconnectedReason);
                         }
@@ -984,6 +1009,8 @@ namespace CoreAI.Net.Mirror
                         try
                         {
                             InvokeSubscribers(bindingReleased, connectionId, ref bindingFailures);
+                            InvokeBindingReleasedSubscribers(bindingReleasedWithPeer, connectionId,
+                                peer, generation, ref bindingFailures);
                             ReportCleanupFailures(bindingFailures, "releasing connection " + connectionId);
                         }
                         finally
@@ -1485,6 +1512,7 @@ namespace CoreAI.Net.Mirror
             UnregisterHandlers();
             PerformOwedDrops(0d, all: true);
             _peersByConnection.Clear();
+            _bindingGenerations.Clear();
             _connectionsByActor.Clear();
             _actorOrder.Clear();
             _localEvents.Clear();
@@ -1503,6 +1531,7 @@ namespace CoreAI.Net.Mirror
             PeerDisconnected = null;
             DisconnectNoticeReceived = null;
             BindingReleased = null;
+            BindingReleasedWithPeer = null;
             FailAllPending(DisposedReason);
         }
 
@@ -2694,9 +2723,13 @@ namespace CoreAI.Net.Mirror
         {
             List<uint> pending = FindPendingFor(connectionId);
             bool wasBound = _peersByConnection.TryGetValue(connectionId, out RbxNetworkPeer peer);
+            long generation = GetBindingGeneration(connectionId);
+            Action<int> bindingReleased = BindingReleased;
+            Action<int, RbxNetworkPeer, long> bindingReleasedWithPeer = BindingReleasedWithPeer;
             if (wasBound)
             {
                 _peersByConnection.Remove(connectionId);
+                _bindingGenerations.Remove(connectionId);
                 if (_connectionsByActor.TryGetValue(peer.ActorId, out int mapped)
                     && mapped == connectionId)
                 {
@@ -2715,9 +2748,13 @@ namespace CoreAI.Net.Mirror
             List<Exception> failures = null;
             // WHY: an earlier peer listener can unregister or dispose before the session host runs.
             // NotifyDisconnected retains this notification until all peer listeners have finished.
-            if (wasBound && !_notifyingDisconnect.Contains(connectionId))
+            bool delayedByDisconnect = _notifyingDisconnect.TryGetValue(connectionId,
+                out long disconnectGeneration) && disconnectGeneration == generation;
+            if (wasBound && !delayedByDisconnect)
             {
-                InvokeSubscribers(BindingReleased, connectionId, ref failures);
+                InvokeSubscribers(bindingReleased, connectionId, ref failures);
+                InvokeBindingReleasedSubscribers(bindingReleasedWithPeer, connectionId, peer, generation,
+                    ref failures);
             }
 
             FailPendingRequests(pending, reason);
@@ -2782,6 +2819,30 @@ namespace CoreAI.Net.Mirror
             }
 
             ReportCleanupFailures(failures, "failing open requests (" + reason + ")");
+        }
+
+        private static void InvokeBindingReleasedSubscribers(
+            Action<int, RbxNetworkPeer, long> subscribers, int connectionId, RbxNetworkPeer releasedPeer,
+            long generation,
+            ref List<Exception> failures)
+        {
+            if (subscribers == null)
+            {
+                return;
+            }
+
+            foreach (Delegate subscriber in subscribers.GetInvocationList())
+            {
+                try
+                {
+                    ((Action<int, RbxNetworkPeer, long>)subscriber)(connectionId, releasedPeer, generation);
+                }
+                catch (Exception exception)
+                {
+                    failures ??= new List<Exception>();
+                    failures.Add(exception);
+                }
+            }
         }
 
         private static void InvokeSubscribers<T>(Action<T> subscribers, T message,

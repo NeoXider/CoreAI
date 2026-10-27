@@ -172,6 +172,43 @@ namespace CoreAI.Core.Tests.EditMode
 #endif
         }
 
+        [TestCase(false)]
+        [TestCase(true)]
+        public void QueueWriter_AvailableCapacity_AllocatesNothingPerChunk(bool cancellable)
+        {
+#if UNITY_5_3_OR_NEWER
+            Assert.Ignore("Allocation accounting is asserted on the portable .NET leg of the suite.");
+#else
+            const int chunks = 4000;
+            QueuedAiOrchestrator.AsyncChunkQueue queue = new(1, 1024);
+            LlmStreamChunk chunk = new() { Text = "t" };
+            using CancellationTokenSource cancellation = new();
+            CancellationToken token = cancellable ? cancellation.Token : CancellationToken.None;
+            WriteAndTakeAvailableChunks(queue, chunk, token, chunks);
+            WriteAndTakeAvailableChunks(queue, chunk, token, chunks);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            WriteAndTakeAvailableChunks(queue, chunk, token, chunks);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            TestContext.WriteLine($"Available-capacity writes: {allocated} B for {chunks} chunks; cancellable={cancellable}.");
+            Assert.AreEqual(0L, allocated,
+                "A producer with available capacity must not allocate cancellation closures before its synchronous return.");
+#endif
+        }
+
+        private static void WriteAndTakeAvailableChunks(QueuedAiOrchestrator.AsyncChunkQueue queue,
+            LlmStreamChunk chunk, CancellationToken token, int chunks)
+        {
+            for (int index = 0; index < chunks; index++)
+            {
+                ValueTask write = queue.WriteAsync(chunk, token);
+                if (!write.IsCompletedSuccessfully)
+                    throw new InvalidOperationException("A write to an empty queue with capacity must complete synchronously.");
+                write.GetAwaiter().GetResult();
+                if (!queue.TryTake(out LlmStreamChunk taken) || !ReferenceEquals(chunk, taken))
+                    throw new InvalidOperationException("Each available-capacity write must deliver its original chunk.");
+            }
+        }
+
         /// <summary>
         /// The reader used to check "queue empty" and then "completed" as two separate reads: a producer
         /// writing its terminal chunk and completing between them made the reader stop with the chunk

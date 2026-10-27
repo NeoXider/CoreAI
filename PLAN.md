@@ -1,5 +1,36 @@
 # Current status and next steps
 
+## Active repair checkpoint - 2026-10-26
+
+Current branch: `demo`, based on released `bc3fd74f` / `v7.54.0`; the older ladder checkpoints below are historical.
+Goal: close all 21 accepted PR findings in `TODO.md`, review every repair diff, and verify the repaired framework and demos.
+Acceptance preserves actor/session scope, public API compatibility, durability, Unicode, cancellation, ordering and replaceable host policies.
+Before delegation: exact disjoint file leases; workers do not commit or operate Unity. Root owns builds, tests, Editor and Git.
+Native GPT workers exhausted their reported quota. Named free OpenCode workers are continuing partial changes through `neoxider-agents`.
+The release-runtime regression baseline is 36 cases: 28 failed and 8 passed; this is failing-baseline evidence, not repaired acceptance.
+All 17 published demo scenes require runtime checks; manual Play Mode must include agent-driven mod creation and editing.
+Publication order: verified repairs to `demo`, then promotion to `main` after demo acceptance. The published tag remains immutable.
+Open work and receipts: `dev-docs/pr-review-2026-10-25/PLAN.md`, `FIXES.json`, and `artifacts/pr-review-20261025/`.
+
+Checkpoint 2026-10-26: Core and Source compile; Mods.Hub and its dependencies compile with zero errors.
+Portable Core receipt `core-repair-final4.trx` contains 2,853 Passed / 3 NotExecuted / 0 Failed (2,856 result rows).
+The user explicitly waived the 15-line implementation limit when external workers were unavailable; root may finish remaining work.
+Fresh native GPT-6.1 Sol/max workers are now verified live, independently reviewing repairs and adding regression coverage.
+Their actor audit found a history default-literal overload ambiguity; the follow-up removes it and adds compile/runtime controls.
+Added scope: migrate RedoSchool CoreAiPro capabilities as a portable Gateway Client feature, with thin Unity integration.
+The user's standalone requirement rules out a Unity-only implementation. Existing server transport and build guards must be reused.
+Gateway design/provenance: `dev-docs/server-bridge/ASSESSMENT.md`. Feature work is staged while root verifies the existing repair wave.
+No new repair commit, demo push or main promotion has been accepted yet; all required Unity/demo gates remain open.
+
+Verification checkpoint: focused portable Lua 130 Passed / 0 Failed; live Unity focused2 ran 432 cases, 429 Passed / 3 Failed.
+Focused3 cleared the cancellation-subtype fixture and real-descriptor UI control: 27 Passed / 1 remaining Advanced-presentation case.
+Reports 33/35 found notification/lifetime and Mirror-generation follow-ups; fixes are owned separately and require new execution.
+Gateway candidates are frozen in `artifacts/server-gateway-20261026/staging/` with 11 baseline hashes and 29 candidate files.
+Isolated C# 9/netstandard2.1 Gateway Core + net8 fake-wire fixtures passed 54 cases; standalone sample compiled and offline help passed.
+Staged Source also compiled against real installed Unity references with zero errors; this is compile-only, not Unity/runtime acceptance.
+Independent Gateway review is in progress; correlation precedence, leaf disposal, transport cancellation cleanup and policy-model consistency need adjudication.
+No Gateway live import, repair publication, release-tag change or main promotion has been accepted.
+
 Checkpoint: 2026-10-15, branch `main`. Current release: **7.50.2** (2026-10-15), all seven packages in lockstep.
 The one MVP ladder of record is `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4 (renumbered on 2026-09-24:
 §4.1 maps the old numbers; `Docs/ROADMAP.md` §4 is the one-screen table). Open work is in `TODO.md`,
@@ -226,3 +257,111 @@ Root accepts all twelve source joins and available measured gates. Final hermeti
 The earlier five benchmark failures passed after two harness defects and replay/G6 fixture contracts were corrected without weakening grading, chunk evidence or negative controls. The earlier16.295306-second cancellation watchdog timeout remains unreproduced, not product-fixed: focused1.065373s and final full0.214230s passes are retained with phase observability. Earlier Windows389 selections were mixed because the unmarked local SkillSet test contacted MiniCPM; its structural last-call observations are not model-quality or broad live-provider acceptance. Root marked it Benchmark/Explicit before final hermetic selection.
 
 Exact two EditMode and two PlayMode environmental exceptions, all raw negatives/invalid attempts, frozen audit15-file/12-hash layout and91/89 intake boundaries remain in the acceptance ledger. Built-player/IL2CPP/browser durability/device/real-socket/load/performance/live-quality gates remain unrun. This checkpoint supersedes earlier dated pending statements only as current status. Publication uses the Git tag and GitHub release https://github.com/NeoXider/CoreAI/releases/tag/v7.54.0; source/receipts bind to that commit/tag, with no self-referential SHA required inside the commit. All C# and the finalized documentation are frozen for root staging.
+
+## Demo repair and feature integration checkpoint - 2026-10-26
+
+Before planning: complete the owner-authorized repairs, reusable Gateway client, runtime code editor/interpreter port, compatible dependency/MCP updates and all-demo QA on demo. Preserve supplied actor/session isolation, ABI compatibility, bounded Lua execution, nonexecuting Python, owned cleanup and WebGL's single-threaded path. RedoSchool business/auth/lesson implementations, global tool upgrades and unrelated user assets are outside this change.
+
+Before delegating: native gpt-6.1-sol workers use reasoning effort max, disjoint staging/file leases and their own Markdown reports. Root alone owns Unity, integration and Git. The owner explicitly authorized root to finish large changes when CLI/free-agent limits were exhausted. No commit may carry coauthor or AI attribution.
+
+Milestone: all 29 Gateway candidates were integrated after live baseline/hash validation. The focused live portable selection passed 94 tests. The complete portable Core result in artifacts/server-gateway-20261026/core-gateway-full1-results/core-gateway-full1.trx contains 2,941 Passed, zero Failed and three NotExecuted entries (2,944 actual result rows). Source/Unity and final dependency gates remain separate.
+
+Acceptance correction: the two recent attached-editor test jobs executed the older loaded test assembly. Root verified its MVID and IL string constants against the changed source and found the DLL timestamp predates the helper/diagnostic changes. Native typing passed in that loaded assembly; the saved paste failures do not validate the newest helper. Explicit AssetDatabase refresh and compilation are now requested before the next applicable test run.
+
+The verified compatible UPM candidate was applied after SHA256 baseline checks, with original manifest and lockfile backups retained in artifacts/dependency-update-20261026/pre-integration. Unity package resolution/import, MCP 10.3.0 reconnect and fresh compiled-source test evidence are still pending. Managed patch candidates remain staged/unverified. The ready Redo editor source is being adapted in isolated staging; no candidate editor is claimed integrated or runtime-tested yet.
+
+Before accepting: root will review actual feature diffs and independent audits, run fresh tests against the final imported tree and exercise all 17 published demos plus real agent-created/edited mods. The existing v7.54.0 tag is immutable. Demo push, main promotion and a new release remain unperformed and gated by the applicable QA.
+## Editor integration and Lua examples checkpoint - 2026-10-26
+
+The owner's latest correction cancels the new NPC-agent system and further subagent work. Root interrupted all three active workers and is finishing directly under the earlier explicit authorization. NPC candidates remain isolated in ignored artifacts and are not promoted into Assets or the published demo inventory. The existing 17 demos remain the manual acceptance scope.
+
+Milestone: root promoted 32 reviewed editor/host-binding candidate files with per-file baseline/candidate hashes and backups in artifacts/editor-integration-20261026/receipt.json. Follow-up root fixes remove leftover Redo business dependencies and keep cancellation-aware coroutine helpers internal under distinct names, preserving existing Resume(default) source compatibility. The actual portable editor contract selection passed8/8 (editor-core3.trx); UI/real-VM budget gates remain pending.
+
+Root added eight opt-in bundled Lua resources: orbit gallery, waypoint platform, tween gate, respawning coins, saved score, round clock, recycling conveyor and a frame-budgeted Lua maze solver. Actual-source real Lua/scheduler regressions passed13/13 in artifacts/editor-integration-20261026/samples-results3/additional-samples3.trx, including bounded/restarted maze search, coin deduplication/respawn, score reload, pause and round progression, no per-frame object growth and owned unload. The examples guide is Assets/CoreAIMods/Docs/LUA_MOD_EXAMPLES.md. Source tests do not claim rendering/input-device/performance or browser durability acceptance.
+
+Dependency checkpoints after the actual managed restore are portable Core2941Passed/3NotExecuted and Lua1940Passed/41NotExecuted (actual TRX rows). Unity6000.6 imported MCP10.3.0 and NeoTools10.19.0; project HTTP MCP is reconnected to the uniquely identified CoreAI instance. Current GUI process17884 was launched through the desktop shell at2026-10-26T22:44:46+05:00; unrelated editor/build processes remain untouched.
+
+Remaining acceptance: finish runtime budget and editor UI compile/regressions, reconcile original21 finding evidence and documentation, exercise every demo and real model mod create/edit, update release/version/changelogs and complete publication gates. Computer Use currently has no node_repl tool in this session; its required mouse/keyboard QA remains explicitly unverified. Demo push, main promotion and a new release remain unperformed.
+## Fresh editor gate and added mod examples - 2026-10-27
+
+Root's current CoreAI GUI process17884 completed a fresh source compilation; the native loaded CoreAI.Core assembly now contains CodeEditorDocument, unlike the stale earlier UI test jobs. Root fixed the copied TextElement call through its actual INotifyValueChanged<string> interface and restricted portable-only NUnit scheduling attributes from Unity's runner. New runtime source, not only generated project files, is imported.
+
+Latest available focused checks: Core editor contracts10/10 Passed (editor-core4.trx), including whitespace preservation inside Lua literals and cross-mod result fencing; invocation guard/cancellation9/9 Passed (invocation-limits2.trx); actual bundled sample13/13 Passed (additional-samples3.trx). Full portable Lua after the interpreter changes passed1,962 with41NotExecuted actual result entries (lua-editor-full1.trx); CLI skip summary is not used for accounting. Its source precedes only later editor-core whitespace/result-fence and Unity NUnit-attribute compatibility changes.
+
+The first invocation-budget probe found an actual typed-error metadata gap in scheduler coroutine trips. Root fixed CreateOwnTrip to keep the exact Lua error text/author line while attaching a typed step, timeout or memory cause. The original narrow assertion then passed with and without Rbx; it was not weakened to accept arbitrary text. Source compilation of Resume(default) remains unambiguous through internal, distinctly named resume helpers.
+
+The new runtime editor/interpreter guide is Docs/CoreAI/CODE_EDITOR.md; the eight example guide is Assets/CoreAIMods/Docs/LUA_MOD_EXAMPLES.md. Real attached-panel/host-composition Unity tests are starting now; their outcomes, demo actions, Computer Use input, release/version and publication remain pending.
+## Root completion status verified - 2026-10-27
+
+CoreAI is not complete. The working tree is still on local demo at bc3fd74f with uncommitted changes. Remote main remains bc3fd74f; no remote demo head was returned. Package version remains7.54.0. No new release or promotion of this repair wave is accepted.
+
+The latest focused Unity editor batch contains57 cases:56 Passed and1 Failed. The remaining failure is CodeEditorUiEditModeTests.DetachReattachAndDispose_InvalidatePendingDocumentWork (expected the Python draft plus p; actual #p). Receipt: artifacts/pr-review-20261025/unity-editor-source-batch1.xml.
+
+Portable checkpoints are Core2951 Passed/3NotExecuted and Lua1962 Passed/41NotExecuted. Earlier Unity PlayMode has390 Passed/1Failed/2Skipped in unity-repair-play1.xml; the isolated console follow-up passed2/2. A complete green PlayMode rerun after the editor integration is not present.
+
+The17-scene manual acceptance and actual model-authored Lua creation/editing remain unverified. A complete PlayMode pass against real models on the current final source is not recorded. Source/portable results and scene-load smoke tests do not establish live-model interaction acceptance.
+
+## Resumed completion wave - 2026-10-27
+
+Goal: finish the current CoreAI repair/features on demo, verify all published demos and actual model-authored Lua create/edit, close confirmed review findings with regressions, update user/developer docs and versions, push demo and promote main only after the applicable gates pass. Reddit work is outside this wave. No new NPC-agent system is added.
+
+Requirements: engine-free portable core, replaceable host seams, scoped identity and world ownership, source preservation, bounded Lua and UI work, exception/cancellation stability, exact persistence receipts and truthful test evidence. No skipped/offline test counts as a real-model or manual-input pass. Preserve unrelated files and user settings/data.
+
+Delegation: coreai_editor_finish owns CodeEditorView and two native typing fixtures; coreai_runtime_finish owns the active-world budget facade plus real editor/runtime tests; coreai_live_qa_finish owns new live-demo acceptance fixtures only. All are native gpt-6.1-sol with max reasoning. Root owns settings, scene wiring, Unity/batch execution, final review, Git and publication. Independent CLI audit route is being checked through the explicit free OpenCode preference.
+
+Before acceptance: read each actual diff, freeze source before running Unity, require exact XML/TRX/provider receipts and close failures without weakening assertions. Original audit reports remain frozen; the21-finding ledger and TODO must be reconciled against actual evidence. No new release or main promotion is claimed while any required gate is unverified.
+
+Provider steering: the owner now requires OpenRouter for all real API PlayMode tests and forbids local-model testing. No local inference request was sent. Root found an existing OpenRouter credential in the local credential store without logging/copying its value. All new live fixtures require explicit OpenRouter test environment and reject local/native/offline fallbacks. Earlier MiniCPM load was setup only and is not test evidence.
+
+Native runtime worker completed the active-world invocation-policy fix and27 regression cases (18 adapter,9 replacement-world). Native editor worker completed the native selection and stale completion-pair fixes; root is reviewing source before graphics-capable batch. Core portable rerun exposed an existing parked-reader allocation guard failure (305B/chunk vs192); a focused repro and separate Core performance investigation are active, with no threshold relaxation authorized.
+
+Source-final and positive checkpoints: the full Core portable Release run passed2954 with3NotExecuted (actual TRX rows). Queue/hot-path regression selection passed111/111 in Debug and111/111 in Release after a negative baseline that measured208B/write Debug and64B/write Release. The old192B end-to-end bound was not relaxed; new direct-write0B assertions remain.
+
+Root wired the existing ModdableUnits scene by verified serialized fileIDs: scope.gameplayBindingsProviders includes its existing controller, and controller.modsScope references the existing Lua scope. No new NPC system or generated scene builder was added. Qwen readiness is provider-aware and the pre-container world-store seam is in place. First Unity focused batch aborted compilation on3 new test namespace references; the author corrected them and the second batch is now running. Root owns every Editor process and no local inference is permitted.
+
+Free OpenCode DeepSeek route passed a chat probe and read/wrote an initial audit outline, but the real worker hit a TLS certificate failure and stalled; the exact task was stopped before transferring documentation ownership to native reviewers. Its generic artifact delta included other workers' files and is not evidence of authorship. Native independent audits now cover all7 changed modules; confirmed additional editor/host findings are being staged while Unity source stays frozen.
+
+Further native and API checkpoints: unity-completion-focused2.xml contains99 cases92Passed/3Failed/4Skipped. All27 new VM/adapter cases,13 bindings and10 Qwen readiness cases pass; failures remain in native editor selection/closer/Tab behavior. Native authors prepared separate patches; root merged12 candidate files into C:/AI/work/coreai-completion-20261027/combined-editor-candidates with original/candidate SHA validation and no merge conflict. No candidate is promoted before independent final review.
+
+Original-scene OpenRouter hub1 aborted before a model request: the supposed pre-Awake PostProcessScene hook actually found built containers, threw in SetAgentMemoryPersistenceMode, and left optional Mirror sceneId compatibility unprocessed. This is a negative isolation/setup receipt, not API acceptance. The author is correcting isolation through public VContainer builder-slot replacement before service resolution; root approved the existing optional endpointRegistryStore parameter's DI fallback. No user store reset or duplicate backing-store registration is accepted. A separate existing direct Meai HTTP PlayMode case is now running against OpenRouter while isolation fixes remain staged.
+
+Actual API PlayMode positive: unity-openrouter-direct1.xml passed the real MeaiLlmClient_CreateHttp_ShouldCreateAndConnect case, exit0; the Unity log records POST https://openrouter.ai/api/v1/chat/completions under the process-only OpenRouter/deepseek environment. This is one real HTTP client path, not seventeen-scene, tool-authoring, manual input, player or performance acceptance. No local inference was used. The scene isolation author has staged the safe public VContainer backing-factory replacement and optional endpoint-store DI expression for independent/root review before the next scene run.
+
+The corrected storage-registration regression passed in actual Unity PlayMode: unity-live-storage1.xml1/1, exit0. It verifies exact public VContainer slot replacement preserves interfaces/lifetime/singleton and never invokes the default storage factory. Original-scene Hub OpenRouter acceptance is retried next with the promoted safe isolation helper and generic optional endpoint-registry store seam. Independent native editor review additionally confirmed tracked quote type-over inside strings is broken in the frozen baseline/candidate; a narrow quote/escape regression correction is being prepared in the merged candidate directory before promotion.
+
+Computer Use availability was rechecked: the installed skill requires node_repl for all Windows actions; that tool is absent from the current catalog. Plugin discovery returned no relevant Computer Use integration. No custom terminal/UI-Automation replacement was attempted. This remains the previously deferred manual-input gate while all available checks continue.
+
+Full original-scene OpenRouter first matrix: unity-openrouter-demos1.xml18=11Passed/5Failed/2Skipped, exit2. Positive cases include live Hub, battle override, wave observer, Forge combat, actor-isolated chat, authority grant/revoke, HTTP-backed QwenGenie/Spellcraft realtools, Skills crafting/attack, WorldCommands and standalonechat. The five failures include initial source/state paths expanded to278 Windows characters by redundant GUID store namespaces, so the real path guard correctly rejects them; the author is fixing the test storage layout without weakening production path safety. FullAccess self-test failed store_roundtrip and GameplayServices had no tour world after the same failed source load. Model-authored code did reach manage_mods but failed admission, so create/edit is NOT accepted yet.
+
+Root found the separately installed Codex CLI advertises computer_use=true. A strictly read-only capability worker coreai-computer-capability-20261027 (gpt-6.1-sol/max through wrapper, session53628) is checking only whether its required official node_repl/@oai/sky tool can import/list apps; no UI control is authorized until root grants an exclusive target lease. Feature advertisement is not proof of actual capability.
+
+Live failure diagnosis was verified: the custom QA root plus redundant storeId GUID hashing expanded a Windows source path to278 characters, above the existing259 guard. Only test replacement constructors were corrected to use the already GUID-owned root directly; production path guards and normal missing-root semantics are unchanged. The helper now performs real source admission and owned-id key/value roundtrip before paid requests. A focused OpenRouter rerun of the5 affected cases is running (unity-openrouter-repair1).
+
+Codex CLI's advertised Computer Use feature was not actual tool availability: coreai-computer-capability-20261027 completed with callable-tool matches[] and no official node_repl. No UI fallback or custom protocol was attempted. C:/AI/work/coreai-completion-20261027/COMPUTER_CAPABILITY.md contains the exact read-only result. The requested Windows Computer Use gate remains deferred/unverified.
+
+## Final demo publication checkpoint - 2026-10-27
+
+Data-safety incident: the live test helper omitted WorldStateManager isolation. Its 60-second
+autosave overwrote the pre-existing default `CoreAI/WorldState/world_state.json` at 10:42 with
+an empty QwenSpellcraft snapshot. Previous bytes have not been recovered; the observed current
+file was copied to task scratch. No more live Unity runs are authorized until the actual manager
+is isolated before Initialize and other active file-backed stores are checked.
+
+Root bumped all seven package manifests, internal pins, McpServerInfo and versioned guide lines to7.55.0 through tools/bump_version.py; lockstep check passed. This is a demo candidate, not a published Git tag or main promotion. Final scope remains editor/Hub native input, actual model create/edit and the Demo05 mod-manager repaint, followed by complete native suites and demo push. Core-final2 has2954Passed/3NotExecuted/0Failed; focused3 has145Passed/5Failed/4Skipped. The source authors are correcting the five native failures and two remaining actual OpenRouter scenarios without weakening assertions. Computer Use, MiniRpg native movement and qualitative material visuals remain separately deferred gates.
+
+The first current full five-assembly EditMode run completed 8,268 cases: 8,239 Passed, 14 Failed and 15 Skipped. All four grouped Hub tests and both typing tests passed. Two UI expectations incorrectly required four spaces at every column; independent literal expectations now pin the four-column policy. Ten older Hub save cases require an explicitly budgeted service fake. The remaining guards require excluding the .NET HttpClient transport from WebGL, using the adapter's synchronous Lua entry point in the Hub, and detaching/restoring the test synchronization context. Authors preserve all previous behavioral assertions; fresh full execution remains required.
+
+The repeated EditMode gate completed 8,273 cases: 8,258 Passed, zero Failed and 15 Skipped. The
+latest real OpenRouter matrix has 13 Passed, three Failed and two Skipped; its three failures and
+the subsequent test-only corrections are recorded in `OPENROUTER_TRIAGE.md` and are not yet retested.
+Independent review approved 48 formatting-only candidates; after promotion the portable Core and Lua
+suites passed 2,954/3 NotExecuted and 1,962/41 NotExecuted respectively. The earlier native run
+precedes those formatting bytes. The newly added explicit world-state path and test isolation have
+not yet passed their focused Unity gate. Main promotion, a tag and a public release remain pending.
+
+World-state manager path isolation subsequently passed seven of seven focused Unity cases after a
+path-separator assertion correction. The test fixture now requires the world-state and audit slots
+to be redirected before construction; its live-scene composition and corrected OpenRouter cases
+remain unverified. The previous global snapshot was not recovered. These remain demo-branch gates.
+
+Root exported the staged candidate to a clean tree. The unchanged positive-module and seven-package version checks both passed; the raw dirty-checkout scan failure remains separate. The staged credential-pattern scan found zero matching paths across 411 added/modified files. An empty orphaned Git index lock from 2026-10-26 was verified against the absence of Git processes and moved to task scratch without changing the index. No commit, push, main promotion or release is established by these checks.

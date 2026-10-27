@@ -813,11 +813,17 @@ namespace CoreAI.Features.Audit
             foreach (AuditEntry entry in batch)
             {
                 localSequence++;
+                // WHY: diagnostic text may contain unpaired UTF-16 surrogates produced by a normal
+                // post-marshalling cut. Normalize them to U+FFFD before hashing/serialization so the
+                // strict UTF-8 writer never throws and stored preimages match the verifier.
                 AuditEntry finalEntry = new(
-                    localSequence, entry.Kind, entry.TraceId, entry.Actor, entry.Model, entry.PromptHash,
-                    entry.ToolName, entry.Args, entry.PolicyDecision, entry.Result, entry.ResultDetail,
-                    entry.DurationMs, entry.WorldDiff, entry.RollbackHandle, sourceTag: entry.SourceTag,
-                    prevHash: localPreviousHash, hash: "", role: entry.Role);
+                    localSequence, entry.Kind, NormalizeAuditText(entry.TraceId), NormalizeAuditText(entry.Actor),
+                    NormalizeAuditText(entry.Model), NormalizeAuditText(entry.PromptHash),
+                    NormalizeAuditText(entry.ToolName), NormalizeAuditText(entry.Args),
+                    NormalizeAuditText(entry.PolicyDecision), NormalizeAuditText(entry.Result),
+                    NormalizeAuditText(entry.ResultDetail), entry.DurationMs, NormalizeAuditText(entry.WorldDiff),
+                    NormalizeAuditText(entry.RollbackHandle), sourceTag: NormalizeAuditText(entry.SourceTag),
+                    prevHash: localPreviousHash, hash: "", role: NormalizeAuditText(entry.Role));
                 string preimage = JsonConvert.SerializeObject(finalEntry, _jsonSettings);
                 string hash = AuditHash.Chain(localPreviousHash, preimage);
                 localPreviousHash = hash;
@@ -985,6 +991,65 @@ namespace CoreAI.Features.Audit
 
             stream.Seek(-1, SeekOrigin.End);
             return stream.ReadByte() == '\n';
+        }
+
+        // WHY: unpaired UTF-16 surrogates cannot be encoded by the strict UTF-8 writer and would
+        // poison a whole requeued batch. Replace only lone surrogates; valid pairs stay unchanged.
+        private static string NormalizeAuditText(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return value ?? "";
+            }
+
+            char[] buffer = null;
+            int write = 0;
+            bool changed = false;
+            int i = 0;
+            while (i < value.Length)
+            {
+                char current = value[i];
+                if (char.IsHighSurrogate(current) && i + 1 < value.Length &&
+                    char.IsLowSurrogate(value[i + 1]))
+                {
+                    if (changed)
+                    {
+                        buffer[write++] = current;
+                        buffer[write++] = value[i + 1];
+                    }
+
+                    i += 2;
+                    continue;
+                }
+
+                if (char.IsHighSurrogate(current) || char.IsLowSurrogate(current))
+                {
+                    if (!changed)
+                    {
+                        buffer = value.ToCharArray();
+                        changed = true;
+                        write = i;
+                    }
+
+                    buffer[write++] = '\uFFFD';
+                    i++;
+                    continue;
+                }
+
+                if (changed)
+                {
+                    buffer[write++] = current;
+                }
+
+                i++;
+            }
+
+            if (!changed)
+            {
+                return value;
+            }
+
+            return new string(buffer, 0, write);
         }
     }
 }

@@ -9,7 +9,10 @@ build as a plain `netstandard2.1` DLL through [`tools/portable`](../../tools/por
 
 Hosts supplying multiple players should start with [multiplayer sessions](../../Docs/CoreAI/MULTIPLAYER_SESSIONS.md): an actor, connection session, persistence partition and role have different purposes. Players may share a role. Supply the admitted `ActorContext` on each request, and use actor/session cancellation for a player stop; global role/scope operations are administrative. The host owns authentication, admission and view lifetimes.
 
-[7.54.0 notes](CHANGELOG.md) and the [acceptance ledger](../../dev-docs/fix-wave-2026-10-24/README.md) record the root-accepted source joins and measured portable/Windows gates, exact exceptions and unrun platform/quality limits. Publication uses the [Git tag and GitHub release](https://github.com/NeoXider/CoreAI/releases/tag/v7.54.0).
+See the [changelog](CHANGELOG.md) for release history and the
+[Gateway Client guide](../../Docs/CoreAI/GATEWAY_CLIENT.md) for server-managed requests.
+Portable [code-editing contracts](../../Docs/CoreAI/CODE_EDITOR.md#replaceable-ports) also let a
+plain .NET host compose its own language, interpreter and view.
 
 ---
 
@@ -256,3 +259,7 @@ on every push as the CI job `portable-core`. Run it yourself for the current cas
 | Release notes | [CHANGELOG.md](CHANGELOG.md) |
 
 License: [PolyForm Noncommercial 1.0](../../LICENSE). Commercial licensing: neoxider@gmail.com.
+
+## Gateway Client
+
+The optional [Gateway Client](../../Docs/CoreAI/GATEWAY_CLIENT.md) composes server-managed OpenAI-compatible requests from this portable package alone. It reuses the HTTP/SSE/vision/native-tool protocol, adds scoped dynamic auth and optional consumed entitlement/usage contracts, and supports plain .NET hosts without Unity. The console sample accepts --server-managed; model selection can remain on the server. Optional side calls are off by default. Streaming native tool calls are forwarded; buffered SmartToolCallingChatClient remains the portable tool executor.

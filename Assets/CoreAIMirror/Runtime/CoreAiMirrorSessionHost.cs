@@ -39,12 +39,24 @@ namespace CoreAI.Net.Mirror
     {
         private readonly Dictionary<string, ActorAdmissionResult> _identitiesByActor =
             new(StringComparer.Ordinal);
-        private readonly Dictionary<int, ActorContext> _actorsByConnection = new();
+        private readonly Dictionary<int, ConnectionSession> _actorsByConnection = new();
         private readonly MirrorNetworkBridge _bridge;
         private readonly Func<ActorContext, bool> _connectActor;
         private readonly Func<ActorContext, bool> _disconnectActor;
         private readonly Action<string> _log;
         private bool _disposed;
+
+        private readonly struct ConnectionSession
+        {
+            public ConnectionSession(ActorContext context, long bindingGeneration)
+            {
+                Context = context;
+                BindingGeneration = bindingGeneration;
+            }
+
+            public ActorContext Context { get; }
+            public long BindingGeneration { get; }
+        }
 
         /// <summary>
         /// Wires the session host to a bridge and the world's connect/disconnect entry points.
@@ -63,7 +75,7 @@ namespace CoreAI.Net.Mirror
                                ?? throw new ArgumentNullException(nameof(disconnectActor));
             _log = log ?? Debug.LogError;
             _bridge.PeerDisconnected += OnPeerDisconnected;
-            _bridge.BindingReleased += OnBindingReleased;
+            _bridge.BindingReleasedWithPeer += OnBindingReleased;
         }
 
         /// <summary>How many connections currently hold a live actor.</summary>
@@ -126,9 +138,9 @@ namespace CoreAI.Net.Mirror
             }
 
             ActorContext context = admission.Context;
-            if (_actorsByConnection.TryGetValue(connectionId, out ActorContext current))
+            if (_actorsByConnection.TryGetValue(connectionId, out ConnectionSession current))
             {
-                return string.Equals(current.ActorId, context.ActorId, StringComparison.Ordinal);
+                return string.Equals(current.Context.ActorId, context.ActorId, StringComparison.Ordinal);
             }
 
             if (TryFindSession(context.ActorId, out int older))
@@ -142,6 +154,7 @@ namespace CoreAI.Net.Mirror
                 new RbxNetworkPeer(context.ActorId, sessionId ?? context.SessionId,
                     connectionId.ToString(CultureInfo.InvariantCulture)),
                 awaitClientReady: true);
+            ConnectionSession session = new(context, _bridge.GetBindingGeneration(connectionId));
             _bridge.RegisterActor(context.ActorId);
 
             bool connected;
@@ -154,7 +167,7 @@ namespace CoreAI.Net.Mirror
                 // WHY released before the rethrow: the throw is the world's to report, but the binding
                 // made above would otherwise resolve this connection — and, once kcp2k reuses its id,
                 // the next one — as a player the world never created.
-                Release(connectionId, context);
+                Release(connectionId, session);
                 throw;
             }
 
@@ -162,20 +175,31 @@ namespace CoreAI.Net.Mirror
             {
                 // The world refused the actor after admission said yes — the connection must not be
                 // left holding a binding that resolves to a player who does not exist.
-                Release(connectionId, context);
+                Release(connectionId, session);
                 return false;
             }
 
-            _actorsByConnection[connectionId] = context;
+            // WHY: a world callback may retire or replace this binding before admission returns.
+            if (_bridge.GetBindingGeneration(connectionId) != session.BindingGeneration)
+            {
+                if (!TryFindSession(context.ActorId, out _))
+                {
+                    _identitiesByActor.Remove(context.ActorId);
+                }
+
+                return false;
+            }
+
+            _actorsByConnection[connectionId] = session;
             return true;
         }
 
         /// <summary>Tears one connection's actor down, whatever ended it.</summary>
         public void Release(int connectionId)
         {
-            if (_actorsByConnection.TryGetValue(connectionId, out ActorContext context))
+            if (_actorsByConnection.TryGetValue(connectionId, out ConnectionSession session))
             {
-                Release(connectionId, context);
+                Release(connectionId, session);
             }
         }
 
@@ -208,7 +232,7 @@ namespace CoreAI.Net.Mirror
 
             _disposed = true;
             _bridge.PeerDisconnected -= OnPeerDisconnected;
-            _bridge.BindingReleased -= OnBindingReleased;
+            _bridge.BindingReleasedWithPeer -= OnBindingReleased;
             _actorsByConnection.Clear();
             _identitiesByActor.Clear();
         }
@@ -227,13 +251,15 @@ namespace CoreAI.Net.Mirror
         {
             if (!int.TryParse(disconnected.Peer.ConnectionHandle, NumberStyles.AllowLeadingSign,
                     CultureInfo.InvariantCulture, out int connectionId)
-                || !_actorsByConnection.TryGetValue(connectionId, out ActorContext context)
-                || !string.Equals(context.ActorId, disconnected.Peer.ActorId, StringComparison.Ordinal))
+                || !_actorsByConnection.TryGetValue(connectionId, out ConnectionSession session)
+                || !string.Equals(session.Context.ActorId, disconnected.Peer.ActorId, StringComparison.Ordinal)
+                || !_bridge.TryGetDisconnectGeneration(connectionId, out long generation)
+                || session.BindingGeneration != generation)
             {
                 return;
             }
 
-            Release(connectionId, context);
+            Release(connectionId, session);
         }
 
         /// <summary>
@@ -245,17 +271,18 @@ namespace CoreAI.Net.Mirror
         /// would tear the same actor down twice. WHY the identity goes only with the actor's last
         /// session: a newer session of the same actor still uses it.
         /// </remarks>
-        private void OnBindingReleased(int connectionId)
+        private void OnBindingReleased(int connectionId, RbxNetworkPeer releasedPeer, long generation)
         {
-            if (!_actorsByConnection.TryGetValue(connectionId, out ActorContext context))
+            if (!_actorsByConnection.TryGetValue(connectionId, out ConnectionSession session)
+                || session.BindingGeneration != generation)
             {
                 return;
             }
 
             _actorsByConnection.Remove(connectionId);
-            if (!TryFindSession(context.ActorId, out _))
+            if (!TryFindSession(session.Context.ActorId, out _))
             {
-                _identitiesByActor.Remove(context.ActorId);
+                _identitiesByActor.Remove(session.Context.ActorId);
             }
         }
 
@@ -267,9 +294,9 @@ namespace CoreAI.Net.Mirror
 
         private bool TryFindSession(string actorId, out int connectionId)
         {
-            foreach (KeyValuePair<int, ActorContext> pair in _actorsByConnection)
+            foreach (KeyValuePair<int, ConnectionSession> pair in _actorsByConnection)
             {
-                if (string.Equals(pair.Value.ActorId, actorId, StringComparison.Ordinal))
+                if (string.Equals(pair.Value.Context.ActorId, actorId, StringComparison.Ordinal))
                 {
                     connectionId = pair.Key;
                     return true;
@@ -280,10 +307,20 @@ namespace CoreAI.Net.Mirror
             return false;
         }
 
-        private void Release(int connectionId, ActorContext context)
+        private void Release(int connectionId, ConnectionSession session)
         {
+            if (_actorsByConnection.TryGetValue(connectionId, out ConnectionSession current)
+                && current.BindingGeneration != session.BindingGeneration)
+            {
+                return;
+            }
+
+            ActorContext context = session.Context;
             _actorsByConnection.Remove(connectionId);
-            _identitiesByActor.Remove(context.ActorId);
+            if (!TryFindSession(context.ActorId, out _))
+            {
+                _identitiesByActor.Remove(context.ActorId);
+            }
             // WHY the world first: DisconnectActor is what fires PlayerRemoving, and that handler is
             // entitled to read the leaving player. Unbinding the connection before it would leave
             // the handler looking at an actor the bridge no longer knows. WHY finally: that handler
@@ -301,7 +338,10 @@ namespace CoreAI.Net.Mirror
             {
                 try
                 {
-                    _bridge.UnregisterActor(context.ActorId);
+                    if (_bridge.GetBindingGeneration(connectionId) == session.BindingGeneration)
+                    {
+                        _bridge.UnregisterActor(context.ActorId);
+                    }
                 }
                 finally
                 {

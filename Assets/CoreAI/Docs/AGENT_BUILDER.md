@@ -927,7 +927,11 @@ storage key. Case-only role differences and former sanitized-name aliases remain
 Legacy migration validates a stored identity, or an exact unambiguous legacy filename, and retains the
 original bytes in a `.legacy` backup. Ambiguous aliases and corrupt embedded history/version JSON are
 refused before replacement. Back up and repair their identity explicitly rather than choosing an owner
-automatically. File aliases, symlinks and concurrent processes require host-owned coordination.
+automatically. A read-triggered migration is a real storage write: file memory settles it through the
+existing flush/confirmation port after releasing its locks, and a summary read persists the migration
+generation through the configured durability hook. When only the async summary hook is configured, a
+synchronous summary read refuses the migration before changing storage instead of blocking. File aliases,
+symlinks and concurrent processes require host-owned coordination.
 
 `FileAgentMemoryStore` retains at most `maxResidentHistories` partitions per instance (default 128).
 It evicts fully persisted partitions and reloads them when needed. Transient or failed-write data is

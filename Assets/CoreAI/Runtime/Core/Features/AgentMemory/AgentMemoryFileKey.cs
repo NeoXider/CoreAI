@@ -6,6 +6,20 @@ using System.Text.RegularExpressions;
 
 namespace CoreAI.Ai
 {
+    /// <summary>
+    /// Call-owned record of filesystem effects observed by legacy migration. Stores settle it through
+    /// their own durability ports after releasing storage gates.
+    /// </summary>
+    internal sealed class MigrationReceipt
+    {
+        internal bool Mutated { get; private set; }
+
+        internal void ObserveMutation()
+        {
+            Mutated = true;
+        }
+    }
+
     /// <summary>Versioned opaque disk keys and conservative legacy identity checks shared by file stores.</summary>
     internal static class AgentMemoryFileKey
     {
@@ -49,6 +63,17 @@ namespace CoreAI.Ai
 
         internal static void MigrateLegacy(string directory, string roleId, string extension, Action<string> validate)
         {
+            MigrateLegacy(directory, roleId, extension, validate, null, null);
+        }
+
+        /// <summary>
+        /// Migrates one legacy file and records every observed storage effect in <paramref name="receipt"/>.
+        /// <paramref name="beforeMutation"/> runs under the migration gate immediately before the first
+        /// effect, so a caller that cannot confirm synchronously can refuse without changing storage.
+        /// </summary>
+        internal static void MigrateLegacy(string directory, string roleId, string extension, Action<string> validate,
+            MigrationReceipt receipt, Action beforeMutation)
+        {
             string canonical = CanonicalPath(directory, roleId, extension);
             string legacy = Path.Combine(directory, LegacyFileStem(roleId) + extension);
             lock (MigrationGate)
@@ -58,7 +83,8 @@ namespace CoreAI.Ai
                 string backup = legacy + ".legacy";
                 if (File.Exists(backup))
                     throw new InvalidDataException("Legacy storage has an ambiguous migration backup; explicit identity repair is required.");
-                if (File.Exists(canonical))
+                bool canonicalExisted = File.Exists(canonical);
+                if (canonicalExisted)
                 {
                     byte[] oldBytes = File.ReadAllBytes(legacy);
                     byte[] currentBytes = File.ReadAllBytes(canonical);
@@ -67,9 +93,28 @@ namespace CoreAI.Ai
                     for (int index = 0; index < oldBytes.Length; index++)
                         if (oldBytes[index] != currentBytes[index])
                             throw new InvalidDataException("Canonical and legacy storage disagree; both files were preserved.");
+                    beforeMutation?.Invoke();
                 }
-                else File.Copy(legacy, canonical, false);
+                else
+                {
+                    beforeMutation?.Invoke();
+                    try
+                    {
+                        File.Copy(legacy, canonical, false);
+                        receipt?.ObserveMutation();
+                    }
+                    catch (Exception)
+                    {
+                        // WHY: the original copy error is the caller's failure, but a destination that was
+                        // absent before and is observably present afterwards is still a storage effect that
+                        // needs confirmation. Never delete or overwrite it to make the operation look clean.
+                        if (!canonicalExisted && File.Exists(canonical))
+                            receipt?.ObserveMutation();
+                        throw;
+                    }
+                }
                 File.Move(legacy, backup);
+                receipt?.ObserveMutation();
             }
         }
     }

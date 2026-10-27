@@ -10,4 +10,11 @@ namespace CoreAI.Ai
         /// </summary>
         AgentMemoryScope GetScope(string roleId);
     }
+
+    /// <summary>Exposes a known admission scope provider without querying its current scope.</summary>
+    public interface IAgentMemoryScopeProviderSource
+    {
+        /// <summary>Returns a nonnull known provider, or false with null when its provider is unknown.</summary>
+        bool TryGetMemoryScopeProvider(out IAgentMemoryScopeProvider provider);
+    }
 }

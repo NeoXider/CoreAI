@@ -19,6 +19,7 @@ namespace CoreAI.Hub.UI.Editor
     {
         private const string PrefabPath = "Assets/CoreAIGenerated/Hub/CoreAiHub.prefab";
         private const string ModsBinderType = "CoreAI.Ai.Hub.CoreAiModsHubBinder, CoreAI.Mods.Hub";
+        private const string WorldStateBinderType = "CoreAI.Ai.Hub.WorldStateHubBinder, CoreAI.Mods.Hub";
 
         [MenuItem("CoreAI/Setup/Add Hub", priority = 12)]
         public static void AddHub()
@@ -52,6 +53,15 @@ namespace CoreAI.Hub.UI.Editor
                 if (modsBinder != null && instance.GetComponent(modsBinder) == null)
                 {
                     instance.AddComponent(modsBinder);
+                }
+
+                // WHY: World-state integration is also optional and lives in the Mods assembly; the shipped
+                // prefab carried this binder, so the generated composition must retain it. It registers the
+                // World page only when a world manager resolves at runtime.
+                Type worldStateBinder = Type.GetType(WorldStateBinderType);
+                if (worldStateBinder != null && instance.GetComponent(worldStateBinder) == null)
+                {
+                    instance.AddComponent(worldStateBinder);
                 }
 
                 Selection.activeGameObject = instance;
@@ -109,6 +119,12 @@ namespace CoreAI.Hub.UI.Editor
             }
 
             so.ApplyModifiedPropertiesWithoutUndo();
+            // WHY: bind the authored object before it is saved as a prefab, not only its live instance.
+            foreach (string typeName in new[] { ModsBinderType, WorldStateBinderType })
+            {
+                Type binderType = Type.GetType(typeName);
+                if (binderType != null && go.GetComponent(binderType) == null) go.AddComponent(binderType);
+            }
             return go;
         }
 

@@ -1,5 +1,6 @@
 #if COREAI_LUA
 using System;
+using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Sandbox.LuaCs;
 
@@ -31,7 +32,7 @@ namespace CoreAI.Demos
     /// <summary>
     /// Lua API that lets mods extend the game with brand-new content. Implemented as a Lua-CSharp
     /// gameplay binding set (<see cref="ILuaCsGameRuntimeBindings"/>) that a host wires into the mod
-    /// runtime at the WorldEdit tier, so only world-editing mods can forge units.
+    /// runtime with its effective capabilities: queries require Read and mutations require WorldEdit.
     /// Exposed functions:
     /// <list type="bullet">
     /// <item><c>forge_define(name, team, hp, dmg, speed, range, color)</c> → bool</item>
@@ -54,16 +55,33 @@ namespace CoreAI.Demos
 
         public void RegisterGameplayApis(LuaCsApiRegistry registry)
         {
+            RegisterGameplayApis(registry, LuaCapabilities.All);
+        }
+
+        /// <summary>Registers query and mutation functions only at their explicit effective tiers.</summary>
+        public void RegisterGameplayApis(LuaCsApiRegistry registry, LuaCapabilities capabilities)
+        {
+            if (registry == null)
+            {
+                throw new ArgumentNullException(nameof(registry));
+            }
+            if ((capabilities & LuaCapabilities.Read) != 0)
+            {
+                registry.Register("forge_count", new Func<string, int>(team => _forge.Count(team)));
+            }
+            if ((capabilities & LuaCapabilities.WorldEdit) == 0)
+            {
+                return;
+            }
             registry.Register("forge_define",
                 new Func<string, string, double, double, double, double, string, bool>(Define));
             registry.Register("forge_spawn",
                 new Func<string, double, double, int>((name, x, z) => _forge.Spawn(name, x, z)));
-            registry.Register("forge_count", new Func<string, int>(team => _forge.Count(team)));
             registry.Register("forge_clear", new Action(() => _forge.ClearUnits()));
             registry.Register("forge_reset", new Action(() => _forge.ResetAll()));
         }
 
-        // Missing Lua arguments arrive as default(T) (null/0), so apply friendly defaults here.
+        // WHY: missing Lua arguments arrive as default(T), so trailing values need host defaults.
         private bool Define(string name, string team, double hp, double damage, double speed, double range,
             string color)
         {

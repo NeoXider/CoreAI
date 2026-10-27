@@ -43,6 +43,7 @@ namespace CoreAI.Tests.EditMode
         public void TearDown()
         {
             FileLuaModSourceStore.PersistenceArmingForTesting = null;
+            FileLuaModSourceStore.FailFirstCanonicalInstallationForTesting = null;
             _store = null;
             SynchronizationContext.SetSynchronizationContext(_previousSynchronizationContext);
 
@@ -77,6 +78,44 @@ namespace CoreAI.Tests.EditMode
             public void Info(string message, string tag = null) { }
             public void Warn(string message, string tag = null) { }
             public void Error(string message, string tag = null) => Errors.Add(message);
+        }
+
+        [Test]
+        public void FirstCanonicalSave_TransientManifestFailureDoesNotPoisonItsRetry()
+        {
+            int attempts = 0;
+            FileLuaModSourceStore.FailFirstCanonicalInstallationForTesting = () => ++attempts == 1;
+            LuaModSourcePersistenceException failed = Assert.Throws<LuaModSourcePersistenceException>(() =>
+                _store.SaveStrict("first", "return 'retry'", Manifest("first")));
+
+            Assert.IsFalse(failed.LocalCommitCompleted);
+            Assert.IsEmpty(Directory.GetDirectories(_root), "No failed canonical installation or staging folder may remain.");
+            Assert.IsFalse(_store.TryLoad("first", out _, out _));
+
+            _store.SaveStrict("first", "return 'retry'", Manifest("first"));
+
+            Assert.AreEqual(2, attempts);
+            using FileLuaModSourceStore reopened = new(_root);
+            Assert.IsTrue(reopened.TryLoad("first", out string source, out LuaModManifest manifest));
+            Assert.AreEqual("return 'retry'", source);
+            Assert.AreEqual("first", manifest.Id);
+            Assert.AreEqual(1, Directory.GetDirectories(_root).Length);
+        }
+
+        [Test]
+        public void FirstCanonicalSave_PreservesExistingCorruptIdentityEvidence()
+        {
+            _store.SaveStrict("existing", "return 'kept'", Manifest("existing"));
+            string directory = Directory.GetDirectories(_root)[0];
+            string manifestPath = Path.Combine(directory, "manifest.json");
+            File.WriteAllText(manifestPath, "{ invalid identity");
+
+            LuaModSourcePersistenceException refused = Assert.Throws<LuaModSourcePersistenceException>(() =>
+                _store.SaveStrict("existing", "return 'replacement'", Manifest("existing")));
+
+            Assert.IsFalse(refused.LocalCommitCompleted);
+            Assert.AreEqual("{ invalid identity", File.ReadAllText(manifestPath));
+            Assert.AreEqual("return 'kept'", File.ReadAllText(Path.Combine(directory, "main.lua")));
         }
 
         [Test]

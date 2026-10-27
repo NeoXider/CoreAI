@@ -269,6 +269,66 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void SyncRead_LegacyMigration_ConfirmsThroughTheSyncPortBeforeReturning()
+        {
+            string root = NewTempRoot();
+            try
+            {
+                const string role = "teacher";
+                const string original = "{\"Summary\":\"legacy fact\"}";
+                string legacy = Path.Combine(root, role + ".json");
+                string canonical = Path.Combine(root, AgentMemoryFileKey.FileStem(role) + ".json");
+                File.WriteAllText(legacy, original);
+                int confirmations = 0;
+                FileConversationSummaryStore store = new(root, afterWrite: () =>
+                {
+                    confirmations++;
+                    return true;
+                });
+
+                Assert.AreEqual("legacy fact", store.LoadSummary(role));
+
+                Assert.AreEqual(1, confirmations, "Read-triggered migration must settle through the configured sync port.");
+                Assert.IsFalse(File.Exists(legacy));
+                Assert.AreEqual(original, File.ReadAllText(legacy + ".legacy"));
+                Assert.AreEqual(original, File.ReadAllText(canonical));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+
+        [Test]
+        public void SyncRead_AsyncOnlyConfirmation_RefusesMigrationBeforeAnyEffect()
+        {
+            string root = NewTempRoot();
+            try
+            {
+                const string role = "teacher";
+                string legacy = Path.Combine(root, role + ".json");
+                string canonical = Path.Combine(root, AgentMemoryFileKey.FileStem(role) + ".json");
+                File.WriteAllText(legacy, "{\"Summary\":\"legacy fact\"}");
+                int confirmations = 0;
+                FileConversationSummaryStore store = new(root, null, null, _ =>
+                {
+                    confirmations++;
+                    return Task.FromResult(true);
+                });
+
+                Assert.AreEqual("", store.LoadSummary(role));
+                Assert.AreEqual(0, confirmations, "A sync read must not wait for the async-only hook.");
+                Assert.IsTrue(File.Exists(legacy));
+                Assert.IsFalse(File.Exists(canonical));
+                Assert.IsFalse(File.Exists(legacy + ".legacy"));
+            }
+            finally
+            {
+                DeleteRoot(root);
+            }
+        }
+
+        [Test]
         public async Task LegacySyncHookFalse_ThrowsOnBothPaths()
         {
             string root = NewTempRoot();

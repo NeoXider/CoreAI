@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Logging;
+using CoreAI.Infrastructure.Llm.Gateway;
 using MEAI = Microsoft.Extensions.AI;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -1050,7 +1051,9 @@ namespace CoreAI.Infrastructure.Llm
                     }
                 }
 
-                ILlmAuthContextProvider auth = LlmAuthContextRegistry.Current;
+                ILlmAuthContextProvider auth = settings is IOpenAiAuthContextSettings scopedAuth
+                    ? scopedAuth.AuthContextProvider
+                    : LlmAuthContextRegistry.Current;
                 if (auth != null)
                 {
                     if (!string.IsNullOrEmpty(auth.TenantId))
@@ -1251,6 +1254,11 @@ namespace CoreAI.Infrastructure.Llm
             if (!string.IsNullOrWhiteSpace(_settings.AuthorizationHeader))
             {
                 return _settings.AuthorizationHeader.Trim();
+            }
+
+            if (_settings is IOpenAiAuthContextSettings scopedAuth)
+            {
+                return scopedAuth.AuthContextProvider?.GetAuthorizationHeader()?.Trim() ?? "";
             }
 
             return string.IsNullOrWhiteSpace(_settings.ApiKey)

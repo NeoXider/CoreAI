@@ -11,9 +11,12 @@ package is the adapter layer that puts it on a scene.
 |---|---|---|
 | `com.neoxider.coreaiunity` | `com.neoxider.coreai` (same version, lockstep) | see [`package.json`](package.json) |
 
-For supplied player identities, follow [multiplayer sessions](../../Docs/CoreAI/MULTIPLAYER_SESSIONS.md). `Resolve(actor)` on the actor-keyed chat factory selects and tracks a service lifetime; it does not bind later requests/history/clear/stop calls. Supply their admitted `ActorContext`, or compose a factory with a connection-bound identity provider for the simple overloads. Roles may be shared across players; the host owns authentication and connection/view transitions.
+For supplied player identities, follow [multiplayer sessions](../../Docs/CoreAI/MULTIPLAYER_SESSIONS.md). `IInGameLlmChatServiceFactory.Resolve(actor)` selects and tracks a legacy `IInGameLlmChatService`: it supports `SendPlayerMessageAsync(message, callerToken)`, `ClearHistory()` and history/rate metrics. Actor-aware requests, persisted-history restore, clear options and stop operations belong to the separate `CoreAI.Chat.CoreAiChatService`; supply the admitted `ActorContext` to those operations or compose that service with a connection-bound identity provider. Factory lifetime keying does not bind later orchestration calls or adapt between the two APIs. Roles may be shared across players; the host owns authentication and connection/view transitions.
 
-[7.54.0 notes](CHANGELOG.md) and the [acceptance ledger](../../dev-docs/fix-wave-2026-10-24/README.md) record root-accepted Windows EditMode 7,917 Passed/13 Skipped and hermetic PlayMode 386 Passed/2 Skipped, both zero-failure selections. Exact exceptions, skipped cases and unrun player/browser/device/network/quality gates remain explicit. Publication uses the [Git tag and GitHub release](https://github.com/NeoXider/CoreAI/releases/tag/v7.54.0). Default shared world capture/storage is a local preset requiring host composition for independent worlds.
+See the [changelog](CHANGELOG.md) for release history. The
+[Gateway Client](../../Docs/CoreAI/GATEWAY_CLIENT.md) supports scoped server-managed HTTP clients;
+the optional Mods and Hub packages provide the [runtime code editor](../../Docs/CoreAI/CODE_EDITOR.md).
+Default shared world capture/storage is a local preset; independent worlds use host-owned composition.
 
 ---
 
@@ -257,3 +260,7 @@ in `package.json`, not in this file.
 
 Author: [Neoxider](https://github.com/NeoXider) · License:
 [PolyForm Noncommercial 1.0](../../LICENSE) · Commercial licensing: neoxider@gmail.com
+
+## Scoped Gateway Client
+
+The optional [Gateway Client](../../Docs/CoreAI/GATEWAY_CLIENT.md) runs in portable CoreAI.Core; CoreAI Unity adds the opt-in RegisterCoreAiGatewayClient installer and bounded UnityWebRequest service transport. Explicit auth/header/refresher bindings are scope-owned and shared by primary/profile construction. Existing ServerManagedAuthorization hooks remain the legacy fallback. Gateway mode does not select the game's network topology and needs no account, student, Hub, Mods or Mirror system.

@@ -28,6 +28,23 @@ namespace CoreAI.Ai
             return new ReadSkillProxy(skills, allowedToolNames);
         }
 
+        internal static bool IsReadSkillProxy(ILlmTool proxy)
+        {
+            return proxy is ReadSkillProxy;
+        }
+
+        public static ILlmTool BindForRole(ILlmTool proxy, IAgentMemoryStore store, string roleId)
+        {
+            if (!IsReadSkillProxy(proxy)) return proxy;
+            return BindForRole(proxy, new CallSkillToolLlmTool.RoleBinding(store, roleId));
+        }
+
+        internal static ILlmTool BindForRole(ILlmTool proxy, CallSkillToolLlmTool.RoleBinding binding)
+        {
+            if (!IsReadSkillProxy(proxy)) return proxy;
+            return ((ReadSkillProxy)proxy).BindForRole(binding);
+        }
+
         /// <summary>Shared read contract for model tools and host adapters: complete entry, one document, or all.</summary>
         public static string ReadSkillJson(IReadOnlyList<SkillSet> skills, string skillName,
             string section = null, bool all = false, IReadOnlyCollection<string> allowedToolNames = null)
@@ -46,6 +63,7 @@ namespace CoreAI.Ai
         private sealed class ReadSkillProxy : LlmToolBase, IAIFunctionLlmTool, ISkillSetMetaLlmTool
         {
             private readonly IReadOnlyList<SkillSet> _skills;
+    private readonly CallSkillToolLlmTool.RoleBinding _roleBinding;
 
             // WHY: When the backing list is a live MutableSkillCatalog (skill authoring), the index follows
             // the catalog so a skill the model just created/updated is immediately visible here. It is
@@ -71,17 +89,20 @@ namespace CoreAI.Ai
                 public HashSet<string> ToolNames { get; } = new(StringComparer.OrdinalIgnoreCase);
             }
 
-            public ReadSkillProxy(IReadOnlyList<SkillSet> skills, IReadOnlyCollection<string> allowedToolNames)
-            {
-                if (skills == null) throw new ArgumentNullException(nameof(skills));
-                _liveCatalog = skills as MutableSkillCatalog;
-                _skills = _liveCatalog ?? (IReadOnlyList<SkillSet>)new List<SkillSet>(skills).AsReadOnly();
-                SkillSetToolResolver.ValidateCatalog(_skills);
-                _allowedToolNames = allowedToolNames == null ? null : new List<string>(allowedToolNames).AsReadOnly();
-                _staticIndex = _liveCatalog != null ? null : IndexSkills(_skills, 0);
-            }
+        public ReadSkillProxy(IReadOnlyList<SkillSet> skills, IReadOnlyCollection<string> allowedToolNames,
+            CallSkillToolLlmTool.RoleBinding roleBinding = null)
+        {
+            if (skills == null) throw new ArgumentNullException(nameof(skills));
+            _roleBinding = roleBinding;
+            _liveCatalog = skills as MutableSkillCatalog;
+            _skills = _liveCatalog ?? (IReadOnlyList<SkillSet>)new List<SkillSet>(skills).AsReadOnly();
+            if (roleBinding == null) SkillSetToolResolver.ValidateCatalog(_skills);
+            _allowedToolNames = allowedToolNames == null ? null : new List<string>(allowedToolNames).AsReadOnly();
+            _staticIndex = _liveCatalog != null ? null : IndexSkills(_skills, 0, roleBinding);
+        }
 
-            private static SkillIndex IndexSkills(IReadOnlyList<SkillSet> skills, long version)
+            private static SkillIndex IndexSkills(IReadOnlyList<SkillSet> skills, long version,
+                CallSkillToolLlmTool.RoleBinding roleBinding = null)
             {
                 SkillIndex index = new(version);
                 foreach (SkillSet skill in skills)
@@ -91,7 +112,10 @@ namespace CoreAI.Ai
                         index.SkillsByName[skill.Name] = skill;
                     }
 
-                    foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildDescriptors(skill))
+                    IEnumerable<SkillToolDescriptor> descriptors = roleBinding == null
+                        ? SkillSetToolResolver.BuildDescriptors(skill)
+                        : roleBinding.GetDescriptors(skill);
+                    foreach (SkillToolDescriptor descriptor in descriptors)
                     {
                         if (!string.IsNullOrWhiteSpace(descriptor.Name))
                         {
@@ -127,7 +151,7 @@ namespace CoreAI.Ai
                         return cached;
                     }
 
-                    SkillIndex index = IndexSkills(_skills, version);
+                    SkillIndex index = IndexSkills(_skills, version, _roleBinding);
                     Volatile.Write(ref _liveIndex, index);
                     return index;
                 }
@@ -159,11 +183,16 @@ namespace CoreAI.Ai
                 return !string.IsNullOrWhiteSpace(toolName) && ResolveIndex().ToolNames.Contains(toolName.Trim());
             }
 
-            public ILlmTool RestrictTo(IReadOnlyCollection<string> allowedToolNames)
-            {
-                return new ReadSkillProxy(_skills,
-                    SkillSetToolResolver.IntersectAllowlist(_allowedToolNames, allowedToolNames));
-            }
+        public ILlmTool RestrictTo(IReadOnlyCollection<string> allowedToolNames)
+        {
+            return new ReadSkillProxy(_skills,
+                SkillSetToolResolver.IntersectAllowlist(_allowedToolNames, allowedToolNames), _roleBinding);
+        }
+
+        public ILlmTool BindForRole(CallSkillToolLlmTool.RoleBinding binding)
+        {
+            return new ReadSkillProxy(_skills, _allowedToolNames, binding);
+        }
 
             public AIFunction CreateAIFunction()
             {
@@ -187,21 +216,23 @@ namespace CoreAI.Ai
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 return ReadSkillLlmTool.Execute(skill_name, section, all, ResolveSkillsByName(),
-                    _allowedToolNames);
+                    _allowedToolNames, _roleBinding);
             }
         }
 
         private static string Execute(string skillName, string sectionName, bool all,
             Dictionary<string, SkillSet> skillsByName,
-            IReadOnlyCollection<string> allowedToolNames)
+            IReadOnlyCollection<string> allowedToolNames,
+            CallSkillToolLlmTool.RoleBinding roleBinding = null)
         {
             return JsonConvert.SerializeObject(
-                ExecuteObject(skillName, sectionName, all, skillsByName, allowedToolNames));
+                ExecuteObject(skillName, sectionName, all, skillsByName, allowedToolNames, roleBinding));
         }
 
         private static object ExecuteObject(string skillName, string sectionName, bool all,
             Dictionary<string, SkillSet> skillsByName,
-            IReadOnlyCollection<string> allowedToolNames)
+            IReadOnlyCollection<string> allowedToolNames,
+            CallSkillToolLlmTool.RoleBinding roleBinding = null)
         {
             if (string.IsNullOrWhiteSpace(skillName))
             {
@@ -209,7 +240,7 @@ namespace CoreAI.Ai
                 {
                     success = false,
                     error = "skill_name is required.",
-                    available = AvailableSkillNames(skillsByName, allowedToolNames)
+                    available = AvailableSkillNames(skillsByName, allowedToolNames, roleBinding)
                 };
             }
 
@@ -218,7 +249,10 @@ namespace CoreAI.Ai
             if (skillsByName.TryGetValue(trimmed, out SkillSet skill))
             {
                 List<object> toolSchemas = new();
-                foreach (SkillToolDescriptor descriptor in SkillSetToolResolver.BuildDescriptors(skill))
+                IEnumerable<SkillToolDescriptor> boundDescriptors = roleBinding == null
+                    ? SkillSetToolResolver.BuildDescriptors(skill)
+                    : roleBinding.GetDescriptors(skill);
+                foreach (SkillToolDescriptor descriptor in boundDescriptors)
                 {
                     if (!IsAllowed(descriptor.Name, allowedToolNames))
                     {
@@ -244,7 +278,7 @@ namespace CoreAI.Ai
                     {
                         success = false,
                         error = $"Skill '{trimmed}' is not available for the current tool allowlist.",
-                        available = AvailableSkillNames(skillsByName, allowedToolNames)
+                        available = AvailableSkillNames(skillsByName, allowedToolNames, roleBinding)
                     };
                 }
 
@@ -260,7 +294,7 @@ namespace CoreAI.Ai
                     {
                         success = false,
                         error = $"Skill '{trimmed}' not found. Did you mean '{kvp.Key}'?",
-                        available = AvailableSkillNames(skillsByName, allowedToolNames)
+                        available = AvailableSkillNames(skillsByName, allowedToolNames, roleBinding)
                     };
                 }
             }
@@ -269,7 +303,7 @@ namespace CoreAI.Ai
             {
                 success = false,
                 error = $"Skill '{trimmed}' not found.",
-                available = AvailableSkillNames(skillsByName, allowedToolNames)
+                available = AvailableSkillNames(skillsByName, allowedToolNames, roleBinding)
             };
         }
 
@@ -420,7 +454,8 @@ namespace CoreAI.Ai
         }
 
         private static List<string> AvailableSkillNames(Dictionary<string, SkillSet> skillsByName,
-            IReadOnlyCollection<string> allowedToolNames)
+            IReadOnlyCollection<string> allowedToolNames,
+            CallSkillToolLlmTool.RoleBinding roleBinding = null)
         {
             if (allowedToolNames == null)
             {
@@ -433,7 +468,10 @@ namespace CoreAI.Ai
                 // WHY: Instructions-only skills (no tools) are always listable; tool-bearing skills are listed
                 // only when at least one of their tools survives the allowlist.
                 bool declaresTools = kvp.Value?.Tools != null && kvp.Value.Tools.Count > 0;
-                bool anyToolAllowed = !declaresTools || SkillSetToolResolver.BuildDescriptors(kvp.Value)
+                IEnumerable<SkillToolDescriptor> descriptors = roleBinding == null
+                    ? SkillSetToolResolver.BuildDescriptors(kvp.Value)
+                    : roleBinding.GetDescriptors(kvp.Value);
+                bool anyToolAllowed = !declaresTools || descriptors
                     .Any(d => IsAllowed(d.Name, allowedToolNames));
                 if (anyToolAllowed)
                 {

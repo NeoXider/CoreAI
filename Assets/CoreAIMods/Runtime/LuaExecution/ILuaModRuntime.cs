@@ -1,9 +1,36 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using CoreAI.Authority;
 
 namespace CoreAI.Ai
 {
+    /// <summary>Immutable limits for the initial execution of one explicit mod load or reload.</summary>
+    public sealed class LuaModInvocationLimits
+    {
+        public const int DefaultTimeoutMs = 100;
+        public const long DefaultMaxSteps = 500_000;
+
+        public LuaModInvocationLimits(int timeoutMs = DefaultTimeoutMs, long maxSteps = DefaultMaxSteps)
+        {
+            if (timeoutMs < 1 || timeoutMs > 1000)
+                throw new ArgumentOutOfRangeException(nameof(timeoutMs), "The invocation timeout must be between 1 and 1000 milliseconds.");
+            if (maxSteps < 1)
+                throw new ArgumentOutOfRangeException(nameof(maxSteps), "The invocation instruction limit must be positive.");
+            TimeoutMs = timeoutMs;
+            MaxSteps = maxSteps;
+        }
+
+        public int TimeoutMs { get; }
+        public long MaxSteps { get; }
+    }
+
+    /// <summary>Optional scoped initial-chunk budgets; existing runtime defaults remain unchanged.</summary>
+    public interface IBudgetedLuaModRuntime
+    {
+        IDisposable BeginInvocation(LuaModInvocationLimits limits, CancellationToken cancellationToken = default);
+    }
+
     /// <summary>
     /// VM-agnostic surface of a persistent Lua mod runtime, so the <c>manage_mods</c> tool and the
     /// auto-repair bridge work against either the MoonSharp <c>LuaModRuntime</c> or the Lua-CSharp

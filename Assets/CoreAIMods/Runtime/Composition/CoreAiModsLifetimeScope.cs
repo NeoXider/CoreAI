@@ -1,6 +1,8 @@
 ﻿using System.Collections.Generic;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Lua;
+using CoreAI.Mods.WorldPackages;
+using CoreAI.Sandbox.LuaCs;
 using UnityEngine;
 using VContainer;
 using VContainer.Unity;
@@ -18,6 +20,15 @@ namespace CoreAI.Composition
     /// </summary>
     public sealed class CoreAiModsLifetimeScope : LifetimeScope
     {
+        [Header("Host gameplay APIs")]
+        [Tooltip("Explicit scene components implementing ICoreAiLuaGameplayBindingsProvider. " +
+                 "Each receives the current VM's effective capabilities; providers must tolerate pre-Start rehydrate.")]
+        [SerializeField]
+        private MonoBehaviour[] gameplayBindingsProviders = System.Array.Empty<MonoBehaviour>();
+
+        /// <summary>Authored providers for this scope; no scene discovery or global provider is used.</summary>
+        public IReadOnlyList<MonoBehaviour> GameplayBindingsProviders => gameplayBindingsProviders;
+
         [Header("Lua capability grant")]
         [Tooltip("When on, mods loaded by this composition may reach the Full tier (reflection over " +
                  "arbitrary GameObjects/components). Host/singleplayer only — never grant to a networked client.")]
@@ -77,6 +88,20 @@ namespace CoreAI.Composition
                  "never rehydrate in another with a different Lua tier.")]
         [SerializeField]
         private string storeId;
+
+        [System.NonSerialized]
+        private IRbxWorldPackageStore runtimeWorldPackageStore;
+
+        /// <summary>Supplies the host's world-package persistence before this scope builds its container.</summary>
+        public void SetWorldPackageStore(IRbxWorldPackageStore store)
+        {
+            if (Container != null)
+            {
+                throw new System.InvalidOperationException("SetWorldPackageStore must be called before the mods scope builds its container.");
+            }
+
+            runtimeWorldPackageStore = store ?? throw new System.ArgumentNullException(nameof(store));
+        }
 
         /// <summary>
         /// Whether this composition grants the Full Lua tier (reflection over arbitrary
@@ -146,7 +171,45 @@ namespace CoreAI.Composition
                 enableFullLuaAccess,
                 enableFullLuaPrivateAccess,
                 blacklistPolicy as IFullLuaAccessBlacklistPolicy,
-                storeId);
+                storeId,
+                Mods.Rbx.Instances.InstanceRegistry.CurrentWorldAclVersion,
+                null, null, null, runtimeWorldPackageStore,
+                CreateAdditionalGameplayBindings());
+        }
+
+        private System.Action<LuaCsApiRegistry, LuaCapabilities> CreateAdditionalGameplayBindings()
+        {
+            List<MonoBehaviour> providers = new List<MonoBehaviour>();
+            foreach (MonoBehaviour provider in gameplayBindingsProviders ?? System.Array.Empty<MonoBehaviour>())
+            {
+                if (provider == null || providers.Contains(provider))
+                {
+                    continue;
+                }
+                if (provider is not ICoreAiLuaGameplayBindingsProvider)
+                {
+                    throw new System.ArgumentException(
+                        "Each assigned gameplay bindings provider must implement ICoreAiLuaGameplayBindingsProvider.",
+                        nameof(gameplayBindingsProviders));
+                }
+                providers.Add(provider);
+            }
+            if (providers.Count == 0)
+            {
+                return null;
+            }
+            // WHY: runtime inspector changes must not retarget the already composed scope's callbacks.
+            MonoBehaviour[] snapshot = providers.ToArray();
+            return (registry, capabilities) =>
+            {
+                foreach (MonoBehaviour provider in snapshot)
+                {
+                    if (provider != null)
+                    {
+                        ((ICoreAiLuaGameplayBindingsProvider)provider).RegisterGameplayBindings(registry, capabilities);
+                    }
+                }
+            };
         }
     }
 }

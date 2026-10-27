@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Infrastructure.Llm.Gateway;
 
 namespace CoreAI.Infrastructure.Llm
 {
@@ -13,10 +14,12 @@ namespace CoreAI.Infrastructure.Llm
     /// OpenAI-compatible client for backend-managed LLM proxy calls with dynamic authorization.
     /// Relies on <see cref="LlmAuthContextRegistry"/> and <see cref="LlmRequestContext"/> for headers.
     /// </summary>
-    public sealed class ServerManagedLlmClient : ILlmClient, ILlmRequestHeaderScope
+    public sealed class ServerManagedLlmClient : ILlmClient, ILlmRequestHeaderScope, IOwnedGatewayClient
     {
-        private readonly MeaiLlmClient _client;
+        private readonly ILlmClient _client;
         private readonly ServerManagedAuthorizationSettings _authorizationSettings;
+        private readonly bool _ownsGatewayResources;
+        private int _disposed;
 
         /// <summary>
         /// Creates a backend-managed proxy client.
@@ -50,6 +53,26 @@ namespace CoreAI.Infrastructure.Llm
                 memoryStore: memoryStore);
         }
 
+        /// <summary>Uses an explicit scoped gateway binding without installing the legacy auth retry wrapper.</summary>
+        internal ServerManagedLlmClient(IOpenAiHttpSettings settings, ICoreAISettings coreSettings,
+            IGameLogger logger, IAgentMemoryStore memoryStore, IUnityGatewayClientBinding gatewayBinding,
+            string routingProfileId = "")
+        {
+            if (gatewayBinding == null) throw new ArgumentNullException(nameof(gatewayBinding));
+            _client = gatewayBinding.CreateClient(settings, coreSettings, logger, memoryStore, routingProfileId)
+                ?? throw new InvalidOperationException("Gateway binding returned no client.");
+            _ownsGatewayResources = true;
+        }
+
+        bool IOwnedGatewayClient.OwnsGatewayResources => _ownsGatewayResources;
+
+        /// <summary>Retires only a scoped owned gateway leaf; legacy construction remains borrowed.</summary>
+        public void Dispose()
+        {
+            if (!_ownsGatewayResources || Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            (_client as IDisposable)?.Dispose();
+        }
+
         /// <inheritdoc />
         public void SetTools(IReadOnlyList<ILlmTool> tools)
         {
@@ -70,7 +93,8 @@ namespace CoreAI.Infrastructure.Llm
             LlmCompletionRequest request,
             CancellationToken cancellationToken = default)
         {
-            using (_authorizationSettings.BeginRequestHeaders(request))
+            if (_ownsGatewayResources) cancellationToken.ThrowIfCancellationRequested();
+            using (BeginHeaders(request))
             {
                 return await _client.CompleteAsync(request, cancellationToken);
             }
@@ -82,7 +106,8 @@ namespace CoreAI.Infrastructure.Llm
             [EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
-            using (_authorizationSettings.BeginRequestHeaders(request))
+            if (_ownsGatewayResources) cancellationToken.ThrowIfCancellationRequested();
+            using (BeginHeaders(request))
             {
                 await foreach (LlmStreamChunk chunk in _client.CompleteStreamingAsync(request, cancellationToken))
                 {
@@ -93,7 +118,17 @@ namespace CoreAI.Infrastructure.Llm
 
         IDisposable ILlmRequestHeaderScope.BeginRequestHeaders(LlmCompletionRequest request)
         {
-            return _authorizationSettings.BeginRequestHeaders(request);
+            return BeginHeaders(request);
+        }
+
+        private IDisposable BeginHeaders(LlmCompletionRequest request)
+        {
+            if (_ownsGatewayResources && Volatile.Read(ref _disposed) != 0)
+                throw new LlmClientException("The owned gateway client has retired.", LlmErrorCode.BackendUnavailable);
+            if (request == null) throw new ArgumentNullException(nameof(request));
+            return _authorizationSettings != null
+                ? _authorizationSettings.BeginRequestHeaders(request)
+                : LlmRequestContext.Begin(request.AgentRoleId, request.TraceId, request.IdempotencyKey, request.ActorId);
         }
 
         private sealed class ServerManagedAuthorizationSettings : IOpenAiHttpSettings

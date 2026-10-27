@@ -24,6 +24,34 @@ namespace CoreAI.Ai
         void DeleteStrict(string id);
     }
 
+    /// <summary>Reports strict mutation support when a source facade can change its backend.</summary>
+    public interface ILuaModSourceStrictCapabilities
+    {
+        /// <summary>Whether the current backend supports strict save acknowledgement.</summary>
+        bool SupportsStrictSave { get; }
+
+        /// <summary>Whether the current backend supports strict removal acknowledgement.</summary>
+        bool SupportsStrictDelete { get; }
+    }
+
+    /// <summary>Resolves optional source capabilities while preserving existing strict stores.</summary>
+    public static class LuaModSourceStoreCapabilities
+    {
+        /// <summary>Whether strict saving is available from the supplied store now.</summary>
+        public static bool CanSaveStrict(ILuaModSourceStore store)
+        {
+            return store is ILuaModSourceStrictWriter &&
+                   (!(store is ILuaModSourceStrictCapabilities capabilities) || capabilities.SupportsStrictSave);
+        }
+
+        /// <summary>Whether strict removal is available from the supplied store now.</summary>
+        public static bool CanDeleteStrict(ILuaModSourceStore store)
+        {
+            return store is ILuaModSourceStrictRemover &&
+                   (!(store is ILuaModSourceStrictCapabilities capabilities) || capabilities.SupportsStrictDelete);
+        }
+    }
+
     /// <summary>
     /// Persists a Lua mod's <em>source</em> plus its <see cref="LuaModManifest"/> so mods survive a
     /// restart and can be shared between hosts. This is deliberately separate from

@@ -165,7 +165,7 @@ namespace CoreAI.Ai.LuaCs
     /// <c>manage_mods</c> can later run on this VM. Both stores default to no-op implementations, so a
     /// host that wires neither keeps the prior in-memory-only behaviour.
     /// </summary>
-    public sealed class LuaCsModRuntime : ILuaModRuntime
+    public sealed class LuaCsModRuntime : ILuaModRuntime, IBudgetedLuaModRuntime
     {
         // WHY: ~10 s matches Luau's script watchdog so a mod handler is not cut sooner than a Roblox one.
         public const int DefaultHandlerTimeoutMs = 10_000;
@@ -582,6 +582,56 @@ namespace CoreAI.Ai.LuaCs
         private readonly LuaCsRbxApiBindings _rbxApi;
         private readonly IRbxRuntimeObservabilitySink _observability;
         private readonly IExecutionBudget _scriptExecutionBudget;
+        private readonly AsyncLocal<InvocationScope> _invocationScope = new();
+
+        private sealed class InvocationScope : IDisposable
+        {
+            private readonly LuaCsModRuntime _owner;
+            private readonly InvocationScope _previous;
+            private bool _disposed;
+
+            public InvocationScope(LuaCsModRuntime owner, LuaModInvocationLimits limits, CancellationToken token)
+            {
+                _owner = owner;
+                _previous = owner._invocationScope.Value;
+                Limits = limits;
+                Token = token;
+                owner._invocationScope.Value = this;
+            }
+
+            public LuaModInvocationLimits Limits { get; }
+            public CancellationToken Token { get; }
+
+            public void Dispose()
+            {
+                if (_disposed) return;
+                if (!ReferenceEquals(_owner._invocationScope.Value, this))
+                    throw new InvalidOperationException("Invocation scopes must be disposed in reverse order.");
+                _owner._invocationScope.Value = _previous;
+                _disposed = true;
+            }
+        }
+
+        /// <inheritdoc />
+        public IDisposable BeginInvocation(LuaModInvocationLimits limits, CancellationToken cancellationToken = default)
+        {
+            if (limits == null) throw new ArgumentNullException(nameof(limits));
+            cancellationToken.ThrowIfCancellationRequested();
+            ThrowIfShutdown();
+            return new InvocationScope(this, limits, cancellationToken);
+        }
+
+        private IExecutionBudget InitialExecutionBudget(InvocationScope invocation)
+        {
+            if (invocation == null) return _scriptExecutionBudget;
+            int timeoutMs = _scriptExecutionBudget.TimeoutMs > 0
+                ? Math.Min(_scriptExecutionBudget.TimeoutMs, invocation.Limits.TimeoutMs)
+                : invocation.Limits.TimeoutMs;
+            long maxSteps = _scriptExecutionBudget.MaxSteps > 0
+                ? Math.Min(_scriptExecutionBudget.MaxSteps, invocation.Limits.MaxSteps)
+                : invocation.Limits.MaxSteps;
+            return new ExecutionBudget(timeoutMs, maxSteps, _scriptExecutionBudget.MaxAllocatedBytes);
+        }
         private readonly List<Mod> _tickScratch = new();
         private int _timerStart;
         private int _eventStart;
@@ -1996,6 +2046,10 @@ namespace CoreAI.Ai.LuaCs
             Action<Mod> commit,
             bool isReload)
         {
+            InvocationScope invocation = _invocationScope.Value;
+            CancellationToken cancellationToken = invocation?.Token ?? CancellationToken.None;
+            cancellationToken.ThrowIfCancellationRequested();
+            IExecutionBudget initialBudget = InitialExecutionBudget(invocation);
             Mod mod = new()
             {
                 Id = modId,
@@ -2041,13 +2095,18 @@ namespace CoreAI.Ai.LuaCs
                 {
                     if (_rbxApi == null)
                     {
-                        _engine.RunChunk(mod.State, compileSource);
+                        if (invocation == null)
+                            _engine.RunChunk(mod.State, compileSource);
+                        else
+                            _engine.RunChunk(mod.State, compileSource, _engine.CreateGuard(initialBudget), cancellationToken);
                     }
                     else
                     {
                         _rbxApi.RunModChunk(
-                            mod.State, modId, compileSource, _scriptExecutionBudget);
+                            mod.State, modId, compileSource, _scriptExecutionBudget, cancellationToken,
+                            invocation == null ? null : initialBudget);
                     }
+                    cancellationToken.ThrowIfCancellationRequested();
                 }
                 finally
                 {

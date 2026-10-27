@@ -810,12 +810,18 @@ namespace CoreAI.Infrastructure.Luau
             _ctx.Note("continue", frame.Continues[0]);
         }
 
+        // WHY: capture the chunk's lexical _ENV before author statements so a later local named _ENV
+        // cannot redirect the primitive; the getter body stays unevaluated until the operation runs,
+        // so an unused floor division never performs math.floor. The getter is called before the
+        // operands so the function is obtained before their side effects.
         private string EnsureFloor()
         {
             if (_ctx.FloorName == null)
             {
+                string envName = NextTemp();
                 _ctx.FloorName = NextTemp();
-                InsertChunkPrelude("local " + _ctx.FloorName + " = math.floor;");
+                InsertChunkPrelude("local " + envName + " = _ENV; local " + _ctx.FloorName
+                    + " = function() return " + envName + ".math.floor end;");
             }
 
             return _ctx.FloorName;
@@ -1032,7 +1038,7 @@ namespace CoreAI.Infrastructure.Luau
                 string lhs = _ctx.Source.Substring(target.Start, target.End - target.Start);
                 if (binOp == "//")
                 {
-                    ReplaceToken(opTok, "= " + EnsureFloor() + "(" + lhs + " / (");
+                    ReplaceToken(opTok, "= " + EnsureFloor() + "()(" + lhs + " / (");
                     int end = ParseExpr();
                     Insert(end, "))");
                 }
@@ -1071,7 +1077,7 @@ namespace CoreAI.Infrastructure.Luau
 
                 if (binOp == "//")
                 {
-                    ReplaceToken(opTok, access + " = " + EnsureFloor() + "(" + access + " / (");
+                    ReplaceToken(opTok, access + " = " + EnsureFloor() + "()(" + access + " / (");
                     int end = ParseExpr();
                     Insert(end, ")) end");
                 }
@@ -1204,7 +1210,7 @@ namespace CoreAI.Infrastructure.Luau
                 (int _, int rhsEnd) = ParseBinExpr(IsRightAssociative(op) ? prec - 1 : prec);
                 if (op.Text == "//")
                 {
-                    Insert(start, EnsureFloor() + "(");
+                    Insert(start, EnsureFloor() + "()(");
                     ReplaceToken(op, "/");
                     Insert(rhsEnd, ")");
                     _ctx.Note("floor division", op);

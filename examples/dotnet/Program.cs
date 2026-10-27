@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.Llm;
+using CoreAI.Infrastructure.Llm.Gateway;
 using CoreAI.Logging;
 using Microsoft.Extensions.AI;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
@@ -19,20 +20,41 @@ internal static class Program
             Console.WriteLine("CoreAI: agent with a tool and a multi-file skill, no Unity.\n" +
                 "Run: dotnet run --project examples/dotnet -- \"How much iron is in stock?\"\n" +
                 "COREAI_ENDPOINT — URL of an OpenAI-compatible API with /v1 (required).\n" +
-                "COREAI_MODEL — model id with native tool calling (required).\n" +
+                "COREAI_MODEL — model id with native tool calling (required in provider mode).\n" +
                 "COREAI_API_KEY — provider key; may be empty for a local server.\n" +
+                "--server-managed uses COREAI_GATEWAY_TOKEN and lets the server select a missing model.\n" +
+                "--allow-insecure-http explicitly enables an HTTP gateway selected by the host.\n" +
                 "--help and an argument-free launch make no network requests. Ctrl+C cancels the request.");
             return 0;
         }
 
+        bool serverManaged = args.Contains("--server-managed");
+        bool allowInsecureHttp = args.Contains("--allow-insecure-http");
+        string[] requestArgs = args.Where(argument => argument != "--server-managed" &&
+            argument != "--allow-insecure-http").ToArray();
+        if (requestArgs.Length == 0)
+        {
+            Console.Error.WriteLine("Provide a request or use --help.");
+            return 2;
+        }
         string endpoint = Environment.GetEnvironmentVariable("COREAI_ENDPOINT") ?? "";
         string model = Environment.GetEnvironmentVariable("COREAI_MODEL") ?? "";
         if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) ||
-            string.IsNullOrWhiteSpace(model))
+            (!serverManaged && string.IsNullOrWhiteSpace(model)))
         {
-            Console.Error.WriteLine("Set COREAI_ENDPOINT (http/https) and COREAI_MODEL. See --help.");
+            Console.Error.WriteLine("Set COREAI_ENDPOINT and a provider model, or use --server-managed. See --help.");
             return 2;
+        }
+
+        if (serverManaged)
+        {
+            try { GatewayClientOptions.ValidateEndpoint(endpoint, allowInsecureHttp); }
+            catch (ArgumentException)
+            {
+                Console.Error.WriteLine("Gateway mode requires HTTPS or explicitly enabled HTTP.");
+                return 2;
+            }
         }
 
         Dictionary<string, int> stock = new(StringComparer.OrdinalIgnoreCase)
@@ -41,9 +63,9 @@ internal static class Program
             ["wood"] = 30
         };
         DelegateLlmTool stockTool = new("get_stock", "Read stock by item id: iron or wood.",
-            (string item) => stock.TryGetValue(item, out int count)
+            new Func<string, string>((string item) => stock.TryGetValue(item, out int count)
                 ? $"{item}: {count}"
-                : "Unknown item. Supported ids: iron, wood.")
+                : "Unknown item. Supported ids: iron, wood."))
         {
             AllowDuplicates = true
         };
@@ -63,7 +85,8 @@ internal static class Program
         OpenAiHttpOptions http = new()
         {
             ApiBaseUrl = endpoint,
-            ApiKey = Environment.GetEnvironmentVariable("COREAI_API_KEY") ?? "",
+            ApiKey = serverManaged ? "" : Environment.GetEnvironmentVariable("COREAI_API_KEY") ?? "",
+            ExecutionMode = serverManaged ? LlmExecutionMode.ServerManagedApi : LlmExecutionMode.ClientOwnedApi,
             Model = model,
             MaxTokens = 2048,
             RequestTimeoutSeconds = 60,
@@ -77,7 +100,12 @@ internal static class Program
             LogToolCallArguments = false,
             LogToolCallResults = false
         };
-        using SmartToolCallingChatClient client = new(new MeaiOpenAiChatClient(http),
+        IChatClient backend = serverManaged
+            ? GatewayClientFactory.Create(http, new HttpClientOpenAiTransport(),
+                new GatewayClientOptions { AllowInsecureHttp = allowInsecureHttp },
+                authContextProvider: new EnvironmentGatewayAuthContext())
+            : new MeaiOpenAiChatClient(http);
+        using SmartToolCallingChatClient client = new(backend,
             NullLog.Instance, settings, false, tools, "Quartermaster");
         using CancellationTokenSource cancellation = new(TimeSpan.FromSeconds(90));
         ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
@@ -93,7 +121,7 @@ internal static class Program
                 new(ChatRole.System, "You are a quartermaster. Answer in the user's language. " +
                     "Read the relevant skill with read_skill before using call_skill_tool.\n" +
                     SkillSet.BuildCatalog(skills)),
-                new(ChatRole.User, string.Join(" ", args))
+                new(ChatRole.User, string.Join(" ", requestArgs))
             };
             ChatResponse response = await client.GetResponseAsync(messages, options, cancellation.Token);
             ChatMessage? answer = response.Messages.LastOrDefault(message => message.Role == ChatRole.Assistant);
@@ -116,5 +144,18 @@ internal static class Program
         {
             Console.CancelKeyPress -= cancelHandler;
         }
+    }
+
+    /// <summary>The application owns its token source; no login or provisioning service is implied.</summary>
+    private sealed class EnvironmentGatewayAuthContext : ILlmAuthContextProvider
+    {
+        public string GetAuthorizationHeader()
+        {
+            string token = Environment.GetEnvironmentVariable("COREAI_GATEWAY_TOKEN") ?? "";
+            return string.IsNullOrWhiteSpace(token) ? "" : "Bearer " + token.Trim();
+        }
+        public string TenantId => "";
+        public string UserId => "";
+        public string SessionId => "";
     }
 }

@@ -1,0 +1,24 @@
+# OpenRouter final matrix triage
+
+Scope: the two published-demo live test fixtures. No model, tool, world, source, or acceptance result is substituted. Root owns Unity verification and publication.
+
+## Evidence and classification
+
+- `artifacts/pr-review-20261025/unity-openrouter-demos-final1.xml`: 18 cases, 13 passed, 3 failed, 2 skipped. These are the pre-change results, not validation of this patch.
+- Authoring: the real Programmer turn received HTTP 200 and called `manage_mods` three times with exactly `{"action":"load"}`. Each call truthfully failed with `load: mod_id and code are required.` The final answer reported failure. Storage admission had already passed. This is observed argument noncompliance, not a storage error or provider timeout. `LuaModsLlmTool` exposes `mod_id` and `code` in its MEAI function, and `MeaiOpenAiChatClient.BuildToolsPayload` forwards that function schema. Conditional requirements are described because list actions need neither field. Earlier repair1 calls carried complete load/reload arguments successfully. Raw response deltas and the complete outgoing schema were not captured, so wire-level provider versus decoder attribution is not independently proven.
+- Tetris: `LuaPlatformExampleController.TetrisMove` queues a real event; `LuaCsModRuntime.EmitEvent` does not synchronously execute it. Therefore a synchronous-callback explanation is unsupported. The actual Lua randomly chooses initial and autopilot columns, including zero, and rejects moves outside the board. Cubes also start parked below the board. The test requested left before sampling its baseline and never ensured left was a legal move. This is a confirmed test precondition defect; prior repair1 passing does not make a random left-wall case valid.
+- Spellcraft: final1 ran from 05:41:37Z to 05:43:18Z and timed out after 100 seconds. Its XML output contains no LLM start, POST, HTTP response, tool receipt, or completion. The raw log has no DemoMage request in the Spellcraft scene segment. Thus no external-provider latency was observed for this failure. `SpellcraftDemo.Submit` rejects an empty input before creating a request, while the helper selected the first global TMP input without tying it to Cast. The helper also never checked request admission. Incorrect input targeting or pre-admission scheduling is a test-harness suspect; the captured evidence cannot prove which guard rejected that particular click. Earlier demos1 executed `cast_spell` successfully, spent mana, and completed the turn in 3.374 seconds.
+
+## Narrow changes
+
+- Authoring prompts now name the actual structured `action`, `mod_id`, and full model-authored `code` arguments explicitly for load/get_source/reload. No Lua source is supplied by the test and strict successful-tool, saved-source, Folder/Stage, and revision assertions remain.
+- Tetris waits for the actual cube above the actual board floor, samples before input, and uses an actual right input only if the observed piece is at the left wall. It then retains the original left-input rendered-position assertion and stop checks. Cell spacing comes from the real floor cubes. No random state or Lua implementation is replaced and the two-second movement bound is unchanged.
+- UI model actions select the input beneath the captured action button's owning demo panel, assert the input survives, invoke that exact button, and require observable busy state or a new real tool receipt within ten seconds. The existing 100-second completion, successful real tool, UI error, cast/mana, and effect assertions remain. The next real run must establish whether this resolves Spellcraft.
+- The original world manager registration now constructs the real `WorldStateManager` with the new explicit save-path overload under the owned run directory. A build callback checks its resolved path before entrypoint initialization. The real `AuditLogWriter` and any registered real `FileSkillStore` are also rooted below that directory. Original singleton/interface/key registration slots are retained. No existing user snapshot is read, written, restored, or removed by the patched fixture.
+
+## Verification and limits
+
+- `git diff --check` for both test files: passed; only the existing CRLF-to-LF notice was emitted.
+- Reviewed the real scoped diff and the production input, event, tool-schema, and storage-factory paths. No assertions were removed and no API keys or authorization headers were copied into this report.
+- No Unity, live API, local model, or additional retries were launched by this worker. Post-change compile/PlayMode/provider verification remains pending with root, after the storage-isolation audit. The old matrix is still failing evidence and must not be relabeled as a pass.
+- Fixture isolation does not recover earlier global snapshot writes. Recovery evidence and any owner-data decision belong to root and the storage-isolation worker.

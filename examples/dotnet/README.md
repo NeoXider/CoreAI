@@ -37,3 +37,17 @@ This is one conversation turn with a read-only tool. Long-term memory and UI are
 Exit codes: `0` — help or an answer received; `1` — runtime error; `2` — bad configuration; `3` — cancelled or overall timeout. A successful request completion is not a judgment on answer correctness. The sample never prints keys, HTTP error bodies, or request payloads to the diagnostic log.
 
 [Source](Program.cs) · [DLL wiring](../../tools/portable/README.md) · [Building agents](../../Assets/CoreAI/Docs/AGENT_BUILDER.md)
+
+## Use a server-managed gateway
+
+Use an OpenAI-compatible relay in an ordinary .NET process with the portable Gateway Client. The relay, its account policy and authentication belong to your host; this repository does not provide a server implementation.
+
+Set COREAI_ENDPOINT to your chosen HTTPS gateway base, and obtain COREAI_GATEWAY_TOKEN from your own host authentication. Do not put provider keys in the sample or a client build. COREAI_MODEL may be empty in this mode: the model field is omitted and the server selects it. Run:
+
+```powershell
+dotnet run --project examples/dotnet/CoreAI.ConsoleSample.csproj -- --server-managed 'How much iron is in stock?'
+```
+
+For an explicitly chosen HTTP gateway, including a LAN/private gateway, add --allow-insecure-http. HTTPS remains the default; the host owns transport confidentiality when opting into HTTP. The sample reads the host token dynamically; it does not create accounts, mint sessions, refresh tokens, or implement backend business rules. Optional entitlement and usage calls are disabled; any plain OpenAI-compatible gateway can serve the completion path.
+
+The existing SmartToolCallingChatClient still executes this sample's buffered tool loop. The portable streamed path forwards native tool calls for the caller to execute; automatic execute-as-you-stream parity is not included. See [Gateway Client](../../Docs/CoreAI/GATEWAY_CLIENT.md) for scoped auth/refresh, optional v1 side calls, bounded telemetry and Unity composition. Help and argument-free launches remain offline. A successful fake-transport or portable test does not prove a live gateway, provider or browser configuration.

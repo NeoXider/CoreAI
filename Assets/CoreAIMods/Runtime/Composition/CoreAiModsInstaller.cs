@@ -12,6 +12,7 @@ using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Mods.WorldPackages;
 using CoreAI.Scripting;
+using CoreAI.Sandbox.LuaCs;
 using Newtonsoft.Json;
 using UnityEngine;
 using VContainer;
@@ -90,6 +91,26 @@ namespace CoreAI.Composition
             System.Func<string, string> skillTextProvider = null,
             ILuaModSourceStore worldSessionSourceStore = null,
             IRbxWorldPackageStore worldPackageStore = null)
+        {
+            RegisterCoreAiMods(builder, allowedLuaScenes, enableFullLuaAccess,
+                enableFullLuaPrivateAccess, fullLuaBlacklistPolicy, modStoreId, worldAclVersion,
+                applicationIsPlayingProvider, skillTextProvider, worldSessionSourceStore, worldPackageStore, null);
+        }
+
+        /// <summary>Registers scoped host gameplay additions without changing the existing overload or grants.</summary>
+        public static void RegisterCoreAiMods(
+            this IContainerBuilder builder,
+            System.Collections.Generic.IEnumerable<string> allowedLuaScenes,
+            bool enableFullLuaAccess,
+            bool enableFullLuaPrivateAccess,
+            IFullLuaAccessBlacklistPolicy fullLuaBlacklistPolicy,
+            string modStoreId,
+            int? worldAclVersion,
+            System.Func<bool> applicationIsPlayingProvider,
+            System.Func<string, string> skillTextProvider,
+            ILuaModSourceStore worldSessionSourceStore,
+            IRbxWorldPackageStore worldPackageStore,
+            System.Action<LuaCsApiRegistry, LuaCapabilities> additionalGameplayBindings)
         {
             LuaCapabilities scriptCapabilities = enableFullLuaAccess
                 ? LuaCapabilities.All | LuaCapabilities.Full
@@ -291,6 +312,7 @@ namespace CoreAI.Composition
                         .GetActorContext(BuiltInAgentRoleIds.Programmer),
                     Capabilities = scriptCapabilities,
                     OneOffCapabilities = oneOffCapabilities,
+                    AdditionalGameplayBindings = additionalGameplayBindings,
                     // WHY: a one-shot chunk may run for seconds under its wall-clock budget; on a
                     // single-threaded player that would freeze the whole page (measured: ~6 s on WebGL).
                     // The player-loop yielder lets the guard hand a frame back while the chunk runs.
@@ -406,7 +428,8 @@ namespace CoreAI.Composition
                         fullLuaBlacklistPolicy,
                         enableFullLuaPrivateAccess,
                         scriptCapabilities,
-                        oneOffCapabilities);
+                        oneOffCapabilities,
+                        additionalGameplayBindings);
                 return new RbxWorldRuntimeSessionController(
                     sessionHost,
                     c.Resolve<IRbxWorldPackageStore>(),
@@ -829,7 +852,8 @@ namespace CoreAI.Composition
             IFullLuaAccessBlacklistPolicy fullLuaBlacklistPolicy,
             bool enableFullLuaPrivateAccess,
             LuaCapabilities scriptCapabilities,
-            LuaCapabilities oneOffCapabilities)
+            LuaCapabilities oneOffCapabilities,
+            System.Action<LuaCsApiRegistry, LuaCapabilities> additionalGameplayBindings)
         {
             LuaCsModStack stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
             {
@@ -855,6 +879,7 @@ namespace CoreAI.Composition
                     .GetActorContext(BuiltInAgentRoleIds.Programmer),
                 Capabilities = scriptCapabilities,
                 OneOffCapabilities = oneOffCapabilities,
+                AdditionalGameplayBindings = additionalGameplayBindings,
                 FrameYielder = PlayerLoopScriptFrameYielder.Instance,
                 RbxApi = rbxApi,
                 // WHY rbxApi.CoroutineResumeBudget and not a fresh resolve: this session's rbxApi already

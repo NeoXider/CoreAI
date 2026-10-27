@@ -25,7 +25,7 @@ dotnet run --project examples/dotnet/CoreAI.ConsoleSample.csproj -- --help
 
 The DLL lands in `tools/portable/bin/Release/netstandard2.1/CoreAI.Core.dll`. The first build restores NuGet dependencies; no model access or API key is needed. `COREAI_LLM` is already defined in the project and unlocks the provider HTTP path.
 
-Dependencies are pinned in [CoreAI.Core.csproj](CoreAI.Core.csproj): Microsoft.Extensions.AI **9.10.2**, Newtonsoft.Json **13.0.3**, System.Text.Json **8.0.6**, plus their transitive dependencies. MEAI contracts are part of the public API.
+Dependencies are pinned in [CoreAI.Core.csproj](CoreAI.Core.csproj): Microsoft.Extensions.AI **9.10.2**, Newtonsoft.Json **13.0.4**, System.Text.Json **8.0.6**, plus their transitive dependencies. MEAI contracts are part of the public API.
 
 Those two versions are the **Unity consumer's ceiling**, not a preference, and this project exists partly to enforce them. Unity substitutes its own `System.Text.Json` (assembly version 8.0.0.0) for any project copy, so a Microsoft.Extensions.AI 10.x build — which targets `System.Text.Json` 10.0.0.0 — cannot load in a game. Building the core against the same floor turns "the consumer cannot upgrade" into a compile error on an ordinary `dotnet build` here, instead of a `CS0234` discovered while integrating. The pin must stay equal to `Assets/packages.config`; `MeaiVersionFloorEditModeTests` fails when they drift apart.
 

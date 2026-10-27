@@ -1999,6 +1999,21 @@ namespace CoreAI.Ai.LuaCs
         public void RunModChunk(IScriptState ownerState, string ownerModId, string source,
             IExecutionBudget resumeBudget)
         {
+            RunModChunk(ownerState, ownerModId, source, resumeBudget, CancellationToken.None);
+        }
+
+        /// <summary>Runs the initial resume with caller cancellation, then releases that cancellation lifetime.</summary>
+        public void RunModChunk(IScriptState ownerState, string ownerModId, string source,
+            IExecutionBudget resumeBudget, CancellationToken cancellationToken)
+        {
+            RunModChunk(ownerState, ownerModId, source, resumeBudget, cancellationToken, null);
+        }
+
+        /// <summary>Overrides only the initial resume budget; subsequent scheduled resumes use the host budget.</summary>
+        public void RunModChunk(IScriptState ownerState, string ownerModId, string source,
+            IExecutionBudget resumeBudget, CancellationToken cancellationToken, IExecutionBudget initialResumeBudget)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             string owner = string.IsNullOrWhiteSpace(ownerModId)
                 ? throw new ArgumentException("Owner mod id is required.", nameof(ownerModId))
                 : ownerModId;
@@ -2010,7 +2025,7 @@ namespace CoreAI.Ai.LuaCs
 
             _schedulerThreadFactory.PrepareWaitBindings(ownerState);
             object callable = _schedulerThreadFactory.CaptureChunk(
-                ownerState, source, resumeBudget);
+                ownerState, source, resumeBudget, cancellationToken, initialResumeBudget);
             IRbxScriptThread thread = _scheduler.Spawn(
                 owner, callable, Array.Empty<object>());
             if (thread is LuaCsRbxScriptThread luaThread)

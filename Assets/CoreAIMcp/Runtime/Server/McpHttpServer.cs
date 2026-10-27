@@ -156,15 +156,11 @@ namespace CoreAI.Mcp.Server
         {
             _dispatcher.SupportsListChanged = false;
             _dispatcher.Registry.Changed -= SignalCatalogChanged;
-            try
-            {
-                _cts?.Cancel();
-            }
-            catch (Exception ex)
-            {
-                _logError($"cancelling in-flight MCP work failed during stop: {ex.GetType().Name}: {ex.Message}");
-            }
 
+            // WHY: release the loopback prefix before invoking cancellation callbacks. A reentrant restart
+            // triggered by one of those callbacks (CoreAiMcpServer.StopServer -> StartServer on the same
+            // port) must be able to bind before this transport is fully disposed. Cancelling first would
+            // run the callbacks while the old listener still owned the prefix and fail the bind.
             try
             {
                 _listener?.Stop();
@@ -177,6 +173,15 @@ namespace CoreAI.Mcp.Server
             finally
             {
                 _listener = null;
+            }
+
+            try
+            {
+                _cts?.Cancel();
+            }
+            catch (Exception ex)
+            {
+                _logError($"cancelling in-flight MCP work failed during stop: {ex.GetType().Name}: {ex.Message}");
             }
 
             lock (_contextsGate)

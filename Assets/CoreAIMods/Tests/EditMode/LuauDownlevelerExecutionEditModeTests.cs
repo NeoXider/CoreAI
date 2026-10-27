@@ -325,6 +325,30 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, result[1].Read<double>());
         }
 
+        [Test]
+        public void FloorDivision_UnusedOperationDoesNotRequireMath()
+        {
+            LuaValue[] result = RunLuau(
+                "local function unused() return 7 // 2 end return 42",
+                null, "math = nil");
+            Assert.AreEqual(42, result[0].Read<double>());
+        }
+
+        [Test]
+        public void FloorDivision_MissingMathErrorsAtOperation()
+        {
+            Assert.Catch<System.Exception>(() =>
+                RunLuau("return 7 // 2", null, "math = nil"));
+        }
+
+        [Test]
+        public void FloorDivision_ObtainsFunctionBeforeOperandEffects()
+        {
+            LuaValue[] result = RunLuau(
+                "return (function() math = nil return 7 end)() // 2");
+            Assert.AreEqual(3, result[0].Read<double>());
+        }
+
         [TestCase("\n", "\"")]
         [TestCase("\r\n", "\"")]
         [TestCase("\n", "'")]

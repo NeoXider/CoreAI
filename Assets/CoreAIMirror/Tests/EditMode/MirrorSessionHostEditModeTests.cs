@@ -28,7 +28,12 @@ namespace CoreAI.Net.Mirror.Tests
             _bridge = new MirrorNetworkBridge(isServer: true, clockSeconds: () => _now);
             _connected = new List<string>();
             _disconnected = new List<string>();
-            _host = new CoreAiMirrorSessionHost(
+            _host = CreateSessionHost();
+        }
+
+        private CoreAiMirrorSessionHost CreateSessionHost()
+        {
+            return new CoreAiMirrorSessionHost(
                 _bridge,
                 context =>
                 {
@@ -98,6 +103,193 @@ namespace CoreAI.Net.Mirror.Tests
             Assert.AreEqual(0, refusing.LiveSessionCount);
             Assert.IsFalse(refusing.TryGetIdentity("actor-b", out _, out _, out _));
             refusing.Dispose();
+        }
+
+        [Test]
+        public void PeerDisconnect_SameIdReplacement_SurvivesDelayedBindingRelease()
+        {
+            ActorAdmissionResult originalAdmission = Admit("actor-a", 1L, "a", "A");
+            Assert.IsTrue(_host.Admit(3, originalAdmission, "session-a"));
+
+            ActorAdmissionResult replacementAdmission = Admit("actor-a", 2L, "a2", "A2");
+            bool replacementAdmitted = false;
+            bool firstDisconnect = true;
+            _bridge.PeerDisconnected += _ =>
+            {
+                if (!firstDisconnect)
+                {
+                    return;
+                }
+
+                firstDisconnect = false;
+                replacementAdmitted = _host.Admit(3, replacementAdmission, "session-replacement");
+            };
+
+            _bridge.NotifyDisconnected(3, RbxNetworkDisconnectReason.TransportLost);
+
+            Assert.IsTrue(replacementAdmitted);
+            CollectionAssert.AreEqual(new[] { "actor-a" }, _disconnected);
+            Assert.AreEqual(1, _host.LiveSessionCount);
+            Assert.IsTrue(_host.HasLiveSession(3));
+            Assert.IsTrue(_host.TryGetIdentity("actor-a", out long userId, out string username,
+                out string displayName));
+            Assert.AreEqual(2L, userId);
+            Assert.AreEqual("a2", username);
+            Assert.AreEqual("A2", displayName);
+            CollectionAssert.Contains(_bridge.ActorIds, "actor-a");
+
+            List<RbxNetworkEventMessage> delivered = new();
+            _bridge.EventReceived += delivered.Add;
+            _bridge.ReceiveServerEvent(3, new CoreAiRemoteEventMessage
+            {
+                RemoteId = 7UL,
+                Direction = (byte)RbxNetworkDirection.ClientToServer,
+                Reliability = (byte)RbxNetworkReliability.ReliableOrdered,
+                Payload = new byte[] { 9 }
+            });
+            Assert.AreEqual(1, delivered.Count);
+            Assert.AreEqual("actor-a", delivered[0].SenderActorId);
+
+            _bridge.NotifyDisconnected(3, RbxNetworkDisconnectReason.TransportLost);
+
+            CollectionAssert.AreEqual(new[] { "actor-a", "actor-a" }, _disconnected);
+            Assert.AreEqual(0, _host.LiveSessionCount);
+            Assert.IsFalse(_host.HasLiveSession(3));
+            Assert.IsFalse(_host.TryGetIdentity("actor-a", out _, out _, out _));
+            CollectionAssert.IsEmpty(_bridge.ActorIds);
+        }
+
+        [TestCase(null)]
+        [TestCase("")]
+        [TestCase("bridge-session-override")]
+        public void WorldRelease_ClearsTheAdmittedGeneration_RegardlessOfSessionOverride(string sessionOverride)
+        {
+            Assert.IsTrue(_host.Admit(3, Admit("actor-a", 1L, "a", "A"), sessionOverride));
+            Assert.Greater(_bridge.GetBindingGeneration(3), 0L);
+
+            _bridge.UnregisterActor("actor-a");
+
+            Assert.AreEqual(0, _host.LiveSessionCount);
+            Assert.IsFalse(_host.HasLiveSession(3));
+            Assert.IsFalse(_host.TryGetIdentity("actor-a", out _, out _, out _));
+            Assert.AreEqual(0L, _bridge.GetBindingGeneration(3));
+            CollectionAssert.IsEmpty(_bridge.ActorIds);
+            CollectionAssert.IsEmpty(_disconnected,
+                "A world-owned release must not ask the world to disconnect the same actor again.");
+            Assert.IsTrue(_host.Admit(3, Admit("actor-b", 2L, "b", "B"), sessionOverride),
+                "The released transport id must be available to a fresh actor admission.");
+            _bridge.UnregisterActor("actor-b");
+            Assert.AreEqual(0, _host.LiveSessionCount);
+            Assert.IsFalse(_host.TryGetIdentity("actor-b", out _, out _, out _));
+        }
+
+        [Test]
+        public void WorldRelease_LegacySubscriberDisposesBridge_StillForgetsHostSession()
+        {
+            Assert.IsTrue(_host.Admit(3, Admit("actor-a", 1L, "a", "A"), null));
+            List<int> legacyReleases = new();
+            _bridge.BindingReleased += connectionId =>
+            {
+                legacyReleases.Add(connectionId);
+                _bridge.Dispose();
+            };
+
+            _bridge.UnregisterActor("actor-a");
+
+            CollectionAssert.AreEqual(new[] { 3 }, legacyReleases);
+            Assert.AreEqual(0, _host.LiveSessionCount);
+            Assert.IsFalse(_host.TryGetIdentity("actor-a", out _, out _, out _));
+            CollectionAssert.IsEmpty(_disconnected);
+            _bridge.UnregisterActor("actor-a");
+            _bridge.Dispose();
+            CollectionAssert.AreEqual(new[] { 3 }, legacyReleases);
+        }
+
+        [Test]
+        public void Admission_ConnectCallbackRetiresBinding_DoesNotPublishTheRetiredSession()
+        {
+            using CoreAiMirrorSessionHost retiring = new(_bridge,
+                context =>
+                {
+                    _bridge.UnregisterActor(context.ActorId);
+                    return true;
+                }, _ => true);
+
+            Assert.IsFalse(retiring.Admit(3, Admit("actor-a", 1L, "a", "A"), "bridge-session"));
+
+            Assert.AreEqual(0, retiring.LiveSessionCount);
+            Assert.IsFalse(retiring.TryGetIdentity("actor-a", out _, out _, out _));
+            Assert.AreEqual(0L, _bridge.GetBindingGeneration(3));
+            CollectionAssert.IsEmpty(_bridge.ActorIds);
+        }
+
+        [TestCase("", false)]
+        [TestCase("reused-bridge-session", false)]
+        [TestCase("", true)]
+        [TestCase("reused-bridge-session", true)]
+        public void PeerDisconnect_ReusedOverrideReplacementSurvivesBothListenerOrders(
+            string sessionOverride, bool replacementListenerFirst)
+        {
+            if (replacementListenerFirst)
+            {
+                _host.Dispose();
+            }
+
+            ActorAdmissionResult original = Admit("actor-a", 1L, "a", "A", "admitted-old");
+            ActorAdmissionResult replacement = Admit("actor-a", 2L, "a2", "A2", "admitted-new");
+            Assert.AreNotEqual(original.Context.SessionId, replacement.Context.SessionId);
+            bool replacementAdmitted = false;
+            bool firstDisconnect = true;
+            _bridge.PeerDisconnected += _ =>
+            {
+                if (!firstDisconnect)
+                {
+                    return;
+                }
+
+                firstDisconnect = false;
+                _host.Release(3);
+                replacementAdmitted = _host.Admit(3, replacement, sessionOverride);
+            };
+            if (replacementListenerFirst)
+            {
+                _host = CreateSessionHost();
+            }
+
+            Assert.IsTrue(_host.Admit(3, original, sessionOverride));
+            long originalGeneration = _bridge.GetBindingGeneration(3);
+
+            _bridge.NotifyDisconnected(3, RbxNetworkDisconnectReason.TransportLost);
+
+            Assert.IsTrue(replacementAdmitted);
+            Assert.Greater(_bridge.GetBindingGeneration(3), originalGeneration,
+                "A new binding must get a fresh token even when every peer value is reused.");
+            Assert.IsFalse(_bridge.TryGetDisconnectGeneration(3, out _),
+                "The captured disconnect generation is retained only for the active callback scope.");
+            CollectionAssert.AreEqual(new[] { "actor-a" }, _disconnected);
+            Assert.AreEqual(1, _host.LiveSessionCount);
+            Assert.IsTrue(_host.HasLiveSession(3));
+            Assert.IsTrue(_host.TryGetIdentity("actor-a", out long userId, out string username,
+                out string displayName));
+            Assert.AreEqual(2L, userId);
+            Assert.AreEqual("a2", username);
+            Assert.AreEqual("A2", displayName);
+            CollectionAssert.AreEqual(new[] { "actor-a" }, _bridge.ActorIds);
+
+            List<RbxNetworkEventMessage> delivered = new();
+            _bridge.EventReceived += delivered.Add;
+            _bridge.ReceiveServerEvent(3, OfflineMirror.Event(7UL));
+            Assert.AreEqual(1, delivered.Count);
+            Assert.AreEqual("actor-a", delivered[0].SenderActorId);
+
+            _bridge.NotifyDisconnected(3, RbxNetworkDisconnectReason.TransportLost);
+            _bridge.NotifyDisconnected(3, RbxNetworkDisconnectReason.TransportLost);
+
+            CollectionAssert.AreEqual(new[] { "actor-a", "actor-a" }, _disconnected);
+            Assert.AreEqual(0, _host.LiveSessionCount);
+            Assert.IsFalse(_host.TryGetIdentity("actor-a", out _, out _, out _));
+            Assert.AreEqual(0L, _bridge.GetBindingGeneration(3));
+            CollectionAssert.IsEmpty(_bridge.ActorIds);
         }
 
         [Test]
@@ -355,11 +547,11 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         private static ActorAdmissionResult Admit(string actorId, long userId, string name,
-            string displayName)
+            string displayName, string contextSessionId = null)
         {
             ActorContext context = new LocalActorIdentityProvider(
                     actorId,
-                    "session-" + actorId,
+                    contextSessionId ?? "session-" + actorId,
                     "world-a",
                     ActorGrantSet.Create(new[] { "read" }),
                     AgentMemoryScope.Empty)

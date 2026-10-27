@@ -6,6 +6,7 @@ using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Demos.Shared;
+using CoreAI.Sandbox.LuaCs;
 using VContainer;
 #endif
 
@@ -13,14 +14,14 @@ namespace CoreAI.Demos
 {
     /// <summary>
     /// "Unit Forge" — an empty arena that ships with <b>no units and no behaviour</b>. Everything
-    /// is added by Lua mods written through chat: a mod calls <c>forge_define{...}</c> to author a
+    /// is added by Lua mods written through chat: a mod calls <c>forge_define(...)</c> to author a
     /// new unit type, <c>forge_spawn(name, x, z)</c> to deploy it, and uses <c>hooks_every</c> to
     /// stream reinforcements. The host only runs a tiny auto-battle: every unit walks toward the
     /// nearest enemy and attacks in range. The whole game emerges from mods.
     /// </summary>
     public sealed class ModdableUnitsDemoController : MonoBehaviour
 #if COREAI_LUA
-        , IUnitForge
+        , IUnitForge, ICoreAiLuaGameplayBindingsProvider
 #endif
     {
 #if COREAI_LUA
@@ -29,9 +30,9 @@ namespace CoreAI.Demos
         private const float ArenaHalfWidth = 7f;
         private const float ArenaHalfDepth = 4.5f;
 
-        [Tooltip("Scene CoreAI scope. Auto-found when left empty.")]
+        [Tooltip("Explicit mods scope supplying this controller's runtime and trusted host identity.")]
         [SerializeField]
-        private CoreAILifetimeScope coreAiScope;
+        private CoreAiModsLifetimeScope modsScope;
 
         [Tooltip("Parent for spawned unit visuals. Created automatically when empty.")]
         [SerializeField]
@@ -68,60 +69,110 @@ namespace CoreAI.Demos
         private CoreAiDemoPanel _panel;
         private string _status = "Starting...";
 
-        private void Start()
-        {
-            _panel = CoreAiDemoPanel.Create(
-                "CoreAI — Unit Forge",
-                "Empty arena. No units and no behaviour ship with it: Lua mods forge and spawn units.");
+        private void Start() => InitializePresentation();
 
-            if (coreAiScope == null)
+        /// <summary>Initializes the runtime view after host injection; repeated calls retain one panel and current units.</summary>
+        public void InitializePresentation()
+        {
+            if (_panel == null)
             {
-                coreAiScope = FindFirstObjectByType<CoreAILifetimeScope>();
+                _panel = CoreAiDemoPanel.Create(
+                    "CoreAI — Unit Forge",
+                    "Empty arena. No units and no behaviour ship with it: Lua mods forge and spawn units.");
+                _panel.transform.SetParent(transform, false);
             }
 
-            if (coreAiScope == null || coreAiScope.Container == null)
+            EnsureUnitRoot();
+            if (_mods == null && modsScope != null && modsScope.Container != null)
             {
-                _status = "CoreAILifetimeScope not found in scene.";
-                _panel.Log(_status);
+                IObjectResolver luaContainer = modsScope.Container;
+                IActorIdentityProvider actorIdentityProvider = luaContainer.Resolve<IActorIdentityProvider>();
+                AttachModRuntime(luaContainer.Resolve<ILuaModRuntime>(),
+                    actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer));
+            }
+
+            if (_mods == null)
+            {
+                _status = "Assign the scene's CoreAiModsLifetimeScope to modsScope.";
+                RefreshStatus();
                 Debug.LogError($"[ModdableUnitsDemo] {_status}");
                 enabled = false;
                 return;
             }
 
-            IObjectResolver luaContainer = CoreAiDemoScope.ResolveModsContainer(coreAiScope);
+            _status = _archetypes.Count == 0 && _units.Count == 0
+                ? "Empty arena. Ask chat to write a mod that forges units."
+                : "Unit Forge ready. Restored mod content is preserved.";
+            enabled = true;
+            RefreshStatus();
+        }
 
-            IActorIdentityProvider actorIdentityProvider = luaContainer.Resolve<IActorIdentityProvider>();
-            _actorContext = actorIdentityProvider.GetActorContext(BuiltInAgentRoleIds.Programmer);
-            _mods = luaContainer.Resolve<ILuaModRuntime>();
-            _mods.AddModEventEmittedListener(_actorContext, OnModEvent);
-            _mods.AddModSourceLoadedListener(_actorContext, OnModLoaded);
+        /// <summary>Installs lazy callbacks at the VM's effective tier, including before Start.</summary>
+        public void RegisterGameplayBindings(LuaCsApiRegistry registry, LuaCapabilities capabilities)
+        {
+            if (this == null)
+            {
+                throw new System.ObjectDisposedException(nameof(ModdableUnitsDemoController));
+            }
 
-            // The forge API (forge_define / forge_spawn / ...) is authored as a Lua-CSharp gameplay binding
-            // set. The runtime seam now exists: LuaCsModStackOptions.AdditionalGameplayBindings feeds a
-            // per-scene Action<LuaCsApiRegistry, LuaCapabilities> into both the persistent runtime and the
-            // one-off executor. What remains to surface it here is composition plumbing — threading that option
-            // through CoreAiModsInstaller.RegisterCoreAiMods / CoreAiModsLifetimeScope and resolving this
-            // forge LAZILY (it is a scene ref available only at Start, after the mods scope builds/rehydrates).
-            // See TODO(moddableunits-binding-seam). The instance is kept ready for that wiring.
-            _bindings = new UnitForgeLuaBindings(this);
+            _bindings ??= new UnitForgeLuaBindings(this);
+            _bindings.RegisterGameplayApis(registry, capabilities);
+        }
 
-            EnsureUnitRoot();
-            _status = "Empty arena. Ask chat to write a mod that forges units.";
-            Log("No content yet - units and waves arrive only from Lua mods.");
+        /// <summary>Attaches a host-supplied runtime and identity, replacing any previous event bridge.</summary>
+        public void AttachModRuntime(ILuaModRuntime runtime, ActorContext actorContext)
+        {
+            if (runtime == null)
+            {
+                throw new System.ArgumentNullException(nameof(runtime));
+            }
+
+            if (!actorContext.IsTrusted || !actorContext.Grants.IsUnrestricted)
+            {
+                throw new System.ArgumentException("A trusted unrestricted host identity is required.",
+                    nameof(actorContext));
+            }
+
+            DetachModRuntime();
+            runtime.AddModEventEmittedListener(actorContext, OnModEvent);
+            try
+            {
+                runtime.AddModSourceLoadedListener(actorContext, OnModLoaded);
+            }
+            catch
+            {
+                runtime.RemoveModEventEmittedListener(actorContext, OnModEvent);
+                throw;
+            }
+
+            _actorContext = actorContext;
+            _mods = runtime;
+            RefreshStatus();
+        }
+
+        private void DetachModRuntime()
+        {
+            ILuaModRuntime previous = _mods;
+            _mods = null;
+            if (previous == null) return;
+            try
+            {
+                previous.RemoveModEventEmittedListener(_actorContext, OnModEvent);
+            }
+            finally
+            {
+                previous.RemoveModSourceLoadedListener(_actorContext, OnModLoaded);
+            }
         }
 
         private void OnDestroy()
         {
-            if (_mods != null)
+            DetachModRuntime();
+            _bindings = null;
+            if (_panel != null)
             {
-                _mods.RemoveModEventEmittedListener(_actorContext, OnModEvent);
-                _mods.RemoveModSourceLoadedListener(_actorContext, OnModLoaded);
-            }
-
-            if (_bindings != null)
-            {
-                // No runtime seam to unregister from (see Start); just drop the reference.
-                _bindings = null;
+                if (Application.isPlaying) Destroy(_panel.gameObject);
+                else DestroyImmediate(_panel.gameObject);
             }
         }
 
@@ -130,12 +181,10 @@ namespace CoreAI.Demos
             if (unitRoot == null)
             {
                 GameObject root = new("ForgeUnitRoot");
-                root.transform.position = Vector3.zero;
+                root.transform.SetParent(transform, false);
                 unitRoot = root.transform;
             }
         }
-
-        // ------------------------------------------------------------------ IUnitForge (called from Lua)
 
         public bool Define(string name, string team, double hp, double damage, double speed, double range,
             string colorHex)
@@ -181,6 +230,7 @@ namespace CoreAI.Demos
                 0.5f,
                 Mathf.Clamp((float)z, -ArenaHalfDepth, ArenaHalfDepth));
 
+            EnsureUnitRoot();
             GameObject visual = GameObject.CreatePrimitive(
                 archetype.Team == "ally" ? PrimitiveType.Capsule : PrimitiveType.Cube);
             Infrastructure.World.CoreAiPrimitiveFactory.EnsureRenderPipelineCompatibleMaterial(visual);
@@ -244,8 +294,6 @@ namespace CoreAI.Demos
             _archetypes.Clear();
             Log("Forge reset: all units and definitions removed.");
         }
-
-        // ------------------------------------------------------------------ Auto-battle simulation
 
         private void Update()
         {
@@ -328,15 +376,13 @@ namespace CoreAI.Demos
             if (Count(team) == 0)
             {
                 _mods?.EmitEvent(_actorContext, "team_wiped", team);
-                Log($"Team '{team}' was wiped out."); // Log() already refreshes the panel.
+                Log($"Team '{team}' was wiped out.");
             }
             else
             {
                 RefreshStatus();
             }
         }
-
-        // ------------------------------------------------------------------ Mod event bridge + UI
 
         private void OnModEvent(string modId, string eventName, string payload)
         {
@@ -362,6 +408,7 @@ namespace CoreAI.Demos
         /// <summary>Recomputes the status block (counts, unit types, loaded mods, event log) shown in the panel.</summary>
         private void RefreshStatus()
         {
+            if (_panel == null) return;
             _panel.SetLog(
                 $"{_status}\n\n" +
                 $"Allies: {Count("ally")}   Enemies: {Count("enemy")}   Defined types: {_archetypes.Count}\n\n" +
@@ -428,7 +475,7 @@ namespace CoreAI.Demos
                 return parsed;
             }
 
-            // Stable fallback: tint by team, vary hue by archetype name hash.
+            // WHY: each archetype retains a stable fallback tint within its team.
             float hueJitter = Mathf.Abs(name.GetHashCode()) % 100 / 100f * 0.12f;
             return team == "ally"
                 ? new Color(0.2f + hueJitter, 0.6f, 1f)

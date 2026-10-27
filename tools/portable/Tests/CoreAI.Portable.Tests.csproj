@@ -32,6 +32,9 @@
   <ItemGroup>
     <Compile Include="RepositoryTestSetup.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/RbxContractRegressionTests.cs" />
+    <Compile Include="../../../Assets/CoreAI/Tests/EditMode/GatewayClientEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAI/Tests/EditMode/GatewayServiceClientEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAI/Tests/EditMode/CodeEditorContractsEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ProviderContractRegressionTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ExecutionAdmissionRegressionTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/MemoryContractRegressionTests.cs" />

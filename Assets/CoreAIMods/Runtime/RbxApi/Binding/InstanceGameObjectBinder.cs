@@ -115,6 +115,7 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private sealed class BindingEntry
         {
+            public InstanceId Id;
             public GameObject GameObject;
             public bool IsPart;
 
@@ -464,6 +465,7 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private void AddBinding(InstanceId id, BindingEntry entry)
         {
+            entry.Id = id;
             _bindings.Add(id, entry);
             _idsByGameObject[entry.GameObject] = id;
         }
@@ -516,6 +518,12 @@ namespace CoreAI.Mods.Rbx.Binding
             {
                 ReportMaterialCleanupFailure(exception);
             }
+        }
+
+        private bool IsCurrentBinding(BindingEntry entry)
+        {
+            return _bindings.TryGetValue(entry.Id, out BindingEntry current)
+                && ReferenceEquals(current, entry);
         }
 
         private void ReportMaterialCleanupFailure(Exception exception)
@@ -1770,6 +1778,13 @@ namespace CoreAI.Mods.Rbx.Binding
             else
             {
                 _materialLeaseProvider.TryAcquireMaterial(in materialId, out sharedMaterial);
+                // WHY: a replaceable provider may retire or remove this binding during acquisition.
+                if (_hostTeardownStarted || !IsCurrentBinding(entry) || renderer == null)
+                {
+                    ReleaseMaterial(sharedMaterial);
+                    return;
+                }
+
                 try
                 {
                     renderer.sharedMaterial = sharedMaterial;

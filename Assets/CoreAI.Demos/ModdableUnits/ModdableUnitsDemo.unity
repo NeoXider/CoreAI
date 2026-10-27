@@ -590,6 +590,8 @@ MonoBehaviour:
   blacklistPolicy: {fileID: 0}
   robloxWorldHost: {fileID: 1231610002}
   storeId: moddable-units-demo
+  gameplayBindingsProviders:
+  - {fileID: 1828887119}
 --- !u!1 &1614572735
 GameObject:
   m_ObjectHideFlags: 0
@@ -732,7 +734,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6c644dc2b6f2455ca9294665824a734f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: CoreAI.Demos::CoreAI.Demos.ModdableUnitsDemoController
-  coreAiScope: {fileID: 0}
+  modsScope: {fileID: 1424676153}
   unitRoot: {fileID: 0}
 --- !u!4 &1828887120
 Transform:

@@ -3543,7 +3543,7 @@ namespace CoreAI.Mods.WorldPackages
         /// selection, and a player's own Hub edits on the startup world were lost at restart.
         /// </remarks>
         private sealed class SessionSourceStore : ILuaModSourceStore, ILuaModSourceAdmission,
-            ILuaModSourceStrictWriter, ILuaModSourceStrictRemover
+            ILuaModSourceStrictWriter, ILuaModSourceStrictRemover, ILuaModSourceStrictCapabilities
         {
             private readonly RbxWorldRuntimeSessionController _owner;
             private readonly ILuaModSourceStore _inner;
@@ -3568,7 +3568,8 @@ namespace CoreAI.Mods.WorldPackages
 
             public void SaveStrict(string id, string source, LuaModManifest manifest)
             {
-                if (!(_inner is ILuaModSourceStrictWriter strictWriter))
+                if (!(_inner is ILuaModSourceStrictWriter strictWriter) ||
+                    !LuaModSourceStoreCapabilities.CanSaveStrict(_inner))
                 {
                     throw new NotSupportedException(
                         "The current world source store has no strict save acknowledgment.");
@@ -3583,6 +3584,9 @@ namespace CoreAI.Mods.WorldPackages
                     _owner.OnSessionSourcesChanged(this);
                 }
             }
+
+            public bool SupportsStrictSave =>
+                LuaModSourceStoreCapabilities.CanSaveStrict(_inner);
 
             public bool TryLoad(string id, out string source, out LuaModManifest manifest)
             {
@@ -3620,7 +3624,8 @@ namespace CoreAI.Mods.WorldPackages
 
             public void DeleteStrict(string id)
             {
-                if (!(_inner is ILuaModSourceStrictRemover strictRemover))
+                if (!(_inner is ILuaModSourceStrictRemover strictRemover) ||
+                    !LuaModSourceStoreCapabilities.CanDeleteStrict(_inner))
                 {
                     throw new NotSupportedException(
                         "The current world source store has no strict removal acknowledgment.");
@@ -3635,6 +3640,9 @@ namespace CoreAI.Mods.WorldPackages
                     _owner.OnSessionSourcesChanged(this);
                 }
             }
+
+            public bool SupportsStrictDelete =>
+                LuaModSourceStoreCapabilities.CanDeleteStrict(_inner);
 
             public bool CanAdmit(string modId, out string refusal)
             {
@@ -4205,7 +4213,7 @@ namespace CoreAI.Mods.WorldPackages
         }
 
         private sealed class ActiveLuaModSourceStore : ILuaModSourceStore,
-            ILuaModSourceStrictWriter, ILuaModSourceStrictRemover
+            ILuaModSourceStrictWriter, ILuaModSourceStrictRemover, ILuaModSourceStrictCapabilities
         {
             private readonly RbxWorldRuntimeSessionController _owner;
 
@@ -4223,7 +4231,9 @@ namespace CoreAI.Mods.WorldPackages
 
             public void SaveStrict(string id, string source, LuaModManifest manifest)
             {
-                if (!(Inner is ILuaModSourceStrictWriter strictWriter))
+                ILuaModSourceStore current = Inner;
+                if (!(current is ILuaModSourceStrictWriter strictWriter) ||
+                    !LuaModSourceStoreCapabilities.CanSaveStrict(current))
                 {
                     throw new NotSupportedException(
                         "The current world source store has no strict save acknowledgment.");
@@ -4231,6 +4241,9 @@ namespace CoreAI.Mods.WorldPackages
 
                 strictWriter.SaveStrict(id, source, manifest);
             }
+
+            public bool SupportsStrictSave =>
+                LuaModSourceStoreCapabilities.CanSaveStrict(Inner);
 
             public bool TryLoad(string id, out string source, out LuaModManifest manifest)
             {
@@ -4254,7 +4267,9 @@ namespace CoreAI.Mods.WorldPackages
 
             public void DeleteStrict(string id)
             {
-                if (!(Inner is ILuaModSourceStrictRemover strictRemover))
+                ILuaModSourceStore current = Inner;
+                if (!(current is ILuaModSourceStrictRemover strictRemover) ||
+                    !LuaModSourceStoreCapabilities.CanDeleteStrict(current))
                 {
                     throw new NotSupportedException(
                         "The current world source store has no strict removal acknowledgment.");
@@ -4262,6 +4277,9 @@ namespace CoreAI.Mods.WorldPackages
 
                 strictRemover.DeleteStrict(id);
             }
+
+            public bool SupportsStrictDelete =>
+                LuaModSourceStoreCapabilities.CanDeleteStrict(Inner);
         }
 
         private sealed class ActiveLuaExecutor : LuaTool.ILuaExecutor, LuaTool.IMutationExecutor
@@ -4356,9 +4374,10 @@ namespace CoreAI.Mods.WorldPackages
             }
         }
 
-        private sealed class ActiveLuaModRuntime : ILuaModRuntime
+        private sealed class ActiveLuaModRuntime : ILuaModRuntime, IBudgetedLuaModRuntime
         {
             private readonly RbxWorldRuntimeSessionController _owner;
+            private readonly AsyncLocal<InvocationPolicy> _invocationPolicy = new();
             private readonly List<HandlerListener> _handlerListeners = new();
             private readonly List<SourceListener> _loadedListeners = new();
             private readonly List<SourceListener> _unloadedListeners = new();
@@ -4371,6 +4390,60 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             private LuaCsModRuntime Inner => _owner.Current.Stack.Runtime;
+
+            public IDisposable BeginInvocation(LuaModInvocationLimits limits, CancellationToken cancellationToken = default)
+            {
+                if (limits == null) throw new ArgumentNullException(nameof(limits));
+                cancellationToken.ThrowIfCancellationRequested();
+                _owner.DemandActive();
+                InvocationPolicy policy = new(limits, cancellationToken, _invocationPolicy.Value);
+                _invocationPolicy.Value = policy;
+                return new InvocationScope(this, policy);
+            }
+
+            private IDisposable EnterInvocation(LuaCsModRuntime runtime)
+            {
+                // WHY: The live world can change after the editor opens its scope. Apply its immutable
+                // policy to the concrete VM captured for this dispatch, rather than the outgoing VM.
+                InvocationPolicy policy = _invocationPolicy.Value;
+                return policy == null ? null : runtime.BeginInvocation(policy.Limits, policy.Token);
+            }
+
+            private sealed class InvocationPolicy
+            {
+                public InvocationPolicy(LuaModInvocationLimits limits, CancellationToken token, InvocationPolicy previous)
+                {
+                    Limits = limits;
+                    Token = token;
+                    Previous = previous;
+                }
+
+                public LuaModInvocationLimits Limits { get; }
+                public CancellationToken Token { get; }
+                public InvocationPolicy Previous { get; }
+            }
+
+            private sealed class InvocationScope : IDisposable
+            {
+                private readonly ActiveLuaModRuntime _owner;
+                private readonly InvocationPolicy _policy;
+                private bool _disposed;
+
+                public InvocationScope(ActiveLuaModRuntime owner, InvocationPolicy policy)
+                {
+                    _owner = owner;
+                    _policy = policy;
+                }
+
+                public void Dispose()
+                {
+                    if (_disposed) return;
+                    if (!ReferenceEquals(_owner._invocationPolicy.Value, _policy))
+                        throw new InvalidOperationException("Invocation scopes must be disposed in reverse order.");
+                    _owner._invocationPolicy.Value = _policy.Previous;
+                    _disposed = true;
+                }
+            }
 
             private InstanceRegistry Registry => _owner.Current.RbxApi.Registry;
 
@@ -4399,6 +4472,7 @@ namespace CoreAI.Mods.WorldPackages
                 LuaCsModRuntime runtime = session.Stack.Runtime;
                 try
                 {
+                    using IDisposable invocation = EnterInvocation(runtime);
                     runtime.LoadMod(caller, id, luaCode, capabilities, persistToStore,
                         SourceKeptCheck(runtime, session.SourceStore, addsSource));
                 }
@@ -4418,7 +4492,9 @@ namespace CoreAI.Mods.WorldPackages
             {
                 string modId = Normalize(id);
                 PrepareExistingOwner(caller, modId);
-                Inner.ReloadMod(caller, id, luaCode);
+                LuaCsModRuntime runtime = Inner;
+                using IDisposable invocation = EnterInvocation(runtime);
+                runtime.ReloadMod(caller, id, luaCode);
             }
 
             public ModReloadReport ReloadMod(
@@ -4429,7 +4505,9 @@ namespace CoreAI.Mods.WorldPackages
             {
                 string modId = Normalize(id);
                 PrepareExistingOwner(caller, modId);
-                return Inner.ReloadMod(caller, id, luaCode, mode);
+                LuaCsModRuntime runtime = Inner;
+                using IDisposable invocation = EnterInvocation(runtime);
+                return runtime.ReloadMod(caller, id, luaCode, mode);
             }
 
             public bool UnloadMod(ActorContext caller, string id)
@@ -4457,6 +4535,7 @@ namespace CoreAI.Mods.WorldPackages
                 bool imported;
                 try
                 {
+                    using IDisposable invocation = EnterInvocation(runtime);
                     imported = runtime.ImportMod(caller, bundleJson, hostGrant, allowFull,
                         SourceKeptCheck(runtime, session.SourceStore, addsSource));
                     if (!imported)
@@ -4501,7 +4580,9 @@ namespace CoreAI.Mods.WorldPackages
             {
                 string modId = Normalize(id);
                 PrepareExistingOwner(caller, modId);
-                return Inner.TryRevertMod(caller, id, revisionIndex, out restoredSource);
+                LuaCsModRuntime runtime = Inner;
+                using IDisposable invocation = EnterInvocation(runtime);
+                return runtime.TryRevertMod(caller, id, revisionIndex, out restoredSource);
             }
 
             public IReadOnlyList<LuaModHandlerError> GetRecentHandlerErrors(

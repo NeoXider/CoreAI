@@ -366,7 +366,7 @@ namespace CoreAI.Tests.EditMode
                 Core = new AiOrchestrator(new Authority(), Provider, new Sink(), new Telemetry(),
                     new AiPromptComposer(new BuiltInDefaultAgentSystemPromptProvider(), new NoAgentUserPromptTemplateProvider(), null),
                     Memory, policy, null, null, new CoreAISettingsOptions { EnableStreaming = false },
-                    new LocalActorIdentityProvider(), scopeProvider: ScopeProvider);
+                     new LocalActorIdentityProvider(), null, null, null, null, null, ScopeProvider);
             }
 
             public void Seed(AgentMemoryScope scope, string text)

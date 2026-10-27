@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Logging;
@@ -48,6 +49,20 @@ namespace CoreAI.Ai
             internal long Generation;
             internal Func<Task> ConfirmAsync;
             internal Action ConfirmSync;
+        }
+
+        private sealed class MutationOutcome
+        {
+            internal DurabilityRequest Pending;
+            internal Exception Error;
+        }
+
+        private sealed class ReadOutcome
+        {
+            internal string Summary;
+            internal DurabilityRequest Pending;
+            internal Exception Error;
+            internal bool OwnMutation;
         }
 
         private sealed class PathState
@@ -181,16 +196,31 @@ namespace CoreAI.Ai
                         "await the async API instead of blocking the calling (Unity main) thread on sync I/O.");
                 }
 
+                string summary;
+                DurabilityRequest pending = null;
+                MigrationReceipt receipt = new();
                 try
                 {
                     if (state.Pending != null)
                         throw new InvalidOperationException("Summary durability is unconfirmed; await LoadSummaryAsync before using the stored fold marker.");
-                    return LoadSummaryCore(roleId);
+                    summary = LoadSummaryCore(roleId, receipt);
                 }
                 finally
                 {
+                    if (receipt.Mutated) pending = state.RecordMutation(this);
                     gate.Release();
                 }
+
+                if (pending != null)
+                {
+                    try { ConfirmPendingSync(state, pending); }
+                    catch (Exception ex)
+                    {
+                        LogStorageFailure("Load", ex);
+                        return "";
+                    }
+                }
+                return summary;
             }
             finally
             {
@@ -216,13 +246,22 @@ namespace CoreAI.Ai
                 // WHY: awaited with default capture so the logging below runs on the original entry
                 // context; only the private file delegate runs on a worker.
                 using SharedPathStateRegistry<PathState>.Lease readLease = AcquirePath(GetPath(roleId));
-                (string summary, DurabilityRequest pending) = await ReadCommittedAsync(roleId, cancellationToken);
-                if (pending != null)
+                ReadOutcome outcome = await ReadCommittedAsync(roleId, readLease.State, cancellationToken);
+                if (outcome.Pending != null)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await ConfirmPendingAsync(readLease.State, pending);
+                    if (!outcome.OwnMutation) cancellationToken.ThrowIfCancellationRequested();
+                    try { await ConfirmPendingAsync(readLease.State, outcome.Pending); }
+                    catch (Exception confirmationFailure)
+                    {
+                        if (outcome.Error == null) throw;
+                        LogStorageFailure("Load", confirmationFailure);
+                    }
                 }
-                return summary;
+                if (outcome.Error != null)
+                {
+                    ExceptionDispatchInfo.Capture(outcome.Error).Throw();
+                }
+                return outcome.Summary;
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
@@ -235,21 +274,35 @@ namespace CoreAI.Ai
             }
         }
 
-        private async Task<(string Summary, DurabilityRequest Pending)> ReadCommittedAsync(string roleId, CancellationToken cancellationToken)
+        private async Task<ReadOutcome> ReadCommittedAsync(string roleId, PathState state,
+            CancellationToken cancellationToken)
         {
-            using SharedPathStateRegistry<PathState>.Lease pathLease = AcquirePath(GetPath(roleId));
-                PathState state = pathLease.State;
+            ReadOutcome outcome = new();
+            MigrationReceipt receipt = new();
             SemaphoreSlim gate = state.Gate;
             await gate.WaitAsync(cancellationToken);
             try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                string result = await RunOffThread(() =>
+                try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    return ReadSummaryCoreStrict(roleId);
-                });
-                return (result, state.Pending);
+                    outcome.Summary = await RunOffThread(() =>
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        return ReadSummaryCoreStrict(roleId, receipt, null);
+                    });
+                }
+                catch (Exception ex)
+                {
+                    outcome.Error = ex;
+                }
+                finally
+                {
+                    outcome.OwnMutation = receipt.Mutated;
+                    if (receipt.Mutated) outcome.Pending = state.RecordMutation(this);
+                    else if (outcome.Error == null) outcome.Pending = state.Pending;
+                }
+                return outcome;
             }
             finally
             {
@@ -257,11 +310,11 @@ namespace CoreAI.Ai
             }
         }
 
-        private string LoadSummaryCore(string roleId)
+        private string LoadSummaryCore(string roleId, MigrationReceipt receipt)
         {
             try
             {
-                return ReadSummaryCoreStrict(roleId);
+                return ReadSummaryCoreStrict(roleId, receipt, RequireSynchronousConfirmation);
             }
             catch (FileNotFoundException)
             {
@@ -282,10 +335,10 @@ namespace CoreAI.Ai
         /// Reads the committed summary; missing file stays empty, corrupt or unreadable storage throws
         /// instead of silently overwriting the existing data.
         /// </summary>
-        private string ReadSummaryCoreStrict(string roleId)
+        private string ReadSummaryCoreStrict(string roleId, MigrationReceipt receipt, Action beforeMutation)
         {
             string path = GetPath(roleId);
-            EnsureLegacyMigration(roleId);
+            EnsureLegacyMigration(roleId, receipt, beforeMutation);
             ValidateExistingParent(path);
             string json;
             try { json = File.ReadAllText(path); }
@@ -338,20 +391,33 @@ namespace CoreAI.Ai
                         "await the async API instead of blocking the calling (Unity main) thread on sync I/O.");
                 }
 
-                DurabilityRequest pending;
+                DurabilityRequest pending = null;
+                Exception failure = null;
+                MigrationReceipt receipt = new();
                 try
                 {
-                    EnsureLegacyMigration(roleId);
-                    _ = ReadSummaryCoreStrict(roleId);
-                    WriteSummaryCore(GetPath(roleId), summary ?? "", roleId);
-                    pending = state.RecordMutation(this);
+                    try
+                    {
+                        EnsureLegacyMigration(roleId, receipt, null);
+                        _ = ReadSummaryCoreStrict(roleId, receipt, null);
+                        WriteSummaryCore(GetPath(roleId), summary ?? "", roleId);
+                        pending = state.RecordMutation(this);
+                    }
+                    catch (Exception ex)
+                    {
+                        failure = ex;
+                    }
+                    finally
+                    {
+                        if (pending == null && receipt.Mutated) pending = state.RecordMutation(this);
+                    }
                 }
                 finally
                 {
                     gate.Release();
                 }
 
-                ConfirmPendingSync(state, pending);
+                SettleSync(state, pending, failure, "Save");
             }
             finally
             {
@@ -379,8 +445,8 @@ namespace CoreAI.Ai
                 // the original entry context outside the file gate.
                 string path = GetPath(roleId);
                 using SharedPathStateRegistry<PathState>.Lease writeLease = AcquirePath(path);
-                DurabilityRequest pending = await CommitSaveAsync(path, roleId, summary ?? "", cancellationToken);
-                await ConfirmPendingAsync(writeLease.State, pending);
+                MutationOutcome outcome = await CommitSaveAsync(path, roleId, summary ?? "", writeLease.State, cancellationToken);
+                await SettleAsync(writeLease.State, outcome, "Save");
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
@@ -393,25 +459,38 @@ namespace CoreAI.Ai
             }
         }
 
-        private async Task<DurabilityRequest> CommitSaveAsync(string path, string roleId, string summary, CancellationToken cancellationToken)
+        private async Task<MutationOutcome> CommitSaveAsync(string path, string roleId, string summary,
+            PathState state, CancellationToken cancellationToken)
         {
-            using SharedPathStateRegistry<PathState>.Lease pathLease = AcquirePath(path);
-            PathState state = pathLease.State;
+            MutationOutcome outcome = new();
+            MigrationReceipt receipt = new();
             SemaphoreSlim gate = state.Gate;
             await gate.WaitAsync(cancellationToken);
             try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                await RunOffThread(() =>
+                try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    EnsureLegacyMigration(roleId);
-                    _ = ReadSummaryCoreStrict(roleId);
-                    PersistedDto dto = new() { Summary = summary, RoleId = roleId };
-                    string json = JsonConvert.SerializeObject(dto, JsonSettings);
-                    AtomicWriteAllText(path, json, cancellationToken);
-                });
-                return state.RecordMutation(this);
+                    await RunOffThread(() =>
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        EnsureLegacyMigration(roleId, receipt, null);
+                        _ = ReadSummaryCoreStrict(roleId, receipt, null);
+                        PersistedDto dto = new() { Summary = summary, RoleId = roleId };
+                        string json = JsonConvert.SerializeObject(dto, JsonSettings);
+                        AtomicWriteAllText(path, json, cancellationToken);
+                    });
+                    outcome.Pending = state.RecordMutation(this);
+                }
+                catch (Exception ex)
+                {
+                    outcome.Error = ex;
+                }
+                finally
+                {
+                    if (outcome.Pending == null && receipt.Mutated) outcome.Pending = state.RecordMutation(this);
+                }
+                return outcome;
             }
             finally
             {
@@ -495,7 +574,7 @@ namespace CoreAI.Ai
                 RequireSynchronousConfirmation();
                 string path = GetPath(roleId);
                 using SharedPathStateRegistry<PathState>.Lease pathLease = AcquirePath(path);
-            PathState state = pathLease.State;
+                PathState state = pathLease.State;
                 SemaphoreSlim gate = state.Gate;
                 if (!gate.Wait(0))
                 {
@@ -504,12 +583,25 @@ namespace CoreAI.Ai
                         "await the async API instead of blocking the calling (Unity main) thread on sync I/O.");
                 }
 
-                DurabilityRequest pending;
+                DurabilityRequest pending = null;
+                Exception failure = null;
+                MigrationReceipt receipt = new();
                 try
                 {
-                    EnsureLegacyMigration(roleId);
-                    DeleteSummaryCore(path);
-                    pending = state.RecordMutation(this);
+                    try
+                    {
+                        EnsureLegacyMigration(roleId, receipt, null);
+                        DeleteSummaryCore(path);
+                        pending = state.RecordMutation(this);
+                    }
+                    catch (Exception ex)
+                    {
+                        failure = ex;
+                    }
+                    finally
+                    {
+                        if (pending == null && receipt.Mutated) pending = state.RecordMutation(this);
+                    }
                 }
                 finally
                 {
@@ -517,7 +609,7 @@ namespace CoreAI.Ai
                 }
 
                 // WHY: A retry after unconfirmed deletion must flush again even when the VFS file is already absent.
-                ConfirmPendingSync(state, pending);
+                SettleSync(state, pending, failure, "Clear");
             }
             finally
             {
@@ -545,8 +637,8 @@ namespace CoreAI.Ai
                 // the original entry context outside the file gate.
                 string path = GetPath(roleId);
                 using SharedPathStateRegistry<PathState>.Lease clearLease = AcquirePath(path);
-                DurabilityRequest pending = await CommitClearAsync(path, roleId, cancellationToken);
-                await ConfirmPendingAsync(clearLease.State, pending);
+                MutationOutcome outcome = await CommitClearAsync(path, roleId, clearLease.State, cancellationToken);
+                await SettleAsync(clearLease.State, outcome, "Clear");
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
@@ -559,22 +651,35 @@ namespace CoreAI.Ai
             }
         }
 
-        private async Task<DurabilityRequest> CommitClearAsync(string path, string roleId, CancellationToken cancellationToken)
+        private async Task<MutationOutcome> CommitClearAsync(string path, string roleId, PathState state,
+            CancellationToken cancellationToken)
         {
-            using SharedPathStateRegistry<PathState>.Lease pathLease = AcquirePath(path);
-            PathState state = pathLease.State;
+            MutationOutcome outcome = new();
+            MigrationReceipt receipt = new();
             SemaphoreSlim gate = state.Gate;
             await gate.WaitAsync(cancellationToken);
             try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                await RunOffThread(() =>
+                try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    EnsureLegacyMigration(roleId);
-                    return TryDeleteFile(path);
-                });
-                return state.RecordMutation(this);
+                    await RunOffThread(() =>
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        EnsureLegacyMigration(roleId, receipt, null);
+                        return TryDeleteFile(path);
+                    });
+                    outcome.Pending = state.RecordMutation(this);
+                }
+                catch (Exception ex)
+                {
+                    outcome.Error = ex;
+                }
+                finally
+                {
+                    if (outcome.Pending == null && receipt.Mutated) outcome.Pending = state.RecordMutation(this);
+                }
+                return outcome;
             }
             finally
             {
@@ -593,15 +698,32 @@ namespace CoreAI.Ai
                 lease = AcquirePath(path);
                 PathState state = lease.State;
                 if (!state.Gate.Wait(0)) throw new InvalidOperationException("Summary file is busy; use asynchronous context preparation.");
-                string summary;
-                long baseline;
+                string summary = null;
+                long baseline = 0;
+                DurabilityRequest pending = null;
+                Exception failure = null;
+                MigrationReceipt receipt = new();
                 try
                 {
-                    if (state.Pending != null) throw new InvalidOperationException("Summary durability is unconfirmed; use asynchronous context preparation.");
-                    summary = ReadSummaryCoreStrict(roleId);
+                    try
+                    {
+                        if (state.Pending != null) throw new InvalidOperationException("Summary durability is unconfirmed; use asynchronous context preparation.");
+                        summary = ReadSummaryCoreStrict(roleId, receipt, RequireSynchronousConfirmation);
+                    }
+                    catch (Exception ex)
+                    {
+                        failure = ex;
+                    }
+                    finally
+                    {
+                        if (receipt.Mutated) pending = state.RecordMutation(this);
+                    }
                     baseline = state.Revision;
                 }
                 finally { state.Gate.Release(); }
+                SettleSync(state, pending, failure, "Load");
+                if (state.Revision != baseline)
+                    throw new InvalidOperationException("Summary changed while migration durability was being confirmed; reopen the transaction.");
                 return CreateTransaction(roleId, path, state, baseline, summary, lease);
             }
             catch { lease?.Dispose(); throw; }
@@ -622,18 +744,45 @@ namespace CoreAI.Ai
                 while (true)
                 {
                     await state.Gate.WaitAsync(cancellationToken);
-                    string summary;
+                    string summary = null;
                     long baseline;
-                    DurabilityRequest pending;
+                    DurabilityRequest pending = null;
+                    Exception failure = null;
+                    MigrationReceipt receipt = new();
                     try
                     {
-                        summary = await RunOffThread(() => ReadSummaryCoreStrict(roleId));
+                        try
+                        {
+                            summary = await RunOffThread(() =>
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                return ReadSummaryCoreStrict(roleId, receipt, null);
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            failure = ex;
+                        }
+                        finally
+                        {
+                            if (receipt.Mutated) pending = state.RecordMutation(this);
+                            else if (failure == null) pending = state.Pending;
+                        }
                         baseline = state.Revision;
-                        pending = state.Pending;
                     }
                     finally { state.Gate.Release(); }
+
+                    if (pending != null)
+                    {
+                        try { await ConfirmPendingAsync(state, pending); }
+                        catch (Exception confirmationFailure)
+                        {
+                            if (failure == null) throw;
+                            LogStorageFailure("Load", confirmationFailure);
+                        }
+                    }
+                    if (failure != null) ExceptionDispatchInfo.Capture(failure).Throw();
                     if (pending == null) return CreateTransaction(roleId, path, state, baseline, summary, lease);
-                    await ConfirmPendingAsync(state, pending);
                 }
             }
             catch { lease?.Dispose(); throw; }
@@ -851,7 +1000,7 @@ namespace CoreAI.Ai
             return AgentMemoryFileKey.FileStem(roleId);
         }
 
-        private void EnsureLegacyMigration(string roleId)
+        private void EnsureLegacyMigration(string roleId, MigrationReceipt receipt, Action beforeMutation)
         {
             AgentMemoryFileKey.MigrateLegacy(_dir, roleId, ".json", path =>
             {
@@ -860,7 +1009,35 @@ namespace CoreAI.Ai
                 if (dto.RoleId != null ? !string.Equals(dto.RoleId, roleId, StringComparison.Ordinal)
                     : !AgentMemoryFileKey.CanAdoptUntaggedLegacy(roleId, path, ".json"))
                     throw new InvalidDataException("Legacy summary identity is ambiguous; explicit identity repair is required.");
-            });
+            }, receipt, beforeMutation);
+        }
+
+        private void SettleSync(PathState state, DurabilityRequest pending, Exception failure, string operation)
+        {
+            if (pending != null)
+            {
+                try { ConfirmPendingSync(state, pending); }
+                catch (Exception confirmationFailure)
+                {
+                    if (failure == null) throw;
+                    LogStorageFailure(operation, confirmationFailure);
+                }
+            }
+            if (failure != null) ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+
+        private async Task SettleAsync(PathState state, MutationOutcome outcome, string operation)
+        {
+            if (outcome.Pending != null)
+            {
+                try { await ConfirmPendingAsync(state, outcome.Pending); }
+                catch (Exception confirmationFailure)
+                {
+                    if (outcome.Error == null) throw;
+                    LogStorageFailure(operation, confirmationFailure);
+                }
+            }
+            if (outcome.Error != null) ExceptionDispatchInfo.Capture(outcome.Error).Throw();
         }
 
         private void EnsureDir()

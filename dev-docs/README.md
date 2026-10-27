@@ -59,3 +59,40 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 - [audits/2026-10-23/README.md](audits/2026-10-23/README.md) - owner-requested CoreAI framework and package audit; individual module reports, coverage and verification limits. Demos, the example game and general developer tooling are outside the final scope.
 
 - [fix-wave-2026-10-24/README.md](fix-wave-2026-10-24/README.md) - 7.54.0 source/acceptance evidence: twelve module joins and MD14-19 follow-ups, passing portable and Windows EditMode/hermetic PlayMode selections, exact exceptions, raw mixed/negative receipts and platform/quality limits. Publication uses the release tag and GitHub release.
+
+
+## Current integration and review
+
+- [pr-review-2026-10-25/README.md](pr-review-2026-10-25/README.md) - original 14-group / 21-finding
+  review, immutable inventory, source repairs and [receipt reconciliation](pr-review-2026-10-25/39-receipt-reconciliation.md).
+- [completion-2026-10-27/PR_AUDIT.md](completion-2026-10-27/PR_AUDIT.md) - current working-tree PR audit,
+  per-module reports, confirmed findings and root-owned acceptance gates.
+- [completion-2026-10-27/DOCUMENTATION.md](completion-2026-10-27/DOCUMENTATION.md) - current usage-guide
+  review and corrections, separate from implementation/runtime acceptance.
+- [completion-2026-10-27/EDITOR.md](completion-2026-10-27/EDITOR.md),
+  [RUNTIME.md](completion-2026-10-27/RUNTIME.md), [LIVE_QA.md](completion-2026-10-27/LIVE_QA.md) and
+  [CORE_PERF.md](completion-2026-10-27/CORE_PERF.md) - focused implementation/verification handoffs.
+- [dependency-update-2026-10-26/PLAN.md](dependency-update-2026-10-26/PLAN.md) - dependency research and
+  historical staging plan. Its candidate/pending language predates actual UPM resolve and managed
+  DLL restore; use the current source/binary readback and later receipts in the reconciliation.
+- [demo-qa-2026-10-26/PLAN.md](demo-qa-2026-10-26/PLAN.md) - demo QA plan; source/test preparation does
+  not replace scene-specific live or manual acceptance.
+- [code-editor/](code-editor/) and [server-bridge/](server-bridge/) - editor and gateway design/provenance
+  records; current usage is in [CODE_EDITOR.md](../Docs/CoreAI/CODE_EDITOR.md) and
+  [GATEWAY_CLIENT.md](../Docs/CoreAI/GATEWAY_CLIENT.md).
+
+- [completion-2026-10-27/FINAL_VERIFICATION.md](completion-2026-10-27/FINAL_VERIFICATION.md) - current
+  candidate 7.55.0 source/receipt checklist, five promoted source fixes, actual native/OpenRouter
+  negatives and explicit deferred/manual/publication gates; not a final PASS certificate.
+- [completion-2026-10-27/CANDIDATE_REVIEW.md](completion-2026-10-27/CANDIDATE_REVIEW.md) - independent
+  merged editor/Hub/registry source review with exact final promotion hashes and preserved rejected
+  candidate history; execution acceptance remains a separate gate.
+
+- [completion-2026-10-27/FINAL_SOURCE_REVIEW.md](completion-2026-10-27/FINAL_SOURCE_REVIEW.md) - independent
+  final editor/manager/model-fixture delta and guard correction-wave source approval; seven distinct
+  runtime findings, exact reviewed hashes and separate pending execution gates.
+- [completion-2026-10-27/WEBGL_GUARDS.md](completion-2026-10-27/WEBGL_GUARDS.md) - .NET HttpClient WebGL
+  exclusion and local test synchronization-context repair, without weakened guard exceptions.
+- [completion-2026-10-27/HUB_SAVE_GUARDS.md](completion-2026-10-27/HUB_SAVE_GUARDS.md) - concrete Lua Run,
+  completed-task compatibility, explicit budget-capable save fixtures and preserved legacy refusal;
+  source-only correction report until current execution is supplied.

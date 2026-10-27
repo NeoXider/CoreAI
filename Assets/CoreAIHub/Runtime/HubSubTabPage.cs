@@ -17,11 +17,12 @@ namespace CoreAI.Hub.UI
     /// <c>new HubSubTabPage("coreai.hub.aisettings", "AI Settings", 100, settingsPage, tokenBudgetPage, statsPage)</c>.
     /// </para>
     /// </summary>
-    public sealed class HubSubTabPage : HubPageBase
+    public sealed class HubSubTabPage : HubPageBase, IHubEscapeHandler
     {
         private readonly List<IHubPage> _children = new();
         private HubSubTabView _view;
         private IHubPage _activeChild;
+        private bool _destroyed;
 
         /// <summary>Creates a grouping page from its ordered child pages (first child shown by default).</summary>
         public HubSubTabPage(string pageId, string displayName, int order, params IHubPage[] children)
@@ -41,6 +42,9 @@ namespace CoreAI.Hub.UI
 
         /// <inheritdoc />
         public override Func<object> CreatePageContent => BuildContent;
+
+        /// <summary>Gives only the selected child an opportunity to dismiss its transient UI.</summary>
+        public bool TryHandleEscape() => !_destroyed && _activeChild is IHubEscapeHandler handler && handler.TryHandleEscape();
 
         private object BuildContent()
         {
@@ -105,6 +109,9 @@ namespace CoreAI.Hub.UI
         /// <inheritdoc />
         public override void OnDestroyed()
         {
+            if (_destroyed) return;
+            _destroyed = true;
+            _activeChild = null;
             foreach (IHubPage child in _children)
             {
                 child.OnDestroyed();

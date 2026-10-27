@@ -10,12 +10,17 @@ Each package keeps its own deep index; this page points you to the right one bef
 you spend time reading the wrong folder. Developer material (plans, backlog, release
 process, research notes) is kept apart in [`dev-docs/`](../dev-docs/README.md).
 
-[7.54.0 acceptance evidence](../dev-docs/fix-wave-2026-10-24/README.md) records passing selected Windows EditMode/hermetic PlayMode and portable checks, exact exceptions, raw historical negatives and unrun platform/quality limits. Publication uses the [Git tag and GitHub release](https://github.com/NeoXider/CoreAI/releases/tag/v7.54.0).
+Release history is available in the [Core changelog](../Assets/CoreAI/CHANGELOG.md) and
+[Unity changelog](../Assets/CoreAiUnity/CHANGELOG.md). Maintainer validation records live in
+[dev-docs](../dev-docs/README.md).
 
 ## Start Here
 
 | Area | Entry Point | Use When |
 |---|---|---|
+| Gateway Client | [GATEWAY_CLIENT.md](CoreAI/GATEWAY_CLIENT.md) | You need a server-managed OpenAI-compatible client in plain .NET or Unity, scoped authentication and optional entitlement/usage services. |
+| Runtime code editor | [CODE_EDITOR.md](CoreAI/CODE_EDITOR.md) | You need Lua editing, explicit Save & run, independent language drafts and replaceable interpreter/view ports. |
+| Bundled Lua examples | [LUA_MOD_EXAMPLES.md](../Assets/CoreAIMods/Docs/LUA_MOD_EXAMPLES.md) | You want eight opt-in programs for animation, state, interaction and bounded grid search. |
 | Supplied multiplayer sessions | [MULTIPLAYER_SESSIONS.md](CoreAI/MULTIPLAYER_SESSIONS.md) | You need trusted per-operation actor context, persistence partitions, actor-specific stop, chat-service ownership or host integration limits. |
 | CoreAI Unity package | [Assets/CoreAiUnity/Docs/DOCS_INDEX.md](../Assets/CoreAiUnity/Docs/DOCS_INDEX.md) | You need setup, chat UI, streaming, settings, architecture, tests, or Unity integration docs. |
 | Portable CoreAI package | [Assets/CoreAI/Docs/README.md](../Assets/CoreAI/Docs/README.md) | You need host-agnostic contracts: agents, tools, routing, MEAI, Lua sandbox, and tool-calling rules. |

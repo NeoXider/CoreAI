@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -188,7 +189,6 @@ namespace CoreAI.Infrastructure.AiMemory
         private sealed class RoleHistory
         {
             public readonly List<HistoryLine> Lines = new();
-
             /// <summary>How many chat messages are currently inside the chat window.</summary>
             public int ChatCount;
 
@@ -218,6 +218,18 @@ namespace CoreAI.Infrastructure.AiMemory
             public long Revision;
         }
 
+        private readonly struct AppendOutcome
+        {
+            internal AppendOutcome(AgentHistoryTrimmedEventArgs? trimmed, bool wrote)
+            {
+                Trimmed = trimmed;
+                Wrote = wrote;
+            }
+
+            internal AgentHistoryTrimmedEventArgs? Trimmed { get; }
+            internal bool Wrote { get; }
+        }
+
         private static readonly JsonSerializerSettings HistoryJson = new()
         {
             Formatting = Formatting.None,
@@ -239,6 +251,7 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <summary>Maximum resident partitions; transient-only data is never silently evicted.</summary>
         public int MaxResidentHistories => _maxResidentHistories;
         private readonly ILog _log;
+        private readonly Func<CancellationToken, Task<bool>> _persistenceConfirmation;
         private readonly int _maxChatHistoryMessages;
         private readonly int _maxTranscriptEntries;
 
@@ -282,16 +295,28 @@ namespace CoreAI.Infrastructure.AiMemory
             int maxChatHistoryMessages = DefaultMaxChatHistoryMessages,
             int maxTranscriptEntries = DefaultMaxTranscriptEntries,
             int maxResidentHistories = 128)
+            : this(log, rootDirectory, maxChatHistoryMessages, maxTranscriptEntries, maxResidentHistories, null)
         {
-            _dir = !string.IsNullOrWhiteSpace(rootDirectory)
+        }
+
+        /// <summary>Supplies one instance's asynchronous arming port while preserving the public constructor ABI.</summary>
+        internal FileAgentMemoryStore(ILog log, string rootDirectory, int maxChatHistoryMessages,
+            int maxTranscriptEntries, int maxResidentHistories,
+            Func<CancellationToken, Task<bool>> persistenceConfirmation)
+        {
+            _dir = Path.GetFullPath(!string.IsNullOrWhiteSpace(rootDirectory)
                 ? rootDirectory.Trim()
                 : Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
-                    CoreAiPersistentPaths.AgentMemory);
+                    CoreAiPersistentPaths.AgentMemory));
             _log = log;
             _maxChatHistoryMessages = Math.Max(1, maxChatHistoryMessages);
             _maxTranscriptEntries = Math.Max(1, maxTranscriptEntries);
             _maxResidentHistories = Math.Max(1, maxResidentHistories);
+            _persistenceConfirmation = persistenceConfirmation ?? ConfirmAutomaticPersistence;
         }
+
+        private static Task<bool> ConfirmAutomaticPersistence(CancellationToken cancellationToken) =>
+            CoreAiWebGlPersistence.SyncAsync(cancellationToken).AsTask();
 
         /// <summary>
         /// Raised after every conversation trim, already outside the store's internal locks, so a handler
@@ -352,15 +377,37 @@ namespace CoreAI.Infrastructure.AiMemory
         /// Durability check for the async paths. Called AFTER the locks are released so a synchronous
         /// caller on the single WebGL thread is never blocked behind it.
         /// </summary>
-        private static async Task ConfirmDurableAsync(CancellationToken cancellationToken)
+        private async Task ConfirmDurableAsync(CancellationToken cancellationToken)
         {
-            bool durable = await CoreAiWebGlPersistence.SyncAsync(cancellationToken);
+            bool durable = await _persistenceConfirmation(cancellationToken);
             if (!durable)
             {
                 throw new IOException(
                     "[FileAgentMemoryStore] The write reached the in-memory filesystem, but this browser page " +
                     "has no durable storage armed, so it will not survive a reload.");
             }
+        }
+
+        private void SettleSyncMigration(MigrationReceipt receipt)
+        {
+            if (receipt != null && receipt.Mutated)
+            {
+                QueueFlush();
+            }
+        }
+
+        private async Task SettleAsync(MigrationReceipt receipt, bool wrote, Exception failure, string operation)
+        {
+            if (receipt.Mutated || wrote)
+            {
+                try { await ConfirmDurableAsync(CancellationToken.None); }
+                catch (Exception confirmationFailure)
+                {
+                    if (failure == null) throw;
+                    LogStorageFailure(operation, confirmationFailure);
+                }
+            }
+            if (failure != null) ExceptionDispatchInfo.Capture(failure).Throw();
         }
 
         #region Memory document
@@ -374,17 +421,23 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <inheritdoc />
         public AgentMemoryLoadStatus TryLoadDetailed(string roleId, out AgentMemoryState state)
         {
-            using MutationLease mutationGate = GetMutationGate(roleId);
-            mutationGate.Wait();
-            _gate.Wait();
-            try
+            MigrationReceipt receipt = new();
+            AgentMemoryLoadStatus status;
+            using (MutationLease mutationGate = GetMutationGate(roleId))
             {
-                return TryLoadDetailedCore(roleId, out state);
+                mutationGate.Wait();
+                _gate.Wait();
+                try
+                {
+                    status = TryLoadDetailedCore(roleId, out state, receipt);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
-            finally
-            {
-                _gate.Release();
-            }
+            SettleSyncMigration(receipt);
+            return status;
         }
 
         /// <summary>
@@ -394,34 +447,50 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <exception cref="AgentMemoryLoadException">The document exists, but reading it failed.</exception>
         public async Task<AgentMemoryState> TryLoadAsync(string roleId)
         {
-            using MutationLease mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
-            await _gate.WaitAsync().ConfigureAwait(false);
-            try
+            MigrationReceipt receipt = new();
+            AgentMemoryState state = null;
+            Exception failure = null;
+            using (MutationLease mutationGate = GetMutationGate(roleId))
             {
-                return await RunOffThread(() =>
+                await mutationGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                await _gate.WaitAsync().ConfigureAwait(false);
+                try
                 {
-                    AgentMemoryLoadStatus status = TryLoadDetailedCore(roleId, out AgentMemoryState state);
-                    if (status == AgentMemoryLoadStatus.Failed)
+                    try
                     {
-                        throw new AgentMemoryLoadException(roleId);
-                    }
+                        state = await RunOffThread(() =>
+                        {
+                            AgentMemoryLoadStatus status = TryLoadDetailedCore(roleId, out AgentMemoryState loaded, receipt);
+                            if (status == AgentMemoryLoadStatus.Failed)
+                            {
+                                throw new AgentMemoryLoadException(roleId);
+                            }
 
-                    return state;
-                }).ConfigureAwait(false);
+                            return loaded;
+                        }).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        failure = ex;
+                    }
+                }
+                finally
+                {
+                    _gate.Release();
+                }
+                mutationGate.Release();
+                await SettleAsync(receipt, false, failure, "load memory");
             }
-            finally
-            {
-                _gate.Release();
-            }
+            return state;
         }
 
-        private AgentMemoryLoadStatus TryLoadDetailedCore(string roleId, out AgentMemoryState state)
+        private AgentMemoryLoadStatus TryLoadDetailedCore(string roleId, out AgentMemoryState state,
+            MigrationReceipt receipt)
         {
             state = null;
             try
             {
-                EnsureLegacyFiles(roleId);
+                EnsureLegacyFiles(roleId, receipt);
                 string path = GetMemoryPath(roleId);
                 if (!File.Exists(path)) return AgentMemoryLoadStatus.NotFound;
                 Persisted p = ReadPersisted(path);
@@ -512,63 +581,86 @@ namespace CoreAI.Infrastructure.AiMemory
         /// </remarks>
         public void Save(string roleId, AgentMemoryState state)
         {
-            using MutationLease mutationGate = GetMutationGate(roleId);
-            mutationGate.Wait();
-            try
+            MigrationReceipt receipt = new();
+            bool queued = false;
+            using (MutationLease mutationGate = GetMutationGate(roleId))
             {
-                _gate.Wait();
+                mutationGate.Wait();
                 try
                 {
-                    SaveCore(roleId, state, true);
-                }
-                catch (Exception ex)
-                {
-                    LogStorageFailure("save memory", ex);
+                    _gate.Wait();
+                    try
+                    {
+                        SaveCore(roleId, state, true, receipt);
+                        queued = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogStorageFailure("save memory", ex);
+                    }
+                    finally
+                    {
+                        _gate.Release();
+                    }
                 }
                 finally
                 {
-                    _gate.Release();
+                    mutationGate.Release();
                 }
             }
-            finally
-            {
-                mutationGate.Release();
-            }
+            if (!queued) SettleSyncMigration(receipt);
         }
 
         /// <summary>
         /// Async variant of <see cref="Save"/> that performs the atomic file write on the thread pool and
-        /// returns only after the write is durable (on WebGL — confirmed by the browser).
+        /// returns after its persistence check. WebGL confirms automatic persistence is armed,
+        /// without claiming that the browser's IndexedDB transaction has completed.
         /// </summary>
         /// <exception cref="IOException">The write failed or was not confirmed.</exception>
         public async Task SaveAsync(string roleId, AgentMemoryState state, CancellationToken cancellationToken = default)
         {
-            using MutationLease mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
+            MigrationReceipt receipt = new();
+            bool wrote = false;
+            Exception failure = null;
+            using (MutationLease mutationGate = GetMutationGate(roleId))
             {
-                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
-                    await RunOffThread(() => { cancellationToken.ThrowIfCancellationRequested(); SaveCore(roleId, state, false); }).ConfigureAwait(false);
+                    await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        try
+                        {
+                            await RunOffThread(() =>
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                SaveCore(roleId, state, false, receipt);
+                            }).ConfigureAwait(false);
+                            wrote = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            failure = ex;
+                        }
+                    }
+                    finally
+                    {
+                        _gate.Release();
+                    }
                 }
                 finally
                 {
-                    _gate.Release();
+                    mutationGate.Release();
                 }
+                await SettleAsync(receipt, wrote, failure, "save memory");
             }
-            finally
-            {
-                mutationGate.Release();
-            }
-
-            await ConfirmDurableAsync(CancellationToken.None);
         }
 
         /// <inheritdoc />
         /// <remarks>
-        /// Honours the contract literally: the mutation's result is on disk (on WebGL - confirmed by the
-        /// browser) BEFORE the method returns that result. Any failure is an exception, not a quiet log line.
+        /// Checks persistence before returning the mutation result. WebGL confirms automatic persistence
+        /// is armed, without claiming browser transaction completion. Any failure is an exception.
         /// </remarks>
         /// <exception cref="AgentMemoryLoadException">
         /// The role's document exists but is unreadable: the mutator does not run and the document is left
@@ -585,43 +677,55 @@ namespace CoreAI.Infrastructure.AiMemory
                 throw new ArgumentNullException(nameof(mutator));
             }
 
-            TResult result;
-            using MutationLease mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
+            TResult result = default;
+            MigrationReceipt receipt = new();
+            bool wrote = false;
+            Exception failure = null;
+            using (MutationLease mutationGate = GetMutationGate(roleId))
             {
-                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
-                    result = await RunOffThread(() =>
+                    await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        AgentMemoryLoadStatus status = TryLoadDetailedCore(roleId, out AgentMemoryState state);
-                        if (status == AgentMemoryLoadStatus.Failed)
+                        try
                         {
-                            // WHY: this used to read `TryLoadCore(roleId) ?? new AgentMemoryState()`: a
-                            // transient read failure turned into a mutation of an EMPTY document, and then
-                            // a successful write replaced the real memory and all of its versions with it.
-                            throw new AgentMemoryLoadException(roleId);
-                        }
+                            result = await RunOffThread(() =>
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                AgentMemoryLoadStatus status = TryLoadDetailedCore(roleId, out AgentMemoryState state, receipt);
+                                if (status == AgentMemoryLoadStatus.Failed)
+                                {
+                                    // WHY: this used to read `TryLoadCore(roleId) ?? new AgentMemoryState()`: a
+                                    // transient read failure turned into a mutation of an EMPTY document, and then
+                                    // a successful write replaced the real memory and all of its versions with it.
+                                    throw new AgentMemoryLoadException(roleId);
+                                }
 
-                        state ??= new AgentMemoryState();
-                        TResult mutated = mutator(state);
-                        SaveCore(roleId, state, false);
-                        return mutated;
-                    }).ConfigureAwait(false);
+                                state ??= new AgentMemoryState();
+                                TResult mutated = mutator(state);
+                                SaveCore(roleId, state, false, receipt);
+                                return mutated;
+                            }).ConfigureAwait(false);
+                            wrote = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            failure = ex;
+                        }
+                    }
+                    finally
+                    {
+                        _gate.Release();
+                    }
                 }
                 finally
                 {
-                    _gate.Release();
+                    mutationGate.Release();
                 }
+                await SettleAsync(receipt, wrote, failure, "save memory");
             }
-            finally
-            {
-                mutationGate.Release();
-            }
-
-            await ConfirmDurableAsync(CancellationToken.None);
             return result;
         }
 
@@ -629,16 +733,16 @@ namespace CoreAI.Infrastructure.AiMemory
         /// Writes a complete memory state after validating any previous document. Unreadable source is
         /// preserved until explicit clear/repair. Exceptions propagate to the selected API boundary.
         /// </summary>
-        private void SaveCore(string roleId, AgentMemoryState state, bool queueFlush)
+        private void SaveCore(string roleId, AgentMemoryState state, bool queueFlush, MigrationReceipt receipt)
         {
             state ??= new AgentMemoryState();
-            EnsureLegacyFiles(roleId);
+            EnsureLegacyFiles(roleId, receipt);
             string existingPath = GetMemoryPath(roleId);
             if (File.Exists(existingPath)) ValidateRecordIdentity(ReadPersisted(existingPath), roleId);
             // WHY: a v1-format file may still carry the conversation in the document's fields. Move it out
             // into its own file BEFORE rewriting the document - otherwise Save would erase the student's
             // history along with those fields.
-            EnsureHistoryLoaded(roleId);
+            EnsureHistoryLoaded(roleId, receipt);
             EnsureDir();
             Persisted p = new()
             {
@@ -666,28 +770,33 @@ namespace CoreAI.Infrastructure.AiMemory
         /// </remarks>
         public void Clear(string roleId)
         {
-            using MutationLease mutationGate = GetMutationGate(roleId);
-            mutationGate.Wait();
-            try
+            MigrationReceipt receipt = new();
+            bool queued = false;
+            using (MutationLease mutationGate = GetMutationGate(roleId))
             {
-                _gate.Wait();
+                mutationGate.Wait();
                 try
                 {
-                    ClearCore(roleId, true);
-                }
-                catch (Exception ex)
-                {
-                    LogStorageFailure("clear memory", ex);
+                    _gate.Wait();
+                    try
+                    {
+                        queued = ClearCore(roleId, true, receipt);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogStorageFailure("clear memory", ex);
+                    }
+                    finally
+                    {
+                        _gate.Release();
+                    }
                 }
                 finally
                 {
-                    _gate.Release();
+                    mutationGate.Release();
                 }
             }
-            finally
-            {
-                mutationGate.Release();
-            }
+            if (!queued) SettleSyncMigration(receipt);
         }
 
         /// <summary>
@@ -697,41 +806,57 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <exception cref="IOException">The removal failed or was not confirmed.</exception>
         public async Task ClearAsync(string roleId, CancellationToken cancellationToken = default)
         {
-            using MutationLease mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
+            MigrationReceipt receipt = new();
+            bool wrote = false;
+            Exception failure = null;
+            using (MutationLease mutationGate = GetMutationGate(roleId))
             {
-                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
-                    await RunOffThread(() => { cancellationToken.ThrowIfCancellationRequested(); ClearCore(roleId, false); }).ConfigureAwait(false);
+                    await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        try
+                        {
+                            await RunOffThread(() =>
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                ClearCore(roleId, false, receipt);
+                            }).ConfigureAwait(false);
+                            wrote = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            failure = ex;
+                        }
+                    }
+                    finally
+                    {
+                        _gate.Release();
+                    }
                 }
                 finally
                 {
-                    _gate.Release();
+                    mutationGate.Release();
                 }
+                await SettleAsync(receipt, wrote, failure, "clear memory");
             }
-            finally
-            {
-                mutationGate.Release();
-            }
-
-            await ConfirmDurableAsync(CancellationToken.None);
         }
 
-        private void ClearCore(string roleId, bool queueFlush)
+        private bool ClearCore(string roleId, bool queueFlush, MigrationReceipt receipt)
         {
             // WHY: first move the conversation out of the v1 file (if it lives there), and only then delete
             // the document.
-            try { EnsureHistoryLoaded(roleId); }
+            try { EnsureHistoryLoaded(roleId, receipt); }
             catch (InvalidDataException) { }
             string path = GetMemoryPath(roleId);
             if (!File.Exists(path))
             {
-                return;
+                return false;
             }
 
-            if (TryLoadDetailedCore(roleId, out _) == AgentMemoryLoadStatus.Failed)
+            if (TryLoadDetailedCore(roleId, out _, receipt) == AgentMemoryLoadStatus.Failed)
             {
                 _log?.Warn("[FileAgentMemoryStore] Removing an unreadable memory document on clear.");
             }
@@ -741,6 +866,7 @@ namespace CoreAI.Infrastructure.AiMemory
             {
                 QueueFlush();
             }
+            return queueFlush;
         }
 
         #endregion
@@ -750,28 +876,33 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <inheritdoc />
         public void ClearChatHistory(string roleId)
         {
-            using MutationLease mutationGate = GetMutationGate(roleId);
-            mutationGate.Wait();
-            try
+            MigrationReceipt receipt = new();
+            bool queued = false;
+            using (MutationLease mutationGate = GetMutationGate(roleId))
             {
-                _gate.Wait();
+                mutationGate.Wait();
                 try
                 {
-                    ClearChatHistoryCore(roleId, true);
-                }
-                catch (Exception ex)
-                {
-                    LogStorageFailure("clear chat history", ex);
+                    _gate.Wait();
+                    try
+                    {
+                        queued = ClearChatHistoryCore(roleId, true, receipt);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogStorageFailure("clear chat history", ex);
+                    }
+                    finally
+                    {
+                        _gate.Release();
+                    }
                 }
                 finally
                 {
-                    _gate.Release();
+                    mutationGate.Release();
                 }
             }
-            finally
-            {
-                mutationGate.Release();
-            }
+            if (!queued) SettleSyncMigration(receipt);
         }
 
         /// <summary>
@@ -781,33 +912,49 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <exception cref="IOException">The removal failed or was not confirmed.</exception>
         public async Task ClearChatHistoryAsync(string roleId, CancellationToken cancellationToken = default)
         {
-            using MutationLease mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
+            MigrationReceipt receipt = new();
+            bool wrote = false;
+            Exception failure = null;
+            using (MutationLease mutationGate = GetMutationGate(roleId))
             {
-                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
-                    await RunOffThread(() => { cancellationToken.ThrowIfCancellationRequested(); ClearChatHistoryCore(roleId, false); }).ConfigureAwait(false);
+                    await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        try
+                        {
+                            await RunOffThread(() =>
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                ClearChatHistoryCore(roleId, false, receipt);
+                            }).ConfigureAwait(false);
+                            wrote = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            failure = ex;
+                        }
+                    }
+                    finally
+                    {
+                        _gate.Release();
+                    }
                 }
                 finally
                 {
-                    _gate.Release();
+                    mutationGate.Release();
                 }
+                await SettleAsync(receipt, wrote, failure, "clear chat history");
             }
-            finally
-            {
-                mutationGate.Release();
-            }
-
-            await ConfirmDurableAsync(CancellationToken.None);
         }
 
-        private void ClearChatHistoryCore(string roleId, bool queueFlush)
+        private bool ClearChatHistoryCore(string roleId, bool queueFlush, MigrationReceipt receipt)
         {
             // WHY: the v1 migration must happen before the delete - otherwise the conversation would stay
             // in the memory document's fields and "resurrect" itself on the next access.
-            EnsureHistoryLoaded(roleId);
+            EnsureHistoryLoaded(roleId, receipt);
             // A previous migration may have written history but failed to remove the legacy fields.
             // Remove those fields before deleting history, or the next store would resurrect it.
             string memoryPath = GetMemoryPath(roleId);
@@ -831,7 +978,7 @@ namespace CoreAI.Infrastructure.AiMemory
                 _histories.Remove(roleId);
                 _historyLeases[roleId].State.ClearRevision = AdvanceHistoryRevision(roleId);
                 ReleaseHistoryLease(roleId);
-                return;
+                return false;
             }
 
             // WHY: the in-memory copy is dropped only after the file delete succeeded. The other way round
@@ -845,6 +992,7 @@ namespace CoreAI.Infrastructure.AiMemory
             {
                 QueueFlush();
             }
+            return queueFlush;
         }
 
         /// <summary>
@@ -870,24 +1018,35 @@ namespace CoreAI.Infrastructure.AiMemory
             }
 
             AgentHistoryTrimmedEventArgs? trimmed = null;
+            MigrationReceipt receipt = new();
+            bool covered = false;
+            Exception failure = null;
             using MutationLease mutationGate = GetMutationGate(roleId);
-            mutationGate.Wait();
             try
             {
+                mutationGate.Wait();
                 _gate.Wait();
                 try
                 {
-                    trimmed = AppendLineCore(roleId, ChatLine(role, content), persistToDisk, true, true);
+                    AppendOutcome outcome = AppendLineCore(roleId, ChatLine(role, content), persistToDisk, true, true, receipt);
+                    trimmed = outcome.Trimmed;
+                    covered = outcome.Wrote;
                 }
                 finally
                 {
                     _gate.Release();
                 }
             }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
             finally
             {
                 mutationGate.Release();
             }
+            if (!covered) SettleSyncMigration(receipt);
+            if (failure != null) ExceptionDispatchInfo.Capture(failure).Throw();
 
             RaiseTrimmed(trimmed);
         }
@@ -924,24 +1083,35 @@ namespace CoreAI.Infrastructure.AiMemory
             }
 
             AgentHistoryTrimmedEventArgs? trimmed = null;
+            MigrationReceipt receipt = new();
+            bool covered = false;
+            Exception failure = null;
             using MutationLease mutationGate = GetMutationGate(roleId);
-            mutationGate.Wait();
             try
             {
+                mutationGate.Wait();
                 _gate.Wait();
                 try
                 {
-                    trimmed = AppendLineCore(roleId, TranscriptLine(entry), persistToDisk, true, true);
+                    AppendOutcome outcome = AppendLineCore(roleId, TranscriptLine(entry), persistToDisk, true, true, receipt);
+                    trimmed = outcome.Trimmed;
+                    covered = outcome.Wrote;
                 }
                 finally
                 {
                     _gate.Release();
                 }
             }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
             finally
             {
                 mutationGate.Release();
             }
+            if (!covered) SettleSyncMigration(receipt);
+            if (failure != null) ExceptionDispatchInfo.Capture(failure).Throw();
 
             RaiseTrimmed(trimmed);
         }
@@ -966,31 +1136,48 @@ namespace CoreAI.Infrastructure.AiMemory
             CancellationToken cancellationToken)
         {
             SynchronizationContext callbackContext = SynchronizationContext.Current;
-            AgentHistoryTrimmedEventArgs? trimmed;
-            using MutationLease mutationGate = GetMutationGate(roleId);
-            await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
+            AgentHistoryTrimmedEventArgs? trimmed = null;
+            AppendOutcome outcome = default;
+            MigrationReceipt receipt = new();
+            Exception failure = null;
+            using (MutationLease mutationGate = GetMutationGate(roleId))
             {
-                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
-                    trimmed = await RunOffThread(() => { cancellationToken.ThrowIfCancellationRequested(); return AppendLineCore(roleId, line, persistToDisk, false, false); })
-                        .ConfigureAwait(false);
+                    await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        try
+                        {
+                            outcome = await RunOffThread(() =>
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                return AppendLineCore(roleId, line, persistToDisk, false, false, receipt);
+                            }).ConfigureAwait(false);
+                            trimmed = outcome.Trimmed;
+                        }
+                        catch (Exception ex)
+                        {
+                            failure = ex;
+                        }
+                    }
+                    finally
+                    {
+                        _gate.Release();
+                    }
                 }
                 finally
                 {
-                    _gate.Release();
+                    mutationGate.Release();
                 }
-            }
-            finally
-            {
-                mutationGate.Release();
-            }
 
-            await RaiseTrimmedAsync(trimmed, callbackContext);
-            if (persistToDisk)
-            {
-                await ConfirmDurableAsync(CancellationToken.None);
+                // WHY: a host callback must not skip settlement of an observed write or replace its primary failure.
+                Exception callbackFailure = null;
+                try { await RaiseTrimmedAsync(trimmed, callbackContext); }
+                catch (Exception ex) { callbackFailure = ex; }
+                await SettleAsync(receipt, outcome.Wrote, failure, "append conversation history");
+                if (callbackFailure != null) ExceptionDispatchInfo.Capture(callbackFailure).Throw();
             }
         }
 
@@ -1032,10 +1219,10 @@ namespace CoreAI.Infrastructure.AiMemory
         /// The synchronous contract: a write failure goes to the log and to
         /// <see cref="RoleHistory.NeedsRewrite"/>. The async contract propagates the exception instead.
         /// </param>
-        private AgentHistoryTrimmedEventArgs? AppendLineCore(string roleId, HistoryLine line, bool persistToDisk,
-            bool queueFlush, bool swallowWriteFailure)
+        private AppendOutcome AppendLineCore(string roleId, HistoryLine line, bool persistToDisk,
+            bool queueFlush, bool swallowWriteFailure, MigrationReceipt receipt)
         {
-            RoleHistory previous = EnsureHistoryLoaded(roleId);
+            RoleHistory previous = EnsureHistoryLoaded(roleId, receipt);
             // Trimming mutates line flags as well as counts. Work on a private candidate so a failed
             // confirmed append leaves both the previous cache and the durable view unchanged.
             RoleHistory history = CopyHistory(previous);
@@ -1060,7 +1247,7 @@ namespace CoreAI.Infrastructure.AiMemory
                     LogTrim(history, trimmed.Value);
                 }
                 _histories[roleId] = history;
-                return trimmed;
+                return new AppendOutcome(trimmed, false);
             }
 
             try
@@ -1094,6 +1281,7 @@ namespace CoreAI.Infrastructure.AiMemory
                 {
                     QueueFlush();
                 }
+                return new AppendOutcome(trimmed, true);
             }
             catch (Exception ex) when (swallowWriteFailure)
             {
@@ -1107,9 +1295,8 @@ namespace CoreAI.Infrastructure.AiMemory
                     LogTrim(history, trimmed.Value);
                 }
                 LogStorageFailure("append conversation history", ex);
+                return new AppendOutcome(trimmed, false);
             }
-
-            return trimmed;
         }
 
         private static RoleHistory CopyHistory(RoleHistory source)
@@ -1277,43 +1464,53 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <inheritdoc />
         public IReadOnlyList<ConversationEntry> GetTranscriptEntries(string roleId, int maxEntries)
         {
-            using MutationLease mutationGate = GetMutationGate(roleId);
-            mutationGate.Wait();
-            _gate.Wait();
+            MigrationReceipt receipt = new();
+            IReadOnlyList<ConversationEntry> result = Array.Empty<ConversationEntry>();
+            Exception failure = null;
             try
             {
-                RoleHistory history = EnsureHistoryLoaded(roleId);
-                List<HistoryLine> lines = history.Lines;
-                // WHY: rows outside the transcript window are always older than rows inside it (rows leave
-                // the window from the head and the order never changes), so the window is the tail of the
-                // list, TranscriptCount rows long.
-                int take = maxEntries > 0 ? Math.Min(maxEntries, history.TranscriptCount) : history.TranscriptCount;
-                if (take == 0)
+                using MutationLease mutationGate = GetMutationGate(roleId);
+                mutationGate.Wait();
+                _gate.Wait();
+                try
                 {
-                    return Array.Empty<ConversationEntry>();
-                }
-
-                List<ConversationEntry> result = new(take);
-                for (int i = lines.Count - take; i < lines.Count; i++)
-                {
-                    HistoryLine line = lines[i];
-                    result.Add(new ConversationEntry
+                    RoleHistory history = EnsureHistoryLoaded(roleId, receipt);
+                    List<HistoryLine> lines = history.Lines;
+                    // WHY: rows outside the transcript window are always older than rows inside it (rows leave
+                    // the window from the head and the order never changes), so the window is the tail of the
+                    // list, TranscriptCount rows long.
+                    int take = maxEntries > 0 ? Math.Min(maxEntries, history.TranscriptCount) : history.TranscriptCount;
+                    if (take > 0)
                     {
-                        Kind = (ConversationEntryKind)line.Kind,
-                        Key = line.Key ?? "",
-                        Content = line.Content ?? "",
-                        CallId = line.CallId ?? "",
-                        Timestamp = line.Timestamp
-                    });
-                }
+                        List<ConversationEntry> entries = new(take);
+                        for (int i = lines.Count - take; i < lines.Count; i++)
+                        {
+                            HistoryLine line = lines[i];
+                            entries.Add(new ConversationEntry
+                            {
+                                Kind = (ConversationEntryKind)line.Kind,
+                                Key = line.Key ?? "",
+                                Content = line.Content ?? "",
+                                CallId = line.CallId ?? "",
+                                Timestamp = line.Timestamp
+                            });
+                        }
 
-                return result;
+                        result = entries;
+                    }
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
-            finally
+            catch (Exception ex)
             {
-                _gate.Release();
-                mutationGate.Release();
+                failure = ex;
             }
+            SettleSyncMigration(receipt);
+            if (failure != null) ExceptionDispatchInfo.Capture(failure).Throw();
+            return result;
         }
 
         /// <summary>
@@ -1321,52 +1518,62 @@ namespace CoreAI.Infrastructure.AiMemory
         /// </summary>
         public ChatMessage[] GetChatHistory(string roleId, int maxMessages = 0)
         {
-            using MutationLease mutationGate = GetMutationGate(roleId);
-            mutationGate.Wait();
-            _gate.Wait();
+            MigrationReceipt receipt = new();
+            ChatMessage[] result = Array.Empty<ChatMessage>();
+            Exception failure = null;
             try
             {
-                RoleHistory history = EnsureHistoryLoaded(roleId);
-                int take = maxMessages > 0 ? Math.Min(maxMessages, history.ChatCount) : history.ChatCount;
-                if (take == 0)
+                using MutationLease mutationGate = GetMutationGate(roleId);
+                mutationGate.Wait();
+                _gate.Wait();
+                try
                 {
-                    return Array.Empty<ChatMessage>();
-                }
-
-                ChatMessage[] result = new ChatMessage[take];
-                int write = take - 1;
-                for (int i = history.Lines.Count - 1; i >= 0 && write >= 0; i--)
-                {
-                    HistoryLine line = history.Lines[i];
-                    if (!line.InChatView)
+                    RoleHistory history = EnsureHistoryLoaded(roleId, receipt);
+                    int take = maxMessages > 0 ? Math.Min(maxMessages, history.ChatCount) : history.ChatCount;
+                    if (take > 0)
                     {
-                        continue;
+                        ChatMessage[] messages = new ChatMessage[take];
+                        int write = take - 1;
+                        for (int i = history.Lines.Count - 1; i >= 0 && write >= 0; i--)
+                        {
+                            HistoryLine line = history.Lines[i];
+                            if (!line.InChatView)
+                            {
+                                continue;
+                            }
+
+                            messages[write--] = new ChatMessage
+                            {
+                                Role = line.Key,
+                                Content = line.Content,
+                                Timestamp = line.Timestamp
+                            };
+                        }
+
+                        result = messages;
                     }
-
-                    result[write--] = new ChatMessage
-                    {
-                        Role = line.Key,
-                        Content = line.Content,
-                        Timestamp = line.Timestamp
-                    };
                 }
-
-                return result;
+                finally
+                {
+                    _gate.Release();
+                }
             }
-            finally
+            catch (Exception ex)
             {
-                _gate.Release();
-                mutationGate.Release();
+                failure = ex;
             }
+            SettleSyncMigration(receipt);
+            if (failure != null) ExceptionDispatchInfo.Capture(failure).Throw();
+            return result;
         }
 
         /// <summary>
         /// Loads the role's conversation on first access: from <c>.history.jsonl</c>, or, when that file
         /// does not exist, by migrating it out of the v1-format memory document's fields.
         /// </summary>
-        private RoleHistory EnsureHistoryLoaded(string roleId)
+        private RoleHistory EnsureHistoryLoaded(string roleId, MigrationReceipt receipt)
         {
-            EnsureLegacyFiles(roleId);
+            EnsureLegacyFiles(roleId, receipt);
             using SharedPathStateRegistry<HistoryPathState>.Lease readLease = MutationLocks.Acquire(GetMemoryPath(roleId));
             long revision = readLease.State.Revision;
             if (_histories.TryGetValue(roleId, out RoleHistory cached) && cached.Revision == revision)
@@ -1382,7 +1589,7 @@ namespace CoreAI.Infrastructure.AiMemory
             }
             else
             {
-                MigrateLegacyConversation(roleId, history);
+                MigrateLegacyConversation(roleId, history, receipt);
             }
 
             if (history.LoadFailed && cached != null)
@@ -1484,7 +1691,7 @@ namespace CoreAI.Infrastructure.AiMemory
         /// everything else becomes a transcript-only row. Chat without a transcript (the oldest format)
         /// becomes chat rows.
         /// </summary>
-        private void MigrateLegacyConversation(string roleId, RoleHistory history)
+        private void MigrateLegacyConversation(string roleId, RoleHistory history, MigrationReceipt receipt)
         {
             string memoryPath = GetMemoryPath(roleId);
             if (!File.Exists(memoryPath))
@@ -1593,6 +1800,7 @@ namespace CoreAI.Infrastructure.AiMemory
 
             TrimRetained(history);
             RewriteHistoryFile(roleId, history);
+            receipt?.ObserveMutation();
 
             // WHY: the conversation now lives in its own file; the memory document is rewritten without the
             // v1 fields so that the migration does not repeat itself and Save does not carry them further.
@@ -1600,7 +1808,7 @@ namespace CoreAI.Infrastructure.AiMemory
             p.transcriptEntriesJson = null;
             p.roleId = roleId;
             AtomicWriteAllText(memoryPath, JsonUtility.ToJson(p));
-            QueueFlush();
+            receipt?.ObserveMutation();
             _log?.Info("[FileAgentMemoryStore] Migrated one role's conversation from the v1 memory document " +
                        "into its own history file.");
         }
@@ -1808,7 +2016,7 @@ namespace CoreAI.Infrastructure.AiMemory
                 throw new InvalidDataException("Memory record identity does not match its requested key.");
         }
 
-        private void EnsureLegacyFiles(string roleId)
+        private void EnsureLegacyFiles(string roleId, MigrationReceipt receipt)
         {
             AgentMemoryFileKey.MigrateLegacy(_dir, roleId, ".json", path =>
             {
@@ -1816,7 +2024,7 @@ namespace CoreAI.Infrastructure.AiMemory
                 ValidateRecordIdentity(record, roleId);
                 if (string.IsNullOrEmpty(record.roleId) && !AgentMemoryFileKey.CanAdoptUntaggedLegacy(roleId, path, ".json"))
                     throw new InvalidDataException("Legacy memory identity is ambiguous; explicit identity repair is required.");
-            });
+            }, receipt, null);
             AgentMemoryFileKey.MigrateLegacy(_dir, roleId, ".history.jsonl", path =>
             {
                 if (!AgentMemoryFileKey.CanAdoptUntaggedLegacy(roleId, path, ".history.jsonl"))
@@ -1824,7 +2032,7 @@ namespace CoreAI.Infrastructure.AiMemory
                 foreach (string line in File.ReadLines(path))
                     if (!string.IsNullOrWhiteSpace(line) && JsonConvert.DeserializeObject<HistoryLine>(line, HistoryJson) == null)
                         throw new InvalidDataException("Legacy history contains an invalid record.");
-            });
+            }, receipt, null);
         }
 
         private void EnsureDir()

@@ -12,7 +12,12 @@ namespace CoreAI.Infrastructure.World
         private readonly IGameLogger _logger;
         private readonly CoreAiComponentCommandOptions _options;
 
-        public CoreAiComponentCommandExecutor(IGameLogger logger, CoreAiComponentCommandOptions options = null)
+        public CoreAiComponentCommandExecutor(IGameLogger logger)
+            : this(logger, null)
+        {
+        }
+
+        public CoreAiComponentCommandExecutor(IGameLogger logger, CoreAiComponentCommandOptions options)
         {
             _logger = logger;
             _options = options ?? new CoreAiComponentCommandOptions();

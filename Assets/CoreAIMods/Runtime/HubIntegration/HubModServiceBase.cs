@@ -375,7 +375,8 @@ namespace CoreAI.Ai.Hub
                     return true;
                 }
 
-                if (_store is ILuaModSourceStrictRemover strictRemover)
+                if (_store is ILuaModSourceStrictRemover strictRemover &&
+                    LuaModSourceStoreCapabilities.CanDeleteStrict(_store))
                 {
                     strictRemover.DeleteStrict(modId);
                     return true;
@@ -525,7 +526,8 @@ namespace CoreAI.Ai.Hub
                 manifest.LoadOrder = LuaModManifest.NextLoadOrder(_store);
             }
 
-            if (_store is ILuaModSourceStrictWriter strictWriter)
+            if (_store is ILuaModSourceStrictWriter strictWriter &&
+                LuaModSourceStoreCapabilities.CanSaveStrict(_store))
             {
                 strictWriter.SaveStrict(modId, code, manifest);
                 return HubModPersistenceStatus.Saved;
@@ -638,7 +640,8 @@ namespace CoreAI.Ai.Hub
 
             try
             {
-                if (_store is ILuaModSourceStrictWriter strictWriter)
+                if (_store is ILuaModSourceStrictWriter strictWriter &&
+                    LuaModSourceStoreCapabilities.CanSaveStrict(_store))
                 {
                     if (!_store.TryLoad(modId, out string source, out LuaModManifest stored) || stored == null)
                     {

@@ -14,7 +14,8 @@ namespace CoreAI.Ai
     /// Adds per-actor fair queueing, concurrency limits, and cancellation scopes around an orchestrator.
     /// </summary>
     public sealed class QueuedAiOrchestrator : IAiOrchestrationService, IAiTaskResultService, IAiActorContextResolver,
-        IScopedAiTaskCancellation, IRoleAiTaskCancellation, IActorAiTaskCancellation, IDisposable
+        IScopedAiTaskCancellation, IRoleAiTaskCancellation, IActorAiTaskCancellation,
+        IAgentMemoryScopeProviderSource, IDisposable
     {
         private readonly IAiOrchestrationService _inner;
         private readonly IAiActorContextResolver _actorContextResolver;
@@ -63,7 +64,7 @@ namespace CoreAI.Ai
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
             _actorContextResolver = inner as IAiActorContextResolver;
             _unstartedTurnRecorder = inner as IUnstartedAiTurnRecorder;
-            _scopeProvider = scopeProvider ?? new DefaultAgentMemoryScopeProvider();
+            _scopeProvider = scopeProvider ?? AgentMemoryScopeKey.ResolveKnownProvider(inner);
             int max = options?.MaxConcurrent ?? 2;
             _maxConcurrent = max < 1 ? 1 : max;
             int maxPending = options?.MaxPending ?? 64;
@@ -79,6 +80,13 @@ namespace CoreAI.Ai
 
         /// <summary>The configured maximum number of pending requests.</summary>
         public int MaxPending => _maxPending;
+
+        /// <inheritdoc />
+        public bool TryGetMemoryScopeProvider(out IAgentMemoryScopeProvider provider)
+        {
+            provider = _scopeProvider;
+            return provider != null;
+        }
 
         /// <summary>
         /// Maximum number of other actor admissions that can occur while an admitted actor remains pending.
@@ -176,7 +184,8 @@ namespace CoreAI.Ai
                 ActorId = ResolveAdmissionActorId(actorContext),
                 MemoryScope = actorContext.HasValue
                     ? actorContext.Value.MemoryScope
-                    : CaptureMemoryScope(effectiveTask.RoleId)
+                    : CaptureMemoryScope(effectiveTask.RoleId),
+                HasCapturedMemoryScope = _scopeProvider != null
             };
 
             if (cancellationToken.IsCancellationRequested)
@@ -226,7 +235,8 @@ namespace CoreAI.Ai
                 ActorId = ResolveAdmissionActorId(actorContext),
                 MemoryScope = actorContext.HasValue
                     ? actorContext.Value.MemoryScope
-                    : CaptureMemoryScope(effectiveTask.RoleId)
+                    : CaptureMemoryScope(effectiveTask.RoleId),
+                HasCapturedMemoryScope = _scopeProvider != null
             };
 
             if (cancellationToken.IsCancellationRequested)
@@ -445,9 +455,7 @@ namespace CoreAI.Ai
             try
             {
                 using (AiCancellationAttributionContext.Push(w.CancellationAttribution))
-                using (w.ActorContext.HasValue
-                           ? AgentMemoryScopeExecutionContext.Push(w.ActorContext.Value)
-                           : AgentMemoryScopeExecutionContext.Push(w.MemoryScope))
+                using (EnterMemoryScope(w.ActorContext, w.MemoryScope, w.HasCapturedMemoryScope))
                 {
                     CancellationToken baseToken = w.ScopeCancellation?.Token ?? w.OuterCt;
                     // WHY: Link the orchestrator's lifetime signal so Dispose() cancels in-flight work even
@@ -529,9 +537,7 @@ namespace CoreAI.Ai
             try
             {
                 using (AiCancellationAttributionContext.Push(w.CancellationAttribution))
-                using (w.ActorContext.HasValue
-                           ? AgentMemoryScopeExecutionContext.Push(w.ActorContext.Value)
-                           : AgentMemoryScopeExecutionContext.Push(w.MemoryScope))
+                using (EnterMemoryScope(w.ActorContext, w.MemoryScope, w.HasCapturedMemoryScope))
                 {
                     CancellationToken baseToken = w.ScopeCancellation?.Token ?? w.OuterCt;
                     // WHY: Always link the lifetime signal (Dispose() teardown) and, when present, the
@@ -665,6 +671,7 @@ namespace CoreAI.Ai
             public ActorContext? ActorContext;
             public string ActorId;
             public AgentMemoryScope MemoryScope;
+            public bool HasCapturedMemoryScope;
             public int UnstartedPersistenceAttempted;
             public readonly AiCancellationAttribution CancellationAttribution = new();
         }
@@ -683,6 +690,7 @@ namespace CoreAI.Ai
             public ActorContext? ActorContext;
             public string ActorId;
             public AgentMemoryScope MemoryScope;
+            public bool HasCapturedMemoryScope;
             public int UnstartedPersistenceAttempted;
             public readonly AiCancellationAttribution CancellationAttribution = new();
 
@@ -1245,7 +1253,13 @@ namespace CoreAI.Ai
         private AgentMemoryScope CaptureMemoryScope(string roleId)
         {
             string normalizedRole = NormalizeRoleId(roleId);
-            return _scopeProvider.GetScope(normalizedRole);
+            return _scopeProvider?.GetScope(normalizedRole) ?? AgentMemoryScope.Empty;
+        }
+
+        private static IDisposable EnterMemoryScope(ActorContext? actorContext, AgentMemoryScope scope, bool hasCapturedScope)
+        {
+            if (actorContext.HasValue) return AgentMemoryScopeExecutionContext.Push(actorContext.Value);
+            return hasCapturedScope ? AgentMemoryScopeExecutionContext.Push(scope) : null;
         }
 
         private ActorContext? CaptureActorContext(AiTaskRequest task)
@@ -1263,7 +1277,7 @@ namespace CoreAI.Ai
 
             ActorContext trusted = actorContext.Value;
             trusted.AssertTrusted();
-            trusted = AgentMemoryScopeKey.CaptureActorScope(trusted, _scopeProvider, NormalizeRoleId(task.RoleId));
+            trusted = AgentMemoryScopeKey.CaptureKnownActorScope(trusted, _scopeProvider, NormalizeRoleId(task.RoleId));
             task.ActorContext = trusted;
             return trusted;
         }
@@ -1382,9 +1396,7 @@ namespace CoreAI.Ai
                 return;
             }
 
-            using (work.ActorContext.HasValue
-                       ? AgentMemoryScopeExecutionContext.Push(work.ActorContext.Value)
-                       : AgentMemoryScopeExecutionContext.Push(work.MemoryScope))
+            using (EnterMemoryScope(work.ActorContext, work.MemoryScope, work.HasCapturedMemoryScope))
             {
                 RecordUnstartedTurn(work.Task, outcome);
             }
@@ -1397,9 +1409,7 @@ namespace CoreAI.Ai
                 return;
             }
 
-            using (work.ActorContext.HasValue
-                       ? AgentMemoryScopeExecutionContext.Push(work.ActorContext.Value)
-                       : AgentMemoryScopeExecutionContext.Push(work.MemoryScope))
+            using (EnterMemoryScope(work.ActorContext, work.MemoryScope, work.HasCapturedMemoryScope))
             {
                 RecordUnstartedTurn(work.Task, outcome);
             }
@@ -1720,9 +1730,34 @@ namespace CoreAI.Ai
                 lock (_signalLock) return (_queue.Count, _bufferedBytes, _handoffTaken != null);
             }
 
-            internal async ValueTask WriteAsync(LlmStreamChunk chunk, CancellationToken cancellationToken)
+            internal ValueTask WriteAsync(LlmStreamChunk chunk, CancellationToken cancellationToken)
             {
                 long bytes = EstimateBytes(chunk);
+                bool queued = false;
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    lock (_signalLock)
+                    {
+                        if (!cancellationToken.IsCancellationRequested && !_completed && bytes <= _maxBytes &&
+                            _queue.Count < _maxChunks && _bufferedBytes + bytes <= _maxBytes)
+                        {
+                            _queue.Enqueue((chunk, bytes));
+                            _bufferedBytes += bytes;
+                            queued = true;
+                        }
+                    }
+                }
+
+                // WHY: Keep cancellation closures and the debug async state object off the free-capacity
+                // path. A completed write needs only the enqueue and reader signal.
+                if (!queued) return WriteWhenBlockedAsync(chunk, bytes, cancellationToken);
+                FireSignal();
+                return default;
+            }
+
+            private async ValueTask WriteWhenBlockedAsync(LlmStreamChunk chunk, long bytes,
+                CancellationToken cancellationToken)
+            {
                 while (true)
                 {
                     TaskCompletionSource<bool> wait = null;

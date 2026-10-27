@@ -8,6 +8,7 @@ using CoreAI.Ai;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Ai;
 using CoreAI.Infrastructure.Llm;
+using CoreAI.Infrastructure.Llm.Gateway;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Logging;
 using UnityEngine;
@@ -606,10 +607,16 @@ namespace CoreAI
                     scope.Container.Resolve(typeof(IAgentMemoryStore)) as IAgentMemoryStore;
                 scope.Container.TryResolve<ILlmAgentProvider>(out ILlmAgentProvider agentProvider);
                 ILog log = scope.Container.Resolve(typeof(ILog)) as ILog ?? Log.Instance;
+                scope.Container.TryResolve<IUnityGatewayClientBinding>(out IUnityGatewayClientBinding gatewayBinding);
 
                 ILlmClient rebuilt = LlmPipelineInstaller.BuildRoutedPrimaryClient(
-                    settings, logger, memoryStore, agentProvider, log);
-                registry.SetLegacyFallback(rebuilt);
+                    settings, logger, memoryStore, agentProvider, log, gatewayBinding);
+                try { registry.SetLegacyFallback(rebuilt); }
+                catch
+                {
+                    if (rebuilt is IOwnedGatewayClient owned && owned.OwnsGatewayResources) owned.Dispose();
+                    throw;
+                }
                 logger.LogInfo(GameLogFeature.Llm,
                     $"CoreAiBackend: active backend switched to {new CoreAiBackendStatus(settings.ExecutionMode, settings.ApiBaseUrl, settings.ModelName, settings.GgufModelPath, true)}");
                 return true;

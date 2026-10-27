@@ -370,6 +370,122 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
+        public void NET001_BindingRelease_CapturedCompanionSurvivesLegacyDisposalAndFailures()
+        {
+            _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));
+            _bridge.RegisterActor("actor-a");
+            long generation = _bridge.GetBindingGeneration(11);
+            List<int> legacyReleases = new();
+            List<(int ConnectionId, RbxNetworkPeer Peer, long Generation)> companionReleases = new();
+            _bridge.BindingReleased += connectionId =>
+            {
+                legacyReleases.Add(connectionId);
+                _bridge.Dispose();
+                throw new InvalidOperationException("legacy release failure");
+            };
+            _bridge.BindingReleased += legacyReleases.Add;
+            _bridge.BindingReleasedWithPeer += (connectionId, peer, capturedGeneration) =>
+            {
+                companionReleases.Add((connectionId, peer, capturedGeneration));
+                throw new InvalidOperationException("companion release failure");
+            };
+            _bridge.BindingReleasedWithPeer += (connectionId, peer, capturedGeneration) =>
+                companionReleases.Add((connectionId, peer, capturedGeneration));
+
+            Assert.DoesNotThrow(() => _bridge.UnregisterActor("actor-a"));
+
+            CollectionAssert.AreEqual(new[] { 11, 11 }, legacyReleases);
+            Assert.AreEqual(2, companionReleases.Count);
+            foreach ((int connectionId, RbxNetworkPeer peer, long capturedGeneration) in companionReleases)
+            {
+                Assert.AreEqual(11, connectionId);
+                Assert.AreEqual("actor-a", peer.ActorId);
+                Assert.AreEqual("session-a", peer.SessionId);
+                Assert.AreEqual(generation, capturedGeneration);
+            }
+
+            Assert.AreEqual(0L, _bridge.GetBindingGeneration(11));
+            Assert.AreEqual(2, _log.Count);
+            StringAssert.Contains("legacy release failure", _log[0]);
+            StringAssert.Contains("companion release failure", _log[1]);
+            _bridge.UnregisterActor("actor-a");
+            _bridge.Dispose();
+            Assert.AreEqual(2, companionReleases.Count);
+        }
+
+        [TestCase("")]
+        [TestCase("reused-session")]
+        public void NET001_Disconnect_IdenticalPeerReplacementKeepsItsGenerationAndRequests(string sessionId)
+        {
+            RbxNetworkPeer peer = new("actor-a", sessionId, "conn-11");
+            _bridge.BindConnection(11, peer);
+            _bridge.RegisterActor("actor-a");
+            long originalGeneration = _bridge.GetBindingGeneration(11);
+            List<RbxNetworkResponse> oldResponses = new();
+            _bridge.SendRequest(ServerRequest(), oldResponses.Add);
+            bool firstDisconnect = true;
+            _bridge.PeerDisconnected += _ =>
+            {
+                if (!firstDisconnect)
+                {
+                    return;
+                }
+
+                firstDisconnect = false;
+                _bridge.BindConnection(11, peer);
+                _bridge.RegisterActor("actor-a");
+            };
+
+            _bridge.NotifyDisconnected(11, RbxNetworkDisconnectReason.TransportLost);
+
+            Assert.Greater(_bridge.GetBindingGeneration(11), originalGeneration);
+            CollectionAssert.AreEqual(new[] { "actor-a" }, _bridge.ActorIds);
+            Assert.AreEqual(1, oldResponses.Count);
+            Assert.IsFalse(oldResponses[0].Succeeded);
+            List<RbxNetworkResponse> replacementResponses = new();
+            _bridge.SendRequest(ServerRequest(), replacementResponses.Add);
+            Assert.IsEmpty(replacementResponses);
+            _bridge.ReceiveServerResponse(11, Answer(2u));
+            Assert.AreEqual(1, replacementResponses.Count);
+            Assert.IsTrue(replacementResponses[0].Succeeded);
+
+            _bridge.NotifyDisconnected(11, RbxNetworkDisconnectReason.TransportLost);
+            Assert.AreEqual(0L, _bridge.GetBindingGeneration(11));
+            Assert.IsFalse(_bridge.TryGetDisconnectGeneration(11, out _));
+            CollectionAssert.IsEmpty(_bridge.ActorIds);
+            Assert.AreEqual(1, oldResponses.Count);
+            Assert.AreEqual(1, replacementResponses.Count);
+        }
+
+        [Test]
+        public void NET001_Disconnect_ReentrantReplacementReleaseNotifiesBothGenerations()
+        {
+            RbxNetworkPeer peer = new("actor-a", "reused-session", "conn-11");
+            _bridge.BindConnection(11, peer);
+            _bridge.RegisterActor("actor-a");
+            long originalGeneration = _bridge.GetBindingGeneration(11);
+            long replacementGeneration = 0;
+            List<long> releases = new();
+            _bridge.BindingReleasedWithPeer += (connectionId, releasedPeer, generation) => releases.Add(generation);
+            _bridge.PeerDisconnected += _ =>
+            {
+                _bridge.BindConnection(11, peer);
+                _bridge.RegisterActor("actor-a");
+                replacementGeneration = _bridge.GetBindingGeneration(11);
+                _bridge.UnregisterActor("actor-a");
+            };
+
+            _bridge.NotifyDisconnected(11, RbxNetworkDisconnectReason.TransportLost);
+
+            Assert.Greater(replacementGeneration, originalGeneration);
+            CollectionAssert.AreEqual(new[] { replacementGeneration, originalGeneration }, releases,
+                "Only the departing generation is delayed; a replacement's own release must still notify.");
+            Assert.AreEqual(0L, _bridge.GetBindingGeneration(11));
+            Assert.IsFalse(_bridge.TryGetDisconnectGeneration(11, out _));
+            CollectionAssert.IsEmpty(_bridge.ActorIds);
+        }
+
+        [Test]
         public void NET001_BindingRelease_AReplacementKeepsItsRegistrationAndNewRequest()
         {
             _bridge.BindConnection(11, new RbxNetworkPeer("actor-a", "session-a", "conn-11"));

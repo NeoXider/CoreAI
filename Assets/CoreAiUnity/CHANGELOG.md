@@ -2,14 +2,23 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
-## [Unreleased]
+## [7.55.0] - 2026-10-27
+
+Candidate on `demo`; publication and the remaining manual acceptance gates are tracked in the [verification report](../../dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md).
 
 ### Fixed
 
+- Per-request execution and memory context survive queued work and role bindings; restored facade overloads preserve existing callers and raw tool traces remain correlated when presentation is trimmed.
+- Hub setup includes optional world/mod binders before prefab persistence. Settings presentation changes no longer invalidate unrelated save receipts, and Escape is consumed only when the active page handles it.
+- Endpoint registry cleanup schedules every owned release even when an activation cancellation callback throws; callback work runs outside the registry mutation lock.
+- Runtime editor selections, native closer input, document transitions and Lua lexical editing policies retain source/caret fidelity. Grouped Mods pages forward transient Escape dismissal before collapsing the Hub.
+- Qwen demo readiness follows the selected provider: configured HTTP scopes do not wait for a native host, while local-model platform and startup checks remain explicit.
 - Benchmark hero banner fits long local model labels on one line instead of wrapping mid-word; the width budget is shared by `FitHeroTitle` and covered by a regression test.
 
 ### Added
 
+- Scope-owned Gateway Client composition and pre-build world-package store configuration use the existing portable framework contracts.
+- Seventeen explicit published-scene API cases and a real model-authored Lua create/edit scenario support isolated OpenRouter acceptance without changing project credentials or user saves. Manual input/visual and player gates remain separately reported.
 - Hero retake tooling: `CaptureSavedCastlePrefab_ForReport` accepts the banner header, stats and caption from a UTF-8 text file (`COREAI_BENCHMARK_RECAPTURE_TEXT_FILE`), and the new explicit `CaptureSavedCastleReplay_ForReport` re-renders a hero by replaying the recorded `_g6_replay.lua` (`COREAI_BENCHMARK_RECAPTURE_LUA`) so runtime textures are regenerated without contacting the model.
 - Benchmark PlayMode runner records provider/tool inactivity on live scenario deadlines and treats gaps of at least `COREAI_BENCHMARK_PROVIDER_STALL_SECONDS` (default 120) as retryable Environment stalls.
 

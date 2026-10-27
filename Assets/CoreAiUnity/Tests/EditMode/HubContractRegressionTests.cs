@@ -116,6 +116,34 @@ namespace CoreAI.Tests.EditMode
         }
 
         [UnityTest]
+        public IEnumerator Window_EscapeOptOut_DoesNotCollapseAndKeepsFocus()
+        {
+            HubPageRegistry registry = new();
+            registry.Register("first", () => new RecordingPage("first"), 0);
+            using (WindowHarness harness = new(registry))
+            {
+                VisualElement root = harness.Host.rootVisualElement;
+                Button tab = root.Q<Button>("coreai-hub-tab-first");
+                Assert.IsNotNull(tab);
+                tab.Focus();
+                FieldInfo escapeField = typeof(CoreAiHubWindow).GetField(
+                    "escapeCollapses", BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.IsNotNull(escapeField);
+                escapeField.SetValue(harness.Window, false);
+
+                Assert.IsFalse(Get<bool>(harness.Window, "_collapsed"));
+                Focusable focusedBefore = root.focusController.focusedElement;
+                SendKey(tab, KeyCode.Escape);
+
+                Assert.IsFalse(Get<bool>(harness.Window, "_collapsed"),
+                    "escapeCollapses=false must not collapse the Hub.");
+                Assert.AreSame(focusedBefore, root.focusController.focusedElement,
+                    "Escape must remain available to the focused element.");
+                yield return null;
+            }
+        }
+
+        [UnityTest]
         public IEnumerator Window_RegistrySwapWithSameId_FencesAlreadyQueuedOldNotification()
         {
             HubPageRegistry first = new();
@@ -263,6 +291,32 @@ namespace CoreAI.Tests.EditMode
             {
                 packagePath, "Assets/CoreAIHub", "Runtime/CoreAiHub.uxml"
             }));
+        }
+
+        [Test]
+        public void Setup_BuildHub_ComposesTheCoreRuntimeComponents()
+        {
+            Type menu = Type.GetType("CoreAI.Hub.UI.Editor.CoreAiHubSetupMenu, CoreAI.Hub.UI.Editor", true);
+            MethodInfo build = menu.GetMethod("BuildHub", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.IsNotNull(build, "BuildHub");
+
+            GameObject authored = (GameObject)build.Invoke(null, null);
+            try
+            {
+                Assert.IsNotNull(authored.GetComponent<UIDocument>(), "UIDocument");
+                Assert.IsNotNull(authored.GetComponent<CoreAiHubWindow>(), "CoreAiHubWindow");
+                Assert.IsNotNull(authored.GetComponent<CoreAiHubDemo>(), "CoreAiHubDemo");
+                Type worldBinder = Type.GetType("CoreAI.Ai.Hub.WorldStateHubBinder, CoreAI.Mods.Hub", false);
+                if (worldBinder != null)
+                {
+                    Assert.IsNotNull(authored.GetComponent(worldBinder),
+                        "The setup-created Hub must bind the available runtime world-state page.");
+                }
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(authored);
+            }
         }
 
         private class LegacyManager : IWorldStateManager

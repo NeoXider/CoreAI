@@ -69,6 +69,8 @@ namespace CoreAI.Infrastructure.Lua
         private readonly bool _useCompactFolderNames;
         internal static Func<bool> PersistenceArmingForTesting;
 
+        internal static Func<bool> FailFirstCanonicalInstallationForTesting;
+
         public FileLuaModSourceStore(
             string rootDirectory = null,
             ILog log = null,
@@ -160,15 +162,74 @@ namespace CoreAI.Infrastructure.Lua
                     throw new RbxWorldPackageFormatLimitException(refusal);
                 }
 
-                Directory.CreateDirectory(modDirectory);
-                AtomicWriteAllText(
-                    Path.Combine(modDirectory, ManifestFileName),
-                    JsonConvert.SerializeObject(toWrite, JsonSettings));
-                AtomicWriteAllText(
-                    Path.Combine(modDirectory, SourceFileName),
-                    source ?? "");
-                localCommitCompleted = true;
-                RequestPersistenceArming();
+                // WHY stage a brand-new canonical package before publishing it: a transient I/O fault
+                // before the first manifest is written must not leave an invalid canonical directory
+                // that blocks every later retry. Owned staging is deleted on failure; foreign paths
+                // and previously seeded evidence are never touched.
+                bool firstInstallation = !Directory.Exists(modDirectory);
+                string stagingDirectory = null;
+                try
+                {
+                    if (firstInstallation)
+                    {
+                        string rootFull = Path.GetFullPath(_dir);
+                        string rootPrefix = rootFull.EndsWith(
+                            Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                            ? rootFull
+                            : rootFull + Path.DirectorySeparatorChar;
+                        stagingDirectory = Path.GetFullPath(Path.Combine(
+                            rootFull, ".staging-" + Guid.NewGuid().ToString("N")));
+                        if (!stagingDirectory.StartsWith(rootPrefix, StringComparison.Ordinal))
+                        {
+                            throw new InvalidOperationException(
+                                "[FileLuaModSourceStore] Staging path resolves outside the store root.");
+                        }
+
+                        EnsureSourcePaths(stagingDirectory, includeTemporaryPaths: true);
+                        EnsureWindowsPathLength(stagingDirectory);
+                        Directory.CreateDirectory(stagingDirectory);
+                        if (FailFirstCanonicalInstallationForTesting != null &&
+                            FailFirstCanonicalInstallationForTesting())
+                        {
+                            throw new IOException("Injected first canonical installation failure.");
+                        }
+
+                        AtomicWriteAllText(
+                            Path.Combine(stagingDirectory, ManifestFileName),
+                            JsonConvert.SerializeObject(toWrite, JsonSettings));
+                        AtomicWriteAllText(
+                            Path.Combine(stagingDirectory, SourceFileName),
+                            source ?? "");
+
+                        if (Directory.Exists(modDirectory))
+                        {
+                            throw new IOException("The canonical mod directory appeared during staging.");
+                        }
+
+                        Directory.Move(stagingDirectory, modDirectory);
+                        stagingDirectory = null;
+                    }
+                    else
+                    {
+                        Directory.CreateDirectory(modDirectory);
+                        AtomicWriteAllText(
+                            Path.Combine(modDirectory, ManifestFileName),
+                            JsonConvert.SerializeObject(toWrite, JsonSettings));
+                        AtomicWriteAllText(
+                            Path.Combine(modDirectory, SourceFileName),
+                            source ?? "");
+                    }
+
+                    localCommitCompleted = true;
+                    RequestPersistenceArming();
+                }
+                finally
+                {
+                    if (stagingDirectory != null && Directory.Exists(stagingDirectory))
+                    {
+                        Directory.Delete(stagingDirectory, true);
+                    }
+                }
             }
             catch (RbxWorldPackageFormatLimitException)
             {

@@ -48,6 +48,29 @@ namespace CoreAI.Ai
         internal const string ScopedKeyPrefix = "scope-v1-";
         internal const string ActorKeyPrefix = "actor-v1-";
 
+        internal static IAgentMemoryScopeProvider ResolveKnownProvider(object candidate)
+        {
+            if (candidate is IAgentMemoryScopeProvider provider) return provider;
+            if (candidate is not IAgentMemoryScopeProviderSource source) return null;
+            bool known = source.TryGetMemoryScopeProvider(out IAgentMemoryScopeProvider exposed);
+            if (known != (exposed != null))
+            {
+                throw new InvalidOperationException("The memory scope provider source returned an inconsistent capability.");
+            }
+
+            return exposed;
+        }
+
+        internal static ActorContext CaptureKnownActorScope(ActorContext actor, IAgentMemoryScopeProvider provider, string roleId)
+        {
+            actor.AssertTrusted();
+            if (actor.HasBoundMemoryScope) return actor;
+            // WHY: An opaque custom store may own a provider we cannot capture. Preserve its legacy
+            // resolution instead of declaring an unrelated empty provider to be an immutable snapshot.
+            if (provider == null && IsEmptyScope(actor.MemoryScope)) return actor;
+            return CaptureActorScope(actor, provider, roleId);
+        }
+
         internal static ActorContext CaptureActorScope(ActorContext actor, IAgentMemoryScopeProvider provider, string roleId)
         {
             if (actor.HasBoundMemoryScope) return actor;

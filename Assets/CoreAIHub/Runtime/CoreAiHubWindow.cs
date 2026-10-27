@@ -355,9 +355,12 @@ namespace CoreAI.Hub.UI
                 return;
             }
 
-            HandleEscapeRequested();
-            evt.PreventDefault();
-            evt.StopPropagation();
+            bool handled = HandleEscapeRequested();
+            if (handled)
+            {
+                evt.PreventDefault();
+                evt.StopPropagation();
+            }
         }
 
         private void OnTabNavigationMove(NavigationMoveEvent evt)
@@ -434,18 +437,23 @@ namespace CoreAI.Hub.UI
             }
         }
 
-        private void HandleEscapeRequested()
+        private bool HandleEscapeRequested()
         {
             if (!_uiReady || _collapsed || !IsHubInputAllowedNow())
             {
-                return;
+                return false;
             }
 
             bool pageHandled = TryActivePageHandleEscape();
             if (ShouldCollapseOnEscape(escapeCollapses, true, pageHandled))
             {
                 SetCollapsed(true);
+                return true;
             }
+
+            // WHY: a page that actually consumes Escape has handled the event even when the Hub does not
+            // collapse; an unhandled Escape with collapse disabled leaves the event for focused UI/host.
+            return pageHandled;
         }
 
         private bool TryActivePageHandleEscape()

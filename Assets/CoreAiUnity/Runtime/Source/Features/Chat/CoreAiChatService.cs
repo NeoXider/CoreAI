@@ -41,8 +41,22 @@ namespace CoreAI.Chat
             IGameLogger logger = null,
             ILlmClient llmClient = null,
             Vision.IAgentCameraService cameraService = null,
-            IActorIdentityProvider actorIdentityProvider = null,
-            IAgentMemoryScopeProvider scopeProvider = null)
+            IActorIdentityProvider actorIdentityProvider = null)
+            : this(orchestrator, memoryPolicy, settings, memoryStore, logger, llmClient, cameraService,
+                actorIdentityProvider, null)
+        {
+        }
+
+        public CoreAiChatService(
+            IAiOrchestrationService orchestrator,
+            AgentMemoryPolicy memoryPolicy,
+            ICoreAISettings settings,
+            IAgentMemoryStore memoryStore,
+            IGameLogger logger,
+            ILlmClient llmClient,
+            Vision.IAgentCameraService cameraService,
+            IActorIdentityProvider actorIdentityProvider,
+            IAgentMemoryScopeProvider scopeProvider)
         {
             _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
             _memoryPolicy = memoryPolicy;
@@ -52,8 +66,19 @@ namespace CoreAI.Chat
             _llmClient = llmClient;
             _cameraService = cameraService;
             _actorIdentityProvider = actorIdentityProvider ??
-                                     CoreServicesInstaller.DefaultLocalHostIdentityProvider;
-            _scopeProvider = scopeProvider ?? new DefaultAgentMemoryScopeProvider();
+                                      CoreServicesInstaller.DefaultLocalHostIdentityProvider;
+            _scopeProvider = scopeProvider;
+            if (_scopeProvider == null)
+            {
+                if (memoryStore != null)
+                {
+                    _scopeProvider = AgentMemoryScopeKey.ResolveKnownProvider(memoryStore);
+                }
+                else
+                {
+                    _scopeProvider = AgentMemoryScopeKey.ResolveKnownProvider(orchestrator);
+                }
+            }
         }
 
         /// <summary>
@@ -271,7 +296,8 @@ namespace CoreAI.Chat
 
             BindRequestActor(request);
             string admittedActorId = request.ActorContext.Value.ActorId;
-            string admittedTraceId = request.TraceId.Trim();
+            string admittedRawTraceId = request.TraceId ?? "";
+            string admittedTrimmedTraceId = admittedRawTraceId.Trim();
             string admittedRoleId = string.IsNullOrWhiteSpace(request.RoleId)
                 ? BuiltInAgentRoleIds.Creator : request.RoleId.Trim();
             // WHY the caller's token alone goes into CallerCancellationToken: the orchestrator attributes a cancelled
@@ -308,9 +334,11 @@ namespace CoreAI.Chat
                     // Capture admission metadata so caller mutation cannot redirect deadline progress.
                     bool Matches(LlmToolCallInfo info)
                     {
+                        string eventRole = string.IsNullOrWhiteSpace(info.RoleId) ? null : info.RoleId.Trim();
                         return string.Equals(info.ActorId, admittedActorId, StringComparison.Ordinal) &&
-                               string.Equals(info.TraceId, admittedTraceId, StringComparison.Ordinal) &&
-                               string.Equals(info.RoleId, admittedRoleId, StringComparison.Ordinal);
+                               (string.Equals(info.TraceId, admittedRawTraceId, StringComparison.Ordinal) ||
+                                string.Equals(info.TraceId, admittedTrimmedTraceId, StringComparison.Ordinal)) &&
+                               string.Equals(eventRole, admittedRoleId, StringComparison.Ordinal);
                     }
 
                     onToolStarted = evt =>
@@ -616,10 +644,17 @@ namespace CoreAI.Chat
         }
 
         /// <summary>Clears selected actor-owned memory without changing another actor's context.</summary>
-        public void ClearContext(string roleId, bool clearChatHistory, bool clearLongTermMemory,
-            ActorContext? actorContext = null)
+        public void ClearContext(string roleId, bool clearChatHistory, bool clearLongTermMemory)
         {
-            using (AgentMemoryActorScope.Enter(ResolveActor(actorContext, roleId), _scopeProvider, roleId))
+            ClearContext(roleId, clearChatHistory, clearLongTermMemory, null);
+        }
+
+        /// <summary>Clears selected actor-owned memory without changing another actor's context.</summary>
+        public void ClearContext(string roleId, bool clearChatHistory, bool clearLongTermMemory,
+            ActorContext? actorContext)
+        {
+            ActorContext actor = BindActorContext(actorContext, roleId);
+            using (AgentMemoryActorScope.Enter(actor))
             {
                 CoreAi.ClearContextStores(_memoryStore, null, roleId, clearChatHistory, clearLongTermMemory);
             }
@@ -628,8 +663,13 @@ namespace CoreAI.Chat
         /// <summary>
         /// Attempts to get persisted chat history and returns whether the operation succeeded.
         /// </summary>
-        public bool TryGetPersistedChatHistory(string roleId, out Ai.ChatMessage[] messages, int maxMessages = 0,
-            ActorContext? actorContext = null)
+        public bool TryGetPersistedChatHistory(string roleId, out Ai.ChatMessage[] messages, int maxMessages = 0)
+        {
+            return TryGetPersistedChatHistory(roleId, out messages, maxMessages, null);
+        }
+
+        public bool TryGetPersistedChatHistory(string roleId, out Ai.ChatMessage[] messages, int maxMessages,
+            ActorContext? actorContext)
         {
             messages = Array.Empty<Ai.ChatMessage>();
             if (_memoryStore == null || string.IsNullOrWhiteSpace(roleId))
@@ -638,10 +678,12 @@ namespace CoreAI.Chat
             }
 
             Ai.ChatMessage[] raw;
-            using (AgentMemoryActorScope.Enter(ResolveActor(actorContext, roleId), _scopeProvider, roleId))
+            ActorContext actor = BindActorContext(actorContext, roleId);
+            using (AgentMemoryActorScope.Enter(actor))
             {
                 raw = _memoryStore.GetChatHistory(roleId.Trim(), maxMessages);
             }
+
             if (raw == null || raw.Length == 0)
             {
                 return false;
@@ -652,7 +694,13 @@ namespace CoreAI.Chat
         }
 
         /// <summary>Requests cancellation of active work for the selected agent role.</summary>
-        public void StopAgent(string roleId, ActorContext? actorContext = null)
+        public void StopAgent(string roleId)
+        {
+            StopAgent(roleId, null);
+        }
+
+        /// <summary>Requests cancellation of active work for the selected agent role.</summary>
+        public void StopAgent(string roleId, ActorContext? actorContext)
         {
             if (_orchestrator is IActorAiTaskCancellation actorCancellation)
             {
@@ -667,7 +715,9 @@ namespace CoreAI.Chat
 
         internal ActorContext BindActorContext(ActorContext? actorContext, string roleId)
         {
-            return AgentMemoryActorScope.Bind(ResolveActor(actorContext, roleId), _scopeProvider, roleId);
+            ActorContext resolved = ResolveActor(actorContext, roleId);
+            resolved.AssertTrusted();
+            return AgentMemoryScopeKey.CaptureKnownActorScope(resolved, _scopeProvider, roleId);
         }
 
         private ActorContext ResolveActor(ActorContext? actorContext, string roleId)

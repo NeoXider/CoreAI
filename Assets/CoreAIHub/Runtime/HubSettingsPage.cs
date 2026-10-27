@@ -574,10 +574,28 @@ namespace CoreAI.Hub.UI
             _endpointOperationStatus = HubPageWidgets.MakeNote("");
             _endpointOperationStatus.name = "coreai-endpoint-operation-status";
             endpointGroup.Add(_endpointOperationStatus);
-            endpointGroup.RegisterCallback<ChangeEvent<string>>(_ => _endpointEditorVersion++);
-            endpointGroup.RegisterCallback<ChangeEvent<int>>(_ => _endpointEditorVersion++);
-            endpointGroup.RegisterCallback<ChangeEvent<float>>(_ => _endpointEditorVersion++);
-            endpointGroup.RegisterCallback<ChangeEvent<bool>>(_ => _endpointEditorVersion++);
+            HashSet<VisualElement> endpointFields = new()
+            {
+                _endpointId, _endpointName, _endpointKind, _endpointBaseUrl, _endpointModel,
+                _endpointGgufModel, _endpointSessionKey, _endpointActive, _endpointContextWindow,
+                _endpointReasoningEffort, _endpointReasoningDialect, _endpointOverrideTemperature,
+                _endpointTemperature, _endpointOverrideMaxTokens, _endpointMaxTokens,
+                _endpointParallelSlots, _endpointSecretReference, _endpointKeepWarm,
+                _endpointUnityAgentName, _endpointPort, _endpointGpuLayers, _endpointFlashAttention
+            };
+            // WHY: status labels and the Advanced foldout also emit value changes. Only draft fields
+            // may invalidate a save receipt; even setting the Saving label must not invalidate itself.
+            Action<IEventHandler> fieldChanged = target =>
+            {
+                if (target is VisualElement field && endpointFields.Contains(field))
+                {
+                    _endpointEditorVersion++;
+                }
+            };
+            endpointGroup.RegisterCallback<ChangeEvent<string>>(evt => fieldChanged(evt.target));
+            endpointGroup.RegisterCallback<ChangeEvent<int>>(evt => fieldChanged(evt.target));
+            endpointGroup.RegisterCallback<ChangeEvent<float>>(evt => fieldChanged(evt.target));
+            endpointGroup.RegisterCallback<ChangeEvent<bool>>(evt => fieldChanged(evt.target));
             body.Add(endpointGroup);
 
             VisualElement routingGroup = MakeGroup("Agent routing");

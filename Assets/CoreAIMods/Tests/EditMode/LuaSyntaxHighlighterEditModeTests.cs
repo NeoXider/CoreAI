@@ -2,8 +2,10 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading;
 using CoreAI.Ai;
 using CoreAI.Ai.Hub;
+using CoreAI.CodeEditing;
 using CoreAI.Infrastructure.Lua;
 using NUnit.Framework;
 using UnityEngine.UIElements;
@@ -101,7 +103,7 @@ namespace CoreAI.Tests.EditMode
     /// </summary>
     public sealed class HubModPagesRefreshEditModeTests
     {
-        private sealed class CountingHubModService : IHubModService
+        private class CountingHubModService : IHubModService
         {
             public int ListModsCalls;
             public int ErrorEntryReads;
@@ -158,7 +160,7 @@ namespace CoreAI.Tests.EditMode
 
             public List<ModReloadMode> SaveModes { get; } = new();
 
-            public HubModSaveResult SaveOrReload(string id, string code, ModReloadMode mode)
+            public virtual HubModSaveResult SaveOrReload(string id, string code, ModReloadMode mode)
             {
                 if (SaveFailure != null)
                 {
@@ -266,6 +268,56 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        private sealed class BudgetedCountingHubModService : CountingHubModService, IBudgetedHubModService
+        {
+            private InvocationGuard _activeInvocation;
+            public int InvocationCount { get; private set; }
+            public int DisposedInvocationCount { get; private set; }
+            public int ActiveInvocationCount => _activeInvocation == null ? 0 : 1;
+            public LuaModInvocationLimits LastInvocationLimits { get; private set; }
+
+            public IDisposable BeginInvocation(LuaModInvocationLimits limits, CancellationToken cancellationToken = default)
+            {
+                if (limits == null) throw new ArgumentNullException(nameof(limits));
+                LuaModInvocationLimits validated = new LuaModInvocationLimits(limits.TimeoutMs, limits.MaxSteps);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (_activeInvocation != null) throw new InvalidOperationException("A test invocation is already active.");
+                LastInvocationLimits = validated;
+                InvocationCount++;
+                _activeInvocation = new InvocationGuard(this, cancellationToken);
+                return _activeInvocation;
+            }
+
+            public override HubModSaveResult SaveOrReload(string id, string code, ModReloadMode mode)
+            {
+                if (_activeInvocation == null) throw new InvalidOperationException("A save requires its bounded invocation.");
+                _activeInvocation.ThrowIfCancellationRequested();
+                return base.SaveOrReload(id, code, mode);
+            }
+
+            private sealed class InvocationGuard : IDisposable
+            {
+                private BudgetedCountingHubModService _owner;
+                private readonly CancellationToken _cancellationToken;
+
+                public InvocationGuard(BudgetedCountingHubModService owner, CancellationToken cancellationToken)
+                {
+                    _owner = owner;
+                    _cancellationToken = cancellationToken;
+                }
+
+                public void ThrowIfCancellationRequested() => _cancellationToken.ThrowIfCancellationRequested();
+
+                public void Dispose()
+                {
+                    if (_owner == null) return;
+                    _owner._activeInvocation = null;
+                    _owner.DisposedInvocationCount++;
+                    _owner = null;
+                }
+            }
+        }
+
         /// <summary>
         /// A mod with 500 erroring Heartbeat handlers raises 500 LogsChanged in one frame; the open Logs
         /// tab queued a full rebuild of every kept line for each of them.
@@ -350,7 +402,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ModEditor_KeepObjectsToggle_DefaultsOff_PicksTheReloadMode_AndTheStatusSaysWhatWasCleaned()
         {
-            CountingHubModService service = new();
+            BudgetedCountingHubModService service = new();
             service.Sources["castle"] = "local x = 1";
             MemoryEditorPreferences preferences = new();
             HubModEditorPage editor = new(service, "castle", "local x = 1", null, preferences);
@@ -373,12 +425,14 @@ namespace CoreAI.Tests.EditMode
 
             Assert.AreEqual(ModReloadMode.KeepObjects, service.SaveModes[1], "the toggle picks keep mode");
             StringAssert.Contains("kept 126 objects", status.text);
+            Assert.AreEqual(2, service.InvocationCount);
+            AssertSaveReleased(root, service);
         }
 
         [Test]
         public void ModEditor_KeepObjectsToggle_IsOneHubPreference_ReadByEveryEditorAndWrittenOnChange()
         {
-            CountingHubModService service = new();
+            BudgetedCountingHubModService service = new();
             service.Sources["first"] = "local x = 1";
             service.Sources["second"] = "local x = 2";
             MemoryEditorPreferences preferences = new();
@@ -401,7 +455,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void ModEditor_ExternalEditsRequireAnExplicitOverwriteOfTheLatestReviewedSource()
         {
-            CountingHubModService service = new();
+            BudgetedCountingHubModService service = new();
             service.Sources["edit"] = "local original = 1";
             HubModEditorPage editor = new(service, "edit", null, null, new MemoryEditorPreferences());
             VisualElement root = editor.Build();
@@ -424,12 +478,13 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("local draft = 2", service.Sources["edit"]);
             Assert.AreEqual(1, service.SaveModes.Count);
             Assert.IsFalse(editor.IsDirty);
+            AssertSaveReleased(root, service);
         }
 
         [Test]
         public void ModEditor_TwoEditorsCannotSilentlyReplaceEachOthersSavedDraft()
         {
-            CountingHubModService service = new();
+            BudgetedCountingHubModService service = new();
             service.Sources["shared"] = "local original = 1";
             HubModEditorPage first = new(service, "shared", null, null, new MemoryEditorPreferences());
             HubModEditorPage second = new(service, "shared", null, null, new MemoryEditorPreferences());
@@ -449,7 +504,7 @@ namespace CoreAI.Tests.EditMode
         public void ModEditor_FailedOrUnconfirmedPersistenceKeepsTheDraftAndBackGuard_AndCanRetryItsOwnLiveChange(
             HubModPersistenceStatus persistenceStatus)
         {
-            CountingHubModService service = new() { SavePersistenceStatus = persistenceStatus };
+            BudgetedCountingHubModService service = new() { SavePersistenceStatus = persistenceStatus };
             service.Sources["retry"] = "local previous = 1";
             int closes = 0;
             HubModEditorPage editor = new(service, "retry", null, () => closes++, new MemoryEditorPreferences());
@@ -463,12 +518,14 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(editor.IsDirty);
             Assert.AreEqual("local retry = 2", editor.DraftSource);
             Assert.AreEqual(DisplayStyle.Flex, root.Q<Button>("coreai-hub-mod-discard").style.display.value);
+            AssertSaveReleased(root, service);
             service.SavePersistenceStatus = HubModPersistenceStatus.Saved;
             editor.Save();
             Assert.AreEqual(2, service.SaveModes.Count, "The retry must not conflict with its own previous live execution.");
             Assert.IsFalse(editor.IsDirty);
             Invoke(editor, "Close");
             Assert.AreEqual(1, closes);
+            AssertSaveReleased(root, service);
         }
 
         [TestCase(HubModPersistenceStatus.Failed)]
@@ -476,11 +533,11 @@ namespace CoreAI.Tests.EditMode
         public void ModEditor_UnacknowledgedSaveOfUnchangedSourceStillKeepsTheDraftDirty(
             HubModPersistenceStatus persistenceStatus)
         {
-            CountingHubModService service = new() { SavePersistenceStatus = persistenceStatus };
+            BudgetedCountingHubModService service = new() { SavePersistenceStatus = persistenceStatus };
             service.Sources["same"] = "local x = 1";
             int closes = 0;
             HubModEditorPage editor = new(service, "same", null, () => closes++, new MemoryEditorPreferences());
-            editor.Build();
+            VisualElement root = editor.Build();
             Assert.IsFalse(editor.IsDirty);
 
             editor.Save();
@@ -489,36 +546,40 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(editor.IsDirty);
             Assert.AreEqual(0, closes);
             Assert.AreEqual("local x = 1", editor.DraftSource);
+            AssertSaveReleased(root, service);
             service.SavePersistenceStatus = HubModPersistenceStatus.Saved;
             editor.Save();
             Assert.IsFalse(editor.IsDirty);
+            AssertSaveReleased(root, service);
         }
 
         [TestCase(false)]
         [TestCase(true)]
         public void ModEditor_ThrownOrCancelledSavePreservesTheBufferAndUnsavedCloseGuard(bool cancelled)
         {
-            CountingHubModService service = new()
+            BudgetedCountingHubModService service = new()
             {
                 SaveFailure = cancelled ? new OperationCanceledException() : new InvalidOperationException("write refused")
             };
             service.Sources["edit"] = "local original = 1";
             int closes = 0;
             HubModEditorPage editor = new(service, "edit", null, () => closes++, new MemoryEditorPreferences());
-            editor.Build().Q<TextField>("coreai-hub-mod-code").value = "local draft = 2";
+            VisualElement root = editor.Build();
+            root.Q<TextField>("coreai-hub-mod-code").value = "local draft = 2";
             editor.Save();
             Invoke(editor, "Close");
             Assert.AreEqual("local draft = 2", editor.DraftSource);
             Assert.IsTrue(editor.IsDirty);
             Assert.AreEqual(0, closes);
             Assert.AreEqual("local original = 1", service.Sources["edit"]);
+            AssertSaveReleased(root, service);
         }
 
         [TestCase(false)]
         [TestCase(true)]
         public void ModEditor_ThrownOrCancelledSaveAfterLiveMutationCanRetryWithoutAnOverwritePrompt(bool cancelled)
         {
-            CountingHubModService service = new()
+            BudgetedCountingHubModService service = new()
             {
                 SaveFailure = cancelled ? new OperationCanceledException() : new InvalidOperationException("write refused"),
                 MutateBeforeSaveFailure = true
@@ -530,6 +591,7 @@ namespace CoreAI.Tests.EditMode
             editor.Save();
             Assert.IsTrue(editor.IsDirty);
             Assert.AreEqual("local draft = 2", service.Sources["retry"]);
+            AssertSaveReleased(root, service);
 
             service.SaveFailure = null;
             editor.Save();
@@ -537,6 +599,36 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(editor.IsDirty);
             Assert.AreEqual(1, service.SaveModes.Count);
             StringAssert.DoesNotContain("changed outside", root.Q<Label>(HubModEditorPage.StatusLabelName).text);
+            AssertSaveReleased(root, service);
+        }
+
+        [Test]
+        public void ModEditor_UnbudgetedLegacyServiceCannotRunOrSaveTheDraft()
+        {
+            CountingHubModService service = new();
+            service.Sources["legacy"] = "local original = 1";
+            HubModEditorPage editor = new(service, "legacy", null, null, new MemoryEditorPreferences());
+            VisualElement root = editor.Build();
+            try
+            {
+                root.Q<TextField>("coreai-hub-mod-code").value = "local draft = 2";
+
+                editor.Save();
+
+                Assert.AreEqual(CodeRunStatus.Unsupported, editor.LastRunResult.Status);
+                Assert.IsFalse(editor.LastRunResult.Executed);
+                Assert.IsFalse(editor.LastRunResult.Persisted);
+                Assert.AreEqual(0, service.SaveModes.Count);
+                Assert.AreEqual("local original = 1", service.Sources["legacy"]);
+                Assert.AreEqual("local draft = 2", editor.DraftSource);
+                Assert.IsTrue(editor.IsDirty);
+                StringAssert.Contains("does not support bounded", root.Q<Label>(HubModEditorPage.StatusLabelName).text);
+                Assert.IsTrue(root.Q<Button>("coreai-hub-mod-save-run").enabledSelf);
+            }
+            finally
+            {
+                editor.OnDestroyed();
+            }
         }
 
         [Test]
@@ -629,6 +721,21 @@ namespace CoreAI.Tests.EditMode
             MethodInfo member = target.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.IsNotNull(member, method);
             member.Invoke(target, arguments);
+        }
+
+        private static void AssertSaveReleased(VisualElement root, BudgetedCountingHubModService service)
+        {
+            Assert.AreEqual(service.InvocationCount, service.DisposedInvocationCount,
+                "Every completed save must release its invocation, including failed and cancelled saves.");
+            Assert.AreEqual(0, service.ActiveInvocationCount);
+            Assert.IsTrue(root.Q<Button>("coreai-hub-mod-save-run").enabledSelf);
+            Assert.IsTrue(root.Q<DropdownField>("coreai-code-editor-language").enabledSelf);
+            Assert.IsFalse(root.Q<TextField>("coreai-hub-mod-code").isReadOnly);
+            if (service.InvocationCount > 0)
+            {
+                Assert.AreEqual(100, service.LastInvocationLimits.TimeoutMs);
+                Assert.AreEqual(500_000, service.LastInvocationLimits.MaxSteps);
+            }
         }
 
         [Test]

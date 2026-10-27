@@ -15,24 +15,29 @@ extend the game at runtime through a host-defined Lua API.
 ## How it works
 
 The scene controller [`ModdableUnitsDemoController`](Scripts/ModdableUnitsDemoController.cs)
-implements `IUnitForge` and authors [`UnitForgeLuaBindings`](Scripts/UnitForgeLuaBindings.cs)
-as a Lua-CSharp `ILuaCsGameRuntimeBindings` set intended for the **WorldEdit** capability tier.
-When wired into the mod runtime, a mod granted WorldEdit (the default tier) gets these extra
-Lua functions:
+implements `IUnitForge` and `ICoreAiLuaGameplayBindingsProvider`. Its lazy
+[`UnitForgeLuaBindings`](Scripts/UnitForgeLuaBindings.cs) callbacks register through
+`LuaCsModStackOptions.AdditionalGameplayBindings` at each Lua state's effective capability tier.
 
-> NOTE: the mod runtime exposes the seam (`LuaCsModStackOptions.AdditionalGameplayBindings`), but the
-> demo's composition layer does not yet thread it through, so the forge functions below are authored and
-> ready but not currently surfaced to running mods. They become live once the demo wires that option through
-> `CoreAiModsInstaller.RegisterCoreAiMods` / `CoreAiModsLifetimeScope` with a lazy forge lookup — tracked as
-> `TODO(moddableunits-binding-seam)`.
+The opt-in is explicit: assign this scene's controller to
+`CoreAiModsLifetimeScope.gameplayBindingsProviders`, then assign that same scope to the controller's
+`modsScope`. Each scope snapshots its assigned providers during composition; an empty provider list
+exposes no forge globals. Other games can implement the provider interface without referencing this
+demo. Code-only hosts can supply an `Action<LuaCsApiRegistry, LuaCapabilities>` through the required
+trailing parameter of the extended `RegisterCoreAiMods` overload, or directly through the factory option.
+The original optional installer overload remains available with the same defaults.
 
-| Function | Effect |
-|---|---|
-| `forge_define(name, team, hp, dmg, speed, range, color)` | Register/overwrite a unit archetype. `team` is `"ally"` or `"enemy"`; `color` is a hex string (or omit it). Trailing args are optional and fall back to sane defaults. Returns `true`. |
-| `forge_spawn(name, x, z)` | Spawn a live instance of a defined archetype at `(x, z)`. Returns its instance id (`0` on failure). |
-| `forge_count(team)` | Live unit count for `"ally"`, `"enemy"`, or `"all"`. |
-| `forge_clear()` | Remove all live units, keep definitions. |
-| `forge_reset()` | Remove all units **and** definitions. |
+The callback reaches persistent mods, persisted rehydrate, replacement-world stacks and `execute_lua`.
+It does not grant additional capabilities: the factory intersects the mod request or one-off tier with
+the host ceiling before invoking the provider.
+
+| Function | Required capability | Effect |
+|---|---|---|
+| `forge_define(name, team, hp, dmg, speed, range, color)` | WorldEdit | Register/overwrite a unit archetype. `team` is `"ally"` or `"enemy"`; `color` is a hex string (or omit it). Trailing args are optional and fall back to sane defaults. Returns `true`. |
+| `forge_spawn(name, x, z)` | WorldEdit | Spawn a live instance of a defined archetype at `(x, z)`. Returns its instance id (`0` on failure). |
+| `forge_count(team)` | Read | Live unit count for `"ally"`, `"enemy"`, or `"all"`. |
+| `forge_clear()` | WorldEdit | Remove all live units, keep definitions. |
+| `forge_reset()` | WorldEdit | Remove all units **and** definitions. |
 
 The host loop walks each unit toward its nearest enemy and attacks in range. Deaths,
 spawns and team wipes are emitted back to mods as events:
@@ -43,9 +48,12 @@ spawns and team wipes are emitted back to mods as events:
 | `unit_died` | `name:team` |
 | `team_wiped` | `team` |
 
-The intended design lets a mod react to its own world with `hooks_on(...)` and drive it over time with
-`hooks_every(...)`, so a complete game emerges from mods alone. See the NOTE above: the `forge_*` scene
-bindings are authored but not yet threaded into the mod runtime, so this demo is currently aspirational.
+A mod can react to its world with `hooks_on(...)` and drive it over time with `hooks_every(...)`.
+Persistent startup chunks may call forge functions before the controller's `Start`: the unit root is
+created lazily and UI updates wait for the panel. `Start` retains those archetypes and visuals.
+The controller attaches its event bridge to the explicitly assigned scope in `Start`; an embedding host
+can attach its real runtime and trusted host identity earlier through `AttachModRuntime`.
+Replacing that attachment removes the previous listeners, and controller teardown removes its listeners.
 
 ## Requirements
 
@@ -54,6 +62,7 @@ bindings are authored but not yet threaded into the mod runtime, so this demo is
   OpenAI-compatible).
 - The scene's `CoreAI` scope uses the built-in **Programmer** role (already wired in the
   scene) so `manage_mods` is available in chat.
+- The explicit provider and `modsScope` references described above are assigned on the scene components.
 
 ## Try it
 
@@ -97,13 +106,20 @@ report("Endless waves armed.")
 
 ## Safety
 
-`forge_*` is meant to be registered for the **WorldEdit** tier only, so read-only mods could not spawn
-anything.
+`forge_count` requires **Read**. Every forge mutation requires **WorldEdit**; unavailable functions are
+absent from the Lua globals, so a read-only mod cannot spawn, redefine or clear units.
 The Lua-CSharp sandbox (no `io`/`load`, `os` limited to `os.time`/`os.clock`), per-call
 instruction/time limits and the quarantine-after-repeated-errors policy (the mod stays loaded with
 dispatch suspended until a reload) all still apply. Spawns are capped (`MaxUnits`)
 and positions are clamped to the arena. Unit visuals are created on Unity's main thread
 during mod ticks, which the mod-runtime ticker guarantees.
+
+The forge is host-owned gameplay state shared by the mods in its assigned scene. Its plain Unity unit
+visuals are outside the Rbx instance registry: unloading a mod does not remove its forged units, and a
+world-package replacement does not snapshot or roll back the controller's unit state. Use explicit
+gameplay cleanup for a complete arena reset. Persisted mod source can recreate startup units on a fresh
+scene entry; this does not persist an in-progress battle. Read-only provider registration itself does
+not touch the arena or create UI.
 
 ## Related
 

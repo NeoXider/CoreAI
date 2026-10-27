@@ -319,8 +319,53 @@ namespace CoreAI.Tests.EditMode
                 "No entry may be lost or duplicated across per-mod buffers under concurrent append.");
         }
 
-        [Test]
-        public async Task GetModLogsLlmTool_ReturnsFormattedEntriesAfterAppends()
+    [Test]
+    public void Clamp_DoesNotSplitSurrogatePair()
+    {
+        LuaLogService service = new LuaLogService(maximumMessageCharacters: 16,
+            maximumRetainedCharacters: 1024, mirrorErrorsToUnityConsole: false);
+        string original = "a" + char.ConvertFromUtf32(0x1F600) + new string('x', 20);
+        service.Append(Entry("m", LuaLogLevel.Print, original, original));
+        IReadOnlyList<LuaLogEntry> returned = service.Query(new LuaLogQuery { ModId = "m", MaxCount = 10 });
+        Assert.AreEqual(1, returned.Count);
+        LuaLogEntry entry = returned[0];
+        Assert.IsTrue(IsWellFormedUnicode(entry.Message));
+        Assert.IsTrue(IsWellFormedUnicode(entry.ScriptName));
+        Assert.AreEqual("a...[truncated]", entry.Message);
+        Assert.AreEqual("a...[truncated]", entry.ScriptName);
+        Assert.LessOrEqual(entry.Message.Length, 16);
+    }
+
+    private static bool IsWellFormedUnicode(string text)
+    {
+        if (text == null)
+        {
+            return true;
+        }
+
+        for (int index = 0; index < text.Length; index++)
+        {
+            if (char.IsLowSurrogate(text[index]))
+            {
+                return false;
+            }
+
+            if (!char.IsHighSurrogate(text[index]))
+            {
+                continue;
+            }
+
+            if (index + 1 >= text.Length || !char.IsLowSurrogate(text[++index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    [Test]
+    public async Task GetModLogsLlmTool_ReturnsFormattedEntriesAfterAppends()
         {
             LuaLogService service = new();
             service.Append(Entry("m", LuaLogLevel.Print, "hello from mod"));

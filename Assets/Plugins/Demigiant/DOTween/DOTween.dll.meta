@@ -1,10 +1,22 @@
 fileFormatVersion: 2
 guid: a811bde74b26b53498b4f6d872b09b6d
-PluginImporter:
+AssetOrigin:
   serializedVersion: 1
+  productId: 27676
+  packageName: DOTween (HOTween v2)
+  packageVersion: 1.2.825
+  assetPath: Assets/Plugins/Demigiant/DOTween/DOTween.dll
+  uploadId: 862444
+PluginImporter:
+  externalObjects: {}
+  serializedVersion: 3
   iconMap: {}
   executionOrder: {}
+  defineConstraints: []
   isPreloaded: 0
+  isOverridable: 0
+  isExplicitlyReferenced: 0
+  validateReferences: 1
   platformData:
     Any:
       enabled: 1
@@ -20,10 +32,3 @@ PluginImporter:
   userData: 
   assetBundleName: 
   assetBundleVariant: 
-AssetOrigin:
-  serializedVersion: 1
-  productId: 27676
-  packageName: DOTween (HOTween v2)
-  packageVersion: 1.2.825
-  assetPath: Assets/Plugins/Demigiant/DOTween/DOTween.dll
-  uploadId: 862444

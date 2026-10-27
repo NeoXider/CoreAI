@@ -55,9 +55,9 @@ namespace IngameDebugConsole
 
         private readonly Event poppedEvent = new Event();
 
-        private delegate object FieldInfoGetDelegate(object obj);
         private delegate void FieldInfoSetDelegate(object obj, object value);
-        private readonly FieldInfoGetDelegate m_IsCompositionActiveGetter = typeof(TMP_InputField).GetField("m_IsCompositionActive", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue;
+        // WHY: modern TMP removed this legacy OSX suppression flag and handles composition in KeyPressed.
+        private readonly FieldInfo m_IsCompositionActive = typeof(TMP_InputField).GetField("m_IsCompositionActive", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
         private readonly FieldInfoSetDelegate m_IsTextComponentUpdateRequiredSetter = typeof(TMP_InputField).GetField("m_IsTextComponentUpdateRequired", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).SetValue;
         private readonly object boxedTrueValue = true;
 
@@ -148,7 +148,7 @@ namespace IngameDebugConsole
                         consumedEvent = true;
 
                         // Special handling on OSX which produces more events which need to be suppressed.
-                        if (poppedEvent.character == 0 && poppedEvent.modifiers == EventModifiers.None && caretPositionInternal == m_CaretPosition && (bool)m_IsCompositionActiveGetter(this))
+                        if (poppedEvent.character == 0 && poppedEvent.modifiers == EventModifiers.None && caretPositionInternal == m_CaretPosition && m_IsCompositionActive != null && (bool)m_IsCompositionActive.GetValue(this))
                             break;
 
                         char ch = poppedEvent.keyCode switch

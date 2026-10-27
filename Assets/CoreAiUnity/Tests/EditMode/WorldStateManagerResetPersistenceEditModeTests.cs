@@ -1,9 +1,8 @@
+using System;
 using System.IO;
-using CoreAI.Infrastructure;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
 using NUnit.Framework;
-using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
 {
@@ -16,43 +15,22 @@ namespace CoreAI.Tests.EditMode
     public sealed class WorldStateManagerResetPersistenceEditModeTests
     {
         private string _saveFilePath;
-        private string _backupPath;
+        private DirectoryInfo _ownedDirectory;
 
         [SetUp]
         public void SetUp()
         {
-            _saveFilePath = Path.Combine(
-                Application.persistentDataPath,
-                CoreAiPersistentPaths.RootFolderName,
-                CoreAiPersistentPaths.WorldState,
-                "world_state.json");
-            _backupPath = _saveFilePath + ".test_backup";
-
-            // WHY: back up any real save so the test never clobbers a live world.
-            if (File.Exists(_saveFilePath))
-            {
-                File.Copy(_saveFilePath, _backupPath, true);
-                File.Delete(_saveFilePath);
-            }
+            _ownedDirectory = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(),
+                "CoreAI-world-reset-" + Guid.NewGuid().ToString("N")));
+            _saveFilePath = Path.Combine(_ownedDirectory.FullName, "world_state.json");
         }
 
         [TearDown]
         public void TearDown()
         {
-            if (File.Exists(_saveFilePath))
+            if (_ownedDirectory != null && _ownedDirectory.Exists)
             {
-                File.Delete(_saveFilePath);
-            }
-
-            if (File.Exists(_saveFilePath + ".tmp"))
-            {
-                File.Delete(_saveFilePath + ".tmp");
-            }
-
-            if (File.Exists(_backupPath))
-            {
-                File.Copy(_backupPath, _saveFilePath, true);
-                File.Delete(_backupPath);
+                _ownedDirectory.Delete(true);
             }
         }
 
@@ -60,7 +38,7 @@ namespace CoreAI.Tests.EditMode
         public void Reset_DeletesSaveFileAndTmpFile_AndFlushesPersistence()
         {
             int flushCount = 0;
-            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance)
+            using WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance, null, true, _saveFilePath)
             {
                 WebGlFlushSync = () =>
                 {
@@ -85,7 +63,7 @@ namespace CoreAI.Tests.EditMode
         public void Reset_WithoutSaveFile_StillFlushesPersistence()
         {
             int flushCount = 0;
-            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance)
+            using WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance, null, true, _saveFilePath)
             {
                 WebGlFlushSync = () =>
                 {

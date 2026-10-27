@@ -10,6 +10,7 @@ using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Config;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.Infrastructure.Llm.Gateway;
 using CoreAI.Logging;
 using CoreAI.Infrastructure.World;
 #if COREAI_HAS_LLMUNITY && !UNITY_WEBGL
@@ -25,7 +26,7 @@ namespace CoreAI.Infrastructure.Llm
     /// <summary>
     /// Microsoft.Extensions.AI client wrapper used by CoreAI orchestration.
     /// </summary>
-    public sealed class MeaiLlmClient : ILlmClient
+    public sealed class MeaiLlmClient : ILlmClient, IOwnedGatewayClient
     {
         private readonly MEAI.IChatClient _innerClient;
         private readonly IGameLogger _logger;
@@ -33,8 +34,17 @@ namespace CoreAI.Infrastructure.Llm
         private readonly ICoreAISettings _settings;
         private readonly bool _supportsNativeToolCalling;
         private readonly IOpenAiHttpSettings? _endpointSettings;
+        private readonly IDisposable? _ownedGatewayResource;
+        private int _gatewayResourceDisposed;
 
         private const int HybridToolJsonHeldTailMaxChars = 64 * 1024;
+
+        private void ThrowIfOwnedGatewayRetired(CancellationToken cancellationToken)
+        {
+            if (_ownedGatewayResource != null) cancellationToken.ThrowIfCancellationRequested();
+            if (_ownedGatewayResource != null && Volatile.Read(ref _gatewayResourceDisposed) != 0)
+                throw new LlmClientException("The owned gateway client has retired.", LlmErrorCode.BackendUnavailable);
+        }
 
         /// <summary>Creates a client using the original constructor signature and inferred endpoint settings.</summary>
         public MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
@@ -50,6 +60,14 @@ namespace CoreAI.Infrastructure.Llm
         public MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
             bool supportsNativeToolCalling, IAgentMemoryStore? memoryStore = null,
             IOpenAiHttpSettings? endpointSettings = null)
+            : this(innerClient, logger, settings, supportsNativeToolCalling, memoryStore, endpointSettings, null)
+        {
+        }
+
+        /// <summary>Retains ownership only for an explicitly constructed gateway leaf.</summary>
+        internal MeaiLlmClient(MEAI.IChatClient innerClient, IGameLogger logger, ICoreAISettings settings,
+            bool supportsNativeToolCalling, IAgentMemoryStore? memoryStore,
+            IOpenAiHttpSettings? endpointSettings, IDisposable? ownedGatewayResource)
         {
             if (innerClient == null)
             {
@@ -61,6 +79,17 @@ namespace CoreAI.Infrastructure.Llm
             _memoryStore = memoryStore;
             _supportsNativeToolCalling = supportsNativeToolCalling;
             _endpointSettings = endpointSettings ?? (innerClient as MeaiOpenAiChatClient)?.RequestSettings;
+            _ownedGatewayResource = ownedGatewayResource;
+        }
+
+        /// <summary>Disposes explicit gateway ownership while leaving legacy borrowed clients unchanged.</summary>
+        bool IOwnedGatewayClient.OwnsGatewayResources => _ownedGatewayResource != null;
+
+        /// <summary>Disposes explicit gateway ownership while leaving legacy borrowed clients unchanged.</summary>
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _gatewayResourceDisposed, 1) == 0)
+                _ownedGatewayResource?.Dispose();
         }
 
         /// <summary>
@@ -103,6 +132,18 @@ namespace CoreAI.Infrastructure.Llm
             bool supportsNativeToolCalling,
             IAgentMemoryStore? memoryStore = null)
         {
+            return CreateHttp(openAiSettings, settings, logger, supportsNativeToolCalling, memoryStore, null);
+        }
+
+        /// <summary>Uses the platform transport with an owned scoped factory result; the transport remains borrowed.</summary>
+        public static MeaiLlmClient CreateHttp(
+            IOpenAiHttpSettings openAiSettings,
+            ICoreAISettings settings,
+            IGameLogger logger,
+            bool supportsNativeToolCalling,
+            IAgentMemoryStore? memoryStore,
+            Func<IOpenAiHttpSettings, IOpenAiHttpTransport, MEAI.IChatClient>? gatewayFactory)
+        {
             if (openAiSettings == null)
             {
                 throw new ArgumentNullException(nameof(openAiSettings));
@@ -138,8 +179,11 @@ namespace CoreAI.Infrastructure.Llm
 #else
             transport = new HttpClientOpenAiTransport();
 #endif
-            MeaiOpenAiChatClient innerClient = new(openAiSettings, transport, supportsNativeToolCalling);
-            return new MeaiLlmClient(innerClient, logger, settings, supportsNativeToolCalling: supportsNativeToolCalling, memoryStore: memoryStore, endpointSettings: openAiSettings);
+            MEAI.IChatClient innerClient = gatewayFactory != null
+                ? gatewayFactory(openAiSettings, transport)
+                : new MeaiOpenAiChatClient(openAiSettings, transport, supportsNativeToolCalling);
+            return new MeaiLlmClient(innerClient, logger, settings, supportsNativeToolCalling,
+                memoryStore, openAiSettings, gatewayFactory != null ? innerClient : null);
         }
 
         /// <summary>
@@ -174,13 +218,16 @@ namespace CoreAI.Infrastructure.Llm
         public async Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
             CancellationToken cancellationToken = default)
         {
+            ThrowIfOwnedGatewayRetired(cancellationToken);
             string roleId = request.AgentRoleId ?? "Unknown";
             using LlmRequestContext.Scope ctxScope = LlmRequestContext.Begin(
                 roleId,
                 request.TraceId,
                 EnsureIdempotencyKey(request),
                 request.ActorId);
-            IReadOnlyList<ILlmTool> invocationTools = BuildInvocationTools(request.Tools, roleId);
+            IReadOnlyList<ILlmTool> invocationTools = request.ForcedToolMode == LlmToolChoiceMode.None
+                ? Array.Empty<ILlmTool>()
+                : BuildInvocationTools(request.Tools, roleId);
             List<MEAI.AIFunction> aiTools = request.ForcedToolMode == LlmToolChoiceMode.None
                 ? new List<MEAI.AIFunction>() : BuildAIFunctions(invocationTools, roleId);
             string bindingError = RequiredToolBindingError(request, aiTools);
@@ -495,6 +542,7 @@ namespace CoreAI.Infrastructure.Llm
             [System.Runtime.CompilerServices.EnumeratorCancellation]
             CancellationToken cancellationToken = default)
         {
+            ThrowIfOwnedGatewayRetired(cancellationToken);
             int maxChars = _settings.MaxResponseChars;
             int keptChars = 0;
             long droppedChars = 0;
@@ -549,7 +597,9 @@ namespace CoreAI.Infrastructure.Llm
             List<MEAI.ChatMessage> chatMessages = BuildMeaiChatMessages(request);
             HashSet<string>? liftedCameraCallIds = null;
 
-            IReadOnlyList<ILlmTool> invocationTools = BuildInvocationTools(request.Tools, roleId);
+            IReadOnlyList<ILlmTool> invocationTools = request.ForcedToolMode == LlmToolChoiceMode.None
+                ? Array.Empty<ILlmTool>()
+                : BuildInvocationTools(request.Tools, roleId);
             List<MEAI.AIFunction> aiTools = request.ForcedToolMode == LlmToolChoiceMode.None
                 ? new List<MEAI.AIFunction>() : BuildAIFunctions(invocationTools, roleId);
             string bindingError = RequiredToolBindingError(request, aiTools);
@@ -3008,15 +3058,8 @@ namespace CoreAI.Infrastructure.Llm
         private IReadOnlyList<ILlmTool> BuildInvocationTools(IReadOnlyList<ILlmTool>? tools, string roleId)
         {
             if (tools == null || tools.Count == 0) return Array.Empty<ILlmTool>();
-            List<ILlmTool> bound = new List<ILlmTool>(tools.Count);
-            foreach (ILlmTool tool in tools)
-            {
-                bound.Add(_memoryStore == null
-                    ? tool
-                    : CallSkillToolLlmTool.BindForRole(tool, _memoryStore, roleId));
-            }
-
-            return bound.AsReadOnly();
+            if (_memoryStore == null) return new List<ILlmTool>(tools).AsReadOnly();
+            return CallSkillToolLlmTool.BindToolsForRole(tools, _memoryStore, roleId);
         }
 
         internal List<MEAI.AIFunction> BuildAIFunctions(IReadOnlyList<ILlmTool>? tools, string roleId)

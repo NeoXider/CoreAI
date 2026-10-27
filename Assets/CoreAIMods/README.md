@@ -1,14 +1,18 @@
 # CoreAI Mods (Lua)
 
+Start with the [ready-to-run Lua examples](Docs/LUA_MOD_EXAMPLES.md): orbit animation,
+waypoint platform, tween gate, respawning coins, saved score, round clock, recycling conveyor
+and a frame-budgeted Lua maze solver. New examples are opt-in and editable from the Hub.
+
 The **optional** Lua modding layer for CoreAI: a sandboxed Lua runtime, persistent mods that the
 in-game AI or the player writes while the game runs, a Roblox-compatible scripting surface (the Rbx
 API), world save/load packages, and the Hub pages that manage mods.
 
 | Package | Depends on | Status |
 |---------|-----------|--------|
-| `com.neoxider.coreaimods` 7.50.2 — [`package.json`](package.json) | `com.neoxider.coreai` 7.50.2, `com.neoxider.coreaiunity` 7.50.2 | Optional |
+| `com.neoxider.coreaimods` — version in [`package.json`](package.json) | `com.neoxider.coreai`, `com.neoxider.coreaiunity` (same version, lockstep) | Optional |
 
-The Lua VM is [Lua-CSharp](https://github.com/nuskey8/Lua-CSharp) v0.5.6 (Lua 5.2 semantics,
+The bundled Lua VM is [Lua-CSharp](https://github.com/nuskey8/Lua-CSharp) (Lua 5.2 semantics,
 double-only numbers), a managed, AOT-safe VM that runs under IL2CPP and WebGL. It ships bundled as
 `Plugins/Lua.dll` + `Plugins/Lua.Annotations.dll`; there is no other Lua package to install. Luau
 sources are rewritten to Lua 5.2 before every compile, so mods may use Roblox-style Luau syntax.
@@ -74,8 +78,24 @@ only when it composes `CoreAiModsLifetimeScope`.
 With `com.neoxider.coreaihub` installed, `CoreAI.Mods.Hub` compiles and **CoreAI → Setup → Add Hub**
 adds `CoreAiModsHubBinder` to the Hub. The binder finds the scene's `CoreAiModsLifetimeScope` and
 registers the **Mods** tab (sub-tabs **Mods** and **Logs**) and the **World Loads** page, and upgrades
-the Settings and Statistics pages with live sources. `WorldStateHubBinder`, added by hand next to the
-Hub window, registers the **World** page. See [the Hub README](../CoreAIHub/README.md).
+the Settings and Statistics pages with live sources. Setup also adds the optional
+`WorldStateHubBinder` when that type is available; it registers **World** when a world manager is
+resolved. A custom Hub can add the binder explicitly. See [the Hub README](../CoreAIHub/README.md).
+
+## Host gameplay and world-package storage
+
+A host can expose its own Lua API through `ICoreAiLuaGameplayBindingsProvider`. Assign explicit
+components to `CoreAiModsLifetimeScope`'s **Gameplay bindings providers** list. Each provider must
+respect the effective `LuaCapabilities` supplied at registration and be safe before `Start`:
+persisted mods can rehydrate during container construction. The captured provider set applies to
+persistent mods, one-off Lua and replacement worlds. The default composition installs no custom
+gameplay API. The ModdableUnits demo shows an opt-in provider for its own unit controller.
+
+`CoreAiModsLifetimeScope.SetWorldPackageStore(IRbxWorldPackageStore)` supplies a host-owned
+world-package store before the Mods container builds. It rejects null and calls after construction;
+its value is runtime-only and is not serialized into the scene. Custom installer composition can
+supply the same existing store port directly. The host owns the store's persistence and lifetime
+contract; selecting a store does not confirm a save or browser durability.
 
 ## Documentation
 
@@ -121,3 +141,9 @@ Package-local notes:
 - Portable (no Unity) runs of the Lua-tier tests: [tools/portable/LuaTests](../../tools/portable/LuaTests/README.md).
 
 What is built and what is planned: [ROBLOX_API_ROADMAP.md](../../Docs/CoreAIMods/ROBLOX_API_ROADMAP.md).
+
+## Runtime source editor
+
+The [runtime code editor and interpreter API](../../Docs/CoreAI/CODE_EDITOR.md) supports Lua
+by default, an independent Python editing stub, bounded presentation and explicit Save & run.
+Hosts can replace the portable language/interpreter ports and the Unity view independently.

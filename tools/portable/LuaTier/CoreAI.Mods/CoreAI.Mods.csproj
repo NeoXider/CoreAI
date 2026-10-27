@@ -52,9 +52,9 @@
       <HintPath>$(RepoRoot)/Assets/CoreAIMods/Plugins/Lua.dll</HintPath>
       <Private>true</Private>
     </Reference>
-    <PackageReference Include="UniTask" Version="2.5.10" />
-    <!-- WHY: Lua.dll is built against Microsoft.Bcl.TimeProvider; Assets/packages.config pins 8.0.0. -->
-    <PackageReference Include="Microsoft.Bcl.TimeProvider" Version="8.0.0" />
+    <PackageReference Include="UniTask" Version="2.5.11" />
+    <!-- WHY: Lua.dll requires Microsoft.Bcl.TimeProvider; keep this compatible patch aligned with Assets/packages.config. -->
+    <PackageReference Include="Microsoft.Bcl.TimeProvider" Version="8.0.1" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="PortablePlayerLoopRefusal.cs" />

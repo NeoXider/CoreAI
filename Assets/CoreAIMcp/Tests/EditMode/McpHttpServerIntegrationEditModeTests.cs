@@ -220,6 +220,107 @@ namespace CoreAI.Mcp.Tests
             await _server.Completion;
         }
 
+        [Test]
+        public async Task Start_AfterStop_RebindsLoopbackPrefix_AndServes()
+        {
+            int port = FreeLoopbackPort();
+            FakeMcpTool echo = new FakeMcpTool("echo_tool");
+            McpToolRegistry registry = new(new[] { echo });
+            McpSessionStore sessions = new();
+            McpHttpServer server = new(port, new McpRpcDispatcher(registry, sessions, new InlineMainThreadDispatcher()));
+            try
+            {
+                try { server.Start(); }
+                catch (HttpListenerException ex)
+                {
+                    server.Dispose();
+                    Assert.Ignore($"HttpListener could not bind loopback (needs a URL ACL): {ex.Message}");
+                    return;
+                }
+
+                server.Stop();
+                Assert.IsFalse(server.IsRunning, "Stop must release the listener.");
+
+                server.Start();
+                Assert.IsTrue(server.IsRunning, "A stopped real listener must be restartable on the same prefix.");
+
+                using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(5) };
+                string url = $"http://127.0.0.1:{port}/mcp";
+                using HttpResponseMessage response = await PostToUrlAsync(client, url, InitializeBody(), "application/json");
+                Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+            }
+            finally
+            {
+                server.Dispose();
+            }
+        }
+
+        [Test]
+        public async Task Stop_ReentrantCancellationCallback_ReleasesPrefixBeforeCallback_AndReplacementServes()
+        {
+            int port = FreeLoopbackPort();
+            ReentrantCancellationTool tool = new ReentrantCancellationTool();
+            McpToolRegistry registry = new(new[] { tool });
+            McpSessionStore sessions = new();
+            McpRpcDispatcher dispatcher = new(registry, sessions, new InlineMainThreadDispatcher());
+            McpHttpServer oldServer = new(port, dispatcher);
+            McpHttpServer replacementServer = null;
+            tool.OnCancelled = () =>
+            {
+                McpHttpServer candidate = new(port, dispatcher);
+                candidate.Start();
+                replacementServer = candidate;
+            };
+
+            try
+            {
+                try { oldServer.Start(); }
+                catch (HttpListenerException ex)
+                {
+                    oldServer.Dispose();
+                    Assert.Ignore($"HttpListener could not bind loopback (needs a URL ACL): {ex.Message}");
+                    return;
+                }
+
+                using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(10) };
+                string url = $"http://127.0.0.1:{port}/mcp";
+                Task<JObject> request = SendRpcToUrlAsync(client, url,
+                    new JObject
+                    {
+                        ["jsonrpc"] = "2.0",
+                        ["id"] = 1,
+                        ["method"] = McpMethods.ToolsCall,
+                        ["params"] = new JObject { ["name"] = tool.Name, ["arguments"] = new JObject() }
+                    });
+
+                Task startedWait = Task.WhenAny(tool.Started.Task, Task.Delay(5000));
+                await startedWait;
+                Assert.IsTrue(tool.Started.Task.IsCompleted, "The blocking request must reach the tool.");
+
+                oldServer.Stop();
+
+                Assert.IsNotNull(replacementServer, "The cancellation callback must install a replacement listener.");
+                Assert.IsTrue(replacementServer.IsRunning, "The replacement must bind while the old stop is still completing.");
+
+                Task completionWait = Task.WhenAny(oldServer.Completion, Task.Delay(5000));
+                await completionWait;
+                Assert.IsTrue(oldServer.Completion.IsCompleted, "The old transport must finish its late cleanup.");
+
+                Assert.IsTrue(replacementServer.IsRunning, "Late old cleanup must not dispose the replacement.");
+
+                string replacementUrl = $"http://127.0.0.1:{port}/mcp";
+                using HttpResponseMessage response = await PostToUrlAsync(client, replacementUrl, InitializeBody(), "application/json");
+                Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, "The replacement must serve real HTTP requests.");
+
+                try { await request; } catch (Exception) { }
+            }
+            finally
+            {
+                replacementServer?.Dispose();
+                oldServer.Dispose();
+            }
+        }
+
         private Task<HttpResponseMessage> OpenNotificationsAsync(HttpClient client, string session)
         {
             HttpRequestMessage request = new(HttpMethod.Get, Url);
@@ -305,6 +406,24 @@ namespace CoreAI.Mcp.Tests
             }
         }
 
+        private Task<HttpResponseMessage> PostToUrlAsync(HttpClient client, string url, string body, string accept)
+        {
+            HttpRequestMessage request = new(HttpMethod.Post, url)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            };
+            request.Headers.TryAddWithoutValidation("Accept", accept);
+            return client.SendAsync(request);
+        }
+
+        private static async Task<JObject> SendRpcToUrlAsync(HttpClient client, string url, JObject body)
+        {
+            using StringContent content = new(body.ToString(), Encoding.UTF8, "application/json");
+            using HttpResponseMessage response = await client.PostAsync(url, content).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            return JObject.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false));
+        }
+
         private Task<HttpResponseMessage> PostAsync(HttpClient client, string body, string accept)
         {
             HttpRequestMessage request = new(HttpMethod.Post, Url)
@@ -341,6 +460,30 @@ namespace CoreAI.Mcp.Tests
             int port = ((IPEndPoint)probe.LocalEndpoint).Port;
             probe.Stop();
             return port;
+        }
+
+        private sealed class ReentrantCancellationTool : IMcpTool
+        {
+            public string Name => "blocking";
+            public string Description => "Blocks until cancelled and restarts on cancellation.";
+            public string InputSchemaJson => "{\"type\":\"object\"}";
+            public TaskCompletionSource<bool> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public Action OnCancelled { get; set; }
+
+            public async Task<McpToolResult> InvokeAsync(JObject arguments, CancellationToken cancellationToken)
+            {
+                using CancellationTokenRegistration registration = cancellationToken.Register(() => OnCancelled?.Invoke());
+                Started.TrySetResult(true);
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
+                return McpToolResult.Text("cancelled");
+            }
         }
     }
 }

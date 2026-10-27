@@ -1,10 +1,17 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 
 namespace CoreAI.Ai.Hub
 {
+    /// <summary>Optional bounded execution scope around the existing Hub save transaction.</summary>
+    public interface IBudgetedHubModService
+    {
+        IDisposable BeginInvocation(LuaModInvocationLimits limits, CancellationToken cancellationToken = default);
+    }
+
     /// <summary>
     /// <see cref="IHubModService"/> adapter over the Lua-CSharp <see cref="LuaCsModRuntime"/> — the
     /// additive migration counterpart of <c>LuaModRuntime</c>. Its lifecycle surface mirrors the
@@ -14,12 +21,21 @@ namespace CoreAI.Ai.Hub
     /// <see cref="LuaCsModRuntime.GetRecentHandlerErrors"/>), so the Hub Mods page renders it
     /// identically. Store persistence is handled by <see cref="HubModServiceBase"/>.
     /// </summary>
-    public sealed class LuaCsModRuntimeHubService : HubModServiceBase, IDisposable
+    public sealed class LuaCsModRuntimeHubService : HubModServiceBase, IDisposable, IBudgetedHubModService
     {
         private readonly ILuaModRuntime _runtime;
         private readonly ActorContext _actorContext;
         private readonly bool _rbxApiAvailable;
         private bool _disposed;
+
+        /// <inheritdoc />
+        public IDisposable BeginInvocation(LuaModInvocationLimits limits, CancellationToken cancellationToken = default)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(LuaCsModRuntimeHubService));
+            if (!(_runtime is IBudgetedLuaModRuntime budgeted))
+                throw new NotSupportedException("The configured Lua runtime does not support bounded editor execution.");
+            return budgeted.BeginInvocation(limits, cancellationToken);
+        }
 
         /// <param name="runtime">The mod runtime, or a facade over the active world session's runtime.</param>
         /// <param name="actorContext">Trusted actor performing Hub mod operations.</param>

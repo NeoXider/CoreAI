@@ -230,17 +230,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         public sealed class SessionCapturingLlmClient : ILlmClient
         {
             private readonly ILlmClient _inner;
-            private readonly Func<double> _clockMilliseconds;
-            private readonly object _gate = new();
-            private readonly List<InFlightTurn> _inFlight = new();
-            private string _systemPrompt = "";
-            private bool _sealed;
-            private LlmProviderResponseState _providerResponseState;
-            private bool _sealedProviderResponseObserved;
-            private LlmTimeoutKind _sealedTimeoutKind;
-            private DateTime? _lastProviderActivityUtc;
-            private DateTime? _sealedLastProviderActivityUtc;
-            private bool _transportFailed;
+    private readonly Func<double> _clockMilliseconds;
+    private readonly Func<DateTime> _utcNow;
+    private readonly object _gate = new();
+    private readonly List<InFlightTurn> _inFlight = new();
+    private string _systemPrompt = "";
+    private bool _sealed;
+    private LlmProviderResponseState _providerResponseState;
+    private bool _sealedProviderResponseObserved;
+    private LlmTimeoutKind _sealedTimeoutKind;
+    private DateTime? _lastProviderActivityUtc;
+    private DateTime? _sealedLastProviderActivityUtc;
+    private DateTime? _currentTurnStartedUtc;
+    private DateTime? _sealedCurrentTurnStartedUtc;
+    private bool _transportFailed;
 
             /// <summary>Explicit transport evidence captured before orchestration can wrap cancellation.</summary>
             public bool TransportFailed
@@ -285,6 +288,15 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 get { lock (_gate) { return _sealed ? _sealedLastProviderActivityUtc : _lastProviderActivityUtc; } }
             }
 
+            /// <summary>
+            /// Start of the current (or most recent) client turn, used as the admission inactivity baseline so a
+            /// freshly accepted turn cannot inherit elapsed time from earlier work. Sealed on <see cref="Seal"/>.
+            /// </summary>
+            public DateTime? CurrentTurnStartedUtc
+            {
+                get { lock (_gate) { return _sealed ? _sealedCurrentTurnStartedUtc : _currentTurnStartedUtc; } }
+            }
+
             private sealed class InFlightTurn
             {
                 public LlmCompletionRequest Request;
@@ -293,14 +305,20 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             }
 
             public SessionCapturingLlmClient(ILlmClient inner)
-                : this(inner, () => Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency)
+                : this(inner, () => Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency, null)
             {
             }
 
             internal SessionCapturingLlmClient(ILlmClient inner, Func<double> clockMilliseconds)
+                : this(inner, clockMilliseconds, null)
+            {
+            }
+
+            internal SessionCapturingLlmClient(ILlmClient inner, Func<double> clockMilliseconds, Func<DateTime> utcNow)
             {
                 _inner = inner ?? throw new ArgumentNullException(nameof(inner));
                 _clockMilliseconds = clockMilliseconds ?? throw new ArgumentNullException(nameof(clockMilliseconds));
+                _utcNow = utcNow ?? (() => DateTime.UtcNow);
             }
 
             public readonly List<CapturedTurn> Turns = new();
@@ -409,9 +427,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                                 if (!_sealed)
                                 {
                                     turn.Request.ProviderResponseState?.RecordResponse();
-                                    if (providerActivity)
+                                     if (providerActivity)
                                     {
-                                        _lastProviderActivityUtc = DateTime.UtcNow;
+                                        _lastProviderActivityUtc = _utcNow();
                                     }
                                 }
                             }
@@ -485,6 +503,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     _sealedProviderResponseObserved = _providerResponseState?.ResponseObserved == true;
                     _sealedTimeoutKind = _providerResponseState?.TimeoutKind ?? LlmTimeoutKind.None;
                     _sealedLastProviderActivityUtc = _lastProviderActivityUtc;
+                    _sealedCurrentTurnStartedUtc = _currentTurnStartedUtc;
                     _sealed = true;
                 }
             }
@@ -499,6 +518,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     {
                         _providerResponseState = request.ProviderResponseState;
                         _lastProviderActivityUtc = null;
+                        _currentTurnStartedUtc = _utcNow();
                         _inFlight.Add(turn);
                     }
                 }
@@ -606,7 +626,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     && (!string.IsNullOrWhiteSpace(result.Content) || (result.ExecutedToolCalls?.Count ?? 0) > 0))
                 {
                     AnyUsableOutput = true;
-                    _lastProviderActivityUtc = DateTime.UtcNow;
+                    _lastProviderActivityUtc = _utcNow();
                 }
 
                 Turns.Add(turn);
@@ -2209,8 +2229,9 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 Environment.GetEnvironmentVariable(EnvProviderStallSeconds));
         }
 
-        private static double ProviderActivityGapSeconds(DateTime scenarioEndUtc, double scenarioLatencySeconds,
-            DateTime? providerActivityUtc, DateTime? toolActivityUtc)
+        internal static double ProviderActivityGapSeconds(DateTime scenarioEndUtc, double scenarioLatencySeconds,
+            DateTime? providerActivityUtc, DateTime? toolActivityUtc,
+            DateTime? currentTurnStartedUtc = null)
         {
             DateTime lastActivity = DateTime.MinValue;
             if (providerActivityUtc.HasValue)
@@ -2223,9 +2244,19 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 lastActivity = toolActivityUtc.Value;
             }
 
-            return lastActivity == DateTime.MinValue
-                ? Math.Max(0, scenarioLatencySeconds)
-                : Math.Max(0, (scenarioEndUtc - lastActivity).TotalSeconds);
+            if (currentTurnStartedUtc.HasValue && currentTurnStartedUtc.Value > lastActivity)
+            {
+                lastActivity = currentTurnStartedUtc.Value;
+            }
+
+            if (lastActivity == DateTime.MinValue)
+            {
+                return Math.Max(0, scenarioLatencySeconds);
+            }
+
+            // WHY: a known current-turn admission baseline beats whole-scenario age, so a freshly accepted
+            // quiet turn is measured from its own start instead of inheriting earlier activity or scenario start.
+            return Math.Max(0, (scenarioEndUtc - lastActivity).TotalSeconds);
         }
 
         /// <summary>Allows another build turn only when the previous one used tools and time remains.</summary>
@@ -2520,7 +2551,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                 // WHY: a task that outlived the grace window must not append turns while they are read below.
                 capture.Seal();
                 double providerStallSeconds = ProviderActivityGapSeconds(scenarioEndUtc, obs.LatencyMs / 1000.0,
-                    capture.LastProviderActivityUtc, toolObserver.LastActivityUtc);
+                    capture.LastProviderActivityUtc, toolObserver.LastActivityUtc, capture.CurrentTurnStartedUtc);
 
                 // WHY: Budget cancellation after executed work can end a scenario cleanly.
                 // WHY: Typed client deadlines are reconciled with provider-response evidence before grading.

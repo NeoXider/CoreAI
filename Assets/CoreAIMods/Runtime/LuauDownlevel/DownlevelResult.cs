@@ -28,7 +28,7 @@ namespace CoreAI.Infrastructure.Luau
         public long MaxWorkUnits { get; }
 
         /// <summary>
-        /// Optional simple Lua identifier outside the reserved __luau_t prefix, naming a trusted host function
+        /// Optional simple Lua identifier outside the reserved __luau_t prefix and reserved lexical names such as _ENV, naming a trusted host function
         /// that normalizes an iterator
         /// expression list into iterator/state/control values. It must preserve ordinary iterator
         /// triples and honor actual __iter metamethods without exposing protected metatables.
@@ -141,6 +141,7 @@ namespace CoreAI.Infrastructure.Luau
 
             switch (name)
             {
+                case "_ENV":
                 case "and": case "break": case "do": case "else": case "elseif": case "end":
                 case "false": case "for": case "function": case "goto": case "if": case "in":
                 case "local": case "nil": case "not": case "or": case "repeat": case "return":

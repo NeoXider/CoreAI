@@ -1,0 +1,33 @@
+{
+  "Status": "in-progress",
+  "Stage": "D:\\Git\\CoreAI\\artifacts\\code-editor-20261026\\staging",
+  "Model": "gpt-6.1-sol",
+  "ReasoningEffort": "max",
+  "Files": [
+    {
+      "Path": "Assets/CoreAIMods/Runtime/HubIntegration/CodeEditing/CodeEditorView.cs",
+      "CandidateSha256": "4F65B6A683F9153FD6C9348080992B8AE6A97D40AAE5A243C26A1A8EF102BE13",
+      "BaselineSha256": null
+    },
+    {
+      "Path": "Assets/CoreAIMods/Runtime/HubIntegration/CodeEditing/CodeEditorSurface.cs",
+      "CandidateSha256": "9D2BCA5D9E5BBFEF4D60CCCDDC6108DFBAF4FB7639E7D4295BE870244F271679",
+      "BaselineSha256": null
+    },
+    {
+      "Path": "Assets/CoreAIMods/Runtime/HubIntegration/CodeEditing/CodeLanguageProfiles.cs",
+      "CandidateSha256": "9D8ED8E1F411CF2009987669D5B1A90D78518C614C71F0575C4C5E15EE68B9DD",
+      "BaselineSha256": null
+    },
+    {
+      "Path": "Assets/CoreAIMods/Runtime/HubIntegration/CodeEditing/CompletionPlacement.cs",
+      "CandidateSha256": "8C7EDC61BECBE68187A506D6A32114FA69CF05B10A6AE377A844230B7DE1EE48",
+      "BaselineSha256": null
+    },
+    {
+      "Path": "Assets/CoreAIMods/Runtime/HubIntegration/HubModEditorPage.cs",
+      "CandidateSha256": "5F34B3A8B86846B7F584B390982ED3F4A6B1CAE92B9AB019629DFBA475801CB0",
+      "BaselineSha256": "17998A6D5DA026D39C4D453F784BFCADDA31B16C18895E95C17A79C9241058CB"
+    }
+  ]
+}
