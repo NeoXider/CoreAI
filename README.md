@@ -15,7 +15,7 @@ change a running world. The core is engine-free, so the same runtime also builds
 [![CI](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml/badge.svg)](https://github.com/NeoXider/CoreAI/actions/workflows/ci.yml)
 [![Unity](https://img.shields.io/badge/Unity-6000.0%2B-black)](https://unity.com/releases/editor)
 [![Runs on](https://img.shields.io/badge/runs%20on-local%204B%20GGUF%20or%20any%20OpenAI--compatible%20API-blue)](#recommended-models)
-[![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-PolyForm%20Small%20Business%201.0-blue)](LICENSE)
 
 <sub>
 <a href="#who-this-is-for">Who it's for</a>&nbsp;&nbsp;•&nbsp;
@@ -506,10 +506,15 @@ Release notes live only in the two changelogs — [core](Assets/CoreAI/CHANGELOG
 
 **Author:** [Neoxider](https://github.com/NeoXider) · **Ecosystem:**
 [NeoxiderTools](https://github.com/NeoXider/NeoxiderTools) · **License:**
-[PolyForm Noncommercial 1.0](LICENSE)
+[PolyForm Small Business 1.0](LICENSE)
 
 **Contact:** neoxider@gmail.com · [GitHub Issues](https://github.com/NeoXider/CoreAI/issues)
 
-CoreAI is free for non-commercial use and developed in spare time. If it saves you hours:
-star the repo, [sponsor on GitHub](https://github.com/sponsors/NeoXider), or write to
-neoxider@gmail.com for a commercial licence, priority support, or custom integration.
+CoreAI is free for personal and non-commercial use and for small businesses: fewer than 100 people
+and under 1,000,000 USD (2019) revenue in the prior tax year. Larger companies need a commercial
+licence: neoxider@gmail.com. This license applies from release 7.55.0; earlier releases keep the
+license they were published under.
+
+CoreAI is developed in spare time. If it saves you hours: star the repo,
+[sponsor on GitHub](https://github.com/sponsors/NeoXider), or write to neoxider@gmail.com for
+priority support or custom integration.

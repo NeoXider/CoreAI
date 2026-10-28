@@ -259,7 +259,10 @@ in `package.json`, not in this file.
 ---
 
 Author: [Neoxider](https://github.com/NeoXider) · License:
-[PolyForm Noncommercial 1.0](../../LICENSE) · Commercial licensing: neoxider@gmail.com
+[PolyForm Small Business 1.0](LICENSE.md) from 7.55.0 on · Free for personal and non-commercial use
+and for small businesses (fewer than 100 people and under 1,000,000 USD (2019) revenue in the prior
+tax year); larger companies need a commercial licence: neoxider@gmail.com. Earlier releases keep the
+license they were published under.
 
 ## Scoped Gateway Client
 

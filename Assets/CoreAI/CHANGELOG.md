@@ -4,6 +4,10 @@
 
 Candidate on `demo`; publication and the remaining manual acceptance gates are tracked in the [verification report](../../dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md).
 
+### License
+
+- Releases from 7.55.0 on are under the [PolyForm Small Business License 1.0.0](LICENSE.md) (`PolyForm-Small-Business-1.0.0` in all seven `package.json` files), replacing PolyForm Noncommercial 1.0.0. Personal and non-commercial use and use by small businesses (fewer than 100 people and under 1,000,000 USD (2019) revenue in the prior tax year) are free; larger companies need a commercial licence from neoxider@gmail.com. Earlier releases keep the license they were published under.
+
 ### Added
 
 - Portable Gateway Client with scoped authentication, quota checks and optional usage reporting, plus a standalone .NET usage example and Unity composition adapters.

@@ -8,7 +8,7 @@
     "name": "Neoxider",
     "url": "https://github.com/NeoXider/CoreAI"
   },
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "PolyForm-Small-Business-1.0.0",
   "licensesUrl": "https://github.com/NeoXider/CoreAI/blob/main/LICENSE",
   "dependencies": {
     "com.neoxider.coreai": "7.55.0",
