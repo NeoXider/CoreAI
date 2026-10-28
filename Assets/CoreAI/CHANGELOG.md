@@ -1,5 +1,17 @@
 # Changelog
 
+## [7.56.0] - 2026-10-28
+
+Released on `main` with tag `v7.56.0`. Full EditMode 8,307: 8,292 passed / 0 failed / 15 skipped; hermetic PlayMode 395: 391 passed / 0 failed / 4 skipped. The real-provider (OpenRouter `:free`) demo cases did not run: every request was refused with HTTP 401 because the local test key is not an OpenRouter key. They stay open in the [verification report](../../dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md) together with the manual input/visual and player/IL2CPP/browser/device gates.
+
+### Changed
+
+- Mods stores (`FileLuaModStore`, `FileLuaModSourceStore`, `FileRbxWorldPackageStore`) and `LuaLogFileSink` resolve their default folders from `CoreAiStorageRoot`, so a host or the test run can move them together with the Unity host's stores. Explicit root arguments still win.
+
+### Fixed
+
+- `FileLuaModSourceStore` ignores `.staging-<id>` folders left by an interrupted first save when listing mods and counting them against the stored-mod limit; such a folder holds a complete manifest and was shown as a second copy of the mod.
+
 ## [7.55.0] - 2026-10-28
 
 Released on `main` with tag `v7.55.0`. The [verification report](../../dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md) lists the saved receipts and the gates still open at release: the three failed real-provider (OpenRouter) demo cases, manual editor input/movement/material-visual checks, and player/IL2CPP/browser/device runs.

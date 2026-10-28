@@ -26,6 +26,9 @@ namespace CoreAI.Infrastructure.Lua
         };
 
         private readonly string _dir;
+
+        /// <summary>The resolved storage directory; internal test seam for storage-root checks.</summary>
+        internal string StoragePath => _dir;
         private readonly ILog _log;
         private readonly Func<string, string, bool> _legacyIdentityVerifier;
         internal static Func<bool> PersistenceArmingForTesting;
@@ -90,7 +93,7 @@ namespace CoreAI.Infrastructure.Lua
         /// <summary>Creates a file-backed Lua mod store under CoreAI persistent data.</summary>
         /// <param name="rootDirectory">
         /// Optional override for the storage directory; defaults to the CoreAI Lua mod folder under
-        /// <see cref="Application.persistentDataPath"/>.
+        /// <see cref="CoreAiStorageRoot.PersistentDataRoot"/>.
         /// </param>
         /// <param name="log">Optional logger.</param>
         /// <param name="storeId">
@@ -109,8 +112,7 @@ namespace CoreAI.Infrastructure.Lua
         {
             string baseDir = !string.IsNullOrWhiteSpace(rootDirectory)
                 ? rootDirectory.Trim()
-                : Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
-                    CoreAiPersistentPaths.LuaMods);
+                : CoreAiStorageRoot.Combine(CoreAiPersistentPaths.LuaMods);
             _dir = LuaModStoreId.ApplyTo(baseDir, storeId);
             _log = log;
             _legacyIdentityVerifier = legacyIdentityVerifier;

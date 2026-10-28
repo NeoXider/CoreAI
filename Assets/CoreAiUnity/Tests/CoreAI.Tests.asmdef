@@ -9,6 +9,7 @@
     "CoreAI.ExampleGame",
     "CoreAI.Hub.UI",
     "CoreAI.Source",
+    "CoreAI.Tests.PlayMode.Shared",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner",
     "VContainer",

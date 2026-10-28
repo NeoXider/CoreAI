@@ -14,9 +14,11 @@ namespace CoreAI.Tests.EditMode
         public void DefaultConstructor_PreservesPublishedSnapshotLocationWithoutReadingIt()
         {
             using WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance);
-            Assert.AreEqual(Path.GetFullPath(Path.Combine(Application.persistentDataPath,
+            Assert.AreEqual(Path.GetFullPath(Path.Combine(CoreAiStorageRoot.PersistentDataRoot,
                 CoreAiPersistentPaths.RootFolderName, CoreAiPersistentPaths.WorldState, "world_state.json")),
                 Path.GetFullPath(manager.SaveFilePath));
+            Assert.AreEqual(Path.GetFullPath(manager.SaveFilePath),
+                Path.GetFullPath(WorldStateManager.DefaultSaveFilePath()));
         }
 
         [Test]

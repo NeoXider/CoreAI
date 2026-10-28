@@ -99,6 +99,9 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 - [completion-2026-10-27/STORAGE_ISOLATION.md](completion-2026-10-27/STORAGE_ISOLATION.md),
   [OPENROUTER_TRIAGE.md](completion-2026-10-27/OPENROUTER_TRIAGE.md) and
   [WORLD_SNAPSHOT_RECOVERY.md](completion-2026-10-27/WORLD_SNAPSHOT_RECOVERY.md) - the world-snapshot
-  overwrite incident: explicit snapshot path and live-fixture store isolation, triage of the three failed
-  OpenRouter cases with bounded direct provider probes, and the read-only search that found no
-  restorable copy of the overwritten `world_state.json`.
+  overwrite incident: explicit snapshot path and live-fixture store isolation, then the single
+  `CoreAiStorageRoot` design that keeps every test run out of the developer's saves (2026-10-28), triage of
+  the three failed OpenRouter cases with bounded direct provider probes, and the read-only search that found
+  no restorable copy of the overwritten `world_state.json`.
+- [completion-2026-10-27/PR_AUDIT.md](completion-2026-10-27/PR_AUDIT.md#root-adjudication-of-all-28-findings---2026-10-28) -
+  also holds the 2026-10-28 root adjudication of all 28 review findings and the two defects fixed with it.

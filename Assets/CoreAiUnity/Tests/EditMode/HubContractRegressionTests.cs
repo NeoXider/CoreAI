@@ -143,6 +143,53 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// PR-09-002 through the real root KeyDown handler: an Escape the Hub does not handle must keep
+        /// bubbling to the host, and an Escape that collapses the Hub must stop there.
+        /// <para>
+        /// WHY an ancestor observer rather than the handler's return value: the original defect consumed
+        /// Escape in <c>OnRootKeyDown</c> even when nothing handled it, and a test of the private handler's
+        /// result stays green if the consume moves back into the event callback.
+        /// </para>
+        /// </summary>
+        [Test]
+        public void Window_RootKeyDown_ConsumesEscapeOnlyWhenTheHubHandlesIt([Values(false, true)] bool collapses)
+        {
+            HubPageRegistry registry = new();
+            registry.Register("first", () => new RecordingPage("first"), 0);
+            using (WindowHarness harness = new(registry))
+            {
+                VisualElement host = harness.Host.rootVisualElement;
+                Button tab = host.Q<Button>("coreai-hub-tab-first");
+                Assert.IsNotNull(tab);
+                tab.Focus();
+                Set(harness.Window, "escapeCollapses", collapses);
+                int bubbledToHost = 0;
+                EventCallback<KeyDownEvent> observer = evt =>
+                {
+                    if (evt.keyCode == KeyCode.Escape)
+                    {
+                        bubbledToHost++;
+                    }
+                };
+                host.RegisterCallback(observer);
+                try
+                {
+                    SendKey(tab, KeyCode.Escape);
+                }
+                finally
+                {
+                    host.UnregisterCallback(observer);
+                }
+
+                Assert.AreEqual(collapses, Get<bool>(harness.Window, "_collapsed"));
+                Assert.AreEqual(collapses ? 0 : 1, bubbledToHost,
+                    collapses
+                        ? "An Escape that collapsed the Hub is handled and must not reach the host as well."
+                        : "An Escape the Hub did not handle must stay available to the host and focused UI.");
+            }
+        }
+
         [UnityTest]
         public IEnumerator Window_RegistrySwapWithSameId_FencesAlreadyQueuedOldNotification()
         {

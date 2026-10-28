@@ -102,6 +102,32 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(1, Directory.GetDirectories(_root).Length);
         }
 
+        /// <summary>
+        /// A first canonical save stages its package in an owned <c>.staging-</c> folder. A crash after
+        /// the staged manifest is written but before the folder is moved into place leaves a complete
+        /// manifest under that name; it must not be listed as an installed mod.
+        /// </summary>
+        [Test]
+        public void List_IgnoresAStagingFolderLeftByAnInterruptedFirstSave()
+        {
+            _store.SaveStrict("real", "return 'real'", Manifest("real"));
+            string realDirectory = Directory.GetDirectories(_root)[0];
+            string leftover = Path.Combine(_root, ".staging-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(leftover);
+            File.Copy(Path.Combine(realDirectory, "manifest.json"), Path.Combine(leftover, "manifest.json"));
+            File.WriteAllText(Path.Combine(leftover, "main.lua"), "return 'staged'");
+
+            using FileLuaModSourceStore reopened = new(_root);
+            IReadOnlyList<LuaModManifest> listed = reopened.List();
+
+            Assert.AreEqual(1, listed.Count,
+                "The staged copy of an interrupted save must not be listed next to the installed mod.");
+            Assert.AreEqual("real", listed[0].Id);
+            Assert.IsTrue(reopened.TryLoad("real", out string source, out _));
+            Assert.AreEqual("return 'real'", source);
+            Assert.IsTrue(Directory.Exists(leftover), "Listing must not delete anything.");
+        }
+
         [Test]
         public void FirstCanonicalSave_PreservesExistingCorruptIdentityEvidence()
         {

@@ -76,6 +76,11 @@ A test that cannot fail for a real defect is noise. Do not write or keep:
 ## A5. Determinism, isolation, assertion quality
 
 - No machine-state filesystem dependence, wall-clock timing, or unseeded randomness.
+- Never touch the developer's saves. Every run redirects `CoreAiStorageRoot` to a fresh
+  `%TEMP%/cai-ts-<id>` directory (`CoreAiTestStorageRootRunCallback`) and deletes it afterwards, so default
+  stores and scene scopes built by a test land there. Never build a path from
+  `Application.persistentDataPath` in a test; use `CoreAiStorageRoot.Combine(...)` or your own temporary
+  directory (`CoreAiStorageRootEditModeTests` fails otherwise).
 - Each test sets up and tears down its own state; tests pass in any order and in isolation.
   Clean up `GameObject`s and global/static state in `TearDown`.
 - One behavior per test; the name states behavior + expected outcome. Every assertion carries
@@ -340,6 +345,12 @@ on the settings asset's backend type alone, so select HTTP there (or install a s
 configuration precedence and gitignored local config file. Environment variables must be set
 in the Unity Editor process; changing them in a shell after the Editor starts does not update
 that process. Run via Unity Test Runner → PlayMode, filtered by assembly when narrowing a run.
+
+Two explicit editor-side checks run only when selected by name: `MiniRpgMovementInputPlayModeTests`
+(walks the MiniRpg player through the scene's controller with a virtual Input System keyboard) and
+`ProceduralMaterialsCapturePlayModeTests` (renders every showcase view and material to PNG; set
+`COREAI_VISUAL_CAPTURE_DIR` to an absolute output directory). They automate what can be automated; physical
+input, window focus and aesthetic acceptance still need a person.
 
 ---
 

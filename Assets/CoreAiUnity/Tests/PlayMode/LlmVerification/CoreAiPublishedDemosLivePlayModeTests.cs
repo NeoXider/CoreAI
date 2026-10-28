@@ -682,16 +682,26 @@ namespace CoreAI.Tests.PlayMode
                     MinimumObservedMana = Math.Min(MinimumObservedMana, int.Parse(mana.Groups[1].Value));
                 }
                 MaximumObservedEffectChildren = Math.Max(MaximumObservedEffectChildren, GameObject.Find("GenieRoot")?.transform.childCount ?? 0);
-                return Read<bool>(button, "interactable") && (CoreAi.GetToolCallHistorySnapshot()?.Count ?? 0) > baseline;
+                return Read<bool>(button, "interactable");
             }, 100f, "actual " + caption + " real model turn");
+            // WHY end on the re-enabled action and not on a new tool receipt: a turn that ends in a provider
+            // error (401, 429, empty reply) re-enables the button without a receipt, and waiting for one
+            // turned a 137 ms failure into an opaque 100-second timeout. The short grace covers a receipt
+            // recorded in the frame after the button re-enables.
+            float receiptGrace = Time.realtimeSinceStartup + 2f;
+            while ((CoreAi.GetToolCallHistorySnapshot()?.Count ?? 0) <= baseline && Time.realtimeSinceStartup < receiptGrace)
+            {
+                yield return null;
+            }
+
+            string text = ReadUiText();
+            StringAssert.DoesNotContain("✘", text, "The actual demo reports a failed model/tool turn: " + text);
             IReadOnlyList<LlmToolCallRecord> history = CoreAi.GetToolCallHistorySnapshot();
             List<LlmToolCallRecord> own = history.Skip(baseline).Where(record => record != null).ToList();
             Assert.IsTrue(own.Any(record => record.Info.ToolName == requiredTool && record.Status == "completed"),
                 "The actual demo agent must execute " + requiredTool + "; a textual promise is insufficient.");
             Assert.IsFalse(own.Any(record => record.Status == "failed" || record.Status == "cancelled" || record.Status == "error"),
                 "The demo model turn produced a failed tool receipt.");
-            string text = ReadUiText();
-            StringAssert.DoesNotContain("✘", text, "The actual demo reports a failed model/tool turn.");
             StringAssert.DoesNotContain("(empty response", text);
             Receipt("MODEL_ACTION", caption + "; actual tool=" + requiredTool + "; calls=" + own.Count);
         }

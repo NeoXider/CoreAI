@@ -61,7 +61,7 @@ namespace CoreAI.Editor
         }
 
         /// <summary>
-        /// Deletes all CoreAI files under <see cref="Application.persistentDataPath"/> after user confirmation.
+        /// Deletes all CoreAI files under <see cref="CoreAiStorageRoot.CoreAiDirectory"/> after user confirmation.
         /// </summary>
         [MenuItem("CoreAI/Delete All Persistent Saves...", false, 60)]
         public static void DeleteAllPersistentSaves()
@@ -75,10 +75,10 @@ namespace CoreAI.Editor
                 return;
             }
 
-            string root = Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName);
+            string root = CoreAiStorageRoot.CoreAiDirectory;
             if (!EditorUtility.DisplayDialog(
                     "CoreAI - Delete Persistent Saves",
-                    "Delete all CoreAI files in persistentDataPath?\n\n" +
+                    "Delete all CoreAI files in the CoreAI storage root?\n\n" +
                     "The entire CoreAI directory and every file and subdirectory inside it will be deleted, " +
                     "including agent memory, chat history, conversation summaries, Lua and data overlay versions, " +
                     "llm-endpoints.json, mods, skills, and audit logs.\n\n" +

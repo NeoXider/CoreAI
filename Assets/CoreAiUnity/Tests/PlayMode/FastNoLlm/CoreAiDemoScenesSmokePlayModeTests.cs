@@ -213,7 +213,7 @@ namespace CoreAI.Tests.PlayMode
         /// by reflection because this assembly must compile without it, and the patch is armed only while
         /// the smoke runs, so builds and manual play mode are untouched.
         /// </remarks>
-        private static class MirrorAutoIdentityPatch
+        internal static class MirrorAutoIdentityPatch
         {
             private static readonly List<(string ScenePath, string ObjectName)> Patched = new();
             private static string _armedScenePath;

@@ -549,10 +549,7 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             string resolvedRoot = string.IsNullOrWhiteSpace(rootDirectory)
-                ? Path.Combine(
-                    Application.persistentDataPath,
-                    CoreAiPersistentPaths.RootFolderName,
-                    "Saves")
+                ? CoreAiStorageRoot.Combine("Saves")
                 : Path.GetFullPath(rootDirectory);
             _manualDirectory = Path.Combine(resolvedRoot, "Manual");
             _autoDirectory = Path.Combine(resolvedRoot, "Auto");

@@ -1,7 +1,8 @@
 namespace CoreAI.Infrastructure
 {
     /// <summary>
-    /// Folder segments under <see cref="UnityEngine.Application.persistentDataPath"/> used by CoreAI file-backed stores.
+    /// Folder segments under <see cref="CoreAiStorageRoot.CoreAiDirectory"/> used by CoreAI file-backed stores.
+    /// Build paths with <see cref="CoreAiStorageRoot.Combine"/>, never from the engine data path directly.
     /// </summary>
     public static class CoreAiPersistentPaths
     {

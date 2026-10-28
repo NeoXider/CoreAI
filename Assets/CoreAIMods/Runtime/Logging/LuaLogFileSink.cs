@@ -8,7 +8,7 @@ namespace CoreAI.Ai.Logging
     /// <summary>
     /// Optional file sink for <see cref="ILuaLogService"/>: off by default. Construct and call
     /// <see cref="Attach"/> to start appending every logged entry as one line to a rolling text file
-    /// under <c>persistentDataPath/CoreAI/Logs</c>; call <see cref="Detach"/> or <see cref="Dispose"/>
+    /// under <c>CoreAI/Logs</c> of <see cref="CoreAI.Infrastructure.CoreAiStorageRoot"/>; call <see cref="Detach"/> or <see cref="Dispose"/>
     /// to stop. The service itself is wired by <c>CoreAiModsInstaller.RegisterCoreAiMods</c>; this sink
     /// stays a deliberate host opt-in and is not attached by any composition root.
     /// </summary>
@@ -32,7 +32,7 @@ namespace CoreAI.Ai.Logging
         /// <param name="logService">Service to subscribe to once <see cref="Attach"/> is called.</param>
         /// <param name="rootDirectory">
         /// Directory the log file is written under. Defaults to
-        /// <c>Application.persistentDataPath/CoreAI/Logs</c> when null.
+        /// <c>CoreAI/Logs</c> under <see cref="CoreAiStorageRoot.PersistentDataRoot"/> when null.
         /// </param>
         /// <param name="maxFileBytes">Size threshold that triggers a roll to a <c>.1</c> backup file.</param>
         public LuaLogFileSink(ILuaLogService logService, string rootDirectory = null,
@@ -46,7 +46,7 @@ namespace CoreAI.Ai.Logging
 
         private static string DefaultRootDirectory()
         {
-            return Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName, LogsFolderName);
+            return CoreAiStorageRoot.Combine(LogsFolderName);
         }
 
         /// <summary>Full path of the active log file (before any roll).</summary>

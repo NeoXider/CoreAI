@@ -41,3 +41,39 @@ Next gate: root should use `openai/gpt-4o-mini` through OpenRouter with native s
 - `Demo14_QwenSpellcraft_HttpCastExecutesToolAndSpendsMana`
 
 The direct probe bypasses the C# SSE decoder, production role prompt, tool executor, and Unity UI/world. It therefore proves provider argument production only. The strict three-case PlayMode run is still necessary to prove the fixes. No further source changes were independently justified before that run; storage helper code remains unchanged during this continuation.
+
+## Free-model rerun - 2026-10-28
+
+Owner decision relayed by the coordinator: live runs only on OpenRouter models whose id ends in `:free`.
+The public catalog (`https://openrouter.ai/api/v1/models`, no key) listed 15 free models with `tools` in
+`supported_parameters`; `nvidia/nemotron-3-ultra-550b-a55b:free` (tools and `tool_choice`, 1M context) was
+chosen. Process variables set only the selectors (`COREAI_TEST_BASE_URL`, `COREAI_TEST_MODEL`, streaming,
+native tools, `{"reasoning":{"enabled":false}}`, HTTP backend); the key was left to the tests' normal
+resolution from the owner's local configuration and was never read, printed or set by the operator. Storage
+was isolated twice: the fixture's own GUID root and the new test-run storage root. The owner folder was
+identical before and after both runs.
+
+| Receipt (`artifacts/storage-root-20261028/`) | Cases | Outcome |
+| --- | --- | --- |
+| `live-free1.xml` | storage registration + the three failed cases | 4 = 1 Passed / 3 Failed |
+| `live-free2-editor.xml` | Demo14 again, after the helper fix below | Failed in 3.5 s on the demo's own error line |
+
+- **Requests:** 4 POSTs to `https://openrouter.ai/api/v1/chat/completions`, each a single attempt answered
+  `HTTP 401` (auth errors are correctly not retried); no 429, no model output. The client logged
+  `Authorization header set (len=16)`, which fits `Bearer ` plus a nine-character local-server placeholder,
+  not an OpenRouter key. The earlier root runs supplied the key through the process environment.
+  **Classification: environment (credential), neither a model limitation nor a CoreAI defect.** No other free
+  model was tried, because a 401 is about the key, not the model.
+- **What still ran and passed:** the live-scene storage composition (`STORAGE_PREFLIGHT` and `STARTED`
+  receipts assert the owned world snapshot, audit and mod stores before any request) in FullAccess twice and
+  in QwenSpellcraft; the non-live exact-slot storage test; Demo01's self-test (16 checks, 0 failures) and the
+  whole Tetris sequence, including the left move that failed on 2026-10-27, so that precondition fix is
+  confirmed; QwenSpellcraft's Cast now admits a real `DemoMage` request, which on 2026-10-27 never left the
+  scene, so the input-targeting fix is confirmed.
+- **CoreAI test defect found and fixed:** the UI-turn helper waited for "action re-enabled AND a new tool
+  receipt", so a turn ending in a provider error was reported as a 100-second timeout. It now ends on the
+  re-enabled action, allows a two-second receipt grace and reports the demo's own failure line first; the rerun
+  failed in 3.5 s with `HTTP error 401`. The demo itself already surfaced the error correctly.
+- **Still open:** the three cases need a run with a valid OpenRouter key in the process environment
+  (`COREAI_TEST_API_KEY`), which this operator may not set. Model-authored create/edit compliance on a free
+  model is therefore unobserved.

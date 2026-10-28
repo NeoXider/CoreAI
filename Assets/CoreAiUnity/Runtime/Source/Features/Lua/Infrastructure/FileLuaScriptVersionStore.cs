@@ -35,6 +35,9 @@ namespace CoreAI.Infrastructure.Lua
         private static readonly JsonSerializerSettings JsonSettings = new() { Formatting = Formatting.Indented };
         private readonly IGameLogger _logger;
         private readonly string _filePath;
+
+        /// <summary>The resolved storage file; internal test seam for storage-root checks.</summary>
+        internal string StoragePath => _filePath;
         private readonly PathState _state;
         private readonly ILlmAsyncMarshaler _host;
         private readonly Func<CancellationToken, Task<bool>> _confirm;
@@ -60,8 +63,8 @@ namespace CoreAI.Infrastructure.Lua
         public FileLuaScriptVersionStore(IGameLogger logger,
             int maxIntermediateRevisions = VersionRetentionPolicy.DefaultMaxIntermediateRevisions,
             long maxTotalBytes = VersionRetentionPolicy.DefaultMaxTotalBytes)
-            : this(logger, Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
-                CoreAiPersistentPaths.LuaScriptVersions, "lua_script_versions.json"), maxIntermediateRevisions, maxTotalBytes) { }
+            : this(logger, CoreAiStorageRoot.Combine(CoreAiPersistentPaths.LuaScriptVersions,
+                "lua_script_versions.json"), maxIntermediateRevisions, maxTotalBytes) { }
 
         /// <summary>Configures persistence without creating directories or reading files.</summary>
         public FileLuaScriptVersionStore(IGameLogger logger, string jsonFilePath,

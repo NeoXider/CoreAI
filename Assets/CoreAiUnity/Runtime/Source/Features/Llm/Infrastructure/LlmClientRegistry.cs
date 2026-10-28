@@ -800,6 +800,8 @@ namespace CoreAI.Infrastructure.Llm
             RuntimeEndpoint replacedRuntime = null;
             Task<LlmEndpointSnapshot> activationToAwait;
             LlmEndpointSnapshot immediateSnapshot;
+            CancellationTokenSource supersededPendingActivation = null;
+            CancellationTokenSource supersededRuntimeActivation = null;
             lock (_gate)
             {
                 string effectiveSessionApiKey = sessionApiKey;
@@ -842,13 +844,13 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (_pendingEndpoints.TryGetValue(id, out pending))
                 {
-                    pending.ActivationCancellation?.Cancel();
+                    supersededPendingActivation = pending.ActivationCancellation;
                 }
 
                 if (_runtimeEndpoints.TryGetValue(id, out currentRuntime) &&
                     currentRuntime.ActivationTask != null && !currentRuntime.ActivationTask.IsCompleted)
                 {
-                    currentRuntime.ActivationCancellation?.Cancel();
+                    supersededRuntimeActivation = currentRuntime.ActivationCancellation;
                 }
 
                 runtime = new RuntimeEndpoint
@@ -907,6 +909,8 @@ namespace CoreAI.Infrastructure.Llm
                 immediateSnapshot = activationToAwait == null ? ToSnapshot(runtime) : null;
             }
 
+            CancelSupersededActivation(supersededPendingActivation);
+            CancelSupersededActivation(supersededRuntimeActivation);
             RequestOwnedHostRelease(replacedRuntime);
             SaveRuntimeState();
             Changed?.Invoke();
@@ -1009,6 +1013,8 @@ namespace CoreAI.Infrastructure.Llm
             bool removed;
             RuntimeEndpoint release = null;
             RuntimeEndpoint pendingRelease = null;
+            CancellationTokenSource runtimeActivation = null;
+            CancellationTokenSource pendingActivation = null;
             if (mode == LlmEndpointRemovalMode.CancelInFlight)
             {
                 // WHY: this registry cannot prove cancellation of tracked in-flight calls; the
@@ -1032,13 +1038,13 @@ namespace CoreAI.Infrastructure.Llm
 
                 if (_runtimeEndpoints.TryGetValue(id, out RuntimeEndpoint runtime))
                 {
-                    runtime.ActivationCancellation?.Cancel();
+                    runtimeActivation = runtime.ActivationCancellation;
                     release = runtime;
                 }
 
                 if (_pendingEndpoints.TryGetValue(id, out RuntimeEndpoint pending))
                 {
-                    pending.ActivationCancellation?.Cancel();
+                    pendingActivation = pending.ActivationCancellation;
                     _pendingEndpoints.Remove(id);
                     pendingRelease = pending;
                 }
@@ -1065,6 +1071,8 @@ namespace CoreAI.Infrastructure.Llm
                 }
             }
 
+            CancelSupersededActivation(pendingActivation);
+            CancelSupersededActivation(runtimeActivation);
             RequestOwnedHostRelease(pendingRelease);
             RequestOwnedHostRelease(release);
 
@@ -1490,6 +1498,45 @@ namespace CoreAI.Infrastructure.Llm
             if (work == null) return;
             RetireOwnedGatewayClient(work.Client);
             _ = CompleteOwnedHostReleaseAsync(work);
+        }
+
+        /// <summary>
+        /// Cancels an activation that an endpoint update or removal superseded. Runs after the registry
+        /// mutation lock exits; a host cancellation callback that throws is logged and never propagated.
+        /// <para>
+        /// WHY: a token callback runs synchronously inside <see cref="CancellationTokenSource.Cancel()"/>.
+        /// Called under the lock, a throwing callback aborted the update or removal half-way, so a removed
+        /// endpoint stayed registered and its owned host was never released; a reentrant callback ran
+        /// against half-mutated registry state. Dispose already settled cancellations this way.
+        /// </para>
+        /// </summary>
+        private void CancelSupersededActivation(CancellationTokenSource cancellation)
+        {
+            if (cancellation == null)
+            {
+                return;
+            }
+
+            try
+            {
+                cancellation.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // WHY: registry disposal may have cancelled and disposed the same source first.
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    _logger.LogWarning(GameLogFeature.Llm,
+                        "Endpoint activation cancellation callback failed: " + ex.GetType().Name);
+                }
+                catch
+                {
+                    // WHY: a failing logger must not reintroduce the abort this method exists to prevent.
+                }
+            }
         }
 
         private static void CancelAndDisposeActivation(CancellationTokenSource cancellation)

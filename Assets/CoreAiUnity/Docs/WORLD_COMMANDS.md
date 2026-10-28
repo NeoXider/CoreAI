@@ -250,9 +250,19 @@ All AI-spawned objects (primitives and prefabs) are automatically tracked for sa
 
 ### How it works
 
-Every `spawn` call attaches a `WorldObjectComponent` with a unique `persistentId`. On **Play Mode exit** (or `Application.quitting`), the `WorldStateManager` snapshots all active `WorldObjectComponent` instances to a JSON file at `persistentDataPath/CoreAI/WorldState/world_state.json`. On **next Play Mode entry**, the file is loaded and all objects are re-created. Load always starts from a clean slate — any pre-existing `WorldObjectComponent` objects in the scene are destroyed first, so duplicate `persistentId`s can never accumulate across sessions.
+Every `spawn` call attaches a `WorldObjectComponent` with a unique `persistentId`. On **Play Mode exit** (or `Application.quitting`), the `WorldStateManager` snapshots all active `WorldObjectComponent` instances to a JSON file at `CoreAI/WorldState/world_state.json` under the CoreAI storage root (`CoreAiStorageRoot.PersistentDataRoot`, which is `Application.persistentDataPath` unless the host or the test run overrides it; see the Developer Guide, section 6.2). On **next Play Mode entry**, the file is loaded and all objects are re-created. Load always starts from a clean slate — any pre-existing `WorldObjectComponent` objects in the scene are destroyed first, so duplicate `persistentId`s can never accumulate across sessions.
 
-That path is the default of the three-argument constructor. A host or test that needs its own snapshot passes an absolute file path to `new WorldStateManager(logger, prefabRegistry, allowPrimitives, saveFilePath)` before `Initialize()` runs; restore, auto-save, the quit-save and `Reset()` then all use that file, and `SaveFilePath` reports it. Relative paths, `.`/`..` segments and paths without a file name throw `ArgumentException` at construction. `WorldCommandsInstaller` registers the default constructor, so selecting another path means replacing that registration before the container builds.
+That path is the default of the three-argument constructor (`WorldStateManager.DefaultSaveFilePath()` returns it); it is resolved once, when the manager is constructed. A host or test that needs its own snapshot passes an absolute file path to `new WorldStateManager(logger, prefabRegistry, allowPrimitives, saveFilePath)` before `Initialize()` runs; restore, auto-save, the quit-save and `Reset()` then all use that file, and `SaveFilePath` reports it. Relative paths, `.`/`..` segments and paths without a file name throw `ArgumentException` at construction.
+
+Through the installer, select the file with the four-argument overload instead of replacing the registration:
+
+```csharp
+// One snapshot per save slot or server room; null keeps the default under the storage root.
+builder.RegisterWorldCommands(prefabRegistry, allowedLuaScenes: null,
+    worldStateSnapshotPath: Path.Combine(slotDirectory, "world_state.json"));
+```
+
+The path is validated when `RegisterWorldCommands` runs, so a relative, traversal or directory path fails at registration rather than at the first resolve. The published overload `RegisterWorldCommands(registry, allowedLuaScenes, enableFullLuaAccess, enableFullLuaPrivateAccess)` is unchanged and keeps the default path. To move every CoreAI store at once (not only the world snapshot), override the storage root instead.
 
 A **periodic auto-save** (default every `WorldStateManager.DefaultAutoSaveIntervalSeconds` = 60s) runs always-on in every scene that wires `WorldStateManager` — started by `WorldStateManager.Initialize()` itself, not by a scene-specific component — as crash protection between an edit and the next quit. On WebGL it also checks `CoreAiWebGlPersistence.Sync()` after each save, so a page without the engine's automatic `persistentDataPath` persistence (`config.autoSyncPersistentDataPath = true` in the web template) is reported instead of silently losing the save. The optional `WorldStateAutoSaveHook` MonoBehaviour (e.g. on the Hub prefab) only overrides the interval for its scene via `WorldStateManager.StartAutoSave(...)`; it does not perform its own quit-save, since `WorldStateManager` already saves exactly once on `Application.quitting`.
 

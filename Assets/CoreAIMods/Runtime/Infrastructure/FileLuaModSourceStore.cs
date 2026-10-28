@@ -45,6 +45,11 @@ namespace CoreAI.Infrastructure.Lua
         private const string ManifestFileName = "manifest.json";
         private const string SourceFileName = "main.lua";
         private const string WorldSessionsDirectoryName = ".world-sessions";
+
+        /// <summary>
+        /// Prefix of the owned folder a first canonical save stages into before it is moved into place.
+        /// </summary>
+        private const string StagingDirectoryPrefix = ".staging-";
         private const string SourceLayoutFileName = ".source-layout";
         private const string CompactSourceLayout = "sha256-base32-v1";
         private const string LowerBase32Alphabet = "abcdefghijklmnopqrstuvwxyz234567";
@@ -62,6 +67,9 @@ namespace CoreAI.Infrastructure.Lua
             new(StringComparer.Ordinal);
 
         private readonly string _dir;
+
+        /// <summary>The resolved storage directory; internal test seam for storage-root checks.</summary>
+        internal string StoragePath => _dir;
         private readonly ILog _log;
         private readonly RootState _rootState;
         private readonly Func<CancellationToken, UniTask<bool>> _persistenceSyncAsync;
@@ -90,10 +98,7 @@ namespace CoreAI.Infrastructure.Lua
         {
             string baseDirectory = !string.IsNullOrWhiteSpace(rootDirectory)
                 ? rootDirectory.Trim()
-                : Path.Combine(
-                    Application.persistentDataPath,
-                    CoreAiPersistentPaths.RootFolderName,
-                    CoreAiPersistentPaths.ModPackages);
+                : CoreAiStorageRoot.Combine(CoreAiPersistentPaths.ModPackages);
             _dir = Path.GetFullPath(LuaModStoreId.ApplyTo(baseDirectory, storeId));
             bool ownedVersion = IsWorldSessionDirectory(_dir);
             bool compactLayoutRequired = useCompactFolderNames
@@ -178,7 +183,7 @@ namespace CoreAI.Infrastructure.Lua
                             ? rootFull
                             : rootFull + Path.DirectorySeparatorChar;
                         stagingDirectory = Path.GetFullPath(Path.Combine(
-                            rootFull, ".staging-" + Guid.NewGuid().ToString("N")));
+                            rootFull, StagingDirectoryPrefix + Guid.NewGuid().ToString("N")));
                         if (!stagingDirectory.StartsWith(rootPrefix, StringComparison.Ordinal))
                         {
                             throw new InvalidOperationException(
@@ -339,6 +344,11 @@ namespace CoreAI.Infrastructure.Lua
                 string[] directories = Directory.GetDirectories(_dir);
                 for (int index = 0; index < directories.Length; index++)
                 {
+                    if (IsStagingDirectory(directories[index]))
+                    {
+                        continue;
+                    }
+
                     string manifestPath = Path.Combine(directories[index], ManifestFileName);
                     if (!File.Exists(manifestPath))
                     {
@@ -714,7 +724,8 @@ namespace CoreAI.Infrastructure.Lua
             string[] directories = Directory.GetDirectories(_dir);
             for (int index = 0; index < directories.Length; index++)
             {
-                if (File.Exists(Path.Combine(directories[index], ManifestFileName)))
+                if (!IsStagingDirectory(directories[index]) &&
+                    File.Exists(Path.Combine(directories[index], ManifestFileName)))
                 {
                     count++;
                 }
@@ -1049,6 +1060,35 @@ namespace CoreAI.Infrastructure.Lua
         private static string Normalize(string value)
         {
             return (value ?? "").Trim();
+        }
+
+        /// <summary>
+        /// True for a first-save staging folder (<c>.staging-</c> plus a 32-digit hex id).
+        /// <para>
+        /// WHY: a crash or a failed cleanup between writing the staged manifest and moving the folder
+        /// into place leaves a complete manifest under the staging name. Listing or counting it would
+        /// show a mod that cannot be loaded by id, duplicate the id once the save is retried, and spend
+        /// the stored-mod quota on a package that was never installed.
+        /// </para>
+        /// </summary>
+        private static bool IsStagingDirectory(string directory)
+        {
+            string name = Path.GetFileName(directory);
+            if (name == null || name.Length != StagingDirectoryPrefix.Length + 32 ||
+                !name.StartsWith(StagingDirectoryPrefix, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            for (int index = StagingDirectoryPrefix.Length; index < name.Length; index++)
+            {
+                if (!Uri.IsHexDigit(name[index]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static void DeleteDirectory(string path)

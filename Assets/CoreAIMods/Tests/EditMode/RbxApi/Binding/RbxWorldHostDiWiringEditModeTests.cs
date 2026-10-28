@@ -1823,7 +1823,8 @@ camera_follow(p)"),
                 FileRbxWorldPackageStore store =
                     container.Resolve<IRbxWorldPackageStore>() as FileRbxWorldPackageStore;
                 Assert.IsNotNull(store, "without an injected store the installer composes the file store");
-                StringAssert.StartsWith(Application.persistentDataPath, store.StartupDirectoryForTests);
+                StringAssert.StartsWith(CoreAI.Infrastructure.CoreAiStorageRoot.PersistentDataRoot,
+                    store.StartupDirectoryForTests);
                 StringAssert.EndsWith(
                     LuaModStoreId.ApplyTo(Path.Combine("Saves", "Startup"), storeId),
                     store.StartupDirectoryForTests,

@@ -67,6 +67,9 @@ namespace CoreAI.Infrastructure.Llm
         private readonly Func<CancellationToken, Task<bool>> _confirm;
         private readonly bool _customConfirmation;
         private readonly string _dir;
+
+        /// <summary>The resolved storage directory; internal test seam for storage-root checks.</summary>
+        internal string StoragePath => _dir;
         private readonly ILog _log;
         private readonly SemaphoreSlim _gate;
         private bool _disposed;
@@ -76,8 +79,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             _dir = Path.GetFullPath(!string.IsNullOrWhiteSpace(rootDirectory)
                 ? rootDirectory.Trim()
-                : Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
-                    CoreAiPersistentPaths.Skills));
+                : CoreAiStorageRoot.Combine(CoreAiPersistentPaths.Skills));
             if (_dir.Length > Path.GetPathRoot(_dir).Length)
                 _dir = _dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             _stateLease = MutationLocks.Acquire(_dir);

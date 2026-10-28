@@ -52,13 +52,15 @@ namespace CoreAI.Infrastructure.Llm
             Path.DirectorySeparatorChar == '\\' ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
         private readonly string _path;
+
+        /// <summary>The resolved storage file; internal test seam for storage-root checks.</summary>
+        internal string StoragePath => _path;
         private readonly object _gate;
 
         public FileLlmEndpointRegistryStore(string path = null)
         {
             _path = Path.GetFullPath(string.IsNullOrWhiteSpace(path)
-                ? Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
-                    "llm-endpoints.json")
+                ? CoreAiStorageRoot.Combine("llm-endpoints.json")
                 : path);
             _gate = PathLocks.GetOrAdd(_path, _ => new object());
         }

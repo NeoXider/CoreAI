@@ -36,8 +36,7 @@ namespace CoreAI.Tests.EditMode
             {
                 builder.Register<IConversationSummaryStore>(_ =>
                         new FileConversationSummaryStore(
-                            Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
-                                CoreAiPersistentPaths.ConversationSummaries),
+                            CoreAiStorageRoot.Combine(CoreAiPersistentPaths.ConversationSummaries),
                             null),
                     Lifetime.Singleton);
 
@@ -80,8 +79,7 @@ namespace CoreAI.Tests.EditMode
             {
                 builder.Register<IConversationSummaryStore>(_ =>
                         new FileConversationSummaryStore(
-                            Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
-                                CoreAiPersistentPaths.ConversationSummaries),
+                            CoreAiStorageRoot.Combine(CoreAiPersistentPaths.ConversationSummaries),
                             null),
                     Lifetime.Singleton);
 

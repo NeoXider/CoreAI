@@ -26,6 +26,9 @@ namespace CoreAI.Infrastructure.Llm
             Path.DirectorySeparatorChar == '\\' ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
         private readonly string _path;
+
+        /// <summary>The resolved storage file; internal test seam for storage-root checks.</summary>
+        internal string StoragePath => _path;
         private readonly ILog _log;
         private readonly object _lock;
 
@@ -34,11 +37,7 @@ namespace CoreAI.Infrastructure.Llm
         {
             _path = Path.GetFullPath(!string.IsNullOrWhiteSpace(filePath)
                 ? filePath.Trim()
-                : Path.Combine(
-                    Application.persistentDataPath,
-                    CoreAiPersistentPaths.RootFolderName,
-                    "TokenCalibration",
-                    "scales.json"));
+                : CoreAiStorageRoot.Combine("TokenCalibration", "scales.json"));
             _lock = PathLocks.GetOrAdd(_path, _ => new object());
             _log = log;
         }

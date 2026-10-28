@@ -452,7 +452,8 @@ namespace CoreAI.Composition
         /// <summary>
         /// Registers <see cref="IConversationSummaryStore"/> for this lifetime scope.
         /// <see cref="AgentMemoryPersistenceMode.Persistent"/> uses
-        /// <c>Application.persistentDataPath/CoreAI/ConversationSummaries</c> on EVERY player, WebGL included;
+        /// <c>CoreAI/ConversationSummaries</c> under <see cref="CoreAiStorageRoot.PersistentDataRoot"/> on EVERY
+        /// player, WebGL included;
         /// <see cref="AgentMemoryPersistenceMode.SessionOnly"/> uses an in-memory backing.
         /// <para>
         /// WHY file-backed on WebGL too: the summary retells everything older than the history window.
@@ -472,8 +473,7 @@ namespace CoreAI.Composition
 #if !UNITY_WEBGL
             builder.Register<ITokenCalibrationStore>(_ =>
                     new FileTokenCalibrationStore(
-                        Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
-                            "TokenCalibration", "scales.json"),
+                        CoreAiStorageRoot.Combine("TokenCalibration", "scales.json"),
                         null),
                 Lifetime.Singleton);
             const bool suppressDefaultTokenCalibrationStore = true;
@@ -484,8 +484,7 @@ namespace CoreAI.Composition
             {
                 builder.Register(c =>
                         new FileConversationSummaryStore(
-                            Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
-                                CoreAiPersistentPaths.ConversationSummaries),
+                            CoreAiStorageRoot.Combine(CoreAiPersistentPaths.ConversationSummaries),
                             ResolveLogOrNull(c),
                             CoreAiWebGlPersistence.Sync,
                             token => CoreAiWebGlPersistence.SyncAsync(token).AsTask()),

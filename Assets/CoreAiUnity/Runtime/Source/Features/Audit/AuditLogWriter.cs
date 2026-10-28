@@ -146,7 +146,7 @@ namespace CoreAI.Features.Audit
         // WHY: VContainer must select the default constructor instead of resolving folder/options.
         [Inject]
         public AuditLogWriter()
-            : this(Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName, "Audit"))
+            : this(CoreAiStorageRoot.Combine(CoreAiPersistentPaths.Audit))
         {
         }
 

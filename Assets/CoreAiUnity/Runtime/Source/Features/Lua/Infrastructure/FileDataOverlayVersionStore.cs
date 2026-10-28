@@ -36,6 +36,9 @@ namespace CoreAI.Infrastructure.Lua
         private readonly IGameLogger _logger;
         private readonly MemoryDataOverlayVersionStore _memory;
         private readonly string _filePath;
+
+        /// <summary>The resolved storage file; internal test seam for storage-root checks.</summary>
+        internal string StoragePath => _filePath;
         private readonly object _ioLock = new();
         private readonly int _maxIntermediateRevisions;
         private readonly long _maxTotalBytes;
@@ -52,8 +55,7 @@ namespace CoreAI.Infrastructure.Lua
             _memory = new MemoryDataOverlayVersionStore(maxIntermediateRevisions, maxTotalBytes);
             _maxIntermediateRevisions = maxIntermediateRevisions;
             _maxTotalBytes = maxTotalBytes;
-            string dir = Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
-                CoreAiPersistentPaths.DataOverlayVersions);
+            string dir = CoreAiStorageRoot.Combine(CoreAiPersistentPaths.DataOverlayVersions);
             Directory.CreateDirectory(dir);
             _filePath = Path.Combine(dir, "data_overlays.json");
             LoadFromDisk();

@@ -76,7 +76,7 @@ namespace CoreAI.Composition
         /// <param name="worldPackageStore">
         /// Optional world-package store for manual slots, autosaves and, when it implements
         /// <see cref="IRbxWorldStartupStore"/>, the world that opens on the next start. Null creates the
-        /// default file-backed store under <c>persistentDataPath</c> whose startup area is namespaced by
+        /// default file-backed store under <c>CoreAiStorageRoot</c> whose startup area is namespaced by
         /// <paramref name="modStoreId"/>; composition tests pass a temporary or in-memory store.
         /// </param>
         public static void RegisterCoreAiMods(

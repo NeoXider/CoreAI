@@ -55,7 +55,7 @@ namespace CoreAI.Infrastructure.AiMemory
 
     /// <summary>
     /// File-backed Unity implementation of agent memory, chat history, and conversation transcripts.
-    /// Data is stored below <see cref="Application.persistentDataPath"/> in the CoreAI folder so it
+    /// Data is stored below <see cref="CoreAiStorageRoot.PersistentDataRoot"/> in the CoreAI folder so it
     /// survives scene reloads and player restarts.
     /// <para>
     /// <b>On-disk layout (v2).</b> Two files per role: <c>&lt;stem&gt;.json</c> is the memory document
@@ -239,6 +239,9 @@ namespace CoreAI.Infrastructure.AiMemory
         private static readonly JsonSerializerSettings CompactJson = new() { Formatting = Formatting.None };
 
         private readonly string _dir;
+
+        /// <summary>The resolved storage directory; internal test seam for storage-root checks.</summary>
+        internal string StoragePath => _dir;
         private readonly Dictionary<string, RoleHistory> _histories = new(StringComparer.Ordinal);
         private readonly Dictionary<string, SharedPathStateRegistry<HistoryPathState>.Lease> _historyLeases = new(StringComparer.Ordinal);
         private readonly object _lifeLock = new();
@@ -287,7 +290,7 @@ namespace CoreAI.Infrastructure.AiMemory
         /// <param name="log">Optional logger.</param>
         /// <param name="rootDirectory">
         /// Optional override for the storage directory (used by tests); defaults to the CoreAI
-        /// agent-memory folder under <see cref="Application.persistentDataPath"/>.
+        /// agent-memory folder under <see cref="CoreAiStorageRoot.PersistentDataRoot"/>.
         /// </param>
         /// <param name="maxChatHistoryMessages">Per-role chat message cap.</param>
         /// <param name="maxTranscriptEntries">Per-role transcript row cap.</param>
@@ -306,8 +309,7 @@ namespace CoreAI.Infrastructure.AiMemory
         {
             _dir = Path.GetFullPath(!string.IsNullOrWhiteSpace(rootDirectory)
                 ? rootDirectory.Trim()
-                : Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName,
-                    CoreAiPersistentPaths.AgentMemory));
+                : CoreAiStorageRoot.Combine(CoreAiPersistentPaths.AgentMemory));
             _log = log;
             _maxChatHistoryMessages = Math.Max(1, maxChatHistoryMessages);
             _maxTranscriptEntries = Math.Max(1, maxTranscriptEntries);

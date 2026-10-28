@@ -532,7 +532,7 @@ namespace CoreAI.Tests.EditMode
         private static HashSet<string> SnapshotConversationFiles()
         {
             HashSet<string> files = new(StringComparer.OrdinalIgnoreCase);
-            string root = Path.Combine(Application.persistentDataPath, CoreAiPersistentPaths.RootFolderName);
+            string root = CoreAiStorageRoot.CoreAiDirectory;
             foreach (string folder in new[]
                      {
                          CoreAiPersistentPaths.AgentMemory,

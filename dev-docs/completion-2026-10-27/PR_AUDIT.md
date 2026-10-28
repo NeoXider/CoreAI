@@ -173,3 +173,72 @@ a failed historical snapshot; approval never retroactively relabels that run.
 `artifacts/completion-20261027/fetch-sse-node-final1.log` ends `ALL PASS`;
 `persist-node-final1.log` contains nine PASS checks. Both logs were independently read, and root
 reports each command exited 0. These are Node source harnesses, not browser/player acceptance.
+
+## Root adjudication of all 28 findings - 2026-10-28
+
+Scope: the 21 original findings ([FIXES.json](../pr-review-2026-10-25/FIXES.json)) and the seven
+additional ones above, checked against the source after release 7.55.0 (`134184ec`) plus the 2026-10-28
+working tree. Each finding was re-read from its original report, the current production path was located,
+and every named regression was found in source and in the new full EditMode receipt
+`artifacts/storage-root-20261028/edit-full1.xml` (8,304 cases: 8,289 Passed / 0 Failed / 15 Skipped). A
+read-only pass located fixes and tests; a sample of its citations was re-read by hand and matched
+(`McpHttpServer.cs:160-185`, `CoreAiMirrorSessionHost.cs:250-257`, `DownlevelResult.cs:144`,
+`CodeEditorView.cs:1451-1455`, `LlmClientRegistry.cs:295-342`). A regression only counts when it fails on
+the old code; where a mapped test would stay green with the fix reverted, a discriminating one was added
+("new regression").
+
+**Result: all 28 are already fixed. None is still present and none was rejected as not a defect. Two more
+defects found while verifying them are confirmed and fixed (ADJ-001, UNITY-REVIEW-002).**
+
+| ID | Classification | Fix (current source) | Regression evidence |
+| --- | --- | --- | --- |
+| PR-EXEC-001 P1 | already fixed | `AiOrchestrator.cs` legacy constructor resolves the provider from the store; `AgentMemoryScope.cs`; `CoreAiChatService.cs` | `PrReviewCompositionEditModeTests` EXEC001, 11 Passed |
+| PR-MEM-001 P2 | already fixed | `AgentMemoryFileKey.cs` migration receipt; `FileConversationSummaryStore.cs` confirms read migrations; `FileAgentMemoryStore.SettleAsync` | 7 Passed; **new regression** `FileAgentMemoryStoreEditModeTests.AsyncLoad_LegacyMigrationRunsTheConfiguredConfirmation` for the agent-memory read path |
+| PR-MEM-002 P2 | already fixed | `CallSkillToolLlmTool.cs` and `ReadSkillLlmTool.cs` bind the same admitted request | MEM002, 2 Passed |
+| PR-LLM-001 P2 | already fixed | `MeaiLlmClient.cs` applies disabled-tool mode before skill binding, completion and streaming | LLM001, 8 Passed |
+| PR-HOST-001 P2 | already fixed | legacy arities on `CoreAi.cs`, `CoreAiChatService.cs`, `CoreAiComponentCommandExecutor.cs` | HOST001, 8 Passed |
+| PR-HOST-002 P2 | already fixed | `CoreAiChatService.cs` matches the propagated raw and trimmed trace | HOST002, 7 Passed |
+| PR-AUD-001 P2 | already fixed | `AuditLogWriter.cs` normalises before hashing; only lone surrogates become U+FFFD | AUD001, 2 Passed |
+| PR-AUD-002 P3 | already fixed | `LuaLogService.cs` clips on a pair boundary | AUD002, 3 Passed |
+| PR-MODS-001 P2 | already fixed | strict capability in `ILuaModSourceStore.cs`; facades in `RbxWorldPackageContracts.cs`, `HubModServiceBase.cs` | `WorldSourceFacade_HubUsesLegacyMutationsWithoutAcknowledgingPersistence`, 2 Passed |
+| PR-MODS-002 P2 | already fixed | `FileLuaModSourceStore.cs` stages a first install and moves it into place | 2 Passed; staging follow-up is ADJ-001 |
+| PR-MODS-003 P2 | already fixed | `LuaModStoreId.cs` strict UTF-8 before any I/O | 2 Passed |
+| PR-RBX-001 P2 | already fixed | `InstanceGameObjectBinder.cs` rechecks teardown after acquire | RBX003, 1 Passed |
+| PR-08-001 P3 | already fixed | `DownlevelResult.cs` refuses `_ENV` as a resolver name | 5 Passed |
+| PR-08-002 P2 | already fixed | `LuauRewriteParser.cs` resolves the floor helper lazily | 3 Passed (`UnusedOperationDoesNotRequireMath` discriminates) |
+| PR-09-001 P2 | already fixed | `CoreAiHubSetupMenu.cs` adds world and mod binders before prefab persistence | 1 Passed |
+| PR-09-002 P2 | already fixed | `CoreAiHubWindow.OnRootKeyDown` consumes Escape only when handled | 4 Passed; **new regression** `HubContractRegressionTests.Window_RootKeyDown_ConsumesEscapeOnlyWhenTheHubHandlesIt` (2 cases) observes bubbling through the real root handler |
+| PR-09-003 P3 | already fixed | `HubSettingsPage.cs` invalidates a pending save only for draft-field edits | 4 Passed |
+| PR-MCP-001 P2 | already fixed | `McpHttpServer.Stop` releases the listener before cancellation callbacks | 2 Passed, real loopback transport |
+| PR-NET-001 P2 | already fixed | generation-checked release in `MirrorNetworkBridge.cs`, `CoreAiMirrorSessionHost.cs` | 9 Passed |
+| PR-BENCH-001 P2 | already fixed | `GameCreationBenchmarkHarness.cs` measures a continuation from its own turn start | 2 PlayMode cases, hermetic receipt in [FINAL_VERIFICATION.md](FINAL_VERIFICATION.md) |
+| PR-14-001 P2 | already fixed (docs) | `Docs/CoreAI/MULTIPLAYER_SESSIONS.md`, `Assets/CoreAiUnity/README.md` | `MultiplayerDocumentationCompileExamples.cs` compiles in the full run |
+| UNITY-REVIEW-001 P2 | already fixed | `LlmClientRegistry.Dispose` settles cancellations outside the lock, isolated | 1 Passed |
+| HUB-REVIEW-001 P2 | already fixed | grouped Mods/editor Escape forwarding (`HubSubTabPage`, `HubModsPage`, `CodeEditorView`) | 2 native cases Passed |
+| EDITOR-REVIEW-001 P2 | already fixed | `CodeLanguageProfiles.cs` classifies with the full source | 13 Passed |
+| EDITOR-REVIEW-002 P3 | already fixed | `CodeEditorTextUtility.cs` accepts the language's insertion context | 2 Passed |
+| CANDIDATE-REVIEW-001 P2 | already fixed | `CodeEditorView.cs` current-token quote checks, verified insertion tracker | 7 Passed |
+| EDITOR-REVIEW-003 P2 | already fixed | `CodeEditorView.cs` swallows Tab/Enter only after a successful acceptance | 2 Passed |
+| DEMO-REVIEW-001 P2 | already fixed | `LiveMechanicsModsChatPersistenceController.RecomputeModLists` repaints after source events | only the explicit live Demo05 case existed; **new hermetic regression** `LiveMechanicsModsChatManagerPlayModeTests.ManagerRows_RepaintAfterRuntimeLoadAndUnloadEvents` drives the real scene without a model |
+
+| New ID | Classification | Trigger and fix | Regression |
+| --- | --- | --- | --- |
+| ADJ-001 P3 | confirmed, fixed | A crash or failed cleanup between writing a first-save staging folder and moving it into place left `.staging-<id>` with a complete manifest; `List()` showed the mod twice and the stored-mod quota counted it. `FileLuaModSourceStore` now skips staging folders when listing and counting. | `FileLuaModSourceStoreEditModeTests.List_IgnoresAStagingFolderLeftByAnInterruptedFirstSave` |
+| UNITY-REVIEW-002 P2 | confirmed, fixed | `LlmClientRegistry.AddOrUpdateEndpointAsync` and `RemoveEndpointAsync` cancelled a superseded activation under the mutation lock; a throwing host callback aborted the operation, so a removed endpoint stayed registered and its owned host was never released. Both now capture the source under the lock and cancel it afterwards, isolated and logged, like `Dispose` and `SetEndpointActiveAsync`. | `GatewayClientCompositionEditModeTests.RemoveEndpoint_ThrowingActivationCallbackCannotAbortRemovalOrSkipOwnedHostRelease`, `UpdateEndpoint_ThrowingSupersededActivationCallbackCannotAbortTheUpdate` |
+
+Red check for the regressions added here: with the four fixes temporarily reverted to their old behaviour
+(registry add/remove from `134184ec`, staging folders listed, Escape always consumed, read migration not
+confirmed), `artifacts/storage-root-20261028/edit-red2.xml` ran the new cases: 6 = 1 Passed / 5 Failed, every
+failure on the asserted symptom (two copies listed; no confirmation exception; `AggregateException` from the
+host callback for remove and update; Escape not reaching the host). The one pass is the collapse control,
+which is consumed on both versions. The green code was restored and `edit-focused2.xml` passed 175/175; the full EditMode suite on the final tree
+(`edit-full2.xml`) is 8,307 = 8,292 Passed / 0 Failed / 15 Skipped. The
+DEMO-REVIEW-001 hermetic case is judged red by reasoning only: without the repaint, the runtime load has no row
+for the test to find; it passes on the current scene in the hermetic gate.
+
+Residual test-strength notes (no defect; kept open in `TODO.md`): PR-BENCH-001 does not check that
+`RunScenario` passes the turn baseline; PR-MCP-001's automatic restart is covered only over the in-memory
+transport and the real-listener test becomes `Assert.Ignore` when the URL ACL bind is refused; PR-08-002
+lacks the two-chunk `LuaCsScriptEngine` reuse case; PR-AUD-001 does not assert the lone-surrogate
+precondition; PR-09-001's `AddHub` path is untested. Open question for the owner, not a finding: in Auto
+tool mode with an empty `AgentRoleId`, a memory store and a skill proxy, `RoleBinding.RequireRole` throws.

@@ -3,6 +3,7 @@ using CoreAI.Ai;
 using CoreAI.Audit;
 using CoreAI.Config;
 using CoreAI.Features.Audit;
+using CoreAI.Infrastructure;
 using CoreAI.Infrastructure.Config;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
@@ -53,6 +54,44 @@ namespace CoreAI.Composition
             // WHY: the two Full-tier flags stay in the signature only because existing callers compile
             // against it (named arguments included). This package cannot reference the Lua mods package
             // that owns the tier, so nothing here can honour them; CoreAiModsInstaller reads its own copies.
+            RegisterWorldCommandsCore(builder, worldPrefabRegistry, allowedLuaScenes, null);
+        }
+
+        /// <summary>
+        /// Registers world commands and selects the file the <see cref="WorldStateManager"/> restores from,
+        /// auto-saves to and resets. Use it to keep two worlds (save slots, server rooms, a test fixture)
+        /// from sharing one snapshot without replacing the manager's registration.
+        /// </summary>
+        /// <param name="builder">Container builder.</param>
+        /// <param name="worldPrefabRegistry">Prefab whitelist for Lua spawn commands.</param>
+        /// <param name="allowedLuaScenes">
+        /// Scene whitelist for <c>load_scene</c>; null or empty allows any Build Settings scene, as in the
+        /// other overload.
+        /// </param>
+        /// <param name="worldStateSnapshotPath">
+        /// Absolute snapshot file. Null keeps the default, <c>CoreAI/WorldState/world_state.json</c> under
+        /// <see cref="CoreAiStorageRoot.PersistentDataRoot"/>. Any other value is validated here, so an empty,
+        /// relative, traversal or directory path fails at registration rather than at first resolve.
+        /// </param>
+        /// <exception cref="System.ArgumentException">The snapshot path is not an absolute file path.</exception>
+        public static void RegisterWorldCommands(
+            this IContainerBuilder builder,
+            CoreAiPrefabRegistryAsset worldPrefabRegistry,
+            System.Collections.Generic.IEnumerable<string> allowedLuaScenes,
+            string worldStateSnapshotPath)
+        {
+            string snapshotPath = worldStateSnapshotPath == null
+                ? null
+                : WorldStateManager.NormalizeSaveFilePath(worldStateSnapshotPath);
+            RegisterWorldCommandsCore(builder, worldPrefabRegistry, allowedLuaScenes, snapshotPath);
+        }
+
+        private static void RegisterWorldCommandsCore(
+            IContainerBuilder builder,
+            CoreAiPrefabRegistryAsset worldPrefabRegistry,
+            System.Collections.Generic.IEnumerable<string> allowedLuaScenes,
+            string worldStateSnapshotPath)
+        {
             CoreAiPrefabRegistryAsset registry;
             if (worldPrefabRegistry != null)
             {
@@ -102,10 +141,15 @@ namespace CoreAI.Composition
             builder.Register(c => new UnityGameConfigStore(c.Resolve<IGameLogger>()), Lifetime.Singleton)
                 .As<IGameConfigStore>();
 
-            builder.Register(c => new WorldStateManager(
-                        c.Resolve<IGameLogger>(),
-                        c.Resolve<ICoreAiPrefabRegistry>(),
-                        c.ResolveOrDefault<ICoreAISettings>()?.AllowWorldPrimitives ?? true),
+            builder.Register(c =>
+                    {
+                        IGameLogger logger = c.Resolve<IGameLogger>();
+                        ICoreAiPrefabRegistry prefabs = c.Resolve<ICoreAiPrefabRegistry>();
+                        bool allowPrimitives = c.ResolveOrDefault<ICoreAISettings>()?.AllowWorldPrimitives ?? true;
+                        return worldStateSnapshotPath == null
+                            ? new WorldStateManager(logger, prefabs, allowPrimitives)
+                            : new WorldStateManager(logger, prefabs, allowPrimitives, worldStateSnapshotPath);
+                    },
                     Lifetime.Singleton)
                 .As<IWorldStateManager>()
                 .As<IWorldStateWriteResults>()

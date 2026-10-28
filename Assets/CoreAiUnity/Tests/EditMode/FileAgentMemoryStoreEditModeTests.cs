@@ -410,6 +410,29 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("after", peer.GetChatHistory(_roleId).Single().Content);
         }
 
+        /// <summary>
+        /// PR-MEM-001 on the agent-memory store: a read that migrates a legacy document copies and renames
+        /// files, so it must run the host's configured confirmation like a write, and a refused
+        /// confirmation must surface instead of a successful load.
+        /// </summary>
+        [Test]
+        public async Task AsyncLoad_LegacyMigrationRunsTheConfiguredConfirmation()
+        {
+            File.WriteAllText(LegacyMemoryPath, "{\"memory\":\"legacy fact\"}");
+            int confirmations = 0;
+            using FileAgentMemoryStore store = new(null, _root, 500, 2000, 128, token =>
+            {
+                confirmations++;
+                return Task.FromResult(false);
+            });
+
+            IOException refused = await CaptureExceptionAsync<IOException>(() => store.TryLoadAsync(_roleId));
+
+            Assert.AreEqual(1, confirmations, "A read that migrated files must ask the host to confirm the mutation.");
+            Assert.IsNotNull(refused, "A refused confirmation must surface as a failure, not as a successful load.");
+            Assert.IsTrue(File.Exists(MemoryPath), "The migration wrote the canonical document before confirmation.");
+        }
+
         [Test]
         public async Task AsyncMigration_PrimaryStorageFailureSurvivesConfirmationFailure()
         {

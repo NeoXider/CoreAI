@@ -742,9 +742,7 @@ namespace CoreAI.Editor.Diagnostics
                 "agentPromptsManifest");
             AgentPromptsDefinition promptsDefinition = manifest != null ? manifest.ToDefinition() : null;
 
-            string persistentRoot = Path.Combine(
-                Application.persistentDataPath,
-                CoreAiPersistentPaths.RootFolderName);
+            string persistentRoot = CoreAiStorageRoot.CoreAiDirectory;
             context = new EditModeInspectorContext
             {
                 ScopeName = scope.name,

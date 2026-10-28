@@ -2,6 +2,23 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
+## [7.56.0] - 2026-10-28
+
+Released on `main` with tag `v7.56.0`. Full EditMode 8,307: 8,292 passed / 0 failed / 15 skipped; hermetic PlayMode 395: 391 passed / 0 failed / 4 skipped. The real-provider (OpenRouter `:free`) demo cases did not run: every request was refused with HTTP 401 because the local test key is not an OpenRouter key. They stay open in the [verification report](../../dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md) together with the manual input/visual and player/IL2CPP/browser/device gates.
+
+### Added
+
+- `CoreAiStorageRoot` is the single root every default CoreAI file store resolves from: agent memory, conversation summaries, token calibration, `llm-endpoints.json`, Lua script and data-overlay versions, skills, the audit log and the world snapshot (and, in the Mods package, mod state, mod sources, world packages and the Lua log). The default is still `Application.persistentDataPath`; `CoreAiStorageRoot.Override(absoluteDirectory)` moves every store at once for a host (scopes nest and restore in any order), and `CoreAiStorageRoot.Combine(...)` builds paths under it while rejecting rooted and traversal segments. Stores resolve the root once, at construction; explicit constructor paths still win. See the Developer Guide, section 6.2.
+- `WorldCommandsInstaller.RegisterWorldCommands(registry, allowedLuaScenes, worldStateSnapshotPath)` selects the `WorldStateManager` snapshot file without replacing the registration; the path is validated at registration and `null` keeps the default. The published overload is unchanged. `WorldStateManager.DefaultSaveFilePath()` reports the default.
+
+### Fixed
+
+- Tests no longer touch the developer's saves. Every EditMode and PlayMode run redirects the storage root to a fresh `%TEMP%/cai-ts-<id>` directory (`CoreAiTestStorageRootRunCallback`, a Test Framework run callback) and deletes it afterwards, so scene tests and production scopes built by tests cannot write into `persistentDataPath`. A full EditMode run had deleted five world autosaves there, and the hermetic PlayMode gate had overwritten the world snapshot, appended to the audit log and seeded sample mods. A guard test fails when code outside the provider reads the engine data path.
+- Endpoint registry updates and removals cancel a superseded activation after the mutation lock exits; a throwing host cancellation callback no longer aborts the operation, leaves a removed endpoint registered or skips its owned-host release.
+- Regression coverage for the Hub's Escape consumption through the real root key handler, the agent-memory read migration's persistence confirmation and the Mods-chat manager repainting rows after runtime source events (now a hermetic PlayMode test of the real scene).
+- The live published-demo UI-turn helper ends a turn when the demo's action is re-enabled and reports the demo's own failure line, so a provider error (401, 429, empty reply) fails in seconds instead of as a 100-second timeout.
+- Two explicit editor-side checks, selected by name: `MiniRpgMovementInputPlayModeTests` walks the MiniRpg player through the scene's own controller with a virtual Input System keyboard, and `ProceduralMaterialsCapturePlayModeTests` renders every view and material of the showcase to PNG files in `COREAI_VISUAL_CAPTURE_DIR` for review.
+
 ## [7.55.0] - 2026-10-28
 
 Released on `main` with tag `v7.55.0`. The [verification report](../../dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md) lists the saved receipts and the gates still open at release: the three failed real-provider (OpenRouter) demo cases, manual editor input/movement/material-visual checks, and player/IL2CPP/browser/device runs.

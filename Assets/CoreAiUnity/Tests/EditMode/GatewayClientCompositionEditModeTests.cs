@@ -557,6 +557,85 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// UNITY-REVIEW-002: removing an endpoint whose activation is still in flight cancels it after the
+        /// registry mutation lock exits, and a throwing host cancellation callback can neither abort the
+        /// removal nor skip the owned-host release.
+        /// </summary>
+        [Test]
+        public async Task RemoveEndpoint_ThrowingActivationCallbackCannotAbortRemovalOrSkipOwnedHostRelease()
+        {
+            using OwnedLeafBinding binding = new OwnedLeafBinding();
+            DisposalWarningLogger logger = new DisposalWarningLogger();
+            using DisposalCallbackEndpointFactory factory = new DisposalCallbackEndpointFactory(binding);
+            using LlmClientRegistry registry = new LlmClientRegistry(logger,
+                new CoreAISettingsOptions(), null, new EmptyRegistryStore(), factory, null, binding);
+            factory.RegistryGate = typeof(LlmClientRegistry).GetField("_gate", BindingFlags.NonPublic | BindingFlags.Instance)
+                .GetValue(registry);
+            LlmEndpointDescriptor faulting = Endpoint("https://pending-fault.test/v1");
+            faulting.EndpointId = "pending-fault";
+            Task<LlmEndpointSnapshot> pendingFault = registry.AddOrUpdateEndpointAsync(faulting);
+            try
+            {
+                Task<bool> removal = null;
+                Assert.DoesNotThrow(() => removal = registry.RemoveEndpointAsync("pending-fault"),
+                    "A throwing host cancellation callback must not abort the removal.");
+                Assert.IsTrue(await removal);
+                Assert.IsFalse(factory.CancelledUnderRegistryLock,
+                    "The superseded activation's callbacks must run after the registry mutation lock exits.");
+                Assert.AreEqual(1, factory.CancellationCount("pending-fault"));
+                Assert.GreaterOrEqual(logger.WarningCount, 1, "The isolated callback fault remains observable.");
+                Assert.IsFalse(registry.GetEndpoints().Any(endpoint => endpoint.Descriptor.EndpointId == "pending-fault"),
+                    "The removed endpoint must not stay registered.");
+
+                factory.CompletePending("pending-fault");
+                await AwaitBounded(pendingFault);
+                await AwaitBounded(factory.Released("pending-fault"));
+                Assert.AreEqual(1, factory.ReleaseCount("pending-fault"), "The removed endpoint's owned host is released once.");
+            }
+            finally
+            {
+                factory.CompletePending("pending-fault");
+            }
+        }
+
+        /// <summary>
+        /// UNITY-REVIEW-002: replacing an endpoint whose activation is still in flight cancels the superseded
+        /// activation after the registry mutation lock exits, so a throwing host callback cannot abort the
+        /// update half-way.
+        /// </summary>
+        [Test]
+        public void UpdateEndpoint_ThrowingSupersededActivationCallbackCannotAbortTheUpdate()
+        {
+            using OwnedLeafBinding binding = new OwnedLeafBinding();
+            DisposalWarningLogger logger = new DisposalWarningLogger();
+            using DisposalCallbackEndpointFactory factory = new DisposalCallbackEndpointFactory(binding);
+            using LlmClientRegistry registry = new LlmClientRegistry(logger,
+                new CoreAISettingsOptions(), null, new EmptyRegistryStore(), factory, null, binding);
+            factory.RegistryGate = typeof(LlmClientRegistry).GetField("_gate", BindingFlags.NonPublic | BindingFlags.Instance)
+                .GetValue(registry);
+            LlmEndpointDescriptor first = Endpoint("https://pending-fault.test/v1");
+            first.EndpointId = "pending-fault";
+            registry.AddOrUpdateEndpointAsync(first);
+            LlmEndpointDescriptor replacement = Endpoint("https://pending-fault-replacement.test/v1");
+            replacement.EndpointId = "pending-fault";
+            try
+            {
+                Assert.DoesNotThrow(() => registry.AddOrUpdateEndpointAsync(replacement),
+                    "A throwing callback on the superseded activation must not abort the update.");
+                Assert.IsFalse(factory.CancelledUnderRegistryLock,
+                    "The superseded activation's callbacks must run after the registry mutation lock exits.");
+                Assert.AreEqual(1, factory.CancellationCount("pending-fault"));
+                Assert.GreaterOrEqual(logger.WarningCount, 1, "The isolated callback fault remains observable.");
+                Assert.AreEqual("https://pending-fault-replacement.test/v1",
+                    registry.GetEndpoints().Single(endpoint => endpoint.Descriptor.EndpointId == "pending-fault").Descriptor.BaseUrl);
+            }
+            finally
+            {
+                factory.CompletePending("pending-fault");
+            }
+        }
+
         private sealed class DisposalCallbackEndpointFactory : ILlmEndpointClientFactory, IDisposable
         {
             private readonly OwnedLeafBinding _binding;

@@ -162,6 +162,10 @@ namespace CoreAI.Infrastructure.World
 
         public event Action RestoreCompleted;
 
+        /// <summary>
+        /// Creates a manager whose snapshot is <c>CoreAI/WorldState/world_state.json</c> under
+        /// <see cref="CoreAiStorageRoot.PersistentDataRoot"/>, resolved once here.
+        /// </summary>
         public WorldStateManager(
             IGameLogger logger,
             ICoreAiPrefabRegistry prefabRegistry = null,
@@ -170,11 +174,7 @@ namespace CoreAI.Infrastructure.World
             _logger = logger;
             _prefabRegistry = prefabRegistry;
             _allowPrimitives = allowPrimitives;
-            _saveFilePath = Path.Combine(
-                Application.persistentDataPath,
-                CoreAiPersistentPaths.RootFolderName,
-                CoreAiPersistentPaths.WorldState,
-                SaveFileName);
+            _saveFilePath = DefaultSaveFilePath();
         }
 
         /// <summary>
@@ -187,7 +187,25 @@ namespace CoreAI.Infrastructure.World
             ICoreAiPrefabRegistry prefabRegistry,
             bool allowPrimitives,
             string saveFilePath)
-            : this(logger, prefabRegistry, allowPrimitives)
+        {
+            _logger = logger;
+            _prefabRegistry = prefabRegistry;
+            _allowPrimitives = allowPrimitives;
+            _saveFilePath = NormalizeSaveFilePath(saveFilePath);
+        }
+
+        /// <summary>The default snapshot file under the current <see cref="CoreAiStorageRoot"/>.</summary>
+        public static string DefaultSaveFilePath()
+        {
+            return CoreAiStorageRoot.Combine(CoreAiPersistentPaths.WorldState, SaveFileName);
+        }
+
+        /// <summary>
+        /// Validates an explicit snapshot path and returns its full form. Shared with
+        /// <c>WorldCommandsInstaller</c> so a bad host option fails at registration, not at first resolve.
+        /// </summary>
+        /// <exception cref="ArgumentException">The path is empty, relative, contains traversal segments or names no file.</exception>
+        internal static string NormalizeSaveFilePath(string saveFilePath)
         {
             if (string.IsNullOrWhiteSpace(saveFilePath) || !Path.IsPathFullyQualified(saveFilePath))
             {
@@ -208,7 +226,7 @@ namespace CoreAI.Infrastructure.World
                 throw new ArgumentException("The world snapshot path must name a file.", nameof(saveFilePath));
             }
 
-            _saveFilePath = Path.GetFullPath(saveFilePath);
+            return Path.GetFullPath(saveFilePath);
         }
 
         public void Initialize()

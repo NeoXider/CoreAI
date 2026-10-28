@@ -15,7 +15,9 @@
     "CoreAI.RbxApi.Binding",
     "CoreAI.RbxApi.Datatypes",
     "UnityEngine.UI",
-    "Unity.TextMeshPro"
+    "Unity.TextMeshPro",
+    "Unity.InputSystem",
+    "Unity.InputSystem.TestFramework"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
@@ -33,6 +35,12 @@
   "defineConstraints": [
     "UNITY_INCLUDE_TESTS"
   ],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.inputsystem",
+      "expression": "1.0.0",
+      "define": "COREAI_HAS_INPUT_SYSTEM"
+    }
+  ],
   "noEngineReferences": false
 }

@@ -1,5 +1,64 @@
 # Final verification record — CoreAI candidate 7.55.0
 
+## Continuation after release 7.55.0 - 2026-10-28
+
+7.55.0 was published on 2026-10-28 with the gates below open. This continuation is published as **7.56.0**
+(tag `v7.56.0`, 2026-10-28) with the gates still listed as open below. It closes what can be closed
+without a person or a device; the older sections that follow are kept as the record and are superseded
+where this section says so. Receipts are under `artifacts/storage-root-20261028/`, each with its process
+arguments and a before/after SHA-256 comparison of the owner's
+`C:/Users/User/AppData/LocalLow/DefaultCompany/CoreAI` folder.
+
+- **Storage isolation: closed.** One configurable root, `CoreAiStorageRoot`, now backs every default store,
+  and every EditMode and PlayMode run redirects it to a per-run temporary directory. Design, guard and red
+  check: [STORAGE_ISOLATION.md](STORAGE_ISOLATION.md). Every Unity run of this continuation left the owner
+  folder identical (678 files, same directory set) apart from Unity's own `TestResults.xml`.
+- **Full EditMode** on the final tree (`edit-full2`, same assemblies and filter as full2): 8,307 cases, 8,292
+  Passed / 0 Failed / 15 Skipped, exit 0. The 15 skips are the same three categories as full2. The earlier
+  `edit-full1` (8,304 = 8,289 / 0 / 15) predates the registry fix and two of the new regressions.
+- **Findings: adjudicated.** All 21 original and 7 additional findings are already fixed; two more were found
+  and fixed (ADJ-001, UNITY-REVIEW-002). Table: [PR_AUDIT.md](PR_AUDIT.md#root-adjudication-of-all-28-findings---2026-10-28).
+- **Clean export:** the unchanged positive-module opt-in tool and `bump_version.py --check` pass on a `git
+  archive` of `134184ec`, and on that archive overlaid with this wave's files.
+- **Third-party log lines:** the NeoxiderTools `DocsEn` missing meta and the interactive-editor Burst pipe
+  errors are not CoreAI code; details and the upstream item are in `TODO.md`.
+- **Hermetic PlayMode** (`play-hermetic3`, same assemblies, filter and categories as the 7.54.0/7.55.0 gate):
+  395 cases, 391 Passed / 0 Failed / 4 Skipped, exit 0. Skips: the two batch-mode `WaitForEndOfFrame` cases and
+  the two new explicit editor-side tests. PR-BENCH-001's two PlayMode regressions and the new storage-root and
+  Mods-chat manager regressions Passed.
+- **Live OpenRouter (free model only):** `nvidia/nemotron-3-ultra-550b-a55b:free`, 4 requests in total, every one
+  `HTTP 401` because the owner's local test configuration holds a local-server placeholder key; no model output.
+  The three previously failed cases therefore remain open for a run with a valid key. The live-scene storage
+  composition passed in three real scenes, Demo01's Tetris fix and Spellcraft's input fix are confirmed up to the
+  provider call, and a test-helper defect that turned provider errors into 100-second timeouts was fixed.
+  Details: [OPENROUTER_TRIAGE.md](OPENROUTER_TRIAGE.md#free-model-rerun---2026-10-28).
+- **Editor-side checks:** `MiniRpgMovementInputPlayModeTests` (explicit) walked the player 0.59 m forward through
+  the scene's own controller with a virtual Input System keyboard; the release step was Inconclusive because the
+  scene invalidated the virtual device's state. `ProceduralMaterialsCapturePlayModeTests` (explicit) rendered 5
+  views and 24 materials to `artifacts/storage-root-20261028/visual/`; a review of a sample saw textured,
+  non-magenta surfaces with consistent projection and overlapping world-space captions in views 2 and 4.
+  Physical input, window focus, mouse look and aesthetic acceptance still need a person; IL2CPP, WebGL/browser
+  and device runs need their targets.
+
+| Run (`artifacts/storage-root-20261028/`) | Result | Owner folder |
+| --- | --- | --- |
+| `edit-focused1` | 80 = 80 Passed | unchanged |
+| `edit-red1` (one store reverted) | 13 = 11 Passed / 2 Failed, as intended | unchanged |
+| `edit-full1` | 8,304 = 8,289 Passed / 0 Failed / 15 Skipped | unchanged |
+| `play-hermetic1`, `play-hermetic2` | aborted (compile error; Mirror stopped Play Mode), no XML | unchanged |
+| `edit-focused2` | 175 = 175 Passed | unchanged |
+| `play-focused1`, `play-focused2` | new PlayMode tests; MiniRpg setup failures fixed after | unchanged |
+| `edit-red2` (four fixes reverted) | 6 = 1 Passed / 5 Failed, as intended | unchanged |
+| `play-hermetic3` | 395 = 391 Passed / 0 Failed / 4 Skipped | unchanged |
+| `live-free1` | 4 = 1 Passed / 3 Failed (HTTP 401) | unchanged |
+| `live-free2-editor` | captures Passed; Demo14 fast 401; MiniRpg release failure (fixed after) | unchanged |
+| `play-editor-final` | MiniRpg: walk asserted, release Inconclusive | unchanged |
+| `edit-guards-final` | 29 = 29 Passed | unchanged |
+| `edit-full2` (final tree) | 8,307 = 8,292 Passed / 0 Failed / 15 Skipped | unchanged |
+
+"Unchanged" means the SHA-256 listing of every file and the directory set were identical before and after,
+apart from Unity's own `TestResults.xml` in that folder.
+
 **Data-safety incident:** The earlier live-scene helper failed to isolate the default
 `CoreAI/WorldState/world_state.json`. The 2026-10-27 OpenRouter run auto-saved an empty
 QwenSpellcraft state over that pre-existing file. Its previous bytes have not been recovered;

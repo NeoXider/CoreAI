@@ -1,12 +1,21 @@
 # TODO
 
-- [ ] Verify the live-scene per-run world-state and audit-store composition before accepting another real-model demo run. Its build callback asserts the owned snapshot path, but it only runs inside the explicit OpenRouter fixture. The standalone manager path tests passed 7/7 and the non-live exact-slot storage test passed on 2026-10-28.
+- [x] Verify the live-scene per-run world-state and audit-store composition before accepting another real-model demo run. Verified 2026-10-28 in `live-free1`: the fixture's `STORAGE_PREFLIGHT`/`STARTED` checks (owned snapshot path, audit and mod stores asserted before any request) passed in FullAccess twice and QwenSpellcraft, the non-live exact-slot storage test passed, and the owner folder was unchanged. The test-run storage root now adds a second layer of isolation.
 - [ ] Recover the pre-existing `world_state.json` only from a verified backup; the live test overwrote it and no previous bytes have been found. Owner decision.
-- [ ] Re-run the three failed OpenRouter scenarios (`ActualProgrammer_ModelCreatesThenEditsOwnedMod_WithSavedSourceAndObservableLuaEffects`, `Demo01_FullAccess_SelfTestTetrisAndLiveChat`, `Demo14_QwenSpellcraft_HttpCastExecutesToolAndSpendsMana`); complete the deferred manual editor, movement and material-visual checks.
-- [x] Hermetic PlayMode gate on the 7.55.0 tree (2026-10-28, FastNoLlm + Mods + MCP + Benchmark assemblies, same exclusions as 7.54.0): 391 cases, 389 Passed / 0 Failed / 2 Skipped (the two batch-mode `WaitForEndOfFrame` cases).
+- [ ] Re-run the three failed OpenRouter scenarios (`ActualProgrammer_ModelCreatesThenEditsOwnedMod_WithSavedSourceAndObservableLuaEffects`, `Demo01_FullAccess_SelfTestTetrisAndLiveChat`, `Demo14_QwenSpellcraft_HttpCastExecutesToolAndSpendsMana`). 2026-10-28 rerun on `nvidia/nemotron-3-ultra-550b-a55b:free`: all three got `HTTP 401` (4 single-attempt requests): the owner's local test config holds a local-server placeholder key, not an OpenRouter key. Environment, not CoreAI. Confirmed on the way: Demo01's Tetris precondition fix (whole sequence passes up to the live chat) and Spellcraft's input-targeting fix (a real request is admitted); the UI-turn helper now fails fast on a provider error. Needs a run with a valid key in `COREAI_TEST_API_KEY`. [Triage](dev-docs/completion-2026-10-27/OPENROUTER_TRIAGE.md#free-model-rerun---2026-10-28).
+- [ ] Editor-side checks that still need a person (2026-10-28): physical keyboard/mouse with window focus and mouse look in MiniRpg (the explicit `MiniRpgMovementInputPlayModeTests` walks the player through the scene's controller with a virtual Input System keyboard; the release step can be invalidated by the scene's input re-initialisation), and aesthetic acceptance of the procedural materials (the explicit `ProceduralMaterialsCapturePlayModeTests` renders 5 views and every material to PNG; a first review saw textured, non-magenta surfaces and overlapping world-space captions in views 2 and 4). Interactive Hub/editor focus, selection and save/reload by hand; IL2CPP, WebGL/browser and device runs need their targets.
+- [x] Hermetic PlayMode gate on the 7.55.0 tree (2026-10-28, FastNoLlm + Mods + MCP + Benchmark assemblies, same exclusions as 7.54.0): 391 cases, 389 Passed / 0 Failed / 2 Skipped (the two batch-mode `WaitForEndOfFrame` cases). Rerun on the storage-root tree (`artifacts/storage-root-20261028/play-hermetic3.xml`): 395 cases, 391 Passed / 0 Failed / 4 Skipped (the same two plus two new explicit editor-side tests), owner folder unchanged.
 - [x] Persistent-store test isolation wave: the orchestrator file-history, audit-writer, world-state PlayMode and persisted chat-history fixtures use GUID-owned temporary directories. Focused EditMode 86/86 Passed; `ChatHistoryPlayModeTests` and `PublishedDemoStorageRegistrationPlayModeTests` 2/2 Passed. A hash comparison of the developer's `persistentDataPath/CoreAI` before and after these runs showed no change.
-- [ ] **The hermetic PlayMode gate still writes into the developer's `persistentDataPath`.** On 2026-10-28 the run above overwrote `CoreAI/WorldState/world_state.json` with an empty `OnlineAuthorityDemo` snapshot when the editor quit, appended to the default `Audit/audit.jsonl`, rewrote a `LuaMods` state file and seeded eight bundled sample mods into the default mod stores; the files were restored from a copy taken before the run. Scene and scope fixtures (demo scene smoke tests, chat demo, test sandboxes) build production scopes whose default stores root at `Application.persistentDataPath`, and the runtime has no single storage-root seam (16 runtime files read `persistentDataPath` directly). Needs a design decision: a configurable root honoured by every default store, or the live fixture's exact-slot replacement applied to every scene test. Until then, back up `persistentDataPath/CoreAI` before running PlayMode locally.
-- [ ] `WorldCommandsInstaller` hardcodes the default-path `WorldStateManager` constructor; a host can only choose another snapshot path by replacing the registration. Consider an installer option for the path.
+- [x] **Tests wrote into the developer's `persistentDataPath`** (the hermetic gate overwrote `world_state.json`, appended to the audit log and seeded sample mods; a full EditMode run deleted five world autosaves). Decided and done 2026-10-28: one configurable root, `CoreAiStorageRoot`, honoured by every default store; every EditMode and PlayMode run redirects it to a per-run `%TEMP%/cai-ts-<id>` directory (`CoreAiTestStorageRootRunCallback`) and deletes it afterwards; `CoreAiStorageRootEditModeTests` guards that no code outside the provider reads the engine data path. Design and receipts: [STORAGE_ISOLATION.md](dev-docs/completion-2026-10-27/STORAGE_ISOLATION.md). Backing up `persistentDataPath/CoreAI` before a local run is no longer required.
+- [x] `WorldCommandsInstaller.RegisterWorldCommands(registry, allowedLuaScenes, worldStateSnapshotPath)` selects the world snapshot path (validated at registration; `null` keeps the default under the storage root); documented in `WORLD_COMMANDS.md` section 7 and covered by `WorldCommandsInstallerEditModeTests`.
+- [ ] Regression-strength gaps left by the 2026-10-28 adjudication (the fixes are in place; these tests would not
+  catch every way of undoing them): PR-BENCH-001 does not check that `RunScenario` passes the turn baseline;
+  PR-MCP-001's automatic `StopServer` -> `StartServer` restart is covered only over the in-memory transport;
+  PR-08-002 lacks the two-chunk `LuaCsScriptEngine` reuse case; PR-AUD-001 does not assert the lone-surrogate
+  precondition; PR-09-001's `AddHub` menu path is untested.
+- [ ] Owner decision: with Auto tool mode, an empty `AgentRoleId`, a memory store and a skill proxy,
+  `CallSkillToolLlmTool` reaches `RoleBinding.RequireRole` and throws. Confirm this refusal is intended or make
+  it a reported tool error.
 
 - [x] Benchmark resume round 3: lossless date/result/trace/Markdown recovery, repetition and hero ownership checks, stable legacy ordering/summary precision, corrupt-run discovery, deferred-target completion, unique backups, credential validation and minimal publishing path edits.
 - [x] Benchmark resume round 3 file-only validation: all four requested Unity-generated projects compile; portable Release suite passes 2602/2602; all-six real-report TEMP repair probe preserves kept JSON/Markdown/trace bytes, metadata, unaffected summaries, row order and repair idempotence.
@@ -51,8 +60,9 @@
 - [ ] Documentation-defect verification gate (2026-10-15): run the new role-stop, audit-role persistence, config read permissions, Unity continuation, scene-validation, NuGet pin, and settings-reset EditMode regressions on the next Editor start. File-only verification does not execute Unity tests.
 - [x] Protected-file follow-up: `CoreAISettingsAsset.ApplyOptions` copies `AllowWorldPrimitives`; `LlmToolChannel.Auto` documents HTTP capability probing. Existing EditMode regressions cover the permission copy.
 
-> **Published: 7.55.0 (2026-10-28, tag `v7.55.0`, `main` and `demo`)**, all seven package manifests
-> in lockstep under PolyForm Small Business 1.0.0. The owner authorized the release with the real-provider,
+> **Published: 7.56.0 (2026-10-28, tag `v7.56.0`, `main` and `demo`)**, all seven package manifests
+> in lockstep under PolyForm Small Business 1.0.0; it adds the single storage root and the world snapshot
+> overload on top of 7.55.0. The owner authorized the release with the real-provider,
 > manual and player gates below still open; receipts and those gates are in
 > [FINAL_VERIFICATION.md](dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md).
 > Shipped history is in the two changelogs (`Assets/CoreAI/CHANGELOG.md`, `Assets/CoreAiUnity/CHANGELOG.md`);
@@ -3476,29 +3486,37 @@ The complete exact-method/receipt map is in
 The initial 36-case receipt remains 28 Failed / 8 Passed; red1/red2 failed compilation. Those
 historical negatives are preserved rather than relabeled by later passes.
 
-### Original 21 findings: final root acceptance pending
+### Original 21 findings: adjudicated 2026-10-28, all already fixed
 
-- [ ] PR-EXEC-001 (P1) - Preserve scoped memory when the new constructor argument is omitted. Repair implemented; 11 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/01-execution.md).
-- [ ] PR-MEM-001 (P2) - Read-triggered key migration bypasses configured persistence confirmation. Repair implemented; 7 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/02-memory-skills.md).
-- [ ] PR-MEM-002 (P2) - The admitted memory binding leaves read_skill reporting the callable target as unavailable. Repair implemented; 2 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/02-memory-skills.md).
-- [ ] PR-LLM-001 (P2) - Apply disabled-tool mode before binding skill proxies. Repair implemented; 8 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/03-providers.md).
-- [ ] PR-HOST-001 (P2) - Retain existing public signatures when adding actor-aware calls. Repair implemented; 8 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/04-unity-host.md).
-- [ ] PR-HOST-002 (P2) - Match progress using the explicit trace actually propagated to custom orchestrators. Repair implemented; 7 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/04-unity-host.md).
-- [ ] PR-AUD-001 (P2) - Strict audit encoding rejects a normal diagnostic snapshot and repeatedly requeues its whole batch. Repair implemented; 2 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/05-audit-log.md).
-- [ ] PR-AUD-002 (P3) - New Mods log clipping splits valid Unicode surrogate pairs. Repair implemented; 3 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/05-audit-log.md).
-- [ ] PR-MODS-001 (P2) - Preserve the legacy backend path through world source facades. Repair implemented; 2 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/06-mods.md).
-- [ ] PR-MODS-002 (P2) - Keep a failed first canonical source save retryable. Repair implemented; 2 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/06-mods.md).
-- [ ] PR-MODS-003 (P2) - Reject malformed UTF-16 before deriving a namespace digest. Repair implemented; 2 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/06-mods.md).
-- [ ] PR-RBX-001 (P2) - Refuse a material acquisition that returns after host teardown. Repair implemented; 1 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/07-rbx-api.md).
-- [ ] PR-08-001 (P3) - Accepted resolver name _ENV captures the environment instead of the callable. Repair implemented; 5 named saved cases Passed in `artifacts/completion-20261027/core-final/core-final1.trx`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/08-luau.md).
-- [ ] PR-08-002 (P2) - Eager floor capture fails even when the division is never evaluated. Repair implemented; 3 named saved cases Passed in `artifacts/editor-integration-20261026/lua-full-results1/lua-editor-full1.trx`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/08-luau.md).
-- [ ] PR-09-001 (P2) - Preserve the World-page binder when generating the setup prefab. Repair implemented; 1 named saved cases Passed in `artifacts/pr-review-20261025/unity-editor-source-batch1.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/09-hub.md).
-- [ ] PR-09-002 (P2) - Consume Escape only when the Hub actually handles it. Repair implemented; 4 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/09-hub.md).
-- [ ] PR-09-003 (P3) - Do not invalidate a pending save when the Advanced foldout opens. Repair implemented; 4 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/09-hub.md).
-- [ ] PR-MCP-001 (P2) - Reentrant restart binds before the stopped HTTP listener releases its prefix. Repair implemented; 2 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/10-mcp.md).
-- [ ] PR-NET-001 (P2) - A delayed old-ID binding notification removes a replacement session. Repair implemented; 9 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/11-mirror.md).
-- [ ] PR-BENCH-001 (P2) - Resetting turn activity makes a fresh continuation inherit the scenario's inactivity age. Repair implemented; 2 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-play1.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/12-benchmark.md).
-- [ ] PR-14-001 (P2) - Distinguish the factory's legacy chat interface from the actor-aware chat service. Repair implemented; corrected legacy/actor-aware guidance and two compile examples; no direct runtime case. Owner: root; [original report](dev-docs/pr-review-2026-10-25/14-docs-packages.md).
+Root adjudication on 2026-10-28 re-checked every finding against the current source and its mapped
+regressions in the new full EditMode receipt (`artifacts/storage-root-20261028/edit-full1.xml`: 8,304 cases,
+8,289 Passed / 0 Failed / 15 Skipped; on the final tree `edit-full2.xml`: 8,307 cases, 8,292 Passed / 0 Failed /
+15 Skipped). All 21 original and all 7 additional findings are already fixed; the
+per-finding table, the regressions added where a mapped test did not fail on the old code, and two further
+defects fixed in the same wave (ADJ-001, UNITY-REVIEW-002) are in
+[PR_AUDIT.md](dev-docs/completion-2026-10-27/PR_AUDIT.md#root-adjudication-of-all-28-findings---2026-10-28).
+
+- [x] PR-EXEC-001 (P1) - Preserve scoped memory when the new constructor argument is omitted. Repair implemented; 11 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/01-execution.md).
+- [x] PR-MEM-001 (P2) - Read-triggered key migration bypasses configured persistence confirmation. Repair implemented; 7 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/02-memory-skills.md).
+- [x] PR-MEM-002 (P2) - The admitted memory binding leaves read_skill reporting the callable target as unavailable. Repair implemented; 2 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/02-memory-skills.md).
+- [x] PR-LLM-001 (P2) - Apply disabled-tool mode before binding skill proxies. Repair implemented; 8 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/03-providers.md).
+- [x] PR-HOST-001 (P2) - Retain existing public signatures when adding actor-aware calls. Repair implemented; 8 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/04-unity-host.md).
+- [x] PR-HOST-002 (P2) - Match progress using the explicit trace actually propagated to custom orchestrators. Repair implemented; 7 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/04-unity-host.md).
+- [x] PR-AUD-001 (P2) - Strict audit encoding rejects a normal diagnostic snapshot and repeatedly requeues its whole batch. Repair implemented; 2 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/05-audit-log.md).
+- [x] PR-AUD-002 (P3) - New Mods log clipping splits valid Unicode surrogate pairs. Repair implemented; 3 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/05-audit-log.md).
+- [x] PR-MODS-001 (P2) - Preserve the legacy backend path through world source facades. Repair implemented; 2 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/06-mods.md).
+- [x] PR-MODS-002 (P2) - Keep a failed first canonical source save retryable. Repair implemented; 2 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/06-mods.md).
+- [x] PR-MODS-003 (P2) - Reject malformed UTF-16 before deriving a namespace digest. Repair implemented; 2 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/06-mods.md).
+- [x] PR-RBX-001 (P2) - Refuse a material acquisition that returns after host teardown. Repair implemented; 1 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/07-rbx-api.md).
+- [x] PR-08-001 (P3) - Accepted resolver name _ENV captures the environment instead of the callable. Repair implemented; 5 named saved cases Passed in `artifacts/completion-20261027/core-final/core-final1.trx`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/08-luau.md).
+- [x] PR-08-002 (P2) - Eager floor capture fails even when the division is never evaluated. Repair implemented; 3 named saved cases Passed in `artifacts/editor-integration-20261026/lua-full-results1/lua-editor-full1.trx`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/08-luau.md).
+- [x] PR-09-001 (P2) - Preserve the World-page binder when generating the setup prefab. Repair implemented; 1 named saved cases Passed in `artifacts/pr-review-20261025/unity-editor-source-batch1.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/09-hub.md).
+- [x] PR-09-002 (P2) - Consume Escape only when the Hub actually handles it. Repair implemented; 4 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/09-hub.md).
+- [x] PR-09-003 (P3) - Do not invalidate a pending save when the Advanced foldout opens. Repair implemented; 4 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/09-hub.md).
+- [x] PR-MCP-001 (P2) - Reentrant restart binds before the stopped HTTP listener releases its prefix. Repair implemented; 2 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/10-mcp.md).
+- [x] PR-NET-001 (P2) - A delayed old-ID binding notification removes a replacement session. Repair implemented; 9 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-focused5.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/11-mirror.md).
+- [x] PR-BENCH-001 (P2) - Resetting turn activity makes a fresh continuation inherit the scenario's inactivity age. Repair implemented; 2 named saved cases Passed in `artifacts/pr-review-20261025/unity-repair-play1.xml`. Owner: root; [original report](dev-docs/pr-review-2026-10-25/12-benchmark.md).
+- [x] PR-14-001 (P2) - Distinguish the factory's legacy chat interface from the actor-aware chat service. Repair implemented; corrected legacy/actor-aware guidance and two compile examples; no direct runtime case. Owner: root; [original report](dev-docs/pr-review-2026-10-25/14-docs-packages.md).
 
 ### Integrated regression and demo acceptance
 
@@ -3515,14 +3533,28 @@ historical negatives are preserved rather than relabeled by later passes.
   selected UI/typing 20=17 Passed /3 Failed, separate grouped-Hub/language 4=2 Passed /2 Failed.
   Completion acceptance/Tab, post-layout navigation and actual grouped-Hub setup remain pending.
 - [ ] Complete native scene-specific checks for all 17 demos, including live model-driven mod
-  create/edit using OpenRouter. Direct HTTP provider success is not Unity scene proof.
+  create/edit using OpenRouter. Direct HTTP provider success is not Unity scene proof. 2026-10-28: blocked on a
+  valid OpenRouter key in the test process (the free-model rerun got HTTP 401); the remaining live cases were
+  not run because every request would fail the same way.
 - [ ] Complete interactive editor input/focus/selection/completion/save/reload checks when Computer
   Use is available. MiniRpg movement and ProceduralMaterials visual assessment remain explicit
-  manual/partial gates; text output cannot close them.
-- [ ] Reconcile third-party immutable-folder missing-meta and Burst startup observations with the
-  native run; do not hide them behind a test summary.
-- [ ] Root adjudicates all original and new review findings, verifies documentation and decides
-  publication readiness. [Current PR audit](dev-docs/completion-2026-10-27/PR_AUDIT.md).
+  manual/partial gates; text output cannot close them. 2026-10-28: both now have explicit automated
+  checks (virtual-keyboard walk through the real controller; PNG captures of every view and material), see
+  the editor-side item at the top of this file for what still needs a person.
+- [x] Reconcile third-party immutable-folder missing-meta and Burst startup observations with the
+  native run (2026-10-28). Neither is CoreAI code. The only missing-meta line in the full EditMode log is
+  `Packages/com.neoxider.tools/DocsEn has no meta file, but it's in an immutable folder` (NeoxiderTools
+  10.19.0 at `ca198556` ships `DocsEn/` without `DocsEn.meta`); the folder is documentation and Unity ignores
+  it, so nothing breaks. The fix belongs upstream (tracked below). The Burst lines (`Can't find file` for the
+  `unity-burst-*` named pipe, `Deferred Burst compiler server command failed`) appear only in the interactive
+  editor log of 2026-10-26 (`artifacts/demo-qa-20261026/interactive-editor3.log`): the Burst 2.0.0 editor
+  client lost its compiler-server pipe. No batch EditMode or PlayMode log of 2026-10-28 contains a Burst
+  warning or error, and CoreAI ships no Burst-compiled code.
+- [ ] NeoxiderTools upstream: ship `DocsEn.meta` (or rename `DocsEn` to `DocsEn~`) so consumers stop logging the
+  immutable-folder warning. Separate repository; not changed from this wave.
+- [x] Root adjudicates all original and new review findings (2026-10-28: all 28 already fixed, two more
+  confirmed and fixed). [Current PR audit](dev-docs/completion-2026-10-27/PR_AUDIT.md). Publication readiness stays
+  with the coordinator.
 - [x] Publication: the owner authorized releasing 7.55.0 on 2026-10-28 with the open live/manual/player
   gates listed above. `main` was fast-forwarded to the release commit, `demo` points at it, `v7.55.0`
   is a new tag and published `v7.54.0` is unchanged.
@@ -3559,39 +3591,43 @@ All seven confirmed source findings have independently approved fixes. These box
 root/native acceptance, not missing implementation. Focused3 remains failed; exact scoped
 positive cases and remaining failures are in FINAL_VERIFICATION.md.
 
-- [ ] UNITY-REVIEW-001 (P2, pre-existing in touched disposal path): isolate activation cancellation
+- [x] UNITY-REVIEW-001 (P2, pre-existing in touched disposal path): isolate activation cancellation
   failures so every ready endpoint's owned host is released once outside the registry mutation lock.
   [Unity review](dev-docs/completion-2026-10-27/UNITY.md).
-- [ ] HUB-REVIEW-001 (P2): route Escape to the actual Mods editor's transient UI before configured Hub
+- [x] HUB-REVIEW-001 (P2): route Escape to the actual Mods editor's transient UI before configured Hub
   collapse; verify with the real Hub ancestor attached. [Hub review](dev-docs/completion-2026-10-27/HUB.md).
-- [ ] EDITOR-REVIEW-001 (P2): retain full Lua lexical context for Enter indentation inside multiline
+- [x] EDITOR-REVIEW-001 (P2): retain full Lua lexical context for Enter indentation inside multiline
   literals/comments; add pure and attached exact-source undo/redo cases.
   [Editor review](dev-docs/completion-2026-10-27/EDITOR_REVIEW.md).
-- [ ] EDITOR-REVIEW-002 (P3): preserve the Lua profile's accepted code context through auto-pairing
+- [x] EDITOR-REVIEW-002 (P3): preserve the Lua profile's accepted code context through auto-pairing
   after `#`, while retaining Python comment behavior. [Editor review](dev-docs/completion-2026-10-27/EDITOR_REVIEW.md).
 
 
-- [ ] CANDIDATE-REVIEW-001 (P2): tracked quote closer type-over and verified insertion-range tracker.
+- [x] CANDIDATE-REVIEW-001 (P2): tracked quote closer type-over and verified insertion-range tracker.
   Fifth finding was present in frozen source; it is not a candidate-merge regression. Source fix
   promoted with the other four; quote/tracker controls pass within focused3, full UI gate remains failed.
   [Candidate review](dev-docs/completion-2026-10-27/CANDIDATE_REVIEW.md).
 - [ ] Close the remaining OpenRouter model create/edit discovery and actual ModsChat manager-row
-  failures. Initial18-case matrix11P5F2Skipped and repair5-case matrix3P2F remain negative history.
+  failures. 2026-10-28: the manager-row repaint is now proven without a model by the hermetic
+  `LiveMechanicsModsChatManagerPlayModeTests`; model create/edit still needs a run with a valid key. Initial18-case matrix11P5F2Skipped and repair5-case matrix3P2F remain negative history.
   Later direct/storage/actual-Hub1/1 passes and Qwen/Skills real-tool positives are scoped evidence.
-- [ ] Reconcile unchanged positive-opt-in tool on the curated clean final-tree export after its raw
-  dirty-checkout scan failed on ignored non-UTF8 Mirror scratch. Preserve the raw failure.
+- [x] Reconcile unchanged positive-opt-in tool on the curated clean final-tree export after its raw
+  dirty-checkout scan failed on ignored non-UTF8 Mirror scratch. Preserve the raw failure. 2026-10-28: on a
+  `git archive` of `134184ec` (released 7.55.0) in a temporary directory the unchanged tool reports PASS and
+  `bump_version.py --check` confirms seven packages plus the MCP constant at 7.55.0; the same two checks pass on
+  that archive overlaid with this wave's changed and new files (ProjectSettings noise excluded).
 - [ ] Root freezes final documentation/receipts and reviews [FINAL_VERIFICATION.md](dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md)
   before Git publication. Computer Use/native movement/qualitative visual deferrals stay explicit.
 
 
 ### Full EditMode correction-wave checkpoint
 
-- [ ] Root accepts original 21 and additional 7 only after current required runtime results and its
-  explicit adjudication. In full1, all mapped methods for 19 original EditMode findings are present
+- [x] Root accepts original 21 and additional 7 only after current required runtime results and its
+  explicit adjudication. Adjudicated 2026-10-28 (all already fixed). In full1, all mapped methods for 19 original EditMode findings are present
   and Passed; PR-BENCH-001 is PlayMode-only and PR-14-001 remains docs-only.
-- [ ] EDITOR-REVIEW-003 (P2): stale completion rejected but Tab/Enter swallowed; source-approved
+- [x] EDITOR-REVIEW-003 (P2): stale completion rejected but Tab/Enter swallowed; source-approved
   acceptance-success/fallback fix. [Final source review](dev-docs/completion-2026-10-27/FINAL_SOURCE_REVIEW.md).
-- [ ] DEMO-REVIEW-001 (P2): actual manager cache/source events did not repaint rows; source-approved
+- [x] DEMO-REVIEW-001 (P2): actual manager cache/source events did not repaint rows; source-approved
   event-driven repaint ordering. Actual OpenRouter Demo05/model-authoring rerun pending.
 - [ ] Full1 remains 8268 total/8239 Passed/14 Failed/15 Skipped. All 14 are explained/corrected at
   source: 2 invalid Tab expectations, 10 positive save fixtures missing deliberate budget capability,
@@ -3605,6 +3641,8 @@ positive cases and remaining failures are in FINAL_VERIFICATION.md.
 - [ ] Refresh final staged export/guards after corrections. Export1 positive-opt-in/version checks
   passed at index 833eafd... before this wave; staged pattern scan 411 paths/0 hits is scoped to that
   snapshot. Raw ignored-Mirror non-UTF8 scan failure is preserved. Root owns staging/settings/Git.
+  2026-10-28: positive-opt-in and version checks re-run on clean exports (above). The staged secret-pattern
+  scan stays with the coordinator, who stages the commit.
 
 
 - [x] FullEditMode2 actual 8273 rows/8258 Passed/15 Skipped/0 Failed, exit 0. UI 20/20, typing 2/2,

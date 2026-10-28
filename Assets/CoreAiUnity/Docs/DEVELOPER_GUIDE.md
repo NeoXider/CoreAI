@@ -573,6 +573,35 @@ This is **separate** CoreAI file storage under `Application.persistentDataPath` 
 - **WebGL** — in `AgentMemoryPersistenceMode.Persistent` mode `persistentDataPath` maps to browser storage (IndexedDB / IDBFS): agent memory and chat use **`FileAgentMemoryStore`** and conversation summaries use **`FileConversationSummaryStore`** under **`CoreAILifetimeScope`** on the **player** too. **The web template must pass `config.autoSyncPersistentDataPath = true` to `createUnityInstance()`** — that is what makes the engine flush every `persistentDataPath` write to IndexedDB by itself. Unity's stock templates ship the line commented out, so add it to your own template or run **`CoreAI/Setup/Install WebGL Template`**, which copies the template shipped inside the package into `Assets/WebGLTemplates/CoreAI` and selects it. `CoreAIWebGlPersistentDataSyncBuildGuard` fails the build without it (opt out for a player that ships without CoreAI storage with the scripting define symbol **`COREAI_WEBGL_NO_PERSISTENCE`**, which is logged on every build) and `CoreAiWebGlPersistence` reports a visible error at runtime. CoreAI does not drive `FS.syncfs` by hand: Unity 6.3 deprecated that path and its completion callback never fires. `SessionOnly` keeps memory, chat, transcript and summary in memory and does not call file persistence. Users can clear site data; quota limits may apply — see [Unity documentation](https://docs.unity3d.com/) for your version under WebGL.
 - **Sync with cloud / a single game save** needs a separate integration (copy files, custom provider, or mirroring after `RecordSuccessfulExecution`).
 
+### 6.2 Storage root (where every CoreAI file store lives)
+
+Every default CoreAI file store resolves its folder from one place, `CoreAI.Infrastructure.CoreAiStorageRoot`:
+agent memory and chat history, conversation summaries, token calibration, `llm-endpoints.json`, Lua script
+versions, data overlays, skills, the audit log, the world snapshot, Lua mod state, mod sources, world packages
+(`Saves/`) and the Lua log file. Each is `CoreAI/<folder>` under `CoreAiStorageRoot.PersistentDataRoot`, which is
+`Application.persistentDataPath` unless something overrides it; the paths in the tables above are that default.
+
+```csharp
+// A dedicated server or launcher, before any CoreAI scope builds:
+IDisposable storage = CoreAiStorageRoot.Override(Path.Combine(dataVolume, "profiles", profileId));
+// ... keep it for the process lifetime, or Dispose() it to fall back to the previous root.
+```
+
+- **One switch for every store.** Overriding the root moves all default stores together; an explicit path given to
+  a store's own constructor (or to `RegisterWorldCommands(..., worldStateSnapshotPath)`) still wins.
+- **Resolved at construction.** A store reads the root once when it is built, so an override must be in place before
+  the scope builds; a store keeps its folder even if the override ends while it is alive.
+- **Scopes nest.** `Override` returns a scope; disposing it restores whatever was active before, in any order.
+  Empty, relative and `.`/`..` roots throw `ArgumentException`. `CoreAiStorageRoot.Combine(...)` builds a path under
+  the CoreAI folder and rejects rooted or traversal segments.
+- **Tests never use your saves.** The test packages redirect the root to a fresh `%TEMP%/cai-ts-<id>` directory for
+  every EditMode and PlayMode run (`CoreAiTestStorageRootRunCallback`, a Unity Test Framework run callback) and delete
+  it when the run finishes, so scene tests and production scopes built by tests cannot touch
+  `Application.persistentDataPath`. The guard `CoreAiStorageRootEditModeTests` fails if code outside the provider reads
+  the engine data path directly.
+- **WebGL.** The engine persists only `Application.persistentDataPath` to IndexedDB; an override outside it lasts only
+  for the session.
+
 ---
 
 ## 7. Tests
@@ -820,7 +849,7 @@ Practical integration pain points and ways to keep CoreAI automatic but configur
 **Simplify:**
 - **CoreAI → Setup → Create Default Assets** creates the settings asset, prompts manifest, log settings, permissions, routing manifest and an empty prefab registry in one step.
 - **CoreAI → Setup → Validate Scene** checks that `CoreAILifetimeScope` is present and its references are valid, and logs warnings.
-- Use **CoreAI → Delete All Persistent Saves...** (Editor only, **not** in Play Mode) to wipe the whole **`Application.persistentDataPath/CoreAI`** folder — agent memory and persisted chat, conversation summaries, Lua script versions, data overlays and any other CoreAI data stored there. Does **not** delete assets under `Assets/`.
+- Use **CoreAI → Delete All Persistent Saves...** (Editor only, **not** in Play Mode) to wipe the whole **`CoreAI`** folder under the storage root (by default **`Application.persistentDataPath/CoreAI`**) — agent memory and persisted chat, conversation summaries, Lua script versions, data overlays and any other CoreAI data stored there. Does **not** delete assets under `Assets/`.
 
 ### 2) Default LLM backend choice and stub fallback
 
@@ -894,4 +923,4 @@ The canonical commit checklist and the CI job list are in [CONTRIBUTING.md](../.
 
 Record major contract changes in **DGF_SPEC** (version in the header). **DEVELOPER_GUIDE** describes the current code map; if it diverges from code, the repository wins — update the guide in the same PR.
 
-**Version of this guide:** 7.55.0 (2026-10-28) — seven-package topology; independent library/feature log-prefix controls; UI Toolkit UXML serialization via `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+, required by Unity 6.6); independent positive `COREAI_LLM` / `COREAI_LUA` opt-ins; provider-only meaning of `COREAI_LLM`; opaque multi-user persistence keys and enqueue-time scope snapshots for queue execution/cancellation; session-only persistence and current chat lifecycle contracts. Historical feature notes remain in both package changelogs.
+**Version of this guide:** 7.56.0 (2026-10-28) — seven-package topology; independent library/feature log-prefix controls; UI Toolkit UXML serialization via `[UxmlElement]` / `[UxmlAttribute]` (Unity 6000.0+, required by Unity 6.6); independent positive `COREAI_LLM` / `COREAI_LUA` opt-ins; provider-only meaning of `COREAI_LLM`; opaque multi-user persistence keys and enqueue-time scope snapshots for queue execution/cancellation; session-only persistence and current chat lifecycle contracts. Historical feature notes remain in both package changelogs.

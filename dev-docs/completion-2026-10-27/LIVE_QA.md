@@ -5,6 +5,11 @@ overwrote the pre-existing default `CoreAI/WorldState/world_state.json` with an 
 The previous bytes have not been recovered. Do not rerun this fixture until its real world-state
 manager is redirected to a verified owned path before initialization.
 
+**Update 2026-10-28:** isolation is verified. The fixture's owned-path checks passed in three real scenes, and
+every test run now also redirects `CoreAiStorageRoot` to a temporary directory, so default stores cannot reach
+the developer's saves. The free-model rerun and its HTTP 401 outcome are in
+[OPENROUTER_TRIAGE.md](OPENROUTER_TRIAGE.md#free-model-rerun---2026-10-28).
+
 Status: real OpenRouter verification is in progress. The complete matrix is not green. The latest fixes for the two remaining automated failures await a root-owned rerun; two manual acceptance gates remain open.
 
 The goal is the actual seventeen published scenes plus two real Programmer turns authoring and editing one harmless Lua mod. The user selected OpenRouter; the tested model was deepseek/deepseek-v4.1-flash. No local/native backend is permitted for these acceptance runs.
