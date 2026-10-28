@@ -133,24 +133,6 @@ entitlement, cancellation and streamed tool-call handling. A fake transport veri
 behavior; it does not establish live gateway, player, IL2CPP or browser behavior. For WebGL,
 check browser CORS, allowed headers, cancellation and scene/scope teardown in the built player.
 
-## Source provenance and retained notice
+## Source provenance
 
-The optional v1 side-call behavior was adapted from the owner's Neoxider CoreAiPro 0.1.0 in RedoSchool, source HEAD f69a0e38624cb91be4b7a50bb0908163f6777622 and package tree 52ba740d6de5df1830594cb2d4bd0642333e9843. No RedoSchool login/session/student/lesson adapter or configuration was copied. Portable scoped middleware and host-neutral composition reuse CoreAI framework contracts. The owner authorized migration/publication; namespace changes do not themselves relicense source material.
-
-The original notice is retained here for derived material:
-
-> Proprietary License — CoreAI Pro
->
-> Copyright (c) 2026 Neoxider. All rights reserved.
->
-> This package ("CoreAI Pro") is proprietary and confidential. It is NOT open source.
->
-> You may NOT, without a separate written commercial license from Neoxider:
-> - redistribute, sublicense, publish, or make this source publicly available;
-> - include it in any open-source repository or public mirror;
-> - use it outside the licensed project(s).
->
-> CoreAI Pro is distributed only to authorized projects. The accompanying open-source
-> CoreAI package is licensed separately under its own terms and is unaffected by this license.
->
-> Unauthorized distribution of this package or any portion of it is prohibited.
+The optional v1 side-call behavior was adapted from the owner's Neoxider CoreAiPro 0.1.0 in RedoSchool, source HEAD f69a0e38624cb91be4b7a50bb0908163f6777622 and package tree 52ba740d6de5df1830594cb2d4bd0642333e9843. No RedoSchool login/session/student/lesson adapter or configuration was copied. Portable scoped middleware and host-neutral composition reuse CoreAI framework contracts. Neoxider, the copyright holder of CoreAiPro, relicensed the adapted material for publication in this repository. It is distributed under the repository license, PolyForm Small Business 1.0.0 (see [LICENSE](../../LICENSE)), like the rest of CoreAI. The proprietary CoreAiPro notice does not apply to the material published here.

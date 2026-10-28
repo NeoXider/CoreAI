@@ -51,10 +51,10 @@
 - [ ] Documentation-defect verification gate (2026-10-15): run the new role-stop, audit-role persistence, config read permissions, Unity continuation, scene-validation, NuGet pin, and settings-reset EditMode regressions on the next Editor start. File-only verification does not execute Unity tests.
 - [x] Protected-file follow-up: `CoreAISettingsAsset.ApplyOptions` copies `AllowWorldPrimitives`; `LlmToolChannel.Auto` documents HTTP capability probing. Existing EditMode regressions cover the permission copy.
 
-> **Published baseline: 7.54.0. Candidate: 7.55.0 on `demo`**, with all seven package manifests
-> in lockstep. The candidate is not a published release/tag and has not been promoted to main.
-> Current receipts, failed/pending gates and deferred manual work are in
-> [FINAL_VERIFICATION.md](dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md); root owns final acceptance.
+> **Published: 7.55.0 (2026-10-28, tag `v7.55.0`, `main` and `demo`)**, all seven package manifests
+> in lockstep under PolyForm Small Business 1.0.0. The owner authorized the release with the real-provider,
+> manual and player gates below still open; receipts and those gates are in
+> [FINAL_VERIFICATION.md](dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md).
 > Shipped history is in the two changelogs (`Assets/CoreAI/CHANGELOG.md`, `Assets/CoreAiUnity/CHANGELOG.md`);
 > future work is in `dev-docs/BACKLOG.md`, root-owned status in `PLAN.md`, and the MVP ladder in
 > `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` section 4.
@@ -3523,10 +3523,9 @@ historical negatives are preserved rather than relabeled by later passes.
   native run; do not hide them behind a test summary.
 - [ ] Root adjudicates all original and new review findings, verifies documentation and decides
   publication readiness. [Current PR audit](dev-docs/completion-2026-10-27/PR_AUDIT.md).
-- [ ] Push `demo` only after the required accepted fixes, documentation and QA gates. Root has set
-  candidate version7.55.0 via the required bump script; this is not a published version/tag/release.
-- [ ] Promote to `main` only after demo push and demo QA acceptance. Preserve published `v7.54.0`;
-  no tag mutation. Root owns any new version/changelog and publication.
+- [x] Publication: the owner authorized releasing 7.55.0 on 2026-10-28 with the open live/manual/player
+  gates listed above. `main` was fast-forwarded to the release commit, `demo` points at it, `v7.55.0`
+  is a new tag and published `v7.54.0` is unchanged.
 
 ## 2026-10-27 feature integration gates (separate from original 21 findings)
 

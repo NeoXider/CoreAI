@@ -2,13 +2,13 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
-## [7.55.0] - 2026-10-27
+## [7.55.0] - 2026-10-28
 
-Candidate on `demo`; publication and the remaining manual acceptance gates are tracked in the [verification report](../../dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md).
+Released on `main` with tag `v7.55.0`. The [verification report](../../dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md) lists the saved receipts and the gates still open at release: the three failed real-provider (OpenRouter) demo cases, manual editor input/movement/material-visual checks, and player/IL2CPP/browser/device runs.
 
 ### License
 
-- Releases from 7.55.0 on are under the [PolyForm Small Business License 1.0.0](LICENSE.md), replacing PolyForm Noncommercial 1.0.0; the same applies to the Mods, Hub, MCP, Mirror and Benchmark packages. Personal and non-commercial use and use by small businesses (fewer than 100 people and under 1,000,000 USD (2019) revenue in the prior tax year) are free; larger companies need a commercial licence from neoxider@gmail.com. Earlier releases keep the license they were published under.
+- Releases from 7.55.0 on are under the [PolyForm Small Business License 1.0.0](LICENSE.md), replacing PolyForm Noncommercial 1.0.0; the same applies to the Mods, Hub, MCP, Mirror and Benchmark packages. Personal and non-commercial use and use by small businesses (fewer than 100 people and under 1,000,000 USD (2019) revenue in the prior tax year) are free; larger companies need a commercial licence from neoxider@gmail.com. Earlier releases keep the license they were published under. Every package folder now ships its own `LICENSE.md`, and the gateway client documentation no longer carries the superseded CoreAiPro notice.
 
 ### Fixed
 
