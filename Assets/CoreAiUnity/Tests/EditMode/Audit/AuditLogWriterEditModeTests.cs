@@ -41,7 +41,7 @@ namespace CoreAI.Tests.EditMode.Audit
         [Test]
         public void Record_QueuesEntry()
         {
-            using AuditLogWriter writer = new();
+            using AuditLogWriter writer = new(_testFolder);
             Assert.DoesNotThrow(() =>
                 writer.Record(AuditEntry.ForToolCall(
                     0, "t", "a", "m", "ph", "test", "{}", "allowed", "ok", "", 0)));

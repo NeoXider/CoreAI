@@ -96,3 +96,9 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 - [completion-2026-10-27/HUB_SAVE_GUARDS.md](completion-2026-10-27/HUB_SAVE_GUARDS.md) - concrete Lua Run,
   completed-task compatibility, explicit budget-capable save fixtures and preserved legacy refusal;
   source-only correction report until current execution is supplied.
+- [completion-2026-10-27/STORAGE_ISOLATION.md](completion-2026-10-27/STORAGE_ISOLATION.md),
+  [OPENROUTER_TRIAGE.md](completion-2026-10-27/OPENROUTER_TRIAGE.md) and
+  [WORLD_SNAPSHOT_RECOVERY.md](completion-2026-10-27/WORLD_SNAPSHOT_RECOVERY.md) - the world-snapshot
+  overwrite incident: explicit snapshot path and live-fixture store isolation, triage of the three failed
+  OpenRouter cases with bounded direct provider probes, and the read-only search that found no
+  restorable copy of the overwritten `world_state.json`.

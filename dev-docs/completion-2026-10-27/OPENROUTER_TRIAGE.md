@@ -20,5 +20,24 @@ Scope: the two published-demo live test fixtures. No model, tool, world, source,
 
 - `git diff --check` for both test files: passed; only the existing CRLF-to-LF notice was emitted.
 - Reviewed the real scoped diff and the production input, event, tool-schema, and storage-factory paths. No assertions were removed and no API keys or authorization headers were copied into this report.
-- No Unity, live API, local model, or additional retries were launched by this worker. Post-change compile/PlayMode/provider verification remains pending with root, after the storage-isolation audit. The old matrix is still failing evidence and must not be relabeled as a pass.
+- The initial source triage launched no Unity, live API, local model, or retries. The two later direct OpenRouter probes below do not execute Unity or its tools. Post-change compile/PlayMode/provider verification remains pending with root, after the storage-isolation audit. The old matrix is still failing evidence and must not be relabeled as a pass.
 - Fixture isolation does not recover earlier global snapshot writes. Recovery evidence and any owner-data decision belong to root and the storage-isolation worker.
+
+## Bounded direct provider probes
+
+Two authorized probes used the same native streaming request, temperature zero, a 360-token output cap, and forced `manage_mods`. The production-like schema exposed all six parameter names and required only `action`, describing the conditional `mod_id`/`code` requirement. The prompt required the model to author the harmless owned Lua source; no Lua was supplied. Credentials were read into process memory only. No tool was executed and no world effect is claimed. Only aggregate counts, field names, and sanitized outcomes were retained.
+
+| Model | Result | Argument fields | Counts | Sanitized evidence |
+| --- | --- | --- | --- | --- |
+| `openai/gpt-4o-mini` | Passed argument probe | `action`, `code`, `mod_id` | 1 call; 3 nonempty required fields; 85 argument fragments; 452 input / 85 output tokens; 168 Lua characters; 0 prose characters | HTTP 200; valid argument JSON; owned id and load action matched; 1.754 seconds; reported cost $0.0001188 |
+| `deepseek/deepseek-v4.1-flash` | Probe unavailable | No fields recorded | No completion recorded | `URLError` after 2.409 seconds; no HTTP status recorded; no retry |
+
+The key reported $0.048442591 remaining before these probes. Neither its limit nor credits were changed. The public OpenRouter model catalog reported input/output prices of $0.15/$0.60 per million tokens for GPT-4o-mini and $0.14/$0.42 for DeepSeek V4.1 Flash. These are small cost differences for a three-case gate; only GPT-4o-mini has a successful fresh direct argument probe. DeepSeek's transport failure does not prove a model compliance defect.
+
+Next gate: root should use `openai/gpt-4o-mini` through OpenRouter with native streaming and the existing fixture timeouts/token limits, after storage-isolation clearance, for exactly these test names:
+
+- `ActualProgrammer_ModelCreatesThenEditsOwnedMod_WithSavedSourceAndObservableLuaEffects`
+- `Demo01_FullAccess_SelfTestTetrisAndLiveChat`
+- `Demo14_QwenSpellcraft_HttpCastExecutesToolAndSpendsMana`
+
+The direct probe bypasses the C# SSE decoder, production role prompt, tool executor, and Unity UI/world. It therefore proves provider argument production only. The strict three-case PlayMode run is still necessary to prove the fixes. No further source changes were independently justified before that run; storage helper code remains unchanged during this continuation.

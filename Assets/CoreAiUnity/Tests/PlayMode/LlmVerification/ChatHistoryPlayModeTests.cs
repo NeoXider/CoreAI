@@ -18,11 +18,14 @@ using UnityEngine.TestTools;
 namespace CoreAI.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode : ,  ChatHistory     (PersistentChatHistoryBetweenSessions = true)
-    ///       (  ).
+    /// PlayMode check that a persisted chat history (PersistentChatHistoryBetweenSessions = true) written
+    /// by one orchestrator/store pair is replayed by a fresh pair over the same GUID-owned directory.
     /// </summary>
     public sealed class ChatHistoryPlayModeTests
     {
+        private string _ownedRoot;
+        private string _ownedDirectoryName;
+
         private sealed class ListSink : IAiGameCommandSink
         {
             public readonly List<ApplyAiGameCommand> Items = new();
@@ -36,21 +39,33 @@ namespace CoreAI.Tests.PlayMode
         [SetUp]
         public void Setup()
         {
-            //    ,    
-            //   FileAgentMemoryStore   ,        roleId
-            string dir = Path.Combine(Application.persistentDataPath, "CoreAI", "AgentMemory");
-            string safePath = Path.Combine(dir, "TestPersistentChatAgent.json");
-            if (File.Exists(safePath))
+            _ownedRoot = null;
+            _ownedDirectoryName = "CoreAI-chat-history-" + Guid.NewGuid().ToString("N");
+            string directory = Path.GetFullPath(Path.Combine(Path.GetTempPath(), _ownedDirectoryName));
+            Assert.IsFalse(Directory.Exists(directory), "The owned test directory must not already exist.");
+            Directory.CreateDirectory(directory);
+            _ownedRoot = directory;
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            if (!string.IsNullOrEmpty(_ownedRoot) && Directory.Exists(_ownedRoot))
             {
-                File.Delete(safePath);
+                Assert.AreEqual(Path.GetFullPath(Path.Combine(Path.GetTempPath(), _ownedDirectoryName)), _ownedRoot,
+                    "Cleanup may remove only this test's GUID-owned temporary directory.");
+                Assert.IsFalse((File.GetAttributes(_ownedRoot) & FileAttributes.ReparsePoint) != 0,
+                    "Cleanup refuses a redirected temporary directory.");
+                Directory.Delete(_ownedRoot, true);
             }
+            _ownedRoot = null;
         }
 
         [UnityTest]
         [Timeout(300000)]
         public IEnumerator ChatHistory_PersistentBetweenSessions_Works()
         {
-            Debug.Log("[ChatHistory]  TEST 1: Persistent Context Across Restarts ");
+            Debug.Log("[ChatHistory] TEST 1: Persistent Context Across Restarts");
 
             // Persistent chat transcript only — no MemoryTool and no live model. This test is about
             // deterministic disk persistence/replay; live LLM behavior is covered by focused LLM suites.
@@ -62,10 +77,9 @@ namespace CoreAI.Tests.PlayMode
                 .WithMode(AgentMode.ChatOnly)
                 .Build();
 
-            Debug.Log("[ChatHistory]  STEP 1: Sending first message...");
+            Debug.Log("[ChatHistory] STEP 1: Sending first message...");
 
-            // ===  1 ===
-            FileAgentMemoryStore store1 = new();
+            using FileAgentMemoryStore store1 = new(rootDirectory: _ownedRoot);
             AgentMemoryPolicy policy1 = new();
             chatAgent.ApplyToPolicy(policy1);
             PersistedHistoryStubLlmClient llm1 = new("I will remember Pineapple.");
@@ -85,7 +99,6 @@ namespace CoreAI.Tests.PlayMode
                 { RoleId = chatAgent.RoleId, Hint = "Hello! My secret word is 'Pineapple'." });
             yield return PlayModeTestAwait.WaitTask(t1, 5f, "chat history part 1");
 
-            // ===   ===
             ChatMessage[] history1 = store1.GetChatHistory(chatAgent.RoleId);
             Assert.GreaterOrEqual(history1.Length, 2,
                 "History should contain at least 2 messages (user + assistant)");
@@ -100,10 +113,9 @@ namespace CoreAI.Tests.PlayMode
 
             Assert.IsTrue(foundSecret, "The secret word should be preserved in memory store history.");
 
-            Debug.Log("[ChatHistory]  STEP 2: Restarting game (creating new orchestrator/store)...");
+            Debug.Log("[ChatHistory] STEP 2: Restarting game (creating new orchestrator/store)...");
 
-            // ===  2 === (  )
-            FileAgentMemoryStore store2 = new();
+            using FileAgentMemoryStore store2 = new(rootDirectory: _ownedRoot);
             AgentMemoryPolicy policy2 = new();
             chatAgent.ApplyToPolicy(policy2);
             PersistedHistoryStubLlmClient llm2 = new("Your secret word was Pineapple.");
@@ -132,7 +144,7 @@ namespace CoreAI.Tests.PlayMode
             Assert.IsTrue(response2.Contains("Pineapple", StringComparison.OrdinalIgnoreCase),
                 $"Agent did not remember the secret word. Response was: {response2}");
 
-            Debug.Log("[ChatHistory]  TEST PASSED");
+            Debug.Log("[ChatHistory] TEST PASSED");
         }
 
         private sealed class PersistedHistoryStubLlmClient : ILlmClient

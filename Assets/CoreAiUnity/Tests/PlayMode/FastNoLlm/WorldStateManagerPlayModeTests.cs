@@ -1,6 +1,6 @@
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
-using CoreAI.Infrastructure;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
 using CoreAI.Messaging;
@@ -18,7 +18,9 @@ namespace CoreAI.Tests.PlayMode
     public sealed class WorldStateManagerPlayModeTests
     {
         private string _saveFilePath;
-        private string _backupPath;
+        private string _ownedRoot;
+        private string _ownedDirectoryName;
+        private readonly List<WorldStateManager> _managers = new();
 
         private sealed class StubPrefabRegistry : ICoreAiPrefabRegistry
         {
@@ -60,19 +62,13 @@ namespace CoreAI.Tests.PlayMode
         [UnitySetUp]
         public IEnumerator SetUp()
         {
-            _saveFilePath = Path.Combine(
-                Application.persistentDataPath,
-                CoreAiPersistentPaths.RootFolderName,
-                CoreAiPersistentPaths.WorldState,
-                "world_state.json");
-            _backupPath = _saveFilePath + ".test_backup";
-
-            // Back up any real save so the test never clobbers a live world.
-            if (File.Exists(_saveFilePath))
-            {
-                File.Copy(_saveFilePath, _backupPath, true);
-                File.Delete(_saveFilePath);
-            }
+            _ownedRoot = null;
+            _ownedDirectoryName = "CoreAI-world-playmode-" + System.Guid.NewGuid().ToString("N");
+            string directory = Path.GetFullPath(Path.Combine(Path.GetTempPath(), _ownedDirectoryName));
+            Assert.IsFalse(Directory.Exists(directory), "The owned test directory must not already exist.");
+            Directory.CreateDirectory(directory);
+            _ownedRoot = directory;
+            _saveFilePath = Path.Combine(_ownedRoot, "world_state.json");
 
             DestroyAllWorldObjects();
             yield return null;
@@ -82,19 +78,30 @@ namespace CoreAI.Tests.PlayMode
         public IEnumerator TearDown()
         {
             DestroyAllWorldObjects();
-
-            if (File.Exists(_saveFilePath))
+            foreach (WorldStateManager manager in _managers)
             {
-                File.Delete(_saveFilePath);
+                manager.Dispose();
             }
+            _managers.Clear();
 
-            if (File.Exists(_backupPath))
+            if (!string.IsNullOrEmpty(_ownedRoot) && Directory.Exists(_ownedRoot))
             {
-                File.Copy(_backupPath, _saveFilePath, true);
-                File.Delete(_backupPath);
+                Assert.AreEqual(Path.GetFullPath(Path.Combine(Path.GetTempPath(), _ownedDirectoryName)), _ownedRoot,
+                    "Cleanup may remove only this test's GUID-owned temporary directory.");
+                Assert.IsFalse((File.GetAttributes(_ownedRoot) & FileAttributes.ReparsePoint) != 0,
+                    "Cleanup refuses a redirected temporary directory.");
+                Directory.Delete(_ownedRoot, true);
             }
+            _ownedRoot = null;
 
             yield return null;
+        }
+
+        private WorldStateManager CreateManager(ICoreAiPrefabRegistry prefabRegistry = null)
+        {
+            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance, prefabRegistry, true, _saveFilePath);
+            _managers.Add(manager);
+            return manager;
         }
 
         private static void DestroyAllWorldObjects()
@@ -199,7 +206,7 @@ namespace CoreAI.Tests.PlayMode
                 rotations[i] = objects[i].transform.rotation;
             }
 
-            WorldStateManager manager = new WorldStateManager(GameLoggerUnscopedFallback.Instance);
+            WorldStateManager manager = CreateManager();
             try
             {
                 for (int round = 0; round < 2; round++)
@@ -253,7 +260,7 @@ namespace CoreAI.Tests.PlayMode
             sphere.transform.position = new Vector3(-1, 0.5f, 4);
             Tag(sphere, "sphere");
 
-            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance);
+            WorldStateManager manager = CreateManager();
             manager.Save();
             Assert.IsTrue(File.Exists(_saveFilePath), "Save should write the world_state.json file.");
 
@@ -295,9 +302,7 @@ namespace CoreAI.Tests.PlayMode
             Tag(enemy, "enemy.basic");
             // Intentionally no SetColor — prefab material must be preserved.
 
-            WorldStateManager manager = new(
-                GameLoggerUnscopedFallback.Instance,
-                new StubPrefabRegistry(prefab, "enemy.basic"));
+            WorldStateManager manager = CreateManager(new StubPrefabRegistry(prefab, "enemy.basic"));
             manager.Save();
             Object.DestroyImmediate(enemy);
             yield return null;
@@ -333,7 +338,7 @@ namespace CoreAI.Tests.PlayMode
                 Tag(childGo, "sphere");
                 childGo.transform.SetParent(parentGo.transform, true);
 
-                WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance);
+                WorldStateManager manager = CreateManager();
                 manager.Save();
 
                 Object.DestroyImmediate(childGo);
@@ -365,7 +370,7 @@ namespace CoreAI.Tests.PlayMode
             cube.name = "TempCube";
             Tag(cube, "cube");
 
-            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance);
+            WorldStateManager manager = CreateManager();
             manager.Save();
             Assert.IsTrue(File.Exists(_saveFilePath));
 
@@ -398,16 +403,14 @@ namespace CoreAI.Tests.PlayMode
             Tag(enemy, "enemy.basic");
 
             StubPrefabRegistry withPrefab = new(prefab, "enemy.basic");
-            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            WorldStateManager manager = CreateManager(withPrefab);
             manager.Save();
             Object.DestroyImmediate(enemy);
             yield return null;
 
             // Simulate the prefab becoming unavailable (registry never resolves it) — load must
             // fail to spawn it but retain it in memory instead of dropping it.
-            WorldStateManager managerNoPrefab = new(
-                GameLoggerUnscopedFallback.Instance,
-                new StubPrefabRegistry(null, "no-such-key"));
+            WorldStateManager managerNoPrefab = CreateManager(new StubPrefabRegistry(null, "no-such-key"));
             Assert.IsTrue(managerNoPrefab.TryLoad(), "TryLoad should still succeed even if a prefab is unresolved.");
             yield return null;
 
@@ -418,7 +421,7 @@ namespace CoreAI.Tests.PlayMode
             yield return null;
 
             // Prefab becomes available again; loading should now restore the retained object.
-            WorldStateManager managerPrefabRestored = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            WorldStateManager managerPrefabRestored = CreateManager(withPrefab);
             Assert.IsTrue(managerPrefabRestored.TryLoad(),
                 "TryLoad should succeed once the prefab is available again.");
             yield return null;
@@ -446,7 +449,7 @@ namespace CoreAI.Tests.PlayMode
             childGo.transform.SetParent(parentGo.transform, true);
 
             StubPrefabRegistry withPrefab = new(prefab, "enemy.basic");
-            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            WorldStateManager manager = CreateManager(withPrefab);
             manager.Save();
             Object.DestroyImmediate(childGo);
             Object.DestroyImmediate(parentGo);
@@ -454,9 +457,7 @@ namespace CoreAI.Tests.PlayMode
 
             // WHY: With the parent's prefab unresolvable the child (a primitive) still spawns, but at
             // the scene root — exactly the state a periodic auto-save would then snapshot.
-            WorldStateManager managerNoPrefab = new(
-                GameLoggerUnscopedFallback.Instance,
-                new StubPrefabRegistry(null, "no-such-key"));
+            WorldStateManager managerNoPrefab = CreateManager(new StubPrefabRegistry(null, "no-such-key"));
             Assert.IsTrue(managerNoPrefab.TryLoad(), "TryLoad should succeed with the parent unresolved.");
             yield return null;
 
@@ -483,7 +484,7 @@ namespace CoreAI.Tests.PlayMode
             StringAssert.Contains($"\"parent\": \"{parentId}\"", json,
                 "A save taken while the parent is unresolved must keep the child's intended parent id.");
 
-            WorldStateManager managerRestored = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            WorldStateManager managerRestored = CreateManager(withPrefab);
             Assert.IsTrue(managerRestored.TryLoad(), "TryLoad should succeed once the parent prefab returns.");
             yield return null;
 
@@ -514,15 +515,13 @@ namespace CoreAI.Tests.PlayMode
             childGo.transform.SetParent(parentGo.transform, true);
 
             StubPrefabRegistry withPrefab = new(prefab, "enemy.basic");
-            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            WorldStateManager manager = CreateManager(withPrefab);
             manager.Save();
             Object.DestroyImmediate(childGo);
             Object.DestroyImmediate(parentGo);
             yield return null;
 
-            WorldStateManager managerNoPrefab = new(
-                GameLoggerUnscopedFallback.Instance,
-                new StubPrefabRegistry(null, "no-such-key"));
+            WorldStateManager managerNoPrefab = CreateManager(new StubPrefabRegistry(null, "no-such-key"));
             Assert.IsTrue(managerNoPrefab.TryLoad());
             yield return null;
 
@@ -532,7 +531,7 @@ namespace CoreAI.Tests.PlayMode
             yield return null;
             Assert.AreEqual("", SavedParentFor("DetachChild"));
 
-            WorldStateManager managerRestored = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            WorldStateManager managerRestored = CreateManager(withPrefab);
             Assert.IsTrue(managerRestored.TryLoad());
             yield return null;
             Assert.IsNull(GameObject.Find("DetachChild").transform.parent,
@@ -554,23 +553,17 @@ namespace CoreAI.Tests.PlayMode
             Tag(childGo, "cube");
             childGo.transform.SetParent(parentGo.transform, true);
 
-            WorldStateManager manager = new(
-                GameLoggerUnscopedFallback.Instance,
-                new StubPrefabRegistry(prefab, "enemy.basic"));
+            WorldStateManager manager = CreateManager(new StubPrefabRegistry(prefab, "enemy.basic"));
             manager.Save();
             Object.DestroyImmediate(childGo);
             Object.DestroyImmediate(parentGo);
             yield return null;
 
-            WorldStateManager managerB = new(
-                GameLoggerUnscopedFallback.Instance,
-                new StubPrefabRegistry(null, "no-such-key"));
+            WorldStateManager managerB = CreateManager(new StubPrefabRegistry(null, "no-such-key"));
             Assert.IsTrue(managerB.TryLoad());
             yield return null;
 
-            WorldStateManager managerA = new(
-                GameLoggerUnscopedFallback.Instance,
-                new StubPrefabRegistry(null, "no-such-key"));
+            WorldStateManager managerA = CreateManager(new StubPrefabRegistry(null, "no-such-key"));
             Assert.IsTrue(managerA.TryLoad());
             yield return null;
             File.WriteAllText(_saveFilePath, "not-json");
@@ -604,21 +597,17 @@ namespace CoreAI.Tests.PlayMode
             Tag(childGo, "cube");
             childGo.transform.SetParent(parentGo.transform, true);
 
-            WorldStateManager snapshotManager = new(
-                GameLoggerUnscopedFallback.Instance,
-                new StubPrefabRegistry(prefab, "enemy.basic"));
+            WorldStateManager snapshotManager = CreateManager(new StubPrefabRegistry(prefab, "enemy.basic"));
             snapshotManager.Save();
             Object.DestroyImmediate(childGo);
             Object.DestroyImmediate(parentGo);
             yield return null;
 
-            WorldStateManager managerA = new(
-                GameLoggerUnscopedFallback.Instance,
-                new StubPrefabRegistry(null, "no-such-key"));
+            WorldStateManager managerA = CreateManager(new StubPrefabRegistry(null, "no-such-key"));
             Assert.IsTrue(managerA.TryLoad());
             yield return null;
 
-            WorldStateManager managerB = new(GameLoggerUnscopedFallback.Instance);
+            WorldStateManager managerB = CreateManager();
             managerB.Dispose();
             Assert.IsFalse(managerB.TryLoad());
 
@@ -637,7 +626,7 @@ namespace CoreAI.Tests.PlayMode
             cube.name = "ResetCube";
             Tag(cube, "cube");
 
-            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance);
+            WorldStateManager manager = CreateManager();
             manager.Save();
             Assert.IsTrue(File.Exists(_saveFilePath));
 
@@ -658,7 +647,7 @@ namespace CoreAI.Tests.PlayMode
             Tag(cube, "cube");
             cube.SetActive(false);
 
-            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance);
+            WorldStateManager manager = CreateManager();
             manager.Save();
             Object.DestroyImmediate(cube);
             yield return null;
@@ -690,7 +679,7 @@ namespace CoreAI.Tests.PlayMode
             WorldObjectComponent cubeTag = Tag(cube, "cube");
             string sharedId = cubeTag.persistentId;
 
-            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance);
+            WorldStateManager manager = CreateManager();
             manager.Save();
             Object.DestroyImmediate(cube);
             yield return null;
@@ -738,15 +727,13 @@ namespace CoreAI.Tests.PlayMode
             Tag(enemy, "enemy.basic");
 
             StubPrefabRegistry withPrefab = new(prefab, "enemy.basic");
-            WorldStateManager manager = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            WorldStateManager manager = CreateManager(withPrefab);
             manager.Save();
             Object.DestroyImmediate(enemy);
             yield return null;
 
             // Load while the prefab is unavailable — the object is retained in memory as unresolved.
-            WorldStateManager managerNoPrefab = new(
-                GameLoggerUnscopedFallback.Instance,
-                new StubPrefabRegistry(null, "no-such-key"));
+            WorldStateManager managerNoPrefab = CreateManager(new StubPrefabRegistry(null, "no-such-key"));
             Assert.IsTrue(managerNoPrefab.TryLoad(), "TryLoad should succeed even with an unresolved prefab.");
             yield return null;
             Assert.IsNull(GameObject.Find("UnresolvedThenReset"),
@@ -761,7 +748,7 @@ namespace CoreAI.Tests.PlayMode
             yield return null;
 
             // Prefab becomes available again — the object must NOT resurrect since Reset discarded it.
-            WorldStateManager managerPrefabRestored = new(GameLoggerUnscopedFallback.Instance, withPrefab);
+            WorldStateManager managerPrefabRestored = CreateManager(withPrefab);
             Assert.IsTrue(managerPrefabRestored.TryLoad(), "TryLoad should succeed after reset+re-save.");
             yield return null;
 

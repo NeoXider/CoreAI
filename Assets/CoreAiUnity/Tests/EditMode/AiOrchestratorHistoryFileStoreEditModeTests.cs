@@ -5,13 +5,12 @@ using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Infrastructure.AiMemory;
 using NUnit.Framework;
-using UnityEngine;
 
 namespace CoreAI.Tests.EditMode
 {
     /// <summary>
     /// The one orchestrator history test that needs the engine: <see cref="FileAgentMemoryStore"/> is a
-    /// CoreAiUnity type rooted at <see cref="Application.persistentDataPath"/>. Everything else about the
+    /// CoreAiUnity type using a GUID-owned temporary directory here. Everything else about the
     /// orchestrator's history lives in <see cref="AiOrchestratorHistoryEditModeTests"/>, which is linked into
     /// the portable test project and must stay engine-free.
     /// </summary>
@@ -22,17 +21,14 @@ namespace CoreAI.Tests.EditMode
         public async Task RunTaskAsync_WithFileStore_AndPersistChatHistory_WritesDiskReadableByNewStore()
         {
             string roleId = "EditMode_OrchPersist_" + Guid.NewGuid().ToString("N");
-            string dir = Path.Combine(Application.persistentDataPath, "CoreAI", "AgentMemory");
-            string safeName = string.Join("_", roleId.Split(Path.GetInvalidFileNameChars()));
-            string filePath = Path.Combine(dir, $"{safeName}.json");
-            if (File.Exists(filePath))
-            {
-                File.Delete(filePath);
-            }
+            string ownedDirectoryName = "CoreAI-orchestrator-history-" + Guid.NewGuid().ToString("N");
+            string directory = Path.GetFullPath(Path.Combine(Path.GetTempPath(), ownedDirectoryName));
+            Assert.IsFalse(Directory.Exists(directory), "The owned test directory must not already exist.");
+            Directory.CreateDirectory(directory);
 
             try
             {
-                FileAgentMemoryStore store1 = new();
+                using FileAgentMemoryStore store1 = new(rootDirectory: directory);
                 AgentMemoryPolicy policy = new();
                 policy.ConfigureChatHistory(roleId, true, 8192, true, 50);
                 policy.DisableMemoryTool(roleId);
@@ -57,7 +53,7 @@ namespace CoreAI.Tests.EditMode
                 Assert.GreaterOrEqual(h1.Length, 2,
                     "After a successful turn the store should contain user + assistant lines.");
 
-                FileAgentMemoryStore store2 = new();
+                using FileAgentMemoryStore store2 = new(rootDirectory: directory);
                 ChatMessage[] h2 = store2.GetChatHistory(roleId);
                 Assert.AreEqual(h1.Length, h2.Length,
                     "A new FileAgentMemoryStore should reload the same persisted chat from disk.");
@@ -65,9 +61,13 @@ namespace CoreAI.Tests.EditMode
             }
             finally
             {
-                if (File.Exists(filePath))
+                if (Directory.Exists(directory))
                 {
-                    File.Delete(filePath);
+                    Assert.AreEqual(Path.GetFullPath(Path.Combine(Path.GetTempPath(), ownedDirectoryName)), directory,
+                        "Cleanup may remove only this test's GUID-owned temporary directory.");
+                    Assert.IsFalse((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0,
+                        "Cleanup refuses a redirected temporary directory.");
+                    Directory.Delete(directory, true);
                 }
             }
         }

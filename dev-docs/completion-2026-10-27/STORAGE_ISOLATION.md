@@ -53,3 +53,15 @@ searched; recovery provenance and any restore remain the root owner's responsibi
 No Unity process, test run, application configuration, scene or user-state write was performed by
 this worker. Source and focused regression are prepared; runtime isolation remains unverified
 until the root owner reviews the integrated helper and runs the exact regression and live gate.
+
+## Verification on 2026-10-28
+
+- Focused EditMode selection (world-state, audit-writer, orchestrator file-history, installer and
+  English-prose guard classes): 86/86 Passed, including the migrated
+  `WorldStateManagerResetPersistenceEditModeTests` (2/2) and `WorldStateManagerIsolationEditModeTests` (7/7).
+- Non-live PlayMode: `ChatHistoryPlayModeTests` and `PublishedDemoStorageRegistrationPlayModeTests`, 2/2 Passed.
+- A SHA-256 listing of `persistentDataPath/CoreAI` taken before and after both runs was identical.
+- The hermetic PlayMode gate (391 cases, 389 Passed / 2 Skipped) is not isolated: scene and scope fixtures
+  wrote the default world snapshot, audit log, a Lua mod state file and eight seeded sample mods. Those
+  files were restored from a copy taken before the run; the open design item is in `TODO.md`.
+- The live-scene composition itself still runs only inside the explicit OpenRouter fixture.
