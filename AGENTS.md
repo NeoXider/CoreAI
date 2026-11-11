@@ -17,10 +17,12 @@ player on device?"**
 
 ## Project goal: a framework of building blocks, not one game
 
-CoreAI exists to build **AI-driven dynamic games** of any kind. A Roblox-like app with Studio and Play in one
-application (creator/play mode switch, Roblox API, template export/import, ~100 players per room) is ONE planned
+CoreAI exists to build **AI-driven dynamic games and applications** of any kind. A realtime play-and-create game —
+Roblox-shaped worlds and scripts with no Studio: one mode in which the player walks or flies through the running
+world, talks to the AI in an in-world chat and sees every change at once (`Docs/ROADMAP.md` §1) — is ONE planned
 product built from the framework — it is not the framework. The same blocks must build a single-player game, a
-player-hosted co-op game, a dedicated-server game, or an AI layer embedded into someone else's Unity game.
+player-hosted co-op game, a dedicated-server game, an AI layer embedded into someone else's Unity game, or an
+application that is not a game.
 
 - **Everything is a configurable, replaceable block**: agent behaviour (roles, prompts, policies, memory), LLM
   endpoints and routing, tools and tool calls, skills, mods and capability tiers, Hub pages, stores/persistence,
@@ -30,6 +32,9 @@ player-hosted co-op game, a dedicated-server game, or an AI layer embedded into 
 - When reviewing a feature, ask: **"can a different game configure or replace this without touching our code?"**
   A hardcoded opinion, a static singleton, demo-only glue on the main path, or a product-specific assumption in a
   package is a bug. Normative detail: `Docs/ARCHITECTURE_RULES.md` §2.1.
+- **Instant and convenient by default.** Also ask: **"does a fresh world get this without configuration, and can
+  a host game switch it off?"** A click, a confirmation or a setting between a new player and the first result is
+  a defect; so is a default nobody can replace (`Docs/ROADMAP.md` §5, principle 10).
 
 ## Conventions (enforced)
 

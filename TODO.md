@@ -77,6 +77,206 @@
 > Benchmark suite 2.0 history and its remaining reporting/resume follow-ups are recorded below;
 > they do not require a current `[Unreleased]` changelog heading.
 
+## Plan of record 2026-11-11: open work by milestone
+
+The plan was re-ordered on 2026-11-11 (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4.0, plan decisions
+D9–D13): demo-gated milestones M0–M4, the existing rungs under their MVPn ids and seventeen new packages
+P1–P17. This section files the open work of M0 and M1; later milestones are filed when they start. The
+sections below keep their items under the rung names they were written for.
+
+### Owner decisions (each has a default the work proceeds with; the owner may override)
+
+- [ ] **Default chat role.** Default: Programmer becomes the shipped chat default in M0; a player-facing
+      builder role with a conversational prompt replaces it in P15.
+- [ ] **Vision Auto for an unknown model name.** Today Auto is ON for any name that is not an obvious
+      utility model. Default: keep it, gate the chat-panel camera on the existing verdict, and flip to
+      "text-only until proven" only on the owner's yes, because that changes current behaviour.
+- [ ] **The one universal-prefix text.** Default: the portable "CRITICAL RULES" block, which the docs
+      already call the package default; the asset default follows it.
+- [ ] **URP dependency of the look applier (P7).** Default: an optional assembly behind `versionDefines`,
+      so the packages keep building without URP.
+- [ ] **`LookMode` default for hosts (P7).** Default: `Apply`, with a scene's own Volume still winning by
+      priority.
+- [ ] **Where the 2K material sets live (P8 stage 2).** Default: an optional "HD materials" package; the
+      main package keeps its size.
+- [ ] **`AssetService` partial implementation (P10 stage 1).** Default: yes, the image constructors only;
+      publishing and inventory stay unsupported.
+- [ ] **Decision endpoints (P13).** Default: a capability on the HTTP endpoint descriptor next to a
+      separate `IDecisionClient` seam, not a new `LlmEndpointKind`; the local path is a `llama-server`
+      sidecar, since no LLMUnity route was found.
+- [ ] **`CallSkillToolLlmTool` with an empty role.** Default: a reported tool error instead of a throw.
+- [ ] **`TextGenerator` run context (P12 stage 2).** The offline mirror does not say whether it is
+      server-only; check the live Roblox reference before the parity path is locked.
+- [ ] **`/undo` without the World Loads confirmation (P3).** Default: yes for an in-session AI snapshot
+      when nothing else changed the world since; every other restore keeps the confirmation.
+- [ ] **Fly from Lua (P1).** Default: `Humanoid:ChangeState(Enum.HumanoidStateType.Flying)` enters fly as
+      a DEV, next to `/fly` and the preset flag.
+- [ ] **Blocky `workspace.Terrain` and the `TextChatService` subset (P4, P2).** Default: both ship as
+      Roblox-shaped subsets with their DEV entries (no smoothing, water without swimming, the AI agent
+      shown as system messages, no message filtering) rather than as CoreAI-only APIs.
+- [ ] **Samples active in the one-click world (P3).** Default: `sample_welcome` only; the block world
+      scene activates `sample_block_world`.
+- [ ] **A valid provider key for the live-model run.** The three OpenRouter scenarios at the top of this
+      file wait for a key in `COREAI_TEST_API_KEY`.
+
+### M0 — Ready to play
+
+Also in M0, filed further down under their old names: **Spike S1** and **Spike S2**, the IL2CPP/WebGL
+player checks and the **Real WebGL page-reload smoke** ("MVP3 follow-ups").
+
+- [ ] **A missing `COREAI_LLM` fails loudly (P11, A2).** *Owner:* LLM pipeline. *Plan:* the `!COREAI_LLM`
+      branches of `LlmPipelineInstaller` (`:311-317`) build a failing `NotConfigured` client that names
+      the define, Offline keeps the stub, one warning at composition and a build check for HTTP/local
+      modes.
+- [ ] **Provider errors never become reply text (P11, A5).** *Owner:* Facade. *Plan:* add
+      `CoreAi.AskResultAsync` / `SmartAskResultAsync` over `SendMessageResultAsync`; the string overloads
+      throw or return `null` on failure, decided once and documented in `COREAI_SINGLETON_API.md`.
+- [ ] **Stream errors are surfaced (P11, A6).** *Owner:* Chat. *Plan:* one helper turns a terminal
+      `{IsDone, Error}` chunk into the `StreamAsync` exception, used by `SendMessageSmartAsync`
+      (`CoreAiChatService.cs:913-922`) and the facade adapter; regression with an error-chunk stub.
+- [ ] **Runtime keys stay out of the shared asset (P11, A8).** *Owner:* Settings. *Plan:* a
+      `[NonSerialized]` session overlay behind `CoreAiBackend.SetApiKey` / `SetApiBaseUrl` / `SetModel`;
+      a test that the asset bytes are unchanged after Play Mode.
+- [ ] **Declare Newtonsoft (P11, B2).** *Owner:* Install. *Plan:* add `com.unity.nuget.newtonsoft-json`
+      to `Assets/CoreAI/package.json` and list it in INSTALL.
+- [ ] **Setup menus compile on a broken install (P11, B1).** *Owner:* Install. *Plan:* move
+      `CoreAIDependencyInstaller` and `CoreAINuGetBootstrapper` into a reference-free editor asmdef;
+      INSTALL shows the manual manifest block first.
+- [ ] **The default chat role can build (P11).** *Owner:* Agents. *Plan:* the shipped chat config
+      defaults to a role with the Lua and world tools (Programmer or a P15 builder role) and the role
+      dropdown says what each role can do; a PM test asks the default chat to build and asserts a world
+      change.
+- [ ] **Deduplicate tools by name (P15, A10).** *Owner:* Agents. *Plan:*
+      `AgentMemoryPolicy.AddToolForRole` (`:248-265`) replaces an ordinal name match and reports whether
+      anything changed.
+- [ ] **Gate the chat-panel camera on vision (P16).** *Owner:* Vision. *Plan:*
+      `CoreAiChatCameraTools.TryAttachCameraTool` consults the vision gate; correct
+      `LLM_TOOLS.md:19,120-122` to the real Auto rule in `VisionCapability.cs:55-90` (the Auto default
+      itself is an owner decision, P16).
+- [ ] **One universal-prefix default (P15).** *Owner:* Prompts. *Plan:* the asset default
+      (`CoreAISettingsAsset.cs:310`) and the portable default (`CoreAISettings.cs:124`) become one text;
+      `AI_AGENT_ROLES.md` §1.3.5 is corrected.
+- [ ] **Merchant's inventory instruction matches its tools (P15).** *Owner:* Prompts. *Plan:* wire
+      `InventoryLlmTool` when an inventory provider is registered, else drop the `get_inventory` line
+      from the Merchant prompt.
+- [ ] **TODO hygiene for the harness.** *Owner:* Docs. *Plan:* tick newcomer A3 after a real-composition
+      test (the code already keeps scope and role, `QueuedAiOrchestrator.cs:713-719`), record A1 as
+      partly fixed, drop the stale first sentence of TODO.md:211-213 (the empty-text submit with
+      attachments stays open), retire TODO.md:189 (suite is 2.0), and drop the "mirror of `world_query`"
+      phrase from [R4] (no such tool exists).
+- [ ] **One-click "Play + Create" world (P3).** *Owner:* mods composition. *Plan:* a runtime preset
+      asset and prefab (scopes, wired `RbxWorldHost`, overlay chat, controls, camera, look profile) plus
+      a `CoreAI/Setup` menu that only instantiates it; decide which samples start active.
+
+### M1 — Block world
+
+MVP4 runs alongside ("MVP4 — script contexts & client runtime" below starts with its design note).
+
+Play loop (P1–P4, P6):
+
+- [ ] **Input focus and pointer lock (P1).** *Owner:* Rbx input. *Plan:* an `IInputFocusState` port
+      that sets `gameProcessedEvent`, `MouseBehavior` routed to an `ICursorPort`, device mouse delta and
+      `GetMouseDelta`, wheel input in `Position.Z`; twin tests with the chat open and closed.
+- [ ] **`Humanoid:Move`, default control script, fly (P1).** *Owner:* Rbx character. *Plan:* a
+      `Move` default interface member on the motor, the PlayerModule-lite Lua script honouring
+      `DevComputerMovementMode`, a Flying motor mode with double-tap toggle and optional noclip.
+- [ ] **Camera module and camera queries (P1).** *Owner:* Rbx camera. *Plan:* orbit, zoom and first
+      person for `CameraType.Custom` behind `IRbxCameraRig`, the `Ray` datatype, `ScreenPointToRay`,
+      `ViewportPointToRay`, `WorldToScreenPoint`, `FieldOfView`; drop the shipped rows from
+      `ClassCatalog`.
+- [ ] **Overlay chat, agent HUD and slash commands (P2).** *Owner:* chat UI. *Plan:* a UI Toolkit
+      feed and one-line input over `CoreAiChatService`, a status line from tool events, a C# command
+      registry with `/undo`, `/fly`, `/agent`, `/model`, `/autopilot`, `/help`; `/stop` waits on the A3
+      cancel fix.
+- [ ] **`TextChatService` subset (P2).** *Owner:* Rbx API. *Plan:* `RBXGeneral`/`RBXSystem`,
+      `SendAsync`, `DisplaySystemMessage`, `MessageReceived`, `TextChatCommand`, the two configuration
+      objects and `DisplayBubble`, with the agent-as-system-message and no-filter DEV candidates written
+      up.
+- [ ] **Write-behind mutation gate (P3).** *Owner:* world packages. *Plan:* in-memory snapshot,
+      mutate at once, durable autosave written behind it, startup refresh debounced; keep the
+      format-limit rules and add fault-injection tests for a crash between mutation and write.
+- [ ] **AI `/undo` ring and configurable rate limit (P3).** *Owner:* mods composition. *Plan:* keep
+      the last 10 pre-mutation snapshots per actor and restore in place when nothing else changed; expose
+      the limiter's count and window in the preset and apply it to `manage_mods` mutations too.
+- [ ] **`Region3`, chunk store and `Terrain` Lua subset (P4).** *Owner:* Rbx API. *Plan:*
+      engine-free 16-cubed chunks, `workspace.Terrain` with `FillBlock`, `FillRegion`, `ReadVoxels`,
+      `WriteVoxels`, `Clear`, `ReplaceMaterial`, `WorldToCell`, `CellCenterToWorld` under the mirror's
+      argument rules.
+- [ ] **Chunk mesher, Terrain raycast and `.world` voxel entry (P4).** *Owner:* Unity binding and
+      world packages. *Plan:* face-culled chunk meshes with one collider each and one shared material,
+      raycasts answering Terrain and Material, an RLE voxel entry inside the WebGL budget, skill text
+      update.
+- [ ] **Block world demo (P6, with the minimal P5 `SelectionBox`).** *Owner:* demos. *Plan:*
+      `sample_block_world` plus a builder-made scene from the P3 preset with hotbar, place and break,
+      target outline, "build here" and `/undo`; add it to the G11 list and the smoke test.
+
+Look (P7, P8 stage 1), ordered by visual payoff:
+
+- [ ] **Default look profile and applier.** *Owner:* rendering (P7). *Plan:* ship
+  `CoreAiLookProfile` (Volume with tonemapping and HDR-only bloom, sky, ambient, reflection, fog) and
+  an optional URP assembly that applies it from `CoreAILifetimeScope`, so all 18 scenes pick it up
+  without edits; `LookMode` `Apply`/`FillMissing`/`Off` plus a replaceable `ICoreAiLookApplier` for
+  hosts that own their rendering.
+- [ ] **Post-processing and AA on every demo camera.** *Owner:* rendering (P7). *Plan:* the applier
+  ensures `UniversalAdditionalCameraData` with post-processing and SMAA/FXAA on the main camera and on
+  later cameras; an EM test iterates the build scenes and fails on any camera without it.
+- [ ] **Hub Graphics page with persisted options.** *Owner:* Hub (P7). *Plan:* `HubGraphicsPage` with
+  presets and switches (post-processing, shadows, AA, render scale, fog, sky) over an engine-free
+  `GraphicsOptions` resolver and a JSON store under `CoreAiStorageRoot` checked by
+  `CoreAiWebGlPersistence.Sync()`; proven in a built WebGL player across a reload.
+- [ ] **WebGL quality tier.** *Owner:* rendering (P7). *Plan:* ship recommended pipeline assets and a
+  `CoreAI/Graphics/Apply recommended quality settings` menu (render scale 1, soft shadows low, two
+  cascades, bloom); record frame time per preset on the G11 reference browser.
+- [ ] **Animated water material.** *Owner:* materials (P8 stage 1). *Plan:* `CoreAI/Rbx/Water` with
+  dual scrolling CC0 normals, Fresnel, depth tint and PC-tier refraction, a WebGL fallback and a test
+  time override; record the BasePart-Water DEV candidate.
+- [ ] **Emission slot and glowing CrackedLava.** *Owner:* materials (P8 stage 1). *Plan:* optional
+  `Emission` texture and strength on the catalog entry and in `RbxTexturedSurface`, plus an editor
+  bake that derives the Lava004 crack mask.
+- [ ] **Plastic and SmoothPlastic surface detail.** *Owner:* materials (P8 stage 1). *Plan:* a small
+  CC0 micro-normal and roughness variation in the procedural surface shader; prove a normal response
+  under a moving light on masked crops.
+- [ ] **Blend variant for partial Transparency.** *Owner:* materials (P8 stage 1). *Plan:* the provider
+  keeps a transparent twin per material, and the binder selects it for 0 < `Transparency` < 1. Absorbs
+  the TODO comment at `InstanceGameObjectBinder.cs:1823` ("MVP1 follow-up — Material catalog with a
+  transparent-blend variant").
+- [ ] **Glass refraction.** *Owner:* materials (P8 stage 1). *Plan:* opaque-texture refraction and
+  Fresnel on the PC tier with reduced wobble; WebGL keeps the alpha blend, as Roblox does on mobile.
+- [ ] **SSAO on Rbx parts.** *Owner:* materials (P8 stage 1). *Plan:* confirm with an SSAO on/off
+  capture, then add a DepthNormals pass to the four lit Rbx shaders, guarded by a shader-source EM test.
+
+Harness (P12 stage 1, P13):
+
+- [ ] **NPC agent block with speech sinks (P12 stage 1).** *Owner:* NPC. *Plan:* portable `NpcAgent` over
+      the AINpc role with per-NPC memory scope, addressing/proximity arbiter, cooldowns, budgets and
+      supersede cancellation; Unity sinks for the in-world chat feed and a UI Toolkit speech bubble.
+- [ ] **Decision client seam with protocol backends (P13).** *Owner:* Decisions. *Plan:*
+      `IDecisionClient` in the portable core, `SystemOneHttpDecisionClient` and
+      `OpenRouterDecisionClient`, error mapping, budgets and recorded-fixture PT tests; a documented
+      `llama-server` sidecar for `d1-2B`.
+- [ ] **Logprob fallback and decision capability check (P13).** *Owner:* Decisions. *Plan:* `Logprobs` /
+      `TopLogprobs` on the request and response parsing, `LogprobDecisionClient` with single-token labels
+      and `Calibrated = false`, and `ListModelsAsync` reading `output_modalities`.
+- [ ] **NPC brain and player autopilot on decisions (P13).** *Owner:* Decisions + demo. *Plan:* event and
+      slow-tick callers, never per frame, a confidence threshold with a deterministic fallback, autopilot
+      through `Humanoid:MoveTo` with hand-back on input; PM tests with a scripted client.
+
+### Existing items these packages absorb or make stale
+
+- Absorbed: newcomer audit A2 (+B3, D9), A5 (+C1), A6, A8, B1 and B2 (M0); A7, A9 and A10 (P15); C9 (P11
+  stage 2); [R7] structured output (P12 stage 2); [R8] the vision round trip (P16); [R9] sub-agents and
+  phases 0, 2 and 3 of `dev-docs/MULTI_CHAT_PLAN.md` (P14); the R7.5 hot-swap item in part (P11); the
+  image-feedback wording item (P16); the Hub duplication item (P11 stage 2); the four benchmark reporting
+  defects (P17); the BACKLOG items "Skill self-improvement" (P15) and "Camera capture stalls the main
+  thread" (P16); the transparent-blend TODO at `InstanceGameObjectBinder.cs:1823` (P8 stage 1).
+- Moved: "Rbx materials, left open" and "Material catalog memory + import defects" go to P8 stage 2; the
+  WebGL material evidence and the near-black Metal finding are re-checked after P7 and close in P8
+  stage 2; lazy material textures leave MVP19 for P8 stage 2.
+- Stale, to be corrected when touched: the base64 sentence of the `capture_camera` item (it already
+  returns `LlmToolImageResult`); the suite 1.16 decision (the suite is 2.0); newcomer A3 (kept in code,
+  unticked); the [R4] reference to a `world_query` tool (none exists); the "MVP10" label on
+  `Humanoid:Move` and the "MVP15" label on `Sound` (the retag item under "Across rungs").
+
 ## Benchmark reporting defects found by the 2026-10-17 free-tier sweep
 
 - [ ] A run with zero graded scenarios must not render a scored model card. When every result is
@@ -238,9 +438,10 @@ tests compile but have **not been run** (they need a model backend).
 
 ## The MVP ladder: numbering and open work by rung (2026-09-24)
 
-The one ladder of record is `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4 (decided 2026-09-24 by the tech lead;
-the owner may override): strictly sequential, multiplayer first, every rung with a measurable DoD. It was
-renumbered that day. **Closed and historical items in this file keep the old numbers; open items carry the new
+**Order superseded on 2026-11-11**: work now follows the milestones of "Plan of record 2026-11-11" above
+(`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4.0); the items below stay filed under their rung names.
+The ladder of 2026-09-24 was strictly sequential and multiplayer first, every rung with a measurable DoD.
+It was renumbered that day. **Closed and historical items in this file keep the old numbers; open items carry the new
 ones.** Old → new:
 
 | Old | Now |

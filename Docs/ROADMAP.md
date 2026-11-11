@@ -7,9 +7,11 @@
 > work items live in [`TODO.md`](../TODO.md), the current status in [`PLAN.md`](../PLAN.md), shipped
 > work in the package changelogs (e.g. [`Assets/CoreAI/CHANGELOG.md`](../Assets/CoreAI/CHANGELOG.md)).
 
-Last updated: 2026-10-15 (release 7.50.2). The ladder was renumbered on 2026-09-24; the plan decisions
-below are decided by the tech lead, and the owner may override any of them. All seven package manifests
-carry the same release version (see §2).
+Last updated: 2026-11-11 (release 7.56.0). The plan was re-ordered that day at the owner's request: the
+flagship is a realtime play-and-create game with no Studio, and work is ordered by product milestones
+(§4). Rungs keep their ids — the ladder was renumbered once, on 2026-09-24, and is not renumbered again.
+Plan decisions D1–D8 were decided by the tech lead and D9–D13 follow the owner's request; the owner may
+override any of them. All seven package manifests carry the same release version (see §2).
 
 ---
 
@@ -31,21 +33,31 @@ stores/persistence, world and scale settings, network topology (solo / player-ho
 client), host-game embedding — and a game composes them through documented seams (interfaces,
 installers, profiles) without forking package code. Opinions live in presets, not in blocks.
 
-**The flagship: one Studio+Play product built on the blocks.** A Roblox-like application with Studio
-and Play in **one** app: an in-game creator mode (Explorer, Properties, gizmos, undo, insert from a
-library) and a play mode, a Roblox-shaped Lua API, template export/import, and about 100 players per
-room. It is **one product**, not the framework: it lives in its own Unity project and consumes the
-packages through UPM (plan decision D7); this repository keeps the packages, presets, samples, bot
-clients and harnesses. Its creator workflow:
+**The flagship: one realtime play-and-create game built on the blocks.** Roblox-shaped worlds and
+scripts with **no Studio**: there is one mode (plan decision D9). The player walks or flies through the
+running world — a free-flight toggle, as in a creative-mode sandbox — talks to the AI in an in-world
+chat, and every change is live at once: no publish step, no restart, no separate editor. It is **one
+product**, not the framework: it lives in its own Unity project and consumes the packages through UPM
+(plan decision D7); this repository keeps the packages, presets, samples, demos, bot clients and
+harnesses. What it promises, each a measurable gate of a milestone (§4):
 
-- **Live edit is the default.** Creators build the running world together — the in-game analog of
-  Roblox Studio Team Create — and every change is live for everyone (the realtime principle).
-- **Play/Stop is an added "test run"** (plan decision D2): a Creator can capture the edit state, play
-  it in an isolated per-creator session and return to the edit state on Stop. In a room with other
-  players it is never a world rewind.
-- **Round trip with Roblox** (owner requirement): scripts, models and places are interchangeable with
-  Roblox in both directions — a Roblox script or model runs here unchanged, and what is made here
-  exports and runs in Roblox (MVP14, prepared by MVP4 and MVP13).
+- **Instant.** A sentence in the chat becomes working logic in the running world within seconds, and
+  the AI repairs its own errors while the game keeps running. Roblox needs a publish and a server
+  restart for a code change and gives players no way to generate game logic in a live server
+  ([`dev-docs/COMPETITIVE_SCAN_2026-11-11.md`](../dev-docs/COMPETITIVE_SCAN_2026-11-11.md)).
+- **Convenient by default.** A fresh world has controls, a camera, a chat, a good-looking scene and a
+  checked model connection without configuration; every default is a replaceable block.
+- **Together.** Several players create in one room at once, each with their own AI — the in-game
+  analog of Roblox Studio Team Create, without the Studio.
+- **Yours.** Any model, a free local one included; the world is a file its author owns, hosts and
+  ships as a standalone build.
+- **Roblox knowledge carries over.** The mod dialect is the Roblox API, and Roblox places and scripts
+  import (MVP14, prepared by MVP4 and MVP13). The owner's round-trip requirement stands; import comes
+  first and export no longer gates a release (plan decision D12).
+
+Creation tools live inside play: selecting, moving, painting and block building are in-play actions
+that go through the same Instance operations and authority resolver as the AI and mods. The Explorer
+and Properties panels and the Play/Stop test run of the earlier plan are backlog.
 
 Two audiences, one framework:
 
@@ -55,7 +67,9 @@ Two audiences, one framework:
   documented API for free.
 - **Developers** embed CoreAI as an AI modding layer into their own, existing Unity games —
   including meter-scale titles (horror, co-op, etc.). Integration is a profile plus the packages the
-  game actually needs; the host game keeps its own physics, assets, and controllers.
+  game actually needs; the host game keeps its own physics, assets, and controllers. The portable core
+  runs without Unity, so the same harness — agents, an orchestrator mode, tools, skills, prompts,
+  routing, memory, chat and decision models — also builds applications that are not games.
 
 Live co-creation falls out of pieces the tracks below carry: the multiplayer join snapshot is the same
 serializer as the world file (Track C); host grants let a co-builder's writes travel as intents the
@@ -129,16 +143,17 @@ CoreAI with identical output (the parity slice of 7.47.2 and the castle quest of
 [`CASTLE_QUEST_PARITY.md`](CoreAIMods/CASTLE_QUEST_PARITY.md)).
 
 **Next.** MVP4 (script contexts, `require`, and `Script`/`LocalScript`/`ModuleScript` instances per
-plan decision D1) is the next rung. API breadth then follows the multiplayer and Studio rungs: MVP13
-(Luau stdlib extensions, coercion parity, welds and spawn locations, the Luau-only export lint), MVP14
-(rbxl/rbxlx/rbxm/rbxmx and the round-trip parity gate), MVP15 (GUI), MVP16 (DataStore), MVP17
-(audio/FX/animation), MVP18 (the generated skill manifest).
+plan decision D1) runs alongside milestone M1, which adds the player-facing surface: `Humanoid:Move`
+and the camera members (P1) and a voxel `workspace.Terrain` subset (P4). M2 brings the `Lighting`
+members (P9), the solo halves of GUI (MVP15), DataStore (MVP16) and audio/FX/animation (MVP17), the
+templates and Luau parity prerequisites (MVP13) and the generated skill manifest (MVP18); their network
+halves follow in M3 and Roblox import (MVP14) in M4.
 
 **Detail:** [`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md`](CoreAIMods/ROBLOX_API_ROADMAP.md) (the ladder
 and every locked decision) · [`Docs/CoreAIMods/SCRIPT_ENGINE_SEAM.md`](CoreAIMods/SCRIPT_ENGINE_SEAM.md) ·
 [`Docs/CoreAIMods/mod-system.md`](CoreAIMods/mod-system.md) · [`Assets/CoreAI/Docs/RBX_API.md`](../Assets/CoreAI/Docs/RBX_API.md).
 
-### Track B — Multiplayer (first on the ladder)
+### Track B — Multiplayer (milestone M3)
 
 **Goal.** Roblox's own model: single-player is a server with one local client. Transport is Mirror
 over kcp, plus a WebSocket transport for WebGL clients, behind `INetworkBridge` (plan decision D4);
@@ -163,12 +178,13 @@ in process. Missing: script contexts, host mode, the join snapshot over the wire
 replication over the wire, networked characters, the dedicated server, an inbound rate limit and
 version negotiation.
 
-**Next.** MVP4 (script contexts — the hard dependency), MVP5 (host mode over a real socket + the join
-snapshot, the player-host preset), MVP6 (world-state replication + write authority, a binary delta
-codec), MVP7 (networked characters and controls, client-owned own character per plan decision D3),
-MVP8 (dedicated server + WebGL client, the dedicated-server preset), MVP9 (100 players per room:
-interest management, bot load test, VM guard cost). Roles and per-player AI over the network are
-MVP11. Mod-facing APIs do not change when the loopback is replaced.
+**Next.** MVP4 (script contexts — the hard dependency) lands during M1. Milestone M3 is multiplayer for
+small rooms: MVP5 (host mode over a real socket + the join snapshot, the player-host preset), MVP6
+(world-state replication + write authority, a binary delta codec), the network half of MVP7
+(client-owned own character per plan decision D3) and MVP11 (roles and per-player AI over the network).
+MVP8 (dedicated server + WebGL client) and MVP9 (scale: interest management, bot load test, VM guard
+cost) are M4, with the room size set after spike S1 (plan decision D11). Mod-facing APIs do not change
+when the loopback is replaced.
 
 Backlog (live co-creation support): per-player attribution of changes in logs and diagnostics;
 per-player undo of one's own recent changes in a shared world (the command stack of MVP12).
@@ -209,9 +225,10 @@ page-reload smoke is an open follow-up. Model packages, templates and the Roblox
 self-contained mod bundle (`ExportMod`) is.
 
 **Next.** The open MVP3 follow-ups (the IL2CPP/WebGL player checks, the WebGL page-reload smoke,
-spikes S1/S2, one full live PlayMode run) before the next networked rung; MVP13 (`.model` packages, the template
-library, place templates); MVP14 (rbxl/rbxlx/rbxm/rbxmx both ways, the round-trip parity gate);
-MVP16 (DataStoreService on the shared JSON contract).
+spikes S1/S2, one full live PlayMode run) are milestone M0. M1 adds a compact voxel entry to the place
+package (P4) and a cheaper autosave-before-mutation gate (P3). M2: MVP13 (`.model` packages, the
+template library, place templates) and MVP16 (DataStoreService on the shared JSON contract). M4: MVP14
+(the Roblox formats, import first) and asset entries in the package — textures, meshes, sounds (P10).
 
 **Detail:** [`Docs/CoreAIMods/WORLD_PACKAGE.md`](CoreAIMods/WORLD_PACKAGE.md) (the shipped format,
 limits, durability, and session-replacement contract) · ROBLOX_API_ROADMAP §MVP3/§MVP13/§MVP14/§MVP16 ·
@@ -236,12 +253,14 @@ landed (Esc collapses the Hub, generation continues). The per-player chat is ser
 channel. The G10 real-provider capacity gate FAILED (17.4–38.5 s p95 on one lane) — a model and
 hardware question (risk R7).
 
-**Next.** MVP11 (player roles gating the human-facing tools, a network chat channel, `AIService` for
-mods, the task queue and HUD status of the async agent workflow); MVP12 (a selection-aware copilot in
-the Studio); MVP13 (AI tools that start from templates); MVP18 (the generated skill manifest,
-a `watch_mod_logs` tool, the in-game console and runtime self-repair). The planned runtime UI tools of
-[`TODO.md`](../TODO.md) [R4] (`ui_command`/`ui_query`, not built) share their element factory with MVP15;
-sub-agent orchestration (R9) stays last.
+**Next.** M0: results that cannot lie and a loud failure when a module is missing (P11 stage 1). M1:
+talking NPCs (P12 stage 1) and decision models as a model kind next to chat (P13). M2: the Connect-API
+flow with per-endpoint checks (P11 stage 2), model calls from mods (P12 stage 2), an orchestrator mode
+with sub-agents and a task queue (P14, the former R9), roles, tools, skills and prompts as data (P15),
+the tool review with camera v2 (P16), runtime self-repair and the generated skill manifest (MVP18) and
+AI tools that start from templates (MVP13). M3: MVP11 (player roles, a network chat channel). The
+planned runtime UI tools of [`TODO.md`](../TODO.md) [R4] (`ui_command`/`ui_query`, not built) share
+their element factory with MVP15.
 
 **Detail:** [`TODO.md`](../TODO.md) (R4–R9) · [`Docs/CoreAI/agent-vision.md`](CoreAI/agent-vision.md) ·
 [`Docs/CoreAI/AGENT_ROLES_AND_TOOLS.md`](CoreAI/AGENT_ROLES_AND_TOOLS.md) · ROBLOX_API_ROADMAP
@@ -274,8 +293,9 @@ composition entry point and there are no presets or boot tests yet. Composabilit
 | Host embedding | `IRbxCharacterMotorProvider`, `AdditionalGameplayBindings`, `ChatRequiresVisibleCursor` | no profile asset |
 | Static facade | the `CoreAi` static API | a static service locator, which `ARCHITECTURE_RULES.md` §2 forbids |
 
-**Next.** MVP5 and MVP8 add the player-host and dedicated-server presets with boot tests; **MVP10**
-consolidates: a `CoreAiProfile` asset (absorbing the host integration profile), one root, five presets
+**Next.** M0 adds the first preset — a one-click play-and-create world (P3) — with a boot test, and P15
+(M2) moves the role table and the tools per role into data. MVP5 and MVP8 add the player-host and
+dedicated-server presets with boot tests; **MVP10** (M4) consolidates: a `CoreAiProfile` asset (absorbing the host integration profile), one root, five presets
 (solo AI sandbox, player-host co-op, dedicated N-player server, client, embed-in-my-game), the statics
 removed from the main paths, tools per role as data, and a replace-with-fake test for every block in
 the table above. NeoxiderTools is one host that can adapt these seams; the framework packages take no
@@ -285,10 +305,11 @@ dependency on it (owner decision 2; `dev-docs/MVP25_BUILD_PLAN_2026-09-04.md` §
 integration profile", "Units / scale", "Assets under scale") and §MVP10 ·
 [`CHARACTER_MOTOR_BRIDGE.md`](CoreAIMods/CHARACTER_MOTOR_BRIDGE.md).
 
-### Track F — Studio & DX
+### Track F — In-play creation & DX
 
-**Goal.** Creating the game *inside* the running game: an in-game Studio for Creators, a runtime-first
-UI path where editor tooling is convenience, never a requirement, and readable mod sources everywhere.
+**Goal.** Creating the game *inside* the running game, in one mode: the player's own controls, an
+in-world chat and in-play creation tools instead of a Studio, a runtime-first UI path where editor
+tooling is convenience, never a requirement, and readable mod sources everywhere.
 
 **Current state.** Shipped: a runtime Lua editor page in the Hub (highlighting, history, Save & run = a
 reload that cleans the previous run's startup objects unless **Keep objects on Save & run** is on; the
@@ -297,18 +318,22 @@ world loads, settings and statistics; `.lua`/`.luau` importers, the highlighted 
 inspector and the `CoreAI/Lua Script Viewer` window, with an engine-independent tokenizer; the Getting
 Started window; the benchmark editor window. There is no Explorer, Properties panel, selection, gizmo,
 undo/redo, Play/Stop or Fly yet (`IsStudio` is a constant), and the runtime UI interpreter of [R4] has
-not started. The editor-tooling rung of the old ladder was dropped: its runtime equivalents are MVP12
+not started. A fresh world has no default controls, mouse look or camera modes, input is not gated
+while a chat is open, the chat's default role has no build tools, and no menu builds a world scene
+(repository survey, 2026-11-11). The editor-tooling rung of the old ladder was dropped: its runtime equivalents are MVP12
 and MVP18.
 
-**Next.** **MVP12** (the Studio core: runtime Explorer and Properties, selection, gizmos as intents,
-insert, a network-aware undo/redo stack, the Fly camera, Play/Stop per plan decision D2, scripts in the
-tree); MVP13 (the Toolbox panel over the template library); MVP15 (GUI, sharing the [R4] element
+**Next.** M0–M1: a one-click world and a cheaper edit loop (P3), default controls with a camera and a
+fly toggle (P1), the in-world chat with an agent status line (P2), and the Block world demo (P6) on
+voxel Terrain (P4). M2: in-play creation tools — selection, grab-move, rotate, scale, paint, duplicate,
+an undo stack (P5) — which replace the Studio core of MVP12 (plan decision D9; its Explorer, Properties
+and Play/Stop are backlog), the template picker of MVP13 and GUI (MVP15, sharing the [R4] element
 factory). The mechanisms go in the packages; the final UX polish goes in the flagship (plan decision
 D7).
 
 **Detail:** ROBLOX_API_ROADMAP §MVP12/§MVP15 · [`TODO.md`](../TODO.md) §[R4].
 
-### Track G — Platforms, performance & scale
+### Track G — Platforms, look, performance & scale
 
 **Goal.** Everything works in built players (RUNTIME-first): Standalone Mono and IL2CPP, WebGL as
 solo / pure client / creator-mode client, a Linux dedicated server, and Android as a client. Budgets
@@ -335,15 +360,18 @@ CoreCLR ([`dev-docs/SCALE_CHARACTERIZATION.md`](../dev-docs/SCALE_CHARACTERIZATI
 on Mono runs about 150 k instructions/s against 24 M on CoreCLR
 ([`tools/vmbench/RESULTS.md`](../tools/vmbench/RESULTS.md)), and IL2CPP has not been measured (risk
 R1). Instance ceilings today: 16,384 per desktop world and 2,048 per actor, 4,032 per WebGL world,
-100,000 in the package format.
+100,000 in the package format. Look (repository survey, 2026-11-11): 36 of the 45 materials carry
+normal maps; the nine procedural ones — the default Plastic and Water among them — do not, water is
+static, 15 of the 16 demo scenes run without post-processing, and textures load eagerly (about 99 MB).
 
-**Next.** Spikes S1 (VM cost on IL2CPP Linux and Mono) and S2 (bytes per update) — open follow-ups
-of MVP3 (closed 2026-09-25) that gate the next networked rung;
-MVP8 (the Linux dedicated server and the WebGL client); **MVP9** (interest management, a bot client,
-the VM guard cost, the O(N) paths, higher ceilings — proven by the staircase against the D5 targets);
-MVP19 (lazy material textures, incremental JSON/ZIP on WebGL, the WebGL client soak, an Android client,
-the performance regression suite F-20). CI player builds (Standalone/WebGL IL2CPP) once a licensed
-runner exists (F-12).
+**Next.** M0: spikes S1 (VM cost on Mono and, where a build target exists, IL2CPP) and S2 (bytes per
+update). M1: the default look — post-processing on by default, a Hub Graphics page, a WebGL tier (P7) —
+and the first materials pass: detail on Plastic, animated water, glass (P8 stage 1). M2: the texture
+tier with lazy loading and anti-tiling (P8 stage 2) and the Lighting API (P9). M4: MVP8 (the Linux
+dedicated server and the WebGL client); **MVP9** (interest management, a bot client, the VM guard cost,
+the O(N) paths, higher ceilings — a staircase against the room size chosen after S1); MVP19
+(incremental JSON/ZIP on WebGL, the WebGL client soak, an Android client, the performance regression
+suite F-20). CI player builds (Standalone/WebGL IL2CPP) once a licensed runner exists (F-12).
 
 **Detail:** [`TODO.md`](../TODO.md) §[R0.6] and audit-cleanup sections ·
 [`Docs/BENCHMARK.md`](BENCHMARK.md) · [`Docs/BENCHMARK_LEADERBOARD.md`](BENCHMARK_LEADERBOARD.md) ·
@@ -351,56 +379,95 @@ ROBLOX_API_ROADMAP §4.3, §MVP9, §MVP19 and §6.5.
 
 ## 4. Release plan
 
-**The release rule.** The ladder is strictly sequential and multiplayer-first. A rung is one minor
-release: it ships as a 7.x minor after its gate — its DoD met, EditMode and PlayMode `FastNoLlm`
-0 failed in Unity, the WebGL checklist passed, the changelogs written, and all seven packages bumped
-together (`python tools/bump_version.py <version>`). Patch releases carry fixes only. The one-screen
-ladder (detail: [`ROBLOX_API_ROADMAP.md` §4](CoreAIMods/ROBLOX_API_ROADMAP.md#4-mvp-ladder-the-ladder-of-record)):
+**The order of record (2026-11-11; plan decisions D9–D13).** Work is ordered by product milestones,
+and each milestone ends with playable demos and a release. Packages inside a milestone run in parallel
+where their files do not overlap. Rung ids (MVPn) and package ids (Pn) are stable names, not an order.
+The goal, done-so-far, to-do, tests and DoD of every rung and package are in
+[`ROBLOX_API_ROADMAP.md` §4](CoreAIMods/ROBLOX_API_ROADMAP.md#4-mvp-ladder-the-ladder-of-record).
 
-| # | Rung | Status (7.50.2, 2026-10-15) | Size | Test |
+| Milestone | What a player gets | Contents | Gate |
+|---|---|---|---|
+| **M0 Ready to play** | A new project reaches a working world and an honest model connection in minutes | P3 (one-click world), P11 stage 1 (truthful failures, install fixes), spikes S1/S2, the open MVP3 player checks, one live-model run with a valid provider key | From a fresh checkout: one menu, one key, the first AI-made object; a missing module fails loudly |
+| **M1 Block world** | The Minecraft-style demo, solo: walk and fly, build with blocks and by chat, talk to NPCs, switch on the autopilot | P1, P2, P3, P4, P6, P7, P8 stage 1, P12 stage 1, P13; MVP4 alongside | The Block world demo passes its recorded script in the editor and in a WebGL player |
+| **M2 Whole games from chat** | A complete small game — HUD, sound, saving — made by talking; the harness upgrades | The solo halves of MVP15, MVP16 and MVP17; MVP13; the self-repair and manifest parts of MVP18; P5, P8 stage 2, P9, P10 stage 1, P11 stage 2, P12 stage 2, P14, P15, P16, P17 | A person who writes no code gets a playable game with HUD, sound and saving in 15 minutes; a "whole game" benchmark tier measures it |
+| **M3 Together** | Several players create in one room | MVP5, MVP6, the network half of MVP7, MVP11, the network halves of MVP15–MVP17 | Four players in a room, two prompting the AI at once; every edit visible within 1 tick + RTT; the world survives joins and leaves |
+| **M4 Platform** | Dedicated servers, scale, Roblox import, asset import, hardening | MVP8, MVP9, MVP10, MVP14 (import first), the rest of MVP18, MVP19, P10 stage 2, the flagship's own project | The rungs' own DoDs |
+
+**The release rule.** A milestone ships as one or more 7.x minors. Each release keeps the gate: the DoD
+of what it claims, EditMode and PlayMode `FastNoLlm` 0 failed in Unity, the WebGL checklist passed, the
+changelogs written, and all seven packages bumped together (`python tools/bump_version.py <version>`).
+Patch releases carry fixes only. Work outside the plan is capped: between two releases that move a
+milestone, at most one release may carry only out-of-plan work (risk R15).
+
+Rungs and packages on one screen (status at 7.56.0, 2026-11-11):
+
+| Id | Name | Milestone | Status | Size |
 |---|---|---|---|---|
-| MVP0 | Engine abstraction seam | landed | M | EM |
-| MVP1 | Instance/DataModel core | landed (6.3.0) | L | EM, PT |
-| MVP2 | Scheduler, signals, clocks, services | surface landed; G10 and `BindToRenderStep` open | L | EM, PL |
-| MVP2.5 | Online foundation + persistence release | landed 7.3.0–7.43.0 (history) | — | EM |
-| — | Gameplay services I (the old MVP8) | landed slice | L | EM, PM, PL |
-| **MVP3** | World/place package + backups (+ spikes S1/S2) | **closed 2026-09-25 (7.47.0)**: Unity gate EditMode and PlayMode `FastNoLlm` 0 failed, audits 1–3 done; S1/S2, IL2CPP/WebGL player checks and one full live PlayMode run are open follow-ups | S | EM, PM, WebGL |
-| **MVP4** | Script contexts & client runtime | **next**, not started | M | PL, EM, PT |
-| MVP5 | Host mode over a real socket + join snapshot | planned | L | EM, MP, MS |
-| MVP6 | World-state replication + write authority | planned | L | PT, EM, MP |
-| MVP7 | Networked characters & controls | planned | L | PM, MP, EM |
-| MVP8 | Dedicated server + WebGL client | planned | M–L | MP, LT |
-| MVP9 | Scale to ~100 players per room | planned | XL | LT, PT, EM |
-| MVP10 | Composable framework: one root, presets, host profile | planned | M | EM, PM, MP |
-| MVP11 | Roles (Creator/Player) & per-player AI over the network | planned | M | EM, MP |
-| MVP12 | Studio mode core | planned | XL | PM, EM, MP, MS |
-| MVP13 | Model packages, template library, Luau parity prerequisites | planned | M–L | PT, PL, EM, PM |
-| MVP14 | Roblox interchange + round-trip parity gate | planned | L | PT, PL, EM, MS |
-| MVP15 | GUI + remaining input | planned | L | PM, PL, MP |
-| MVP16 | DataStore + leaderstats | planned | M | EM, PL, LT |
-| MVP17 | Audio / FX / animation | planned | M | PM, MP |
-| MVP18 | Mod UX rest, skill manifest, console + self-repair | planned | M–L | EM, PL, PM |
-| MVP19 | Performance, WebGL and mobile hardening | planned | M | LT, WebGL/Android |
+| MVP0 | Engine abstraction seam | — | landed | M |
+| MVP1 | Instance/DataModel core | — | landed (6.3.0) | L |
+| MVP2 | Scheduler, signals, clocks, services | — | surface landed; G10 and `BindToRenderStep` open | L |
+| MVP2.5 | Online foundation + persistence release | — | landed 7.3.0–7.43.0 (history) | — |
+| — | Gameplay services I | — | landed slice | L |
+| MVP3 | World/place package + backups | M0 (follow-ups) | closed 2026-09-25 (7.47.0); S1/S2, the player checks and one live run open | S |
+| MVP4 | Script contexts & client runtime | M1 (alongside) | not started | M |
+| P1 | Player controls and camera | M1 | not started | L |
+| P2 | In-world chat and agent HUD | M1 | not started | M |
+| P3 | Instant edit loop and one-click world | M0–M1 | not started | M |
+| P4 | Voxel Terrain | M1 | not started | L |
+| P6 | Block world demo | M1 | not started | M |
+| P7 | Default look and the Hub Graphics page | M1 | not started | M |
+| P8 | Materials v2 | M1 (stage 1), M2 (stage 2) | 36 of 45 materials textured with normals | M + M |
+| P11 | Truthful results and the Connect-API doctor | M0 (stage 1), M2 (stage 2) | not started | M |
+| P12 | Gameplay LLM API and talking NPCs | M1 (stage 1), M2 (stage 2) | `AIService` is a stub | M + L |
+| P13 | Decision models | M1 | not started | L |
+| P5 | In-play creation tools | M2 | click picking only | L |
+| P9 | Lighting API | M2 | structure only | M |
+| P10 | New materials and asset import | M2 (stage 1), M4 (stage 2) | `MaterialVariant` over built-in textures | M + L |
+| P14 | Orchestrator mode | M2 | plan only | L |
+| P15 | Roles, tools, skills and prompts as data | M2 | role table hard-coded | M–L |
+| P16 | Tool review and camera v2 | M2 | camera tools v1 | M |
+| P17 | Benchmark touch-ups | M2 | four reporting defects open | S |
+| MVP13 | Model packages, template library, Luau parity prerequisites | M2 | planned | M–L |
+| MVP15 | GUI + remaining input | M2 (solo), M3 (network) | planned | L |
+| MVP16 | DataStore + leaderstats | M2 (solo), M3 (network) | planned | M |
+| MVP17 | Audio / FX / animation | M2 (solo), M3 (network) | planned | M |
+| MVP18 | Mod UX rest, skill manifest, console + self-repair | M2 (self-repair, manifest), M4 (rest) | planned | M–L |
+| MVP5 | Host mode over a real socket + join snapshot | M3 | planned | L |
+| MVP6 | World-state replication + write authority | M3 | planned | L |
+| MVP7 | Networked characters & controls | M1 (controls, as P1), M3 (network) | planned | L |
+| MVP11 | Roles (Creator/Player) & per-player AI over the network | M3 | planned | M |
+| MVP8 | Dedicated server + WebGL client | M4 | planned | M–L |
+| MVP9 | Scale | M4 | planned; the room size is set after S1 | XL |
+| MVP10 | Composable framework: one root, presets, host profile | M4 (first preset in M0) | planned | M |
+| MVP12 | Studio mode core | backlog (replaced by P5, plan decision D9) | — | — |
+| MVP14 | Roblox interchange | M4 (import first) | planned | L |
+| MVP19 | Performance, WebGL and mobile hardening | M4 | planned | M |
 
-Sizes: S ≈ ≤2 agent-days, M ≈ ≤1 agent-week, L ≈ multi-week, XL ≈ several L-sized milestones. Tests:
-EM EditMode · PM PlayMode `FastNoLlm` · PT portable engine-free suite · PL portable Lua tier · MP two
-or more processes · LT load test with bot clients · MS manual scene with recorded evidence.
+Sizes: S ≈ ≤2 agent-days, M ≈ ≤1 agent-week, L ≈ multi-week, XL ≈ several L-sized milestones. Calendar
+estimates for the milestones are in [`PLAN.md`](../PLAN.md). Tests: EM EditMode · PM PlayMode `FastNoLlm`
+· PT portable engine-free suite · PL portable Lua tier · MP two or more processes · LT load test with
+bot clients · MS manual scene with recorded evidence.
 
-**Scale targets (plan decision D5).** The gated product goal for a room, frozen before anything is
-measured and published only when the MVP9 staircase passes: 100 players per room; a 30 Hz server tick
-with p99 frame ≤33 ms (server Lua ≤8 ms); downstream per client average ≤50 KB/s and p99 ≤100 KB/s;
-upstream ≤10 KB/s; join ≤10 s on LAN; a 10,000-instance place for 30 min with 0 disconnects and a
-retained heap delta ≤100 MB; on a reference 8-vCPU Linux server. Until then no concurrency number is
-claimed publicly: the no-claim-before-measurement rule of owner decision 4 is kept, its 20-client bar
-is replaced.
+**Scale targets (plan decisions D5 and D11).** The 2026-09-24 numbers stay as the aspiration, not as a
+frozen release promise: 100 players per room; a 30 Hz server tick with p99 frame ≤33 ms (server Lua
+≤8 ms); downstream per client average ≤50 KB/s and p99 ≤100 KB/s; upstream ≤10 KB/s; join ≤10 s on LAN;
+a 10,000-instance place for 30 min with 0 disconnects and a retained heap delta ≤100 MB; on a reference
+8-vCPU Linux server. Spike S1 measures the guarded VM on Mono and IL2CPP first — the estimate in §6 for
+100 players on Mono is about 63 ms per frame — and the room size MVP9 gates on is chosen from that
+measurement. M3 gates on a small room (2–8 players). No concurrency number is claimed publicly before it
+is measured (owner decision 4).
 
-**Plan decisions D1–D8** (decided 2026-09-24 by the tech lead; the owner may override any of them;
-detail in [`ROBLOX_API_ROADMAP.md` §8.1](CoreAIMods/ROBLOX_API_ROADMAP.md)): D1 hybrid script instances
-(views over the mod source store); D2 live edit by default plus a per-creator Play/Stop test run; D3 a
-client-owned own character with server validation, every other part server-owned; D4 Mirror/kcp plus
-WebSocket for WebGL, behind `INetworkBridge`; D5 the scale targets above; D6 WebGL as solo, pure client
-and creator-mode client, never a listen server; D7 the flagship in its own Unity project over UPM; D8
-Lua-CSharp with a cheaper guard first, native Luau on the server only as the fallback.
+**Plan decisions** (detail in [`ROBLOX_API_ROADMAP.md` §8.1](CoreAIMods/ROBLOX_API_ROADMAP.md)).
+D1–D8, decided 2026-09-24 by the tech lead: D1 hybrid script instances (views over the mod source
+store); D2 superseded by D9; D3 a client-owned own character with server validation, every other part
+server-owned; D4 Mirror/kcp plus WebSocket for WebGL, behind `INetworkBridge`; D5 the scale targets,
+revised by D11; D6 WebGL as solo, pure client and creator-mode client, never a listen server; D7 the
+flagship in its own Unity project over UPM; D8 Lua-CSharp with a cheaper guard first, native Luau on the
+server only as the fallback. D9–D13, 2026-11-11 at the owner's request: D9 one play-and-create mode, no
+Studio; D10 demo-gated milestones with parallel packages instead of a strictly sequential,
+multiplayer-first ladder; D11 the room size is chosen after S1; D12 Roblox import first, export later
+and not a release gate; D13 decision models are a model kind next to chat. The owner may override any
+of them.
 
 **History.**
 
@@ -438,9 +505,9 @@ Lua-CSharp with a cheaper guard first, native Luau on the server only as the fal
    script, line, a stable code, and a suggested fix — the reader is an agent that will
    immediately patch the mod. The AI skill document *is* the documentation.
 2. **Realtime.** Creation happens inside the running game — hot reload, live logs, in-play
-   debugging are core features. Live edit is the default; the Studio's Play/Stop is an added test run,
-   never the only loop and never a rewind of a shared world. Every feature answers "does this work in a
-   built player, on device, mid-session?" (RUNTIME-first, `AGENTS.md`).
+   debugging are core features. There is one mode: play and creation happen in the same running world,
+   and nothing rewinds a shared world. Every feature answers "does this work in a built player, on
+   device, mid-session?" (RUNTIME-first, `AGENTS.md`).
 3. **A framework of building blocks, not a game.** Every subsystem is a block that a game can
    configure, replace or leave out without editing package code; opinions live in presets, and a
    product (the flagship included) is a preset plus its own code. Each shipped preset has a boot test,
@@ -466,6 +533,10 @@ Lua-CSharp with a cheaper guard first, native Luau on the server only as the fal
 9. **Safety is layered, not optional.** Sandbox capability tiers with host masking, execution
    budgets, quarantine-not-unload, versioned sources with revert, autosave before every AI
    mutation, redacted secrets and logs.
+10. **Instant and convenient by default.** A default exists for everything a first session needs —
+    controls, a camera, a chat, the look of the scene, a checked model connection — and each default is
+    a replaceable block. A click, a confirmation or a setting that stands between a new player and the
+    first result is a defect, and so is a default a host game cannot switch off.
 
 ## 6. Risks
 
@@ -483,7 +554,11 @@ into measured numbers early ([`ROBLOX_API_ROADMAP.md` §4.3](CoreAIMods/ROBLOX_A
 | R7 | LLM capacity for per-player AI | G10 FAILED: 17.4–38.5 s p95 on one lane; 12–25 lanes needed for 40 requests per 60 s | Role-gate the human AI to Creators, a queue and HUD, `AIService` quotas (MVP11); small local models for routine work |
 | R8 | A large unverified surface | Before the MVP3 gate: Mirror fixtures compile-only, no Unity run of the wave. The 2026-09-25 gate ran every leg in Unity (EditMode 0 failed, Mirror leg included; PlayMode `FastNoLlm` 0 failed); 7.48.0 checked a WebGL player in real Chrome (chat, attachments, `execute_lua`); still unverified: IL2CPP players, the MVP3 stack and budget checks in IL2CPP/WebGL players, one full live-model PlayMode run, 2 Lua-tier cases not run on Linux | The MVP3 player-build follow-ups; a licensed CI runner (F-12) |
 | R9 | Protocol security and compatibility | No inbound rate limit on decode/dispatch; no version negotiation | Both in MVP5 |
-| R10 | Studio scope creep (XL) | Absent today; many UI panels | Mechanisms in the packages, UX in the flagship (plan decision D7); Explorer, Properties, gizmos, undo and Play/Stop first (MVP12) |
+| R10 | In-play creation tools grow into a Studio | Absent today; the earlier plan had an XL Studio rung with many panels | Plan decision D9: tools are in-play actions (P5), panels and Play/Stop are backlog; mechanisms in the packages, UX in the flagship (plan decision D7) |
 | R11 | Plan drift across ROADMAP, ROBLOX_API_ROADMAP, TODO, PLAN and dev-docs | 28 stale or contradictory statements found on 2026-09-24 (fixed the same day) | One ladder of record, one status table here; dev-docs plans marked as history |
 | R12 | Two network stacks in one project | NGO 2.11 is installed and used by the example game (`Assets/_exampleGame`); the framework uses Mirror | NGO stays in the example game only and is never used by the framework (owner decision 2); whether the demo project keeps it is decided in `TODO.md` |
+| R14 | The window closes | Roblox ships a prompt-to-game tab (Build, alpha) and an agentic Studio Assistant; Atomontage pitches live AI editing of a multiplayer world ([scan](../dev-docs/COMPETITIVE_SCAN_2026-11-11.md)) | Demo-gated milestones, a public Block world demo at M1; compete only on live player-authored logic, openness and ownership |
+| R15 | Out-of-plan work displaces the plan | Nine releases and no rung between 2026-09-25 and 2026-10-28 | The cap in the release rule (§4); out-of-plan findings become `TODO.md` items, not waves |
+| R16 | A block world outgrows the Part model | One GameObject per Part, ceilings of 16,384 per world and 4,032 on WebGL, per-part property blocks defeat the SRP Batcher | Voxel Terrain outside the instance quota (P4); a part-count benchmark before raising ceilings (MVP9) |
+| R17 | The decision-model protocol is young | `/v1/systemone` reached llama.cpp on 2026-10-02; LM Studio support is undated; LLMUnity has none | One seam with three backends, the logprob fallback included (P13); the local path runs a `llama-server` sidecar |
 | R13 | The round-trip parity scope is larger than the API ladder assumes | RT1–RT13: script containers, stdlib, coercion, DEV deviations, class coverage, four formats, asset ids, no licensed corpus | Script instances (plan decision D1, MVP4); the parity prerequisites (MVP13); the corpus gate with a stated subset and loss reports (MVP14); the licensed-corpus policy (ROBLOX_API_ROADMAP §7) |

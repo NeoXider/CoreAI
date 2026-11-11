@@ -457,30 +457,34 @@ Invariants (testable from MVP1):
 
 ## 4. MVP ladder (the ladder of record)
 
-**Decided 2026-09-24 (tech lead; owner may override).** This section is the one ladder of record for
-CoreAI — not only the Roblox API, but multiplayer, the framework consolidation and the Studio as well.
-`Docs/ROADMAP.md` §4 carries the same ladder as a one-screen release table, `TODO.md` files open work
-under the same rung names, and `PLAN.md` says where the work stands today. Any other plan (the
-dev-docs MVP2.5 plans included) is history and defers to this section.
+**Decided 2026-09-24 (tech lead) and re-ordered 2026-11-11 at the owner's request (the owner may
+override).** This section is the one plan of record for CoreAI — the Roblox API, multiplayer, the
+framework, the agent harness and the flagship's play-and-create loop. `Docs/ROADMAP.md` §4 carries the
+same plan as a one-screen table, `TODO.md` files open work under the same rung and package names, and
+`PLAN.md` says where the work stands today. Any other plan (the dev-docs MVP2.5 plans included) is
+history and defers to this section.
 
 Rules of the ladder:
 
-- **Strictly sequential.** Each rung depends only on earlier rungs and ends testable on its own. A rung
-  ships as one minor release after its gate (`Docs/ROADMAP.md` §4).
-- **Multiplayer first.** With MVP3 closed, MVP4–MVP9 finish multiplayer — script contexts, host mode,
-  replication, characters, the dedicated server and scale — before the framework consolidation
-  (MVP10), roles (MVP11) and the Studio (MVP12).
+- **Ordered by milestones (plan decision D10).** §4.0 is the order of record: five product milestones,
+  each ending with playable demos and a release (`Docs/ROADMAP.md` §4). Rungs (MVPn) and packages (Pn)
+  are stable ids, not an order. A rung or package depends only on what its "Reuses" line names and ends
+  testable on its own; packages of one milestone run in parallel where their files do not overlap.
+- **The flagship has one mode (plan decision D9).** There is no Studio and no Play/Stop split: creation
+  tools are in-play actions over the same Instance operations as the AI and mods.
 - **Every rung states** its goal, what is done so far (with paths), what remains, how it is tested, a
   measurable Definition of Done (DoD), what it reuses, and what belongs in the packages versus the
   flagship product. Paths without a root are relative to `Assets/CoreAIMods/Runtime/`.
-- **Implicit DoD items for every rung from MVP4 on:**
+- **Implicit DoD items for every rung from MVP4 on and for every package:**
   (a) the WebGL acceptance checklist (§6.5) passes;
   (b) if the rung grows the Lua-visible surface, the "Rbx API" skill (`RbxApi.txt` and
   `BuiltInRbxApiSkillText.cs`, byte-identical) and `Assets/CoreAI/Docs/RBX_API.md` change in the same
   commit — and from MVP18 on the generated API manifest is regenerated and CI-diffed too;
   (c) composability (`Docs/ARCHITECTURE_RULES.md` §2.1): every block the rung adds can be configured,
   replaced or left out without editing package code, a block that claims to be replaceable has a
-  replace-with-fake test, and a preset the rung introduces has a boot test.
+  replace-with-fake test, and a preset the rung introduces has a boot test;
+  (d) convenient by default (`Docs/ROADMAP.md` §5, principle 10): what the rung adds works in a fresh
+  world without configuration, and a host game can switch the default off.
 - **Product split (plan decision D7).** The flagship Studio+Play Roblox-like app lives in its own Unity
   project and consumes the packages through UPM. This repository keeps the packages, presets, samples,
   bot clients and test harnesses. Each rung says which side each part lands on.
@@ -493,6 +497,26 @@ Test methods: **EM** Unity EditMode · **PM** PlayMode `FastNoLlm` · **PT** por
 processes (Standalone builds, or Multiplayer Play Mode virtual players — `com.unity.multiplayer.playmode`
 2.0.2 is installed) · **LT** load test with bot clients · **MS** a manual scene in a sample or the
 flagship, with recorded evidence.
+
+### 4.0 Milestones (the order of record, 2026-11-11)
+
+| Milestone | Outcome | Rungs and packages | Gate | Demos |
+|---|---|---|---|---|
+| **M0 Ready to play** | A new project reaches a working world and an honest model connection in minutes | P3 (one-click world), P11 stage 1, spikes S1 and S2, the open MVP3 player checks, one live-model run with a valid provider key | From a fresh checkout: one menu, one key, the first AI-made object; a missing module fails loudly | the one-click world |
+| **M1 Block world** | The Minecraft-style demo, solo: walk and fly, build with blocks and by chat, talk to NPCs, switch on the autopilot | P1, P2, P3, P4, P6, P7, P8 stage 1, P12 stage 1, P13; MVP4 alongside | The Block world demo passes its recorded script in the editor and in a WebGL player | Block world |
+| **M2 Whole games from chat** | A complete small game — HUD, sound, saving — made by talking; the harness upgrades | The solo halves of MVP15, MVP16 and MVP17; MVP13; the self-repair and manifest parts of MVP18; P5, P8 stage 2, P9, P10 stage 1, P11 stage 2, P12 stage 2, P14, P15, P16, P17 | A person who writes no code gets a playable game with HUD, sound and saving in 15 minutes; a "whole game" benchmark tier measures it | an obby and a tycoon from templates, an NPC town, an application that is not a game on the same harness |
+| **M3 Together** | Several players create in one room | MVP5, MVP6, the network half of MVP7, MVP11, the network halves of MVP15–MVP17 | Four players in a room, two prompting the AI at once; every edit visible within 1 tick + RTT; the world survives joins and leaves | Block world co-op |
+| **M4 Platform** | Dedicated servers, scale, Roblox import, asset import, hardening | MVP8, MVP9, MVP10, MVP14 (import first), the rest of MVP18, MVP19, P10 stage 2, the flagship's own project | The rungs' own DoDs | the flagship |
+
+Packages added on 2026-11-11 (detail after §MVP19): **P1** player controls and camera · **P2** in-world
+chat and agent HUD · **P3** instant edit loop and one-click world · **P4** voxel Terrain · **P5** in-play
+creation tools · **P6** Block world demo · **P7** default look and the Hub Graphics page · **P8**
+materials v2 · **P9** Lighting API · **P10** new materials and asset import · **P11** truthful results
+and the Connect-API doctor · **P12** gameplay LLM API and talking NPCs · **P13** decision models ·
+**P14** orchestrator mode · **P15** roles, tools, skills and prompts as data · **P16** tool review and
+camera v2 · **P17** benchmark touch-ups.
+
+A split rung keeps one section: its **Order** line says which half belongs to which milestone.
 
 ### 4.1 Numbering: old → new
 
@@ -529,7 +553,10 @@ and `ClassCatalog.cs` (`MVP9`, `MVP10`, `MVP11`, `MVP14`, `MVP15`), the `MVP5` p
 `game:BindToClose` in `RbxDataModel.cs`, and the "Rbx API" skill that quotes them. Read them through
 this table: a stub that names "MVP9" means DataStore, which is MVP16 now.
 
-### 4.2 The ladder at a glance
+### 4.2 The rungs at a glance
+
+Ids, sizes and the status at 7.50.2; the milestone of each rung and the packages P1–P17 are in §4.0, the
+current status in `Docs/ROADMAP.md` §4.
 
 | # | Rung | Status (7.50.2, 2026-10-15) | Size | Test | Old |
 |---|---|---|---|---|---|
@@ -568,8 +595,10 @@ Three spikes turn the largest unknowns into measured numbers before the rungs th
 
 S1 and S2 are recorded measurements (no pass/fail); their numbers go into `TODO.md`.
 
-**Scale targets (plan decision D5).** The flagship's room size is the gated product goal, frozen before
-anything is measured and published only when the MVP9 staircase passes on the reference machine:
+**Scale targets (plan decisions D5 and D11).** These numbers were frozen on 2026-09-24 as the gated
+product goal. Since 2026-11-11 they are the aspiration: spike S1 is measured first, and the room size
+MVP9 gates on is chosen from it; M3 gates on a small room (2–8 players). Nothing is published before the
+staircase passes on the reference machine:
 
 | Target | Value |
 |---|---|
@@ -638,6 +667,33 @@ old ones, and 4.1 maps them:
 - **The seed's "MVP4 tooling" is split**: editor tooling (MVP7) vs. in-game console + self-repair
   (MVP16), because the latter depends on the Mirror-era log routing and the mature tool surface.
   (Editor tooling is dropped now; the console is MVP18.)
+
+### 4.5 Why the order changed on 2026-11-11
+
+- **One mode, no Studio (plan decision D9).** The owner's flagship is a realtime game like Roblox in
+  which everything is instant and convenient by default. A creator mode with a switch into play is the
+  friction Roblox has; here creation tools are in-play actions, so the XL Studio rung (MVP12) became
+  the smaller P5 and its panels moved to the backlog.
+- **Demo-gated milestones replaced the sequential ladder (plan decision D10).** Between 2026-09-25 and
+  2026-10-28 nine releases shipped and no rung moved, and under the old order the first complete game —
+  one with a HUD, sound and saving — stood behind twelve rungs (GUI was MVP15, DataStore MVP16, audio
+  MVP17). A milestone now ends with a demo a player can run.
+- **The Block world leads.** One Minecraft-style demo exercises what the flagship promises: default
+  controls with a fly toggle, an in-world chat, realtime edits by blocks and by chat, a scene that looks
+  right, NPCs that talk and an autopilot on a decision model. Each of those was missing or unconvincing
+  in the 2026-11-11 repository survey.
+- **Solo halves before the network.** GUI, sound and saving land as solo halves in M2 and get their
+  network halves in M3. MVP4 keeps them network-ready: Solo already runs the three script contexts over
+  loopback remotes, so a solo half is written against the contexts it will have in a room.
+- **Scale after measurement (plan decision D11).** Roblox runs 200 to 700 players per server; the
+  flagship does not differ by scale. The 100-player goal stays an aspiration until spike S1 says what
+  the guarded VM costs on Mono and IL2CPP.
+- **Import before export (plan decision D12).** Import brings Roblox authors and their places in;
+  export needs a manual Roblox Studio gate per release.
+- **Decision models joined chat (plan decision D13).** Models that answer typed questions with
+  probabilities appeared in September 2026 and one protocol is already spoken by the common runtimes;
+  NPC behaviour and a player autopilot need exactly that
+  (`dev-docs/COMPETITIVE_SCAN_2026-11-11.md`).
 
 ### MVP0 — Engine abstraction seam *(landed 2026-07-22)*
 
@@ -860,8 +916,10 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   contract of MVP2 (`Scripting/LuaCs/LuaCsRbxJson.cs`) that deliverable 1 planned.
 - **Package/flagship**: packages only.
 
-### MVP4 — Script contexts & client runtime *(next)* (M)
+### MVP4 — Script contexts & client runtime (M)
 
+- **Order (2026-11-11)**: milestone M1, alongside the Block world packages. Nothing in M1's demo waits for it; everything in M2
+  and M3 does.
 - **Goal**: every script declares `server | client | shared`; the process topology, not the actor's
   grant, decides which side runs it; a client process runs only client and shared code against a
   replica registry. This is the one hard dependency of multiplayer: without declared contexts the join
@@ -910,6 +968,7 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP5 — Host mode over a real socket + join snapshot (L) *(the old MVP11)*
 
+- **Order (2026-11-11)**: milestone M3 (small rooms); spike S3 runs at its start.
 - **Goal**: a desktop host (server plus local player) and remote clients play one world over kcp, and
   a joining client receives the world. Topology order stays Null loopback (solo) → host → dedicated
   (MVP8).
@@ -1020,6 +1079,7 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP6 — World-state replication + write authority (L) *(the old MVP12)*
 
+- **Order (2026-11-11)**: milestone M3.
 - **Goal**: server-created and server-changed instances and part properties replicate to clients;
   client writes follow `ClientWritePolicy`, and host grants travel as intents. The identity promise
   (§3.3) is cashed in.
@@ -1079,6 +1139,9 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP7 — Networked characters & controls (L)
 
+- **Order (2026-11-11)**: split. The solo half — `Humanoid:Move`, the default control script and camera,
+  ContextActionService-lite and Fly — is package P1 in M1; the network half — character replication,
+  own-character authority and `GetNetworkPing` — is M3.
 - **Goal**: each player walks, jumps and sees the others move smoothly — the base of any Roblox-like
   game.
 - **Done so far**: `RbxCharacterFactory`, `RbxHumanoid` (`MoveTo`, `Jump`, `WalkSpeed`, `Died`),
@@ -1124,6 +1187,7 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP8 — Dedicated server + WebGL client (M–L) *(the old MVP13)*
 
+- **Order (2026-11-11)**: milestone M4.
 - **Goal**: the same bridge and mod stack runs headless on Linux; desktop and WebGL clients join.
 - **Done so far**: `HeadlessRbxWorldSessionHost` (`Infrastructure/RbxWorldPackageContracts.cs`); the
   `RendersFrames` topology flag and `Players.LocalPlayer = nil` on a dedicated server;
@@ -1157,6 +1221,8 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP9 — Scale to ~100 players per room (XL)
 
+- **Order (2026-11-11)**: milestone M4. The 100-player numbers are the aspiration; the room size this rung gates on is chosen
+  after spike S1 (plan decision D11).
 - **Goal**: one room holds 100 players within the budgets of the scale targets (§4.3), proven by a
   load test.
 - **Done so far**: `tools/ScaleHarness` (loopback, CoreCLR) and the staircase method
@@ -1189,6 +1255,8 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP10 — Composable framework: one composition root, presets, host profile (M)
 
+- **Order (2026-11-11)**: milestone M4. The first preset — the one-click play-and-create world — lands in M0 with P3, and the
+  role table and the tools per role move into data in P15 (M2).
 - **Goal**: building blocks (`AGENTS.md`, `Docs/ARCHITECTURE_RULES.md` §2.1). One entry point assembles
   any product from presets, and every preset boots in a test. This rung consolidates what MVP5 and MVP8
   started with their own presets and must land before MVP11–MVP12, whose role and tool gating is
@@ -1240,6 +1308,8 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP11 — Roles (Creator/Player) & per-player AI over the network (M)
 
+- **Order (2026-11-11)**: milestone M3 for roles, gating and the network chat channel. `AIService` moves to P12 stage 2 (M2), the
+  task queue to P14 (M2) and the HUD status to P2 (M1).
 - **Goal**: every connected player has a per-world **player role** — Creator or Player (§2, roles
   decision) — and their AI chat runs server-side under their identity, gated by that role.
 - **Done so far**: the actor-keyed chat factory `ActorKeyedInGameLlmChatServiceFactory`
@@ -1275,6 +1345,9 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP12 — Studio mode core (XL)
 
+- **Order (2026-11-11)**: backlog (plan decision D9). The flagship has no Studio mode: selection, transforms, painting and undo
+  are in-play tools in P5 (M2), and the fly camera is P1 (M1). The Explorer and Properties panels,
+  Play/Stop and the `RunService:IsStudio` semantics stay below as the record.
 - **Goal**: an in-game creator mode and a switch between creating and playing, in one application —
   runtime-first (`AGENTS.md`): every panel works in a built player. This reverses the old non-goal
   "a Studio-like 3D editing UI" (§7) and replaces the old MVP7 (editor tooling).
@@ -1317,6 +1390,7 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP13 — Model packages, template library, Luau parity prerequisites (M–L)
 
+- **Order (2026-11-11)**: milestone M2.
 - **Goal**: save or insert any subtree plus its scripts as a model; place templates come from a local
   library and the AI starts from them; close the script-level gaps a Roblox round trip needs before any
   file format is built (MVP14).
@@ -1351,6 +1425,8 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP14 — Roblox interchange + round-trip parity gate (L) *(the old MVP4, widened)*
 
+- **Order (2026-11-11)**: milestone M4, import first (plan decision D12). The reader, import and DoD items (a) and (d) gate the
+  rung; export and the manual Roblox Studio gate (c) follow in a later release and no longer block one.
 - **Goal**: Roblox places and models open here and run unchanged, and what is made here exports and runs
   in Roblox — proven by a corpus, not by fixtures written for the implementation (owner requirement:
   scripts and templates interchangeable both ways).
@@ -1427,6 +1503,8 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP15 — GUI + remaining input (L) *(the old MVP14 and the rest of the old MVP10)*
 
+- **Order (2026-11-11)**: split. The solo half — the class set, layout, events and `PlayerGui` — is M2; `StarterGui` replication
+  and the multi-client fixtures are M3.
 - **Goal**: tutorial-grade GUI scripts run on host, client and WebGL: `ScreenGui`/`Frame`/`TextLabel`/
   `TextButton`/`ImageLabel`/`TextBox` + `UICorner`/`UIListLayout`, rendered as runtime UI Toolkit
   (UXML/USS interpreted at runtime — RUNTIME-first, the same approach as the Hub).
@@ -1453,6 +1531,8 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP16 — DataStore + leaderstats (M) *(the old MVP9)*
 
+- **Order (2026-11-11)**: split. The service over the local store with `leaderstats` and `BindToClose` is M2; dedicated-server
+  storage and the 100-player soak follow in M3 and M4.
 - **Goal**: Roblox-shaped persistence over CoreAI's existing store, semantics per the S-rules
   (`03_SERVICES_AND_DATA.md`, DataStore emulation table), running server-side on a dedicated server.
 - **Done so far**: the `DataStoreService` stub (`ServiceCatalog.cs`, phase `MVP9`);
@@ -1494,6 +1574,7 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP17 — Audio / FX / animation (M) *(the old MVP15)*
 
+- **Order (2026-11-11)**: split. Local playback of sound, particles and the Animator-lite is M2; networked playback is M3.
 - **Goal**: presentation-layer breadth, networked.
 - **Done so far**: loud stubs only (`Sound`, `ParticleEmitter` in `ClassCatalog.cs`, `SoundService` in
   `ServiceCatalog.cs`, all phased `MVP15`).
@@ -1511,6 +1592,8 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP18 — Mod UX rest, skill manifest, console + self-repair (M–L) *(the old MVP5 rest, MVP6 and MVP16)*
 
+- **Order (2026-11-11)**: split. Runtime self-repair, `watch_mod_logs`, the console and the generated manifest with the tiered
+  skill are M2 (the manifest together with P15); folder mods, `api_version` and enable/disable are M4.
 - **Goal**: close the realtime loop — the AI (and the player) see, diagnose and fix mods during play with
   zero editor involvement — and make the skill generated from the code so it cannot drift.
 - **Done so far**: the Lua log service is wired end to end (`Logging/`); `get_mod_logs`
@@ -1598,6 +1681,7 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP19 — Performance, WebGL and mobile hardening (M) *(the old MVP17, rest)*
 
+- **Order (2026-11-11)**: milestone M4. Lazy material textures move to P8 stage 2 (M2).
 - **Goal**: the whole stack holds its budget on the weakest targets: WebGL client and Android client.
 - **Done so far**: the per-resume budgets and quarantine; `ILuaCsGuardObserver`; the WebGL browser gate
   (2026-09-02, `TODO.md`); a WebGL player checked in real Chrome for 7.48.0 (chat, attachments, the
@@ -1622,6 +1706,1673 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   stress profile on mid-tier hardware; the WebGL build passes the same ≥85% A+B+C corpus gate as desktop,
   restricted to the solo-eligible subset (multi-client fixtures excluded), plus the client-mode fixture
   set.
+
+### Packages added on 2026-11-11 (P1–P17)
+
+Seventeen packages carry what the flagship's play-and-create loop and the agent harness lacked on
+2026-11-11. Their milestones are in §4.0; each section has the shape of a rung. Three repository surveys
+of release 7.56.0 supplied the "Done so far" facts. Path conventions differ by group, because each group
+lives in different packages: P1–P6 follow this document's rule (relative to `Assets/CoreAIMods/Runtime/`
+unless a path starts with `Assets/` or `Docs/`); P7–P10 are relative to `Assets/`; P11–P17 are written
+from the repository root, with `RbxApi/...`, `Scripting/...` and `LuaExecution/...` under
+`Assets/CoreAIMods/Runtime/` and `Features/...` under `Assets/CoreAiUnity/Runtime/Source/`. Mirror
+references point into the offline Roblox reference at `D:\Git\RobloxDocs`. A "DEV candidate" is a
+deviation that receives the next free DEV id (§5.1.4 ends at DEV-17) when its package starts. Facts
+marked *(research 2026-11-11)* come from `dev-docs/COMPETITIVE_SCAN_2026-11-11.md` and were not checked
+against the providers.
+
+### P1 — Player controls and camera (L) *(new 2026-11-11)*
+
+- **Goal** (M1): a freshly opened world is playable with zero code — WASD/arrows/gamepad walk, Space
+  jumps, the mouse looks, the wheel zooms from third into first person, and a double-tapped jump toggles
+  creative flight; typing into the chat or the Hub never moves the character. Takes the solo half of
+  MVP7's "To do" (MVP7 keeps replication, own-character authority and the speed-hack check).
+- **Done so far**:
+  - `RbxApi/Instances/RbxUserInputService.cs`: `InputBegan`/`InputEnded`/`InputChanged`, `IsKeyDown`,
+    `GetKeysPressed`, `GetMouseLocation`, `MouseBehavior`. `gameProcessedEvent` is hardwired `false`
+    (`GameNotProcessed`, line 31); `MouseBehavior` is state-only (pointer-lock TODO at line 63); the
+    mouse delta is a position diff, so it reads zero under a locked cursor; the wheel is never read.
+  - `RbxApi/Binding/UnityNewInputSource.cs` polls `Keyboard.current`/`Mouse.current`/`Gamepad.current`
+    with no knowledge of UI focus. Host-side gating exists only for CoreAI's own hotkeys:
+    `ChatRequiresVisibleCursor` (`Assets/CoreAI/Runtime/Core/Features/Chat/CoreAiChatOptions.cs:149`) and
+    the Hub's `requireVisibleCursor` (`Assets/CoreAIHub/Runtime/CoreAiHubWindow.cs:73`). No package code
+    sets `Cursor.lockState`.
+  - Character: `RbxApi/Instances/Networking/RbxCharacterFactory.cs` (Model + 2x2x1 `HumanoidRootPart` +
+    `Humanoid`, spawned at (0, 5, 0)), `RbxApi/Instances/RbxHumanoid.cs` (`MoveTo`, `Jump`, `WalkSpeed`,
+    state machine), `RbxApi/Binding/UnityRbxCharacterMotor.cs` (velocity-driven Rigidbody; only `MoveTo`
+    and `TryJump`), `RbxApi/Binding/IRbxCharacterMotorProvider.cs`. `Humanoid:Move` is a loud
+    `PlannedMethod` still labelled "MVP10" (`RbxApi/Instances/ClassCatalog.cs:947`; stale label).
+  - Camera: `RbxApi/Binding/UnityCameraRig.cs` + `RbxCameraFollower.cs` keep a fixed position offset;
+    `CameraType` is stored with no behaviour (`Scripting/LuaCs/LuaCsRbxApiBindings.cs:3322`);
+    `CameraSubject` drives the follow; the camera is never attached to the character by default.
+    `FieldOfView`, `ScreenPointToRay`, `ViewportPointToRay`, `WorldToScreenPoint` are backlog stubs
+    (`ClassCatalog.cs:1108-1130`); the `Ray` and `Region3` globals are backlog stubs
+    (`LuaCsRbxApiBindings.cs:3752-3754`); `Player.CameraMode` is unsupported (`ClassCatalog.cs:896`).
+  - Enum items already present: `HumanoidStateType.Flying` (`RbxApi/Datatypes/RbxEnum.cs:219`),
+    `UserInputType.MouseWheel` (`RbxEnum.cs:183`). `StarterPlayer` is a registered service
+    (`ClassCatalog.cs:629`) with no members bound.
+  - The only walkable demo uses a host C# controller with no Humanoid (NeoxiderTools
+    `PlayerController3DPhysics`, `Assets/CoreAI.Demos/MiniRpg/README.md`); nothing anywhere has fly,
+    noclip or a free camera.
+- **To do**:
+  - **Input focus**: an engine-free `IInputFocusState` port (any CoreAI text field focused, the pointer
+    over a CoreAI panel) fed by the chat (P2) and the Hub; while it holds, `InputBegan`/`InputEnded` fire
+    with `gameProcessedEvent = true`, exactly as MVP7's design note says. Mirror `GetFocusedTextBox`,
+    `TextBoxFocused` and `TextBoxFocusReleased` (`classes/UserInputService.yaml`) for CoreAI's own
+    fields.
+  - **Pointer lock and real delta**: route `MouseBehavior.LockCenter`/`LockCurrentPosition` to the host
+    cursor through a replaceable `ICursorPort`; read the device delta (not a position diff) into
+    `InputObject.Delta` and `UserInputService:GetMouseDelta()`, scaled by `MouseDeltaSensitivity`. WebGL
+    pointer lock needs a user gesture: lock on the first click into the game view, release on Escape.
+  - **Mouse wheel**: `InputChanged` with `UserInputType.MouseWheel`, the direction in `Position.Z`
+    (`classes/InputObject.yaml:112`).
+  - **`Humanoid:Move(moveDirection, relativeToCamera = false)`** (`classes/Humanoid.yaml:2023`): a
+    `Move(direction)` default interface member on `IRbxCharacterMotor`, so host motors keep compiling
+    (the `MeasuredSpeed`/`TryJump` pattern, `TODO.md` "Character motor contract"); `MoveDirection`
+    reports it.
+  - **Default control script (PlayerModule-lite)**: bundled Lua, `client` context once MVP4 lands (a
+    system mod in solo until then): keyboard and gamepad stick to `Humanoid:Move(dir, true)`, Space to
+    `Jump`, events with `gameProcessedEvent = true` ignored. A game turns it off Roblox-style with
+    `StarterPlayer.DevComputerMovementMode = Enum.DevComputerMovementMode.Scriptable`
+    (`classes/StarterPlayer.yaml:481`) or replaces it with its own script of the same name; a host preset
+    flag does the same from C#.
+  - **Camera module**: `CameraType.Custom` orbits `CameraSubject` (defaults to the local Humanoid) with
+    locked-pointer or right-drag look, wheel zoom clamped to
+    `Player.CameraMinZoomDistance`/`CameraMaxZoomDistance` (`classes/Player.yaml:95-121`, plus the
+    `StarterPlayer` defaults), first person at the minimum, `Player.CameraMode = LockFirstPerson`
+    honoured, a collision pull-in ray; `CameraType.Scriptable` hands the camera to scripts, as today. The
+    module is a replaceable block behind `IRbxCameraRig`.
+  - **Fly and noclip** in the motor: a Flying mode with no gravity, Space rises and Shift descends
+    (Minecraft creative), a double-tapped jump toggles it (window configurable, default 0.3 s), noclip
+    (root part does not collide) off by default. Lua enters it through
+    `Humanoid:ChangeState(Enum.HumanoidStateType.Flying)`: Roblox lists the state but gives it no
+    locomotion, so this is a DEV candidate; `/fly` (P2) and a preset flag are the framework paths.
+  - **Camera queries**: the `Ray` datatype, `Camera:ScreenPointToRay`/`ViewportPointToRay`,
+    `WorldToScreenPoint`/`WorldToViewportPoint`, `ViewportSize`, read/write `FieldOfView`.
+  - Retire the stale "MVP10" label on `Move` and remove the shipped members from the `ClassCatalog` stub
+    tables in the same change.
+- **Test**: PT (`Ray`, orbit/zoom clamp maths, `ScreenPointToRay` against a known projection, the
+  fly-mode integrator on a fake body); EM (`gameProcessedEvent` from a fake focus port with its negative
+  twin, the `Move` binding, `DevComputerMovementMode` switching, the motor fly mode); PM `FastNoLlm`
+  (WASD moves the character with the Hub open and closed, which is MVP7's sprint-on-shift fixture;
+  double-tap fly; pointer lock and delta through the Input System test devices); PL (control-script
+  conformance); MS (recorded capture of walk, look, zoom, fly in the Editor and a WebGL player).
+- **DoD**:
+  - Solo input-to-motion ≤1 frame (MVP7's figure), at 0.28 m/stud and at 1:1.
+  - With the chat focused, typing `wasd` moves nothing and `InputBegan` carries `gameProcessedEvent =
+    true`; the negative twin (chat closed) fires `false` and the character moves.
+  - `MouseBehavior = LockCenter` locks the cursor and `GetMouseDelta()` is non-zero while the mouse
+    moves; `Default` releases it.
+  - Wheel zoom stays inside the min/max distances; at the minimum the view is first person.
+  - A double-tapped jump enters `Flying`; with no input the height drifts ≤0.05 stud over 5 s; flying
+    into a wall stops with noclip off, and passes through with noclip on (twin pair).
+  - `ScreenPointToRay` at the viewport centre matches `Camera.CFrame.LookVector` within 1e-4.
+  - With `DevComputerMovementMode = Scriptable` default input moves nothing and a game script still
+    drives the Humanoid (twin pair).
+  - Every row above also passes in a WebGL player capture (MS).
+- **Reuses**: the MVP1 input slice, Gameplay services I (Humanoid, motor, raycast), MVP4 (client
+  context); feeds MVP7 (replication of the same character).
+- **Package/flagship**: packages: input focus and cursor ports, `Move`, the motor fly mode, the control
+  script and camera module (each replaceable: a host motor through `IRbxCharacterMotorProvider`, a host
+  camera through `IRbxCameraRig`, the scripts by name or by the movement mode), tuning values in a preset
+  asset. Flagship: feel tuning and key bindings shown to players.
+
+### P2 — In-world chat and agent HUD (M) *(new 2026-11-11)*
+
+- **Goal** (M1): the player talks to the world without leaving it. T, Enter or `/` opens a one-line input
+  over the running game; recent lines fade; the AI's answer streams into the same feed while a status
+  line says what the agent is doing; `/undo`, `/fly`, `/agent`, `/model`, `/autopilot` work from the same
+  input; NPC lines land in the feed too. The default chat role can build, and the Hub chat stays
+  available.
+- **Done so far**:
+  - `Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatPanel.cs`: the UI Toolkit chat panel (open
+    hotkey C, `CoreAiChatConfig.cs:151`; Escape closes; streaming bubbles; typing dots and a
+    tool-progress hint; `StopAgent`; agent and API switching via
+    `EnableAgentSwitching`/`EnableApiSwitching`, used by `Assets/CoreAIHub/Runtime/HubChatPage.cs:141`);
+    `CoreAiChatService.cs`; `CoreAiToolCallChatFormatter.cs` renders tool calls inline
+    (`ShowToolCallsInChat`, forced on in the Hub chat).
+  - `Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatExternalDriver.cs` drives the panel from
+    string entry points (WebGL harnesses), a model for routing a second surface into the same service.
+  - The default role is `SmartChat` (`Assets/CoreAI/Runtime/Core/Features/Chat/CoreAiChatOptions.cs:88`;
+    the Hub prefab's `chatConfig` is unset), which carries no Lua tools; `execute_lua` and `manage_mods`
+    are added to `Programmer` only (`Composition/CoreAiModsInstaller.cs:648-683`). Only FullAccess and
+    LiveMechanics default to `Programmer`
+    (`Assets/CoreAI.Demos/LiveMechanics/LiveMechanicsChatConfig.asset`).
+  - Roblox chat is not modelled: `Player.Chatted` and the `Chat` service are stubs whose text calls
+    `TextChatService` a non-goal (`RbxApi/Instances/ClassCatalog.cs:848-887`).
+  - Known cancel gap: `StopAgent(roleId)`/`CancelTasks(scope)` cancel nothing in the default composition
+    (`TODO.md`, Newcomer audit item A3), so a `/stop` built on them would be a no-op today.
+- **To do**:
+  - **Overlay chat (framework)**: a UI Toolkit feed + one-line input, a separate replaceable view over
+    the same `CoreAiChatService` (no Hub required). Keys from a preset (default T, Enter, and `/`, which
+    pre-fills the slash); lines fade after a configurable delay (default 10 s) and come back while the
+    input is open; scroll with the wheel while open; Escape closes the input only. Opening it raises the
+    P1 input-focus state, so typing never reaches the game.
+  - **Agent HUD (framework)**: one status line under the input: "thinking", "running execute_lua",
+    "loading mod", retry and error, elapsed time; the AI answer streams into its feed line in place;
+    `/stop` or Escape on an empty input cancels the turn once A3 is fixed (a dependency, not a
+    duplicate).
+  - **Slash commands (framework registry)**: a C# command registry the overlay parses before anything
+    goes to the model, with built-ins `/undo` (P3), `/fly` (P1), `/agent <role>`, `/model <profile>` (the
+    routing controller the Hub Settings page already uses), `/autopilot` (P13 hook), `/help`; a game adds
+    or removes commands without editing package code.
+  - **Roblox-shaped Lua surface (a `TextChatService` subset)**, mirrored from
+    `classes/TextChatService.yaml`, `TextChannel.yaml`, `TextChatCommand.yaml`: default channels
+    `RBXGeneral`/`RBXSystem`, `TextChannel:SendAsync`, `TextChannel:DisplaySystemMessage`,
+    `MessageReceived`, `TextChatService.SendingMessage`/`MessageReceived`, `TextChatCommand`
+    (`PrimaryAlias`, `SecondaryAlias`, `Triggered(originTextSource, unfilteredText)`) dispatched through
+    the same registry, `ChatWindowConfiguration.Enabled` and
+    `ChatInputBarConfiguration.Enabled`/`KeyboardKeyCode` (Roblox's own extra focus key besides `/`,
+    `ChatInputBarConfiguration.yaml:211`), and `TextChatService:DisplayBubble(partOrCharacter, message)`
+    for NPC speech (P12). This reverses the `TextChatService` non-goal for the subset only.
+  - **What is not Roblox**: the AI agent is not a `Player`, so its lines arrive as system messages with
+    agent metadata (DEV candidate); Lua sees one final `MessageReceived` per answer, while the stream is
+    a view concern; Roblox filters every message through `TextService`, CoreAI does not (DEV candidate; a
+    host moderation filter seam is an M4 platform concern).
+  - **A building default role**: the overlay's default role must carry `execute_lua` and `manage_mods`
+    and still talk naturally. P11 stage 1 switches the shipped default to a role that can build; a
+    player-facing builder role with a conversational prompt comes with P15. `/agent` switches either way.
+  - The Hub chat stays; both surfaces share one session history, so a line typed in one shows in the
+    other.
+- **Test**: EM (command parsing and registry, routing to the chat service through a fake, fade timing,
+  `TextChatCommand.Triggered`, the focus state while the input is open); PM `FastNoLlm` (open with T,
+  Enter and `/`; a scripted stub model streams into a feed line; the status line follows tool events;
+  typing does not move the character); PL (`TextChannel`/`TextChatCommand` conformance against the
+  mirror); MS (recorded capture of a full "build a tower here" turn in the Editor and in WebGL).
+- **DoD**:
+  - With no Hub in the scene, T opens the input, Escape closes it, and typed keys reach no Lua
+    `InputBegan` handler as unprocessed input (twin: closed input, the same keys do).
+  - A streamed answer updates one feed line in place; Lua `MessageReceived` fires once with the final
+    text.
+  - The status line shows the running tool name within one frame of the tool event and clears on done,
+    error and cancel (three rows).
+  - `/fly` toggles flight, `/agent Programmer` switches role, and an unknown command answers locally and
+    sends nothing to the model (twin: plain text is sent).
+  - A `TextChatCommand` created by a mod fires `Triggered` for its alias and not for a near miss.
+  - With the default configuration, "put a red block in front of me" ends with a new part in the world
+    using no role switch (recorded with a scripted model in PM and a real one in MS).
+- **Reuses**: `CoreAiChatService`, `CoreAiChatPanel` styling and bubbles, the routing controller behind
+  the Hub Settings page, the P1 focus port, MVP4 (client context for chat scripts).
+- **Package/flagship**: packages: the overlay view, the command registry and built-in commands, the agent
+  HUD, the `TextChatService` subset; every key, delay and command is preset data and the view is
+  replaceable. Flagship: chat look, sounds, and the command set shown to players.
+
+### P3 — Instant edit loop and one-click world (M) *(new 2026-11-11)*
+
+- **Goal** (M0/M1): one click gives a playable, AI-editable world in the Editor and the same world from a
+  runtime preset in a built player; an AI change appears as soon as its tool runs, with no file write in
+  front of it; `/undo` takes back the last AI change; failures say what is missing instead of degrading
+  silently.
+- **Done so far**:
+  - `ConfirmedWorldMutationGate` (`Infrastructure/LuaCsGameToolExecutor.cs:80`), always composed
+    (`Composition/CoreAiModsInstaller.cs:167-179`): single-flight; before every `execute_lua` call and
+    every `manage_mods` load/reload/unload/import/forget/revert
+    (`LuaExecution/LuaModsLlmTool.cs:285-302`) it captures the whole world
+    (`IRbxWorldRuntimeService.CaptureCurrent`) and awaits a durable autosave in
+    `FileRbxWorldPackageStore` (ring of 10, `Infrastructure/FileRbxWorldPackageStore.cs:467`), then the
+    session controller may write a new startup package (world-only changes throttled by
+    `DefaultStartupRefreshInterval` = 5 s, `Infrastructure/RbxWorldPackageContracts.cs:1437`). A world
+    past a format limit refuses every gated tool except forget and a confirmed load.
+  - The built-in mutating tools share one serialized chain per turn
+    (`Assets/CoreAI/Runtime/Core/Features/ Llm/ToolExecutionPolicy.cs:1344`). `execute_lua` is rate
+    limited to 20 calls per 60 s by one shared `LuaGenerationRateLimiter`
+    (`LuaExecution/LuaGenerationRateLimiter.cs`, registered with defaults in
+    `Composition/CoreAiModsLifetimeScope.cs:131`); `manage_mods` has no limit.
+  - Undo today: per-mod `versions`/`revert`; whole-world restore from an autosave needs a player click on
+    the World Loads page (`PlayerConfirmationRequired => true`, `RbxWorldPackageContracts.cs:495`).
+    One-off instances carry a `console:<n>` origin (`RbxApi/Instances/OriginTag.cs:12`).
+  - Setup: `CoreAI/Setup/Create Chat Demo Scene` (chat only), `Add Hub` (needs existing scopes,
+    `Assets/CoreAIHub/Editor/CoreAiHubSetupMenu.cs:69`), no menu creates an `RbxWorldHost`; without one,
+    wired through `CoreAiModsLifetimeScope.robloxWorldHost` (`CoreAiModsLifetimeScope.cs:57`), mods run
+    headless with an error (`CoreAiModsInstaller.cs:246`). Eleven demo scenes carry the wiring by hand.
+  - Truthfulness gaps (`TODO.md`, "Newcomer API ergonomics audit"): a missing `COREAI_LLM` swaps in
+    `StubLlmClient` silently (A2;
+    `Assets/CoreAiUnity/Runtime/Source/Composition/LlmPipelineInstaller.cs:420`,
+    `.../Features/Llm/Infrastructure/LlmClientRegistry.cs:1851`); the install-fix menus need VContainer
+    to compile (B1); Newtonsoft is undeclared (B2). A1 (Git-URL setup menus) is still open in `TODO.md`,
+    but the menus now resolve assets by GUID and `PackageInfo.FindForAssembly`
+    (`CoreAiHubSetupMenu.cs:131`): probably fixed, unverified on a real Git install.
+  - Defaults that need a manual step: every bundled sample except `sample_welcome` ships `active: false`
+    (`Resources/CoreAIMods/*.lua`); the default chat role cannot build (P2); no look profile exists.
+- **To do**:
+  - **Cheaper gate, same safety net**: capture the snapshot in memory (a copy-on-write tree view or a
+    serialized byte buffer), run the mutation at once, and write the autosave behind it; the next gated
+    mutation waits only if the previous write is still pending, and a crash before the write loses at
+    most that one backup, which the gate reports. Debounce the startup refresh across a burst of AI
+    edits. Keep the format-limit and encoding-failure rules exactly as they are, with their tests.
+  - **`/undo` and `/redo` of AI changes**: keep the in-memory pre-mutation snapshots of the last N AI
+    changes per actor (default 10) and restore the latest one in place without the load confirmation when
+    nothing else changed the world since; otherwise refuse with the reason and offer the World Loads
+    page. A finer, operation-level undo is P5.
+  - **Configurable rate limit**: expose window and count (and an off switch for solo) in the mods preset;
+    apply the same limiter to `manage_mods` mutations; say the remaining budget in the HUD (P2).
+  - **One-click world**: an editor menu `CoreAI/Setup/Create Play + Create World` and a runtime prefab or
+    preset asset that builds the same composition in a player: lifetime scopes, `RbxWorldHost` wired, the
+    overlay chat (P2), the control and camera modules (P1), a look profile (sky, light, post, material
+    tier), the building default role, and the Hub as an optional child. The menu only instantiates the
+    preset; nothing is editor-only. This is the first slice of MVP10's presets.
+  - **Truthful failures**: a missing `COREAI_LUA`, `RbxWorldHost` or model is shown in the HUD and the
+    Hub as one actionable line. The client and install fixes themselves (newcomer items A2, B1 and B2)
+    are P11 stage 1.
+  - **Sensible defaults**: decide which samples start active in the one-click world, keep the rest one
+    click away in the Mods page; the default chat role builds (P2).
+- **Test**: PT (snapshot and write-behind ordering, undo ring eviction, limiter configuration); EM (gate:
+  mutation runs before the write completes, a second mutation waits for a pending write, the format-limit
+  refusals unchanged; `/undo` restores and its twin refuses after a non-AI change; the preset composes
+  the same graph as the menu); PM `FastNoLlm` (one-click world plays with no Hub; a scripted model's
+  `execute_lua` is visible on the next frame); MS (a fresh project through the README path to a first
+  AI-made object, recorded, Editor and WebGL).
+- **DoD**:
+  - The visible change of a scripted `execute_lua` lands in the frame after the tool call on a
+    2,048-instance world; on a 16,384-instance desktop world the in-memory capture costs ≤50 ms and the
+    autosave of the pre-change state is durable within 2 s (targets, measured in PM; today's cost is not
+    measured).
+  - A crash between mutation and write is reported on the next start as one missing backup, never as a
+    corrupt ring (EM fault injection).
+  - `/undo` after an AI build restores the previous tree byte-identically (golden); after a player edit
+    in between it refuses with a reason (twin).
+  - With the rate limit set to 3 per 10 s, the fourth call is refused with the reset time; with it off,
+    100 calls pass (twin).
+  - In an empty project with the packages installed, the menu (or the prefab dropped in a scene) plus
+    Play gives a walkable world, the overlay chat and a building agent, with no manual wiring.
+  - A player built without `COREAI_LLM` shows "no LLM provider compiled in" on the first message instead
+    of a stub answer (twin: with the define it answers).
+- **Reuses**: MVP3 (package, autosave ring, startup selection), MVP10 (presets), the newcomer-audit
+  items.
+- **Package/flagship**: packages: the gate change, the undo ring, the limiter options, the preset asset
+  and prefab, the menu; every part replaceable through the existing seams (`IConfirmedWorldMutationGate`,
+  `IRbxWorldPackageStore`). Flagship: which samples ship active and the look profile's art.
+
+### P4 — Voxel Terrain (L) *(new 2026-11-11)*
+
+- **Goal** (M1): a world holds hundreds of thousands of blocks that the player and the AI place and break
+  in real time, saved with the world and playable in WebGL. Scripts reach them through
+  `workspace.Terrain` with Roblox's own names and call shapes, so a block-world script reads like a
+  Roblox terrain script.
+- **Done so far**:
+  - Nothing voxel exists. `Workspace.Terrain` is an unsupported property whose message calls voxel
+    Terrain "a roadmap non-goal" (`RbxApi/Instances/ClassCatalog.cs:701-703`); §7 lists Terrain among the
+    non-goals and MVP14's importer skips `Terrain` with an info diagnostic. This package reverses the
+    non-goal for the subset below only; voxel import from RBXL stays out.
+  - Why Parts do not scale to a block world: every instance is its own GameObject
+    (`RbxApi/Binding/InstanceGameObjectBinder.cs:1342-1365`) with a MeshFilter, MeshRenderer and collider
+    (`:1528-1543`) and a `MaterialPropertyBlock` tint (`:1806-1821`), which takes renderers off the SRP
+    Batcher path (`RbxApi/Unity/PROCEDURAL_MATERIALS.md:24-26`); the ceilings are 2,048 instances per
+    actor, 16,384 per desktop world and 4,032 per WebGL world (`LuaExecution/LuaCsModRuntime.cs:176-199`;
+    WebGL save budget 4 MiB and 4,096 instances, `Infrastructure/FileRbxWorldPackageStore.cs:475-476`). A
+    single 64 x 64 floor of blocks is already 4,096 Parts.
+  - Pieces to build on: `WorldRoot:Raycast` (`Scripting/LuaCs/LuaCsRbxInstanceBindings.cs:1875`) with
+    `RaycastResult.Instance/Position/Normal/Material/Distance`
+    (`RbxApi/Instances/RbxRaycast.cs:219-246`); the 45-item `Enum.Material` catalog with procedural and
+    texture providers (`PROCEDURAL_MATERIALS.md`; the `Air` and `Water` items exist,
+    `RbxApi/Datatypes/RbxEnum.cs:167`); the `.world` ZIP with additive entries
+    (`Docs/CoreAIMods/WORLD_PACKAGE.md`; entries up to 16 MiB, at most 2,048 entries,
+    `Infrastructure/RbxWorldPackageSerializer.cs:29-31`). The `Region3` global is a backlog stub
+    (`Scripting/LuaCs/LuaCsRbxApiBindings.cs:3754`).
+  - Mirror facts (`classes/Terrain.yaml`): `Terrain` inherits `BasePart`, is `NotCreatable`, and is a 4 x
+    4 x 4-stud cell grid where each cell holds a material and an occupancy in 0..1. `FillBlock(cframe,
+    size, material)`, `FillRegion(region, resolution, material)`, `ReadVoxels(region, resolution)`
+    returning `materials, occupancies` 3D arrays with a `Size` field (region limit 4,194,304 voxels),
+    `WriteVoxels(region, resolution, materials, occupancy)`, `Clear()`; the resolution "must be 4". At
+    the locked 0.28 m/stud (`RbxApi/Binding/RbxWorldHost.cs:21`) a cell is 1.12 m, close to a Minecraft
+    block.
+- **To do**:
+  - **Engine-free chunk store** (`RbxApi/Instances`, PT-testable): 16 x 16 x 16-cell chunks of a material
+    id and an occupancy byte, a sparse chunk map, dirty-chunk tracking, change events, world bounds and a
+    cell budget from the preset (separate desktop and WebGL values).
+  - **`Region3` datatype** (`Region3.new(min, max)`, `CFrame`, `Size`, `ExpandToGrid(4)`) and the
+    `Terrain` instance under `Workspace` (`workspace.Terrain`), not creatable and not destroyable.
+  - **Lua subset**: `FillBlock`, `FillRegion`, `ReadVoxels`, `WriteVoxels`, `Clear`, `ReplaceMaterial`,
+    `WorldToCell`, `CellCenterToWorld`, with the mirror's argument rules (grid-aligned regions,
+    resolution 4, the region size limit) and a `BAD_ARGUMENT` that names the fix; a rotated `FillBlock`
+    fills the cells whose centres fall inside the oriented box. Every other `Terrain` member stays a loud
+    stub.
+  - **Unity mesher** (`RbxApi/Unity`): face-culled cube meshes per chunk (greedy merging only if
+    measuring asks for it), one MeshRenderer and one MeshCollider per chunk, one shared material over an
+    `Enum.Material` texture array or atlas built from the existing providers (no per-cell tint, so the
+    SRP Batcher stays on); dirty chunks re-meshed under a per-frame budget, with jobs only where the
+    platform runs them off the main thread.
+  - **Blocky rendering**: any cell with occupancy > 0 draws as a full cube; Roblox smooths terrain, so
+    this is a DEV candidate. `Water` draws as a transparent block with no swimming (Humanoid swimming is
+    a backlog stub), a second DEV candidate.
+  - **Raycast and physics**: a ray that hits a chunk collider answers `Instance = workspace.Terrain`, the
+    hit cell's `Material` and the face `Normal`; `RaycastParams` filters can include or exclude Terrain;
+    the character motor's ground probe stands on chunk colliders.
+  - **Persistence**: one compact `.world` entry (for example `Terrain/voxels.bin`: a chunk index plus
+    run-length-encoded material and occupancy) outside the instance quota but inside the package byte
+    budget; capture and restore through the existing codec; decide whether the entry is additive or bumps
+    `format_version`, pinned by a test, as MVP4 does for contexts. The P3 gate snapshots chunks
+    copy-on-write, so an AI `FillBlock` does not serialize the whole world first.
+  - **Authority**: Terrain writes need `WorldEdit` and pass the same authority resolver as Part writes,
+    so multiplayer (MVP6) later replicates chunk deltas, not instances.
+  - **Docs and skill**: `Assets/CoreAI/Docs/RBX_API.md`, `Docs/CoreAIMods/RBX_API_SKILL.md` and the
+    built-in skill text (`Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInRbxApiSkillText.cs`)
+    teach `workspace.Terrain` for block worlds and Parts for props; `ClassCatalog` drops the shipped
+    members from its stub tables; the §7 non-goal line is narrowed to smooth terrain and RBXL voxel
+    import.
+- **Test**: PT (chunk store, `Region3`, the RLE codec round trip, region validation, the rotated
+  `FillBlock` rasterizer); PL (`Terrain` calls against mirror-shaped expectations, including the error
+  rows); EM (Terrain in the instance tree, package capture and restore, the raycast mapping over a fake
+  collider map, gate snapshot cost); PM `FastNoLlm` (the mesh appears in the frame after a write, a chunk
+  collider blocks the character, a raycast reports Terrain and Material); MS (frame time and memory
+  capture of the reference world in the Editor and a WebGL player).
+- **DoD**:
+  - `FillBlock` of a 64 x 4 x 64-cell slab shows the mesh in the frame after the call, and `ReadVoxels`
+    of the same region returns the written materials (golden).
+  - The reference world (256 x 64 x 256 cells, ground plus caves) renders at ≥60 fps on the reference
+    desktop and ≥30 fps in a WebGL player, with draw calls bounded by visible chunks, not by cells
+    (targets; MS capture records the numbers).
+  - Placing or breaking one cell re-meshes only the touched chunk and the neighbours that share the face,
+    within one frame (PM counter).
+  - Save and load of the reference world is byte-identical (golden) and its `.world` fits the WebGL 4 MiB
+    budget; an over-budget world is refused with the measured size (twin).
+  - A `ReadVoxels` region over 4,194,304 voxels or not aligned to 4 raises `BAD_ARGUMENT`, as does a
+    resolution other than 4 (twin: an aligned region at resolution 4 passes).
+  - A raycast straight down onto a grass cell answers `Terrain`, `Enum.Material.Grass` and normal (0, 1,
+    0).
+- **Reuses**: Gameplay services I (raycast, motor), MVP3 (package and gate), the material catalog, P3
+  (gate snapshot); MVP6 later replicates the deltas.
+- **Package/flagship**: packages: the chunk store, `Region3`, the `Terrain` subset, the mesher
+  (replaceable behind a mesher port, so a host can swap in smooth or textured meshing), the codec entry,
+  budgets in the preset. Flagship and demo: the block texture set and the reference world.
+
+### P5 — In-play creation tools (L) *(new 2026-11-11)*
+
+- **Goal** (M2): the player builds by hand inside the running game, with no separate editor: look at an
+  object, it highlights; grab, move, rotate and scale it with snapping; duplicate, delete, paint material
+  and colour; undo and redo; and "change this" in the chat means the object under the crosshair. This
+  replaces the in-world half of MVP12 (Studio mode core); MVP12's Explorer, Properties panel and
+  Play/Stop move to the backlog, in line with plan decision D9 (one mode, no Studio; `Docs/ROADMAP.md`
+  §1).
+- **Done so far**:
+  - Picking: `RbxApi/Binding/IClickPickSource.cs` and `UnityClickPickSource.cs` cast from the scene
+    camera through a screen point and answer an `InstanceId` and a distance only (no hit point, no
+    normal); `ClickDetector.MouseClick` fires through it; `MouseHoverEnter`/`MouseHoverLeave` exist but
+    the pick pump leaves them unfired (`RbxApi/Instances/RbxClickDetector.cs:7`). `workspace:Raycast`
+    gives the full hit.
+  - `SelectionBox` and `Highlight` are backlog classes (`RbxApi/Instances/ClassCatalog.cs:1353-1354`);
+    the mirror members are
+    `Highlight.Adornee/DepthMode/Enabled/FillColor/FillTransparency/OutlineColor/OutlineTransparency` and
+    `SelectionBox.LineThickness/SurfaceColor3/SurfaceTransparency` plus the inherited `Adornee`/`Color3`
+    (`classes/Highlight.yaml`, `classes/SelectionBox.yaml`).
+  - No gizmo anywhere in the packages; a third-party RuntimeInspector plugin sits in
+    `Assets/Plugins/RuntimeInspector` and nothing in the packages or demos uses it.
+  - Authority and history to build on: `RbxApi/Instances/Replication/WriteGrantLedger.cs` and
+    `IntentGateway.cs`, origin tags (`RbxApi/Instances/OriginTag.cs`), per-mod revisions, the P3 AI undo
+    ring; the chat agents already get a camera (vision) tool by default (`EnableCameraTool`,
+    `Assets/CoreAI/Runtime/Core/Features/Chat/CoreAiChatOptions.cs:150`).
+  - MVP12's design note stands: manual operations go through the same Instance operations and authority
+    resolver as the AI and mods, so building by hand is a UI layer, not a new system.
+- **To do**:
+  - **`SelectionBox` and `Highlight`**, real and Roblox-shaped, rendered by a replaceable adornment port
+    (an outline pass where the pipeline offers one, a wireframe box otherwise); the minimal
+    `SelectionBox` lands early for P6 (M1).
+  - **Pick under the crosshair** (locked pointer) or the cursor: extend `IClickPickSource` with the hit
+    point and normal; fire `MouseHoverEnter`/`MouseHoverLeave`; resolve Terrain cells as well as Parts.
+  - **Tools (framework, in-world)**: grab-move on the hit surface or along an axis, rotate in 15 or 90
+    degree steps, scale by faces, all with a configurable grid snap (default 1 stud, 4 for Terrain);
+    duplicate, delete, paint `Material` and `Color`, insert from a small parts palette. Each operation is
+    an intent through `IntentGateway` and the write-grant check, so a tool can never do what the player's
+    grant forbids; the tool set is a registry a game extends or trims.
+  - **Undo and redo per player**: an operation-level command stack over registry and Terrain mutations
+    (default 100 steps), merging the P3 AI undo entries into the same history so `/undo` and Ctrl+Z
+    agree; network-aware once MVP6 lands (undo only your own operations).
+  - **"This object" for the AI**: the chat turn carries the selected or targeted instance (path, class,
+    size, position, material) as context, so "make this taller" needs no names.
+  - **Backlog** (explicit): the runtime Explorer tree, the Properties panel, Play/Stop test runs,
+    multi-user co-editing beyond what MVP6 replicates.
+- **Test**: PT (snap maths, the command stack and its merge with AI entries); EM (intent and grant
+  refusals with negative twins, `SelectionBox`/`Highlight` members, hover signals, the "this object"
+  context payload); PM `FastNoLlm` (pick, grab, rotate, duplicate, delete, paint, undo with scripted
+  input; the Hub open and closed); MS (a recorded build of a small house by hand, Editor and WebGL).
+- **DoD**:
+  - A player builds a 50-part house with the tools only (no chat, no code) and undoes the last 50 steps
+    back to a byte-identical tree (golden), carrying over MVP12's acceptance shape.
+  - A move denied by the write grant changes nothing and says why (twin: granted, it moves).
+  - `Highlight.Adornee = part` shows the outline in the next frame and `Adornee = nil` removes it (PM
+    capture); `MouseHoverEnter` fires once when the crosshair enters a detector's part (twin on leave).
+  - "Make this red" with a part targeted changes that part only (scripted model in PM, real model in MS).
+  - Undo of an AI change from the same stack restores the pre-change tree (shared golden with P3).
+- **Reuses**: MVP12's done-so-far (pick source, Hub shell, autosave, grants and intents), P1 (crosshair
+  and pointer lock), P3 (AI undo), P4 (Terrain cells), MVP6 (networked intents) later.
+- **Package/flagship**: packages: adornment classes and the adornment port, the pick extension, the tool
+  registry and built-in tools, the command stack; every tool replaceable and the set configurable.
+  Flagship: tool feel, key bindings, the palette's contents and its art.
+
+### P6 — Block world demo (M) *(new 2026-11-11)*
+
+- **Goal** (M1): the showcase. A fresh player lands in a block world, walks or flies, picks a block from
+  a hotbar, places and breaks blocks at the crosshair with a target outline, types "build a watchtower
+  here" and watches it rise, talks to a villager, and can hand the controls to the autopilot. It proves
+  P1-P4 in one scene and is the template for "a game like this".
+- **Done so far**:
+  - No voxel, block-building or Minecraft-like sample exists. The bundled mods are thirteen Lua files in
+    `Resources/CoreAIMods/` with `@coreai` headers; all but `sample_welcome` ship `active: false`.
+    `sample_tetris3d.lua` and `sample_lane_racer.lua` show `UserInputService` play, `sample_clicker.lua`
+    shows `ClickDetector` picking.
+  - A crosshair raycast works today from Lua: `workspace:Raycast(camera.CFrame.Position,
+    camera.CFrame.LookVector * reach)` returns the hit instance, position, normal and material.
+  - The published player QA matrix is the frozen 17-scene G11 list
+    (`CoreAIG11WebGlBuild.FrozenScenePaths`, `Assets/CoreAiUnity/Editor/CoreAIBuildMenu.cs:571`), pinned
+    again by `CoreAiDemoScenesSmokePlayModeTests`; several demos are built by editor menus
+    (`CoreAI/Demos/Build Gameplay Services Demo` and three more), the model for this scene.
+  - `Lighting.ClockTime` is a loud stub (`RbxApi/Instances/ClassCatalog.cs:774`), so a day cycle needs
+    the Lighting mapping first; GUI (`ScreenGui`) is MVP15, so a Roblox-shaped hotbar UI is not available
+    in M1.
+- **To do**:
+  - **Scene**: built by an editor builder menu from the P3 preset (world host, overlay chat, controls,
+    look profile), pre-authored so it is visible without Play, with its own mods `storeId`; added to the
+    G11 list (17 to 18 scenes) and the smoke test in the same change.
+  - **Bundled mod `sample_block_world`** (pure Roblox API plus P4 `Terrain`): seeded terrain (grass,
+    dirt, stone, sand, water), a hotbar of `Enum.Material` blocks on keys 1-9 and the wheel, left click
+    breaks and right click places at the crosshair cell (`WorldToCell` on the hit position plus the
+    normal), a target `SelectionBox` (the minimal P5 slice), a reach limit, and a creative-mode flag.
+  - **Hotbar view in M1**: a demo HUD element that reads `Player:GetAttribute("SelectedBlock")` and the
+    slot list, so the mod stays Roblox-shaped; it moves to `ScreenGui` when MVP15 lands.
+  - **"Build here"**: the chat turn carries the targeted cell and the player's position (P5's context, M1
+    slice), and the skill text gains a block-world recipe (`FillBlock`/`WriteVoxels`, sizes in cells), so
+    "a watchtower here" lands at the crosshair, then `/undo` (P3) takes it back.
+  - **Integration points, not implementations**: villagers spawn as Humanoid NPCs whose lines go to the
+    feed and `TextChatService:DisplayBubble` (logic in P12); `/autopilot` hands the local Humanoid to the
+    decision model (P13). The demo works with both absent.
+  - **Water** as the P4 transparent block; **optional day cycle** once `Lighting.ClockTime` maps to the
+    sun (a look-profile item).
+  - A README beside the scene with the controls, the prompts to try and what needs a model.
+- **Test**: PL (the mod's hotbar, place and break logic against a fake Terrain); PM `FastNoLlm` (scripted
+  input places and breaks a block at the crosshair, the outline follows the target, a scripted model's
+  "build here" fills cells at the target and `/undo` removes them, the scene opens with no model); MS (a
+  recorded two-minute session in the Editor and in the WebGL player: walk, fly, build by hand, build by
+  chat, undo).
+- **DoD**:
+  - The scene opens and plays (walk, fly, place, break) with no model configured; AI features say plainly
+    that a model is needed (twin: with a model, "build here" works).
+  - Place and break land in the frame after the click, at the cell the outline showed, within the reach
+    limit (twin: a click beyond reach does nothing).
+  - "Build a watchtower here" with a scripted model writes cells only inside a box at the crosshair, and
+    `/undo` restores the terrain byte-identically (golden).
+  - The demo's saved world reopens identically after a restart, inside the WebGL budget.
+  - The G11 list and the smoke test name the scene; the WebGL capture runs at ≥30 fps on the reference
+    machine (target, recorded).
+- **Reuses**: P1 (controls, fly, camera), P2 (chat and HUD), P3 (preset, `/undo`), P4 (Terrain), the
+  minimal P5 `SelectionBox`; P12 and P13 as optional hooks.
+- **Package/flagship**: packages: `sample_block_world` as a bundled sample and the scene builder. Demo
+  content: the scene, block textures, the villager and autopilot wiring, the README. The flagship game
+  starts from this template but owns its art and progression.
+
+### P7 — Default look and the Hub Graphics page (M) *(new 2026-11-11)*
+
+Milestone: **M1**.
+
+- **Goal**: every world opens tonemapped, anti-aliased, with soft shadows, a real sky, reflections
+  and fog, in the Editor and in a built player (WebGL included), without anyone touching a scene.
+  The player tunes the look from a Hub **Graphics** page, and the choice survives a restart.
+- **Done so far**:
+  - Two quality levels, `Mobile` and `PC` (`ProjectSettings/QualitySettings.asset`). WebGL defaults
+    to `Mobile` (`m_PerPlatformDefaultQuality`), which uses `Settings/Mobile_RPAsset.asset`: render
+    scale 0.8, MSAA off, one 1024 shadow cascade, soft shadows off, no depth or opaque texture, and
+    `Settings/Mobile_Renderer.asset` (Forward, no renderer features).
+  - `Settings/PC_RPAsset.asset`: HDR, MSAA off, 2048 shadow map, 4 cascades, soft shadows high,
+    depth and opaque textures. `Settings/PC_Renderer.asset` is Forward+ (`m_RenderingMode: 2`) with
+    an SSAO renderer feature (DepthNormals source, intensity 0.4).
+  - `Settings/DefaultVolumeProfile.asset` sets Tonemapping to None. Of the 16 scenes under
+    `CoreAI.Demos/`, only `ProceduralMaterials/ProceduralMaterialsShowcase.unity` has a Volume and
+    URP camera data with post-processing (ACES, Neon-only bloom, SMAA, a custom skybox, authored by
+    `CoreAI.Demos/ProceduralMaterials/Editor/RbxProceduralMaterialsShowcaseBuilder.cs:231-279`). The
+    other 15 use the built-in default skybox and no fog, and their cameras carry no URP camera data
+    (post-processing off) or carry it switched off (`Hub/CoreAiHubDemo.unity`,
+    `QwenDemo/QwenSpellcraftDemo.unity`).
+  - All 18 scenes (the 16 demos plus `CoreAiUnity/Scenes/CoreAiChatDemo.unity` and `_mainCoreAI.unity`)
+    contain a `CoreAILifetimeScope`. 11 of them also contain an `RbxWorldHost`
+    (`CoreAIMods/Runtime/RbxApi/Binding/RbxWorldHost.cs`).
+  - No package assembly references URP. Only `CoreAI.Demos/CoreAI.Demos.asmdef` does, and no
+    package `package.json` declares `com.unity.render-pipelines.universal` (17.6.0 in
+    `Packages/manifest.json`). The Rbx shaders already include the URP ShaderLibrary.
+  - No runtime code sets `QualitySettings` or `RenderSettings`. Lighting is set only by editor
+    scene builders. Lua cannot see graphics quality: `GraphicsQualityChangeRequest` is an unsupported
+    stub reading "graphics quality is host configuration, not scriptable"
+    (`CoreAIMods/Runtime/RbxApi/Instances/ClassCatalog.cs:1171`). That matches Roblox, where quality
+    belongs to the user.
+  - The Hub already has the pieces a new page needs: `HubPageRegistry` and `IHubPage`
+    (`CoreAI/Runtime/Core/Features/Hub/`), and built-in pages registered by
+    `HubBuiltInPages.RegisterAll` (`CoreAIHub/Runtime/HubBuiltInPages.cs`). The UI Toolkit window is
+    `CoreAIHub/Runtime/CoreAiHubWindow.cs`. File persistence follows `CoreAiStorageRoot` and
+    `CoreAiWebGlPersistence.Sync()` (`CoreAiUnity/Runtime/Source/Infrastructure/`), as
+    `FileLlmEndpointRegistryStore` does.
+- **To do**:
+  - **Options model (engine-free)**: `GraphicsOptions` holds a preset id (`Low`, `Medium`, `High`)
+    plus explicit overrides: post-processing on/off, shadows off/hard/soft, anti-aliasing
+    off/FXAA/SMAA, render scale (clamped to a declared range), fog on/off, sky on/off. A pure
+    resolver turns preset plus overrides into effective values. An unknown preset id resolves to the
+    platform default.
+  - **Options store**: a JSON file under `CoreAiStorageRoot`, written through the
+    `CoreAiWebGlPersistence.Sync()` check (§6.5 item 3). A missing or corrupt file starts the game on
+    defaults and logs one warning.
+  - **Look profile asset**: `CoreAiLookProfile`, a ScriptableObject with no scene references.
+    - It holds a VolumeProfile: tonemapping, bloom with a threshold of at least 1 so only HDR and
+      Neon surfaces bloom, and colour adjustments.
+    - It also holds a skybox material (a CC0 HDRI or URP's procedural sky), the ambient source,
+      the reflection source, fog colour and density, and the default sun.
+    - The package ships one default instance under `Resources/`.
+  - **Look applier (URP-only, optional assembly)**: a new assembly that references URP, compiled
+    only when URP is present (`versionDefines` on `com.unity.render-pipelines.universal`). The
+    packages keep building without URP.
+    - It creates one global Volume with a priority below 0, so any Volume a scene authors wins. The
+      showcase's own global Volume uses priority 0 (`RbxProceduralMaterialsShowcaseBuilder.cs:479`).
+    - It ensures `UniversalAdditionalCameraData` with post-processing and the chosen AA on the main
+      camera and on cameras created later.
+    - It sets sky, ambient and fog through `RenderSettings`, and refreshes the environment
+      reflection (`DynamicGI.UpdateEnvironment`).
+  - **Composition**: `CoreAILifetimeScope` installs the applier by default, so all 18 scenes pick
+    the look up with no scene edits. `RbxWorldHost` worlds later drive the same applier from Lua
+    `Lighting` (P9). The fixed-exposure rig of `ProceduralMaterialsShowcase` keeps working because
+    its scene Volume outranks the default one.
+  - **Host opt-out**: a serialized `LookMode` with three values.
+    - `Apply` is the default.
+    - `FillMissing` leaves alone anything the scene already authored: a global Volume, camera data
+      or a skybox.
+    - `Off` touches nothing.
+    A host that owns its rendering sets `Off`, or binds its own `ICoreAiLookApplier` in the
+    container. With `Off`, the Hub Graphics page shows "managed by the game" unless the host
+    registers an `IGraphicsOptionsSink`.
+  - **Applying options at runtime**:
+    - Camera-level and light-level options apply directly: post-processing, AA mode, shadow type,
+      fog, sky.
+    - Options that URP keeps on the pipeline asset (render scale, shadow distance and cascades) are
+      applied either by setting the asset properties URP 17.6 exposes as writable on a runtime clone,
+      or by switching between shipped pipeline assets per preset. Which of the two works is decided
+      by the first spike (see Unknowns).
+  - **WebGL tier**: a recommended WebGL quality setup to replace today's `Mobile` defaults: render
+    scale 1, FXAA or SMAA, soft shadows low, two cascades, bloom on. Each step is measured on the G11
+    reference browser. Packages must not own `ProjectSettings`, so the package ships the
+    recommended pipeline assets plus an editor menu `CoreAI/Graphics/Apply recommended quality
+    settings`, and this repository applies them to its own settings.
+  - **Hub Graphics page**: `HubGraphicsPage : IHubPage` in `CoreAIHub`, registered by
+    `HubBuiltInPages.RegisterAll`.
+    - A preset dropdown plus one switch per option, and a render-scale slider.
+    - Changes apply live, "Reset to defaults" is available, and the page writes through the store.
+  - **Docs**: a user doc covering the options and presets, and the host opt-out.
+- **Test**:
+  - PT: the options resolver (preset plus overrides, clamping, unknown preset id) and the JSON
+    contract round trip.
+  - EM:
+    - The applier on a bare scene creates exactly one global Volume with active tonemapping, and
+      camera data with post-processing on and AA set.
+    - Negative twins: a scene with its own global Volume keeps it untouched under `FillMissing`, and
+      `Off` changes nothing.
+    - The store round-trips, and a corrupt file falls back to defaults.
+    - The Hub page callbacks write the store. Test the callback logic directly: a detached UITK
+      element fires no `ChangeEvent`.
+  - PM (`FastNoLlm`):
+    - Switching post-processing off at runtime changes the rendered frame.
+    - Options written in one composition are re-applied by a fresh composition over the same
+      `CoreAiStorageRoot.Override`.
+  - MS:
+    - Every build-settings scene is captured in the Editor and in a WebGL build, before and after.
+    - In a built WebGL player, each Hub switch is toggled, the page is reloaded, and the options are
+      shown to survive.
+    - Evidence goes in a `dev-docs/` note with the PNGs.
+  - Visual proof uses `CoreAiUnity/Tests/PlayMode/LlmVerification/PlayModeCameraShot.cs` captures
+    compared on zoomed crops with an object-masked metric (the part's projected renderer bounds,
+    as `RbxMaterialVariantRenderPlayModeTests` does), never a whole-frame mean.
+- **DoD**:
+  - In Play Mode every scene in `ProjectSettings/EditorBuildSettings.asset` has a main camera with
+    post-processing on and AA not None, an active global Volume with tonemapping not None, a skybox
+    that is not the built-in default, and fog as the profile says. One EM/PM test iterates the
+    build scenes. Negative twin: the same scene with `LookMode = Off` shows none of them.
+  - Bloom reaches Neon only. A masked ring around a Neon part is brighter with bloom on than off.
+    The same ring around a Plastic part of the same colour does not change (negative twin).
+  - Tonemapping removes clipping. Under the default sun, no masked crop of the 45-material sheet
+    (`RbxAllMaterialsSheetPlayModeTests`) has more than 2% channel-clipped pixels. Right after the
+    Forward+ fix, with no tonemapping, Snow measured (255, 255, 255) and the rig had to be dimmed
+    (`dev-docs/FORWARD_PLUS_LIGHTING_FIX_2026-09-04.md`).
+  - Each Hub switch changes its masked region:
+    - shadows: luminance under a caster;
+    - AA: stair-step count along a masked silhouette;
+    - fog: contrast of a far part;
+    - sky: background crop.
+    Each switch also writes the store, and the values survive a restart of a built WebGL player
+    (MS evidence).
+  - A corrupt options file starts the game on defaults with exactly one warning.
+  - Frame time for every preset is recorded on the G11 reference browser. The WebGL default is the
+    highest preset that meets the MVP19 frame budget.
+- **Reuses**:
+  - `HubPageRegistry`, `CoreAiStorageRoot` and `CoreAiWebGlPersistence`.
+  - The showcase builder's volume code, `PlayModeCameraShot`, and the 45-material sheet tests.
+- **Package/flagship**:
+  - **Packages**: the options model and store, the look profile asset type with one default
+    instance, the optional URP applier assembly (replaceable through `ICoreAiLookApplier`, disabled
+    through `LookMode`), the Hub Graphics page, and the recommended pipeline assets.
+  - **Flagship**: the art direction of the shipped default profile and the block world's sky and fog.
+
+### P8 — Materials v2 (stage 1 M, stage 2 M) *(new 2026-11-11)*
+
+Milestones: **stage 1 in M1** (what the block world needs), **stage 2 in M2**.
+
+- **Goal**:
+  - Stage 1: water visibly moves and refracts, Glass reads as glass, Plastic has surface detail,
+    CrackedLava glows, and partial `Transparency` actually blends.
+  - Stage 2: every textured material holds up in close-up on desktop, and the whole catalog renders
+    correctly in the WebGL player.
+- **Done so far**:
+  - **Provider chain**: `InstanceGameObjectBinder` (`CoreAIMods/Runtime/RbxApi/Binding/`) defaults
+    to `RbxTextureMaterialProvider`, which lays `RbxMaterialTextureCatalog` over
+    `RbxProceduralMaterialProvider` (all in `CoreAIMods/Runtime/RbxApi/Unity/`). Part colour and
+    alpha travel in a MaterialPropertyBlock (`InstanceGameObjectBinder.cs:1806-1821`).
+  - **Textured, 36 of the 45 items**: shader `CoreAI/Rbx/Textured Surface`
+    (`Unity/Resources/CoreAIRbxMaterials/RbxTexturedSurface.shader`), opaque, face-unrolled and
+    triplanar, no mesh UVs.
+    - Every textured entry has albedo, NormalGL and roughness wired; the provider rejects an entry
+      missing one of them (`Entry.HasRequiredTextures`).
+    - 26 entries carry a baked cavity/AO map and 4 a metalness map.
+    - Emission is hard-coded to 0, so CrackedLava cannot glow. The local 2K `Lava004` set has no
+      emission map either, so a mask has to be derived.
+  - **Procedural, 9 items, no normal map** (bump derived from a noise height): Plastic,
+    SmoothPlastic, Neon, Salt, Glacier, Glass, ForceField, Air, Water. Plastic is the Part default
+    (`Binding/PartProperties.cs:67`), so most AI-built geometry wears a material with no texture
+    detail.
+  - **Water**: rendered by `RbxProceduralTransparent.shader` mode 2, the same mode as Glacier and the
+    procedural Ice: a static ice-fracture height, alpha-blended, ZWrite off.
+    - No `_Time` input. ForceField (mode 0) is the only animated surface.
+    - No scene-colour refraction and no depth absorption.
+    - No water shader exists anywhere under `Assets/`.
+  - **Glass and Air**: mode 1, tinted alpha blend with Fresnel, and no refraction
+    (`dev-docs/MATERIAL_QUALITY_GAP.md`, transparent optics).
+  - **Partial transparency**: 0 < `Transparency` < 1 does not blend on opaque materials; the alpha is
+    carried but ignored, and only 1 hides the renderer (TODO at `InstanceGameObjectBinder.cs:1823`).
+  - **No DepthNormals pass**: no Rbx shader has one. They `UsePass` URP Lit's ShadowCaster and
+    DepthOnly only, while the PC renderer's SSAO reads DepthNormals.
+  - **Packaged textures**: 140 JPGs, 122.9 MB, in `Unity/Resources/CoreAIRbxTextures/` with a CC0
+    `LICENSE.md` (34 ambientCG and 2 Poly Haven sets).
+    - Sizes: 100 at 1024x1024, 12 at 1024x512 (the Wood095, Bricks104, Concrete034 and
+      PavingStones150 sets), cavity maps at 512.
+    - The WebGL import override caps every file at 1024.
+  - **Eager load**: `EnsureSharedCache` builds a material for every entry the first time any part is
+    created, which keeps about 99 MB of textures resident (`TODO.md:2154`).
+  - **Owner's local override**: gitignored `CoreAIRbxTexturesLocal/` holds 36 ambientCG/Poly Haven
+    2K sets (1.4 GB). Every entry has cavity 0, and its Displacement maps are not used by any shader.
+  - **Guards already in place**: `RbxShaderClusterLightLoopEditModeTests` (Forward+ keyword in every
+    lit pass) and `RbxTexturedShaderMathEditModeTests`. The material sheets are
+    `RbxAllMaterialsSheetPlayModeTests` (`CoreAiUnity/Tests/PlayMode/LlmVerification/`) and
+    `RbxMaterialSeamSheetPlayModeTests` (`CoreAIMods/Tests/PlayMode/RbxApi/`).
+  - **Roblox parity**: in Roblox, `Enum.Material.Water` and `Air` "apply to Terrain only" and are
+    NotBrowsable (`D:\Git\RobloxDocs\creator-docs\content\en-us\reference\engine\enums\Material.yaml`).
+    Roblox also does not refract Glass on mobile, so our WebGL fallback matches Roblox's own mobile
+    behaviour.
+- **To do**:
+  - **Stage 1 — Plastic, SmoothPlastic and Salt**:
+    - A small tileable CC0 micro-normal and a roughness variation map, applied by the procedural
+      surface shader. Part colour keeps the hue.
+    - SmoothPlastic stays clean, with roughness variation only.
+  - **Stage 1 — emission slot**:
+    - `_EmissionMap`, an emission strength and an emission keyword in `RbxTexturedSurface`.
+    - An optional `Emission` texture plus strength on `RbxMaterialTextureCatalog.Entry`. Additive
+      serialized fields, so old catalog assets load unchanged.
+    - An editor bake that derives a crack mask for `Lava004` from its colour map (modelled on
+      `RbxCavityMapBake`), so CrackedLava glows and P7 bloom picks it up.
+  - **Stage 1 — water shader** `CoreAI/Rbx/Water`:
+    - Two scrolling CC0 normal maps in world space, Fresnel reflection of the P7 sky and probe, and
+      a depth tint from `_CameraDepthTexture`.
+    - Refraction from `_CameraOpaqueTexture` on the PC tier.
+    - WebGL fallback: animated normals plus tinted alpha when the depth/opaque textures are off.
+    - Time comes from `_Time`, overridable by a global property so a test can take captures at
+      fixed times.
+    - The shader must also work on the block world's merged water surface. Hiding the inner faces of
+      touching water blocks belongs to the Terrain mesher (P4); this package only provides the
+      material.
+  - **Stage 1 — Glass**: opaque-texture refraction plus Fresnel on the PC tier, and the noise
+    wobble reduced as `MATERIAL_QUALITY_GAP.md` recommends. WebGL keeps today's alpha blend.
+  - **Stage 1 — transparent variants**:
+    - A blended twin of the textured and procedural surface materials, held by the provider per
+      `(material, transparent)` pair: Transparent queue, ZWrite off, alpha from `_BaseColor.a`.
+    - The binder selects the twin when 0 < `Transparency` < 1. This closes the
+      `InstanceGameObjectBinder.cs:1823` TODO.
+  - **Stage 1 — SSAO on Rbx parts**: add a DepthNormals pass to the four lit Rbx shaders. First
+    confirm the gap with a capture: SSAO on/off over a corner built from Rbx parts.
+  - **Stage 2 — lazy loading**: the catalog stores Resources paths instead of direct `Texture2D`
+    references. A material is built on first use and released on world replace. Closes the eager
+    half of `TODO.md:2154`.
+  - **Stage 2 — 2K CC0 hero sets**: Brick, Cobblestone, Wood, WoodPlanks, Grass and Rock first (the
+    "real texture data required" row of `MATERIAL_QUALITY_GAP.md`). 2K on desktop, 1K on WebGL
+    through the platform max size. The package-size delta is measured before merge (owner decision
+    below).
+  - **Stage 2 — stochastic anti-tiling**: histogram-preserving tiling for the unstructured sets
+    (Grass, Sand, Ground, Rock, Snow, Concrete, Asphalt), behind a quality tier. Port the MIT arlez80
+    implementation shortlisted in `dev-docs/SHADER_SOURCES_RESEARCH.md`.
+  - **Stage 2 — parallax tier**: from the ambientCG Displacement maps, for Brick, Cobblestone,
+    WoodPlanks, DiamondPlate, Slate and Ground. Small step budget, distance fade, off on WebGL Low.
+  - **Stage 2 — content fixes** (`TODO.md:222`):
+    - Standing cylinders sample rotated 180 degrees (the binder's Z+90 child, around
+      `InstanceGameObjectBinder.cs:1527`).
+    - WoodPlanks is bound to a herringbone parquet set; Wood095 has almost no relief.
+    - Concrete034 tiling repeats visibly.
+    - Concrete, Plaster, Asphalt, Snow and Cardboard have no cavity map, and the local override has
+      cavity 0.
+    - Metal's roughness anchor; Glacier has no grain.
+  - **Stage 2 — WebGL defects**:
+    - Metal renders near-black in the player (`TODO.md:229`). Re-check it after P7 provides a sky
+      and a reflection source.
+    - The shader variants were never built for WebGL: build them and record the variant count.
+    - The 46-slot evidence in the WebGL player is still open (`TODO.md:2153`).
+  - **Stage 2 — importer bug**: `CoreAIMods/Editor/RbxMaterials/RbxLocalTextureCatalogImport.cs:108`
+    hardcodes `IsSmoothnessMap = false`. Copy it from the source the way
+    `RbxMegascansCatalogImporter.cs:317-318` does.
+  - **DEV candidate (P8-a)**: `Part.Material = Enum.Material.Water` renders animated water on a
+    BasePart, which Roblox does not do (Water is Terrain-only there). The block world's water is voxel
+    Terrain (P4) drawn with the same material, and parts keep the animated look as well. DEV-17 is the
+    highest id in use today.
+- **Test**:
+  - EM:
+    - Catalog schema: the emission fields are optional and an old catalog asset loads unchanged.
+    - The provider returns the transparent twin for `Transparency = 0.5` and the opaque material for
+      0 (negative twin).
+    - With a counting fake loader, lazy loading reads only the textures of the material resolved.
+    - Shader-source guards: every lit Rbx shader has a DepthNormals pass; the cluster-keyword guard
+      is extended to the water shader.
+  - PM (`FastNoLlm`): transparent-twin selection and repaint on a `Transparency` write; water
+    material resolution and the deterministic time override.
+  - MS: the 45-material sheet and a water/glass/lava rig, captured in the Editor and in a WebGL
+    build. All visual claims use `PlayModeCameraShot` captures compared on zoomed crops with an
+    object-masked metric, never a whole-frame mean.
+- **DoD**:
+  - **Normal response**: every opaque material of the 45 changes its masked shading under a light
+    moved through three azimuths, Plastic and SmoothPlastic included. The procedural fallback
+    material shows no such response (negative twin). Glass, Water, ForceField, Neon and Air are
+    proven by their own bullets.
+  - **Water**:
+    - Two captures 1.0 s apart (fixed time override) differ inside the water mask above a
+      threshold. A Plastic slab in the same frames does not change (negative twin).
+    - Water and Ice masked crops differ above a threshold; today they share one shader mode.
+    - On the PC tier a striped object behind the water shows displaced stripes compared with the
+      refraction-off capture. The WebGL capture renders water without errors.
+  - **Glass** shows the same refraction proof on the PC tier and today's look on WebGL.
+  - **CrackedLava**: in a capture with no sun and black ambient, the CrackedLava crop stays bright
+    while Basalt goes near black (negative twin).
+  - **Transparency**: at 0.5 on Brick, a masked crop differs between "object behind present" and
+    "absent". At 0 it does not (negative twin).
+  - **Stage 2 — memory**: a scene using one material keeps only that set's textures resident (the
+    Memory Profiler sample is recorded), down from the full catalog.
+  - **Stage 2 — anti-tiling**: the tile-period autocorrelation peak of a masked Concrete crop drops
+    by a recorded margin with stochastic tiling on.
+  - **Stage 2 — WebGL**: the 46-slot sheet passes in the WebGL player. Metal's masked luminance is
+    within 15% of the Editor's. The WebGL shader-variant count is recorded and under the MVP19
+    budget.
+- **Reuses**:
+  - P7 (sky, reflection probe and bloom are prerequisites for Fresnel, metal and lava).
+  - `RbxTextureMaterialProvider`, the catalog, `RbxCavityMapBake`, and the material sheet tests.
+  - The research in `dev-docs/MATERIAL_QUALITY_GAP.md` and `dev-docs/SHADER_SOURCES_RESEARCH.md`.
+- **Package/flagship**:
+  - **Packages**: shaders, the catalog schema, CC0 textures, and provider twins, all replaceable
+    through the override catalog and P10's provider injection.
+  - **Flagship**: the block world's water and lava look. The 2K hero sets may ship as an optional
+    package (owner decision).
+
+### P9 — Lighting API (M) *(new 2026-11-11)*
+
+Milestone: **M2**.
+
+- **Goal**: an AI or a script sets the mood of a world with Roblox's own `Lighting` surface: time of
+  day, ambient, fog, sky, atmosphere, bloom and colour grading, plus `PointLight`, `SpotLight` and
+  `SurfaceLight` on parts. The world saves and reloads with that mood.
+- **Done so far**:
+  - `Lighting` is a structure-only service (`CoreAIMods/Runtime/RbxApi/Instances/ClassCatalog.cs:625`,
+    TODO at 623). `ClockTime`, `Ambient` and `GeographicLatitude` are backlog member stubs
+    (`ClassCatalog.cs:772-781`).
+  - `PointLight`, `SpotLight`, `SurfaceLight`, `Sky`, `Atmosphere`, `Clouds`, `BloomEffect`,
+    `BlurEffect`, `ColorCorrectionEffect`, `SunRaysEffect` and `DepthOfFieldEffect` are backlog class
+    stubs. Their workaround reads "configure the host scene lighting outside Lua until the lighting
+    slice is scheduled" (`ClassCatalog.cs:1275`, `1365-1377`). `BasePart.CastShadow` and
+    `Reflectance` are backlog property stubs (`ClassCatalog.cs:1180-1183`).
+  - `RbxWorldSettings` (`CoreAIMods/Runtime/Infrastructure/RbxWorldPackageContracts.cs:24-38`) carries
+    no lighting, and the `.world` v1 durable surface lists none (`Docs/CoreAIMods/WORLD_PACKAGE.md`).
+    §MVP14 RT10 records "`Lighting` properties are backlog", and §5.1.6 lists them with no rung
+    assigned.
+  - Additive optional DTOs in `world.json` need no format bump: `WorldMaterialVariantDto` followed
+    the `WorldClickDetectorDto` pattern (`RbxWorldPackageSerializer.cs:2327-2334`).
+  - **Real surface, from `D:\Git\RobloxDocs\api-dump\API-Dump.json`**:
+    - `Lighting` properties: `Ambient`, `Brightness`, `ClockTime`, `ColorShift_Bottom`,
+      `ColorShift_Top`, `EnvironmentDiffuseScale`, `EnvironmentSpecularScale`,
+      `ExposureCompensation`, `FogColor`, `FogEnd`, `FogStart`, `GeographicLatitude`,
+      `GlobalShadows`, `OutdoorAmbient`, `ShadowSoftness`, `TimeOfDay` (a string).
+    - `Lighting` methods: `GetMinutesAfterMidnight`, `SetMinutesAfterMidnight`, `GetSunDirection`,
+      `GetMoonDirection`, `GetMoonPhase`. Event: `LightingChanged`.
+    - `LightingStyle` and `PrioritizeLightingQuality` are write-`RobloxScriptSecurity`, and
+      `Technology` is read- and write-`RobloxScriptSecurity`. All three stay out of reach of scripts
+      as loud `Unsupported` stubs.
+    - Fog members are hidden when `Lighting` contains an `Atmosphere` (`Lighting.yaml`, the
+      `FogEnd`/`FogStart`/`FogColor` entries).
+    - Other classes:
+      - `Sky`: skybox faces as asset ids, `StarCount`, `SunAngularSize`, `MoonAngularSize`,
+        `CelestialBodiesShown`, `SkyboxOrientation`.
+      - `Atmosphere`: `Color`, `Decay`, `Density`, `Glare`, `Haze`, `Offset`.
+      - `PostEffect.Enabled`, with subclasses `BloomEffect` (`Intensity`, `Size`, `Threshold`),
+        `ColorCorrectionEffect` (`Brightness`, `Contrast`, `Saturation`, `TintColor`) and
+        `ColorGradingEffect.TonemapperPreset` (`Default`, `Retro`). PostEffects work parented to
+        `Lighting` or `Workspace.CurrentCamera` (`PostEffect.yaml`).
+      - `Light` (`Brightness`, `Color`, `Enabled`, `Shadows`), with `PointLight.Range` and
+        `SpotLight`/`SurfaceLight` (`Angle`, `Face`, `Range`).
+    - Property defaults are in `Full-API-Dump.json`, for example `ClockTime` 14, `Brightness` 1,
+      `FogEnd` 100000, `GeographicLatitude` 41.73.
+- **To do**:
+  - **`Lighting` members over the P7 look applier**. Lua never touches URP types; the mapping lives
+    behind a replaceable `IRbxLightingSink`.
+    - `ClockTime`, `TimeOfDay` and `GeographicLatitude` drive the sun direction, and
+      `GetSunDirection` returns the same vector.
+    - `Brightness` drives sun intensity.
+    - `Ambient` and `OutdoorAmbient` drive ambient colour; `ColorShift_Top` drives the sun tint.
+    - `EnvironmentDiffuseScale` and `EnvironmentSpecularScale` drive the ambient and reflection
+      intensity.
+    - `ExposureCompensation` drives post exposure.
+    - `GlobalShadows` and `ShadowSoftness` drive the sun's shadows.
+    - Fog members drive linear fog, in studs through `RbxSpace`.
+    - Changes fire `Changed`, `GetPropertyChangedSignal` and `LightingChanged`.
+  - **New-world template**: a fresh CoreAI world writes baseline `Lighting` values chosen to match
+    the P7 default profile, the way Roblox's place templates differ from raw class defaults. Class
+    defaults stay as in `Full-API-Dump.json`.
+  - **`Sky`**: `StarCount`, `SunAngularSize`, `MoonAngularSize` and `CelestialBodiesShown` over a
+    procedural sky. Skybox face asset ids resolve through P10's texture loader; until P10 they raise
+    the existing "content is never fetched" style of error.
+  - **`Atmosphere`**: `Density`, `Haze`, `Color` and `Offset` drive exponential fog and sky tint. When
+    an `Atmosphere` exists, the `Fog*` members stop applying, as in Roblox.
+  - **PostEffects**: `BloomEffect`, `ColorCorrectionEffect` and `ColorGradingEffect` become real,
+    parented under `Lighting` or `CurrentCamera`, and map to Volume overrides on a world Volume above
+    the P7 default. The player's Hub "post-processing off" choice still wins, matching Roblox's note
+    that effects change or stop at low graphics quality. `BlurEffect`, `SunRaysEffect`,
+    `DepthOfFieldEffect` and `Clouds` stay loud stubs, phased to a later package.
+  - **Lights**:
+    - `PointLight`, `SpotLight` and `SurfaceLight` become a Unity `Light` on the parent part's
+      object, with `Range` in studs and `Face` respected.
+    - Budget: the per-object limit is 4 additional lights on both tiers
+      (`m_AdditionalLightsPerObjectLimit`).
+      The Mobile/WebGL renderer is plain Forward, so the light budget and its overflow rule are
+      documented.
+    - `BasePart.CastShadow` becomes real.
+  - **Persistence**: an optional `lighting` DTO in `world.json` holds the service properties.
+    `Sky`, `Atmosphere`, PostEffects and lights become serialized instance classes following the
+    `WorldMaterialVariantDto` pattern. Additive only, no `format_version` bump. This closes the
+    Lighting part of RT10.
+  - **AI surface**: `Docs/CoreAIMods/RBX_API_SKILL.md` gains a mood section (time of day, fog,
+    atmosphere, bloom, colour grading) with copy-ready snippets.
+  - **DEV candidates**:
+    - **P9-a**: Roblox separates `Ambient` (sky-occluded areas) from `OutdoorAmbient` (open areas).
+      Unity's ambient has no sky-occlusion term, so `OutdoorAmbient` maps to sky and equator colour
+      and `Ambient` to the ground term.
+    - **P9-b**: `Atmosphere` is approximated with exponential fog and sky tint, not Roblox's
+      scattering model.
+    - **P9-c**: `SurfaceLight` is approximated by a spot light from the face centre, because URP has
+      no realtime area lights.
+    - **P9-d**: `ShadowSoftness` maps onto URP's soft-shadow quality steps rather than a continuous
+      penumbra.
+    - **P9-e**: `ClockTime` is tagged NotReplicated in the dump; replication of `Lighting` follows
+      MVP6 when M3 lands. P9 itself is solo.
+- **Test**:
+  - PL:
+    - Conformance for every member: defaults equal `Full-API-Dump.json`, `ClockTime` and
+      `TimeOfDay` stay in sync (`"06:30:00"` gives 6.5), and `SetMinutesAfterMidnight` round-trips.
+    - Writes fire `LightingChanged`; an equal write fires nothing (negative twin).
+    - Fog members stop applying while an `Atmosphere` child exists.
+    - The three `RobloxScriptSecurity` members are loud `Unsupported` stubs. No CoreAI code models
+      that security level today, so the test pins the stub text.
+  - PT: the `lighting` DTO and the light/effect DTOs round-trip; an old package without them loads
+    unchanged.
+  - EM: the sink mapping, for example `ClockTime` 6 against 12 gives the expected sun pitch, and
+    `FogEnd` in studs gives `RenderSettings.fogEndDistance` in metres.
+  - PM (`FastNoLlm`): a `PointLight` lights a masked wall region; disabling it restores the region.
+  - MS: an AI chat turn "make it sunset with light fog" produces a recorded capture pair.
+  - Visual claims use object-masked crops, never a whole-frame mean.
+- **DoD**:
+  - Every non-security `Lighting` property and method in the mirror's dump is implemented or a loud
+    stub with a phase. A test diffs the dump against the catalog.
+  - `ClockTime` 6 and 18 give a lower sun than 12. The masked shadow of a pole is longer, and the
+    sky crop differs.
+  - `FogEnd = 50` makes a part 100 studs away read within 5% of `FogColor` in its masked crop, while
+    a part at 10 studs does not (negative twin).
+  - `BloomEffect.Enabled = false` removes the Neon halo that `true` shows. With the Hub's
+    post-processing switch off, `true` shows no halo either.
+  - A world saved with a sunset, fog, `Atmosphere`, a `ColorCorrectionEffect` and three lights
+    reloads to captures matching the pre-save captures within a recorded masked-crop tolerance.
+- **Reuses**: P7 (applier, profile, Hub switch), the MVP3 world package, the MVP2 property-changed
+  signals, `RbxSpace`, and P10's texture loader for `Sky` faces.
+- **Package/flagship**:
+  - **Packages**: the Lua classes, `IRbxLightingSink` with the URP sink as its replaceable default,
+    and the DTOs.
+  - **Flagship**: the block world's day/night cycle and the AI's mood presets in the skill doc.
+
+### P10 — New materials and asset import (stage 1 M, stage 2 L) *(new 2026-11-11)*
+
+Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
+
+- **Goal**:
+  - Stage 1: a player, the AI or a host game adds a new material from its own images while the game
+    runs, and it is saved with the world.
+  - Stage 2: worlds and mods carry their own meshes, images and sounds.
+- **Done so far**:
+  - **Provider injection exists but is not exposed**: `InstanceGameObjectBinder` takes an optional
+    `IRbxMaterialProvider<Material>`
+    (`CoreAIMods/Runtime/RbxApi/Binding/InstanceGameObjectBinder.cs:174-182`), but
+    `RbxWorldHost.Initialize` constructs it without one (`RbxWorldHost.cs:103`).
+  - **Texture loading is Resources-only**: the provider's map loader is `Resources.Load<Texture2D>`
+    in production (`RbxTextureMaterialProvider.cs:89-93`; a `Func<string, Texture2D>` seam exists
+    only on internal constructors). A `MaterialVariant` map can therefore name only a texture
+    already built into the player.
+  - **`MaterialVariant` shipped** (`RbxApi/Instances/RbxMaterialVariant.cs`): `BaseMaterial`,
+    `ColorMap`, `NormalMap`, `RoughnessMap`, `MetalnessMap`, `StudsPerTile`. It is durable in
+    `.world` and repaints live (`dev-docs/MATERIAL_VARIANT_2026-09-04.md`).
+    - Not implemented from the real class: `AlphaMode`, `MaterialPattern`,
+      `CustomPhysicalProperties`, the `Emissive*` members, the `*Content` members.
+    - `RbxMaterialService` (`RbxApi/Instances/RbxMaterialService.cs`) is a container with an internal
+      lookup only. The dump's script-callable `GetMaterialVariant`, `GetBaseMaterialOverride` and
+      `SetBaseMaterialOverride` (security None) are absent.
+  - **Variant cache**: the provider clears its by-name cache and destroys idle variants when
+    `VariantSource` changes (`RbxTextureMaterialProvider.cs:131-150`). The doc's open TODO says two
+    worlds reusing a variant name share one material (`MATERIAL_VARIANT_2026-09-04.md:184`). No test
+    pins either reading.
+  - **Override catalog**: `Resources/CoreAIRbxTextureCatalogOverride`, merged by enum value
+    (`RbxMaterialTextureCatalog.MergeEntries`). It can only re-skin the 45 canonical items.
+  - **Editor menus** (`CoreAIMods/Editor/RbxMaterials/`), all under `CoreAI/Materials/`:
+    `Download CC0 texture sets (ambientCG)...`, `Import Bridge-Megascans folder...`,
+    `Rebuild override catalog from local sets`, `Rebuild packaged catalog from packaged textures`,
+    `Bake cavity maps for packaged textures`, `Retune surface profiles (tiling + relief)`,
+    `Apply import policy to packaged textures`.
+  - **No runtime import of any kind**:
+    - Backlog stubs: `MeshPart` ("mesh assets are not loaded, and rbxassetid content is never
+      fetched") and `SpecialMesh` (`ClassCatalog.cs:1289-1292`); `Decal`, `Texture` and
+      `SurfaceAppearance` (`ClassCatalog.cs:1347-1352`).
+    - `Sound` is `Planned("MVP15")`, an old number; the roadmap now calls that rung MVP17.
+    - `AssetService` and `InsertService` are Unsupported stubs ("a Roblox platform backend service",
+      `ServiceCatalog.cs:237-238`, `283-284`), and `ContentProvider` is a backlog stub.
+    - No glTF/FBX/OBJ loader, no runtime image or audio loading, and no glTF package in
+      `Packages/manifest.json`.
+  - **`.world` v1 cannot carry binary assets**: its reader refuses any ZIP entry not in the manifest
+    index (`CoreAIMods/Runtime/Infrastructure/RbxWorldPackageSerializer.cs:1796`). Limits are
+    64 MiB compressed, 16 MiB per entry and 128 MiB expanded (`Docs/CoreAIMods/WORLD_PACKAGE.md:120`).
+    Mod bundles are one JSON file with Lua and metadata only, "no prefabs, audio clips, textures"
+    (`Docs/CoreAIMods/MOD_SHARING.md:138`).
+  - **Licensing is decided**:
+    - CC0 (ambientCG, Poly Haven) may ship in the package
+      (`Unity/Resources/CoreAIRbxTextures/LICENSE.md`).
+    - Fab/Megascans content is used only through the local importer into the gitignored
+      `CoreAIRbxTexturesLocal/` (`dev-docs/SHADER_SOURCES_RESEARCH_2026-09-02.md` §1,
+      `dev-docs/MEGASCANS_FAB_SHOPPING_LIST_2026-09-02.md`).
+  - **Roblox's own runtime path, from the mirror's dump**:
+    - `AssetService:CreateEditableImage`, `CreateEditableImageAsync`, `CreateEditableMesh`,
+      `CreateMeshPartAsync`, `CreateSurfaceAppearanceAsync` (security None).
+    - `EditableImage:WritePixelsBuffer`.
+    - The `Content` datatype with `Content.fromUri` and `Content.fromObject`, which the
+      `MaterialVariant.*MapContent` members accept.
+- **To do**:
+  - **Stage 1 — provider injection**: `RbxWorldHost` exposes a serialized or container-bound
+    `IRbxMaterialProvider<Material>`, defaulting to today's provider, and hands it to the binder.
+    A host can then replace the whole material system without editing package code.
+  - **Stage 1 — texture source seam**: `IRbxTextureSource`, which resolves a map reference to a
+    `Texture2D` asynchronously through the scheduler, with no blocking waits (§6.5).
+    - Built-in sources: Resources (today's behaviour), package-embedded (the world's own asset
+      entries, stage 2), local file under `CoreAiStorageRoot`, and URL (`UnityWebRequestTexture`;
+      the browser's CORS rules apply on WebGL).
+    - Hard caps: decoded size at most 2048 px per side, a byte cap, and a per-world texture-memory
+      budget. Non-PNG/JPG input is refused.
+    - URL fetch goes through the same host policy as `HttpService`: `IRbxHttpRequestPolicy`, deny-all
+      by default (`RbxDenyAllHttpRequestPolicy`, `Scripting/LuaCs/LuaCsRbxHttpServiceAdapter.cs:109`).
+    - A refused or failed load keeps the base texture and logs an error, as `ResolveVariantMap` does
+      today. Unlike today, it logs once per reference.
+  - **Stage 1 — `MaterialService` 1:1**: `GetMaterialVariant(material, name)`, and
+    `SetBaseMaterialOverride` / `GetBaseMaterialOverride` so one variant can re-skin every part of a
+    base material. This is the Roblox-native answer to "replace all Grass".
+  - **Stage 1 — `MaterialVariant` members**: `ColorMapContent`, `NormalMapContent`,
+    `RoughnessMapContent` and `MetalnessMapContent` (accepting `Content`), plus the emissive members
+    over P8's emission slot.
+  - **Stage 1 — AI-facing creation**, in Roblox shape:
+    `AssetService:CreateEditableImageAsync(Content.fromUri(uri))`, then
+    `EditableImage:WritePixelsBuffer`, then `variant.ColorMapContent = Content.fromObject(image)`.
+    - Supporting this means moving `AssetService` from Unsupported to a partial implementation.
+      Only the image and mesh constructors become real; publishing and inventory stay Unsupported.
+    - The Hub, or a chat tool, offers "make a material from these images" over the same calls.
+    - `RBX_API_SKILL.md` gains the snippet.
+  - **Stage 1 — variant lifetime**: a test proves that replacing a world with a same-named variant
+    re-resolves its maps. If it fails, evict on `PublishReplacement` and close the
+    `MATERIAL_VARIANT` TODO.
+  - **Stage 1 — editor convenience**: `CoreAI/Materials/Create material from images...`, which takes
+    colour/normal/roughness/metalness files, applies the import policy and writes an override-catalog
+    entry or a `MaterialVariant` preset. A thin wrapper over the runtime path, never the only path.
+  - **Stage 1 — DEV candidates**:
+    - **P10-a**: `Content.fromUri` accepts `file:` and `https:` URIs and a CoreAI asset scheme. Roblox
+      accepts only `rbxassetid://` and its own schemes.
+    - **P10-b**: `rbxassetid://` content stays unfetched, with the existing loud error.
+  - **Stage 2 — `.world` v2 asset entries**: indexed `Assets/<sha256>.<ext>` entries listed in the
+    manifest with type, byte size and hash, under per-type caps inside the v1 limits.
+    - This needs a `format_version` bump, because v1 readers refuse unlisted entries.
+    - An old v1 package keeps loading.
+  - **Stage 2 — `MeshPart` through runtime glTF**: `MeshContent`/`MeshId`, `TextureContent`,
+    `DoubleSided`, and `AssetService:CreateMeshPartAsync`.
+    - FBX is converted to glTF in the Editor, because Unity's FBX importer does not run in a player.
+    - The glTF package's licence and an IL2CPP/WebGL AOT smoke test are gates before adoption (§6.5
+      item 4).
+    - Meshes count against the instance and memory budgets.
+  - **Stage 2 — `Decal`, `Texture` and `SurfaceAppearance`**: over the same texture source, with
+    `Texture.StudsPerTileU/V` and the `AlphaMode` subset.
+  - **Stage 2 — sound files**: OGG/WAV as package entries, played by MVP17's `Sound`.
+  - **Stage 2 — mod bundles with assets**: a bundle v2 that references hashed assets. JSON stays the
+    text shape; the assets travel beside it or inside a `.world`.
+  - **Licensing stays as decided**: CC0 in the package, Fab/Megascans only through the local
+    importer. User-supplied assets carry their own licence, which the world package records as an
+    optional field per asset entry.
+- **Test**:
+  - PL:
+    - `MaterialService:GetMaterialVariant`, `SetBaseMaterialOverride` and `GetBaseMaterialOverride`
+      conformance.
+    - `MaterialVariant.*MapContent` members.
+    - `Content` constructors and `SourceType`.
+    - A refused source (over the cap, or a URL the HTTP policy denies) keeps the base map and raises
+      nothing fatal (negative twin of a successful load).
+  - PT: the texture-source policy (caps, schemes, grant), and the stage-2 manifest asset index (a
+    listed entry is accepted; an unlisted or oversized one is refused, with a negative twin).
+  - EM: provider injection through `RbxWorldHost`; the editor wizard writes a valid override entry.
+  - PM (`FastNoLlm`): a PNG written to a temp `CoreAiStorageRoot`, loaded as a variant's `ColorMap`,
+    repaints a part. The masked crop moves toward the image's mean colour, as
+    `RbxMaterialVariantRenderPlayModeTests` already measures for packaged maps.
+  - MS: in a WebGL build, a chat request makes a material from an image URL. A stage-2 `.world` with
+    a glTF mesh is saved and reloaded on another machine.
+- **DoD**:
+  - A host replaces the material provider through `RbxWorldHost` with no package edit. A test-double
+    provider receives every resolve.
+  - A runtime-created material from a file and from `EditableImage` pixels renders on a part. It
+    survives save and reload of the world once the stage-2 asset entries exist; in stage 1 it
+    survives save and reload for file references.
+  - `SetBaseMaterialOverride(Enum.Material.Grass, "MyGrass")` repaints every Grass part and only
+    those. A Brick part in the same capture is unchanged (negative twin).
+  - Over-cap, wrong-type and policy-denied loads are refused with one log line each.
+  - Stage 2: a `.world` with a mesh, an image and a sound round-trips byte-identically. A v1 reader
+    refuses it with the existing version error, and a v2 reader loads a v1 package.
+- **Reuses**:
+  - The `MaterialVariant` slice and `RbxTextureMaterialProvider`.
+  - The `CoreAiStorageRoot` and `CoreAiWebGlPersistence` stores.
+  - The MVP3 world package, P8's emission slot, and MVP17's `Sound`.
+  - The `IBundledModSource` seam pattern (`CoreAIMods/Runtime/Composition/CoreAiModsInstaller.cs:183`).
+- **Package/flagship**:
+  - **Packages**: `IRbxTextureSource` with its built-in sources, provider injection, the
+    `MaterialService`/`MaterialVariant`/`AssetService` subset, the `.world` v2 codec, the glTF adapter
+    and the editor wizard. Each can be replaced or disabled by a host.
+  - **Flagship**: the "make a material from this picture" chat flow and the block world's custom
+    block textures.
+
+### P11 — Truthful results and the Connect-API doctor (M, stage 1 S–M) *(new 2026-11-11)*
+
+- **Goal**: a newcomer who installs CoreAI either gets a working AI or a clear, actionable error — never
+  a silent stub, never a provider error spoken as an NPC line. Stage 2 makes connecting any API a guided
+  two-minute flow in the Hub with automatic checks and a fix hint per failed check.
+- **Done so far**:
+  - Inspector **Test Connection** (`Assets/CoreAiUnity/Editor/CoreAISettingsAssetEditor.uxml:74-75`).
+  - Hub **AI Settings** (`Assets/CoreAIHub/Runtime/HubSettingsPage.cs`, 2,282 lines): a legacy backend
+    section (Mode / base URL / key / model, **Fetch models**, **Vision** + **Detect vision**, **Apply**,
+    **Test backend**), an endpoint registry editor with an Advanced foldout, and **Assign to agent**
+    per-role routing.
+  - `CoreAiBackend.VerifyAsync` (`Assets/CoreAiUnity/Runtime/Source/Api/CoreAiBackend.cs:351`) sends one
+    "Reply with the single word: ok" completion on the SmartChat route; `ListModelsAsync` (`:433`) reads
+    `GET {baseUrl}/models`.
+  - `VisionSelfProbe` (`Assets/CoreAiUnity/Runtime/Source/Features/Vision/VisionSelfProbe.cs`) sends a
+    solid green test image and caches the verdict per model.
+  - `LlmToolChannel.Auto` probes a runtime endpoint for the native `tools` channel and logs the decision
+    (`Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/LlmToolChannelProbe.cs`).
+  - Endpoints persist in `llm-endpoints.json` under the storage root
+    (`Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/LlmEndpointRegistryPersistence.cs:63`);
+    a missing HTTP model is rejected at the Hub, registry and factory (TODO.md, "Configuration defect
+    verification", F19).
+  - The defects this package closes, all re-checked in code on 2026-11-11 (TODO.md "Newcomer API
+    ergonomics audit (2026-09-24)"):
+    - A2: without `COREAI_LLM` the pipeline returns `new StubLlmClient()` with no log
+      (`Assets/CoreAiUnity/Runtime/Source/Composition/LlmPipelineInstaller.cs:311-317`).
+    - A5: `CoreAi.AskAsync` / `SmartAskAsync` return only `Task<string?>` (`CoreAi.cs:125-164`,
+      `:518-544`); there is no result-typed twin.
+    - A6: `CoreAiChatService.SendMessageSmartAsync` joins `chunk.Text` and never reads `chunk.Error`
+      (`Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs:913-922`).
+    - A8: `CoreAiBackend.SetApiKey` / `SetApiBaseUrl` mutate the shared `CoreAISettingsAsset`
+      (`CoreAiBackend.cs:336-345`, via `MutateAndRebuild`).
+    - B1: `CoreAIDependencyInstaller` and `CoreAINuGetBootstrapper` live in `CoreAI.Editor`, whose asmdef
+      references `CoreAI.Core`, `CoreAI.Source`, `VContainer` and `undream.llmunity.Runtime`
+      (`Assets/CoreAiUnity/Editor/CoreAI.Editor.asmdef`).
+    - B2: no CoreAI `package.json` declares `com.unity.nuget.newtonsoft-json`.
+    - C9: two backend dropdowns, `backendType` "LLM Backend" and `executionMode` "LLM Mode"
+      (`CoreAISettingsAssetEditor.uxml:14-17`).
+  - The chat panel's default role is SmartChat
+    (`Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatConfig.cs:14`), which has only `memory`
+    (+ `camera` attached by the panel); building needs Programmer (`Docs/CoreAI/AGENT_ROLES_AND_TOOLS.md`
+    §2).
+- **To do**:
+  - **Stage 1 (M0)**:
+    - A2: the `!COREAI_LLM` branches build a failing `NotConfiguredLlmClient` (`Ok = false`, a new
+      `LlmErrorCode.NotConfigured` — the enum in `ILlmClient.cs` ends at `ClientLimitExceeded = 14` — and
+      the fix named in the message) instead of the stub; an explicit `Offline` mode keeps the
+      deterministic stub; one warning at composition; a build check fails a player build whose settings
+      select an HTTP/local mode without the define.
+    - A5: `CoreAi.AskResultAsync` / `SmartAskResultAsync` over `SendMessageResultAsync` return
+      `LlmCompletionResult`; the string overloads keep their contract, documented in
+      `COREAI_SINGLETON_API.md`, and never return provider error text as a reply (they throw or return
+      `null`, decided once for all string entry points).
+    - A6: one shared helper turns a terminal `{IsDone, Error}` chunk into the same exception
+      `StreamAsync` throws, used by `SendMessageSmartAsync` and the facade adapter.
+    - A8: runtime key/URL/model changes go into a `[NonSerialized]` session overlay that the getters
+      prefer; the asset is written only by the inspector (coordinate with the R7.5 hot-swap item).
+    - B1: a reference-free setup asmdef holds the dependency installer and NuGet bootstrapper, so the
+      menus exist before VContainer, MEAI or LLMUnity are present.
+    - B2: declare `com.unity.nuget.newtonsoft-json` in `com.neoxider.coreai` and list it in INSTALL.
+    - The default chat role can build: the shipped chat config defaults to a role that has the Lua and
+      world tools (Programmer, or a new player-facing builder role from P15), and the role dropdown names
+      what each role can do.
+  - **Stage 2 (M2)**:
+    - A Hub **Connect API** flow: pick a provider preset (OpenRouter, generic OpenAI-compatible, LM
+      Studio, Ollama, llama.cpp `llama-server`), fill only what the preset needs (key, model from **Fetch
+      models**), save as a registry endpoint.
+    - A per-endpoint **doctor** that runs ordered checks against the endpoint being edited (not the
+      SmartChat route): reachability, auth, model listed, chat completion, streaming (SSE chunks arrive
+      incrementally), native tool call (reuse the tool-channel probe, then one real call), vision (reuse
+      `VisionSelfProbe`), context size (the provider limit when reported), logprobs (`top_logprobs`
+      returned) and decision support (P13 capability check). Each check reports pass / fail / not
+      supported, the measured latency, and a fix hint ("start llama.cpp with `--jinja`", "this model is
+      text-only: set Vision Off").
+    - Doctor results feed routing: an endpoint without tools or vision is not offered to a role that
+      needs them, with the reason shown.
+    - One configuration surface: the registry endpoint is the only backend model; the legacy section
+      becomes "default endpoint", and C9's two dropdowns become one.
+    - A simpler Settings page: Connect API, endpoint list with doctor badges, per-role assignment;
+      everything else behind Advanced; remove the duplicated GGUF dropdown and the per-field 200 ms
+      placeholder timers (TODO.md "Hub duplication/dead code (v6.6)").
+- **Test**:
+  - EM: the `!COREAI_LLM` composition yields a failing client and one warning; `Offline` still yields the
+    stub; `AskResultAsync` surfaces a 401; the smart-ask helper throws on an error chunk; a runtime key
+    change leaves the asset bytes unchanged; the build check refuses an HTTP-mode build without the
+    define.
+  - PT: the doctor's check runner against a fake transport (each check's pass / fail / unsupported row
+    and hint), preset expansion into endpoint descriptors.
+  - PM: the Hub Connect flow against a loopback fake server, through save, doctor and per-role
+    assignment.
+  - MS: a clean Git-URL install in a fresh project following README only, recorded; the doctor run
+    against LM Studio, Ollama, llama.cpp and OpenRouter, each screenshot stored with the run.
+- **DoD**:
+  - Stage 1: a project without `COREAI_LLM` and with HTTP mode selected answers `AskAsync` with a
+    `NotConfigured` failure naming the define; the negative twin (Offline mode) still answers with the
+    stub.
+  - Stage 1: a provider 401/500 never reaches an NPC line or a quest JSON through any `CoreAi` string
+    API; a test sends the error through every public ask/stream entry point.
+  - Stage 1: Play Mode key changes leave `Resources/CoreAISettings.asset` byte-identical after exit.
+  - Stage 1: the setup menus appear in a project that has only the three CoreAI packages and no
+    VContainer.
+  - Stage 1: the default Hub chat answers "build a red tower" with a tool call that changes the world.
+  - Stage 2: each of the five presets reaches a green chat check against its server in the recorded run;
+    every failing check shows a hint, pinned by a fake that fails each check once.
+  - Stage 2: the Settings page has one backend selector; the legacy and registry paths cannot disagree.
+- **Reuses**: MVP10 (one composition root, presets), the 5.9 endpoint registry, `VisionSelfProbe`, the
+  tool-channel probe.
+- **Package/flagship**: the doctor, presets and failing client are package blocks (presets are data, a
+  host can add its own; the check list is an interface a host can extend); the Connect flow page ships in
+  the Hub package; the flagship only themes it.
+
+### P12 — Gameplay LLM API and talking NPCs (L; stage 1 M) *(new 2026-11-11)*
+
+- **Goal**: NPCs in the block world talk like people — they answer when addressed, remember the player,
+  speak in the in-world chat feed and over their heads, and never stall the game. Stage 2 lets a mod call
+  a model as game logic through Roblox's own `TextGenerator` shape, so a Roblox NPC script runs here.
+- **Done so far**:
+  - The AINpc role and prompt ("in-world NPC voice ... short lines (1-3 sentences)",
+    `Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInAgentSystemPromptTexts.cs:57`) with its
+    response policy (`Assets/CoreAI/Runtime/Core/Features/Orchestration/AINpcResponsePolicy.cs`); AINpc
+    has `memory` only (`Docs/CoreAI/AGENT_ROLES_AND_TOOLS.md` §2).
+  - Per-actor chat services: `IInGameLlmChatService` and `ActorKeyedInGameLlmChatServiceFactory`
+    (`Assets/CoreAI/Runtime/Core/Features/Orchestration/InGameLlmChatServiceFactory.cs:22`), attached to
+    the Rbx bindings through `AttachChatFactory` (`Scripting/LuaCs/LuaCsRbxApiBindings.cs:1538`); a uGUI
+    `InGameChatPanel`
+    (`Assets/CoreAiUnity/Runtime/Source/Features/PlayerChat/Presentation/InGameChatPanel.cs`).
+  - Memory partitions: `AgentMemoryScope` (tenant, player, session, topic) and
+    `IAgentMemoryScopeProvider` (`Assets/CoreAI/Runtime/Core/Features/AgentMemory/`).
+  - The queue: `QueuedAiOrchestrator` with `AiOrchestrationQueueOptions.MaxConcurrent = 2`, `MaxPending =
+    64`; `AiTaskRequest` carries `Priority`, `SourceTag`, `CancellationScope`, `ActorContext`,
+    `MaxOutputTokens`, `AllowedToolNames`.
+  - C# entry points `CoreAi.AskAsync` / `SmartAskAsync` / `StreamAsync` / `OrchestrateAsync` and
+    `AgentBuilder`; the Qwen Genie and Spellcraft scenes run a ToolsOnly agent that must make exactly one
+    guarded tool call (`Assets/CoreAI.Demos/QwenDemo/README.md`).
+  - Lua: `AIService` is a stub — "CoreAI agent/chat access from Lua is planned; not yet scriptable"
+    (`RbxApi/Instances/ServiceCatalog.cs:220`), not replicated
+    (`RbxApi/Instances/Replication/ReplicationFilter.cs:60-68`); `LuaCapabilities` ends at `Full = 1 <<
+    4` (`LuaExecution/LuaCapabilities.cs`); the `Ai = 1<<5` bit and the `SourceTag = "Mod:<modId>"` /
+    `CancellationScope = "Mod:<modId>"` conventions are reserved (this document, §2 "AI-call
+    reservations"); the generic `ScheduleWaitUntil` resume primitive exists
+    (`RbxApi/Instances/Scheduling/ModScheduler.cs`). A mod cannot reach a model today: `HttpService`
+    defaults to a deny-all policy and a refusing transport
+    (`Scripting/LuaCs/LuaCsRbxHttpServiceAdapter.cs:24,109`).
+  - Not known to the catalogs: `TextGenerator` (no hit in `Assets/CoreAIMods/Runtime`); `TextChatService`
+    is an unsupported stub, "a non-goal" (`ServiceCatalog.cs:271`); `BillboardGui` is backlog
+    (`RbxApi/Instances/ClassCatalog.cs:1402`).
+  - Roblox's own shape, read from the offline mirror
+    (`D:\Git\RobloxDocs\creator-docs\content\en-us\reference\engine\classes\TextGenerator.yaml` and
+    `api-dump/API-Dump.json`): `TextGenerator` is a creatable `Instance` with properties `SystemPrompt`
+    (string), `Temperature` (float, default 0.7, clamped to [0.4, 1.0]), `TopP` (default 0.9, clamped to
+    [0.5, 1.0]) and `Seed` (int, default 0), and one yielding method `GenerateTextAsync(request)`. The
+    request dictionary takes `UserPrompt`, `ContextToken` (an opaque summary of the conversation so far),
+    `MaxTokens` and `JsonSchema` (a json-schema.org string the response must conform to); the result is
+    `{GeneratedText, ContextToken, Model}`. Requests are limited to 100 per minute, scaling with
+    concurrent users, and Roblox moderates inputs and outputs
+    (`creator-docs/content/en-us/generative-AI.md`). The mirror states no run-context restriction and has
+    no code sample text.
+- **To do**:
+  - **Stage 1 (M1) — the NPC agent block (C#)**:
+    - `NpcAgent` (portable core) over the AINpc role: persona (name, prompt fragment, voice rules),
+      per-NPC memory through an `AgentMemoryScope` topic of `npc:<id>` so one role serves many NPCs
+      without clobbering history (MULTI_CHAT_PLAN approach A1 without a role per NPC), and
+      `ConversationId` when P14 lands.
+    - Addressing and proximity rules as data: by name in chat, by distance and line of sight, by
+      interaction key; a "who answers" arbiter so two NPCs do not reply to one line.
+    - Budgets: per-NPC cooldown, per-world calls-per-minute, max output tokens, a lower queue `Priority`
+      than the player's build agent; one in-flight turn per NPC, a newer line cancels the older through
+      `CancellationScope = "npc:<id>"`.
+    - Delivery: an `INpcSpeechSink` with two Unity adapters — the in-world chat feed (the Minecraft-style
+      chat of the M1 demo) and a world-space speech bubble (UI Toolkit, no IMGUI); streaming text grows
+      the bubble, a failure shows a short in-character fallback line from data, never provider text (P11
+      A5).
+    - A C# event surface for game rules (`NpcSaid`, `NpcAddressed`) so quests can react.
+  - **Stage 2 (M2) — model calls from mods**:
+    - Parity path: implement `TextGenerator` with the mirror's members and limits — `GenerateTextAsync`
+      yields through `ScheduleWaitUntil`, `ContextToken` is an opaque handle to a CoreAI conversation
+      (`ConversationId`, P14), `JsonSchema` maps to the request-level schema below, the clamps and
+      defaults match the mirror, and the rate limit is a host-configurable per-world quota whose default
+      mirrors 100/min. It routes through a host-chosen role/profile (data), so a Roblox NPC script runs
+      unchanged.
+    - CoreAI-only `AIService` for what Roblox has no shape for (agent with tools, decisions from P13,
+      cancellation): the `Ai = 1<<5` capability bit excluded from `All`, origin tags `ai:<modId>` on
+      anything an AI call creates, per-mod quotas and budget trips, flagged for the MVP13/MVP14 export
+      lint (RT7 already names `AIService`).
+    - Typed results for C# callers (`LlmCompletionResult` / a `GenerateResult` with error code) and a
+      request-level `json_schema` on `AiTaskRequest` and `LlmCompletionRequest` (TODO.md [R7]); the
+      transport already maps MEAI `ResponseFormat` to `response_format`
+      (`Assets/CoreAI/Runtime/Core/Features/Llm/MeaiOpenAiChatClient.cs:3769-3796`); post-validation
+      through `IRoleStructuredResponsePolicy` stays the fallback for servers that ignore the schema.
+    - Moderation seam: an `ITextModerationFilter` (default pass-through) on inputs and outputs, so a host
+      shipping on a platform with rules can plug one in.
+- **Test**:
+  - PT: `NpcAgent` addressing arbiter, cooldowns, cancellation of a superseded line, memory scope keys,
+    the fallback line on a failed turn (scripted `ILlmClient`).
+  - EM: the speech sink adapters, queue priority against a running build task.
+  - PL (stage 2): `TextGenerator` defaults, clamps, `GenerateTextAsync` yielding and resuming,
+    `ContextToken` round trip, `JsonSchema` conformance with a scripted client, quota refusal;
+    `AIService` refused without `Ai`, granted with it.
+  - PM: three NPCs in a scene answer the right speaker within budget against a scripted client.
+  - MS: the M1 block-world demo with a real small model — a recorded conversation with two NPCs.
+- **DoD**:
+  - Stage 1: addressing one NPC by name gets exactly one reply from that NPC; the negative twin (a line
+    addressed to nobody, or to an NPC out of range) gets none.
+  - Stage 1: a provider error produces the in-character fallback line and never the error text.
+  - Stage 1: NPC chatter never delays the player's build task beyond its queue slot (measured with a
+    scripted slow client).
+  - Stage 2: the mirror's `TextGenerator` NPC example runs unchanged against a scripted client; a mod
+    without `Ai` calling `AIService` is refused with a capability error, and the twin with `Ai` succeeds.
+  - Stage 2: a `JsonSchema` request returns text that parses against the schema, or a typed failure.
+- **Reuses**: MVP2 scheduler (`ScheduleWaitUntil`), MVP11 roles and quotas, P11 truthful results, P13
+  decisions, P14 `ConversationId`.
+- **Package/flagship**: `NpcAgent`, the arbiter, budgets and sinks are package blocks (personas and rules
+  are data; sinks are replaceable); `TextGenerator` lives in the Rbx API layer; the villagers, their
+  personas and the bubble styling are M1 demo content.
+
+### P13 — Decision models (L) *(new 2026-11-11)*
+
+- **Goal**: a game asks a model a typed question — "attack, flee or trade?", "is the player hostile?",
+  "rate this build 1-10" — and gets one answer with probabilities and a confidence in one cheap call. NPC
+  brains and a player autopilot run on it, falling back to deterministic behaviour when confidence is low
+  or the model is unavailable.
+- **Done so far**:
+  - Nothing decision-shaped exists. `ILlmClient` is chat completion and streaming only
+    (`Assets/CoreAI/Runtime/Core/Features/Orchestration/ILlmClient.cs:879`); no source under
+    `Assets/CoreAI`, `Assets/CoreAiUnity` or `Assets/CoreAIMods` mentions logprobs, embeddings, rerank or
+    a scoring call; `LlmSamplingOptions` carries `TopP`, `Seed`, `Stop`, `FrequencyPenalty`,
+    `PresencePenalty` only; no grammar (GBNF) path exists.
+  - `LlmEndpointKind` is `HttpOpenAi`, `LlmUnity` or `Offline`
+    (`Assets/CoreAI/Runtime/Core/Features/LlmRouting/LlmEndpointContracts.cs:10`).
+  - Seams the new kind can reuse: the endpoint registry and per-role/per-request routing profiles
+    (`ILlmClientRegistry.ResolveRouteForRole`, `AiTaskRequest.RoutingProfileId`,
+    `Assets/CoreAiUnity/Docs/RUNTIME_BACKEND_SWITCHING.md` §1), `SecretReference` key hygiene, the HTTP
+    transport and its WebGL fetch path, the error taxonomy `LlmErrorCode`, the decorator pipeline (retry,
+    timeout, circuit breaker), and `LlmUsageRecord`.
+  - `CoreAiBackend.ListModelsAsync` returns model ids only (`CoreAiModelListResult.Models`,
+    `Assets/CoreAiUnity/Runtime/Source/Api/CoreAiBackend.cs:81-98`), so `output_modalities` is not read
+    today.
+  - Actuators for the autopilot: `Humanoid:MoveTo` is implemented
+    (`Scripting/LuaCs/LuaCsRbxInstanceBindings.cs:1835`, `RbxApi/Instances/RbxHumanoid.cs:108`);
+    `Humanoid:Move` is a planned stub (`RbxApi/Instances/ClassCatalog.cs:948`); a host controller plugs
+    in through `IRbxCharacterMotorProvider` (`RbxApi/Binding/IRbxCharacterMotorProvider.cs:37`).
+  - The protocol, *(research 2026-11-11)*: one decision protocol is spoken by TypeSafe, OpenRouter
+    (`typesafe/jev-1.14`, plus an alpha `/api/alpha/decisions`), llama.cpp (`POST /v1/systemone`), Ollama
+    0.35+ and LM Studio. Request `{model, state, questions: {id: {type, instructions, criteria}},
+    assets?}` with types `noul` (yes/no), `choice` (1-255 options) and `score` (1-10 levels); the
+    response gives per question id the choice, per-option `probabilities` and a `confidence`; no
+    streaming; capability shows as `"decisions"` in `output_modalities` of `GET /v1/models`. Local test
+    model: Liquid `d1-2B` (official GGUF, 1.1 GB) under `llama-server`, which reports noul/choice/score
+    only. LLMUnity support was not found, so the local path is a `llama-server` sidecar.
+- **To do**:
+  - Portable core (`CoreAI.Core`, engine-free): `IDecisionClient.DecideAsync(DecisionRequest,
+    CancellationToken) -> DecisionResult`; `DecisionRequest` = state text, ordered questions (`YesNo`,
+    `Choice` with 1-255 labelled options, `Score` 1-10), optional assets (images through `AiAttachment`);
+    `DecisionResult` = per question the chosen option, the full probability vector, a confidence, a
+    `Calibrated` flag, usage and an `LlmErrorCode`.
+  - Three backends behind the one interface:
+    - `SystemOneHttpDecisionClient` (llama.cpp, Ollama, LM Studio, TypeSafe) over the existing transport.
+    - `OpenRouterDecisionClient` (the `typesafe/jev-*` model route and the alpha decisions endpoint
+      behind one option, since the alpha may change).
+    - `LogprobDecisionClient` over any OpenAI-compatible chat model: each option gets a single-token
+      label, forced by `json_schema` / an enum where the server honours it or by a grammar where it
+      accepts one; read `top_logprobs`, softmax over the label tokens, renormalise, set `Calibrated =
+      false`. Needs a `Logprobs` / `TopLogprobs` request field and the response parsing (new in the
+      transport).
+  - Endpoint and routing: a decision capability on the endpoint descriptor (or a new `LlmEndpointKind`,
+    decided in the rung), routing profiles per consumer (`npc-brain`, `autopilot`), the capability check
+    reading `output_modalities` (extend `ListModelsAsync`) and a probe question; P11's doctor shows it.
+  - Budgets and errors: per-consumer calls-per-second and in-flight caps, a per-call deadline (decisions
+    must be fast — default sub-second target for local), the existing retry/timeout/circuit decorators,
+    and mapping of protocol errors onto `LlmErrorCode` (unsupported question type, too many options).
+  - Consumer 1, NPC brain: `NpcDecisionPolicy` asks on events (player approaches, attacked, offered a
+    trade) and on a slow tick (default no faster than every 2 s per NPC), never per frame; actions are a
+    closed list in data; below a confidence threshold, or on any failure, a deterministic behaviour tree
+    / utility fallback decides.
+  - Consumer 2, player autopilot: an opt-in mode that drives the local player through the same actuator a
+    human uses (`Humanoid:MoveTo`, later `Humanoid:Move`, or `IRbxCharacterMotorProvider`), choosing
+    among goals (gather, build, follow, flee) on events and slow ticks, with the same threshold fallback
+    and an instant hand-back on any player input.
+  - Lua: decisions reach mods through `AIService` (P12 stage 2, `Ai` capability) — Roblox has no shape
+    for them, so the surface is CoreAI-only and flagged for the export lint.
+  - Local path: a documented `llama-server` sidecar endpoint (model download, start command, port) and a
+    readiness check; no LLMUnity change.
+- **Test**:
+  - PT: request/response serialization for each backend against recorded fixtures; the logprob softmax
+    and renormalisation; `Calibrated` flags; error mapping; budgets and deadline; question-type
+    validation (0 or 256 options refused).
+  - EM: routing a consumer to a decision endpoint; the capability check reading `output_modalities`; the
+    NPC policy and autopilot fallbacks with a scripted `IDecisionClient`.
+  - PM: an NPC and the autopilot in a scene with a scripted client — tick rate, never-per-frame,
+    hand-back on input.
+  - MS: `d1-2B` under `llama-server` and one OpenRouter decision model answering the same fixture set,
+    latency and agreement recorded.
+- **DoD**:
+  - One `DecideAsync` call returns a choice, a probability vector summing to 1 (+/-1e-6) and a confidence
+    on each of the three backends against fixtures.
+  - The logprob backend marks results uncalibrated; the SystemOne backend's twin does not.
+  - An endpoint without the capability is refused at routing with a named reason; the twin with it
+    routes.
+  - The NPC brain calls the model at most once per configured tick per NPC (counted over 60 s of play);
+    below the threshold the deterministic fallback acts and the decision is logged as such.
+  - The autopilot releases control within one frame of player input.
+- **Reuses**: the 5.9 endpoint registry and routing, the HTTP/WebGL transport, the resilience decorators,
+  P11 doctor, P12 `AIService` and NPC block, MVP7 character controls.
+- **Package/flagship**: the interface, backends, budgets and policies are package blocks (each backend
+  replaceable; thresholds, ticks and action lists are data); the villager brains and the autopilot goal
+  set are M1 demo content.
+
+### P14 — Orchestrator mode (L) *(new 2026-11-11)*
+
+- **Goal**: "make me a survival game" in chat becomes a plan the player can watch: a lead agent splits it
+  into tasks, hands each to a focused sub-agent with a clean context, and reports progress in a HUD line
+  and the in-world chat; a new instruction joins the queue instead of derailing the work in progress;
+  Stop stops everything it started.
+- **Done so far**:
+  - No orchestrator mode, lead agent or delegation exists. "Orchestrator / Director" appears only as a
+    benchmark role-fitness label (`Assets/CoreAI/Runtime/Core/Features/Benchmarking/RoleFitness.cs:90`).
+    `SubAgentDefinition`, `IAgentRegistry`, `AgentOrchestrator` and `AgentLlmTool` are not in the code;
+    the design is `dev-docs/MULTI_AGENT_ORCHESTRATION_V2_PLAN.md` ("plan, not implemented"), tracked as
+    TODO.md [R9], lowest priority.
+  - That plan predates current rules in places: settings as statics on `CoreAISettings`, a fixed 60 s
+    agent timeout, and a v0.8 → v0.9 version step.
+  - The single-agent engine it would build on: `AiOrchestrator` (3,333 lines) behind
+    `QueuedAiOrchestrator` (`Assets/CoreAI/Runtime/Core/Features/Orchestration/`), `MaxConcurrent = 2` /
+    `MaxPending = 64` (`AiOrchestrationQueueOptions.cs`), cancellation by scope and role (`ScopeEntry`
+    carries `CancellationScope` and `RoleId`, `QueuedAiOrchestrator.cs:713-719`), per-role tool-roundtrip
+    caps (Creator, Builder and Programmer are unlimited, `AgentMemoryPolicy.cs:562-566`), turn traces
+    (`InMemoryAgentTurnTraceSink`) and the Agent Session Inspector.
+  - Two tool loops carry turns: `SmartToolCallingChatClient` (core, non-streaming) and the streaming
+    `MeaiLlmClient` (`Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/MeaiLlmClient.cs`);
+    the 7.50.1 changelog records unifying their fallback prompts.
+  - Conversation identity: none. `ConversationId` has no hit in any `.cs`; history is keyed by role
+    (`dev-docs/MULTI_CHAT_PLAN.md` §0); `CoreAiChatService` already correlates its idle re-arm by
+    `TraceId` (`Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatService.cs:299-340`), the panel
+    does not.
+  - Background generation (Esc collapses the Hub, the turn continues) and the reserved async agent
+    workflow (task queue + HUD status) in §MVP11 "To do".
+- **To do**:
+  - Refresh the V2 plan against the current tree: DI-registered options instead of statics, the current
+    deadline model (total ceiling, response wait) instead of a fixed timeout, actor/session scopes, both
+    tool loops, WebGL (`MeaiToolTaskBridge.Publish` for the delegate tool body).
+  - `ConversationId` end to end (MULTI_CHAT_PLAN phases 0, 2 and 3): on `AiTaskRequest`, tool-call events
+    and history keys (falls back to the role id when empty); the panel filters tool bubbles by it;
+    stop/clear scope to it.
+  - Sub-agent definitions as data: role, description for the lead, tool allowlist (never the delegate
+    tool), routing profile, max output tokens, max tool roundtrips, deadline.
+  - `delegate_task` tool, offered only to the lead: runs a sub-agent in a fresh conversation with only
+    the task text and the context the lead passes, returns its result as the tool result; bounded
+    parallelism (default 1 on a single local endpoint, configurable for cloud), a total budget per plan
+    (calls, tokens).
+  - The lead role and its prompt: plan → tasks → delegate → verify (read logs / `camera_capture`) →
+    report; an explicit plan object the HUD can render.
+  - Task queue: a new player instruction during a running plan is queued, shown as "next", and may be
+    promoted or cancelled by the player; it never rewrites the running sub-agent's context.
+  - HUD status line and chat lines from one status source ("building: walls 2/5"), shared with the M1
+    in-world chat; a completion notification.
+  - Cancellation: Stop cancels the lead and every sub-agent through one scope; a cancelled sub-agent's
+    partial world changes stay behind the existing pre-mutation autosave (`ConfirmedWorldMutationGate`).
+  - Opt-in: a mode switch per chat (off by default for small local models); a single-agent turn stays
+    unchanged when the mode is off.
+- **Test**:
+  - PT: delegation with scripted clients — context isolation (the sub-agent request contains no parent
+    history), no nested delegation, parallelism and budget caps, result as tool result, cancellation
+    fan-out.
+  - EM: `ConversationId` history keys and fallbacks; two same-role conversations do not clobber each
+    other; tool-bubble filtering; queue promote/cancel.
+  - PM: a scripted three-task plan end to end with HUD updates and Stop mid-plan.
+  - MS: a real model builds a small game through the mode, the transcript and HUD captured.
+- **DoD**:
+  - A sub-agent request contains only its task and the passed context (asserted on the captured request);
+    the twin — a sub-agent trying to call `delegate_task` — is refused.
+  - Two conversations on one role keep separate histories; clearing one leaves the other.
+  - Stop during a plan cancels every in-flight request it started within one second (scripted client).
+  - A plan exceeding its call budget stops with a reported, typed reason.
+  - With the mode off, existing single-agent tests pass unchanged.
+- **Reuses**: MVP11 async agent workflow and roles, P11 truthful results, P15 role data, the
+  `ConfirmedWorldMutationGate` autosave tier.
+- **Package/flagship**: the mode, `delegate_task`, sub-agent definitions, queue and status source are
+  package blocks (definitions and budgets are data; the planner prompt is replaceable); the HUD skin and
+  the "make me a game" flow are flagship content.
+
+### P15 — Roles, tools, skills and prompts as data (M–L) *(new 2026-11-11)*
+
+- **Goal**: a game changes what each agent is, can do and knows by editing data — no package code — and
+  every prompt and skill change is checked against a fixture set before it ships, with its token cost
+  measured instead of estimated.
+- **Done so far**:
+  - Nine built-in roles (`Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInAgentRoleIds.cs`);
+    their memory/history/roundtrip defaults are hard-coded in the `AgentMemoryPolicy` constructor
+    (`Assets/CoreAI/Runtime/Core/Features/AgentMemory/AgentMemoryPolicy.cs:539-580`).
+  - Tools are wired in installer code: `CoreAiModsInstaller` adds every Lua and world-package tool and
+    all three skills to Programmer
+    (`Assets/CoreAIMods/Runtime/Composition/CoreAiModsInstaller.cs:648-708`); `WorldCommandsInstaller`
+    adds `world_command` to Creator/Builder and `camera` to Programmer
+    (`Assets/CoreAiUnity/Runtime/Source/Composition/WorldCommandsInstaller.cs:219,244`).
+  - `AgentBuilder` (28 fluent methods) and `SkillSetAsset` + `RoleSkillsBinding[]` on
+    `CoreAILifetimeScope`
+    (`Assets/CoreAiUnity/Runtime/Source/Composition/CoreAILifetimeScope.cs:121-131`);
+    `PromptVersionRegistry` (active version and rollback per role); prompt layers documented in
+    `Assets/CoreAiUnity/Docs/DEVELOPER_GUIDE.md` §3.5.
+  - Open defects (TODO.md "Newcomer API ergonomics audit"): A7 — `AgentMode` is read only for build
+    warnings and the streaming default (`AgentBuilder.cs:672-684,878`); A9 — `Build()` before CoreAI
+    starts registers nothing and an unknown role runs as a default agent; A10 — `AddToolForRole` appends
+    duplicates (`AgentMemoryPolicy.cs:248-265`, re-checked).
+  - Universal prefix: the asset default is "Respond concisely and to the point. Avoid unnecessary
+    verbosity."
+    (`Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/CoreAISettingsAsset.cs:310`), the
+    portable default is the "CRITICAL RULES FOR ALL AGENTS" block
+    (`Assets/CoreAI/Runtime/Core/CoreAISettings.cs:124`), and `Assets/CoreAiUnity/Docs/AI_AGENT_ROLES.md`
+    §1.3.5 documents only the second as "the package default".
+  - Prompt checks today: `ToolContractPromisesEditModeTests` (7.50.1) runs every action word the memory
+    hint offers through `MemoryTool`; the MVP18 DoD already asks for a prompt-eval fixture set. The
+    Merchant prompt asks for `get_inventory`, which no installer wires
+    (`Docs/CoreAI/AGENT_ROLES_AND_TOOLS.md` §2).
+  - Skills: Rbx API 41,807 bytes, Lua Modding 9,604, Full Lua 2,004
+    (`Assets/CoreAiUnity/Resources/AgentSkills/*.txt`), each also kept as a C# literal
+    (`Assets/CoreAI/Runtime/Core/Features/AgentPrompts/Built*SkillText.cs`) and pinned equal by
+    `LuaModdingSkillEditModeTests.cs:269-275`. The "~91% savings" figure is arithmetic (50 tools x 80
+    tokens vs 2 meta-tools + catalog, `Assets/CoreAI/Docs/AGENT_BUILDER.md:498-507`), not a measurement.
+    Tiering is open question Q9 of this document (tentative answer: compact core + per-service sections
+    on demand).
+  - `manage_skills` lets an agent author skills (`AgentBuilder.WithSkillAuthoring`); "Skill
+    self-improvement" is undesigned (`dev-docs/BACKLOG.md` "Skill System (before MVP2)"); owner decision
+    open: with Auto tool mode, an empty `AgentRoleId`, a memory store and a skill proxy,
+    `CallSkillToolLlmTool` throws in `RoleBinding.RequireRole` (TODO.md:16-18).
+- **To do**:
+  - A role definition asset (portable `RoleDefinition` + a ScriptableObject adapter): id, prompt
+    reference, memory/history/compaction policy, roundtrip cap, tool profile, skills, routing profile;
+    the nine built-ins become shipped definitions; the `AgentMemoryPolicy` constructor reads them.
+  - Tool profiles as data: named sets (`lua-builder`, `world-builder`, `npc`, `observer`) that installers
+    register tools into and roles reference, replacing the hard-coded `AddToolForRole(Programmer, ...)`
+    calls; per-world overrides through the MVP10 profile.
+  - A7: carry `Mode` into the prepared role (ChatOnly strips tools, ToolsOnly defaults history off) after
+    one release of warnings. A9: queue configs until initialisation, warn once per unknown role. A10:
+    replace by name and report the change.
+  - One universal-prefix default (decide which text), the same in the asset and the portable settings,
+    with the doc corrected.
+  - A prompt regression fixture set (PT, scripted and recorded transcripts): per role a handful of inputs
+    with asserted tool choice / shape; runnable against a real small model as an explicit benchmark.
+  - Measured skill costs: tokenize every shipped skill and tool contract with the provider-reported
+    counts (`LlmUsageRecord`) or `BpeTokenCounter`, publish the table, replace the 91% claim.
+  - A tiered Rbx API skill built from the generated manifest (MVP18 items 3-5): a compact core plus
+    per-service sections through `read_skill(name, section)`; one source file per skill, the C# literal
+    generated at build or replaced by a loader, so the Resources/literal pair cannot drift.
+  - Skill self-improvement design: proposals from observed repair sessions land as `manage_skills`
+    revisions behind a review gate; feeds MVP18's "Common mistakes".
+  - Decide the `CallSkillToolLlmTool` empty-role case (refusal as a reported tool error, or documented
+    throw).
+  - Wire `get_inventory` for Merchant through its tool profile, or drop the instruction.
+- **Test**:
+  - EM: built-in role definitions reproduce today's per-role config exactly (a golden snapshot of
+    `AgentMemoryPolicy`); a host definition overrides a built-in without code; tool profile resolution;
+    A7/A9/A10 regressions; the same universal prefix in asset and portable paths.
+  - PT: the prompt fixture set against scripted clients; skill generation is deterministic; the
+    token-cost table is reproducible.
+  - MS: the fixture set against one small local model, results recorded next to the cost table.
+- **DoD**:
+  - Replacing the Programmer's tool profile with `npc` in data removes `execute_lua` from its requests;
+    the negative twin (the shipped profile) keeps it.
+  - A ChatOnly agent's request carries no tools; a ToolsOnly agent sends no chat history.
+  - Two `RegisterGameStateTool` calls publish one `game_state` function.
+  - A skill text exists in exactly one committed file; a CI check fails on a hand-edited generated copy.
+  - Every shipped skill has a measured token count in the docs.
+- **Reuses**: MVP10 composition profile, MVP18 skill manifest, the benchmark harness for the explicit
+  run.
+- **Package/flagship**: role definitions, tool profiles, the fixture runner and the skill generator are
+  package blocks; the flagship ships its own role set and prompts as data.
+
+### P16 — Tool review and camera v2 (M) *(new 2026-11-11)*
+
+- **Goal**: the agent sees what it built from any angle with one clear camera tool, never sends images to
+  a model that cannot read them, and every tool reads well to a small model — short schema, honest
+  result, a next step on failure.
+- **Done so far**:
+  - Two camera tools. `CoreAI.Vision.CameraLlmTool`
+    (`Assets/CoreAiUnity/Runtime/Source/Features/Vision/CameraLlmTool.cs`), registered as `camera` on
+    Programmer by `WorldCommandsInstaller` and on the active chat role by the chat panel:
+    `camera_capture` / `screenshot` (`cameraName?`, `maxSize` default 512, clamped 64..1024),
+    `camera_look` (`cameraName?`, `posX/Y/Z`, `rotX/Y/Z`, `lookAt` = a GameObject name) and
+    `camera_list`. Movement only for cameras carrying `CoreAiAgentCamera` with `allowMove`
+    (`Features/Vision/CoreAiAgentCamera.cs`); one capture per second per role
+    (`AgentCameraService.DefaultMinCaptureIntervalSeconds = 1.0`,
+    `Features/Vision/AgentCameraService.cs:157`).
+    The host-wired `camera_tool` → `capture_camera` (`width`/`height` 64..1024,
+    `Features/World/Infrastructure/CameraLlmTool.cs`) already returns `LlmToolImageResult`, so
+    TODO.md:211 ("still returns a base64 `dataUri`") is stale.
+  - The image reaches the model as a follow-up user message
+    (`SmartToolCallingChatClient.LiftCameraImages`); a new camera frame replaces the previous one; the
+    fixed camera prompt is part of the G6 benchmark contract (`Docs/CoreAI/agent-vision.md` §5).
+  - Capture renders into `RenderTexture.GetTemporary` and reads back with a synchronous `ReadPixels` on
+    the main thread, then `EncodeToJPG`
+    (`Assets/CoreAiUnity/Runtime/Source/Api/AiAttachmentUnityExtensions.cs:180-307`); no
+    `AsyncGPUReadback` anywhere (BACKLOG "Performance": "Camera capture stalls the main thread").
+  - Vision gate: `VisionSupportMode.Auto` is ON for every model name except obvious utility models
+    (`Assets/CoreAiUnity/Runtime/Source/Features/Llm/Infrastructure/VisionCapability.cs:55-90`), while
+    `Assets/CoreAI/Docs/LLM_TOOLS.md:120-122` says Auto infers vision from a list of known model names;
+    the chat-panel attach does not consult the gate (`Features/Chat/CoreAiChatCameraTools.cs:23-26`).
+  - Open items: image feedback wording reused for non-camera tools (TODO.md:208); live vision round trip
+    never run (TODO.md [R8], TODO.md:202-204); external chat submit rejects empty text with attachments
+    (TODO.md:212-213).
+  - Read-only world inspection: `world_command` has `list_objects` / `list_prefabs` / `list_animations`
+    (Creator/Builder only); `scene_tool` (`find_objects`, `get_hierarchy`, `get_transform`) is host-wired
+    only; Programmer inspects the world through `execute_lua`, and every `execute_lua` call takes a
+    pre-mutation autosave (`Docs/CoreAI/AGENT_ROLES_AND_TOOLS.md` §3). No `world_query` tool exists,
+    although TODO.md [R4] calls `ui_query` its "mirror".
+  - Tool descriptions share a 500-character contract limit (7.50.1 changelog, `MemoryLlmTool` entry).
+- **To do**:
+  - One `camera` tool with clear actions: `capture` (any camera, the agent camera, or a temporary free
+    camera), `look` (position, rotation, a point target or an object target, FOV), `orbit` (around a
+    point or object: yaw, pitch, distance), `list`; the free agent camera is created on demand, never the
+    player's; `camera_tool` / `capture_camera` deprecated onto it with one release of aliasing.
+  - Async readback: `AsyncGPUReadback` where supported, the synchronous path as fallback (WebGL), pooled
+    targets; the capture result keeps its JSON summary shape.
+  - Vision-gated attach in the chat panel; an honest Auto default (unknown name = text-only until the P11
+    doctor or `VisionSelfProbe` proves vision, or the user sets On) — an owner decision, since it changes
+    today's default; `LLM_TOOLS.md` corrected either way.
+  - A live vision round trip `[Explicit]` PlayMode test (TODO.md [R8]).
+  - Tool pass for small models: every tool's schema, description and result reviewed against the contract
+    limit and a failure-with-next-step rule; neutral image-feedback wording for non-camera tools with a
+    suite version bump (TODO.md:208); drop the stale first sentence of TODO.md:211.
+  - Read-only query tools if a measurement shows they spare `execute_lua` calls: `world_query` (find,
+    tree, properties of Rbx instances, in studs) for the Programmer, no autosave, capped output; measure
+    on the benchmark G-scenarios before and after.
+- **Test**:
+  - EM: action schemas; ownership (player camera never moves; twin: the free agent camera moves); FOV and
+    orbit math; the vision gate on attach; the Auto default; alias of the old tool.
+  - PM: async and sync readback produce a valid JPEG; capture does not exceed a frame-time budget
+    measured in a built player.
+  - PT: `world_query` output caps and shapes on a headless world.
+  - MS: a real vision model captures, orbits and describes a block build; recorded.
+- **DoD**:
+  - A text-only model never receives an image part (pinned by a fake provider that fails on `image_url`);
+    the twin, a vision model, receives the frame.
+  - `orbit` around a target returns frames whose pose matches the requested yaw/pitch/distance within
+    0.01.
+  - With async readback on, a capture adds no frame over the budget in the recorded player run.
+  - Every shipped tool description fits the contract limit (one test over all tools).
+- **Reuses**: P11 doctor (vision check), P15 tool profiles, the benchmark harness.
+- **Package/flagship**: the camera tool, readback and gate are package blocks (camera rules are
+  configurable; the readback strategy is replaceable); camera presets for the block world are demo
+  content.
+
+### P17 — Benchmark touch-ups (S) *(new 2026-11-11)*
+
+- **Goal**: the leaderboard never ranks a dead provider route or a partial run as a model result, and the
+  verification gates the last waves left open are run once. Deliberately small: no new suite in M2.
+- **Done so far**:
+  - Suite 2.0 is current (`SuiteVersion = "2.0"`,
+    `Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks/GameCreationBenchmarkPlayModeTests.cs:50`), with
+    resume, Environment attribution and provider-stall handling (TODO.md lines 20-39); the first
+    maintainer runs are published (`Docs/BENCHMARK_LEADERBOARD.md`, `Docs/BenchmarkRuns/`).
+  - Four reporting defects are open (TODO.md "Benchmark reporting defects found by the 2026-10-17
+    free-tier sweep"): a zero-graded run still renders a scored card
+    (`BenchmarkReportFormatter.ModelCardScene`,
+    `Assets/CoreAI/Runtime/Core/Features/Benchmarking/BenchmarkReportFormatter.cs:376`);
+    `tools/benchmark_chart.py` ranks partial runs; comparisons lack a like-for-like mean; short target
+    labels leak as model ids (`BenchmarkTargetList`, `BenchmarkTargets.cs:123`).
+  - Open gates (TODO.md): resume rounds 2 and 3 (:22, :26), the live multi-target G6 resume (:33), the
+    provider-stall EditMode gate (:39), sampling (:44), local-Qwen (:51), edit3/play3 (:55),
+    documentation defects (:60), configuration defects (:122-124), request shaping (:133), and the 7.47.x
+    live fixtures that never ran (:199-204). TODO.md:189 asks for a suite 1.16 decision that the move to
+    2.0 has overtaken.
+- **To do**:
+  - "No graded scenarios" card and unrated tiles for an all-Environment run.
+  - The chart refuses or marks partial-group rows and prints the graded count next to the score.
+  - A like-for-like mean over the groups every compared model ran.
+  - A display name separate from the model id on targets.
+  - Run the open gates once on a settled tree; close or re-scope each line; retire TODO.md:189.
+  - Named, not scheduled: a decision-model scenario (P13 consumers graded on agreement, latency and
+    fallback rate) and a "whole game" tier (P14 plans graded end to end), each a new suite version when
+    it lands.
+- **Test**: EM (formatter cases: zero-graded, partial, display name), PT (chart generator over fixture
+  reports), the listed gates themselves.
+- **DoD**:
+  - An all-Environment report renders "no graded scenarios"; the twin, a graded run scoring zero, renders
+    its score.
+  - A partial run is excluded from the ranked chart or marked, pinned by a fixture.
+  - Every gate named above has a receipt or a re-scoped TODO line.
+- **Reuses**: the benchmark package as it is.
+- **Package/flagship**: packages (`com.neoxider.coreaibenchmark`) and the repository tools only.
 
 ### Dropped: the old MVP7 (editor tooling)
 
@@ -2627,7 +4378,8 @@ Tests that pin a recorded DEV decision use the `DEV<n>_` prefix in the same way 
 ## 7. Non-goals
 
 - Full Roblox fidelity: R15/R6 rigs, `MarketplaceService`, avatar/catalog systems, real
-  DataStore cloud semantics (versioning, ordered stores), Parallel Luau actors, Terrain,
+  DataStore cloud semantics (versioning, ordered stores), Parallel Luau actors, smooth Terrain (a
+  blocky voxel subset of `workspace.Terrain` is in scope since 2026-11-11, package P4),
   `HttpService` open internet access (CoreAI's own AI backend is the only network egress;
   `HttpService` exposes JSON members only).
 - Copying Roblox **documentation text or assets** — API *shape* compatibility only; the corpus
@@ -2642,6 +4394,10 @@ Tests that pin a recorded DEV decision use the `DEV<n>_` prefix in the same way 
   `Terrain` instances with an info diagnostic.
 - WebGL as a server of any kind (host or dedicated) — browsers are solo, pure client or
   creator-mode client only (plan decision D6).
+- **Revised 2026-11-11 (plan decision D9): a Studio mode is a non-goal again; in-play creation tools
+  are not.** The flagship has one mode. Selection, transforms, painting, block building and undo are
+  in-play actions (P5, P1, P4) over the same Instance operations; a separate creator mode with Explorer
+  and Properties panels and a Play/Stop test run is backlog (MVP12, kept as the record).
 - **Reversed 2026-09-24 — no longer a non-goal: a Studio-like 3D editing UI.** It was listed here
   ("CoreAI's editor is conversation + Hub + (optionally) Unity"; manual building a backlog note,
   "explicitly NOT a priority"). The flagship needs an in-game creator mode, so it is **MVP12**, built
@@ -2668,6 +4424,14 @@ D9 = the clock model), which keep their names.
 | D6 | WebGL role | (a) solo + pure client; (b) plus creator-mode client of a server; (c) plus a browser-hosted listen server | **(b)** | Creator edits travel as intents, so no hosting is needed; (c) is impossible (no listen sockets in browsers) | MVP8, MVP12 |
 | D7 | Where the flagship lives | (a) a separate Unity project consuming the packages via UPM; (b) a demo in this repo; (c) a package sample | **(a)** | It enforces the framework/product split and dogfoods the Git-URL install (broken today, `TODO.md`); this repo keeps packages, presets, samples, bots and harnesses | all |
 | D8 | Server Lua VM if S1 is bad | (a) keep Lua-CSharp with a cheaper guard (adaptive batch / accounting); (b) native Luau on the server only, behind `IScriptEngine` (WebGL keeps Lua-CSharp); (c) cap per-player server script work | **(a) first, (b) as the fallback** | The seam exists (§2, engine abstraction), so (b) is one adapter, but two VMs double the conformance surface | MVP9 |
+| D9 | The flagship's creator workflow (supersedes D2) | (a) Studio and Play with a mode switch; (b) live edit plus a per-creator Play/Stop test run (D2); (c) one play-and-create mode, no Studio | **(c)** | The owner's flagship is a realtime game in which everything is instant and convenient by default; creation tools are in-play actions over the same Instance operations, and a mode switch or a publish step is the friction Roblox has | P1, P2, P5, MVP12 |
+| D10 | Order of work (supersedes "strictly sequential, multiplayer first") | (a) the sequential ladder; (b) demo-gated product milestones with parallel packages | **(b)** | Under (a) the first complete game stood behind twelve rungs, and nine releases moved no rung; a milestone ends with a playable demo, and the solo halves of GUI, sound and saving precede the network | all |
+| D11 | Scale target (revises D5) | (a) keep 100 players per room frozen as the gated goal; (b) keep the numbers as the aspiration and choose the gated room size after spike S1 | **(b)** | The guarded VM on Mono is estimated at about 63 ms per frame for 100 players against a 33 ms budget and is unmeasured on IL2CPP; Roblox runs 200 to 700 players per server, so scale is not where the flagship differs | MVP9, M3 |
+| D12 | Roblox interchange order | (a) both directions gate one release (the MVP14 DoD of 2026-09-24); (b) import first, export later and not a release gate | **(b)** | Import is the on-ramp for Roblox authors; export needs a manual Roblox Studio gate per release. The owner's round-trip requirement stands as the goal | MVP14 |
+| D13 | Model kinds | (a) chat only; (b) decision models as a first-class kind next to chat, behind their own seam | **(b)** | NPC behaviour and a player autopilot need fast typed decisions with probabilities; one protocol (`/v1/systemone`) is spoken by TypeSafe, OpenRouter, llama.cpp, Ollama and LM Studio, and a logprob fallback covers ordinary chat endpoints (`dev-docs/COMPETITIVE_SCAN_2026-11-11.md` §4) | P13 |
+
+D9–D13 were decided on 2026-11-11 at the owner's request; D2 and D5 stay in the table as the record of
+what they replaced.
 
 ### 8.2 Earlier questions
 

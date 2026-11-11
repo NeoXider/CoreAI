@@ -1,5 +1,72 @@
 # Current status and next steps
 
+## Plan revision and next steps - 2026-11-11
+
+Current release: **7.56.0** (2026-10-28, tag `v7.56.0`, `main` and `demo`). Everything after 7.56.0 is
+under PolyForm Noncommercial 1.0.0 again (`37696969`); 7.55.0 and 7.56.0 keep PolyForm Small Business.
+The sections below this one are history: the repair wave they track shipped as 7.55.0 and 7.56.0.
+
+**The plan was re-ordered at the owner's request.** The flagship is a realtime play-and-create game with
+no Studio; work is ordered by demo-gated milestones M0–M4 with parallel packages; the room size is
+chosen after spike S1; Roblox import precedes export; decision models are a model kind next to chat
+(plan decisions D9–D13). The order of record is `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4.0, the
+one-screen table is `Docs/ROADMAP.md` §4, the evidence is `dev-docs/COMPETITIVE_SCAN_2026-11-11.md`, and
+open work is filed in `TODO.md` under "Plan of record 2026-11-11".
+
+### Where we are
+
+- MVP0–MVP3 are closed. No rung moved between 2026-09-25 and 2026-10-28: nine releases went to the
+  benchmark, audits, repairs, the code editor and the gateway client.
+- MVP4 (script contexts) is not started. Spikes S1 and S2, the IL2CPP/WebGL player checks, the WebGL
+  page-reload smoke and one live-model run with a valid provider key are still open.
+- The 2026-11-11 repository survey found what a first session lacks: no default controls, mouse look or
+  fly; no menu that builds a world scene; a chat whose default role cannot build; every AI edit behind
+  a full world capture and a durable autosave; 15 of 16 demo scenes without post-processing; the default
+  Plastic without normals and static water; no way for a mod to call a model; chat-only model kinds;
+  a connection test that pings one role with plain text.
+
+### Next steps
+
+1. **M0 Ready to play** (overlaps the start of M1): the one-click play-and-create world (P3), truthful
+   results and a loud failure when a module is missing (P11 stage 1), spikes S1 and S2, the open MVP3
+   player checks, the live-model run once the owner supplies a valid key.
+2. **M1 Block world**, three tracks in parallel:
+   - play: P1 (controls, camera, fly) → P2 (in-world chat) → P4 (voxel Terrain) → P6 (the demo);
+   - look: P7 (default look, Hub Graphics page) → P8 stage 1 (Plastic detail, water, glass);
+   - harness: P12 stage 1 (talking NPCs) and P13 (decision models, local `d1-2B` through a
+     `llama-server` sidecar);
+   - MVP4 runs alongside on the mods runtime.
+3. **M2 Whole games from chat**, then **M3 Together** and **M4 Platform** as listed in §4.0.
+
+### Estimates (2026-11-11)
+
+Calendar ranges, not promises. Basis: five rungs landed between 2026-07-22 and 2026-09-25, about two
+weeks per rung in sequence; the milestones assume up to four packages in parallel and one Unity
+verification pass per package.
+
+| Milestone | Estimate | Running total |
+|---|---|---|
+| M0 Ready to play | about 1 week, overlapping M1 | — |
+| M1 Block world | 5–7 weeks; a first playable slice (walk, fly, in-world chat, default look, on Parts) after 2–3 | about 1.5 months |
+| M2 Whole games from chat | 7–9 weeks | 3.5–4 months |
+| M3 Together | 6–8 weeks | about 5.5 months |
+| M4 Platform | 8–12 weeks | 8–9 months |
+
+The package sizes sum to about 16 agent-weeks for M1 and about 22 for M2; the ranges assume four
+parallel tracks and add a fifth to a third for integration and verification. The longest M1 track is
+P3 → P4 → P6 (the edit loop, voxel Terrain, the demo).
+
+What moves the ranges: Unity runs are serial on one settled tree; live-model checks need a valid key and
+provider limits; look and feel need the owner's eyes; IL2CPP, WebGL and device checks need builds; and
+every out-of-plan release costs about a week of the plan (the release rule caps them).
+
+### Working rules for this plan
+
+- Root owns Unity, tests, integration and Git; workers get disjoint file leases and never run Unity.
+- A finished worker is continued for follow-up work in its area instead of starting a new one.
+- A package is done when its DoD is proven by tests or recorded captures, its docs and the Rbx API skill
+  are updated in the same change, and its demo runs with the defaults.
+
 ## Active repair checkpoint - 2026-10-26
 
 Current branch: `demo`, based on released `bc3fd74f` / `v7.54.0`; the older ladder checkpoints below are historical.
