@@ -10,7 +10,7 @@
 Last updated: 2026-11-11 (release 7.56.0). The plan was re-ordered that day at the owner's request: the
 flagship is a realtime play-and-create game with no Studio, and work is ordered by product milestones
 (§4). Rungs keep their ids — the ladder was renumbered once, on 2026-09-24, and is not renumbered again.
-Plan decisions D1–D8 were decided by the tech lead and D9–D13 follow the owner's request; the owner may
+Plan decisions D1–D8 were decided by the tech lead and D9–D14 follow the owner's request; the owner may
 override any of them. All seven package manifests carry the same release version (see §2).
 
 ---
@@ -325,7 +325,8 @@ and MVP18.
 
 **Next.** M0–M1: a one-click world and a cheaper edit loop (P3), default controls with a camera and a
 fly toggle (P1), the in-world chat with an agent status line (P2), and the Block world demo (P6) on
-voxel Terrain (P4). M2: in-play creation tools — selection, grab-move, rotate, scale, paint, duplicate,
+voxel Terrain (P4), and game UI as UXML and USS text handed over from Lua at runtime (P18, plan decision
+D14). M2: in-play creation tools — selection, grab-move, rotate, scale, paint, duplicate,
 an undo stack (P5) — which replace the Studio core of MVP12 (plan decision D9; its Explorer, Properties
 and Play/Stop are backlog), the template picker of MVP13 and GUI (MVP15, sharing the [R4] element
 factory). The mechanisms go in the packages; the final UX polish goes in the flagship (plan decision
@@ -366,7 +367,9 @@ static, 15 of the 16 demo scenes run without post-processing, and textures load 
 
 **Next.** M0: spikes S1 (VM cost on Mono and, where a build target exists, IL2CPP) and S2 (bytes per
 update). M1: the default look — post-processing on by default, a Hub Graphics page, a WebGL tier (P7) —
-and the first materials pass: detail on Plastic, animated water, glass (P8 stage 1). M2: the texture
+and the first materials pass: detail on Plastic, animated water, glass (P8 stage 1); honest performance —
+frame time, garbage per frame and Lua throughput measured in built players, budgets as tests, then
+optimization by measured rank (P19). M2: the texture
 tier with lazy loading and anti-tiling (P8 stage 2) and the Lighting API (P9). M4: MVP8 (the Linux
 dedicated server and the WebGL client); **MVP9** (interest management, a bot client, the VM guard cost,
 the O(N) paths, higher ceilings — a staircase against the room size chosen after S1); MVP19
@@ -379,7 +382,7 @@ ROBLOX_API_ROADMAP §4.3, §MVP9, §MVP19 and §6.5.
 
 ## 4. Release plan
 
-**The order of record (2026-11-11; plan decisions D9–D13).** Work is ordered by product milestones,
+**The order of record (2026-11-11; plan decisions D9–D14).** Work is ordered by product milestones,
 and each milestone ends with playable demos and a release. Packages inside a milestone run in parallel
 where their files do not overlap. Rung ids (MVPn) and package ids (Pn) are stable names, not an order.
 The goal, done-so-far, to-do, tests and DoD of every rung and package are in
@@ -388,7 +391,7 @@ The goal, done-so-far, to-do, tests and DoD of every rung and package are in
 | Milestone | What a player gets | Contents | Gate |
 |---|---|---|---|
 | **M0 Ready to play** | A new project reaches a working world and an honest model connection in minutes | P3 (one-click world), P11 stage 1 (truthful failures, install fixes), spikes S1/S2, the open MVP3 player checks, one live-model run with a valid provider key | From a fresh checkout: one menu, one key, the first AI-made object; a missing module fails loudly |
-| **M1 Block world** | The Minecraft-style demo, solo: walk and fly, build with blocks and by chat, talk to NPCs, switch on the autopilot | P1, P2, P3, P4, P6, P7, P8 stage 1, P12 stage 1, P13; MVP4 alongside | The Block world demo passes its recorded script in the editor and in a WebGL player |
+| **M1 Block world** | The Minecraft-style demo, solo: walk and fly, build with blocks and by chat, talk to NPCs, switch on the autopilot | P1, P2, P3, P4, P6, P7, P8 stage 1, P12 stage 1, P13, P18, P19; MVP4 alongside | The Block world demo — Lua end to end, interface included — passes its recorded script in the editor and in a WebGL player; the P19 budgets hold; the bundled sample mods and published demos run on the defaults |
 | **M2 Whole games from chat** | A complete small game — HUD, sound, saving — made by talking; the harness upgrades | The solo halves of MVP15, MVP16 and MVP17; MVP13; the self-repair and manifest parts of MVP18; P5, P8 stage 2, P9, P10 stage 1, P11 stage 2, P12 stage 2, P14, P15, P16, P17 | A person who writes no code gets a playable game with HUD, sound and saving in 15 minutes; a "whole game" benchmark tier measures it |
 | **M3 Together** | Several players create in one room | MVP5, MVP6, the network half of MVP7, MVP11, the network halves of MVP15–MVP17 | Four players in a room, two prompting the AI at once; every edit visible within 1 tick + RTT; the world survives joins and leaves |
 | **M4 Platform** | Dedicated servers, scale, Roblox import, asset import, hardening | MVP8, MVP9, MVP10, MVP14 (import first), the rest of MVP18, MVP19, P10 stage 2, the flagship's own project | The rungs' own DoDs |
@@ -420,6 +423,8 @@ Rungs and packages on one screen (status at 7.56.0, 2026-11-11):
 | P11 | Truthful results and the Connect-API doctor | M0 (stage 1), M2 (stage 2) | not started | M |
 | P12 | Gameplay LLM API and talking NPCs | M1 (stage 1), M2 (stage 2) | `AIService` is a stub | M + L |
 | P13 | Decision models | M1 | not started | L |
+| P18 | Runtime UI from Lua: UXML and USS | M1 | not started; the [R4] specification | L |
+| P19 | Honest performance: measurement, budgets, optimization | M1 | `tools/vmbench` numbers only | L |
 | P5 | In-play creation tools | M2 | click picking only | L |
 | P9 | Lighting API | M2 | structure only | M |
 | P10 | New materials and asset import | M2 (stage 1), M4 (stage 2) | `MaterialVariant` over built-in textures | M + L |
@@ -428,7 +433,7 @@ Rungs and packages on one screen (status at 7.56.0, 2026-11-11):
 | P16 | Tool review and camera v2 | M2 | camera tools v1 | M |
 | P17 | Benchmark touch-ups | M2 | four reporting defects open | S |
 | MVP13 | Model packages, template library, Luau parity prerequisites | M2 | planned | M–L |
-| MVP15 | GUI + remaining input | M2 (solo), M3 (network) | planned | L |
+| MVP15 | GUI + remaining input: the Roblox GUI classes over the P18 element factory | M2 (solo), M3 (network) | planned | L |
 | MVP16 | DataStore + leaderstats | M2 (solo), M3 (network) | planned | M |
 | MVP17 | Audio / FX / animation | M2 (solo), M3 (network) | planned | M |
 | MVP18 | Mod UX rest, skill manifest, console + self-repair | M2 (self-repair, manifest), M4 (rest) | planned | M–L |
@@ -463,11 +468,12 @@ store); D2 superseded by D9; D3 a client-owned own character with server validat
 server-owned; D4 Mirror/kcp plus WebSocket for WebGL, behind `INetworkBridge`; D5 the scale targets,
 revised by D11; D6 WebGL as solo, pure client and creator-mode client, never a listen server; D7 the
 flagship in its own Unity project over UPM; D8 Lua-CSharp with a cheaper guard first, native Luau on the
-server only as the fallback. D9–D13, 2026-11-11 at the owner's request: D9 one play-and-create mode, no
+server only as the fallback. D9–D14, 2026-11-11 at the owner's request: D9 one play-and-create mode, no
 Studio; D10 demo-gated milestones with parallel packages instead of a strictly sequential,
 multiplayer-first ladder; D11 the room size is chosen after S1; D12 Roblox import first, export later
-and not a release gate; D13 decision models are a model kind next to chat. The owner may override any
-of them.
+and not a release gate; D13 decision models are a model kind next to chat; D14 game UI is UXML and USS text that
+Lua hands to the engine at runtime, with the Roblox GUI classes as a compatibility layer. The owner may
+override any of them.
 
 **History.**
 

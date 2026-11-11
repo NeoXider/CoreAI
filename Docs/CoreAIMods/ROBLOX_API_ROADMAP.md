@@ -503,7 +503,7 @@ flagship, with recorded evidence.
 | Milestone | Outcome | Rungs and packages | Gate | Demos |
 |---|---|---|---|---|
 | **M0 Ready to play** | A new project reaches a working world and an honest model connection in minutes | P3 (one-click world), P11 stage 1, spikes S1 and S2, the open MVP3 player checks, one live-model run with a valid provider key | From a fresh checkout: one menu, one key, the first AI-made object; a missing module fails loudly | the one-click world |
-| **M1 Block world** | The Minecraft-style demo, solo: walk and fly, build with blocks and by chat, talk to NPCs, switch on the autopilot | P1, P2, P3, P4, P6, P7, P8 stage 1, P12 stage 1, P13; MVP4 alongside | The Block world demo passes its recorded script in the editor and in a WebGL player | Block world |
+| **M1 Block world** | The Minecraft-style demo, solo: walk and fly, build with blocks and by chat, talk to NPCs, switch on the autopilot | P1, P2, P3, P4, P6, P7, P8 stage 1, P12 stage 1, P13, P18, P19; MVP4 alongside | The Block world demo — Lua end to end, interface included — passes its recorded script in the editor and in a WebGL player; the P19 budgets hold; the bundled sample mods and published demos run on the defaults | Block world |
 | **M2 Whole games from chat** | A complete small game — HUD, sound, saving — made by talking; the harness upgrades | The solo halves of MVP15, MVP16 and MVP17; MVP13; the self-repair and manifest parts of MVP18; P5, P8 stage 2, P9, P10 stage 1, P11 stage 2, P12 stage 2, P14, P15, P16, P17 | A person who writes no code gets a playable game with HUD, sound and saving in 15 minutes; a "whole game" benchmark tier measures it | an obby and a tycoon from templates, an NPC town, an application that is not a game on the same harness |
 | **M3 Together** | Several players create in one room | MVP5, MVP6, the network half of MVP7, MVP11, the network halves of MVP15–MVP17 | Four players in a room, two prompting the AI at once; every edit visible within 1 tick + RTT; the world survives joins and leaves | Block world co-op |
 | **M4 Platform** | Dedicated servers, scale, Roblox import, asset import, hardening | MVP8, MVP9, MVP10, MVP14 (import first), the rest of MVP18, MVP19, P10 stage 2, the flagship's own project | The rungs' own DoDs | the flagship |
@@ -514,7 +514,8 @@ creation tools · **P6** Block world demo · **P7** default look and the Hub Gra
 materials v2 · **P9** Lighting API · **P10** new materials and asset import · **P11** truthful results
 and the Connect-API doctor · **P12** gameplay LLM API and talking NPCs · **P13** decision models ·
 **P14** orchestrator mode · **P15** roles, tools, skills and prompts as data · **P16** tool review and
-camera v2 · **P17** benchmark touch-ups.
+camera v2 · **P17** benchmark touch-ups · **P18** runtime UI from Lua (UXML and USS) ·
+**P19** honest performance: measurement, budgets, optimization.
 
 A split rung keeps one section: its **Order** line says which half belongs to which milestone.
 
@@ -690,6 +691,14 @@ old ones, and 4.1 maps them:
   the guarded VM costs on Mono and IL2CPP.
 - **Import before export (plan decision D12).** Import brings Roblox authors and their places in;
   export needs a manual Roblox Studio gate per release.
+- **Interfaces are text (plan decision D14).** The owner wants game UI as UXML and USS that Lua can
+  change while the game runs, so the [R4] interpreter became package P18 in M1 and the Block world draws
+  its own hotbar from Lua. The Roblox GUI classes (MVP15) follow as a compatibility layer on the same
+  element factory.
+- **Measured speed (P19).** The owner asked for honest optimization: frame-time and allocation
+  measurements in built players come before any optimization and before any claim.
+- **Multiplayer stays after the Block world** (owner, 2026-11-11): single-player worlds, mods and the
+  demo are finished and measured first.
 - **Decision models joined chat (plan decision D13).** Models that answer typed questions with
   probabilities appeared in September 2026 and one protocol is already spoken by the common runtimes;
   NPC behaviour and a player autopilot need exactly that
@@ -1503,8 +1512,9 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP15 — GUI + remaining input (L) *(the old MVP14 and the rest of the old MVP10)*
 
-- **Order (2026-11-11)**: split. The solo half — the class set, layout, events and `PlayerGui` — is M2; `StarterGui` replication
-  and the multi-client fixtures are M3.
+- **Order (2026-11-11)**: the primary UI path is UXML/USS from Lua (P18, M1; plan decision D14). The class
+  set of this rung becomes a compatibility layer over P18's element factory for imported Roblox scripts:
+  its solo half is M2, and `StarterGui` replication with the multi-client fixtures is M3.
 - **Goal**: tutorial-grade GUI scripts run on host, client and WebGL: `ScreenGui`/`Frame`/`TextLabel`/
   `TextButton`/`ImageLabel`/`TextBox` + `UICorner`/`UIListLayout`, rendered as runtime UI Toolkit
   (UXML/USS interpreted at runtime — RUNTIME-first, the same approach as the Hub).
@@ -1707,9 +1717,9 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   restricted to the solo-eligible subset (multi-client fixtures excluded), plus the client-mode fixture
   set.
 
-### Packages added on 2026-11-11 (P1–P17)
+### Packages added on 2026-11-11 (P1–P19)
 
-Seventeen packages carry what the flagship's play-and-create loop and the agent harness lacked on
+Nineteen packages carry what the flagship's play-and-create loop and the agent harness lacked on
 2026-11-11. Their milestones are in §4.0; each section has the shape of a rung. Three repository surveys
 of release 7.56.0 supplied the "Done so far" facts. Path conventions differ by group, because each group
 lives in different packages: P1–P6 follow this document's rule (relative to `Assets/CoreAIMods/Runtime/`
@@ -2157,8 +2167,7 @@ against the providers.
     again by `CoreAiDemoScenesSmokePlayModeTests`; several demos are built by editor menus
     (`CoreAI/Demos/Build Gameplay Services Demo` and three more), the model for this scene.
   - `Lighting.ClockTime` is a loud stub (`RbxApi/Instances/ClassCatalog.cs:774`), so a day cycle needs
-    the Lighting mapping first; GUI (`ScreenGui`) is MVP15, so a Roblox-shaped hotbar UI is not available
-    in M1.
+    the Lighting mapping first; the Roblox GUI classes (`ScreenGui`) are MVP15, so the M1 hotbar is a P18 screen.
 - **To do**:
   - **Scene**: built by an editor builder menu from the P3 preset (world host, overlay chat, controls,
     look profile), pre-authored so it is visible without Play, with its own mods `storeId`; added to the
@@ -2167,8 +2176,9 @@ against the providers.
     dirt, stone, sand, water), a hotbar of `Enum.Material` blocks on keys 1-9 and the wheel, left click
     breaks and right click places at the crosshair cell (`WorldToCell` on the hit position plus the
     normal), a target `SelectionBox` (the minimal P5 slice), a reach limit, and a creative-mode flag.
-  - **Hotbar view in M1**: a demo HUD element that reads `Player:GetAttribute("SelectedBlock")` and the
-    slot list, so the mod stays Roblox-shaped; it moves to `ScreenGui` when MVP15 lands.
+  - **Hotbar and HUD from Lua**: the mod builds its hotbar, crosshair and block counter as a P18 screen —
+    UXML and USS text inside the mod, slots bound to Lua handlers — so the whole demo, interface included,
+    is Lua.
   - **"Build here"**: the chat turn carries the targeted cell and the player's position (P5's context, M1
     slice), and the skill text gains a block-world recipe (`FillBlock`/`WriteVoxels`, sizes in cells), so
     "a watchtower here" lands at the crosshair, then `/undo` (P3) takes it back.
@@ -3374,6 +3384,134 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
 - **Reuses**: the benchmark package as it is.
 - **Package/flagship**: packages (`com.neoxider.coreaibenchmark`) and the repository tools only.
 
+### P18 — Runtime UI from Lua: UXML and USS (L) *(new 2026-11-11)*
+
+- **Goal** (M1): a mod — and the AI through it — builds, restyles and rebinds the game's interface while
+  the game runs, by handing UXML and USS text to the engine from Lua. The Block world's hotbar, crosshair
+  and HUD are made this way, so the demo is Lua end to end. It works in a built player and in WebGL, and
+  a change of the text shows in the next frame.
+- **Done so far**:
+  - Nothing renders UI for a mod today. The Roblox GUI classes are planned stubs whose workaround reads
+    "build HUD content in 3D space until the GUI subset lands" (`RbxApi/Instances/ClassCatalog.cs:1269`,
+    `:1390-1403`); `PlayerGui` exists as a bare container (`ClassCatalog.cs:591`); the Hub has no Lua API
+    for pages (`Assets/CoreAIHub/README.md`).
+  - The specification exists: `TODO.md` [R4] "Runtime UI (UI Toolkit)" (owner request 2026-07-12). Its
+    source of truth is native UXML/USS text, rendered by a runtime interpreter because UXML/USS import is
+    editor-only; it adds a theme of design tokens, a runtime host, persistence and the
+    `ui_command`/`ui_query` tools. None of it is built.
+  - Reference patterns in the tree: `CoreAiChatPanel` (a UIDocument or an embedded host) and the Hub
+    pages over `HubPageRegistry`.
+  - Roblox itself has no markup. Its UI is a tree of instances (`ScreenGui`, `Frame`, `TextLabel`, ...)
+    created in Studio or from code with `Instance.new`, styled by properties and by `StyleSheet` and
+    `StyleRule` instances (`classes/StyleSheet.yaml`, `classes/StyleRule.yaml` in the mirror). UXML/USS
+    from Lua therefore has no Roblox shape and is CoreAI-only surface (plan decision D14).
+- **To do**:
+  - **UXML parser and element factory** (an engine-free parser, a Unity factory): `VisualElement`,
+    `Label`, `Button`, `Toggle`, `Slider`, `TextField`, `ProgressBar`, `Image`, `ScrollView`, `ListView`
+    and templates. An unknown element becomes a labelled placeholder and is reported, so the author can
+    correct it.
+  - **USS subset interpreter**: selectors (type, `.class`, `#name`, descendant and child combinators,
+    `:hover`, `:active`, `:focus`, `:disabled`), specificity and cascade, custom properties (`var()`),
+    and the layout, box, text, colour, background, border, opacity and transition properties. Every
+    unsupported rule is reported with its line; nothing is dropped silently.
+  - **Runtime host**: screens with show, hide, stack and sort order; one theme of design tokens whose
+    values can change at runtime; a focused text field raises the P1 input-focus state; a host game can
+    replace the host or switch it off.
+  - **Lua surface** (CoreAI-only: a DEV entry, flagged by the MVP13 export lint, behind a `Ui`
+    capability): create a screen from UXML and USS text; replace either text live, keeping element state
+    where names match; query elements by selector; read and write text, value, visibility, classes and
+    single style properties; connect `Clicked`, `ValueChanged` and `Submitted` as ordinary signals. A
+    screen belongs to its mod: unload removes it and hot reload rebuilds it. Budgets cap screens,
+    elements and text size per mod. The service and member names are fixed in a design note before code.
+  - **Skill text**: a UI section in the Rbx API skill — the supported UXML elements and USS subset, the
+    Lua calls and one hotbar example — so the AI writes interfaces the interpreter accepts.
+  - **Later, on the same factory**: the `ui_command`/`ui_query` tools and the persisted, AI-authored
+    screens of [R4] (M2, with P16), and the Roblox GUI classes of MVP15 as a compatibility layer for
+    imported Roblox scripts.
+- **Test**: PT (UXML parsing, selector matching, specificity, `var()` resolution, unsupported-rule
+  reports); EM (factory output for every supported element; a parity test of the interpreter against the
+  editor importer on the same source for the supported subset); PL (create, query, set, events, unload
+  cleanup, budgets, the capability refusal with its twin); PM `FastNoLlm` (a hotbar screen renders, a
+  click reaches its Lua handler, a live USS swap restyles without rebuilding the tree, typing in a text
+  field does not move the character); MS (recorded captures in the Editor and a WebGL player).
+- **DoD**:
+  - The Block world hotbar, crosshair and counter are one Lua-made screen; no C# in the demo draws UI.
+  - Replacing the USS text changes the look in the next frame and keeps the selected slot; replacing the
+    UXML keeps the values of elements whose names match.
+  - Every supported USS property matches the editor importer in the parity test; an unsupported rule
+    produces one report naming its line (twin: a supported rule produces none).
+  - Unloading the mod removes its screens and handlers: zero live elements and zero connections remain.
+  - A mod without the `Ui` capability is refused with a capability error (twin: granted, it renders).
+  - A screen of 200 elements builds in 10 ms or less and allocates nothing per frame while idle, measured
+    by the P19 harness.
+- **Reuses**: the MVP2 signals and scheduler, the mod lifecycle (unload, hot reload), P1 (input focus),
+  the [R4] specification; MVP15 and the [R4] tools build on it.
+- **Package/flagship**: packages: the parser, the interpreter, the host, the Lua surface and the theme
+  tokens; the host and the theme are replaceable. Demo content: the Block world screens. Flagship: the
+  visual theme.
+
+### P19 — Honest performance: measurement, budgets, optimization (L) *(new 2026-11-11)*
+
+- **Goal** (M1): single-player worlds, mods and the Block world run without hitches, and every claim
+  about speed is a published measurement — frame time, garbage per frame and Lua throughput, taken in
+  built players, with the method next to the number.
+- **Done so far**:
+  - `tools/vmbench` and `tools/vmbench/RESULTS.md` (2026-08-31): the guarded Lua VM runs 24.4 M
+    instructions/s on CoreCLR and 158 k on Mono at the production hook batch of 4 — 1.26% of the raw Mono
+    VM — and 3.6 M at a batch of 128. IL2CPP and WebGL are not measured (spike S1).
+  - `tools/ScaleHarness` and `dev-docs/SCALE_CHARACTERIZATION.md` (loopback, CoreCLR only).
+  - Allocation guards exist in places: `Assets/CoreAI/Tests/EditMode/CoreHotPathAuditEditModeTests.cs`,
+    `Scripting/LuaCs/LuaCsAllocationBudget.cs`, and the zero-allocation guard hot path of 6.3.3–6.3.4.
+  - Recorded and not re-verified since: the 2026-07-24 performance audit in `dev-docs/BACKLOG.md`
+    ("Performance") — per-call guard allocations, per-event dispatch arrays, boxing in var-args
+    marshalling, a `JObject` per SSE token, a synchronous camera readback.
+  - Known structural costs (repository survey 2026-11-11): one GameObject, renderer and collider per
+    Part with a per-part property block that defeats the SRP Batcher; about 99 MB of material textures
+    loaded eagerly; a whole-world capture and a durable write before every AI edit;
+    `ProcessPreSimulation` visiting every instance.
+  - No frame-time or garbage measurement of a running world exists, and no performance regression suite
+    (F-20 is planned in MVP19).
+- **To do**:
+  - **Measurement first**: a harness of reference scenes — an idle world, the bundled sample mods
+    running, 2,048 and 16,384 Parts, the Block world reference — that records frame-time percentiles,
+    garbage allocated per frame, Lua instructions per second and per-resume cost, draw calls and
+    batches, and memory, into a JSON report and a dated table in `dev-docs/`. It runs in the Editor, a
+    Standalone Mono player, an IL2CPP player and a WebGL player.
+  - **Spike S1 inside the harness**: guarded VM throughput per hook batch on Mono, IL2CPP and WebGL; it
+    decides the adaptive batch of plan decision D8 (a).
+  - **Budgets as tests**: zero garbage per frame in steady state for an idle world, a Heartbeat handler
+    that writes part properties, a signal fire, input events and an idle chat overlay; a byte budget for
+    a block place or break; frame-time budgets per reference scene. Each budget is a test that fails
+    with the measured number.
+  - **Optimization by measured rank**, never by guess: the guard batch with a bounded allocation
+    exposure; the remaining marshalling and dispatch allocations; SRP-Batcher-compatible Part rendering;
+    dirty-only pre-simulation; the SSE token parser; the edit gate with P3 and lazy textures with P8.
+    Each pass records before and after on the same harness.
+  - **Honest reporting**: every number names the build type, machine, scene and commit; a regression is
+    reported, not averaged away; nothing about speed is claimed in a README without a row in the table;
+    where Roblox can be measured on the same Lua micro-benchmarks (`dev-docs/LUA_VM_BENCHMARK_PLAN.md`)
+    the comparison is printed whichever way it falls.
+  - **Regression suite** (the F-20 item pulled forward): the portable part runs in CI; the player part
+    is an explicit run recorded per release.
+- **Test**: PT (the harness maths and report format; VM throughput on CoreCLR); EM (the allocation
+  budgets on the hot paths, each with a negative twin that allocates and fails); PM (the reference scenes
+  with frame and garbage counters); MS (the Standalone, IL2CPP and WebGL runs, their reports stored).
+- **DoD**:
+  - The dated table has a row for every reference scene on Editor, Standalone Mono and WebGL (IL2CPP when
+    a build target is available), each with frame-time p50/p95/p99, garbage per frame and Lua throughput.
+  - Steady-state garbage is 0 B per frame in the idle-world and Heartbeat scenes in a Standalone player
+    (twin: a handler that allocates is caught by the same test).
+  - Guarded Lua throughput on Mono improves by a recorded factor with the allocation bound intact: an
+    allocation bomb still trips within the documented byte exposure (twin).
+  - The 16,384-Part scene's batch count shows SRP batching, and its frame time is recorded before and
+    after.
+  - The Block world reference holds its P4 frame-rate targets on the reference desktop and in WebGL.
+  - A change that breaks a budget fails a test that prints the measured value.
+- **Reuses**: `tools/vmbench`, `tools/ScaleHarness`, the Statistics page, P3, P4 and P8; MVP9 and MVP19
+  keep the scale and device work.
+- **Package/flagship**: packages: the harness, the budgets and the fixes; the reference scenes are
+  repository test content. Flagship: its own content budgets.
+
 ### Dropped: the old MVP7 (editor tooling)
 
 Dropped on 2026-09-24. Under the RUNTIME-first rule and the Studio-in-game goal, the runtime Studio
@@ -4429,8 +4567,9 @@ D9 = the clock model), which keep their names.
 | D11 | Scale target (revises D5) | (a) keep 100 players per room frozen as the gated goal; (b) keep the numbers as the aspiration and choose the gated room size after spike S1 | **(b)** | The guarded VM on Mono is estimated at about 63 ms per frame for 100 players against a 33 ms budget and is unmeasured on IL2CPP; Roblox runs 200 to 700 players per server, so scale is not where the flagship differs | MVP9, M3 |
 | D12 | Roblox interchange order | (a) both directions gate one release (the MVP14 DoD of 2026-09-24); (b) import first, export later and not a release gate | **(b)** | Import is the on-ramp for Roblox authors; export needs a manual Roblox Studio gate per release. The owner's round-trip requirement stands as the goal | MVP14 |
 | D13 | Model kinds | (a) chat only; (b) decision models as a first-class kind next to chat, behind their own seam | **(b)** | NPC behaviour and a player autopilot need fast typed decisions with probabilities; one protocol (`/v1/systemone`) is spoken by TypeSafe, OpenRouter, llama.cpp, Ollama and LM Studio, and a logprob fallback covers ordinary chat endpoints (`dev-docs/COMPETITIVE_SCAN_2026-11-11.md` §4) | P13 |
+| D14 | How game UI is authored | (a) the Roblox GUI classes only (`ScreenGui`, `Frame`, ...); (b) UXML/USS text from Lua only; (c) UXML/USS text from Lua as the primary path, with the Roblox GUI classes later as a compatibility layer on the same element factory | **(c)** | Owner decision: interfaces are UXML and USS, changeable from Lua while the game runs. Models write this markup well, one theme keeps screens consistent, and a text change is a live edit. Roblox has no markup (instances plus `StyleSheet` rules), so the surface is CoreAI-only and the GUI classes stay for imported Roblox scripts | P18, MVP15 |
 
-D9–D13 were decided on 2026-11-11 at the owner's request; D2 and D5 stay in the table as the record of
+D9–D14 were decided on 2026-11-11 at the owner's request; D2 and D5 stay in the table as the record of
 what they replaced.
 
 ### 8.2 Earlier questions

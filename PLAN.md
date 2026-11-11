@@ -9,7 +9,7 @@ The sections below this one are history: the repair wave they track shipped as 7
 **The plan was re-ordered at the owner's request.** The flagship is a realtime play-and-create game with
 no Studio; work is ordered by demo-gated milestones M0–M4 with parallel packages; the room size is
 chosen after spike S1; Roblox import precedes export; decision models are a model kind next to chat
-(plan decisions D9–D13). The order of record is `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4.0, the
+(plan decisions D9–D14). The order of record is `Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4.0, the
 one-screen table is `Docs/ROADMAP.md` §4, the evidence is `dev-docs/COMPETITIVE_SCAN_2026-11-11.md`, and
 open work is filed in `TODO.md` under "Plan of record 2026-11-11".
 
@@ -28,37 +28,42 @@ open work is filed in `TODO.md` under "Plan of record 2026-11-11".
 ### Next steps
 
 1. **M0 Ready to play** (overlaps the start of M1): the one-click play-and-create world (P3), truthful
-   results and a loud failure when a module is missing (P11 stage 1), spikes S1 and S2, the open MVP3
-   player checks, the live-model run once the owner supplies a valid key.
-2. **M1 Block world**, three tracks in parallel:
-   - play: P1 (controls, camera, fly) → P2 (in-world chat) → P4 (voxel Terrain) → P6 (the demo);
+   results and a loud failure when a module is missing (P11 stage 1), the open MVP3 player checks, the
+   live-model run once the owner supplies a valid key.
+2. **M1 Block world — single-player, finished and measured.** The owner decided on 2026-11-11 that
+   multiplayer comes after the demo, that game UI is UXML/USS text from Lua (P18, plan decision D14) and
+   that optimization starts from honest measurements (P19). Tracks:
+   - play: P1 (controls, camera, fly) → P2 (in-world chat) → P4 (voxel Terrain) → P6 (the demo), with P3
+     (the edit loop) alongside;
    - look: P7 (default look, Hub Graphics page) → P8 stage 1 (Plastic detail, water, glass);
-   - harness: P12 stage 1 (talking NPCs) and P13 (decision models, local `d1-2B` through a
-     `llama-server` sidecar);
-   - MVP4 runs alongside on the mods runtime.
-3. **M2 Whole games from chat**, then **M3 Together** and **M4 Platform** as listed in §4.0.
+   - harness: P11 stage 1, then P12 stage 1 (talking NPCs) and P13 (decision models, local `d1-2B`
+     through a `llama-server` sidecar);
+   - interface: P18 — the interpreter and host first, the Lua surface after P1's input-focus port;
+   - performance: P19 — the harness and the first table, then optimization by measured rank;
+   - MVP4 alongside on the mods runtime.
+   First wave, started 2026-11-11: P1, P7, P11 stage 1, the P18 interpreter and the P19 harness.
+3. **M2 Whole games from chat**, **M3 Together** and **M4 Platform** as listed in §4.0; the order of M2
+   and M3 is confirmed after M1.
 
-### Estimates (2026-11-11)
+### Estimates (2026-11-11, in AI working time)
 
-Calendar ranges, not promises. Basis: five rungs landed between 2026-07-22 and 2026-09-25, about two
-weeks per rung in sequence; the milestones assume up to four packages in parallel and one Unity
-verification pass per package.
+The owner asked for estimates in AI development time. An agent-day is one day of active work by one
+agent. Wall-clock assumes three or four agents in parallel with root integrating, one audit round per
+package and acceptance by demo; with the three audit rounds per rung used through 7.47.0, multiply by
+1.5 to 2. These are ranges, not promises.
 
-| Milestone | Estimate | Running total |
+| Milestone | Agent-days | Wall-clock at 3–4 agents |
 |---|---|---|
-| M0 Ready to play | about 1 week, overlapping M1 | — |
-| M1 Block world | 5–7 weeks; a first playable slice (walk, fly, in-world chat, default look, on Parts) after 2–3 | about 1.5 months |
-| M2 Whole games from chat | 7–9 weeks | 3.5–4 months |
-| M3 Together | 6–8 weeks | about 5.5 months |
-| M4 Platform | 8–12 weeks | 8–9 months |
-
-The package sizes sum to about 16 agent-weeks for M1 and about 22 for M2; the ranges assume four
-parallel tracks and add a fifth to a third for integration and verification. The longest M1 track is
-P3 → P4 → P6 (the edit loop, voxel Terrain, the demo).
+| M0 + M1: the single-player Block world with UI from Lua and the performance baseline | about 43 | 4–5 weeks; a first playable slice after about 1.5 |
+| M2 Whole games from chat | about 37 | 3–4 weeks |
+| M3 Together | about 19 | about 3 weeks (the network rungs are sequential) |
+| M4 Platform | about 30 | 4–5 weeks |
+| Total | about 130 | 3.5–4.5 months |
 
 What moves the ranges: Unity runs are serial on one settled tree; live-model checks need a valid key and
-provider limits; look and feel need the owner's eyes; IL2CPP, WebGL and device checks need builds; and
-every out-of-plan release costs about a week of the plan (the release rule caps them).
+provider limits; look and feel need the owner's eyes; IL2CPP, WebGL and device checks need builds;
+network debugging across two processes has never been done in this repository; and every out-of-plan
+release costs days of the plan (the release rule caps them).
 
 ### Working rules for this plan
 

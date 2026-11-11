@@ -80,8 +80,8 @@
 ## Plan of record 2026-11-11: open work by milestone
 
 The plan was re-ordered on 2026-11-11 (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4.0, plan decisions
-D9–D13): demo-gated milestones M0–M4, the existing rungs under their MVPn ids and seventeen new packages
-P1–P17. This section files the open work of M0 and M1; later milestones are filed when they start. The
+D9–D14): demo-gated milestones M0–M4, the existing rungs under their MVPn ids and nineteen new packages
+P1–P19. This section files the open work of M0 and M1; later milestones are filed when they start. The
 sections below keep their items under the rung names they were written for.
 
 ### Owner decisions (each has a default the work proceeds with; the owner may override)
@@ -260,6 +260,34 @@ Harness (P12 stage 1, P13):
 - [ ] **NPC brain and player autopilot on decisions (P13).** *Owner:* Decisions + demo. *Plan:* event and
       slow-tick callers, never per frame, a confidence threshold with a deterministic fallback, autopilot
       through `Humanoid:MoveTo` with hand-back on input; PM tests with a scripted client.
+
+UI from Lua (P18) and performance (P19):
+
+- [ ] **UXML parser, element factory and USS subset interpreter (P18).** *Owner:* runtime UI. *Plan:* an
+      engine-free UXML parser and USS subset (selectors, cascade, `var()`, the documented properties)
+      with a Unity element factory; unknown elements and unsupported rules are reported with their line;
+      a parity test against the editor importer on the same source.
+- [ ] **Runtime UI host and theme tokens (P18).** *Owner:* runtime UI. *Plan:* screens with show, hide,
+      stack and sort order, one theme of design tokens changeable at runtime, replaceable or switched
+      off by a host; a focused text field raises the P1 input-focus state.
+- [ ] **Lua surface for screens (P18).** *Owner:* Rbx API. *Plan:* a design note fixes the CoreAI-only
+      service and member names first; then create, live-replace, query, set and event signals behind a
+      `Ui` capability, screens owned by their mod (removed on unload, rebuilt on hot reload), per-mod
+      budgets, the DEV entry and the skill section. Starts after P1's input-focus port lands.
+- [ ] **Performance harness and the first dated table (P19).** *Owner:* performance. *Plan:* reference
+      scenes (idle world, bundled sample mods, 2,048 and 16,384 Parts, later the Block world) recording
+      frame-time percentiles, garbage per frame, Lua throughput, batches and memory into JSON and a table
+      in `dev-docs/`; Editor and Standalone Mono first, WebGL and IL2CPP when their builds exist.
+- [ ] **Spike S1 inside the harness (P19).** *Owner:* Lua runtime + performance. *Plan:* guarded VM
+      throughput per hook batch on Mono, IL2CPP and WebGL; this is the "Spike S1" item below, run through
+      the harness; it decides the adaptive batch.
+- [ ] **Allocation and frame budgets as tests (P19).** *Owner:* performance. *Plan:* zero garbage per
+      frame for the idle world, a Heartbeat handler writing part properties, a signal fire, input events
+      and the idle chat overlay; each budget is a test with an allocating negative twin.
+- [ ] **Optimization passes by measured rank (P19).** *Owner:* performance. *Plan:* take the top rows of
+      the table — expected candidates are the guard batch, marshalling and dispatch allocations, the
+      per-part property block that defeats the SRP Batcher and the every-instance pre-simulation pass —
+      and record before and after for each on the same harness.
 
 ### Existing items these packages absorb or make stale
 
@@ -3291,6 +3319,8 @@ Open:
 
 ### [R4] Runtime UI (UI Toolkit) — AI & mods build in-game interfaces (owner request 2026-07-12)
 
+> **Re-prioritized 2026-11-11:** the interpreter, the host and a Lua surface are package P18 in M1 (plan
+> decision D14); the `ui_command`/`ui_query` tools and the persisted AI-authored screens follow in M2.
 > **Re-prioritized 2026-09-24:** R4 is no longer the next minor — the MVP ladder puts multiplayer first, and R4's
 > runtime element factory is to be shared with the GUI rung (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §MVP15). The
 > spec below is unchanged. The agent (and Lua mods) must be able to
