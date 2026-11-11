@@ -228,6 +228,39 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         }
 
         [Test]
+        public void P6_Hud_TheVeil_CoversTheScreen_WhileTheFirstViewIsBuilt_AndCountsItsColumns()
+        {
+            FakeRbxUiBackend.FakeElement veil = Screen.Find("veil");
+
+            _world.SetAttribute("BlockWorldOpeningColumns", 4d);
+            _world.SetAttribute("BlockWorldColumns", 1d);
+            _world.SetAttribute("BlockWorldOpened", false);
+            _world.Frame();
+
+            Assert.IsFalse(veil.Classes.Contains("is-hidden"), "a new player waits behind the veil");
+            Assert.AreEqual("The land around you: 1 of 4", Screen.Find("veilprogress").Text);
+            _world.SetAttribute("BlockWorldColumns", 3d);
+            _world.Frame();
+            Assert.AreEqual("The land around you: 3 of 4", Screen.Find("veilprogress").Text);
+
+            _world.SetAttribute("BlockWorldOpened", true);
+            _world.Frame();
+
+            Assert.IsTrue(veil.Classes.Contains("is-hidden"), "the built first view lifts it");
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_Hud_WithoutAWorldThatHoldsThePlayer_ThereIsNoVeil_NegativeTwin()
+        {
+            _world.Frame(30);
+
+            Assert.IsNull(_world.Attribute("BlockWorldOpened"), "no world mod runs here");
+            Assert.IsTrue(Screen.Find("veil").Classes.Contains("is-hidden"),
+                "only a world that says it is building the first view raises the veil");
+        }
+
+        [Test]
         public void P6_Hud_ANotice_ShowsForFourSeconds()
         {
             FakeRbxUiBackend.FakeElement notice = Screen.Find("notice");

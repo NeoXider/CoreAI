@@ -362,7 +362,8 @@ namespace CoreAI.Tests.EditMode
                 Capabilities = source.Capabilities,
                 Active = source.Active,
                 UpdateAvailable = source.UpdateAvailable,
-                Entry = source.Entry
+                Entry = source.Entry,
+                Context = source.Context
             };
         }
 

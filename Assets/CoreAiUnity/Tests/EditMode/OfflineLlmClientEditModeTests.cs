@@ -120,6 +120,52 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task CompleteAsync_NpcRole_FailsAsNotConfigured_SoTheNpcSpeaksItsOwnLine()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            OfflineLlmClient client = new(settings);
+            LlmCompletionRequest request = new()
+            {
+                AgentRoleId = BuiltInAgentRoleIds.AiNpc,
+                UserPayload = "Player: hello"
+            };
+
+            LlmCompletionResult result = await client.CompleteAsync(request);
+            LlmStreamChunk last = null;
+            await foreach (LlmStreamChunk chunk in ((ILlmClient)client).CompleteStreamingAsync(request))
+            {
+                last = chunk;
+            }
+
+            Assert.IsFalse(result.Ok, "an NPC never gets the offline system line as its answer");
+            Assert.AreEqual(LlmErrorCode.NotConfigured, result.ErrorCode, "a configuration fault: never retried");
+            StringAssert.DoesNotContain("Offline mode", result.Content ?? "");
+            Assert.IsNotNull(last);
+            Assert.AreEqual(LlmErrorCode.NotConfigured, last.ErrorCode, "the streamed turn fails the same way");
+
+            Object.DestroyImmediate(settings);
+        }
+
+        [Test]
+        public async Task CompleteAsync_NpcRole_NamedForTheCustomLine_GetsIt_NegativeTwin()
+        {
+            CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
+            settings.ConfigureOffline(true, "The villager only shrugs.", BuiltInAgentRoleIds.AiNpc);
+            OfflineLlmClient client = new(settings);
+
+            LlmCompletionResult result = await client.CompleteAsync(new LlmCompletionRequest
+            {
+                AgentRoleId = BuiltInAgentRoleIds.AiNpc,
+                UserPayload = "Player: hello"
+            });
+
+            Assert.IsTrue(result.Ok, "a game that names the NPC role chose this line for its NPCs");
+            Assert.AreEqual("The villager only shrugs.", result.Content);
+
+            Object.DestroyImmediate(settings);
+        }
+
+        [Test]
         public async Task CompleteAsync_CustomResponse_ShouldReturnCustomText()
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();

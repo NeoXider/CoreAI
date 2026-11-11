@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Text;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Mods.Folders;
+using CoreAI.Mods.Rbx.Instances.Scripts;
 
 namespace CoreAI.Ai.Hub
 {
@@ -113,6 +114,15 @@ namespace CoreAI.Ai.Hub
 
         /// <summary>Unloads a loaded mod. Returns false when it was not loaded.</summary>
         protected abstract bool RuntimeUnload(string id);
+
+        /// <summary>
+        /// Ends the binding of a deleted mod's script instance (MVP4 step C1-5): destroyed when it still sits at its
+        /// default placement with nothing inside it, unbound otherwise. Runs before the stored package is deleted,
+        /// which tells the placement's folder. The default does nothing, for a runtime without script instances.
+        /// </summary>
+        protected virtual void RuntimeReleaseScript(string id)
+        {
+        }
 
         /// <summary>Adapters call this from their runtime load/unload events so the UI live-refreshes.</summary>
         protected void RaiseChanged()
@@ -233,7 +243,11 @@ namespace CoreAI.Ai.Hub
                     StoredActive = manifest.Active,
                     SuspendedAfterBudgetTrips = manifest.SuspendedAfterBudgetTrips,
                     LoadOrder = manifest.LoadOrder,
-                    IsStored = true
+                    IsStored = true,
+                    Context = StoredContext(manifest.Context),
+                    RunState = ScriptRunRules.ToWireName(manifest.SuspendedAfterBudgetTrips
+                        ? ScriptRunState.Suspended
+                        : ScriptRunState.Unloaded)
                 };
             }
 
@@ -256,6 +270,15 @@ namespace CoreAI.Ai.Hub
                 record.Timers = info.Timers;
                 record.Errors = info.Errors;
                 record.Capabilities = info.Capabilities.ToString();
+                if (info.Context.Length > 0)
+                {
+                    record.Context = info.Context;
+                }
+
+                record.RunState = info.RunState.Length > 0
+                    ? info.RunState
+                    : ScriptRunRules.ToWireName(ScriptRunState.Running);
+                record.ScriptPath = info.ScriptPath;
             }
 
             List<HubModRecord> result = new(byId.Count);
@@ -444,6 +467,7 @@ namespace CoreAI.Ai.Hub
             _pendingSaves.TryRemove(modId, out _);
             try
             {
+                RuntimeReleaseScript(modId);
                 if (_store == null)
                 {
                     return true;
@@ -613,6 +637,15 @@ namespace CoreAI.Ai.Hub
             return HubModPersistenceStatus.Unconfirmed;
         }
 
+        /// <summary>The display spelling of a stored manifest's context: <c>legacy</c> when it declares none or none it knows.</summary>
+        private static string StoredContext(string context)
+        {
+            return ScriptContexts.ToDisplayName(
+                ScriptContexts.TryParseDeclared(context, out ScriptContext parsed, out string _)
+                    ? parsed
+                    : ScriptContext.Legacy);
+        }
+
         /// <summary>Fills empty display fields from the mod's <c>@coreai</c> header (parsed from its source).</summary>
         private void EnrichFromHeader(HubModRecord record)
         {
@@ -660,6 +693,11 @@ namespace CoreAI.Ai.Hub
             if (string.IsNullOrWhiteSpace(record.Capabilities))
             {
                 record.Capabilities = header.Capabilities ?? "";
+            }
+
+            if (string.IsNullOrWhiteSpace(record.Context))
+            {
+                record.Context = StoredContext(header.Context);
             }
         }
 

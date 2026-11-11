@@ -29,6 +29,27 @@ namespace CoreAI.Ai
         /// <c>/</c>-separated path; empty is the top level). Runtimes that do not read headers report empty.
         /// </summary>
         public string Category = "";
+
+        /// <summary>
+        /// The script context the run was started with (MVP4): <c>legacy</c> for a mod that declares none, else
+        /// <c>server</c> or <c>client</c>. Runtimes without script contexts report empty.
+        /// </summary>
+        public string Context = "";
+
+        /// <summary>The class of the instance <c>script</c> is (<c>Script</c>, <c>LocalScript</c>); empty without one.</summary>
+        public string ScriptClassName = "";
+
+        /// <summary>
+        /// Where <c>script</c> lives, as <c>Instance:GetFullName()</c> spells it (<c>ServerScriptService.door</c>);
+        /// empty without the Roblox surface or before the chunk made it.
+        /// </summary>
+        public string ScriptPath = "";
+
+        /// <summary>
+        /// The run state (MVP4 SC-9) in its stable spelling: <c>running</c>, <c>quarantined</c> or <c>suspended</c> for
+        /// a loaded mod. Runtimes without script contexts report empty.
+        /// </summary>
+        public string RunState = "";
     }
 
     /// <summary>

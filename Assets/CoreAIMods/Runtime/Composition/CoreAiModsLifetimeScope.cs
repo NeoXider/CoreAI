@@ -113,6 +113,15 @@ namespace CoreAI.Composition
         [SerializeField]
         private CoreAiPlayerCameraSettings playerCamera = new();
 
+        [Header("Self-repair and mod console")]
+        [Tooltip("Runtime self-repair of failing AI-written mods and the in-game mod console (F8, /console). "
+                 + "See Docs/CoreAIMods/MOD_CONSOLE.md.")]
+        [SerializeField]
+        private CoreAiModSelfRepairSettings selfRepair = new();
+
+        /// <summary>The self-repair and console settings this scope registers when it builds.</summary>
+        public CoreAiModSelfRepairSettings SelfRepair => selfRepair ??= new CoreAiModSelfRepairSettings();
+
         [System.NonSerialized]
         private IRbxWorldPackageStore runtimeWorldPackageStore;
 
@@ -272,6 +281,8 @@ namespace CoreAI.Composition
             {
                 builder.RegisterCoreAiWorldChatCommands();
             }
+
+            builder.RegisterCoreAiModSelfRepair(SelfRepair);
         }
 
         private System.Action<LuaCsApiRegistry, LuaCapabilities> CreateAdditionalGameplayBindings()

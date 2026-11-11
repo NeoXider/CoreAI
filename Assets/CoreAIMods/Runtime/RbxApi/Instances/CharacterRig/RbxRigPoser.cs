@@ -230,11 +230,12 @@ namespace CoreAI.Mods.Rbx.Instances.CharacterRig
                     break;
                 default:
                 {
+                    // WHY no spread: an R6 arm hangs flush against the torso, and any spread at the shoulder
+                    // opens a wedge under the armpit that reads as an A-pose; the idle lives in the sway.
                     double breath = Math.Sin(_time * TwoPi / 3.2d);
                     double sway = Math.Sin(_time * TwoPi / 4.6d);
                     armRight = 0.05d * sway;
                     armLeft = -0.05d * sway;
-                    armSpread = 0.06d + 0.03d * breath;
                     bob = 0.035d * breath;
                     nod = 0.025d * breath;
                     break;

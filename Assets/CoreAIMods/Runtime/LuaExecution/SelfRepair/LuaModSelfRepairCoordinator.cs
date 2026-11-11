@@ -535,7 +535,7 @@ namespace CoreAI.Ai.SelfRepair
                 LuaModRepairTurnRequest request = BuildRequestLocked(incident, incident.Attempt + 1);
                 RunningTurn turn = new() { ModId = id, StartedAt = now };
 
-                // WHY the attempt begins before the runner is called: a runner may run the whole turn, the model's
+                // WHY: the attempt begins before the runner is called: a runner may run the whole turn, the model's
                 // reload included, inside TryStart, and that reload must find the mod in its running attempt.
                 _policy.TryBeginAttempt(id, now, out int attempt);
                 _running = turn;

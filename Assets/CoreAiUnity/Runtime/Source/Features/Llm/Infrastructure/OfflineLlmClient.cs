@@ -21,6 +21,9 @@ namespace CoreAI.Infrastructure.Llm
             "No AI model is set up, so the AI cannot build or script anything yet. " +
             "Choose a model in the Hub (Settings), then ask again.";
 
+        /// <summary>The error an NPC turn fails with when no model is set up.</summary>
+        public const string NpcNoModelError = "No AI model is set up, so an NPC has nothing generated to say.";
+
         public OfflineLlmClient(CoreAISettingsAsset settings)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -42,6 +45,20 @@ namespace CoreAI.Infrastructure.Llm
             string response;
             string roleId = request.AgentRoleId ?? "";
 
+            // WHY a failure for an NPC: an NPC says whatever text it is given, and the offline line is a system
+            // message, not something a character says. A failed turn makes the NPC speak its own in-character
+            // fallback line instead. A game that names the NPC role for its custom offline line still gets it.
+            if (string.Equals(roleId, BuiltInAgentRoleIds.AiNpc, StringComparison.OrdinalIgnoreCase)
+                && !NamesRoleForCustomResponse(roleId))
+            {
+                return Task.FromResult(new LlmCompletionResult
+                {
+                    Ok = false,
+                    ErrorCode = LlmErrorCode.NotConfigured,
+                    Error = NpcNoModelError
+                });
+            }
+
             if (_settings.ShouldUseOfflineCustomResponse(roleId))
             {
                 response = _settings.OfflineCustomResponse;
@@ -60,6 +77,26 @@ namespace CoreAI.Infrastructure.Llm
                 Ok = true,
                 Content = response
             });
+        }
+
+        /// <summary>True when the custom offline line is on and its role list names <paramref name="roleId"/>
+        /// itself, not through the <c>*</c> wildcard.</summary>
+        private bool NamesRoleForCustomResponse(string roleId)
+        {
+            if (!_settings.OfflineUseCustomResponse)
+            {
+                return false;
+            }
+
+            foreach (string role in _settings.OfflineCustomResponseRoles.Split(','))
+            {
+                if (role.Trim().Equals(roleId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static string GetStructuredOfflineStub(LlmCompletionRequest request)

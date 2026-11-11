@@ -28,9 +28,11 @@ namespace CoreAI.Mods.WorldPackages
     public static class RbxWorldPackageSerializer
     {
         /// <summary>
-        /// The format version <see cref="Capture(RbxWorldPackageCaptureContext)"/> writes. It stays 1 until the mod
-        /// runtime binds sources to script instances (MVP4 step C1): a version 2 package written before that would
-        /// declare every mod detached. The reader accepts every one of <see cref="SupportedFormatVersions"/>.
+        /// The format version <see cref="Capture(RbxWorldPackageCaptureContext)"/> writes for a world that needs no
+        /// script bindings, which is every world whose mods declare nothing (MVP4 rule R4): such a world is written
+        /// byte for byte as before script instances existed. A world with a saved script instance or a mod that
+        /// declares a context is written as <see cref="ScriptBindingsFormatVersion"/>
+        /// (<see cref="FormatVersionFor"/>). The reader accepts every one of <see cref="SupportedFormatVersions"/>.
         /// </summary>
         public const int CurrentFormatVersion = LegacyScriptPlacementFormatVersion;
 
@@ -170,25 +172,53 @@ namespace CoreAI.Mods.WorldPackages
 
         private const string SelectionBoxClassName = "SelectionBox";
 
-        /// <summary>Captures the supported world-owned DataModel projection plus settings and mods.</summary>
+        /// <summary>
+        /// Captures the supported world-owned DataModel projection plus settings and mods, in the lowest format version
+        /// that can express them (MVP4 rule R4, <see cref="FormatVersionFor"/>).
+        /// </summary>
         public static RbxWorldPackagePayload Capture(RbxWorldPackageCaptureContext context)
         {
-            return Capture(context, CurrentFormatVersion);
+            return CaptureCore(context, null);
         }
 
         /// <summary>
         /// Captures the world as <paramref name="formatVersion"/> writes it: version 1 drops every script block,
-        /// version 2 keeps them with the SC-7 repairs (<see cref="ProjectScriptState"/>). Production capture is
-        /// <see cref="CurrentFormatVersion"/>; the other version is for tests until step C1 raises it.
+        /// version 2 keeps them with the SC-7 repairs (<see cref="ProjectScriptState"/>). Production capture chooses
+        /// the version itself; this overload is for tests that need one of them.
         /// </summary>
         internal static RbxWorldPackagePayload Capture(RbxWorldPackageCaptureContext context, int formatVersion)
+        {
+            RequireSupportedFormatVersion(formatVersion);
+            return CaptureCore(context, formatVersion);
+        }
+
+        /// <summary>
+        /// The format version a world needs (MVP4 rule R4): <see cref="ScriptBindingsFormatVersion"/> when its projected
+        /// tree holds a script instance or one of its mods declares a context, otherwise
+        /// <see cref="LegacyScriptPlacementFormatVersion"/>, so a world of mods that declare nothing stays
+        /// byte-identical to one written before script instances existed.
+        /// </summary>
+        internal static int FormatVersionFor(InstanceTreeSnapshot projectedTree, IReadOnlyList<RbxWorldModSource> mods)
+        {
+            List<string> contexts = new(mods.Count);
+            foreach (RbxWorldModSource mod in mods)
+            {
+                contexts.Add(mod.Manifest?.Context);
+            }
+
+            return ScriptPackageFormat.RequiresScriptBindings(projectedTree.Instances, contexts)
+                ? ScriptBindingsFormatVersion
+                : LegacyScriptPlacementFormatVersion;
+        }
+
+        private static RbxWorldPackagePayload CaptureCore(RbxWorldPackageCaptureContext context,
+            int? requestedFormatVersion)
         {
             if (context == null)
             {
                 throw new ArgumentNullException(nameof(context));
             }
 
-            RequireSupportedFormatVersion(formatVersion);
             if (!context.Registry.TryGet(context.Game.Id, out RbxInstance registeredGame)
                 || !ReferenceEquals(registeredGame, context.Game))
             {
@@ -257,6 +287,7 @@ namespace CoreAI.Mods.WorldPackages
                 ? ProjectFiniteCameraCFrame(context.CameraRig.GetCFrame(), tree, diagnostics)
                 : (RbxCFrame?)null;
             IReadOnlyList<RbxWorldModSource> mods = CaptureMods(context.ModSourceStore, diagnostics);
+            int formatVersion = requestedFormatVersion ?? FormatVersionFor(tree, mods);
             ProjectScriptState(capturedTree, tree, context.Registry, mods, formatVersion, diagnostics);
             RbxWorldPackagePayload payload = new(
                 capturedAtUtc,

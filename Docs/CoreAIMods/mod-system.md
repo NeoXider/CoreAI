@@ -84,9 +84,16 @@ Where `script` lives:
 - A legacy mod reloaded with a header that declares a context hands what its legacy folder held to the new
   instance (a clean reload removes what the mod itself owned there, as its startup objects) and the legacy
   folder goes.
-- Saving the binding with the world (package format version 2) arrives with MVP4 step C1-4. Until then a
-  saved world keeps the instance as a plain unbound script; the next load of the mod binds it again when
-  it still sits at its placement under the mod's name, instead of making a second one.
+- A world with a declared mod is saved as package format version 2, which keeps the instance and its binding;
+  a world whose mods declare nothing is saved exactly as before (`Docs/CoreAIMods/WORLD_PACKAGE.md`, "Script
+  instances"). When such a world loads, a declared mod whose instance the world no longer holds stays detached
+  and does not start until it is loaded again. A world saved as version 1 keeps the instance as a plain
+  unbound script, and the next load of the mod binds it again when it still sits at its placement under the
+  mod's name, instead of making a second one.
+- Where a declared script runs does not depend on its context yet. In single-player (one machine that is
+  both server and client) a `context: client` script runs once, on that machine, like every other mod.
+  TODO: on a dedicated server a `context: client` script also runs today, on the server; from MVP4 step C1-6
+  it will not start there (`dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md`, SC-9).
 
 Parsing rules:
 - The block form must be the first thing in the file: the source starts with `--[[@coreai` and the
@@ -215,7 +222,7 @@ Folders through `manage_mods` (parameters `folder` and `target`):
 
 | Action | Arguments | Does |
 |---|---|---|
-| `list` | optional `folder` | each mod carries its `folder`; a `folders` array lists every folder (`path`, `mods`); with `folder` only that branch, an unknown one is `FOLDER_NOT_FOUND` |
+| `list` | optional `folder` | each mod carries its `folder`, its `context` (`legacy`, `server`, `client`), its `script_path` (where `script` lives, as `GetFullName` spells it) and its `run_state` (`running`, `quarantined`); a `folders` array lists every folder (`path`, `mods`); with `folder` only that branch, an unknown one is `FOLDER_NOT_FOUND` |
 | `load` | `mod_id`, `code`, optional `folder` | writes `category: <folder>` into the header before loading (the existing casing of a folder is reused) |
 | `move` | `mod_id`, `folder` (empty = top level) | moves a loaded mod without running it again: only its header line and stored manifest change |
 | `create_folder` | `folder` | creates an empty folder; `FOLDER_ALREADY_EXISTS` when it exists in any casing |
@@ -294,6 +301,11 @@ source-loaded / source-unloaded notifications (`AddModSourceLoadedListener` /
 path. The Mods and Logs tabs coalesce their notifications: however many `ModsChanged` or `LogsChanged`
 events arrive, from whatever thread, each tab rebuilds at most once per panel update and always on the
 main thread, through the panel's own scheduler (`HubModsPage.cs` and `HubModLogsPage.cs`). See §6.
+
+Each `HubModRecord` also carries the mod's `Context`, `RunState` and, while loaded, `ScriptPath` (§1, "Where
+`script` lives"). They come from the runtime for a loaded mod and from the manifest the listing already holds
+otherwise (`unloaded`, or `suspended` after budget trips), never from a store read of their own. Deleting a mod
+in the Hub ends the binding of its script instance the way a forget does (`ILuaModScriptInstanceReleaser`).
 
 ## 5. Events mods can hook
 

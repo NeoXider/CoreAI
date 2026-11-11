@@ -85,10 +85,13 @@ game:GetService('RunService').Heartbeat:Connect(function()
   end
 end)";
 
-        /// <summary>The watchtower recipe of the skill text (stage 1's <c>WatchtowerExample</c>), as a model would send it.</summary>
+        /// <summary>
+        /// The watchtower recipe of the skill text (stage 1's <c>WatchtowerExample</c>), as a model would send it;
+        /// <c>{here}</c> is the attribute the model was told holds "here", filled in by the scripted model.
+        /// </summary>
         private const string WatchtowerCode = @"
 local terrain = workspace.Terrain
-local base = workspace:GetAttribute('CrosshairPlaceCell')
+local base = workspace:GetAttribute('{here}')
 if typeof(base) ~= 'Vector3' then error('point the crosshair at a block first') end
 local function fill(x0, y0, z0, x1, y1, z1, material)
   local min = terrain:CellCornerToWorld(x0, y0, z0)
@@ -405,6 +408,23 @@ return 'watchtower built'";
 
         private IEnumerator WaitUntilStanding(string firstFrameShot = null)
         {
+            // WHY first: a new player is held behind the HUD's veil until the world has built the first view.
+            bool veilSeen = false;
+            int openedAfter = 0;
+            for (; openedAfter < 1800 && !Equals(Workspace().GetAttribute("BlockWorldOpened"), true); openedAfter++)
+            {
+                if (firstFrameShot != null && !veilSeen && Equals(Workspace().GetAttribute("BlockWorldOpened"), false))
+                {
+                    veilSeen = true;
+                    yield return ShootWithUi("veil.png");
+                }
+
+                yield return null;
+            }
+
+            Record("first view built after " + openedAfter + " frames (veil captured " + veilSeen + "), columns "
+                   + Workspace().GetAttribute("BlockWorldColumns"));
+            Expect(Equals(Workspace().GetAttribute("BlockWorldOpened"), true), "the world lets the new player go");
             RbxHumanoid humanoid = Humanoid();
             RbxVector3 previous = RootPosition(humanoid);
             int still = 0;
@@ -706,6 +726,7 @@ return 'watchtower built'";
                 "the chat says in a sentence that no model is set up, not with a code stub");
             Expect(Equals(looked, "Mira"), "the crosshair names the villager looked at");
             Expect(MentionsMissingModel(villager), "a villager with no model says that no model answers");
+            Expect(!villager.Contains("Offline mode"), "in character: the villager never speaks the offline system line");
             Expect(Equals(autopilot, true) && banner is string text && text.Length > 0,
                 "/autopilot on hands over the character with no model (the fixed rule) and the banner says so");
         }
@@ -1106,12 +1127,14 @@ return 'watchtower built'";
             yield return Frames(5);
             yield return ShootWithUi("watchtower.png");
 
-            Record("watchtower: base " + baseCell + ", model saw the crosshair " + model.SawCrosshairAttribute
-                   + ", execute_lua result '" + model.LastToolResult + "', reply '" + reply + "'; cells changed "
+            Record("watchtower: base " + baseCell + ", the request told the model 'here' is '" + model.HereAttribute
+                   + "', execute_lua result '" + model.LastToolResult + "', reply '" + reply + "'; cells changed "
                    + changed + " (outside the 5 x 10 x 5 box: " + outside + "), tower present " + tower
                    + "; /undo answered '" + undoReply + "'; world instances changed between the build and /undo: "
                    + changedSince + "; terrain golden " + goldenBefore + " -> " + goldenAfter + "; /redo answered '"
                    + redoReply + "', tower back " + redone);
+            Expect(model.SawCrosshairAttribute && model.HereAttribute == "CrosshairPlaceCell",
+                "the turn told the model, in its world state, that \"here\" is the attribute CrosshairPlaceCell");
             Expect(model.ToolCalls == 1, "the scripted model called execute_lua once");
             Expect(tower && changed > 50, "the watchtower stands at the crosshair");
             Expect(outside == 0, "every cell the build wrote is inside the box at the crosshair");
@@ -1316,9 +1339,10 @@ return 'watchtower built'";
             }
 
             yield return ShootWithUi("villager_talking.png");
+            int drawn = CountShownBubbles("Tobin");
             Record("villager: Tobin's agent " + agent + "; the model was asked as " + model.NpcPersonaSeen
                    + "; chat '" + lines + "'" + probe + "; BlockWorldVillagerReply '" + reply + "'; bubble '" + bubble
-                   + "'");
+                   + "', drawn " + drawn + " time(s)");
             Expect(probe.Length == 0, "the chat line that names Tobin reaches Tobin through the chat's hearing");
             Expect(agent != null, "Tobin has an AIService agent (AI from Lua is on in this scene)");
             Expect(model.NpcPersonaSeen.Contains("Tobin"), "the turn reached the model with Tobin's persona");
@@ -1326,6 +1350,32 @@ return 'watchtower built'";
                 "Tobin answers in the chat by name");
             Expect(bubble.StartsWith(ScriptedBlockWorldModel.TobinReply, StringComparison.Ordinal),
                 "Tobin's answer shows in a bubble over his head");
+            Expect(drawn == 1, "the bubble document draws Tobin's answer once");
+        }
+
+        /// <summary>Bubble elements of <paramref name="npcName"/> the NPC speech document shows now.</summary>
+        private static int CountShownBubbles(string npcName)
+        {
+            int shown = 0;
+            foreach (UIDocument document in Object.FindObjectsByType<UIDocument>(FindObjectsSortMode.None))
+            {
+                if (document.gameObject.name != NpcSpeechBubbleSurface.GameObjectName || document.rootVisualElement == null)
+                {
+                    continue;
+                }
+
+                foreach (VisualElement element in document.rootVisualElement.Query(className: NpcSpeechBubbleView.BubbleClass)
+                             .ToList())
+                {
+                    Label name = element.Q<Label>(className: NpcSpeechBubbleView.NameClass);
+                    if (element.style.display.value != DisplayStyle.None && name != null && name.text == npcName)
+                    {
+                        shown++;
+                    }
+                }
+            }
+
+            return shown;
         }
 
         // ---- helpers -------------------------------------------------------------------------------------------------
@@ -1510,55 +1560,67 @@ return 'watchtower built'";
         }
 
         /// <summary>
-        /// The camera frame with the UI Toolkit panels (HUD, chat overlay, bubbles) composited over it: every panel is
-        /// pointed at one transparent target for a frame, then put back.
+        /// The camera frame with the UI Toolkit panels (HUD, chat overlay, bubbles) composited over it in sorting
+        /// order: every panel draws into a transparent target of its own for two frames, then is put back.
         /// </summary>
+        /// <remarks>
+        /// WHY a cleared texture per panel: a panel redrawn into its target keeps what an earlier frame drew unless it
+        /// clears, and a world-anchored element (an NPC bubble) moves when the panel's target changes size, so one
+        /// shared, uncleared texture showed such an element twice.
+        /// </remarks>
         private IEnumerator ShootWithUi(string fileName)
         {
             Color[] scene = Shoot("_scene_" + fileName);
-            RenderTexture ui = new(ShotWidth, ShotHeight, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
-            ui.Create();
-            RenderTexture previousActive = RenderTexture.active;
-            RenderTexture.active = ui;
-            GL.Clear(true, true, Color.clear);
-            RenderTexture.active = previousActive;
-            List<(PanelSettings Panel, RenderTexture Target)> panels = new();
+            List<(PanelSettings Panel, RenderTexture Previous, bool Clears, Color ClearValue, RenderTexture Target)>
+                panels = new();
             foreach (UIDocument document in Object.FindObjectsByType<UIDocument>(FindObjectsSortMode.None))
             {
                 PanelSettings panel = document.panelSettings;
-                if (panel != null && document.isActiveAndEnabled && !panels.Exists(entry => entry.Panel == panel))
+                if (panel == null || !document.isActiveAndEnabled || panels.Exists(entry => entry.Panel == panel))
                 {
-                    panels.Add((panel, panel.targetTexture));
-                    panel.targetTexture = ui;
+                    continue;
                 }
-            }
 
-            yield return null;
-            yield return null;
-            Texture2D read = new(ShotWidth, ShotHeight, TextureFormat.RGBA32, false);
-            RenderTexture.active = ui;
-            read.ReadPixels(new Rect(0, 0, ShotWidth, ShotHeight), 0, 0);
-            read.Apply();
-            RenderTexture.active = previousActive;
-            foreach ((PanelSettings panel, RenderTexture target) in panels)
-            {
+                RenderTexture target = new(ShotWidth, ShotHeight, 24, RenderTextureFormat.ARGB32,
+                    RenderTextureReadWrite.sRGB);
+                target.Create();
+                panels.Add((panel, panel.targetTexture, panel.clearColor, panel.colorClearValue, target));
+                panel.clearColor = true;
+                panel.colorClearValue = Color.clear;
                 panel.targetTexture = target;
             }
 
-            Color[] overlay = read.GetPixels();
-            Color[] composed = new Color[scene.Length];
-            for (int index = 0; index < scene.Length; index++)
+            panels.Sort((first, second) => first.Panel.sortingOrder.CompareTo(second.Panel.sortingOrder));
+            yield return null;
+            yield return null;
+            Color[] composed = (Color[])scene.Clone();
+            Texture2D read = new(ShotWidth, ShotHeight, TextureFormat.RGBA32, false);
+            RenderTexture previousActive = RenderTexture.active;
+            foreach ((PanelSettings panel, RenderTexture previous, bool clears, Color clearValue, RenderTexture target)
+                     in panels)
             {
-                Color top = overlay[index];
-                Color under = scene[index];
-                composed[index] = new Color(top.r + under.r * (1f - top.a), top.g + under.g * (1f - top.a),
-                    top.b + under.b * (1f - top.a), 1f);
+                RenderTexture.active = target;
+                read.ReadPixels(new Rect(0, 0, ShotWidth, ShotHeight), 0, 0);
+                read.Apply();
+                Color[] overlay = read.GetPixels();
+                for (int index = 0; index < composed.Length; index++)
+                {
+                    Color top = overlay[index];
+                    Color under = composed[index];
+                    composed[index] = new Color(top.r + under.r * (1f - top.a), top.g + under.g * (1f - top.a),
+                        top.b + under.b * (1f - top.a), 1f);
+                }
+
+                panel.targetTexture = previous;
+                panel.clearColor = clears;
+                panel.colorClearValue = clearValue;
+                target.Release();
+                Object.Destroy(target);
             }
 
+            RenderTexture.active = previousActive;
             WritePng(fileName, composed);
             Object.Destroy(read);
-            ui.Release();
-            Object.Destroy(ui);
             Record("ui shot " + fileName + ": " + panels.Count + " panels composited");
         }
 
@@ -1671,6 +1733,9 @@ return 'watchtower built'";
 
             public bool SawCrosshairAttribute { get; private set; }
 
+            /// <summary>The attribute the request named as "here"; empty when it named none.</summary>
+            public string HereAttribute { get; private set; } = "";
+
             public string NpcPersonaSeen { get; private set; } = "";
 
             public async Task<LlmCompletionResult> CompleteAsync(LlmCompletionRequest request,
@@ -1695,10 +1760,24 @@ return 'watchtower built'";
                 if (lua is IAIFunctionLlmTool function && !string.IsNullOrEmpty(ExecuteLuaCode)
                     && text.Contains("watchtower"))
                 {
-                    SawCrosshairAttribute = text.Contains("CrosshairPlaceCell");
+                    // WHY read from the request: a model that never saw the demo knows "here" only from what it
+                    // is given, so the attribute name comes from the prompt, not from this test.
+                    System.Text.RegularExpressions.Match told = System.Text.RegularExpressions.Regex.Match(text,
+                        "\"Here\" is the workspace attribute (\\w+)");
+                    SawCrosshairAttribute = told.Success;
+                    HereAttribute = told.Success ? told.Groups[1].Value : "";
+                    if (!told.Success)
+                    {
+                        return new LlmCompletionResult
+                        {
+                            Ok = true, Content = "Where is 'here' in this world? Nothing told me.", Model = "scripted"
+                        };
+                    }
+
                     ToolCalls++;
                     object result = await function.CreateAIFunction().InvokeAsync(new AIFunctionArguments(
-                        new Dictionary<string, object> { ["code"] = ExecuteLuaCode }), cancellationToken);
+                        new Dictionary<string, object> { ["code"] = ExecuteLuaCode.Replace("{here}", HereAttribute) }),
+                        cancellationToken);
                     LastToolResult = result?.ToString() ?? "";
                     return new LlmCompletionResult
                     {

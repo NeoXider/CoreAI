@@ -163,7 +163,8 @@ namespace CoreAI.Ai.Hub
             foreach (LuaModInfo mod in mods)
             {
                 result.Add(new HubLoadedInfo(
-                    mod.Id, mod.Capabilities, mod.HandlerCount, mod.TimerCount, mod.ErrorCount));
+                    mod.Id, mod.Capabilities, mod.HandlerCount, mod.TimerCount, mod.ErrorCount, mod.Context,
+                    mod.RunState, mod.ScriptPath));
             }
 
             return result;
@@ -195,6 +196,15 @@ namespace CoreAI.Ai.Hub
         protected override ModReloadReport RuntimeReload(string id, string code, ModReloadMode mode)
         {
             return _runtime.ReloadMod(_actorContext, id, code, mode);
+        }
+
+        /// <inheritdoc />
+        protected override void RuntimeReleaseScript(string id)
+        {
+            if (_runtime is ILuaModScriptInstanceReleaser releaser)
+            {
+                releaser.ReleaseScriptInstance(_actorContext, id);
+            }
         }
 
         protected override bool RuntimeUnload(string id)

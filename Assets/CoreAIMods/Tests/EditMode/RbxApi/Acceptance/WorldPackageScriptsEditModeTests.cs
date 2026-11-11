@@ -181,19 +181,23 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         /// <summary>
-        /// Twin: production capture still writes version 1. A world with script instances writes no script block and
-        /// the manifest versions of a 7.56.0 package, and it restores with the legacy placement.
+        /// Twin: a version 1 capture of a world with script instances writes no script block and the manifest versions
+        /// of a 7.56.0 package, and it restores with the legacy placement. Production capture writes this world as
+        /// version 2 since MVP4 step C1-4 (rule R4, <c>ScriptWorldPackageEditModeTests</c>), so the capture names the
+        /// version.
         /// </summary>
         [Test]
         public void PackageV1_CaptureOfAWorldWithScriptInstances_WritesNoScriptBlock_AndIsMarkedLegacyPlacement()
         {
             ScriptWorld world = ScriptWorld.CreateFull();
 
-            RbxWorldPackagePayload captured = world.CaptureProduction();
+            RbxWorldPackagePayload captured = world.Capture(RbxWorldPackageSerializer.LegacyScriptPlacementFormatVersion);
             byte[] package = RbxWorldPackageSerializer.WritePackage(captured);
 
             Assert.AreEqual(1, captured.FormatVersion);
             Assert.AreEqual(RbxWorldPackageSerializer.CurrentFormatVersion, captured.FormatVersion);
+            Assert.AreEqual(2, world.CaptureProduction().FormatVersion,
+                "rule R4: production capture writes a world that holds script instances as version 2");
             JObject manifest = EntryJson(package, RbxWorldPackageSerializer.ManifestEntryName);
             Assert.AreEqual(1, (int)manifest["format_version"]);
             Assert.AreEqual(1, (int)manifest["minimum_reader_version"]);
@@ -501,7 +505,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             RbxWorldPackageException refused = Assert.Throws<RbxWorldPackageException>(
                 () => world.Capture(RbxWorldPackageSerializer.ScriptBindingsFormatVersion));
             StringAssert.Contains("bound to two script instances", refused.Message);
-            RbxWorldPackagePayload version1 = world.CaptureProduction();
+            RbxWorldPackagePayload version1 = world.Capture(RbxWorldPackageSerializer.LegacyScriptPlacementFormatVersion);
             Assert.IsEmpty(version1.Diagnostics, "version 1 neither repairs nor reports a binding");
             Assert.IsNotNull(RbxWorldPackageSerializer.WritePackage(version1));
         }

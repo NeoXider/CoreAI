@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_world
 name: Block World 1 - World
-version: 1.1.0
+version: 1.2.0
 active: false
 capabilities: All
 category: Samples/Block World
@@ -18,9 +18,14 @@ description: Part of the Block World demo (the eight mods of the Samples/Block W
 -- per column, so the world does not depend on the order the player walks in. Nothing is generated while the
 -- mod loads: a reload (an AI edit, a hot reload) runs under a tool's 100 ms limit, and a column takes longer.
 --
+-- A new player waits at the spawn, held, until the first view is built: the spawn's column and the next ones,
+-- which are the columns the camera faces (BlockWorldOpened; the HUD draws its "Building the world" veil until then).
+--
 -- Other Block World mods read what this one publishes as workspace attributes:
 --   BlockWorldSeed (number), BlockWorldReady (true once the spawn column exists),
---   BlockWorldSpawn (Vector3, studs), BlockWorldColumns (columns generated), BlockWorldNotice (text).
+--   BlockWorldOpened (false while a new player waits for the first view), BlockWorldOpeningColumns (how many
+--   columns that view needs), BlockWorldSpawn (Vector3, studs), BlockWorldColumns (columns generated),
+--   BlockWorldNotice (text).
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -42,6 +47,8 @@ local HEIGHT_BUDGET = 48        -- surface heights one frame may sample
 local PILLAR_BUDGET = 250      -- work one frame may spend filling pillars, in cells (see pillarWork)
 local PILLAR_WORK = 8           -- a pillar's own cost, in cells
 local CAVE_WORK = 24            -- the most a pillar's caves cost, in cells: up to thirteen rows of 3D noise
+local OPENING_COLUMNS = 4       -- columns made before a new player is let go: the spawn's and the three it faces
+local OPENING_SECONDS = 6       -- the longest a new player waits for them
 local PROBE_BUDGET = 1          -- "is this column already generated?" reads per frame (each scans the radius)
 local LOOK_PULL = 0.5           -- columns a column straight ahead of the camera counts as nearer
 local SPAWN_SEARCH = 24         -- rings of pillars searched for land around the middle of the first column
@@ -318,14 +325,18 @@ end
 
 local generated = {}
 local columnsDone = 0
+local columnsKnown = 0          -- made this run or found made: what the first view waits for
 local job = nil
 local stopped = false
 workspace:SetAttribute("BlockWorldColumns", 0)
 workspace:SetAttribute("BlockWorldReady", false)
+workspace:SetAttribute("BlockWorldOpened", false)
+workspace:SetAttribute("BlockWorldOpeningColumns", OPENING_COLUMNS)
 
 local function finishColumn(finished)
     generated[columnKey(finished.cx, finished.cz)] = true
     columnsDone = columnsDone + 1
+    columnsKnown = columnsKnown + 1
     workspace:SetAttribute("BlockWorldColumns", columnsDone)
 end
 
@@ -394,7 +405,26 @@ local function nextMissing(center)
     return bestX, bestZ
 end
 
+local opened = false
+local heldRoot = nil
+
+-- The first view is built (or the wait is over): the held character is let go.
+local function becomeOpened()
+    if opened then
+        return
+    end
+    opened = true
+    workspace:SetAttribute("BlockWorldOpened", true)
+    if heldRoot then
+        pcall(function()
+            heldRoot.Anchored = false
+        end)
+        heldRoot = nil
+    end
+end
+
 local function stopStreaming(reason)
+    becomeOpened()
     stopped = true
     job = nil
     workspace:SetAttribute("BlockWorldNotice", "The world stopped growing: " .. reason)
@@ -461,16 +491,15 @@ local spawnLook = Vector3.new(math.cos(bestHeading), 0, math.sin(bestHeading))
 workspace:SetAttribute("BlockWorldSpawnLook", spawnLook)
 
 local ready = false
-local heldRoot = nil
 
--- Until the spawn column exists the character waits there, anchored, instead of falling into the void.
+-- Until the first view exists the character waits at the spawn, anchored, instead of falling into the void.
 local function moveToSpawn(character)
     if not character then
         return
     end
     character:PivotTo(CFrame.lookAt(spawn, spawn + spawnLook))
     local root = rootPart(character)
-    if root and not ready then
+    if root and not opened then
         pcall(function()
             root.Anchored = true
         end)
@@ -484,12 +513,6 @@ local function becomeReady()
     end
     ready = true
     workspace:SetAttribute("BlockWorldReady", true)
-    if heldRoot then
-        pcall(function()
-            heldRoot.Anchored = false
-        end)
-        heldRoot = nil
-    end
     print("[blockworld] world seed " .. seed .. " - the spawn is ready, the rest streams in around you.")
 end
 
@@ -523,10 +546,11 @@ for _, player in ipairs(Players:GetPlayers()) do
 end
 Players.PlayerAdded:Connect(watchPlayer)
 
--- The spawn column comes first, wherever the camera is; a saved world already has it.
+-- The spawn column comes first, wherever the camera is; a saved world already has it, and its first view.
 if isGenerated(spawnColumnX, spawnColumnZ) then
     generated[columnKey(spawnColumnX, spawnColumnZ)] = true
     becomeReady()
+    becomeOpened()
 else
     job = newJob(spawnColumnX, spawnColumnZ)
 end
@@ -534,7 +558,15 @@ end
 -- ---- streaming loop -------------------------------------------------------------------------------
 
 local fallCheck = 0
+local openingWait = 0
 RunService.Heartbeat:Connect(function(dt)
+    if ready and not opened then
+        openingWait = openingWait + dt
+        if columnsKnown >= OPENING_COLUMNS or openingWait >= OPENING_SECONDS then
+            becomeOpened()
+        end
+    end
+
     fallCheck = fallCheck + dt
     if fallCheck >= 0.5 then
         fallCheck = 0
@@ -556,10 +588,12 @@ RunService.Heartbeat:Connect(function(dt)
         for _ = 1, PROBE_BUDGET do
             local cx, cz = nextMissing(center)
             if cx == nil then
+                becomeOpened()
                 return
             end
             if isGenerated(cx, cz) then
                 generated[columnKey(cx, cz)] = true
+                columnsKnown = columnsKnown + 1
             else
                 job = newJob(cx, cz)
                 return

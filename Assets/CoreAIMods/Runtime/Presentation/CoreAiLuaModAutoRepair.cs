@@ -108,6 +108,18 @@ namespace CoreAI.Presentation
                 yield break;
             }
 
+            // WHY: the mods scope's own self-repair loop (RegisterCoreAiModSelfRepair) reacts to the same failures;
+            // with both active one failing mod would be rewritten twice.
+            if (lifetimeScope.Container.TryResolve<CoreAiModSelfRepairEntryPoint>(
+                    out CoreAiModSelfRepairEntryPoint selfRepair)
+                && selfRepair?.Coordinator != null
+                && selfRepair.Coordinator.Options.Mode != CoreAI.Ai.SelfRepair.LuaModRuntimeRepairMode.Off)
+            {
+                SetStatus("Lua mod auto-repair idle: the mods scope's self-repair loop handles failing mods.");
+                enabled = false;
+                yield break;
+            }
+
             IActorIdentityProvider actorIdentityProvider =
                 lifetimeScope.Container.ResolveOrDefault<IActorIdentityProvider>();
             if (actorIdentityProvider == null)

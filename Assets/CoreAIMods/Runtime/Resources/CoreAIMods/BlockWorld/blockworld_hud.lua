@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_hud
 name: Block World 3 - HUD and hotbar
-version: 1.1.0
+version: 1.2.0
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. The whole interface, made in this mod from UXML and USS text through UxmlService - a crosshair, a nine-slot hotbar (keys 1-9, the mouse wheel or a click on a slot), a key legend, the clock, creative or survival, your health in survival, a placed and broken counter, the block counts in survival, the autopilot banner and short notices from the other Block World mods. Choosing a slot publishes the workspace attribute BlockWorldSelected, which the build and torch mods read. Hot-reload it to restyle the HUD live.
+description: Part of the Block World demo. The whole interface, made in this mod from UXML and USS text through UxmlService - a crosshair, a nine-slot hotbar (keys 1-9, the mouse wheel or a click on a slot), a key legend, the clock, creative or survival, your health in survival, a placed and broken counter, the block counts in survival, the autopilot banner, short notices from the other Block World mods and the Building the world veil a new player waits behind while the first view is made. Choosing a slot publishes the workspace attribute BlockWorldSelected, which the build and torch mods read. Hot-reload it to restyle the HUD live.
 ]]
 
 -- The hotbar is the single owner of "what is in your hand": a slot is chosen by number key, wheel or click,
@@ -80,6 +80,11 @@ local UXML = [[
   <ui:VisualElement name="help" class="help" picking-mode="Ignore">
 ]] .. table.concat(legendMarkup) .. [[
   </ui:VisualElement>
+  <ui:VisualElement name="veil" class="veil is-hidden" picking-mode="Ignore">
+    <ui:Label name="veiltitle" class="veil-title" text="Building the world" picking-mode="Ignore" />
+    <ui:Label name="veilprogress" class="veil-progress" text="" picking-mode="Ignore" />
+    <ui:Label name="veiltip" class="veil-tip" text="Left click breaks a block, right click places one. T talks to the AI." picking-mode="Ignore" />
+  </ui:VisualElement>
 </ui:UXML>
 ]]
 
@@ -112,6 +117,12 @@ local USS = [[
 .legend-text { font-size: 16px; color: rgb(240, 240, 240); }
 .health { color: rgb(255, 150, 150); }
 .health.is-low { background-color: rgba(150, 24, 24, 0.85); color: rgb(255, 255, 255); }
+.veil { position: absolute; left: 0; top: 0; right: 0; bottom: 0; align-items: center; justify-content: center;
+  background-color: rgb(118, 166, 214); }
+.veil-title { font-size: 46px; color: rgb(255, 255, 255); -unity-font-style: bold;
+  text-shadow: 2px 2px 4px rgba(20, 40, 70, 0.6); }
+.veil-progress { margin-top: 10px; font-size: 20px; color: rgba(255, 255, 255, 0.92); }
+.veil-tip { margin-top: 36px; font-size: 18px; color: rgba(255, 255, 255, 0.85); }
 .is-hidden { display: none; }
 ]]
 
@@ -132,6 +143,8 @@ local counterLabel = hud:GetElement("counter")
 local noticeLabel = hud:GetElement("notice")
 local autopilotLabel = hud:GetElement("autopilot")
 local itemLabel = hud:GetElement("itemname")
+local veil = hud:GetElement("veil")
+local veilProgress = hud:GetElement("veilprogress")
 
 local shown = {}
 local function setText(label, key, text)
@@ -258,6 +271,24 @@ end
 workspace:GetAttributeChangedSignal("BlockWorldNoticeAt"):Connect(showNotice)
 workspace:GetAttributeChangedSignal("BlockWorldAutopilot"):Connect(refreshAutopilot)
 
+-- The veil covers the screen while the world mod holds a new player for the first view (BlockWorldOpened false),
+-- so the first thing seen is the land around the spawn, not the void around one column.
+local function refreshVeil()
+    if workspace:GetAttribute("BlockWorldOpened") ~= false then
+        veil:AddClass("is-hidden")
+        return
+    end
+    veil:RemoveClass("is-hidden")
+    local made = workspace:GetAttribute("BlockWorldColumns") or 0
+    local needed = workspace:GetAttribute("BlockWorldOpeningColumns") or 0
+    setText(veilProgress, "veilprogress", needed > 0
+        and ("The land around you: " .. math.min(made, needed) .. " of " .. needed)
+        or "The land around you")
+end
+for _, name in ipairs({ "BlockWorldOpened", "BlockWorldColumns", "BlockWorldOpeningColumns" }) do
+    workspace:GetAttributeChangedSignal(name):Connect(refreshVeil)
+end
+
 local clockTimer = 0
 RunService.Heartbeat:Connect(function(dt)
     clockTimer = clockTimer - dt
@@ -276,3 +307,4 @@ end)
 refreshClock()
 refreshStatus()
 refreshAutopilot()
+refreshVeil()

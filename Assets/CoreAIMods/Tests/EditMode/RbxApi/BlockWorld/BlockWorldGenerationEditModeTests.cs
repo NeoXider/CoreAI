@@ -224,6 +224,46 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         }
 
         [Test]
+        public void P6_World_ANewPlayer_IsHeld_UntilTheFirstViewIsBuilt_ThenLetGo()
+        {
+            using BlockWorldTestWorld world = new();
+            world.ConnectLocalPlayer();
+            world.Load(Mod);
+            world.FrameUntil(() => true.Equals(world.Attribute("BlockWorldReady")), 40, "the spawn column");
+            world.Frame(2);
+
+            Assert.AreEqual(false, world.Attribute("BlockWorldOpened"), "the spawn column alone is not the first view");
+            Assert.AreEqual(4d, world.Number("BlockWorldOpeningColumns"));
+            Assert.IsTrue(RootAnchored(world, "test_held"), "the player waits at the spawn, held, behind the veil");
+
+            world.FrameUntil(() => true.Equals(world.Attribute("BlockWorldOpened")), 600, "the first view");
+
+            Assert.GreaterOrEqual(world.Number("BlockWorldColumns"), 4d, "the spawn column and the three it faces");
+            Assert.IsFalse(RootAnchored(world, "test_let_go"), "then the player is let go");
+            world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_World_AWorldWhoseSpawnColumnExists_HoldsNobody_NegativeTwin()
+        {
+            using BlockWorldTestWorld world = new();
+            world.Load(Mod);
+            world.FrameUntil(() => world.Number("BlockWorldColumns") >= 4d, 600, "four columns");
+
+            world.Stack.Runtime.ReloadMod(Mod, BlockWorldTestWorld.Source(Mod));
+
+            Assert.AreEqual(true, world.Attribute("BlockWorldOpened"), "a saved world opens at once: its land is there");
+            world.AssertHealthy(Mod);
+        }
+
+        private static bool RootAnchored(BlockWorldTestWorld world, string probeId)
+        {
+            world.LoadSource(probeId, "workspace:SetAttribute('TestRootAnchored', "
+                                      + "game:GetService('Players'):GetPlayers()[1].Character.HumanoidRootPart.Anchored)");
+            return true.Equals(world.Attribute("TestRootAnchored"));
+        }
+
+        [Test]
         public void P6_World_TheSpawn_StandsInTheAirAboveLand()
         {
             using BlockWorldTestWorld world = new();

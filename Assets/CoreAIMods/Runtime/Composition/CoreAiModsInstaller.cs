@@ -591,9 +591,12 @@ namespace CoreAI.Composition
                                         container.ResolveOrDefault<ILuaModSourceStore>(),
                                         stack.GameplayBindings.RbxApi?.Registry,
                                         hostActor);
+                                    // WHY legacy placement: the default world's store holds no tree, so a declared
+                                    // mod gets its script instance at its placement instead of starting detached.
                                     sessionController.CurrentConcreteRuntime.RehydrateFromStore(
                                         scriptCapabilities,
-                                        (scriptCapabilities & LuaCapabilities.Full) != 0);
+                                        (scriptCapabilities & LuaCapabilities.Full) != 0,
+                                        legacyScriptPlacement: true);
                                 },
                                 message => startupLog.Warn(
                                     "[CoreAI.WorldLoad] " + message,
@@ -724,8 +727,12 @@ namespace CoreAI.Composition
                         worldMutationGate: worldMutationGate,
                         rateLimiter: limiter,
                         folderList: folders));
+                    // WHY the marshaler: without a host scheduler the tool's wait_seconds answers at once.
                     policy.AddToolToProfile(luaBuilder,
-                        new GetModLogsLlmTool(container.Resolve<ILuaLogService>()));
+                        new GetModLogsLlmTool(
+                            container.Resolve<ILuaLogService>(),
+                            container.ResolveOrDefault<ICoreAISettings>()?.ToolInvocationMarshaler,
+                            container.ResolveOrDefault<CoreAiModSelfRepairEntryPoint>()?.Lifecycle));
                     IRbxWorldRuntimeService worldRuntime = container.Resolve<IRbxWorldRuntimeService>();
                     policy.AddToolToProfile(luaBuilder, "save_world",
                         roleId => new SaveWorldLlmTool(worldRuntime, actorIdentityProvider, roleId));

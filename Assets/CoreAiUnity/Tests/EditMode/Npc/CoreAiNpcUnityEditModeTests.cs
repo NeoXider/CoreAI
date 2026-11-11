@@ -208,6 +208,32 @@ namespace CoreAI.Tests.EditMode.Npc
         }
 
         [Test]
+        public void Surface_GivesThePanelItMakes_TheDefaultRuntimeTheme()
+        {
+            NpcSpeechBubbleSurface surface = NpcSpeechBubbleSurface.Create(new CoreAiNpcSettings());
+            _created.Add(GameObject.Find(NpcSpeechBubbleSurface.GameObjectName));
+            ThemeStyleSheet theme = Resources.Load<ThemeStyleSheet>(CoreAiChatOverlaySettings.DefaultThemeResourcePath);
+
+            Assert.IsNotNull(theme, "the runtime theme ships in Resources");
+            Assert.AreSame(theme, surface.Panel.themeStyleSheet,
+                "a panel with a theme logs no 'No Theme Style Sheet set' warning");
+            surface.Dispose();
+        }
+
+        [Test]
+        public void Surface_KeepsAGamesOwnPanelSettingsAsTheyAre_NegativeTwin()
+        {
+            PanelSettings own = ScriptableObject.CreateInstance<PanelSettings>();
+            _created.Add(own);
+            NpcSpeechBubbleSurface surface = NpcSpeechBubbleSurface.Create(new CoreAiNpcSettings { PanelSettings = own });
+            _created.Add(GameObject.Find(NpcSpeechBubbleSurface.GameObjectName));
+
+            Assert.AreSame(own, surface.Panel, "the game's panel is used");
+            Assert.IsNull(own.themeStyleSheet, "and the surface does not restyle it");
+            surface.Dispose();
+        }
+
+        [Test]
         public void Surface_CreatesARuntimeDocument_AndDisposeDestroysIt()
         {
             NpcSpeechBubbleSurface surface = NpcSpeechBubbleSurface.Create(new CoreAiNpcSettings());

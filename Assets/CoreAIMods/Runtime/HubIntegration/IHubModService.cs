@@ -78,6 +78,22 @@ namespace CoreAI.Ai.Hub
         /// stored); a folder switched on as a whole starts its mods in this order.
         /// </summary>
         public long LoadOrder;
+
+        /// <summary>
+        /// The script context (MVP4): <c>legacy</c>, <c>server</c>, <c>client</c> or <c>shared</c>. A loaded mod
+        /// reports the one its run started with; a stored one the context its manifest declares.
+        /// </summary>
+        public string Context = "";
+
+        /// <summary>
+        /// The run state in its stable spelling (<c>running</c>, <c>quarantined</c>, <c>suspended</c>,
+        /// <c>unloaded</c>), from the runtime for a loaded mod and from the stored flags otherwise; never from a
+        /// store read of its own.
+        /// </summary>
+        public string RunState = "";
+
+        /// <summary>Where a loaded mod's <c>script</c> lives (<c>ServerScriptService.door</c>); empty otherwise.</summary>
+        public string ScriptPath = "";
     }
 
     /// <summary>
@@ -242,12 +258,24 @@ namespace CoreAI.Ai.Hub
     public readonly struct HubLoadedInfo
     {
         public HubLoadedInfo(string id, LuaCapabilities caps, int handlers, int timers, int errors)
+            : this(id, caps, handlers, timers, errors, "", "", "")
+        {
+        }
+
+        /// <param name="context">The run's script context (<see cref="LuaModInfo.Context"/>); empty when unknown.</param>
+        /// <param name="runState">The run state (<see cref="LuaModInfo.RunState"/>); empty when unknown.</param>
+        /// <param name="scriptPath">Where the run's <c>script</c> lives (<see cref="LuaModInfo.ScriptPath"/>).</param>
+        public HubLoadedInfo(string id, LuaCapabilities caps, int handlers, int timers, int errors, string context,
+            string runState, string scriptPath)
         {
             Id = id ?? "";
             Capabilities = caps;
             Handlers = handlers;
             Timers = timers;
             Errors = errors;
+            Context = context ?? "";
+            RunState = runState ?? "";
+            ScriptPath = scriptPath ?? "";
         }
 
         public string Id { get; }
@@ -255,6 +283,9 @@ namespace CoreAI.Ai.Hub
         public int Handlers { get; }
         public int Timers { get; }
         public int Errors { get; }
+        public string Context { get; }
+        public string RunState { get; }
+        public string ScriptPath { get; }
     }
 
     /// <summary>

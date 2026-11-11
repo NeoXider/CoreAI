@@ -423,16 +423,19 @@ namespace CoreAI.Sandbox.LuaCs
 
         /// <summary>
         /// Charges <paramref name="steps"/> that a library function spent inside one call (the instructions of
-        /// the Lua loop it replaces) to this run: they come off what it may still spend, so its hook trips at
-        /// its next fire once they exhaust it, as the loop would have, and they reach the runs this one is nested
-        /// in and its record like a raw coroutine's steps.
+        /// the Lua loop it replaces) to this run: they come off what it may still spend and reach the runs this
+        /// one is nested in and its record like a raw coroutine's steps. A charge that exhausts the limit trips
+        /// the run with the line its own hook would give, recorded and signalled by cancellation as a hook signals
+        /// it, so the run ends the moment the library call returns, as uncatchably as the loop would have ended.
+        /// <paramref name="where"/> is the thread executing the call, whose line the trip names.
         /// </summary>
         /// <remarks>
         /// WHY here and not a per-call allowance like the pattern matcher's: a table loop is bounded by its
         /// table, so the call itself always ends; what it must not do is let a script do a loop's work for the
-        /// price of one instruction under a per-resume budget the host sized for that work.
+        /// price of one instruction under a per-resume budget the host sized for that work. WHY the trip is not
+        /// left to the next hook fire: a run that returns within one hook window of the call never fires it.
         /// </remarks>
-        internal void ChargeLibrarySteps(long steps)
+        internal void ChargeLibrarySteps(long steps, LuaState where)
         {
             if (steps <= 0)
             {
@@ -442,6 +445,15 @@ namespace CoreAI.Sandbox.LuaCs
             _nestedSteps += steps;
             _nestedUnreportedSteps += steps;
             ChargeNestedSteps(steps);
+            if (RemainingSteps >= 0 || RecordedTrip != null || !_executing)
+            {
+                return;
+            }
+
+            LuaCsHostFunctionException lenderTrip = TripOfLender(LuaCsGuardTripKind.Steps, false, where);
+            RecordNestedTrip(LuaCsGuardTripKind.Steps,
+                lenderTrip ?? CreateOwnTrip(LuaCsGuardTripKind.Steps, where), lenderTrip == null);
+            CancelRun();
         }
 
         /// <summary>

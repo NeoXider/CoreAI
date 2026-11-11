@@ -77,6 +77,27 @@ namespace CoreAI.Mods.Rbx.Instances.CharacterRig
         public static readonly RbxColor3 LegColor = RbxColor3.FromRGB(13f, 105f, 172f);
 
         /// <summary>
+        /// The size the Head is drawn at, in studs: Roblox draws the 2x1x1 R6 Head part through a head mesh
+        /// (<c>SpecialMesh</c>, <c>MeshType.Head</c>, <c>Scale</c> 1.25), a block about 1.25 studs each way and
+        /// narrower than the shoulders. The part keeps Roblox's Size; only its drawing follows the mesh.
+        /// </summary>
+        public static readonly RbxVector3 HeadMeshSize = new(1.25f, 1.25f, 1.25f);
+
+        /// <summary>The skin a bundled default character is seeded with (see <see cref="DefaultShirtColor"/>).</summary>
+        public static readonly RbxColor3 DefaultSkinColor = RbxColor3.FromRGB(240f, 200f, 158f);
+
+        /// <summary>
+        /// The torso a bundled default character is seeded with. DEV candidate: the mirror's BodyColors
+        /// defaults (<see cref="SkinColor"/>, <see cref="TorsoColor"/>, <see cref="LegColor"/>) read as one dark
+        /// mass in the default look's morning light, so the bundled body wears a skin tone, a clear shirt and dark
+        /// trousers instead. Only the seed changes: a script that colours a part keeps its colour.
+        /// </summary>
+        public static readonly RbxColor3 DefaultShirtColor = RbxColor3.FromRGB(58f, 132f, 214f);
+
+        /// <summary>The legs a bundled default character is seeded with (see <see cref="DefaultShirtColor"/>).</summary>
+        public static readonly RbxColor3 DefaultTrousersColor = RbxColor3.FromRGB(52f, 58f, 82f);
+
+        /// <summary>
         /// The six joints, indexed by joint (RootJoint, Neck, Right Shoulder, Left Shoulder, Right Hip, Left Hip).
         /// </summary>
         public static readonly RbxRigJoint[] Joints =
@@ -143,12 +164,12 @@ namespace CoreAI.Mods.Rbx.Instances.CharacterRig
                 return new RbxCharacterPartSeed(PartSizes[index], rootCFrame, default, false, 1f, true, false);
             }
 
-            RbxColor3 color = part == RbxR6Part.Torso ? TorsoColor
-                : part == RbxR6Part.RightLeg || part == RbxR6Part.LeftLeg ? LegColor
-                : SkinColor;
+            RbxColor3 color = part == RbxR6Part.Torso ? DefaultShirtColor
+                : part == RbxR6Part.RightLeg || part == RbxR6Part.LeftLeg ? DefaultTrousersColor
+                : DefaultSkinColor;
             bool canCollide = part == RbxR6Part.Torso || part == RbxR6Part.Head;
             return new RbxCharacterPartSeed(PartSizes[index], rootCFrame * RestOffsets[index], color, true, 0f,
-                canCollide, false);
+                canCollide, false, part == RbxR6Part.Head ? HeadMeshSize : RbxVector3.Zero);
         }
 
         private static RbxCFrame[] BuildRestOffsets()

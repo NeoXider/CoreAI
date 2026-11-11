@@ -151,14 +151,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
         public static bool TryPlan(in ScriptPlacementRequest request, out ScriptPlacementPlan plan, out RbxError refusal)
         {
             plan = null;
-            refusal = null;
             string sourceId = request.SourceId ?? string.Empty;
-            if (!ScriptContexts.TryParseDeclared(request.HeaderContext, out ScriptContext headerContext,
-                    out string contextError))
+            if (!TryResolveContext(in request, out ScriptContext context, out refusal))
             {
-                refusal = RbxError.BadArgument(contextError,
-                    "write context: server, context: client or context: shared in the @coreai header, or leave the key "
-                    + "out to run as a legacy script");
                 return false;
             }
 
@@ -171,21 +166,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
                 return false;
             }
 
-            ScriptContext context = headerContext;
             ScriptContext boundContext = ScriptContext.Legacy;
-            if (request.HasBoundInstance
-                && !ScriptContexts.TryGetEffective(request.BoundClassName, request.BoundRunContext,
-                    ScriptContext.Legacy, out boundContext, out string boundError))
+            if (request.HasBoundInstance)
             {
-                refusal = RbxError.BadArgument("the script instance bound to mod '" + sourceId + "' cannot run: "
-                                               + boundError,
-                    "set its RunContext to Server or Client, or forget the mod and load it again");
-                return false;
-            }
-
-            if (context == ScriptContext.Legacy)
-            {
-                context = request.HasBoundInstance ? boundContext : ParseLenient(request.FallbackContext);
+                ScriptContexts.TryGetEffective(request.BoundClassName, request.BoundRunContext, ScriptContext.Legacy,
+                    out boundContext, out string _);
             }
 
             if (context == ScriptContext.Shared)
@@ -236,6 +221,48 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
 
             plan = ScriptPlacementPlan.Durable(context, request.BoundClassName, runContext, true, parentPath,
                 defaultPath, previousDefaultPath);
+            return true;
+        }
+
+        /// <summary>
+        /// The context a load of the source runs with (SC-5): the header's when it declares one, else the bound
+        /// instance's (its class and <c>RunContext</c>), else <see cref="ScriptPlacementRequest.FallbackContext"/>, else
+        /// <see cref="ScriptContext.Legacy"/>. Refuses, as <see cref="TryPlan"/> does, a header value that is not a
+        /// context and a bound instance that cannot run. A restore asks this before it decides whether to start a
+        /// source at all (a ModuleScript source is not started as a script).
+        /// </summary>
+        public static bool TryResolveContext(in ScriptPlacementRequest request, out ScriptContext context,
+            out RbxError refusal)
+        {
+            refusal = null;
+            if (!ScriptContexts.TryParseDeclared(request.HeaderContext, out context, out string contextError))
+            {
+                refusal = RbxError.BadArgument(contextError,
+                    "write context: server, context: client or context: shared in the @coreai header, or leave the key "
+                    + "out to run as a legacy script");
+                return false;
+            }
+
+            if (context != ScriptContext.Legacy)
+            {
+                return true;
+            }
+
+            if (!request.HasBoundInstance)
+            {
+                context = ParseLenient(request.FallbackContext);
+                return true;
+            }
+
+            if (!ScriptContexts.TryGetEffective(request.BoundClassName, request.BoundRunContext, ScriptContext.Legacy,
+                    out context, out string boundError))
+            {
+                refusal = RbxError.BadArgument("the script instance bound to mod '" + (request.SourceId ?? string.Empty)
+                                               + "' cannot run: " + boundError,
+                    "set its RunContext to Server or Client, or forget the mod and load it again");
+                return false;
+            }
+
             return true;
         }
 

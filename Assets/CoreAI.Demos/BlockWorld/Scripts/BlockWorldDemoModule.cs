@@ -5,6 +5,7 @@ using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Lua;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.WorldPackages;
 using UnityEngine;
@@ -15,9 +16,10 @@ namespace CoreAI.Demos.BlockWorld
     /// <summary>
     /// The Block World scene's own play world module: it turns the framework setting that lets mods create agents
     /// (<c>CoreAiLuaAiOptions.AllowAgentsFromLua</c>) on for this scene's mods scope only, and switches the bundled
-    /// <c>Samples/Block World</c> mod folder on in this scene's mods store, so the seven mods run in the published
-    /// world and every later start rehydrates them. The game itself is the Lua in that folder; this module holds no
-    /// rule of it.
+    /// <c>Samples/Block World</c> mod folder on in this scene's mods store, so the eight mods run in the published
+    /// world and every later start rehydrates them, and it tells the Programmer on every turn where "here" is (the
+    /// crosshair cell the build mod publishes), in the turn's world state. The game itself is the Lua in that folder;
+    /// this module holds no rule of it.
     /// </summary>
     /// <remarks>
     /// WHY after the first world frame: the mods scope seeds the bundled mods and rehydrates the active ones in its
@@ -30,6 +32,16 @@ namespace CoreAI.Demos.BlockWorld
     {
         /// <summary>The mod folder (the <c>category:</c> of the bundled Block World mods) this scene switches on.</summary>
         public const string DefaultFolder = "Samples/Block World";
+
+        /// <summary>
+        /// What the Programmer is told on every turn of this scene (its world state): where "here" is. A model that
+        /// has never seen the demo builds "here" from this; the RbxApi skill's building section has the recipe.
+        /// </summary>
+        public const string HereContext =
+            "This game is the Block World: a voxel world in workspace.Terrain, in cells of 4 studs. \"Here\" is the "
+            + "workspace attribute CrosshairPlaceCell: a Vector3 of whole cell numbers, the empty cell in front of the "
+            + "block the player looks at; build up from it. CrosshairCell is the block looked at, CrosshairHasTarget "
+            + "is false for the sky or beyond reach. The RbxApi skill's building section builds a watchtower this way.";
 
         [Tooltip("Mod folder switched on in this scene's mods store at every start; its sub-folders are included.")]
         [SerializeField]
@@ -47,8 +59,10 @@ namespace CoreAI.Demos.BlockWorld
         private int webGlViewRadius = 3;
 
         private readonly List<string> _switchedOn = new();
+        private readonly HereContextProvider _here = new();
         private CoreAiPlayWorldComposition _composition;
         private LuaCsRbxApiBindings _handledWorld;
+        private AgentMemoryPolicy _policy;
 
         /// <summary>The mod folder switched on at every start.</summary>
         public string ModFolder => string.IsNullOrWhiteSpace(modFolder) ? DefaultFolder : modFolder.Trim();
@@ -84,6 +98,24 @@ namespace CoreAI.Demos.BlockWorld
             }
 
             ApplyViewRadius(container.Resolve<RbxWorldRuntimeSessionController>().CurrentRbxApi);
+            // WHY only when free: a role has one runtime context provider, and a game's own one wins.
+            AgentMemoryPolicy policy = composition.CoreScope?.Container?.ResolveOrDefault<AgentMemoryPolicy>();
+            if (policy != null && !policy.TryGetRuntimeContextProvider(BuiltInAgentRoleIds.Programmer, out _))
+            {
+                policy.SetRuntimeContextProvider(BuiltInAgentRoleIds.Programmer, _here);
+                _policy = policy;
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (_policy != null && _policy.TryGetRuntimeContextProvider(BuiltInAgentRoleIds.Programmer,
+                    out IAgentRuntimeContextProvider current) && ReferenceEquals(current, _here))
+            {
+                _policy.ClearRuntimeContextProvider(BuiltInAgentRoleIds.Programmer);
+            }
+
+            _policy = null;
         }
 
         private void Update()
@@ -96,6 +128,7 @@ namespace CoreAI.Demos.BlockWorld
 
             RbxWorldRuntimeSessionController session = container.Resolve<RbxWorldRuntimeSessionController>();
             LuaCsRbxApiBindings world = session.CurrentRbxApi;
+            _here.Observe(world?.Game?.FindFirstChildOfClass("Workspace"));
             if (world == null || ReferenceEquals(world, _handledWorld) || world.Scheduler == null
                 || world.Scheduler.FrameIndex == 0)
             {
@@ -189,6 +222,44 @@ namespace CoreAI.Demos.BlockWorld
         {
             Failure = "Block World: " + reason;
             Debug.LogError("[CoreAI] " + Failure, this);
+        }
+
+        /// <summary>
+        /// The Programmer's world state in this scene: <see cref="HereContext"/> and the crosshair cell as it is now.
+        /// </summary>
+        /// <remarks>
+        /// WHY copied on the main thread: a turn's prompt is built off it, and the world is read only from Unity's
+        /// frame, so <see cref="Observe"/> keeps the last line and <see cref="BuildContext"/> only reads it.
+        /// </remarks>
+        internal sealed class HereContextProvider : IAgentRuntimeContextProvider
+        {
+            private volatile string _now = "";
+            private object _lastCell;
+            private object _lastHasTarget;
+
+            /// <summary>Copies the crosshair attributes of <paramref name="workspace"/> when they changed.</summary>
+            public void Observe(RbxInstance workspace)
+            {
+                object cell = workspace?.GetAttribute("CrosshairPlaceCell");
+                object hasTarget = workspace?.GetAttribute("CrosshairHasTarget");
+                if (Equals(cell, _lastCell) && Equals(hasTarget, _lastHasTarget))
+                {
+                    return;
+                }
+
+                _lastCell = cell;
+                _lastHasTarget = hasTarget;
+                _now = cell is RbxVector3 place && Equals(hasTarget, true)
+                    ? "Right now CrosshairPlaceCell is (" + (int)place.X + ", " + (int)place.Y + ", " + (int)place.Z + ")."
+                    : "Right now the crosshair has no target.";
+            }
+
+            /// <inheritdoc />
+            public string BuildContext(AiTaskRequest request, string roleId, string traceId)
+            {
+                string now = _now;
+                return now.Length == 0 ? HereContext : HereContext + " " + now;
+            }
         }
     }
 }

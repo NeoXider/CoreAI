@@ -541,7 +541,10 @@ namespace CoreAI.Ai
                     quarantined = mod.Quarantined,
                     log_reports = mod.LogReports,
                     loaded_at_utc = mod.LoadedAtUtc.ToString("O"),
-                    folder = ModFolderPath.FromStored(mod.Category).Value
+                    folder = ModFolderPath.FromStored(mod.Category).Value,
+                    context = mod.Context,
+                    script_path = mod.ScriptPath,
+                    run_state = mod.RunState
                 });
             }
 

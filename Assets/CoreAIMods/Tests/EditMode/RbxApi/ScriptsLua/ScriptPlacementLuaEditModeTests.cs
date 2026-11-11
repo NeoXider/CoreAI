@@ -367,6 +367,22 @@ store_set('part', tostring(ok) .. '|' .. tostring(err))", "alice");
         }
 
         [Test]
+        public void C1_ClientScript_InSinglePlayer_RunsOnceOnTheOneMachine()
+        {
+            Assert.AreEqual(CoreAI.Mods.Rbx.Instances.Networking.RbxNetworkTopology.Solo,
+                _world.Roblox.NetworkBridge.Topology, "precondition: a world without a network is single-player");
+
+            _world.Load("hud", ClientHeader + @"
+local runs = (tonumber(store_get('runs')) or 0) + 1
+store_set('runs', tostring(runs))");
+            _world.Roblox.Scheduler.Advance(0d);
+            _world.Roblox.Scheduler.Advance(0d);
+
+            Assert.AreEqual("1", _world.Get("hud", "runs"),
+                "one machine is both sides, so the client script runs there once, like every other mod");
+        }
+
+        [Test]
         public void C1_Load_SharedContext_IsNotImplementedNamingStepC4()
         {
             Exception failure = Assert.Catch(() =>
@@ -553,12 +569,67 @@ made.Parent = script.Parent");
             Assert.AreSame(Service("ServerScriptService"), script.Parent.Parent);
         }
 
+        // ---- C1-5: what a listing reports -----------------------------------------------------
+
+        private LuaModInfo Listed(string modId)
+        {
+            foreach (LuaModInfo info in _world.Stack.Runtime.ListMods())
+            {
+                if (info.Id == modId)
+                {
+                    return info;
+                }
+            }
+
+            Assert.Fail("mod '" + modId + "' is not listed");
+            return null;
+        }
+
+        [Test]
+        public void C1_5_ListMods_ReportsADeclaredModsContextScriptAndRunState()
+        {
+            _world.Load("door", ServerHeader + "-- @coreai category: Games\nstore_set('ok', 'yes')");
+
+            LuaModInfo door = Listed("door");
+
+            Assert.AreEqual("server", door.Context);
+            Assert.AreEqual("Script", door.ScriptClassName);
+            Assert.AreEqual("ServerScriptService.Games.door", door.ScriptPath);
+            Assert.AreEqual("running", door.RunState);
+        }
+
+        [Test]
+        public void C1_5_ListMods_Negative_ALegacyModReportsItsSyntheticScript()
+        {
+            _world.Load("legacy", "store_set('ok', 'yes')");
+
+            LuaModInfo legacy = Listed("legacy");
+
+            Assert.AreEqual("legacy", legacy.Context);
+            Assert.AreEqual("Script", legacy.ScriptClassName);
+            Assert.AreEqual("ServerScriptService.legacy.legacy", legacy.ScriptPath);
+            Assert.AreEqual("running", legacy.RunState);
+        }
+
+        [Test]
+        public void C1_5_ListMods_AQuarantinedModReportsQuarantined()
+        {
+            _world.Dispose();
+            _world = new World(maxErrorsBeforeQuarantine: 1);
+            _world.Load("door", ServerHeader + "hooks_on('tick', function() error('boom') end)");
+
+            _world.Stack.Runtime.Tick(0.1d);
+
+            Assert.AreEqual("quarantined", Listed("door").RunState);
+        }
+
         // ---- harness ---------------------------------------------------------------------------
 
         private sealed class World : IDisposable
         {
             public World(int maxInstancesPerActor = LuaCsModRuntime.DefaultMaxRegisteredInstancesPerActor,
-                Action<InstanceRegistry> seed = null, ILuaModSourceStore sources = null)
+                Action<InstanceRegistry> seed = null, ILuaModSourceStore sources = null,
+                int maxErrorsBeforeQuarantine = LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine)
             {
                 Roblox = new LuaCsRbxApiBindings();
                 seed?.Invoke(Roblox.Registry);
@@ -570,7 +641,8 @@ made.Parent = script.Parent");
                     ModSourceStore = sources,
                     RbxApi = Roblox,
                     LuaScriptVersions = new MemoryLuaScriptVersionStore(),
-                    MaxRegisteredInstancesPerActor = maxInstancesPerActor
+                    MaxRegisteredInstancesPerActor = maxInstancesPerActor,
+                    MaxErrorsBeforeQuarantine = maxErrorsBeforeQuarantine
                 });
             }
 

@@ -295,6 +295,17 @@ namespace CoreAI.Tests.EditMode.RbxApi.CharacterRig
             Assert.IsTrue(rootSeed.CanCollide, "and stays the character's collider");
             foreach ((RbxInstance part, RbxCharacterPartSeed seed) in _port.Seeds)
             {
+                if (part.Name == "Head")
+                {
+                    Assert.AreEqual(new RbxVector3(2f, 1f, 1f), seed.Size, "the Head part keeps Roblox's 2x1x1");
+                    Assert.AreEqual(RbxR6Rig.HeadMeshSize, seed.MeshSize, "and is drawn through the head mesh");
+                    Assert.IsTrue(seed.HasMeshSize);
+                }
+                else
+                {
+                    Assert.IsFalse(seed.HasMeshSize, part.Name + " is drawn at its own size");
+                }
+
                 Assert.IsFalse(seed.Anchored, part.Name + " is unanchored, as in Roblox");
                 Assert.AreEqual(part.Name == "Torso" || part.Name == "Head" || part.Name == "HumanoidRootPart",
                     seed.CanCollide, part.Name + " carries R6's CanCollide");

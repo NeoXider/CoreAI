@@ -93,6 +93,9 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <summary>Parts the character rig holds: an unanchored one runs a kinematic body (see <see cref="SetPoseDriven"/>).</summary>
         private readonly HashSet<InstanceId> _poseDriven = new();
 
+        /// <summary>Sizes parts are drawn at instead of their Size (see <see cref="SetDrawnSize"/>); absent means Size.</summary>
+        private readonly Dictionary<InstanceId, RbxVector3> _drawnSizes = new();
+
         // WHY an index by variant name (A3-08): editing a MaterialVariant repaints the parts wearing
         // it, and finding them used to walk every binding in the world — a whole-world pass for each
         // write to one variant. The index is kept in step with _partProperties, whose every write
@@ -738,6 +741,7 @@ namespace CoreAI.Mods.Rbx.Binding
         {
             _localTransparency.Remove(id);
             _poseDriven.Remove(id);
+            _drawnSizes.Remove(id);
             bool boundPart = _bindings.TryGetValue(id, out BindingEntry entry) && entry.IsPart;
             if (!boundPart && !_partProperties.ContainsKey(id))
             {
@@ -1020,6 +1024,28 @@ namespace CoreAI.Mods.Rbx.Binding
         public bool IsPoseDriven(InstanceId id)
         {
             return _poseDriven.Contains(id);
+        }
+
+        /// <inheritdoc />
+        public void SetDrawnSize(InstanceId id, RbxVector3 size)
+        {
+            bool draws = size.X > 0f && size.Y > 0f && size.Z > 0f;
+            bool changed;
+            if (draws)
+            {
+                changed = !_drawnSizes.TryGetValue(id, out RbxVector3 previous) || !previous.Equals(size);
+                _drawnSizes[id] = size;
+            }
+            else
+            {
+                changed = _drawnSizes.Remove(id);
+            }
+
+            if (changed && _bindings.TryGetValue(id, out BindingEntry entry) && entry.IsPart && entry.OwnsGameObject
+                && entry.GameObject != null)
+            {
+                ApplyScale(entry, GetPartPropertiesOrDefault(id));
+            }
         }
 
         public void SetShape(InstanceId id, RbxPartShape shape)
@@ -1491,19 +1517,21 @@ namespace CoreAI.Mods.Rbx.Binding
             ApplyCanCollide(entry, properties.CanCollide);
         }
 
-        private static void ApplyTransform(BindingEntry entry, in PartProperties properties)
+        private void ApplyTransform(BindingEntry entry, in PartProperties properties)
         {
             ApplyPose(entry, properties);
             ApplyScale(entry, properties);
         }
 
-        private static void ApplyScale(BindingEntry entry, in PartProperties properties)
+        private void ApplyScale(BindingEntry entry, in PartProperties properties)
         {
             // WHY: for every shape the part root carries Size * MetersPerStud (D3); shape
             // primitives are authored so 1 local unit = 1 stud (Cylinder's child corrects
             // Unity's 2-unit-tall mesh, see BuildCylinderVisual). No other part's scale multiplies
             // into it, because a part is never parented under another part (see ChildContainerOf).
-            entry.GameObject.transform.localScale = RbxSpace.SizeToUnity(properties.Size);
+            // A drawn size (the R6 head mesh) replaces Size here and nowhere else.
+            RbxVector3 size = _drawnSizes.TryGetValue(entry.Id, out RbxVector3 drawn) ? drawn : properties.Size;
+            entry.GameObject.transform.localScale = RbxSpace.SizeToUnity(size);
         }
 
         private static void ApplyPose(BindingEntry entry, in PartProperties properties)

@@ -49,6 +49,10 @@ namespace CoreAI.Mods.Rbx.Binding.CharacterRig
             properties.CanCollide = seed.CanCollide;
             properties.Anchored = seed.Anchored;
             _sink.SetPartProperties(part.Id, in properties);
+            if (seed.HasMeshSize)
+            {
+                _drivenParts?.SetDrawnSize(part.Id, seed.MeshSize);
+            }
         }
 
         /// <inheritdoc />

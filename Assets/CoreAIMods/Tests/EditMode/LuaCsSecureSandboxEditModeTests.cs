@@ -68,23 +68,24 @@ namespace CoreAI.Tests.EditMode
 
         [Test]
         [Timeout(30000)]
-        public void Coroutine_Wrap_IsRemoved_UnguardablePrimitiveCannotHang()
+        public void Coroutine_Wrap_RunsThroughTheGuardedResume_UnguardablePrimitiveCannotHang()
         {
             LuaCsSecureEnvironment env = new();
             LuaState state = env.Create();
 
-            // SECURITY: coroutine.wrap drives a hidden CHILD LuaState through the library's OWN resume, bypassing
-            // the guarded coroutine.resume, so a wrap body (`while true do end`) would run with no step/time/alloc
-            // hook and hang the host forever. It is therefore stripped (set nil). First, assert it is gone.
-            LuaValue[] isNil = env.RunChunk(state, "return coroutine.wrap == nil");
-            Assert.IsTrue(isNil.Length > 0 && isNil[0].Read<bool>(),
-                "coroutine.wrap must be removed from the sandbox — it cannot be guarded on this Lua-CSharp build.");
+            // SECURITY: the native coroutine.wrap drives a hidden CHILD LuaState through the library's OWN resume,
+            // bypassing the guarded coroutine.resume, so a wrap body (`while true do end`) would run with no
+            // step/time/alloc hook and hang the host forever. The sandbox's wrap resumes through the guarded
+            // coroutine.resume instead (MVP13, RT5), so the same body is cut by the per-resume budget.
+            LuaValue[] present = env.RunChunk(state, "return type(coroutine.wrap)");
+            Assert.AreEqual("function", present[0].Read<string>(), "Luau's coroutine.wrap exists");
 
-            // And reaching for it must raise a clean nil-call error PROMPTLY, not hang. If a regression re-natives
-            // wrap, the unguarded child-state loop below runs forever and this [Timeout] test fails — the signal.
-            Assert.Throws<LuaRuntimeException>(
+            // If a regression re-natives wrap, the unguarded child-state loop below runs forever and this
+            // [Timeout] test fails — the signal.
+            LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(
                 () => env.RunChunk(state, "coroutine.wrap(function() while true do end end)()"),
-                "Calling the removed coroutine.wrap must raise a nil-call error, never hang.");
+                "A runaway coroutine.wrap body must be cut by the resume budget, never hang.");
+            StringAssert.Contains("EXCEEDED_COROUTINE_STEP_BUDGET", ex.Message);
         }
 
         [Test]
@@ -417,7 +418,15 @@ namespace CoreAI.Tests.EditMode
         [TestCase("table.concat({string.rep('x', 600000), string.rep('y', 600000)})",
             "sandbox: table.concat result would exceed 1000000 chars.")]
         [TestCase("string.format('%99999999d', 1)",
-            "sandbox: string.format width/precision exceeds 1000000 chars.")]
+            "invalid format (width or precision too long)")]
+        [TestCase("string.format('%y', 1)",
+            "invalid conversion '%y' to 'format'")]
+        [TestCase("unpack({}, 1, 100000)",
+            "too many results to unpack")]
+        [TestCase("table.insert(table.freeze({}), 1)",
+            "attempt to modify a readonly table")]
+        [TestCase("table.create(2000000, 0)",
+            "sandbox: table.create would fill 2000000 slots, more than the 1048576 one call may build.")]
         [TestCase("(string.rep('a', 30000):gsub('.', string.rep('b', 40)))",
             "sandbox: string.gsub result would exceed 1000000 chars.")]
         public void SandboxLibraryRefusal_EveryProtectedPathGetsTheSameCleanLine(string call, string expected)

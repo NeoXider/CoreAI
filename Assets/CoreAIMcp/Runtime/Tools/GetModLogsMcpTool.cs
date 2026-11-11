@@ -25,7 +25,8 @@ namespace CoreAI.Mcp.Tools
                 throw new ArgumentNullException(nameof(logService));
             }
 
-            _inner = new GetModLogsLlmTool(logService);
+            // WHY: the MCP server runs on the host's own threads, never in a WebGL player, so Task.Delay may pace a wait.
+            _inner = new GetModLogsLlmTool(logService, PassThroughLlmAsyncMarshaler.Instance);
         }
 
         /// <inheritdoc />

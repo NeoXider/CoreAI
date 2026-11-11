@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CoreAI.Authority;
+using CoreAI.Mods.WorldPackages;
 
 namespace CoreAI.Ai.Logging
 {
@@ -8,9 +9,12 @@ namespace CoreAI.Ai.Logging
     /// Writes each mod's load, reload and unload into its log (<see cref="LifecycleScriptName"/>, level
     /// <see cref="LuaLogLevel.Print"/>), so the console shows the timeline next to the mod's output, and remembers the
     /// log sequence of every mod's latest load: the cursor <c>get_mod_logs since_reload=true</c> starts after, so a
-    /// model that just changed a mod sees only what the new code did. Engine-free; thread-safe.
+    /// model that just changed a mod sees only what the new code did. Watching the world-mutation gate as well, it
+    /// places the cursor of a gated load (an AI's <c>manage_mods</c>) before the new main chunk ran, so what that chunk
+    /// printed counts as the new code's; an ungated load (a Hub save) starts after its own line. Engine-free;
+    /// thread-safe.
     /// </summary>
-    public sealed class LuaModLifecycleLog : IDisposable
+    public sealed class LuaModLifecycleLog : IDisposable, IRbxWorldMutationObserver
     {
         /// <summary><c>ScriptName</c> of the lifecycle lines; mods cannot set a script name, so they cannot forge one.</summary>
         public const string LifecycleScriptName = "coreai:lifecycle";
@@ -32,6 +36,7 @@ namespace CoreAI.Ai.Logging
         private readonly HashSet<string> _loaded = new(StringComparer.Ordinal);
         private readonly Action<string, string, LuaCapabilities> _onLoaded;
         private readonly Action<string, string, LuaCapabilities> _onUnloaded;
+        private long _mutationStartSequence = -1;
         private bool _disposed;
 
         /// <summary>Starts writing the lifecycle of the mods <paramref name="runtime"/> loads into <paramref name="logs"/>.</summary>
@@ -109,6 +114,25 @@ namespace CoreAI.Ai.Logging
             return newest.Count == 0 ? 0 : newest[newest.Count - 1].Sequence;
         }
 
+        /// <inheritdoc />
+        public void OnMutationStarting(RbxWorldMutationInfo mutation)
+        {
+            long latest = LatestSequence(_logs);
+            lock (_gate)
+            {
+                _mutationStartSequence = latest;
+            }
+        }
+
+        /// <inheritdoc />
+        public void OnMutationFinished(RbxWorldMutationInfo mutation, RbxWorldSnapshot before, bool completed)
+        {
+            lock (_gate)
+            {
+                _mutationStartSequence = -1;
+            }
+        }
+
         /// <summary>Stops listening.</summary>
         public void Dispose()
         {
@@ -137,9 +161,13 @@ namespace CoreAI.Ai.Logging
             }
 
             LuaLogEntry entry = Append(id, reload ? ReloadedMessage : LoadedMessage);
-            if (entry != null && entry.Sequence > 0)
+            lock (_gate)
             {
-                lock (_gate)
+                if (_mutationStartSequence >= 0)
+                {
+                    _lastLoad[id] = _mutationStartSequence;
+                }
+                else if (entry != null && entry.Sequence > 0)
                 {
                     _lastLoad[id] = entry.Sequence;
                 }

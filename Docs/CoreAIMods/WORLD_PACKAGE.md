@@ -135,7 +135,7 @@ keys are additive without a `format_version` bump: readers up to 7.56.0 refuse a
 name, as they refuse every unknown key (`WorldPackageLightingEditModeTests.UnknownKeys_*`). Tests:
 `WorldPackageModFoldersEditModeTests`, `Mvp4ScriptManifestEditModeTests`.
 
-**Script instances: format version 2 (MVP4 SC-7, reader only).** `Script`, `LocalScript` and `ModuleScript` are
+**Script instances: format version 2 (MVP4 SC-7, rules R3 and R4).** `Script`, `LocalScript` and `ModuleScript` are
 ordinary instances whose `SourceId` names the mod they are bound to (MVP4 design note SC-1). A format version 2
 package gives every such node a `script` block: `source_id` (the mod id, `""` when unbound) and, on a Script or
 LocalScript only, `enabled` and `run_context` (the `Enum.RunContext` number); a ModuleScript's block holds
@@ -149,19 +149,32 @@ in version 2, a script node without a block, a binding to a mod the package does
 bound to one mod (duplicate), a bound node whose class and `run_context` disagree with its mod's `Context` by the
 SC-4 table, and a bound node whose mod declares a context that is not server, client or shared; in any version, a
 block on a class that is no script, `run_context` 3 (`Plugin`) or an undefined number, a `run_context` other than 0
-on a LocalScript, and `enabled` or `run_context` on a ModuleScript. **The writer stays at version 1** until the mod
-runtime binds sources to instances (MVP4 step C1): capture drops every script block, so a world written today is
-byte-identical to one written before script instances existed (a Script's `Enabled` and `RunContext` are not saved
-yet). A version 2 capture, which C1 makes the default, repairs in the snapshot only what its reader would refuse: a
-binding to a source the package does not hold is saved unbound (`missing`, member `SourceId`), and a world-owned
-bound script inside a mod-ephemeral subtree is left out (`mod-ephemeral`, member `Script`), so its source loads
-detached; a mod's own legacy script, mod-owned runtime infrastructure until C1, is left out without one. Two
-instances bound to one source, or a binding that disagrees with its source's context, can only come from a runtime
-defect, so a version 2 capture fails on it instead of saving another script than the one running. Readers up to
-7.56.0, and every reader before this one, accept `format_version` 1 only and refuse a version 2 package by its
-version ("Unsupported world package format version 2"). Until C1 a session that loads a hand-written version 2
-package still starts its active mods the version 1 way, every one at the legacy placement. Tests:
-`WorldPackageScriptsEditModeTests`, `ScriptSnapshotEditModeTests`.
+on a LocalScript, and `enabled` or `run_context` on a ModuleScript.
+
+- **The writer picks the lowest version that can express the world (rule R4,
+  `RbxWorldPackageSerializer.FormatVersionFor`).** A world whose saved tree holds no `Script`, `LocalScript` or
+  `ModuleScript` and none of whose mods declares a context is written as version 1, byte for byte as before script
+  instances existed: a mod that declares nothing runs from its legacy script, mod-owned runtime infrastructure that
+  is never saved. A world with a saved script instance, or a mod whose header declares `context:` (its manifest's
+  `Context`), is written as version 2.
+- **What a version 2 capture repairs**, in the snapshot only, is what its reader would refuse: a binding to a source
+  the package does not hold is saved unbound (`missing`, member `SourceId`), and a world-owned bound script inside a
+  mod-ephemeral subtree is left out (`mod-ephemeral`, member `Script`), so its source loads detached. Two instances
+  bound to one source, or a binding that disagrees with its source's context, can only come from a runtime defect, so
+  a version 2 capture fails on it instead of saving another script than the one running.
+- **How a loaded world starts its mods (rule R3).** In version 1 every active mod starts: a mod that declares nothing
+  at the legacy placement, a declared mod at its placement, where it binds the unbound node the version 1 save kept
+  for it. In version 2 a declared source (a header `context:` or `parent:`, or a stored `Context`) whose instance the
+  world does not hold is detached and does not start; a mod that declares nothing still starts at the legacy
+  placement. A `context: shared` source (a ModuleScript) is never started as a script in either version. Client
+  scripts start after every server-side one. The load reports what it did not start in
+  `RbxWorldLoadResult.NotStartedMods` (`door (detached)`, `tools (module)`) and in one session diagnostic. The
+  default world's store holds no tree, so its boot start is the version 1 way.
+- Readers up to 7.56.0, and every reader before this one, accept `format_version` 1 only and refuse a version 2
+  package by its version ("Unsupported world package format version 2").
+
+Tests: `WorldPackageScriptsEditModeTests`, `ScriptSnapshotEditModeTests`, `ScriptWorldPackageEditModeTests`,
+`ScriptSessionEditModeTests`.
 
 An in-memory instance snapshot also keeps the runtime-infrastructure flag (`InstanceSnapshot.IsRuntimeInfrastructure`,
 `InstanceRegistry.RestoreInstance(..., isRuntimeInfrastructure)`), so a world restored straight through

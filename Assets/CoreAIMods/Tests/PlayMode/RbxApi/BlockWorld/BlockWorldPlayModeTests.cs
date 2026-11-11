@@ -190,6 +190,14 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
                 end)");
             yield return Frames(120);
             Assert.IsNotNull(Humanoid(), "the local character spawned");
+            // WHY: a new player is held at the spawn until the world has built the first view.
+            for (int frame = 0; frame < 1200 && !Equals(Attribute("BlockWorldOpened"), true); frame++)
+            {
+                yield return Frames(1);
+            }
+
+            Assert.AreEqual(true, Attribute("BlockWorldOpened"), "the world lets the player go");
+            yield return Frames(30);
         }
 
         private static string Resource(string path)

@@ -1752,14 +1752,26 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   zero editor involvement — and make the skill generated from the code so it cannot drift.
 - **Done so far**: the Lua log service is wired end to end (`Logging/`); `get_mod_logs`
   (`Logging/GetModLogsLlmTool.cs`) is registered for the Programmer role; skills
-  (`read_skill`/`manage_skills`); load-error auto-repair (`LuaExecution/LuaModAutoRepairPolicy.cs`,
-  `Presentation/CoreAiLuaModAutoRepair.cs`); the preprocessor at load with author line numbers
-  (`LuaExecution/LuauSourceGate.cs`); the hand-maintained "Rbx API" skill kept byte-identical in
-  `Assets/CoreAiUnity/Resources/AgentSkills/RbxApi.txt` and
-  `Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInRbxApiSkillText.cs`.
+  (`read_skill`/`manage_skills`); the older handler-error repair bridge (`LuaExecution/LuaModAutoRepairPolicy.cs`,
+  `Presentation/CoreAiLuaModAutoRepair.cs`, a demo-scene component that sends an unshown orchestrator task); the
+  preprocessor at load with author line numbers (`LuaExecution/LuauSourceGate.cs`); the hand-maintained "Rbx API"
+  skill kept byte-identical in `Assets/CoreAiUnity/Resources/AgentSkills/RbxApi.txt` and
+  `Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInRbxApiSkillText.cs`. **M2 part (2026-11-11,
+  [MOD_CONSOLE.md](MOD_CONSOLE.md))**: runtime self-repair (`LuaExecution/SelfRepair/`): AI-written mods only by
+  default (content-hash authorship through the world-mutation gate), an incident on a streak of 3, the same site 3
+  times in 30 s, 2 budget trips in 30 s or a quarantine; 3 attempts with 10 s and 30 s backoff, verified by 5 s
+  without an error, one repair turn at a time, at most 3 queued and 6 turns per 10 minutes; the turn runs as a host
+  turn of the in-world chat (`ChatOverlayController.TryStartHostTurn`: status line, `/stop`, busy rule) and the model
+  applies the fix with its own `manage_mods reload` through the gate, so `/undo` takes it back; `/fixmod <id>`; one
+  chat line per step; nothing without a model. `watch_mod_logs` is not a new tool: `get_mod_logs` gained
+  `since_reload`, a bounded `wait_seconds` (0-10, frame-driven) and the `next_sequence` cursor, 239 to 272 tokens,
+  with the load/reload/unload timeline in the mod log (`LuaModLifecycleLog`). The in-game console (F8, `/console`):
+  a 512-entry allocation-free ring (`LuaModConsoleModel`) on the runtime UI host, filters by mod and level, repair
+  lines in it. Proven by EditMode tests on the real Lua runtime and the real `manage_mods` tool with a scripted model
+  (`Tests/EditMode/SelfRepair/`).
 - **To do**: folder mods and `api_version`; `list_mods`/`enable_mod`/`disable_mod`/`get_api_surface`; a
-  generated API manifest with a CI diff; `watch_mod_logs`, the in-game console and runtime self-repair
-  (below).
+  generated API manifest with a CI diff; the scripted chaos test of the self-repair loop in a built player;
+  authorship persisted in the mod manifest; `run_console` (below).
 - **Test**: EM, PL, PM (console), a scripted chaos test in a built player.
 - **DoD**: the three carried DoDs below — the AI fixes a broken folder mod through tools only; the
   manifest is deterministic and CI-diffed with a prompt-eval fixture set; a mod that starts failing at

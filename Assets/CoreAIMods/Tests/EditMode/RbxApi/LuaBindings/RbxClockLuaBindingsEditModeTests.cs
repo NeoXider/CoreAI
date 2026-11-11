@@ -174,22 +174,25 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Lua_OsTable_HoldsOnlyTimeAndClock_DangerousMembersAreNil()
+        public void Lua_OsTable_HoldsOnlyLuausMembers_DangerousMembersAreNil()
         {
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             stack.Runtime.LoadMod("m", @"
                 assert(type(os) == 'table')
                 assert(type(os.time) == 'function')
                 assert(type(os.clock) == 'function')
+                assert(type(os.date) == 'function')
+                assert(type(os.difftime) == 'function')
                 assert(os.execute == nil)
                 assert(os.remove == nil)
                 assert(os.rename == nil)
                 assert(os.exit == nil)
                 assert(os.getenv == nil)
                 assert(os.tmpname == nil)
+                assert(os.setlocale == nil)
                 local count = 0
                 for _ in pairs(os) do count = count + 1 end
-                assert(count == 2)");
+                assert(count == 4)");
             Assert.IsTrue(stack.Runtime.IsLoaded("m"));
         }
 
@@ -471,10 +474,15 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Lua_A3_06_TheOsTableHasNoDate_SoNoDocumentPromisesARoundTripThroughIt()
+        public void Lua_A3_06_OsDateIsUtcLikeOsTime_SoTheRoundTripHolds()
         {
-            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
-            stack.Runtime.LoadMod("m", "assert(os.date == nil, 'os.date is not part of the sandbox os table')");
+            FakeClockSource fake = new() { UnixTimeSeconds = 1700000000L };
+            LuaCsModStack stack = BuildStack(BindingsWith(fake));
+            stack.Runtime.LoadMod("m", @"
+                assert(os.time(os.date('*t', 1000000000)) == 1000000000)
+                assert(os.time(os.date('!*t', 1234567)) == 1234567)
+                assert(os.date('!%Y-%m-%d %H:%M:%S') == '2023-11-14 22:13:20', 'the default is the clock os.time reads')
+                assert(os.date('%H') == os.date('!%H'), 'the local form is UTC too (DEV-98)')");
             Assert.IsTrue(stack.Runtime.IsLoaded("m"));
         }
 

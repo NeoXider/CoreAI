@@ -49,6 +49,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.CharacterRig
                 maxArm = Math.Max(maxArm, poser.ArmForwardRight);
                 minArm = Math.Min(minArm, poser.ArmForwardRight);
                 maxBob = Math.Max(maxBob, Math.Abs(poser.Bob));
+                Assert.AreEqual(0d, poser.ArmSpread, 1e-12d, "the arms hang at the sides, not out in an A-pose");
                 Assert.AreEqual(0d, poser.LegForwardRight, 1e-12d, "an idle character does not walk-cycle");
                 Assert.AreEqual(0d, poser.LegForwardLeft, 1e-12d);
             }

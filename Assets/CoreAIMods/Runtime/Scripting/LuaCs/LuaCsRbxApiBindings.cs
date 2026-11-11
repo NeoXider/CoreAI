@@ -1461,7 +1461,8 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Builds the sanctioned sandbox <c>os</c> table: ONLY <c>time</c> and <c>clock</c>. The
+        /// Builds the sanctioned sandbox <c>os</c> table: ONLY Luau's <c>time</c>, <c>clock</c>, <c>date</c> and
+        /// <c>difftime</c> (<see cref="LuaCsSecureEnvironment.InstallLuauOsExtensions"/>). The
         /// stock library stays removed (it carries execute/remove/rename/exit/getenv/tmpname);
         /// this is the single definition shared by the value factory and the HttpService
         /// decorator, so decorator ordering can never widen or narrow the surface.
@@ -1491,6 +1492,7 @@ namespace CoreAI.Ai.LuaCs
                 return seconds.Value;
             });
             os["clock"] = Fn("os.clock", _ => _clockSource.ProcessTimeSeconds);
+            LuaCsSecureEnvironment.InstallLuauOsExtensions(os, () => _clockSource.UnixTimeSeconds);
             return new LuaValue(os);
         }
 
@@ -1512,8 +1514,8 @@ namespace CoreAI.Ai.LuaCs
         /// conversion ("we prefer UTC for consistency"), and every other CoreAI clock is UTC —
         /// <c>os.time()</c> reads <see cref="IRbxClockSource.UnixTimeSeconds"/> — so a server and a
         /// client in different time zones compute the same timestamp. That is also why <c>isdst</c>
-        /// changes nothing. The sandbox has no <c>os.date</c> (see <see cref="BuildOsTable"/>), so
-        /// there is no round trip through it to promise. WHY nil before the epoch: Luau's
+        /// changes nothing. The sandbox's <c>os.date</c> is UTC too, so <c>os.time(os.date("*t", t))</c> is
+        /// <c>t</c> (see <see cref="LuaCsSecureEnvironment.InstallLuauOsExtensions"/>). WHY nil before the epoch: Luau's
         /// <c>os_timegm</c> fails a date before 1970 — by its day, or by the time of day on 1970-01-01
         /// — and a script written for Roblox tests the result for nil, not for a negative number.
         /// </remarks>
@@ -4663,6 +4665,33 @@ namespace CoreAI.Ai.LuaCs
         /// durable script (with <paramref name="keepOwnObjects"/> false, what the mod itself owns there goes with the
         /// folder), and both are destroyed. False when the mod has no synthetic placement or no durable script.
         /// </summary>
+        /// <summary>
+        /// The instance a loaded mod's <c>script</c> is (MVP4 step C1-5, for listings): its bound durable instance,
+        /// else its synthetic legacy script once its chunk built one. Never creates either.
+        /// </summary>
+        internal bool TryGetExecutingScript(string ownerModId, out RbxInstance script)
+        {
+            script = null;
+            if (string.IsNullOrWhiteSpace(ownerModId))
+            {
+                return false;
+            }
+
+            if (_scriptInstances.TryGetBoundScript(ownerModId, out RbxLuaSourceContainer bound))
+            {
+                script = bound;
+                return true;
+            }
+
+            if (TryGetExecutingScriptBacking(ownerModId, out ExecutingScriptBacking backing))
+            {
+                script = backing.Script;
+                return true;
+            }
+
+            return false;
+        }
+
         internal bool RetireExecutingScript(string ownerModId, bool keepOwnObjects)
         {
             if (string.IsNullOrWhiteSpace(ownerModId)

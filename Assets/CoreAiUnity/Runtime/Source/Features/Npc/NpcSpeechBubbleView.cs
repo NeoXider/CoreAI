@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.ChatOverlay;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -260,6 +261,9 @@ namespace CoreAI.Ai.Npc
         /// <summary>The document's root element; null once disposed.</summary>
         public VisualElement Root => _document != null ? _document.rootVisualElement : null;
 
+        /// <summary>The panel the bubbles are drawn on: the settings' own, or one made for them.</summary>
+        public PanelSettings Panel => _document != null ? _document.panelSettings : null;
+
         /// <summary>Creates the document described by <paramref name="settings"/>.</summary>
         public static NpcSpeechBubbleSurface Create(CoreAiNpcSettings settings)
         {
@@ -275,6 +279,14 @@ namespace CoreAI.Ai.Npc
                 panel.screenMatchMode = PanelScreenMatchMode.MatchWidthOrHeight;
                 panel.match = 0.5f;
                 panel.sortingOrder = resolved.SortingOrder;
+                // WHY a theme: a panel without one logs "No Theme Style Sheet set" and lacks the default text
+                // settings; the bubbles take the runtime theme the chat overlay and the runtime UI use.
+                ThemeStyleSheet theme = Resources.Load<ThemeStyleSheet>(CoreAiChatOverlaySettings.DefaultThemeResourcePath);
+                if (theme != null)
+                {
+                    panel.themeStyleSheet = theme;
+                }
+
                 surface._ownedPanel = panel;
             }
 

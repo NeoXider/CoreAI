@@ -85,6 +85,11 @@
     <Compile Include="$(TestsRoot)/Sandbox/LuaCsHookBatchEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/Sandbox/LuaCsHookBatchEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/Sandbox/LuaCsGuardedPathAllocationBudgetEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/Sandbox/LuaCsGuardedPathAllocationBudgetEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/Sandbox/LuauMathLibraryEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/Sandbox/LuauMathLibraryEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/Sandbox/LuauTableLibraryEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/Sandbox/LuauTableLibraryEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/Sandbox/LuauStringLibraryEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/Sandbox/LuauStringLibraryEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/Sandbox/LuauUtf8Bit32LibraryEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/Sandbox/LuauUtf8Bit32LibraryEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/Sandbox/LuauGlobalsLibraryEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/Sandbox/LuauGlobalsLibraryEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/Sandbox/LuauLibraryInventoryEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/Sandbox/LuauLibraryInventoryEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaCsModRuntimeEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsModRuntimeEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaCsModRuntimePersistenceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsModRuntimePersistenceEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaCsSecureSandboxEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsSecureSandboxEditModeTests.cs" />

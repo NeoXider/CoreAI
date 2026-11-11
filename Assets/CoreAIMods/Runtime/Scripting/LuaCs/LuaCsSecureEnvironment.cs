@@ -224,6 +224,7 @@ namespace CoreAI.Sandbox.LuaCs
             StripRiskyGlobals(state);
             HardenCoroutineLibrary(state, liveResumeBudget ?? new LuaCsCoroutineBudgetSettings());
             CountCallsBackIntoLua(state);
+            InstallLuauStandardLibrary(state);
             InstallTrustedIteratorResolver(state);
             registry?.ApplyToEnvironment(state);
             InstallTrustedIteratorResolver(state);
@@ -314,13 +315,13 @@ namespace CoreAI.Sandbox.LuaCs
         // Wrapping `coroutine.resume` arms a per-resume step+time+alloc guard hook on the child state and
         // clears it afterwards, so the coroutine body is cut like any other guarded execution.
         //
-        // coroutine.wrap is REMOVED (set nil), not left native: its resumer drives a hidden child thread
-        // through the library's OWN internal resume, bypassing the wrapped coroutine.resume below, so a
+        // The native coroutine.wrap is REMOVED (set nil), not left native: its resumer drives a hidden child
+        // thread through the library's OWN internal resume, bypassing the wrapped coroutine.resume below, so a
         // wrap-created body would run with NO guard hook — an unbounded-loop / allocation-bomb host-hang
-        // vector. It cannot be safely re-armed on this Lua-CSharp build: a C# reimplementation's returned
-        // function did not round-trip as callable, and a Lua redefinition needs a sync-over-async
-        // Load/Execute that DEADLOCKS on a SynchronizationContext-bearing thread (editor domain reload).
-        // Removing it is fail-safe: mods use the guarded create + resume pair instead.
+        // vector. A Lua redefinition needs a sync-over-async Load/Execute that DEADLOCKS on a
+        // SynchronizationContext-bearing thread (editor domain reload). InstallLuauCoroutineExtensions then
+        // installs a C# wrap that resumes through the guarded coroutine.resume, so its body runs under the same
+        // per-resume budget as any raw coroutine.
         private static void HardenCoroutineLibrary(LuaState state, LuaCsCoroutineBudgetSettings liveResumeBudget)
         {
             LuaValue coroValue = state.Environment["coroutine"];

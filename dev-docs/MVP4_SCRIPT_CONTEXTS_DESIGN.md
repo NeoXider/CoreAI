@@ -1,9 +1,9 @@
 # MVP4 — Script contexts and the client runtime: design note
 
-Status (2026-11-11): **steps A1–A3, B1, B2 and C1-1 to C1-3 written; C1-4 to C1-6 and C2–C6 not started.**
+Status (2026-11-11): **steps A1–A3, B1, B2 and C1-1 to C1-5 written; C1-6 and C2–C6 not started.**
 A1–A3 are green in Unity 6000.6 EditMode; B1 (the script instance classes and `Enum.RunContext`), B2 (the package v2
-reader) and C1-1 to C1-3 (declared mods get durable bound script instances, see the C1 entry) have passed their
-portable tests only. The declared context decides placement and the load refusals; it does not yet decide where or
+reader) and C1-1 to C1-5 (declared mods get durable bound script instances, saved in format version 2, see the C1
+entry) have passed their portable tests only. The declared context decides placement and the load refusals; it does not yet decide where or
 whether a script runs (C2, C3). Written 2026-11-11 for the rung "MVP4 — Script contexts & client
 runtime" (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md:929-977`) and the open item "Design note for plan
 decision D1 (c) before any code" (`TODO.md:557-561`). Plan decision D1 (c) — "instances are views over
@@ -905,8 +905,35 @@ listed, SC-4 replacement on a class change).
   an instance another actor owns is refused**, besides the note's mod-owned parent.
 - **Gating is not in C1**: a loaded declared script always runs; `ScriptRunStates.Describe` therefore reports a
   loaded source as running, and the SC-9 predicate decides starts only from C1-6/C2.
-- **Interim until C1-4**: production capture still writes version 1, which keeps a durable instance as a plain
-  script node without its binding; the next load adopts it (above).
+- **Interim until C1-4** (closed by C1-4): production capture still wrote version 1, which keeps a durable instance
+  as a plain script node without its binding; the next load adopts it (above).
+
+**Built in C1-4 and C1-5 (2026-11-11)** (portable tests `ScriptWorldPackageEditModeTests`, `ScriptSessionEditModeTests`,
+the C1-5 rows of `ScriptPlacementLuaEditModeTests`; Unity-only `Mvp4HubScriptStateEditModeTests`):
+
+- **Writer (R4):** `RbxWorldPackageSerializer.Capture(context)` picks `FormatVersionFor(projectedTree, mods)`; a world of
+  legacy mods is version 1 byte for byte (pinned against the explicit version 1 capture), a declared mod or a saved
+  script instance makes it version 2. Two B2 tests that pinned "production writes version 1" for worlds with script
+  instances now capture version 1 explicitly; their version 1 assertions are unchanged.
+- **Restore (R3):** `RehydrateExactOrThrow(hostGrant, allowFull, legacyScriptPlacement, out notStarted)` and
+  `RehydrateFromStore(..., legacyScriptPlacement = true)` classify each active source through
+  `ScriptPlacementPlanner.TryResolveContext`: a `shared` source never starts (`module`), in version 2 a declared source
+  without a bound instance is detached; client scripts start after the server side. The session passes
+  `payload.FormatVersion < 2`, expects the active count minus the skipped ones, reports them in
+  `RbxWorldLoadResult.NotStartedMods` and one diagnostic. The boot rehydrate passes `legacyScriptPlacement: true`
+  (the default world's store holds no tree).
+- **Undo:** a gated load of a declared mod undoes with its source and its instance, and later undos do not refuse
+  (pinned).
+- **Listing (C1-5):** `LuaModInfo.Context`, `ScriptClassName`, `ScriptPath`, `RunState`; `manage_mods list` adds
+  `context`, `script_path`, `run_state` to each result item (the tool's contract text is unchanged); `HubModRecord`
+  gets `Context`, `RunState`, `ScriptPath`, from the runtime for a loaded mod and from the listed manifest otherwise.
+  The Hub's delete releases the script instance through the new optional `ILuaModScriptInstanceReleaser` (the session
+  facade forwards it), before the package is deleted so the release still knows the folder; a mod without an
+  instance does nothing more than before.
+- **Not in C1-5:** detached entries are not listed by the runtime (it lists loaded runs), so `detached` and `module`
+  appear only in a load's `NotStartedMods` until C1-6 registers sources without a run.
+- **Named TODO (C1-6):** a `context: client` script on a dedicated server still runs; in single-player it runs once on
+  the one machine (pinned, `C1_ClientScript_InSinglePlayer_RunsOnceOnTheOneMachine`).
 
 The original entry, kept for its file list:
 

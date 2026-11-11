@@ -166,7 +166,8 @@ namespace CoreAI.Ai.LuaCs
     /// <c>manage_mods</c> can later run on this VM. Both stores default to no-op implementations, so a
     /// host that wires neither keeps the prior in-memory-only behaviour.
     /// </summary>
-    public sealed class LuaCsModRuntime : ILuaModRuntime, IBudgetedLuaModRuntime, ILuaModSourceRetitler
+    public sealed class LuaCsModRuntime : ILuaModRuntime, IBudgetedLuaModRuntime, ILuaModSourceRetitler,
+        ILuaModScriptInstanceReleaser
     {
         // WHY: ~10 s matches Luau's script watchdog so a mod handler is not cut sooner than a Roblox one.
         public const int DefaultHandlerTimeoutMs = 10_000;
@@ -1492,12 +1493,43 @@ namespace CoreAI.Ai.LuaCs
                         LoadedAtUtc = mod.LoadedAtUtc,
                         OwnerActorId = mod.OwnerActorId,
                         Quarantined = mod.Quarantined,
-                        Category = global::CoreAI.Mods.Folders.ModFolderHeaderEditor.ReadCategory(mod.Source)
+                        Category = global::CoreAI.Mods.Folders.ModFolderHeaderEditor.ReadCategory(mod.Source),
+                        Context = ScriptContexts.ToDisplayName(mod.Context),
+                        RunState = ScriptRunRules.ToWireName(ScriptRunStates.Describe(new ScriptRunFacts
+                        {
+                            IsLoaded = true,
+                            IsActive = true,
+                            IsQuarantined = mod.Quarantined,
+                            DeclaredContext = mod.Context,
+                            HasBoundInstance = mod.Placement == ScriptPlacementKind.Durable
+                        }))
                     });
                 }
             }
 
+            // WHY outside the gate: the script's path is read from the world tree, which a loaded mod's code may be
+            // changing on this thread, and nothing here needs the mod table any more.
+            FillScriptInstances(result);
             return result;
+        }
+
+        /// <summary>The class and full name of each listed mod's <c>script</c> (MVP4 step C1-5); read from the world, never from the store.</summary>
+        private void FillScriptInstances(List<LuaModInfo> mods)
+        {
+            if (_rbxApi == null)
+            {
+                return;
+            }
+
+            for (int index = 0; index < mods.Count; index++)
+            {
+                LuaModInfo info = mods[index];
+                if (_rbxApi.TryGetExecutingScript(info.Id, out RbxInstance script) && !script.IsDestroyed)
+                {
+                    info.ScriptClassName = script.ClassName;
+                    info.ScriptPath = script.GetFullName();
+                }
+            }
         }
 
         /// <summary>
@@ -2356,29 +2388,85 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         private ScriptPlacementPlan PlanScriptPlacement(string modId, string luaCode, ScriptPlanSeed seed)
         {
-            LuaModHeader header = LuaModHeader.Parse(luaCode ?? "", modId);
-            RbxLuaSourceContainer bound = null;
-            bool hasBound = _rbxApi != null && _rbxApi.ScriptInstances.TryGetBoundScript(modId, out bound);
-            ScriptPlacementRequest request = new()
-            {
-                SourceId = modId,
-                HeaderContext = header.Context,
-                HeaderParent = header.Parent,
-                FallbackContext = seed.FallbackContext,
-                FolderSegments = header.FolderPath.GetSegments(),
-                PreviousFolderSegments = seed.PreviousSource == null
-                    ? null
-                    : LuaModHeader.Parse(seed.PreviousSource, modId).FolderPath.GetSegments(),
-                HasBoundInstance = hasBound,
-                BoundClassName = bound?.ClassName,
-                BoundRunContext = bound is RbxBaseScript script ? script.RunContext : RunContextValues.Legacy
-            };
+            ScriptPlacementRequest request = PlacementRequestFor(modId, luaCode, seed.FallbackContext,
+                seed.PreviousSource, out LuaModHeader _);
             if (!ScriptPlacementPlanner.TryPlan(in request, out ScriptPlacementPlan plan, out RbxError refusal))
             {
                 throw refusal;
             }
 
             return plan;
+        }
+
+        /// <summary>The planner's facts for a load of <paramref name="luaCode"/>: its header and the instance bound to the mod.</summary>
+        private ScriptPlacementRequest PlacementRequestFor(string modId, string luaCode, string fallbackContext,
+            string previousSource, out LuaModHeader header)
+        {
+            header = LuaModHeader.Parse(luaCode ?? "", modId);
+            RbxLuaSourceContainer bound = null;
+            bool hasBound = _rbxApi != null && _rbxApi.ScriptInstances.TryGetBoundScript(modId, out bound);
+            return new ScriptPlacementRequest
+            {
+                SourceId = modId,
+                HeaderContext = header.Context,
+                HeaderParent = header.Parent,
+                FallbackContext = fallbackContext ?? "",
+                FolderSegments = header.FolderPath.GetSegments(),
+                PreviousFolderSegments = previousSource == null
+                    ? null
+                    : LuaModHeader.Parse(previousSource, modId).FolderPath.GetSegments(),
+                HasBoundInstance = hasBound,
+                BoundClassName = bound?.ClassName,
+                BoundRunContext = bound is RbxBaseScript script ? script.RunContext : RunContextValues.Legacy
+            };
+        }
+
+        /// <summary>When a restore starts one active stored source (MVP4 step C1-4).</summary>
+        private enum RestoreStart
+        {
+            /// <summary>In the restore order: a legacy or server script (the server side).</summary>
+            WithTheServerSide,
+
+            /// <summary>After every server-side source, in the restore order: a client script (rule R2.2).</summary>
+            AfterTheServerSide,
+
+            /// <summary>Not at all: a detached declared source (rule R3) or a ModuleScript source.</summary>
+            NotStarted
+        }
+
+        /// <summary>
+        /// Decides when a restore starts <paramref name="modId"/>. A ModuleScript source (<c>context: shared</c>) is
+        /// never started as a script: <c>require</c> runs it (MVP4 step C4), and step C1-6 registers it without a
+        /// run. With <paramref name="legacyScriptPlacement"/> false (a format version 2 world) a source that declares
+        /// a context or a <c>parent:</c> but has no bound instance is detached and is not started either (rule R3);
+        /// with it true (a version 1 world, the default world's store) it starts and gets its instance at its
+        /// placement. A source whose header the planner refuses starts, so its load fails with the planner's error.
+        /// </summary>
+        private RestoreStart ClassifyRestore(string modId, string source, string storedContext,
+            bool legacyScriptPlacement, out string notStartedReason)
+        {
+            notStartedReason = "";
+            ScriptPlacementRequest request = PlacementRequestFor(modId, source, storedContext, null,
+                out LuaModHeader header);
+            if (!ScriptPlacementPlanner.TryResolveContext(in request, out ScriptContext context, out RbxError _))
+            {
+                return RestoreStart.WithTheServerSide;
+            }
+
+            if (context == ScriptContext.Shared)
+            {
+                notStartedReason = "module";
+                return RestoreStart.NotStarted;
+            }
+
+            if (!legacyScriptPlacement && !request.HasBoundInstance
+                                       && (context != ScriptContext.Legacy || !string.IsNullOrWhiteSpace(header.Parent)))
+            {
+                notStartedReason = "detached";
+                return RestoreStart.NotStarted;
+            }
+
+            return context == ScriptContext.Client ? RestoreStart.AfterTheServerSide : RestoreStart.WithTheServerSide;
         }
 
         /// <summary>
@@ -5435,6 +5523,21 @@ namespace CoreAI.Ai.LuaCs
             return wasLoaded || modId.Length > 0;
         }
 
+        /// <inheritdoc />
+        public bool ReleaseScriptInstance(ActorContext caller, string id)
+        {
+            DemandModAccess(caller, "forget", id);
+            string modId = Normalize(id);
+            string source = SourceOfBoundScript(modId);
+            if (source == null)
+            {
+                return false;
+            }
+
+            ReleaseBoundScript(modId, source);
+            return true;
+        }
+
         /// <summary>
         /// The source whose folder tells a durable script's default placement: the loaded run's, else the stored
         /// package's. Null when no instance is bound to the mod, which is every legacy mod.
@@ -5522,7 +5625,13 @@ namespace CoreAI.Ai.LuaCs
         /// auto-acquire full reflection. Loads run in independent try/catch blocks so one bad package does
         /// not abort the rest. Returns the count successfully loaded.
         /// </summary>
-        internal int RehydrateFromStore(LuaCapabilities hostGrant, bool allowFull = false)
+        /// <param name="legacyScriptPlacement">
+        /// True (the default, and every store-only world: the store holds no tree) starts every active source;
+        /// false skips a declared source without a bound instance (MVP4 rule R3, <see cref="ClassifyRestore"/>). A
+        /// ModuleScript source is never started, and client scripts start after the server side.
+        /// </param>
+        internal int RehydrateFromStore(LuaCapabilities hostGrant, bool allowFull = false,
+            bool legacyScriptPlacement = true)
         {
             IReadOnlyList<LuaModManifest> manifests;
             try
@@ -5538,6 +5647,8 @@ namespace CoreAI.Ai.LuaCs
             List<LuaModManifest> ordered = new(manifests);
             ordered.Sort(CompareRestoreOrder);
             int loaded = 0;
+            List<Action> clientSide = null;
+            List<string> notStarted = null;
             foreach (LuaModManifest manifest in ordered)
             {
                 if (manifest == null || !manifest.Active)
@@ -5563,14 +5674,35 @@ namespace CoreAI.Ai.LuaCs
                     string capsText = stored != null ? stored.Capabilities : manifest.Capabilities;
                     LuaCapabilities effectiveCaps = ApplyHostGrant(ParseCaps(capsText), hostGrant, allowFull);
                     string ownerActorId = stored?.OwnerActorId?.Trim() ?? manifest.OwnerActorId?.Trim() ?? "";
+                    string storedContext = stored?.Context ?? manifest.Context;
+                    RestoreStart start = ClassifyRestore(modId, source, storedContext, legacyScriptPlacement,
+                        out string notStartedReason);
+                    if (start == RestoreStart.NotStarted)
+                    {
+                        (notStarted ??= new List<string>()).Add(modId + " (" + notStartedReason + ")");
+                        continue;
+                    }
 
                     // WHY: Load with the masked runtime tier but do NOT re-persist: the stored manifest already
                     // holds the mod's declared capabilities. Overwriting it with the masked tier would
                     // permanently strip Full from the store, so a later allowFull rehydrate could not
                     // restore it.
-                    LoadModInternal(
+                    Action load = () => LoadModInternal(
                         modId, source, ownerActorId, effectiveCaps, false,
-                        ownerActorId.Length == 0, storedContext: stored?.Context ?? manifest.Context);
+                        ownerActorId.Length == 0, storedContext: storedContext);
+                    if (start == RestoreStart.AfterTheServerSide)
+                    {
+                        (clientSide ??= new List<Action>()).Add(() =>
+                        {
+                            if (TryRehydrateOne(modId, load))
+                            {
+                                loaded++;
+                            }
+                        });
+                        continue;
+                    }
+
+                    load();
                     loaded++;
                 }
                 catch (Exception ex)
@@ -5583,7 +5715,40 @@ namespace CoreAI.Ai.LuaCs
                 }
             }
 
+            if (clientSide != null)
+            {
+                for (int index = 0; index < clientSide.Count; index++)
+                {
+                    clientSide[index]();
+                }
+            }
+
+            if (notStarted != null)
+            {
+                _log?.Info($"[LuaCsModRuntime] Rehydrate did not start {notStarted.Count} mod(s): {string.Join(", ", notStarted)}.");
+            }
+
             return loaded;
+        }
+
+        /// <summary>One deferred rehydrate load, with the quiet skip of <see cref="RehydrateFromStore"/>.</summary>
+        private bool TryRehydrateOne(string modId, Action load)
+        {
+            if (IsLoaded(modId))
+            {
+                return false;
+            }
+
+            try
+            {
+                load();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _log?.Warn($"[LuaCsModRuntime] Rehydrate skipped mod '{modId}': {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -5595,6 +5760,20 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         internal int RehydrateExactOrThrow(LuaCapabilities hostGrant, bool allowFull = false)
         {
+            return RehydrateExactOrThrow(hostGrant, allowFull, true, out IReadOnlyList<string> _);
+        }
+
+        /// <summary>
+        /// <see cref="RehydrateExactOrThrow(LuaCapabilities, bool)"/> for a world restore that knows its package's format
+        /// (MVP4 step C1-4). With <paramref name="legacyScriptPlacement"/> false (format version 2), a declared source
+        /// without a bound instance is detached and not started (rule R3). A ModuleScript source is never started.
+        /// Client scripts start after the server side, each side in <see cref="CompareRestoreOrder"/> order, so a
+        /// world of legacy and server scripts starts exactly as before. <paramref name="notStarted"/> names every
+        /// active source it skipped, with the reason (<c>detached</c> or <c>module</c>).
+        /// </summary>
+        internal int RehydrateExactOrThrow(LuaCapabilities hostGrant, bool allowFull, bool legacyScriptPlacement,
+            out IReadOnlyList<string> notStarted)
+        {
             ThrowIfShutdown();
             IReadOnlyList<LuaModManifest> manifests = _sourceStore.List()
                 ?? throw new InvalidOperationException(
@@ -5602,6 +5781,8 @@ namespace CoreAI.Ai.LuaCs
             List<LuaModManifest> ordered = new(manifests);
             ordered.Sort(CompareRestoreOrder);
             int loaded = 0;
+            List<Action> clientSide = new();
+            List<string> skipped = new();
             for (int index = 0; index < ordered.Count; index++)
             {
                 LuaModManifest manifest = ordered[index]
@@ -5638,7 +5819,15 @@ namespace CoreAI.Ai.LuaCs
                 LuaCapabilities effectiveCaps = ApplyHostGrant(
                     ParseCaps(stored.Capabilities), hostGrant, allowFull);
                 string ownerActorId = stored.OwnerActorId?.Trim() ?? "";
-                LoadModInternal(
+                RestoreStart start = ClassifyRestore(modId, source, stored.Context, legacyScriptPlacement,
+                    out string notStartedReason);
+                if (start == RestoreStart.NotStarted)
+                {
+                    skipped.Add(modId + " (" + notStartedReason + ")");
+                    continue;
+                }
+
+                Action load = () => LoadModInternal(
                     modId,
                     source,
                     ownerActorId,
@@ -5646,9 +5835,23 @@ namespace CoreAI.Ai.LuaCs
                     false,
                     ownerActorId.Length == 0,
                     storedContext: stored.Context);
+                if (start == RestoreStart.AfterTheServerSide)
+                {
+                    clientSide.Add(load);
+                    continue;
+                }
+
+                load();
                 loaded++;
             }
 
+            for (int index = 0; index < clientSide.Count; index++)
+            {
+                clientSide[index]();
+                loaded++;
+            }
+
+            notStarted = skipped;
             return loaded;
         }
 

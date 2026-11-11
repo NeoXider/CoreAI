@@ -97,7 +97,9 @@ store_set('done', 'yes')");
             Assert.AreEqual("yes", _store.Get("probe", "done"), "the probe ran: " + _store.Get("probe", "names"));
             Assert.AreEqual("Head|Left Arm|Part|true|8|1|true|false|false", _store.Get("probe", "names"),
                 "seven parts and a Humanoid; the root is the PrimaryPart and invisible; R6's collision flags");
-            Assert.AreEqual("40,127,71", _store.Get("probe", "torso"), "the mirror's BodyColors.TorsoColor3 default");
+            RbxColor3 shirt = RbxR6Rig.DefaultShirtColor;
+            Assert.AreEqual(System.Math.Round(shirt.R * 255f) + "," + System.Math.Round(shirt.G * 255f) + "," + System.Math.Round(shirt.B * 255f),
+                _store.Get("probe", "torso"), "the bundled default body's shirt (a DEV candidate over BodyColors)");
 
             RbxInstance character = Character();
             RbxInstance head = character.FindFirstChild("Head");

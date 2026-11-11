@@ -1,3 +1,4 @@
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 
 namespace CoreAI.Mods.Rbx.Binding.CharacterRig
@@ -20,5 +21,12 @@ namespace CoreAI.Mods.Rbx.Binding.CharacterRig
 
         /// <summary>True while <paramref name="id"/> is held for the rig.</summary>
         bool IsPoseDriven(InstanceId id);
+
+        /// <summary>
+        /// Draws <paramref name="id"/> at <paramref name="size"/> studs instead of its Size, as a <c>SpecialMesh</c>
+        /// under a part does in Roblox (the R6 head mesh); a zero size draws it at its Size again. Part.Size, what a
+        /// script reads, does not change.
+        /// </summary>
+        void SetDrawnSize(InstanceId id, RbxVector3 size);
     }
 }

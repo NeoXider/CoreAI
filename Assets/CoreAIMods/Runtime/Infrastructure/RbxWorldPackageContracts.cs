@@ -702,13 +702,32 @@ namespace CoreAI.Mods.WorldPackages
         /// </summary>
         public string BackupWarning { get; private set; } = "";
 
+        /// <summary>
+        /// The active mods of the loaded world that did not start, each as <c>id (reason)</c> (MVP4 step C1-4):
+        /// <c>detached</c> for a declared source of a format version 2 world whose script instance the world does not
+        /// hold (rule R3), <c>module</c> for a ModuleScript source, which only <c>require</c> runs. Empty otherwise.
+        /// </summary>
+        public IReadOnlyList<string> NotStartedMods { get; private set; } = Array.Empty<string>();
+
         /// <summary>A copy of this result that carries <paramref name="warning"/> as its <see cref="BackupWarning"/>.</summary>
         internal RbxWorldLoadResult WithBackupWarning(string warning)
         {
             return new RbxWorldLoadResult(
                 Success, Error, ActiveModsStarted, StartupSelectionPersisted, StartupSelectionError, Status)
             {
-                BackupWarning = warning ?? ""
+                BackupWarning = warning ?? "",
+                NotStartedMods = NotStartedMods
+            };
+        }
+
+        /// <summary>A copy of this result that names <paramref name="notStarted"/> as its <see cref="NotStartedMods"/>.</summary>
+        internal RbxWorldLoadResult WithNotStartedMods(IReadOnlyList<string> notStarted)
+        {
+            return new RbxWorldLoadResult(
+                Success, Error, ActiveModsStarted, StartupSelectionPersisted, StartupSelectionError, Status)
+            {
+                BackupWarning = BackupWarning,
+                NotStartedMods = notStarted ?? Array.Empty<string>()
             };
         }
     }
@@ -2685,9 +2704,14 @@ namespace CoreAI.Mods.WorldPackages
                 CopyDeclaredLogicSlots(
                     Current.Stack.GameplayBindings.LogicSlots,
                     stagedStack.GameplayBindings.LogicSlots);
+                // WHY the package's format decides: in a version 1 world every active mod starts at its legacy
+                // placement or gets its script instance there, while in version 2 a declared mod whose instance the
+                // world does not hold is detached and does not start (MVP4 rule R3).
                 int started = stagedStack.Runtime.RehydrateExactOrThrow(
-                    _hostGrant, _allowFull);
-                int expected = CountActive(payload.Mods);
+                    _hostGrant, _allowFull,
+                    payload.FormatVersion < RbxWorldPackageSerializer.ScriptBindingsFormatVersion,
+                    out IReadOnlyList<string> notStarted);
+                int expected = CountActive(payload.Mods) - notStarted.Count;
                 if (started != expected)
                 {
                     throw new InvalidOperationException(
@@ -2791,9 +2815,15 @@ namespace CoreAI.Mods.WorldPackages
                             + "was retained and was not disposed: " + ex.Message);
                 }
 
+                if (notStarted.Count > 0)
+                {
+                    ReportDiagnostic("The loaded world did not start " + notStarted.Count.ToString(CultureInfo.InvariantCulture)
+                                     + " active mod(s): " + string.Join(", ", notStarted) + ".");
+                }
+
                 if (startupSource == null)
                 {
-                    return new RbxWorldLoadResult(true, "", started);
+                    return new RbxWorldLoadResult(true, "", started).WithNotStartedMods(notStarted);
                 }
 
                 // WHY still inside the load: the next confirmed load cannot publish until this one's
@@ -2804,7 +2834,7 @@ namespace CoreAI.Mods.WorldPackages
                     "",
                     started,
                     selectionError.Length == 0,
-                    selectionError);
+                    selectionError).WithNotStartedMods(notStarted);
             }
             catch (Exception ex)
             {
@@ -4989,7 +5019,8 @@ namespace CoreAI.Mods.WorldPackages
             }
         }
 
-        private sealed class ActiveLuaModRuntime : ILuaModRuntime, IBudgetedLuaModRuntime
+        private sealed class ActiveLuaModRuntime : ILuaModRuntime, IBudgetedLuaModRuntime,
+            ILuaModScriptInstanceReleaser
         {
             private readonly RbxWorldRuntimeSessionController _owner;
             private readonly AsyncLocal<InvocationPolicy> _invocationPolicy = new();
@@ -5165,6 +5196,11 @@ namespace CoreAI.Mods.WorldPackages
                 }
 
                 return imported;
+            }
+
+            public bool ReleaseScriptInstance(ActorContext caller, string id)
+            {
+                return Inner is ILuaModScriptInstanceReleaser releaser && releaser.ReleaseScriptInstance(caller, id);
             }
 
             public bool ForgetMod(ActorContext caller, string id)

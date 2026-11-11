@@ -45,9 +45,16 @@ namespace CoreAI.Mods.Rbx.Instances.CharacterRig
     /// <summary>The BasePart properties a spawned character part starts with.</summary>
     public readonly struct RbxCharacterPartSeed
     {
-        /// <summary>Creates a seed.</summary>
+        /// <summary>Creates a seed for a part drawn at its own size.</summary>
         public RbxCharacterPartSeed(RbxVector3 size, RbxCFrame cframe, RbxColor3 color, bool hasColor,
             float transparency, bool canCollide, bool anchored)
+            : this(size, cframe, color, hasColor, transparency, canCollide, anchored, RbxVector3.Zero)
+        {
+        }
+
+        /// <summary>Creates a seed for a part drawn at <paramref name="meshSize"/> (zero: at its own size).</summary>
+        public RbxCharacterPartSeed(RbxVector3 size, RbxCFrame cframe, RbxColor3 color, bool hasColor,
+            float transparency, bool canCollide, bool anchored, RbxVector3 meshSize)
         {
             Size = size;
             CFrame = cframe;
@@ -56,6 +63,7 @@ namespace CoreAI.Mods.Rbx.Instances.CharacterRig
             Transparency = transparency;
             CanCollide = canCollide;
             Anchored = anchored;
+            MeshSize = meshSize;
         }
 
         /// <summary>Part.Size in studs.</summary>
@@ -78,5 +86,15 @@ namespace CoreAI.Mods.Rbx.Instances.CharacterRig
 
         /// <summary>Part.Anchored.</summary>
         public bool Anchored { get; }
+
+        /// <summary>
+        /// The size the part is drawn at, in studs, when it differs from <see cref="Size"/>: what a
+        /// <c>SpecialMesh</c> under the part does in Roblox (the R6 Head is a 2x1x1 part drawn through a head
+        /// mesh). Zero draws the part at <see cref="Size"/>.
+        /// </summary>
+        public RbxVector3 MeshSize { get; }
+
+        /// <summary>True when the part is drawn at <see cref="MeshSize"/> rather than at its Size.</summary>
+        public bool HasMeshSize => MeshSize.X > 0f && MeshSize.Y > 0f && MeshSize.Z > 0f;
     }
 }

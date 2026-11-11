@@ -55,15 +55,18 @@ namespace CoreAI.Ai.Logging
 
         /// <param name="logService">The mod log.</param>
         /// <param name="asyncMarshaler">
-        /// Schedules <c>wait_seconds</c>. Null uses the pass-through default, whose delay is <c>Task.Delay</c>: that never
-        /// fires in a WebGL player, so a Unity host passes its frame-driven marshaler (<c>ICoreAISettings.ToolInvocationMarshaler</c>).
+        /// Schedules <c>wait_seconds</c>; null answers at once instead of waiting. A Unity host passes its frame-driven
+        /// marshaler (<c>ICoreAISettings.ToolInvocationMarshaler</c>); a host with a thread pool may pass
+        /// <see cref="PassThroughLlmAsyncMarshaler.Instance"/>, whose delay is <c>Task.Delay</c>.
         /// </param>
         /// <param name="lifecycle">The recorded load of every mod for <c>since_reload</c>; null scans the log for the load line.</param>
         public GetModLogsLlmTool(ILuaLogService logService, ILlmAsyncMarshaler asyncMarshaler,
             LuaModLifecycleLog lifecycle = null)
         {
             _logService = logService ?? throw new ArgumentNullException(nameof(logService));
-            _asyncMarshaler = asyncMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
+            // WHY: no default scheduler: the pass-through delay is Task.Delay, which never fires in a WebGL player, so
+            // a tool built without one must not wait at all rather than hang the model turn.
+            _asyncMarshaler = asyncMarshaler;
             _lifecycle = lifecycle;
         }
 
@@ -77,23 +80,22 @@ namespace CoreAI.Ai.Logging
 
         /// <inheritdoc />
         public string Description =>
-            "Read Lua mod logs (print, warn, error, runtime_error) captured during play: what a mod printed and " +
-            "which error it threw, with script:line, so you can repair it. Read-only. Every result has " +
-            "next_sequence; pass it as since_sequence to get only newer entries. To check a change, call it right " +
-            "after manage_mods reload with mod_id, since_reload=true and wait_seconds=5: it answers as soon as a " +
-            "warning or error arrives, otherwise after the wait.";
+            "Read Lua mod logs captured during play: what a mod printed and which error it threw, with " +
+            "script:line. Read-only. Each result has next_sequence; pass it as since_sequence for newer entries " +
+            "only. To check a change, call right after manage_mods reload with mod_id, since_reload=true, " +
+            "wait_seconds=5: it answers once a warning or error arrives, else after the wait.";
 
         /// <inheritdoc />
         public string ParametersSchema =>
             "{" +
             "\"type\":\"object\"," +
             "\"properties\":{" +
-            "\"mod_id\":{\"type\":\"string\",\"description\":\"Only this mod's logs.\"}," +
-            "\"level\":{\"type\":\"string\",\"description\":\"Minimum severity: print, warn, error, runtime_error.\"}," +
-            "\"since_sequence\":{\"type\":\"integer\",\"description\":\"Only entries with a higher sequence (next_sequence of an earlier result).\"}," +
-            "\"max_entries\":{\"type\":\"integer\",\"description\":\"Most entries to return (default 50).\"}," +
-            "\"since_reload\":{\"type\":\"boolean\",\"description\":\"With mod_id: only entries since the mod's latest load or reload.\"}," +
-            "\"wait_seconds\":{\"type\":\"integer\",\"description\":\"Wait up to this many seconds (0-10) for a new warning or error.\"}" +
+            "\"mod_id\":{\"type\":\"string\",\"description\":\"Only this mod.\"}," +
+            "\"level\":{\"type\":\"string\",\"description\":\"Minimum: print, warn, error, runtime_error.\"}," +
+            "\"since_sequence\":{\"type\":\"integer\",\"description\":\"Only entries after this sequence.\"}," +
+            "\"max_entries\":{\"type\":\"integer\",\"description\":\"Most entries (default 50).\"}," +
+            "\"since_reload\":{\"type\":\"boolean\",\"description\":\"With mod_id: only entries since its latest load or reload.\"}," +
+            "\"wait_seconds\":{\"type\":\"integer\",\"description\":\"Wait up to N seconds (max 10) for a new warning or error.\"}" +
             "}}";
 
         /// <summary>Creates the MEAI function surface for <c>get_mod_logs</c>.</summary>
@@ -127,17 +129,17 @@ namespace CoreAI.Ai.Logging
         // the result must be published with the host SynchronizationContext cleared, or the model turn
         // never resumes after an asynchronously completed body (see MeaiToolTaskBridge).
         public Task<string> ExecuteAsync(
-            [Description("Only this mod's logs.")]
+            [Description("Only this mod.")]
             string mod_id = null,
-            [Description("Minimum severity: print, warn, error, runtime_error.")]
+            [Description("Minimum: print, warn, error, runtime_error.")]
             string level = null,
-            [Description("Only entries with a higher sequence (next_sequence of an earlier result).")]
+            [Description("Only entries after this sequence.")]
             long since_sequence = 0,
-            [Description("Most entries to return (default 50).")]
+            [Description("Most entries (default 50).")]
             int max_entries = DefaultMaxEntries,
-            [Description("With mod_id: only entries since the mod's latest load or reload.")]
+            [Description("With mod_id: only entries since its latest load or reload.")]
             bool since_reload = false,
-            [Description("Wait up to this many seconds (0-10) for a new warning or error.")]
+            [Description("Wait up to N seconds (max 10) for a new warning or error.")]
             int wait_seconds = 0,
             CancellationToken cancellationToken = default)
         {
@@ -178,6 +180,11 @@ namespace CoreAI.Ai.Logging
                 return Task.FromResult(Format(query, -1));
             }
 
+            if (_asyncMarshaler == null)
+            {
+                return Task.FromResult(Format(query, 0));
+            }
+
             return MeaiToolTaskBridge.Publish(WaitAndFormatAsync(query, wait, cancellationToken));
         }
 
@@ -203,7 +210,7 @@ namespace CoreAI.Ai.Logging
                 }
             };
 
-            // WHY a flag polled in short host-scheduled steps instead of a completion source: the event is raised
+            // WHY: a flag polled in short host-scheduled steps instead of a completion source: the event is raised
             // inside the mod's own print or error call, and completing the tool from there would run the model
             // turn's continuation in the middle of that mod's code.
             int waitedMilliseconds = 0;

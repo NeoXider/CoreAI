@@ -116,6 +116,34 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         }
 
         [Test]
+        public void TheHead_IsDrawnAtTheHeadMeshSize_WhileItsPartKeepsRobloxsSize()
+        {
+            RbxInstance head = Part(RbxR6Part.Head);
+            Assert.IsTrue(_binder.TryGetBoundObject(head.Id, out GameObject drawn));
+            Assert.IsTrue(_binder.TryGetPartProperties(head.Id, out PartProperties properties));
+
+            Assert.AreEqual(new RbxVector3(2f, 1f, 1f), properties.Size, "a script still reads the R6 Head's 2x1x1");
+            Vector3 expected = RbxSpace.SizeToUnity(RbxR6Rig.HeadMeshSize);
+            Assert.AreEqual(expected.x, drawn.transform.localScale.x, Tolerance, "drawn as the head mesh: narrower");
+            Assert.AreEqual(expected.y, drawn.transform.localScale.y, Tolerance, "and taller than the part");
+        }
+
+        [Test]
+        public void TheTorso_IsDrawnAtItsOwnSize_AndAZeroDrawnSizeRestoresTheHead_NegativeTwin()
+        {
+            RbxInstance torso = Part(RbxR6Part.Torso);
+            Assert.IsTrue(_binder.TryGetBoundObject(torso.Id, out GameObject torsoObject));
+            Assert.AreEqual(RbxSpace.SizeToUnity(new RbxVector3(2f, 2f, 1f)).x, torsoObject.transform.localScale.x,
+                Tolerance, "no mesh: the part's own size");
+
+            RbxInstance head = Part(RbxR6Part.Head);
+            _binder.SetDrawnSize(head.Id, RbxVector3.Zero);
+            Assert.IsTrue(_binder.TryGetBoundObject(head.Id, out GameObject headObject));
+            Assert.AreEqual(RbxSpace.SizeToUnity(new RbxVector3(2f, 1f, 1f)).x, headObject.transform.localScale.x,
+                Tolerance, "a zero drawn size draws the Head at its Size again");
+        }
+
+        [Test]
         public void AWalk_SwingsTheLegTransforms_AndStandingStillDoesNot()
         {
             Frames(30);
