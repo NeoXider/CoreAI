@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_build
 name: Block World 2 - Build
-version: 1.2.0
+version: 1.2.1
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. Breaking and placing blocks at the crosshair: a thin outline shows the block you look at, left click breaks it, right click places the hotbar block on the face you look at, holding a button repeats, and nothing happens beyond a reach of five blocks. Bedrock cannot be broken and a block is never placed inside you. G switches between creative (endless blocks) and survival (you place what you broke); you start in first person, as in Minecraft, and V switches to third person behind your character and back. Publishes the crosshair cell as workspace attributes (CrosshairCell, CrosshairPlaceCell, CrosshairNormal) so the AI and other mods build where you look.
+description: Part of the Block World demo. Breaking and placing blocks at the crosshair: a thin outline shows the block you look at, left click breaks it, right click places the hotbar block on the face you look at, holding a button repeats, and nothing happens beyond a reach of five blocks. Bedrock cannot be broken and a block is never placed inside you. G switches between creative (endless blocks) and survival (you place what you broke, and a tree trunk gives planks); you start in first person, as in Minecraft, and V switches to third person behind your character and back. Publishes the crosshair cell as workspace attributes (CrosshairCell, CrosshairPlaceCell, CrosshairNormal) so the AI and other mods build where you look.
 ]]
 
 -- The target is found once per frame: a ray from the camera along its look direction (the crosshair is the
@@ -32,6 +32,8 @@ local BEDROCK_ROW = -16         -- the world's floor (blockworld_world)
 local REPEAT_SECONDS = 0.25     -- a held button acts again this often
 local EDGE = 0.1                -- outline thickness in studs
 local DEFAULT_ITEM = "Grass"
+-- WHY: a trunk is Mud drawn as bark (blockworld_world); breaking one gives the planks the hotbar can place.
+local DROPS = { Mud = "WoodPlanks" }
 
 -- Every Terrain material a player may place, by its Enum.Material name.
 local PLACEABLE = {}
@@ -244,8 +246,9 @@ local function breakTarget()
     broken = broken + 1
     workspace:SetAttribute("BlockWorldBroken", broken)
     if not creative then
-        counts[material.Name] = (counts[material.Name] or 0) + 1
-        publishCount(material.Name)
+        local drop = DROPS[material.Name] or material.Name
+        counts[drop] = (counts[drop] or 0) + 1
+        publishCount(drop)
     end
     shownKey = nil
 end

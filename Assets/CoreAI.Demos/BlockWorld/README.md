@@ -43,7 +43,7 @@ In a WebGL player the module sets `BlockWorldViewRadius` to 3 columns before the
 
 One seed always makes the same world. At the sea level lie the sea, lakes and sandy beaches; above them grass
 lowlands with woods (one stands near the spawn) and single trees of three shapes: round oaks, tall narrow trees
-and big oaks. Hills rise in steps a block or two high, and a step's side shows the earth under the grass, as in
+and big oaks (a trunk is the Terrain material Mud, which the block look draws as bark). Hills rise in steps a block or two high, and a step's side shows the earth under the grass, as in
 Minecraft. High ground (eleven blocks above the sea and more) and faces too steep to hold soil are bare rock,
 and the highest peaks, fourteen blocks above the sea and more, are snow over rock. Caves run under the hills
 and open onto their sides (see [Caves](#caves)). The land is streamed around you, four columns of 64 studs each
@@ -67,7 +67,7 @@ The key legend is on screen at the bottom right.
 | Left click | Break the outlined block (hold to keep breaking); on a torch, take it back |
 | Right click | Place the hotbar block on the outlined face (hold to keep placing) |
 | 1 - 9, mouse wheel | Choose a hotbar slot (or click a slot while the pointer is free); slot 9 is the torch |
-| G | Creative (endless blocks, no damage) or survival (you place what you broke, and falls hurt) |
+| G | Creative (endless blocks, no damage) or survival (you place what you broke, a tree trunk gives planks, and falls hurt) |
 | V | First person (the start) or third person over the shoulder |
 | E | Talk to the villager you look at, or the nearest one within 14 studs |
 | P, or `/autopilot on`, `/autopilot off`, `/autopilot status` | Autopilot on or off; any movement key also takes the controls back |

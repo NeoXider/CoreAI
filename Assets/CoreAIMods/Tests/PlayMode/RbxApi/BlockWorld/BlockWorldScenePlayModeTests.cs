@@ -390,7 +390,7 @@ return 'watchtower built'";
             RbxVector3 spawn = (RbxVector3)Workspace().GetAttribute("BlockWorldSpawn");
             int sx = Mathf.FloorToInt(spawn.X / Cell);
             int sz = Mathf.FloorToInt(spawn.Z / Cell);
-            TerrainMaterials.TryGetSlot("WoodPlanks", out byte trunkSlot);
+            TerrainMaterials.TryGetSlot("Mud", out byte trunkSlot);
             TerrainMaterials.TryGetSlot("LeafyGrass", out byte leafSlot);
             Vector3Int peak = new(sx, -16, sz);
             Dictionary<(int X, int Z), int> trunksByBlock = new();

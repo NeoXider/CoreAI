@@ -24,7 +24,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         /// SHA-256 of the Terrain package entry (<c>TerrainVoxelCodec</c>, canonical chunk order) after seed 1337
         /// streamed the 21 columns of view radius 2 around the origin. A change here is a change of the generated world.
         /// </summary>
-        private const string GoldenSeed1337Radius2 = "aee6793b5ff4fcabe52e77427eda6198784c4d8b2fc67230c540a33a032a1531";
+        private const string GoldenSeed1337Radius2 = "3269e260ad5fd673252764c4c494b33f47a6f08a2d4122c37364aba5dcb2c49b";
 
         private SynchronizationContext _savedContext;
 
@@ -100,7 +100,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             }
 
             TestContext.WriteLine("seed 1337, radius 2 (enum value = cells): " + summary);
-            foreach (string material in new[] { "Grass", "Ground", "Rock", "Sand", "Water", "WoodPlanks", "LeafyGrass" })
+            foreach (string material in new[] { "Grass", "Ground", "Rock", "Sand", "Water", "Mud", "LeafyGrass" })
             {
                 Assert.Greater(Count(counts, material), 0, material + " in the radius-2 world of seed 1337");
             }
@@ -177,7 +177,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         /// <summary>The highest cell of the pillar that is ground (not air, water, trunk or leaves), or -16.</summary>
         private static int TopGround(BlockWorldTestWorld world, int x, int z)
         {
-            byte trunk = BlockWorldTestWorld.Slot("WoodPlanks");
+            byte trunk = BlockWorldTestWorld.Slot("Mud");
             byte leaves = BlockWorldTestWorld.Slot("LeafyGrass");
             for (int y = 15; y > -16; y--)
             {
@@ -282,7 +282,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         public void P6_World_GrowsAWoodNearTheSpawn_AndSingleTrees_TrunksApart_NoneAtTheSpawn()
         {
             using BlockWorldTestWorld world = RadiusTwoWorld(out int spawnX, out int spawnZ);
-            byte trunk = BlockWorldTestWorld.Slot("WoodPlanks");
+            byte trunk = BlockWorldTestWorld.Slot("Mud");
             List<(int X, int Z)> trunks = new();
             for (int x = -32; x <= 47; x++)
             {
@@ -509,7 +509,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             int z = (int)Math.Floor(spawn.Z / 4d);
             Assert.AreEqual(TerrainMaterials.Air, world.Material(x, y, z), "the spawn cell is empty");
             byte below = world.Material(x, y - 2, z);
-            Assert.IsTrue(below == BlockWorldTestWorld.Slot("Grass") || below == BlockWorldTestWorld.Slot("WoodPlanks"),
+            Assert.IsTrue(below == BlockWorldTestWorld.Slot("Grass") || below == BlockWorldTestWorld.Slot("Mud"),
                 "land under the spawn, found slot " + below);
         }
 

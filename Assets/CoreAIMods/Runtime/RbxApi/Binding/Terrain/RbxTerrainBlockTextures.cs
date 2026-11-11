@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Instances.Terrain;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace CoreAI.Mods.Rbx.Binding.Terrain
 {
@@ -61,10 +62,15 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         /// <summary>
         /// Builds the textures of every style <paramref name="look"/> paints, so a host can pay for them behind its
         /// loading screen instead of in the first frames that draw each material; returns the styles built now.
+        /// Builds nothing without a graphics device (a headless or dedicated-server host draws no Terrain).
         /// </summary>
+        /// <remarks>
+        /// Cost on a desktop: painting and uploading 21 styles, a few milliseconds each on the main thread, about 4 MB
+        /// of texture memory; a second call costs one dictionary lookup per material.
+        /// </remarks>
         public static int Preload(TerrainBlockLook look)
         {
-            if (look == null)
+            if (look == null || SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
             {
                 return 0;
             }

@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_world
 name: Block World 1 - World
-version: 1.3.1
+version: 1.3.2
 active: false
 capabilities: All
 category: Samples/Block World
@@ -87,7 +87,7 @@ local GRASS = Enum.Material.Grass
 local SAND = Enum.Material.Sand
 local SNOW = Enum.Material.Snow
 local SEA = Enum.Material.Water
-local TRUNK = Enum.Material.WoodPlanks
+local TRUNK = Enum.Material.Mud -- WHY: Terrain has no log material; the block look draws Mud as bark
 local LEAVES = Enum.Material.LeafyGrass
 
 local seed = workspace:GetAttribute("BlockWorldSeed")

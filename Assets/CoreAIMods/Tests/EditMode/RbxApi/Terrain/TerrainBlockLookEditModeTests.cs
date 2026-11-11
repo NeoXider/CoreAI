@@ -9,7 +9,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Terrain
     /// Engine-free: the painted block tiles and the table that picks one per Terrain material. Every style paints a
     /// whole, opaque, deterministic 16-texel tile with unit normals; the tiles read as what they are named (a green
     /// lawn, brown earth, warm sand, leaves with dark gaps, cobbles you can count between their mortar, planks between
-    /// seams); the default look paints every solid material and leaves Air and Water alone; the photo look paints
+    /// seams, dark brown bark); the default look paints every solid material (Mud as bark) and leaves Air and Water alone; the photo look paints
     /// nothing; and a style given to Water or an unknown material is refused.
     /// </summary>
     [TestFixture]
@@ -101,6 +101,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Terrain
             Assert.Greater(ShareDarkerThan(TerrainBlockStyle.Leaves, 40f), 0.12f,
                 "a leaf block shows dark gaps between its clusters");
             Assert.Greater(ShareBrighterThan(TerrainBlockStyle.Leaves, 120f), 0.03f, "and light leaf tips");
+            Mean(TerrainBlockStyle.Bark, out float barkR, out float barkG, out float barkB);
+            Assert.Greater(barkR, barkB + 15f, "bark is brown");
+            Assert.Less(Luminance(barkR, barkG, barkB), Luminance(earthR, earthG, earthB) + 10f, "and dark");
             Mean(TerrainBlockStyle.Stone, out float stoneR, out float stoneG, out float stoneB);
             Assert.Less(Math.Abs(stoneR - stoneB), 12f, "stone is grey, not the mossy green of the photo set");
         }
@@ -161,6 +164,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Terrain
             Assert.AreEqual(TerrainBlockStyle.Leaves, look.StyleOf(Slot("LeafyGrass")), "LeafyGrass cells are leaves");
             Assert.AreEqual(TerrainBlockStyle.Cobblestone, look.StyleOf(Slot("Cobblestone")));
             Assert.AreEqual(TerrainBlockStyle.Earth, look.StyleOf(Slot("Ground")));
+            Assert.AreEqual(TerrainBlockStyle.Bark, look.StyleOf(Slot("Mud")), "Mud is the block world's tree bark");
             Assert.IsTrue(look.PaintsAny);
         }
 

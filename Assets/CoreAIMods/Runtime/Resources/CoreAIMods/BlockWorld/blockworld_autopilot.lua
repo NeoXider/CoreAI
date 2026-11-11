@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_autopilot
 name: Block World 7 - Autopilot
-version: 1.1.0
+version: 1.1.1
 active: false
 capabilities: All
 category: Samples/Block World
@@ -34,7 +34,7 @@ local SCAN = 3                  -- cells around the character searched for somet
 local GOALS = "wander: explore the hills nearby; follow: walk up to the nearest villager; "
     .. "gather: walk to nearby wood or stone and break it; build: put a small plank shelter next to you; "
     .. "home: walk back to the spawn, wise at night; idle: stand still"
-local GATHER = { WoodPlanks = 1, LeafyGrass = 2, Rock = 3, Cobblestone = 3 }
+local GATHER = { Mud = 1, WoodPlanks = 1, LeafyGrass = 2, Rock = 3, Cobblestone = 3 } -- Mud: a tree trunk
 
 local goal = ""
 local stepTimer, stateTimer = 0, 0

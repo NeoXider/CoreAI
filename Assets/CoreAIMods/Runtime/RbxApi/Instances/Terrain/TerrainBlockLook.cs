@@ -6,9 +6,9 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
     /// How each Terrain material is drawn as a voxel cell: a painted block tile (<see cref="TerrainBlockPainter"/>),
     /// one whole tile per cell face on the cell grid, or <see cref="TerrainBlockStyle.Photo"/>, the material
     /// catalog's photographed surface laid across the world as a Part shows it. <see cref="Blocks"/>, the default,
-    /// paints every solid material; <see cref="PhotoSets"/> draws them all from the catalog. A drawing rule only:
-    /// the cell keeps its material for <c>ReadVoxels</c>, raycasts and saved worlds, and a Part of the same material
-    /// keeps the catalog's look.
+    /// paints every solid material (Mud as tree bark, for trunks); <see cref="PhotoSets"/> draws them all from the
+    /// catalog. A drawing rule only: the cell keeps its material for <c>ReadVoxels</c>, raycasts and saved worlds, and
+    /// a Part of the same material keeps the catalog's look.
     /// </summary>
     /// <remarks>
     /// WHY a rule for voxel cells only: a 4-stud cell needs a picture made for one block face (stones you can count,
@@ -47,7 +47,9 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
             .With("LeafyGrass", TerrainBlockStyle.Leaves)
             .With("Sand", TerrainBlockStyle.Sand)
             .With("Snow", TerrainBlockStyle.Snow)
-            .With("Mud", TerrainBlockStyle.Mud)
+            // WHY Mud as bark: Roblox Terrain has no log material, so a block world's trunks need one of the 23;
+            // Mud is the brown one a block world least needs as itself (Ground is its dirt). DEV candidate.
+            .With("Mud", TerrainBlockStyle.Bark)
             .With("Ground", TerrainBlockStyle.Earth)
             .With("Asphalt", TerrainBlockStyle.Asphalt)
             .With("Salt", TerrainBlockStyle.Salt)

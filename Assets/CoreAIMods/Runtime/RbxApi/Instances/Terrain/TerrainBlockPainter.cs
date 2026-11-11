@@ -31,7 +31,10 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
         Concrete,
         Pavement,
         Asphalt,
-        Planks
+        Planks,
+
+        /// <summary>Tree bark: wavy vertical ridges between dark furrows, for trunks (Terrain has no log material).</summary>
+        Bark
     }
 
     /// <summary>
@@ -142,6 +145,7 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
                 TerrainBlockStyle.Pavement => Pavement(),
                 TerrainBlockStyle.Asphalt => Asphalt(),
                 TerrainBlockStyle.Planks => Planks(),
+                TerrainBlockStyle.Bark => Bark(),
                 _ => throw new ArgumentOutOfRangeException(nameof(style), style, "unknown block style")
             };
             return canvas?.Finish(style);
@@ -207,6 +211,8 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
         private static readonly uint[] PlankPalette = { 0x7A542F, 0x886136, 0x966D3E, 0xA37946, 0xAF854F, 0xBB9159 };
 
         private const uint PlankSeam = 0x4A321E;
+
+        private static readonly uint[] BarkPalette = { 0x2E2116, 0x3B2A1C, 0x493423, 0x573F2A, 0x654A32, 0x73563B };
 
         // ---- styles ---------------------------------------------------------------------------------------
 
@@ -734,6 +740,37 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
                 canvas.Set(i, PlankPalette, (int)Math.Round(value), 0.85f + 0.15f * grain);
             }
 
+            return canvas;
+        }
+
+        private static Canvas Bark()
+        {
+            Canvas canvas = new(1.7f, 0.9f);
+            for (int i = 0; i < P; i++)
+            {
+                int x = i % S;
+                int y = i / S;
+                // WHY a wandering offset: bark furrows run up the trunk but never in straight lines.
+                float wander = 2.2f * (Noise(0f, y, 1, 4, 181) - 0.5f) + 1.2f * (Noise(x, y, 4, 2, 182) - 0.5f);
+                float across = (x + wander + S) % 4f;
+                if (across < 0.9f)
+                {
+                    canvas.Set(i, BarkPalette, Rnd(x, y, 183) < 0.3f ? 1 : 0, 0f);
+                    continue;
+                }
+
+                // A ridge is lit on its left flank and falls off to the right, so the trunk reads round.
+                float value = 3.4f - 0.9f * (across - 0.9f) + 1.2f * (Noise(x, y, 4, 16, 184) - 0.5f)
+                              + 0.8f * (Rnd(x, y, 185) - 0.5f);
+                canvas.Set(i, BarkPalette, (int)Math.Round(value), 0.55f + 0.15f * (across - 0.9f));
+            }
+
+            Rng rng = new(186);
+            int knotX = rng.Range(0, S - 1);
+            int knotY = rng.Range(0, S - 1);
+            canvas.Set(Index(knotX, knotY), BarkPalette, 0, 0f);
+            canvas.Set(Index(knotX + 1, knotY), BarkPalette, 1, 0.1f);
+            canvas.Set(Index(knotX, knotY + 1), BarkPalette, 1, 0.1f);
             return canvas;
         }
 

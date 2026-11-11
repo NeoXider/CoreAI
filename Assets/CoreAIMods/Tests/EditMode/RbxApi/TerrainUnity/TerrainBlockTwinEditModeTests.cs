@@ -240,6 +240,54 @@ namespace CoreAI.Tests.EditMode.RbxApi.TerrainUnity
         }
 
         [Test]
+        public void AQuadWithOneShadedCorner_IsSplitAwayFromIt_SoTheShadeStaysInTheCorner()
+        {
+            _renderer = new RbxTerrainRenderer(_terrain, _host.transform, blockLook: TerrainBlockLook.Blocks);
+            Fill(0, 0, 0, 8, 1, 8, Slot("Rock"));
+            Fill(3, 1, 3, 1, 1, 1, Slot("Rock"));
+            Drain();
+
+            Mesh mesh = Chunk().GetComponent<MeshFilter>().sharedMesh;
+            Color32[] colors = mesh.colors32;
+            int checkedQuads = 0;
+            for (int submesh = 0; submesh < mesh.subMeshCount; submesh++)
+            {
+                int[] indices = mesh.GetIndices(submesh);
+                for (int start = 0; start + 6 <= indices.Length; start += 6)
+                {
+                    int first = Mathf.Min(Mathf.Min(indices[start], indices[start + 1]), indices[start + 2]);
+                    first = Mathf.Min(first, Mathf.Min(Mathf.Min(indices[start + 3], indices[start + 4]), indices[start + 5]));
+                    int shaded = -1;
+                    int shadedCount = 0;
+                    for (int corner = 0; corner < 4; corner++)
+                    {
+                        if (colors[first + corner].r < 255)
+                        {
+                            shaded = first + corner;
+                            shadedCount++;
+                        }
+                    }
+
+                    if (shadedCount != 1)
+                    {
+                        continue;
+                    }
+
+                    int uses = 0;
+                    for (int offset = 0; offset < 6; offset++)
+                    {
+                        uses += indices[start + offset] == shaded ? 1 : 0;
+                    }
+
+                    Assert.AreEqual(1, uses, "the split runs between the two corners beside the shaded one");
+                    checkedQuads++;
+                }
+            }
+
+            Assert.AreEqual(4, checkedQuads, "the four floor cells diagonal to the block have one shaded corner");
+        }
+
+        [Test]
         public void Preload_BuildsEveryPaintedStyleOnce_AndThePhotoLookBuildsNothing()
         {
             RbxTerrainBlockTextures.Preload(TerrainBlockLook.Blocks);

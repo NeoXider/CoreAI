@@ -275,9 +275,12 @@ rows above by about a quarter; read the rows against each other):
 - The corner shade (the block-game ambient occlusion in the vertex RGB) adds about 36 µs a chunk, 18% of the light
   pass: three window lookups per face corner, no extra pass. The window itself (30 x 30 x 30 cells for reach 6) is
   still the cost: a surface chunk with a tree on it has shaded cells under the canopy, so it classifies and floods
-  the whole window. Two cheap reductions remain, not done: classify only up to the window's highest column top (the
-  rows above it are all open and a flood never enters them, about half of a surface window), and cache the levels of
-  a chunk's own cells so neighbouring chunks stop recomputing them (each window overlaps 26 others).
+  the whole window. Classifying and flooding only up to the window's highest column top (the rows above it are all
+  open and a flood never enters them) was tried and measured: no gain beyond the run-to-run noise on the reference
+  world (78-83 against 77-79 µs a window, same machine, A/B in one sitting), so it was not kept. The reduction that
+  remains is a cache of the levels of a chunk's own cells, invalidated by `CollectLightAffectedChunks`, so
+  neighbouring chunks stop recomputing them: each window overlaps 26 others, and streaming should come back
+  towards the 7 chunks a frame it had before the sky exposure.
 - The painted block textures cost nothing per chunk: 21 styles are painted and uploaded once per process (16 x 16
   texels each, enlarged to 128 x 128 with mips, about 4 MB in all); `RbxTerrainBlockTextures.Preload` moves that
   to a loading screen. The block twins are one material per Terrain material, like the photo copies, so draw calls

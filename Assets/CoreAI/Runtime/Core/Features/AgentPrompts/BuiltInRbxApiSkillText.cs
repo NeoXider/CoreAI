@@ -606,7 +606,9 @@ use Parts for props, doors, moving things and anything that needs Color or Trans
   Basalt, CrackedLava, Sand, Sandstone, Snow, Ice, Glacier, Salt, Limestone, Brick, Cobblestone,
   Concrete, Pavement, Asphalt, WoodPlanks`. Plastic, Neon, Wood, Glass and other Part materials raise
   BAD_ARGUMENT. Water draws as transparent blocks you can walk through (no swimming) and rays pass through
-  it.
+  it. Each block draws as a block-game tile: Grass is a grass block (earth sides), LeafyGrass is leaves (use it
+  for tree crowns), Mud is tree bark (use it for trunks; there is no log material), WoodPlanks is planks, Ground
+  is dirt, Rock is stone, Cobblestone is cobbles; corners where blocks meet are shaded.
 - `workspace:Raycast` on a block answers `Instance == workspace.Terrain`, the cell's `Material` and the
   face `Normal` (an axis vector): add `Normal * 2` to `Position` and call `WorldToCell` to get the cell to
   place into, subtract it to get the cell to break. Filter Terrain in or out with RaycastParams like any

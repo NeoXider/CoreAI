@@ -55,7 +55,9 @@ wrapped Worley cells and short palettes, with a height field that bakes a top-le
 and becomes the normal map. The painter is engine-free and seeded, so every client and test sees the same
 block; it ships no texture files. `TerrainBlockLook` names the style per material (Grass a lawn, LeafyGrass
 leaves with dark gaps and light tips, Ground brown earth, Rock stone, Cobblestone cobbles in mortar, WoodPlanks
-four boards, Brick, Sand, and so on for all 21 solids).
+four boards, Brick, Sand, and so on for all 21 solids). Mud draws as tree bark: Terrain has no log material, so a
+block world builds its trunks from Mud cells (the brown material it least needs as itself, Ground being its dirt),
+and a trunk then reads as bark rather than as a post of planks.
 
 `RbxTerrainBlockTextures` turns each tile into three textures (colour, normal, roughness), every texel
 enlarged to an 8 x 8 block and mip-mapped, so faces stay crisp a few studs away and calm far away (about
@@ -146,9 +148,9 @@ need WorldEdit and pass the same authority checks as a Part property write.
   shows; CoreAI's blocky cells draw a Grass cell as a grass block (grass on top, earth on the sides under a
   grass band, earth underneath) by default, because that is what a block world is expected to look like.
   A drawing rule: the cell stays Grass for every API. Parts with `Material.Grass` are unchanged.
-- **Block tiles and corner shade (DEV candidate).** Roblox draws every Terrain material with its own
-  smooth-terrain textures; CoreAI draws a cell with a painted 16-texel block tile per face and darkens the
-  corners where blocks meet, and calms the cells' water. A drawing rule: `ReadVoxels`, raycasts and saved
+- **Block tiles and corner shade (DEV-115).** Roblox draws every Terrain material with its own
+  smooth-terrain textures; CoreAI draws a cell with a painted 16-texel block tile per face (Mud as tree bark)
+  and darkens the corners where blocks meet, and calms the cells' water. A drawing rule: `ReadVoxels`, raycasts and saved
   worlds keep the material, and Parts keep the catalog's look; `TerrainBlockLook.PhotoSets` restores it.
 - **Sky exposure.** Roblox's own sky occlusion is a voxel lighting grid of its engine; CoreAI's is the
   per-vertex flood above, of Terrain cells only (Parts do not block the sky).

@@ -250,6 +250,22 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         }
 
         [Test]
+        public void P6_Build_Survival_ATreeTrunkGivesPlanks()
+        {
+            _world.Terrain.Store.SetCell(0, 0, 0, BlockWorldTestWorld.Slot("Mud"), 255);
+            _world.SetAttribute("BlockWorldCreative", false);
+            _world.Frame();
+            AimAtTopOf(0, 0);
+
+            _world.Click(LeftButton);
+
+            Assert.AreEqual(TerrainMaterials.Air, _world.Material(0, 0, 0), "the trunk cell was broken");
+            Assert.AreEqual(1d, _world.Number("BlockWorldCount_WoodPlanks"), "a trunk is collected as planks");
+            Assert.IsNull(_world.Attribute("BlockWorldCount_Mud"), "a trunk is never counted as Mud");
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
         public void P6_Build_HoldingTheButton_BreaksAgainEveryQuarterSecond()
         {
             AimAtTopOf(0, 0);
