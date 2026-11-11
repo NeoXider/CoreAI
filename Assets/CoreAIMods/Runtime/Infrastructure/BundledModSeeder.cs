@@ -23,7 +23,9 @@ namespace CoreAI.Infrastructure.Lua
     ///   <item>a same-or-older bundled version, or a user-authored mod that happens to share an id, is
     ///   <b>skipped</b>.</item>
     /// </list>
-    /// All work is best-effort: a store failure on one mod never aborts the rest or startup.
+    /// All work is best-effort: a store failure on one mod never aborts the rest or startup. Every save is read back,
+    /// and a mod the store refused or did not keep is counted as <see cref="SeedResult.Failed"/>, with the reason in
+    /// <see cref="SeedResult.FirstFailure"/> and an error in the log, never as installed.
     /// </summary>
     public sealed class BundledModSeeder
     {
@@ -56,26 +58,36 @@ namespace CoreAI.Infrastructure.Lua
             /// <summary>Up-to-date, older, or user-owned entries left as-is.</summary>
             public readonly int Skipped;
 
-            internal SeedResult(int installed, int updated, int flagged, int skipped)
+            /// <summary>Bundled mods the store refused or did not keep (a save that cannot be read back); never counted as installed.</summary>
+            public readonly int Failed;
+
+            /// <summary>Why the first failed mod was not kept, naming it; empty when none failed.</summary>
+            public readonly string FirstFailure;
+
+            internal SeedResult(int installed, int updated, int flagged, int skipped, int failed = 0, string firstFailure = "")
             {
                 Installed = installed;
                 Updated = updated;
                 FlaggedForUpdate = flagged;
                 Skipped = skipped;
+                Failed = failed;
+                FirstFailure = firstFailure ?? "";
             }
 
             /// <inheritdoc />
             public override string ToString()
             {
-                return
+                string text =
                     $"installed={Installed}, updated={Updated}, updateAvailable={FlaggedForUpdate}, skipped={Skipped}";
+                return Failed == 0 ? text : text + $", failed={Failed} (first: {FirstFailure})";
             }
         }
 
         /// <summary>Seeds/updates every bundled mod into the store. Never throws.</summary>
         public SeedResult Seed()
         {
-            int installed = 0, updated = 0, flagged = 0, skipped = 0;
+            int installed = 0, updated = 0, flagged = 0, skipped = 0, failed = 0;
+            string firstFailure = "";
 
             foreach (IBundledModSource source in _sources)
             {
@@ -110,19 +122,42 @@ namespace CoreAI.Infrastructure.Lua
                     }
                     catch (Exception ex)
                     {
+                        failed++;
+                        if (firstFailure.Length == 0)
+                        {
+                            firstFailure = "'" + mod.Id + "': " + ex.Message;
+                        }
+
                         _log?.Warn($"[BundledModSeeder] Failed to seed '{mod.Id}': {ex.Message}");
-                        skipped++;
                     }
                 }
             }
 
-            SeedResult result = new(installed, updated, flagged, skipped);
-            if (installed + updated + flagged > 0)
+            SeedResult result = new(installed, updated, flagged, skipped, failed, firstFailure);
+            if (failed > 0)
+            {
+                _log?.Error($"[BundledModSeeder] {failed} bundled mod(s) were not kept by the mod store: {result}");
+            }
+            else if (installed + updated + flagged > 0)
             {
                 _log?.Info($"[BundledModSeeder] Seeded bundled mods: {result}");
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Saves a bundled mod and reads it back; throws when the store kept something else or nothing, so a store
+        /// that drops a save without saying so is not counted as having installed it.
+        /// </summary>
+        private void SaveAndConfirm(string id, string source, LuaModManifest manifest)
+        {
+            _store.Save(id, source, manifest);
+            if (!_store.TryLoad(id, out string _, out LuaModManifest keptManifest) || keptManifest == null)
+            {
+                throw new InvalidOperationException(
+                    "the mod store accepted the save but does not hold the source afterwards, so the mod was not installed.");
+            }
         }
 
         private enum Outcome
@@ -149,7 +184,7 @@ namespace CoreAI.Infrastructure.Lua
                 // active bundled mod starts before any mod the player loads later, and a mod without a
                 // recorded order restores first. A bundled library therefore still starts before the
                 // player's mods that use it.
-                _store.Save(id, mod.Source, BuildManifest(mod, origin, newHash, HeaderActive(mod.Source), null));
+                SaveAndConfirm(id, mod.Source, BuildManifest(mod, origin, newHash, HeaderActive(mod.Source), null));
                 return Outcome.Installed;
             }
 
@@ -170,7 +205,7 @@ namespace CoreAI.Infrastructure.Lua
             BundledMod seeded = KeepPlayerFolder(mod, existingSource, existing);
             LuaModManifest updated = BuildManifest(seeded, origin, newHash, existing.Active, existing);
             updated.LoadOrder = existing.LoadOrder;
-            _store.Save(id, seeded.Source, updated);
+            SaveAndConfirm(id, seeded.Source, updated);
             return Outcome.Updated;
         }
 

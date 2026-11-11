@@ -2756,6 +2756,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     "t.Transparency = 0.5; t.Transparency = 0.5", 1),
                 ("BasePart.Anchored", AnchoredPartLua, "t.Anchored = false; t.Anchored = false", 1),
                 ("BasePart.CanCollide", AnchoredPartLua, "t.CanCollide = false; t.CanCollide = false", 1),
+                ("BasePart.LocalTransparencyModifier", AnchoredPartLua,
+                    "t.LocalTransparencyModifier = 0.5; t.LocalTransparencyModifier = 0.5", 1),
                 ("Camera.CFrame", "workspace.CurrentCamera",
                     "t.CFrame = CFrame.new(7, 8, 9); t.CFrame = CFrame.new(7, 8, 9)", 1),
                 ("Camera.CameraType", "workspace.CurrentCamera",
@@ -2985,7 +2987,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 h:GetPropertyChangedSignal('FloorMaterial')
                 Instance.new('Humanoid'):GetPropertyChangedSignal('FloorMaterial')
                 game:GetService('Players'):GetPropertyChangedSignal('NumPlayers')
-                Instance.new('Part'):GetPropertyChangedSignal('LocalTransparencyModifier')
+                Instance.new('Part'):GetPropertyChangedSignal('ReceiveAge')
                 store_set('loaded', 'true')");
             roblox.Scheduler.Advance(0d);
 
@@ -2996,7 +2998,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     line.Contains("Humanoid:GetPropertyChangedSignal(\"FloorMaterial\")")).Count,
                 "one note per class and name, however many humanoids ask");
             Assert.AreEqual(1, log.FindAll(line => line.Contains("Players.NumPlayers")).Count);
-            Assert.AreEqual(1, log.FindAll(line => line.Contains("Part.LocalTransparencyModifier")).Count);
+            Assert.AreEqual(1, log.FindAll(line => line.Contains("Part.ReceiveAge")).Count);
         }
 
         [Test]
@@ -3024,7 +3026,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 try('long', p, string.rep('Q', 101))
                 try('bound', p, 'Position')
                 try('catalogued', p, 'BrickColor')
-                try('unmodelled', p, 'LocalTransparencyModifier')");
+                try('unmodelled', p, 'ReceiveAge')");
 
             foreach (string label in new[] { "case", "swap", "extra", "humanoidCase", "event", "method", "long" })
             {

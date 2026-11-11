@@ -121,6 +121,7 @@
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageStarterPlayerEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageStarterPlayerEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp4ReplicaStagingEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp4ReplicaStagingEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageModFoldersEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageModFoldersEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageGuiEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageGuiEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp8CollectionServiceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp8CollectionServiceEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp8DebrisAddItemEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp8DebrisAddItemEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp8HumanoidEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp8HumanoidEditModeTests.cs" />
@@ -153,6 +154,7 @@
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxInputLuaBindingsEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxInputLuaBindingsEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/P1PlayerControlsLuaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/P1PlayerControlsLuaEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/P1CameraLuaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/P1CameraLuaEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/P1LocalTransparencyLuaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/P1LocalTransparencyLuaEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/P9LightingLuaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/P9LightingLuaEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/P4TerrainShippedRegistrationEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/P4TerrainShippedRegistrationEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Binding/P1UiFocusBridgeEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Binding/P1UiFocusBridgeEditModeTests.cs" />
@@ -175,6 +177,7 @@
     <Compile Include="$(TestsRoot)/RbxApi/RuntimeUi/UxmlServiceArchitectureFitnessEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/RuntimeUi/UxmlServiceArchitectureFitnessEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/GuiLua/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/GuiLua/%(Filename)%(Extension)" />
     <Compile Include="$(TestsRoot)/RbxApi/Bindables/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Bindables/%(Filename)%(Extension)" />
+    <Compile Include="$(TestsRoot)/RbxApi/ScriptsLua/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/ScriptsLua/%(Filename)%(Extension)" />
     <Compile Include="$(TestsRoot)/RbxApi/Networking/BridgeTopologyAndClockEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/BridgeTopologyAndClockEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RecordingLog.cs" Link="Assets/CoreAIMods/Tests/EditMode/RecordingLog.cs" />
     <Compile Include="$(TestsRoot)/ScriptEngineSeamEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/ScriptEngineSeamEditModeTests.cs" />

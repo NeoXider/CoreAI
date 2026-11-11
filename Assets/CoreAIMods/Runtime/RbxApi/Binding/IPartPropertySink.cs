@@ -91,6 +91,18 @@ namespace CoreAI.Mods.Rbx.Binding
         void OnPartDestroyed(InstanceId id)
         {
         }
+
+        /// <summary>
+        /// Sets <c>BasePart.LocalTransparencyModifier</c>, which only this machine draws: the part renders at
+        /// <see cref="RbxBasePart.EffectiveTransparency"/> of its Transparency and the modifier, and not at all
+        /// at 1. It is local state: never stored in <see cref="PartProperties"/>, replicated or saved.
+        /// </summary>
+        /// <remarks>
+        /// WHY a default body: added after the interface shipped; a sink that draws nothing has nothing to hide.
+        /// </remarks>
+        void SetLocalTransparencyModifier(InstanceId id, float modifier)
+        {
+        }
     }
 
     /// <summary>

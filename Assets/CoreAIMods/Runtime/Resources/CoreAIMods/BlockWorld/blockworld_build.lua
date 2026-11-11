@@ -149,11 +149,16 @@ local function findTarget()
         return nil
     end
     if hit.Instance == terrain then
-        local cell = terrain:WorldToCell(hit.Position - hit.Normal * (CELL / 2))
+        -- WHY a step back along the ray: a hit on a cell's edge lies on the boundary of two cells, and the normal
+        -- alone can name the neighbour across that edge, whose place cell is solid. A point just before the hit
+        -- is always in the empty cell in front of the face that was hit, and the face's own cell is behind it.
+        local normal = Vector3.new(math.round(hit.Normal.X), math.round(hit.Normal.Y), math.round(hit.Normal.Z))
+        local place = terrain:WorldToCell(hit.Position + normal * (CELL / 2) - camera.CFrame.LookVector * 0.05)
+        local cell = place - normal
         return {
             kind = "Terrain",
             cell = cell,
-            place = terrain:WorldToCell(hit.Position + hit.Normal * (CELL / 2)),
+            place = place,
             normal = hit.Normal,
             key = "T" .. cellKey(cell),
         }
@@ -283,7 +288,9 @@ end
 
 -- ---- modes ------------------------------------------------------------------------------------------
 
-local firstPerson = true
+-- WHY third person first: a new player sees the character in the world it stands in; V gives first person.
+local firstPerson = false
+local SHOULDER_DISTANCE = 12    -- studs from the camera to the character in third person
 
 local function applyView()
     local player = localPlayer()
@@ -295,8 +302,8 @@ local function applyView()
             player.CameraMode = Enum.CameraMode.LockFirstPerson
         else
             player.CameraMode = Enum.CameraMode.Classic
-            player.CameraMinZoomDistance = 14
-            player.CameraMaxZoomDistance = 14
+            player.CameraMinZoomDistance = SHOULDER_DISTANCE
+            player.CameraMaxZoomDistance = SHOULDER_DISTANCE
         end
     end)
 end

@@ -2258,7 +2258,8 @@ namespace CoreAI.Ai.LuaCs
             ("Workspace", Names("Gravity", "CurrentCamera", "SignalBehavior")),
             ("Model", Names("PrimaryPart", "WorldPivot")),
             ("BasePart", Names("Shape", "Material", "MaterialVariant", "Position", "Size", "CFrame",
-                "Orientation", "Rotation", "Color", "Transparency", "Anchored", "CanCollide")),
+                "Orientation", "Rotation", "Color", "Transparency", "Anchored", "CanCollide",
+                "LocalTransparencyModifier")),
             ("Camera", Names("CFrame", "CameraType", "CameraSubject", "FieldOfView", "ViewportSize")),
             ("Humanoid", Names("Health", "MaxHealth", "WalkSpeed", "JumpPower", "JumpHeight",
                 "UseJumpPower", "DisplayName", "MoveDirection", "RootPart", "Jump")),
@@ -3277,6 +3278,9 @@ namespace CoreAI.Ai.LuaCs
                 case "Transparency":
                     value = properties.Transparency;
                     return true;
+                case "LocalTransparencyModifier":
+                    value = self is RbxBasePart localPart ? localPart.LocalTransparencyModifier : 0f;
+                    return true;
                 case "Anchored":
                     value = properties.Anchored;
                     return true;
@@ -3303,6 +3307,20 @@ namespace CoreAI.Ai.LuaCs
             IPartPropertySink sink = context.PartSink;
             InstanceId id = self.Id;
             string className = self.ClassName;
+            if (string.Equals(key, RbxBasePart.LocalTransparencyModifierMember, StringComparison.Ordinal))
+            {
+                // WHY no mutation record: the modifier is drawn on this machine only and is neither replicated
+                // nor saved (BasePart.yaml), so it is no change to the world an undo or a package would carry.
+                context.RequireWorldEditForWrite(self, key);
+                float modifier = ReadAssignedFloat(value, className, key);
+                if (self is RbxBasePart localPart && localPart.SetLocalTransparencyModifier(modifier))
+                {
+                    sink.SetLocalTransparencyModifier(id, modifier);
+                }
+
+                return true;
+            }
+
             PartProperties before;
             switch (key)
             {

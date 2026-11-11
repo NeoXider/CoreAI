@@ -322,6 +322,33 @@ local spawn = Vector3.new(spawnX * CELL + CELL / 2, (spawnHeight + 1) * CELL + 4
 local spawnColumnX, spawnColumnZ = math.floor(spawnX / CHUNK), math.floor(spawnZ / CHUNK)
 workspace:SetAttribute("BlockWorldSpawn", spawn)
 
+-- The heading a new player first looks along: of sixteen, the one whose next 30 pillars show the most - a hill that
+-- rises above the spawn, the sea, its sandy shore. From the heights alone, so the same seed faces the same way.
+local function viewScore(dx, dz)
+    local rise, sea, shore = 0, false, false
+    for step = 6, 30, 2 do
+        local h = surfaceHeight(spawnX + math.round(dx * step), spawnZ + math.round(dz * step))
+        rise = math.max(rise, h - spawnHeight)
+        if h <= WATER then
+            sea = true
+        elseif h <= SHORE then
+            shore = true
+        end
+    end
+    return rise + (sea and 6 or 0) + (shore and 3 or 0)
+end
+
+local bestHeading, bestScore = 0, -math.huge
+for index = 0, 15 do
+    local heading = index * math.pi / 8
+    local score = viewScore(math.cos(heading), math.sin(heading))
+    if score > bestScore then
+        bestHeading, bestScore = heading, score
+    end
+end
+local spawnLook = Vector3.new(math.cos(bestHeading), 0, math.sin(bestHeading))
+workspace:SetAttribute("BlockWorldSpawnLook", spawnLook)
+
 local ready = false
 local heldRoot = nil
 
@@ -330,7 +357,7 @@ local function moveToSpawn(character)
     if not character then
         return
     end
-    character:PivotTo(CFrame.new(spawn))
+    character:PivotTo(CFrame.lookAt(spawn, spawn + spawnLook))
     local root = rootPart(character)
     if root and not ready then
         pcall(function()

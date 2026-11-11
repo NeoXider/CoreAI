@@ -58,6 +58,30 @@ below 0 or above the maximum, and the block in a tree without a `StarterPlayer` 
 bump; readers up to 7.56.0 refuse the key by name. Tests: `WorldPackageStarterPlayerEditModeTests` (including
 a literal 7.56.0 package that loads with the defaults and re-encodes to the same text).
 
+**Roblox GUI.** Every world-owned GUI node the tree retains — a `ScreenGui`, a `GuiObject` (`Frame`, `TextLabel`,
+`TextButton`, `TextBox`, `ImageLabel`, `ImageButton`, `ScrollingFrame`) or a UI layout object (`UICorner`, `UIPadding`,
+`UIStroke`, `UIScale`, `UIListLayout`, `UIGridLayout`, `UIAspectRatioConstraint`, `UISizeConstraint`) — carries an
+optional `gui` block with every property of its class a script can set, under snake_case Roblox names (`size`,
+`background_color3`, `text_x_alignment`, …), in a fixed order per class (`RbxWorldPackageGuiSchema`, one table for
+capture, restore, validation and both writers). Enums are their Roblox numbers; a `Color3` is `[r, g, b]`, a
+`Vector2` `[x, y]`, a `UDim` `[scale, offset]` and a `UDim2` `[x scale, x offset, y scale, y offset]`, offsets integers.
+A `UISizeConstraint` keeps its unbounded default as `"Infinity"`; every other number is finite. Layout results
+(`Absolute*`), focus, the TextBox caret (`CursorPosition`) and the presenter's state are never written. The block is on
+the nodes wherever they sit (StarterGui, ReplicatedStorage); a mod's own GUI is mod-ephemeral and every `PlayerGui`
+copy sits under a `Player`, so neither is in the tree. A bindable (`BindableEvent`, `BindableFunction`) saves its name
+only; callbacks are mod code. `world.json` carries an optional top-level `starter_gui` block
+(`show_development_gui`, `screen_orientation` as a number, `core_gui_disabled` as the ascending `Enum.CoreGuiType`
+numbers switched off, `All` expanded) when any switch differs from the defaults (true, 4, none). Restore puts both back
+through the classes' setters after the tree; a node without a block restores with its class defaults. The reader refuses
+a block on a class without one, a key the class does not have (by name), a missing or repeated key, a value of the wrong
+JSON type, an offset that is not an integer, NaN, an infinity elsewhere, an enum number outside its items, a
+non-canonical `core_gui_disabled` and a `starter_gui` block in a tree without a `StarterGui` service. A lone surrogate in
+GUI text is replaced in the snapshot with an `ill-formed-text` diagnostic, and the WebGL work budget counts GUI text.
+Both keys are omitted when absent, so a world without GUI writes the same bytes as before; no `format_version` or
+reader-version change: readers up to 7.56.0 refuse either key by name. Tests: `WorldPackageGuiEditModeTests` (a
+literal golden, a HUD reaching every class that round-trips byte-identically through the setters, an old package
+without blocks, and drift guards that fail when a GUI class or a public GUI setter is added without persistence).
+
 **Terrain cells.** The Workspace `Terrain` node is runtime infrastructure (every data model bootstrap
 creates it, so it is not in `world.json`), but its cells are durable: a world with at least one cell writes
 them in a last entry `Terrain/voxels.bin` (`TerrainVoxelCodec`, CAVX v1, canonical run-length chunks; save,
@@ -101,7 +125,8 @@ The durable v1 surface is class/name/Archivable, world-owned origin/ACL/revision
 tags, BasePart properties, Model PrimaryPart/stored WorldPivot, ClickDetector distance, camera CFrame,
 ValueBase `Value` payloads (Int/Number/String/Bool/Object/Vector3/CFrame/Color3; ObjectValue targets
 must name a serialized instance in the same package, nil is 0), and exact Lua mod manifests/source. `MaterialVariant` instances and part `MaterialVariant` references
-are durable package state. `OwnerModId` is teardown bookkeeping used to form the projection,
+are durable package state, and so are the optional blocks above (PointLight, Lighting day cycle, StarterPlayer, GUI,
+StarterGui, Terrain cells, mod folders). `OwnerModId` is teardown bookkeeping used to form the projection,
 not durable tree state. Runtime key/value scratch data, callbacks, signal connections, in-flight
 requests, scheduler state, input state, and camera-follow attachment are ephemeral.
 

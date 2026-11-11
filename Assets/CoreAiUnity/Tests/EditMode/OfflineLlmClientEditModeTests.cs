@@ -62,7 +62,7 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public async Task CompleteAsync_ProgrammerRole_ShouldReturnLua()
+        public async Task CompleteAsync_ProgrammerRole_SaysNoModelIsSetUp()
         {
             CoreAISettingsAsset settings = ScriptableObject.CreateInstance<CoreAISettingsAsset>();
             OfflineLlmClient client = new(settings);
@@ -75,8 +75,8 @@ namespace CoreAI.Tests.EditMode
             });
 
             Assert.IsTrue(result.Ok);
-            Assert.IsTrue(result.Content.Contains("```lua"));
-            Assert.IsTrue(result.Content.Contains("function noop"));
+            Assert.AreEqual(OfflineLlmClient.OfflineProgrammerReply, result.Content);
+            StringAssert.DoesNotContain("```", result.Content);
 
             Object.DestroyImmediate(settings);
         }
@@ -158,13 +158,13 @@ namespace CoreAI.Tests.EditMode
             });
             Assert.AreEqual("Custom", result1.Content);
 
-            // Programmer keeps the role-specific stub.
+            // WHY: the Programmer keeps its own no-model reply; the custom response applies only to the listed roles.
             LlmCompletionResult result2 = await client.CompleteAsync(new LlmCompletionRequest
             {
                 AgentRoleId = "Programmer",
                 UserPayload = "test"
             });
-            Assert.IsTrue(result2.Content.Contains("```lua"));
+            Assert.AreEqual(OfflineLlmClient.OfflineProgrammerReply, result2.Content);
 
             Object.DestroyImmediate(settings);
         }

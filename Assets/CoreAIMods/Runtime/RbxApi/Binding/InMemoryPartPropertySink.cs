@@ -32,6 +32,7 @@ namespace CoreAI.Mods.Rbx.Binding
         public const int DestroyedPartRetention = 2048;
 
         private readonly Dictionary<InstanceId, PartProperties> _properties = new();
+        private readonly Dictionary<InstanceId, float> _localTransparency = new();
         private readonly DestroyedPartStateStore _destroyed = new(DestroyedPartRetention);
 
         /// <summary>A sink told about destruction through <see cref="OnPartDestroyed"/>.</summary>
@@ -170,8 +171,34 @@ namespace CoreAI.Mods.Rbx.Binding
         }
 
         /// <inheritdoc />
+        /// <inheritdoc />
+        public void SetLocalTransparencyModifier(InstanceId id, float modifier)
+        {
+            if (modifier == 0f)
+            {
+                _localTransparency.Remove(id);
+                return;
+            }
+
+            _localTransparency[id] = modifier;
+        }
+
+        /// <summary>The <c>LocalTransparencyModifier</c> last pushed for <paramref name="id"/>; 0 when none.</summary>
+        public float GetLocalTransparencyModifier(InstanceId id)
+        {
+            return _localTransparency.TryGetValue(id, out float modifier) ? modifier : 0f;
+        }
+
+        /// <summary>The transparency this sink would draw <paramref name="id"/> at on this machine.</summary>
+        public float GetDrawnTransparency(InstanceId id)
+        {
+            return RbxBasePart.EffectiveTransparency(GetPartPropertiesOrDefault(id).Transparency,
+                GetLocalTransparencyModifier(id));
+        }
+
         public void OnPartDestroyed(InstanceId id)
         {
+            _localTransparency.Remove(id);
             if (_properties.TryGetValue(id, out PartProperties last))
             {
                 _properties.Remove(id);

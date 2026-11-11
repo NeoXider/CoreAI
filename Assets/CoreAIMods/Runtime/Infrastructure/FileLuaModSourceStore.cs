@@ -31,6 +31,35 @@ namespace CoreAI.Infrastructure.Lua
     }
 
     /// <summary>
+    /// The folder of a file-backed mod source store is too long for the file paths it must write on Windows, so
+    /// no mod can be stored in it. Thrown by every save, never swallowed: a save that cannot be read back must not
+    /// look like a success.
+    /// </summary>
+    public sealed class LuaModSourceStorageRootTooLongException : PathTooLongException
+    {
+        public LuaModSourceStorageRootTooLongException(string rootDirectory, int requiredPathLength, int maximumPathLength)
+            : base("The Lua mod source root '" + rootDirectory + "' requires a Windows source path of "
+                   + requiredPathLength + " characters; at most " + maximumPathLength + " are supported. "
+                   + "The folder is " + (rootDirectory ?? "").Length + " characters long, so the store cannot keep "
+                   + "the mod there: point CoreAiStorageRoot.Override at a shorter folder, or shorten the company or "
+                   + "product name the player's persistentDataPath is built from.")
+        {
+            RootDirectory = rootDirectory ?? "";
+            RequiredPathLength = requiredPathLength;
+            MaximumPathLength = maximumPathLength;
+        }
+
+        /// <summary>The store folder that is too long.</summary>
+        public string RootDirectory { get; }
+
+        /// <summary>The longest path a save in that folder needs.</summary>
+        public int RequiredPathLength { get; }
+
+        /// <summary>The longest path the store writes on Windows.</summary>
+        public int MaximumPathLength { get; }
+    }
+
+    /// <summary>
     /// File-backed Lua source store. Every instance sharing a root also shares one fail-fast mutation
     /// gate; exact world imports are written into an isolated session-version directory and their
     /// persistence hook must accept the write before that directory can become a session's source store.
@@ -127,7 +156,9 @@ namespace CoreAI.Infrastructure.Lua
 
         /// <summary>
         /// Saves the mod's source and manifest. A new mod id past the world-package mod limit is
-        /// refused with <see cref="RbxWorldPackageFormatLimitException"/>; any other failure is logged.
+        /// refused with <see cref="RbxWorldPackageFormatLimitException"/>, and every save into a folder too long
+        /// for its Windows paths with <see cref="LuaModSourceStorageRootTooLongException"/>; any other failure is
+        /// logged.
         /// </summary>
         public void Save(string id, string source, LuaModManifest manifest)
         {
@@ -240,6 +271,14 @@ namespace CoreAI.Infrastructure.Lua
             {
                 throw;
             }
+            catch (LuaModSourceStorageRootTooLongException ex)
+            {
+                // WHY thrown even from the best-effort Save: logging it let a seeder count 21 installed mods while
+                // the store kept none, and a caller that goes on as if the source were kept runs a mod that is
+                // missing from every save and from the next start.
+                _log?.Error("[FileLuaModSourceStore] Save refused for " + modId + ": " + ex.Message);
+                throw;
+            }
             catch (OperationCanceledException) when (strict)
             {
                 throw;
@@ -274,6 +313,11 @@ namespace CoreAI.Infrastructure.Lua
             {
                 return AdmitsLocked(
                     ResolveModDirectory(modId, forWrite: true), modId, out refusal);
+            }
+            catch (LuaModSourceStorageRootTooLongException ex)
+            {
+                refusal = ex.Message;
+                return false;
             }
             finally
             {
@@ -968,10 +1012,7 @@ namespace CoreAI.Infrastructure.Lua
         {
             if (Path.DirectorySeparatorChar == '\\' && path.Length > WindowsMaximumPathLength)
             {
-                throw new PathTooLongException(
-                    "The Lua mod source root '" + _dir + "' requires a Windows source path of "
-                    + path.Length + " characters; at most " + WindowsMaximumPathLength
-                    + " are supported. Configure a shorter source root.");
+                throw new LuaModSourceStorageRootTooLongException(_dir, path.Length, WindowsMaximumPathLength);
             }
         }
 

@@ -16,6 +16,11 @@ namespace CoreAI.Infrastructure.Llm
         private readonly CoreAISettingsAsset _settings;
         private IReadOnlyList<ILlmTool> _tools = Array.Empty<ILlmTool>();
 
+        /// <summary>What the Programmer answers with no model: a line a player can act on.</summary>
+        public const string OfflineProgrammerReply =
+            "No AI model is set up, so the AI cannot build or script anything yet. " +
+            "Choose a model in the Hub (Settings), then ask again.";
+
         public OfflineLlmClient(CoreAISettingsAsset settings)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -63,7 +68,9 @@ namespace CoreAI.Infrastructure.Llm
 
             if (role.Contains("programmer"))
             {
-                return "```lua\n-- Offline: Lua not available\nfunction noop() end\n```";
+                // WHY: a sentence and not a code stub - the Programmer answers the in-world chat, so this is what a
+                // player reads when no model is set up.
+                return OfflineProgrammerReply;
             }
 
             if (role.Contains("mechanic") || role.Contains("coremechanic"))

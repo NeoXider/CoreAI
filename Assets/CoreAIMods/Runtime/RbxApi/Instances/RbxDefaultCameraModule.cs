@@ -32,6 +32,44 @@ namespace CoreAI.Mods.Rbx.Instances
     }
 
     /// <summary>
+    /// The PlayerModule's TransparencyController rule: how transparent the local character is drawn for a camera
+    /// at a distance from its focus. Fully hidden in first person, fading between 0.5 and 1.25 studs, drawn
+    /// beyond; a fade moves at most <see cref="MaxRatePerSecond"/>, while entering and leaving first person
+    /// happen at once. Values are rounded to hundredths, so a steady camera writes nothing.
+    /// </summary>
+    public static class RbxCameraTransparency
+    {
+        /// <summary>The fastest a fade moves, per second.</summary>
+        public const double MaxRatePerSecond = 2.8d;
+
+        /// <summary>The transparency wanted for a camera <paramref name="distance"/> studs from its focus.</summary>
+        public static double Target(double distance)
+        {
+            if (double.IsNaN(distance) || double.IsInfinity(distance))
+            {
+                return 0d;
+            }
+
+            double transparency = distance < 2d ? 1d - (distance - 0.5d) / 1.5d : 0d;
+            return transparency < 0.5d ? 0d : Math.Min(1d, transparency);
+        }
+
+        /// <summary>The next transparency from the last one, the wanted one and the frame time.</summary>
+        public static double Step(double last, bool hasLast, double target, double deltaSeconds)
+        {
+            double next = target;
+            if (hasLast && target < 1d && last < 0.95d && deltaSeconds > 0d && !double.IsInfinity(deltaSeconds))
+            {
+                double maxDelta = MaxRatePerSecond * deltaSeconds;
+                next = last + Math.Max(-maxDelta, Math.Min(maxDelta, target - last));
+            }
+
+            next = Math.Round(next, 2, MidpointRounding.AwayFromZero);
+            return next < 0d ? 0d : next > 1d ? 1d : next;
+        }
+    }
+
+    /// <summary>
     /// The default <see cref="IRbxCameraModule"/>: a third-person orbit around the focus with wheel zoom
     /// down to first person. The look turns with the pointer while it is locked or while the right button
     /// is held, and with the right thumbstick; the zoom follows the PlayerModule curve, is clamped to the
@@ -48,6 +86,8 @@ namespace CoreAI.Mods.Rbx.Instances
         private double _yaw;
         private double _pitch;
         private double _zoom;
+        private double _localTransparency;
+        private bool _hasLocalTransparency;
 
         /// <summary>Builds the module with <paramref name="options"/>, or the PlayerModule defaults.</summary>
         public RbxDefaultCameraModule(RbxCameraModuleOptions options = null)
@@ -72,6 +112,8 @@ namespace CoreAI.Mods.Rbx.Instances
         public void Reset()
         {
             _seeded = false;
+            _hasLocalTransparency = false;
+            _localTransparency = 0d;
         }
 
         /// <inheritdoc />
@@ -131,6 +173,9 @@ namespace CoreAI.Mods.Rbx.Instances
                 }
             }
 
+            _localTransparency = RbxCameraTransparency.Step(_localTransparency, _hasLocalTransparency,
+                RbxCameraTransparency.Target(distance), input.DeltaSeconds);
+            _hasLocalTransparency = true;
             return new RbxCameraModuleOutput
             {
                 HasCFrame = true,
@@ -138,7 +183,8 @@ namespace CoreAI.Mods.Rbx.Instances
                 MouseLock = mouseLock,
                 IsFirstPerson = firstPerson,
                 ZoomDistance = _zoom,
-                Distance = distance
+                Distance = distance,
+                LocalTransparency = _localTransparency
             };
         }
 

@@ -86,7 +86,7 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 float4 positionCS : SV_POSITION;
                 float3 positionWS : TEXCOORD0;
                 half3 normalWS : TEXCOORD1;
-                float fogFactor : TEXCOORD2;
+                float fogDepth : TEXCOORD2;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
                 UNITY_VERTEX_OUTPUT_STEREO
             };
@@ -99,10 +99,13 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
                 VertexPositionInputs positionInputs = GetVertexPositionInputs(input.positionOS.xyz);
                 output.positionCS = positionInputs.positionCS;
-                // WHY here: URP's ComputeFogFactor needs the vertex-stage clip-space z. Fed the
-                // fragment-stage SV_POSITION.z (device depth) it put every surface near the far
-                // plane, so with fog on every part took the full fog colour.
-                output.fogFactor = ComputeFogFactor(positionInputs.positionCS.z);
+                // WHY the view depth and not a fog factor: the depth is affine in the vertex position, so
+                // it interpolates exactly across a part of any size, and the fragment clamps it the way
+                // URP's own fragment fog does. URP's ComputeFogFactor fed the fragment-stage
+                // SV_POSITION.z (device depth) put every surface near the far plane, and a factor
+                // computed per vertex clamps the vertices behind the camera, which spread the far fog of
+                // a large part (the baseplate) onto the ground in front of the camera.
+                output.fogDepth = -positionInputs.positionVS.z;
                 output.positionWS = positionInputs.positionWS;
                 output.normalWS = TransformObjectToWorldNormal(input.normalOS);
                 return output;
@@ -242,7 +245,7 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 inputData.normalWS = normalWS;
                 inputData.viewDirectionWS = viewDirectionWS;
                 inputData.shadowCoord = TransformWorldToShadowCoord(input.positionWS);
-                inputData.fogCoord = input.fogFactor;
+                inputData.fogCoord = ComputeFogFactorZ0ToFar(max(input.fogDepth - _ProjectionParams.y, 0.0));
                 inputData.vertexLighting = VertexLighting(input.positionWS, normalWS);
                 inputData.bakedGI = SampleSH(normalWS);
                 inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);

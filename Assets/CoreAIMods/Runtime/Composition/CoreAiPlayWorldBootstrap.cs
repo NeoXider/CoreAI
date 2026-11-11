@@ -245,6 +245,18 @@ namespace CoreAI.Composition
             }
 
             Light sun = RenderSettings.sun;
+            if (sun == null)
+            {
+                // WHY: a scene made from Unity's templates has a Directional Light but leaves RenderSettings.sun
+                // empty; a second, created sun doubled the daylight and kept every night lit, because the day
+                // cycle drives only one of them.
+                sun = FindSceneDirectionalLight();
+                if (sun != null)
+                {
+                    RenderSettings.sun = sun;
+                }
+            }
+
             if (sun == null && createSunWhenMissing)
             {
                 sun = factory.CreateSun(root);
@@ -296,6 +308,20 @@ namespace CoreAI.Composition
 
             RaiseComposed();
             return true;
+        }
+
+        /// <summary>The scene's first enabled directional light, or null.</summary>
+        private static Light FindSceneDirectionalLight()
+        {
+            foreach (Light light in FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                if (light.type == LightType.Directional && light.enabled)
+                {
+                    return light;
+                }
+            }
+
+            return null;
         }
 
         /// <summary>

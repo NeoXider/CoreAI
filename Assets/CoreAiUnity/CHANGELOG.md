@@ -49,6 +49,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 - The chat panel attaches a camera image only when `IsVisionEnabled()` allows it.
 - `camera_look` and `camera_orbit` with an empty camera name move the agent's own or free camera instead of refusing (`main` and unmarked cameras are still refused, and a refusal names the next step); an empty-name capture uses the free camera once the agent has moved it; object targets aim at the centre of the rendered bounds; cancellation propagates as `OperationCanceledException`.
 - `LlmErrorCode.NotConfigured` has a player-facing phrase, and an `LlmRequestFailedException` is presented from its typed failure in the player line and the log line.
+- In Offline mode the Programmer role answers with one sentence a player can act on (`OfflineLlmClient.OfflineProgrammerReply`) instead of a fenced Lua stub: the Programmer answers the in-world chat, and the stub was what a player read when no model was set up.
 
 ### Fixed
 

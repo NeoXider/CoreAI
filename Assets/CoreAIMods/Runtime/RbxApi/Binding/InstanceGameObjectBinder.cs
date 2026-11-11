@@ -86,6 +86,9 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private readonly Dictionary<InstanceId, PartProperties> _partProperties = new();
 
+        /// <summary>BasePart.LocalTransparencyModifier by part, local to this machine; absent means 0.</summary>
+        private readonly Dictionary<InstanceId, float> _localTransparency = new();
+
         // WHY an index by variant name (A3-08): editing a MaterialVariant repaints the parts wearing
         // it, and finding them used to walk every binding in the world — a whole-world pass for each
         // write to one variant. The index is kept in step with _partProperties, whose every write
@@ -729,6 +732,7 @@ namespace CoreAI.Mods.Rbx.Binding
         /// </summary>
         public void OnPartDestroyed(InstanceId id)
         {
+            _localTransparency.Remove(id);
             bool boundPart = _bindings.TryGetValue(id, out BindingEntry entry) && entry.IsPart;
             if (!boundPart && !_partProperties.ContainsKey(id))
             {
@@ -949,6 +953,31 @@ namespace CoreAI.Mods.Rbx.Binding
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.Transparency = Mathf.Clamp01(transparency);
             Store(id, properties, PartAspect.Appearance);
+        }
+
+        /// <inheritdoc />
+        public void SetLocalTransparencyModifier(InstanceId id, float modifier)
+        {
+            float clamped = Mathf.Clamp01(modifier);
+            float previous = _localTransparency.TryGetValue(id, out float stored) ? stored : 0f;
+            if (previous.Equals(clamped))
+            {
+                return;
+            }
+
+            if (clamped == 0f)
+            {
+                _localTransparency.Remove(id);
+            }
+            else
+            {
+                _localTransparency[id] = clamped;
+            }
+
+            if (_bindings.TryGetValue(id, out BindingEntry entry) && entry.IsPart)
+            {
+                ApplyAppearance(entry, GetPartPropertiesOrDefault(id));
+            }
         }
 
         public void SetCanCollide(InstanceId id, bool canCollide)
@@ -1769,11 +1798,15 @@ namespace CoreAI.Mods.Rbx.Binding
                     properties.Material.Value, properties.MaterialVariant);
             }
 
+            // WHY the drawn transparency and not the property: LocalTransparencyModifier fades a part on this
+            // machine only (the local character in first person), and Transparency stays what scripts read.
+            float drawnTransparency = RbxBasePart.EffectiveTransparency(Mathf.Clamp01(properties.Transparency),
+                _localTransparency.TryGetValue(entry.Id, out float localModifier) ? localModifier : 0f);
             Material sharedMaterial;
             if (_materialLeaseProvider == null)
             {
                 _materialProvider.TryGetMaterial(in materialId, out sharedMaterial);
-                renderer.sharedMaterial = SelectTransparencyMaterial(sharedMaterial, properties.Transparency);
+                renderer.sharedMaterial = SelectTransparencyMaterial(sharedMaterial, drawnTransparency);
             }
             else
             {
@@ -1787,8 +1820,7 @@ namespace CoreAI.Mods.Rbx.Binding
 
                 try
                 {
-                    renderer.sharedMaterial = SelectTransparencyMaterial(sharedMaterial,
-                        properties.Transparency);
+                    renderer.sharedMaterial = SelectTransparencyMaterial(sharedMaterial, drawnTransparency);
                 }
                 catch
                 {
@@ -1807,7 +1839,7 @@ namespace CoreAI.Mods.Rbx.Binding
             // WHY: MaterialPropertyBlock avoids per-part material instantiation (edit-mode
             // safe, no leaks); both _Color and _BaseColor are set so BiRP and URP shaders read
             // the same value. The block is reused off the entry so no alloc per write.
-            float alpha = 1f - Mathf.Clamp01(properties.Transparency);
+            float alpha = 1f - drawnTransparency;
             bool materialUsesNeutralDefault = sharedMaterial != null &&
                                               sharedMaterial.HasProperty(
                                                   NeutralDefaultPartColorPropertyId) &&
@@ -1821,7 +1853,7 @@ namespace CoreAI.Mods.Rbx.Binding
             block.SetColor(BaseColorPropertyId, color);
             renderer.SetPropertyBlock(block);
 
-            renderer.enabled = properties.Transparency < 1f;
+            renderer.enabled = drawnTransparency < 1f;
         }
 
         /// <summary>

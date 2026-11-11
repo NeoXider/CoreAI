@@ -115,35 +115,65 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual(BuiltInLuaModdingSkillText.Instructions, overrideAsset.text);
         }
 
+        /// <summary>The Rbx skill as the installer builds it: one text split into its sections.</summary>
+        private static SkillSet ShippedRbxSkill()
+        {
+            return SkillSet.FromTextContent(BuiltInRbxApiSkillText.SkillName, BuiltInRbxApiSkillText.SkillDescription,
+                BuiltInRbxApiSkillText.Instructions);
+        }
+
+        private static string RbxSection(string name)
+        {
+            Assert.IsTrue(ShippedRbxSkill().TryGetSection(name, out SkillSection section),
+                "the Rbx skill has no section '" + name + "'");
+            return section.Content;
+        }
+
+        /// <summary>
+        /// Each pinned name is checked in the section that holds it since the skill is read in parts: a fact
+        /// that leaves the always-read core, or lands in a section nobody reads for that task, fails here even
+        /// though the whole text still contains it. The core holds the rules and the part basics every build
+        /// needs; the rest moved with their topic.
+        /// </summary>
         [Test]
         public void RbxApiInstructions_CoverTheApiFamiliesThePromptSummarizes()
         {
-            string text = BuiltInRbxApiSkillText.Instructions;
-
-            string[] required =
+            (string Section, string[] Facts)[] pinned =
             {
-                "Instance.new", "game:GetService", "workspace",
-                "Vector3", "CFrame", "Color3", "UDim", "Random", "Enum",
-                "Position", "Size", "CFrame", "Transparency", "Anchored", "CanCollide",
-                "SetAttribute", "GetAttribute", "AddTag", "HasTag",
-                "BAD_ARGUMENT", "INSTANCE_DESTROYED", "PARENT_LOCKED", "NOT_IMPLEMENTED",
-                "1 stud = 0.28 m", "LookVector is -Z",
-                "TweenService:Create", "TweenInfo.new", "CollectionService:AddTag", "GetTagged",
-                "Humanoid", "TakeDamage", "MoveToFinished", "workspace:Raycast", "RaycastParams",
-                "15,000 studs", "workspace.Gravity", "196.2", "BasePart.Touched", "TouchEnded",
-                "IntValue", "NumberValue", "StringValue", "BoolValue", "ObjectValue",
-                "Vector3Value", "CFrameValue", "Color3Value", "leaderstats",
-                "LoadCharacterAsync", "LoadCharacter", "CharacterAdded", "CharacterRemoving",
-                "DistanceFromCharacter", "CharacterAutoLoads", "RespawnTime"
+                ("core", new[]
+                {
+                    "Instance.new", "game:GetService", "workspace", "Vector3", "CFrame", "Color3",
+                    "Position", "Size", "Transparency", "Anchored", "CanCollide",
+                    "BAD_ARGUMENT", "INSTANCE_DESTROYED", "PARENT_LOCKED", "NOT_IMPLEMENTED",
+                    "1 stud = 0.28 m", "LookVector is -Z", "Not implemented", "```lua"
+                }),
+                ("datatypes", new[] { "UDim", "Random", "Enum" }),
+                ("attributes", new[]
+                {
+                    "SetAttribute", "GetAttribute", "AddTag", "HasTag", "CollectionService:AddTag", "GetTagged",
+                    "IntValue", "NumberValue", "StringValue", "BoolValue", "ObjectValue", "Vector3Value",
+                    "CFrameValue", "Color3Value", "leaderstats"
+                }),
+                ("tweens", new[] { "TweenService:Create", "TweenInfo.new" }),
+                ("parts", new[]
+                {
+                    "workspace:Raycast", "RaycastParams", "15,000 studs", "workspace.Gravity", "196.2",
+                    "BasePart.Touched", "TouchEnded"
+                }),
+                ("characters", new[]
+                {
+                    "Humanoid", "TakeDamage", "MoveToFinished", "LoadCharacterAsync", "LoadCharacter",
+                    "CharacterAdded", "CharacterRemoving", "DistanceFromCharacter", "CharacterAutoLoads", "RespawnTime"
+                })
             };
-            foreach (string api in required)
+            foreach ((string section, string[] facts) in pinned)
             {
-                StringAssert.Contains(api, text, $"Rbx skill reference lost coverage of '{api}'");
+                string text = RbxSection(section);
+                foreach (string api in facts)
+                {
+                    StringAssert.Contains(api, text, $"Rbx skill section '{section}' lost coverage of '{api}'");
+                }
             }
-
-            // Worked examples and the not-implemented catalog are the reason this skill exists.
-            StringAssert.Contains("```lua", text);
-            StringAssert.Contains("Not implemented", text);
         }
 
         /// <summary>
@@ -213,7 +243,8 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void RbxApiInstructions_DocumentsEveryShippedCharacterMember()
         {
-            string text = BuiltInRbxApiSkillText.Instructions;
+            // WHY the characters section: that is where a model looking for the player surface reads.
+            string text = RbxSection("characters");
             ClassCatalog catalog = ClassCatalog.CreateMvp1();
 
             (string ClassName, string MemberName)[] shippedCharacterMembers =
@@ -248,25 +279,29 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void RbxApiInstructions_DocumentsEveryShippedCameraMember()
         {
-            string text = BuiltInRbxApiSkillText.Instructions;
+            // WHY two sections: the Camera members live in the camera section; the per-Player camera settings
+            // are copied from StarterPlayer, so they are documented with StarterPlayer in the input section.
             ClassCatalog catalog = ClassCatalog.CreateMvp1();
-            (string ClassName, string MemberName)[] shipped =
+            (string Section, string ClassName, string MemberName)[] shipped =
             {
-                ("Camera", "FieldOfView"), ("Camera", "ViewportSize"), ("Camera", "ScreenPointToRay"),
-                ("Camera", "ViewportPointToRay"), ("Camera", "WorldToScreenPoint"),
-                ("Camera", "WorldToViewportPoint"), ("Player", "CameraMode"),
-                ("Player", "CameraMaxZoomDistance"), ("Player", "CameraMinZoomDistance")
+                ("camera", "Camera", "FieldOfView"), ("camera", "Camera", "ViewportSize"),
+                ("camera", "Camera", "ScreenPointToRay"), ("camera", "Camera", "ViewportPointToRay"),
+                ("camera", "Camera", "WorldToScreenPoint"), ("camera", "Camera", "WorldToViewportPoint"),
+                ("input", "Player", "CameraMode"), ("input", "Player", "CameraMaxZoomDistance"),
+                ("input", "Player", "CameraMinZoomDistance")
             };
 
-            foreach ((string className, string memberName) in shipped)
+            foreach ((string section, string className, string memberName) in shipped)
             {
                 Assert.IsFalse(catalog.TryGetKnownUnimplementedMember(
                         className, memberName, RbxKnownUnimplementedMemberAccess.Read, out _, out _),
                     className + "." + memberName + " ships and must leave the stub table");
-                StringAssert.Contains(memberName, text, className + "." + memberName + " ships but the skill never names it");
+                StringAssert.Contains(memberName, RbxSection(section),
+                    className + "." + memberName + " ships but section '" + section + "' never names it");
             }
 
-            StringAssert.Contains("Ray.new(origin, direction)", text);
+            string text = BuiltInRbxApiSkillText.Instructions;
+            StringAssert.Contains("Ray.new(origin, direction)", RbxSection("camera"));
             StringAssert.DoesNotContain("`Ray` (use `workspace:Raycast`)", text, "Ray is no longer a loud stub");
             StringAssert.DoesNotContain("`Camera.FieldOfView`,", text, "FieldOfView is no longer a loud stub");
         }
@@ -274,26 +309,29 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public async Task ReadSkillTool_ReturnsRbxApiInstructions()
         {
-            SkillSet rbx = new(
-                BuiltInRbxApiSkillText.SkillName,
-                BuiltInRbxApiSkillText.SkillDescription,
-                BuiltInRbxApiSkillText.Instructions);
-            ILlmTool tool = ReadSkillLlmTool.Create(new List<SkillSet> { BuildSkill(), rbx });
+            ILlmTool tool = ReadSkillLlmTool.Create(new List<SkillSet> { BuildSkill(), ShippedRbxSkill() });
 
             string json = await ReadAsync(tool, BuiltInRbxApiSkillText.SkillName);
 
             StringAssert.Contains("\"success\":true", json);
+            StringAssert.Contains("\"section\":\"core\"", json, "a bare read returns the core, not the whole skill");
             StringAssert.Contains("Instance.new", json);
         }
 
         [Test]
-        public void ProgrammerPrompt_PointsAtTheRbxSkill()
+        public void ProgrammerPrompt_PointsAtTheRbxSkill_AndSaysHowToReadItsSections()
         {
             StringAssert.Contains("read_skill('Rbx API')", BuiltInAgentSystemPromptTexts.Programmer);
+            StringAssert.Contains("read_skill('Rbx API', section=", BuiltInAgentSystemPromptTexts.Programmer);
         }
 
+        /// <summary>
+        /// The installer prefers the Resources text and falls back to the built-in constant; both must give the
+        /// model the same sections. Whether the two copies match their single source (skill-sources/RbxApi) is
+        /// checked by <c>SkillSourceCopiesEditModeTests</c>; this one checks the TextAsset Unity actually imports.
+        /// </summary>
         [Test]
-        public void RbxApiResourcesOverride_WhenPresent_MatchesTheBuiltInText()
+        public void RbxApiResourcesOverride_WhenPresent_LoadsTheSameSectionsAsTheBuiltInText()
         {
             UnityEngine.TextAsset overrideAsset =
                 UnityEngine.Resources.Load<UnityEngine.TextAsset>("AgentSkills/RbxApi");
@@ -302,7 +340,16 @@ namespace CoreAI.Tests.EditMode
                 Assert.Ignore("No Resources/AgentSkills/RbxApi override in this project.");
             }
 
-            Assert.AreEqual(BuiltInRbxApiSkillText.Instructions, overrideAsset.text);
+            SkillSet fromResources = SkillSet.FromTextContent(BuiltInRbxApiSkillText.SkillName,
+                BuiltInRbxApiSkillText.SkillDescription, overrideAsset.text);
+            SkillSet builtIn = ShippedRbxSkill();
+            Assert.AreEqual(builtIn.Sections.Count, fromResources.Sections.Count);
+            for (int i = 0; i < builtIn.Sections.Count; i++)
+            {
+                Assert.AreEqual(builtIn.Sections[i].Name, fromResources.Sections[i].Name);
+                Assert.AreEqual(builtIn.Sections[i].Content, fromResources.Sections[i].Content,
+                    "section " + builtIn.Sections[i].Name);
+            }
         }
 
         [Test]

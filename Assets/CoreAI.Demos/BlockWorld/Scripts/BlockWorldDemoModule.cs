@@ -148,8 +148,20 @@ namespace CoreAI.Demos.BlockWorld
             {
                 Fail("the folder '" + folder + "' is not complete in this scene's mods store (not stored: "
                      + (unstored.Count == 0 ? "every bundled mod of it" : string.Join(", ", unstored))
+                     + "; the store lists " + DescribeStore(store)
                      + "); the bundled Block World mods ship in Assets/CoreAIMods/Runtime/Resources/CoreAIMods/BlockWorld/.");
             }
+        }
+
+        private static string DescribeStore(ILuaModSourceStore store)
+        {
+            List<string> listed = new();
+            foreach (LuaModManifest manifest in store.List())
+            {
+                listed.Add(manifest.Id + (manifest.Active ? "" : " (off)") + " in '" + manifest.Category + "'");
+            }
+
+            return listed.Count + " mods: " + string.Join(", ", listed);
         }
 
         private void ApplyViewRadius(LuaCsRbxApiBindings world)

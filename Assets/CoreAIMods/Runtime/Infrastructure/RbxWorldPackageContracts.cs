@@ -106,6 +106,15 @@ namespace CoreAI.Mods.WorldPackages
         /// </summary>
         public IReadOnlyList<string> ModFolders { get; set; }
 
+        /// <summary>
+        /// The properties of every world-owned GUI node in the tree (ScreenGui, GuiObject and UI layout objects), by
+        /// instance id; null or missing ids are class defaults.
+        /// </summary>
+        public IReadOnlyDictionary<InstanceId, RbxWorldPackageGui> Gui { get; set; }
+
+        /// <summary>The StarterGui service's recorded switches; null means the class defaults.</summary>
+        public RbxWorldPackageStarterGui? StarterGui { get; set; }
+
         internal RbxWorldPackageOptionalState Clone()
         {
             return new RbxWorldPackageOptionalState
@@ -114,7 +123,9 @@ namespace CoreAI.Mods.WorldPackages
                 PointLights = PointLights,
                 Lighting = Lighting,
                 StarterPlayer = StarterPlayer,
-                ModFolders = ModFolders
+                ModFolders = ModFolders,
+                Gui = Gui,
+                StarterGui = StarterGui
             };
         }
     }
@@ -275,6 +286,9 @@ namespace CoreAI.Mods.WorldPackages
         private static readonly IReadOnlyDictionary<InstanceId, RbxWorldPackagePointLight> EmptyPointLights =
             new Dictionary<InstanceId, RbxWorldPackagePointLight>();
 
+        private static readonly IReadOnlyDictionary<InstanceId, RbxWorldPackageGui> EmptyGui =
+            new Dictionary<InstanceId, RbxWorldPackageGui>();
+
         private readonly RbxWorldPackageOptionalState _optional;
 
         public RbxWorldPackagePayload(
@@ -350,6 +364,12 @@ namespace CoreAI.Mods.WorldPackages
 
         /// <summary>The persisted mod folders, sorted canonical paths; never null.</summary>
         public IReadOnlyList<string> ModFolders => _optional.ModFolders ?? Array.Empty<string>();
+
+        /// <summary>The properties of every GUI node the package stores, by instance id; never null.</summary>
+        public IReadOnlyDictionary<InstanceId, RbxWorldPackageGui> Gui => _optional.Gui ?? EmptyGui;
+
+        /// <summary>The StarterGui switches, or null when they are the class defaults.</summary>
+        public RbxWorldPackageStarterGui? StarterGui => _optional.StarterGui;
 
         /// <summary>A copy of the optional blocks, for a caller that builds a payload from this one.</summary>
         public RbxWorldPackageOptionalState OptionalState => _optional.Clone();

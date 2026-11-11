@@ -214,6 +214,11 @@ namespace CoreAI.Mods.Rbx.Datatypes
             // round-trip cannot carry back.
             registry.Register(new RbxEnum("RaycastFilterType",
                 ("Exclude", 0), ("Include", 1)));
+            // WHY all four items although CoreAI refuses Plugin: RunContext.yaml lists Legacy 0, Server 1, Client 2
+            // and Plugin 3, and a script that names Plugin must fail on the assignment that uses it, not on the
+            // enum lookup (MVP4 design note SC-4).
+            registry.Register(new RbxEnum("RunContext",
+                ("Legacy", 0), ("Server", 1), ("Client", 2), ("Plugin", 3)));
             // WHY the FULL mirror item set and not only the five states CoreAI enters: an enum is a
             // vocabulary, and a script that writes Enum.HumanoidStateType.Seated must fail on the
             // ChangeState call it makes, with a message naming what is missing — not on the enum

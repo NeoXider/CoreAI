@@ -164,7 +164,7 @@ namespace CoreAI.Mods.WorldPackages
             sink.StartArray();
             foreach (InstanceSnapshot node in payload.Tree.Instances)
             {
-                Instance(sink, node, payload.Parts, payload.PointLights);
+                Instance(sink, node, payload.Parts, payload.PointLights, payload.Gui);
             }
 
             sink.EndArray();
@@ -200,6 +200,26 @@ namespace CoreAI.Mods.WorldPackages
                 sink.EndObject();
             }
 
+            if (payload.StarterGui.HasValue)
+            {
+                RbxWorldPackageStarterGui starterGui = payload.StarterGui.Value;
+                sink.Name("starter_gui");
+                sink.StartObject();
+                sink.Name("show_development_gui");
+                sink.Bool(starterGui.ShowDevelopmentGui);
+                sink.Name("screen_orientation");
+                sink.Number(starterGui.ScreenOrientation);
+                sink.Name("core_gui_disabled");
+                sink.StartArray();
+                for (int index = 0; index < starterGui.CoreGuiDisabled.Count; index++)
+                {
+                    sink.Number(starterGui.CoreGuiDisabled[index]);
+                }
+
+                sink.EndArray();
+                sink.EndObject();
+            }
+
             sink.EndObject();
         }
 
@@ -207,7 +227,8 @@ namespace CoreAI.Mods.WorldPackages
             Sink sink,
             InstanceSnapshot node,
             IReadOnlyDictionary<InstanceId, PartProperties> parts,
-            IReadOnlyDictionary<InstanceId, RbxWorldPackagePointLight> lights)
+            IReadOnlyDictionary<InstanceId, RbxWorldPackagePointLight> lights,
+            IReadOnlyDictionary<InstanceId, RbxWorldPackageGui> gui)
         {
             if (node.Tags == null)
             {
@@ -395,6 +416,63 @@ namespace CoreAI.Mods.WorldPackages
                 sink.Name("range");
                 sink.Number(light.Range);
                 sink.EndObject();
+            }
+
+            if (gui.TryGetValue(new InstanceId(node.Id), out RbxWorldPackageGui block))
+            {
+                sink.Name("gui");
+                Gui(sink, block);
+            }
+
+            sink.EndObject();
+        }
+
+        /// <summary>A <c>gui</c> block in the property order of its class, each value in its kind's JSON form.</summary>
+        private static void Gui(Sink sink, RbxWorldPackageGui block)
+        {
+            sink.StartObject();
+            for (int index = 0; index < block.Count; index++)
+            {
+                sink.Name(RbxWorldPackageGuiSchema.KeyAt(block.ClassName, index));
+                RbxGuiValue value = block.ValueAt(index);
+                switch (value.Kind)
+                {
+                    case RbxGuiValueKind.Bool:
+                        sink.Bool(value.Flag);
+                        break;
+                    case RbxGuiValueKind.Int:
+                        sink.Number(value.First);
+                        break;
+                    case RbxGuiValueKind.Float:
+                        sink.Number(value.X);
+                        break;
+                    case RbxGuiValueKind.Color3:
+                        Vector(sink, value.X, value.Y, value.Z);
+                        break;
+                    case RbxGuiValueKind.UDim:
+                        sink.StartArray();
+                        sink.Number(value.X);
+                        sink.Number(value.First);
+                        sink.EndArray();
+                        break;
+                    case RbxGuiValueKind.UDim2:
+                        sink.StartArray();
+                        sink.Number(value.X);
+                        sink.Number(value.First);
+                        sink.Number(value.Y);
+                        sink.Number(value.Second);
+                        sink.EndArray();
+                        break;
+                    case RbxGuiValueKind.Vector2:
+                        sink.StartArray();
+                        sink.Number(value.X);
+                        sink.Number(value.Y);
+                        sink.EndArray();
+                        break;
+                    default:
+                        sink.Text(value.Text);
+                        break;
+                }
             }
 
             sink.EndObject();

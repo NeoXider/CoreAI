@@ -1,35 +1,114 @@
-# CoreAI Rbx (Roblox-compatible) API Reference
+<!-- section: core -->
+# Rbx API core: the rules every Roblox-style script needs
 
-A Roblox-style Lua surface layered over the CoreAI mod sandbox: Instance tree, datatypes
-(Vector3/CFrame/Color3/...), Enum, plus input and camera. It runs INSIDE the same mods as the
-classic API — you still load code with manage_mods / execute_lua and can freely mix in
-hooks_every, store_set, coreai_world_*, etc. (read_skill('Lua Modding') covers those). This skill
-covers only the Rbx surface.
+Roblox-style Lua inside CoreAI mods (load code with manage_mods / execute_lua); it mixes freely with
+the classic globals (hooks_every, store_set, coreai_world_*: read_skill('Lua Modding')). Before you use a
+feature this core names a section for, read that section; read only the sections your task uses.
 
-Contents: 1. Space & rules  2. Datatypes  3. Enum  4. Instances  5. Part properties
-6. Physics (Raycast, Gravity, Touched)  7. Block worlds (Terrain)  8. Humanoid  9. Players & Characters
-10. Value objects  11. Input (UserInputService)  12. UI (ScreenGui, UxmlService)  13. Camera
-14. Lighting & lights
-15. Attributes & tags  16. AI (TextGenerator, AIService)  17. Errors  18. Not implemented  19. Examples
+Sections (read_skill('Rbx API', section='<name>')):
+- scripting: Luau syntax, tasks and coroutines, signal and budget limits, clocks, reloading
+- datatypes: Vector3, CFrame, Color3, UDim2, Random, Luau math, argument conversion, Enum
+- instances: Finders, Changed signals, Clone rules, Debris, Model pivots, the service catalog
+- attributes: Attributes, tags, CollectionService, value objects, leaderstats
+- parts: Part write rules, Shape, materials, MaterialVariant, Raycast, Touched, Gravity
+- tweens: TweenService animation
+- messaging: RemoteEvent, RemoteFunction, BindableEvent/Function between mods
+- terrain: Block worlds: Terrain cells, FillBlock, FillRegion, WriteVoxels
+- building: Build at the crosshair in cells (sizes, undo); towers of Parts
+- characters: Humanoid, Players, Player.Character, respawn
+- input: UserInputService, gameProcessed, ClickDetector, a keyboard game loop
+- camera: CurrentCamera, screen rays, the default camera, framing a game
+- gui: Roblox GUI: ScreenGui, Frame, TextLabel, TextButton, PlayerGui
+- uxml: UXML/USS screens (UxmlService), UI error codes and budgets, a hotbar HUD
+- lighting: Day cycle (ClockTime), sun and ambient light, PointLight
+- ai: TextGenerator and AIService agents (NPCs that talk)
 
-## 1. Space & rules
+## Rules
+- Coordinates are in STUDS, not meters (1 stud = 0.28 m by default). Right-handed axes; a CFrame's
+  LookVector is -Z. The engine maps studs->Unity for you; a mod NEVER converts units or flips Z itself.
+- One shared world: `game` (DataModel) and `workspace` are globals every mod and every execute_lua call
+  see: an instance one mod creates is the one another mod finds.
+- Creating or mutating instances needs the WorldEdit capability (persistent mods have it by default);
+  read-only scripts can read the world, input and the camera, and `Instance.new` raises there.
+- Signals are DEFERRED: handlers run at the next script-resumption point, not where the signal fires,
+  and the order of several connections is NOT guaranteed. A handler may `task.wait()`. A one-off
+  execute_lua chunk has no owning mod: Connect/Once/ConnectParallel/Wait there raise CONTEXT_VIOLATION,
+  so put listeners, UI and AI agents in a mod.
+- Budgets are per resume: loop forever only if the loop yields (`while true do task.wait() end`). A
+  resume that never yields, or keeps too much memory alive, is cut with BUDGET_EXCEEDED, and the cut
+  CANNOT be caught (`pcall`/`xpcall` let it through): fix the loop, do not wrap it.
+- Drive a game from one `RunService.Heartbeat:Connect(function(dt) ... end)` and scale motion by `dt`.
+  Anchor gameplay parts (`part.Anchored = true`) unless you WANT physics: an unanchored Part falls under
+  gravity and a dense stack shoves itself apart.
 
-- Coordinates are in STUDS, not meters (1 stud = 0.28 m by default). Right-handed axes;
-  a CFrame's LookVector is -Z. The engine maps studs->Unity for you; a mod NEVER converts
-  units or flips Z itself.
-- One shared world: `game` (DataModel) and `workspace` are globals every mod and every
-  execute_lua call see. An instance one mod creates is the same one another mod navigates.
-- Creating or mutating instances needs the WorldEdit capability (persistent mods have it by
-  default). Read-only scripts still get `game`/`workspace`/datatypes and can READ input
-  (UserInputService) and the camera, but no mutation (`Instance.new` raises the capability error).
-- Every `RbxScriptSignal` uses DEFERRED dispatch. Firing queues handlers instead of running
-  them at the fire site; they run at the next script-resumption point, and the queue flushes
-  at every script-resumption point of the frame loop. `:Connect()`, `:Once()`, and `:Wait()`
-  work, and a connected handler may call `task.wait()`. Invocation order for multiple
-  connections to one signal is NOT guaranteed; never depend on connection order.
-  `:ConnectParallel()` is `:Connect()` (runs serially, logs once per mod). A one-off execute_lua
-  chunk has no owning mod: Connect/Once/ConnectParallel/Wait there raise CONTEXT_VIOLATION — put
-  listeners in a mod. Each handler gets its own copy of a table argument (no metatable).
+## Instances and parts
+- `Instance.new("Class")`, configure, then set `.Parent` last (the parent argument is deprecated).
+  Creatable: Part, Folder, Model, Backpack (a plain container), ClickDetector (section input),
+  RemoteEvent, UnreliableRemoteEvent, RemoteFunction, BindableEvent, BindableFunction (messaging),
+  MaterialVariant (parts), Humanoid (characters), PointLight (lighting), TextGenerator (ai), the value
+  objects (attributes) and the GUI classes (gui). A real Roblox class CoreAI does not build yet
+  (WedgePart, SpawnLocation, Weld, Attachment, ...) raises NOT_IMPLEMENTED; any other name errors. A
+  Camera is not creatable: use `workspace.CurrentCamera`. `workspace.Terrain` exists in every world
+  (terrain): build ground and many blocks with it, not one Part per block.
+- The actor a mod runs for may own at most 2,048 instances (a WebGL world at most 4,032 in total): one
+  more `Instance.new`, `Clone` or `TweenService:Create` raises BUDGET_EXCEEDED; `Destroy()` what you no
+  longer need instead of retrying. Temporary objects: `Debris:AddItem(inst, seconds)` (instances).
+- `FindFirstChild(name[,recursive])` returns nil on a miss; `inst.ChildName` errors on a miss.
+  `WaitForChild(name)` yields until the child exists. Other finders: section instances.
+- `Clone()`, `Destroy()`, `ClearAllChildren()` need WorldEdit. After Destroy any member access errors with
+  INSTANCE_DESTROYED; re-parenting it raises PARENT_LOCKED: drop the reference, make a new one.
+- Part properties, read+write: `Position`, `Size`, `CFrame`, `Color` (Color3), `Transparency` (0..1),
+  `Anchored`, `CanCollide`, `Shape` (Enum.PartType), `Material` (Enum.Material), `MaterialVariant`,
+  `Orientation` and `Rotation` (Vector3 of degrees; Orientation is YXZ, Rotation XYZ). Setting
+  `Position` keeps the rotation; setting `CFrame` sets position AND rotation; setting `Orientation` or
+  `Rotation` sets the rotation and keeps the position.
+
+```lua
+local p = workspace:FindFirstChild("Block1")
+if p then
+  p.CFrame = p.CFrame * CFrame.Angles(0, math.pi / 4, 0) -- rotate 45 deg about Y
+  p.Position = p.Position + Vector3.new(0, 5, 0) -- 5 studs up, rotation kept
+  print(tostring(p.Position)) -- "x, y, z" in studs
+end
+```
+
+## Services, UI and AI
+- `game:GetService("Name")`. Roblox services CoreAI has not built yet (DataStoreService, SoundService,
+  ContextActionService, PathfindingService, Teams, ...) are placeholders: GetService returns them (do not
+  guard it) and their first member use raises NOT_IMPLEMENTED with a workaround. An unknown name raises
+  UNKNOWN_SERVICE. Which services are real: section instances.
+- UI needs the `Ui` capability (part of `All`; a header that lists tiers must add `Ui`), lives in a mod
+  and goes away with it: Roblox GUI (gui) or UXML screens (uxml). Input handlers start with
+  `if gameProcessed then return end` (input). AI from Lua (ai) works only when the game turned it on.
+
+## Not implemented (raise NOT_IMPLEMENTED: do not use)
+`Instance.fromExisting` (use `Clone`), `model:MoveTo(pos)` (use `model:PivotTo(CFrame.new(pos))`), and
+the globals `BrickColor` (use `Color3.fromRGB`), `NumberSequence`, `ColorSequence`, `NumberRange`, `Rect`,
+`PhysicalProperties`, `OverlapParams`, `DateTime` (use `os.time()`) and `shared` (use
+mods_export/mods_get). Each section lists its own stubs.
+
+## Errors
+Every failure is a Lua error `CODE: message | fix: suggestion`, inside a mod prefixed with
+`[mod:<id> script:main.lua line:N] `. Argument numbers do not count `self`. `pcall`, `xpcall` and
+`coroutine.resume` get exactly that one line (no stack trace). Codes: BAD_ARGUMENT, UNKNOWN_SERVICE,
+INSTANCE_DESTROYED, PARENT_LOCKED, NOT_IMPLEMENTED, WORLD_DETACHED, BUDGET_EXCEEDED, SIGNAL_CASCADE,
+CONTEXT_VIOLATION, NOT_AUTHORITY, THREAD_CAP, PAYLOAD_TOO_LARGE; a UI refusal carries an inner code
+(`BAD_ARGUMENT: UI_CAPABILITY_REQUIRED: ...`). WORLD_DETACHED is not your bug (the world was torn down:
+scene load, domain reload, leaving play mode): report it, do not retry, until the mods are reloaded.
+
+<!-- section: scripting -->
+# Luau syntax, tasks and coroutines, signal and budget limits, clocks, reloading
+
+- Luau syntax IS accepted and auto-downleveled to Lua 5.2 before compiling: `+=` (and
+  `-=/*=//=/%=/^=/..=`), `continue`, `` `str{}` `` interpolation, if-then-else expressions, and
+  type annotations/casts all work. Plain Lua 5.2 is unaffected. Nesting deeper than 200 levels
+  is a syntax error.
+- `typeof(v)` returns Roblox type names ("Instance", "Vector3", "EnumItem", ...). `warn(...)`
+  writes to the mod log at Warn level (get_mod_logs shows it). Errors of a one-off execute_lua
+  chunk carry no `[mod:...]` prefix.
+- Signals: `:Connect()`, `:Once()`, and `:Wait()` work; firing queues handlers, and the queue flushes
+  at every script-resumption point of the frame loop. `:ConnectParallel()` is `:Connect()` (runs
+  serially, logs once per mod). Each handler gets its own copy of a table argument (no metatable).
   A handler that keeps re-firing its own signal is cut after 10 generations (SIGNAL_CASCADE);
   more than 16,384 handler calls of one mod in one resumption point are dropped (BUDGET_EXCEEDED).
 - `task.wait/spawn/defer/delay/cancel` work. `task.synchronize/desynchronize` are no-ops that
@@ -47,20 +126,7 @@ Contents: 1. Space & rules  2. Datatypes  3. Enum  4. Instances  5. Part propert
   thread (a `coroutine.running()` value) it returns `false, "cannot resume a task or signal-handler
   thread with coroutine.resume; ..."` and leaves the thread alone: resume a parked task with
   `task.spawn(t)`, where `t` is the handle task.spawn/defer/delay returned.
-- `typeof(v)` returns Roblox type names ("Instance", "Vector3", "EnumItem", ...). `warn(...)`
-  writes to the mod log at Warn level (get_mod_logs shows it).
-- Clocks: `os.time()` (Unix seconds; `os.time({year=,month=,day=[,hour=,min=,sec=]})` reads the
-  table as UTC, hour defaults to 12, a field that is not a number counts as missing — a missing
-  year/month/day is BAD_ARGUMENT — and a date before 1970 returns nil), `os.clock()`, `time()`
-  (scaled game time), and `workspace:GetServerTimeNow()` (Unix seconds every player agrees on: a
-  client reads the server's clock once joined, from then on it never goes backwards, and it stands
-  still while the server's clock does). There is no `os.date`; `DateTime` is not implemented.
-- A player who leaves takes the mods loaded for them along: they are unloaded (after their running
-  code returns) and start again on the next world load.
-- Budgets are per resume: a thread may loop forever as long as it yields
-  (`while true do task.wait() end` is fine); one resume that never yields, or that keeps too much
-  memory alive, is cut with BUDGET_EXCEEDED. The cut CANNOT be caught: `pcall`/`xpcall` inside the cut code let it through (an
-  xpcall handler does not run) — fix the loop, do not wrap it. Only the code that
+- Budgets: an xpcall handler does not run for a budget cut. Only the code that
   `coroutine.resume`d a `coroutine.create` coroutine that was cut sees `false, err`, and that
   coroutine is dead. A `coroutine.create` body shares the memory budget of the code that resumes it.
   `string.find/match/gmatch/gsub` stop after 5,000,000 matcher steps per call and
@@ -74,14 +140,24 @@ Contents: 1. Space & rules  2. Datatypes  3. Enum  4. Instances  5. Part propert
   tostring/print/warn/string.format, a `table.sort` comparator, `__pairs`/`__ipairs`,
   `coroutine.resume` or an immediate task.spawn counts 2 (pcall nests 128 deep, sort/tostring 63).
   The next raises a catchable "C stack overflow (...)". Plain recursion is not limited this way.
+- Clocks: `os.time()` (Unix seconds; `os.time({year=,month=,day=[,hour=,min=,sec=]})` reads the
+  table as UTC, hour defaults to 12, a field that is not a number counts as missing — a missing
+  year/month/day is BAD_ARGUMENT — and a date before 1970 returns nil), `os.clock()`, `time()`
+  (scaled game time), and `workspace:GetServerTimeNow()` (Unix seconds every player agrees on: a
+  client reads the server's clock once joined, from then on it never goes backwards, and it stands
+  still while the server's clock does). There is no `os.date`; `DateTime` is not implemented.
 - Reloading: `manage_mods reload` (and the Hub's Save & run) first removes the previous run's
   startup objects — what its main chunk built before its first yield and the mod still owns — so a
   mod that builds its scene at startup never duplicates it; objects made later by handlers, tasks or
   players stay. Pass keep_objects=true to keep everything and build next to it. Two budget cuts in a
   row quarantine the mod and keep it from starting with the next game.
+- A player who leaves takes the mods loaded for them along: they are unloaded (after their running
+  code returns) and start again on the next world load.
 
-## 2. Datatypes (immutable value types; assigning a field errors)
+<!-- section: datatypes -->
+# Vector3, CFrame, Color3, UDim2, Random, Luau math, argument conversion, Enum
 
+Datatypes are immutable value types; assigning a field errors.
 Globals: `Vector3`, `Vector2`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Random`, `Enum`.
 
 - Vector3: `Vector3.new(x,y,z)`, `.zero/.one/.xAxis/.yAxis/.zAxis`,
@@ -112,16 +188,21 @@ Globals: `Vector3`, `Vector2`, `CFrame`, `Color3`, `UDim`, `UDim2`, `Random`, `E
   `:NextNumber()` -> [0,1); `:NextNumber(min,max)`; `:NextInteger(min,max)`;
   `:NextUnitVector()`; `:Clone()`; `:Shuffle(arrayTable)` (in place, seeded Fisher-Yates).
   NextInteger bounds must be finite whole numbers within +/-9007199254740991.
-- Arguments convert like Luau (section 17): a numeric string counts as a number, a number as a
-  string (its tostring text); constructor numbers default to 0 when nil; a boolean is never
-  converted. UDim/UDim2 offsets are 32-bit integers (fractions truncate).
-
 - Luau math: `math.noise(x, y?, z?)` is Perlin noise (0 at whole-number points, mostly within -1..1,
   repeats every 256; the same inputs give the same value on every machine, so seed terrain with it),
   `math.clamp(x, min, max)` (max below min is an error), `math.round(x)` (halves away from zero) and
   `math.sign(x)` (-1, 0 or 1).
 
-## 3. Enum
+Argument conversion. Both surfaces, the Rbx API and the mod-core functions (`store_set`, `hooks_on`,
+`mods_call`, ...), convert arguments and property writes like Luau: a string parameter takes a number as
+`tostring` writes it (`store_set(7, 8)` stores "7" = "8"; `FindFirstChild(5)` finds "5"); a number
+parameter takes a string `tonumber` accepts ("0x10", "1e3"); an integer parameter truncates toward zero;
+a boolean parameter takes only true/false, never a truthy value (`FindFirstChild(name, 1)` is
+BAD_ARGUMENT). Datatype constructor numbers default to 0 when nil. UDim/UDim2 offsets are 32-bit
+integers (fractions truncate). The mod-core functions report a wrong argument the way Lua does —
+`bad argument #1 to 'store_set' (string expected, got table)`.
+
+## Enum
 
 `Enum.<Type>.<Item>` e.g. `Enum.Material.Wood`, `Enum.PartType.Ball`, `Enum.KeyCode.Space`,
 `Enum.UserInputType.Keyboard`, `Enum.NormalId.Top`, `Enum.Axis.X`, `Enum.RotationOrder.XYZ`,
@@ -140,76 +221,93 @@ Names AND numeric values are the real Roblox ones (e.g. KeyCode gamepad
 buttons live at 1000+; all 283 KeyCode items; `Enum.KeyCode.None` is 0 and `Unknown` is its
 alias).
 
-## 4. Instances
+<!-- section: instances -->
+# Finders, Changed signals, Clone rules, Debris, Model pivots, the service catalog
 
-- `Instance.new("Class"[, parent])` — creatable classes are "Part", "Folder", "Model",
-  "ClickDetector", "RemoteEvent", "UnreliableRemoteEvent", "RemoteFunction", "BindableEvent",
-  "BindableFunction",
-  "MaterialVariant", "Humanoid" (section 8), "PointLight" (section 14), "TextGenerator"
-  (section 16), "Backpack" (a plain container), the value objects of section 10, and the GUI classes
-  of section 12 (ScreenGui, Frame, TextLabel, TextButton, TextBox, ...).
-  `workspace.Terrain` exists in every world and cannot be created, destroyed or moved (section 7). A real Roblox class CoreAI does not build yet (WedgePart, SpawnLocation,
-  Weld, Attachment, ...) raises NOT_IMPLEMENTED; any other name errors (a Camera is not creatable —
-  reach the world camera through `workspace.CurrentCamera`).
-  The parent argument is deprecated (logs once); set `.Parent` after configuring instead.
-  The actor a mod runs for may own at most 2,048 instances (a WebGL world at most 4,032 in total):
-  one more `Instance.new`, `Clone` or `TweenService:Create` raises BUDGET_EXCEEDED naming the call
-  — `Destroy()` what you no longer need (Debris below) instead of retrying.
-- `RemoteEvent`/`UnreliableRemoteEvent` fire one-way; an `UnreliableRemoteEvent` payload over
-  1,000 bytes raises PAYLOAD_TOO_LARGE, in solo too. `RemoteFunction:InvokeServer/InvokeClient`
-  yields for a reply and is bounded to 30 scheduler seconds: a missing or stalled receiver raises
-  an error instead of yielding forever (a deliberate deviation from Roblox). Wrap a fallible
-  invoke in `pcall`.
-- `BindableEvent` (`:Fire(...)`, `.Event`) and `BindableFunction` (`:Invoke(...)`, `.OnInvoke = fn`) work as in
-  Roblox between scripts and mods: use them, not workspace attributes, to talk between mods. `Fire` never
-  yields; `Invoke` yields until the callback returns, runs it as the mod that assigned it, raises the
-  callback's error in the invoker, and waits (no timeout) while no `OnInvoke` is set. `OnInvoke` is write-only.
-  Arguments and results are copied by the RemoteEvent rules: tables copied without metatable, non-string keys
-  become strings, functions arrive as nil; a mixed array/dictionary table or a cycle raises BAD_ARGUMENT, more
-  than 64 KiB PAYLOAD_TOO_LARGE.
-- `ClickDetector` — parent one under a Part to make that 3D part clickable:
-  `local cd = Instance.new("ClickDetector"); cd.Parent = part; cd.MouseClick:Connect(function() ... end)`.
-  MouseClick fires `(playerWhoClicked)` when the user clicks THAT part with the mouse and the
-  player's character is within `cd.MaxActivationDistance` studs of it (default 32; measured from
-  the camera when there is no character). A detector under a Model or Folder covers all of its
-  parts; the deepest detector above the clicked part wins. Only the part under the cursor fires.
-- `game:GetService("Name")` — the standard runtime has live tree-backed `Workspace`, `Lighting`,
-  `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `StarterGui`, `Players`,
-  `HttpService`, `UserInputService`, `RunService`, `MaterialService`, `Debris`, `TweenService`, and
-  `CollectionService` services.
-- The service catalog has 43 registrations. Real ones: `HttpService`, `Players`, `Debris`,
-  `TweenService`, `CollectionService` and `ScriptContext` (tree-backed — NOT placeholders), `Lighting`
-  (the day cycle, section 14), `UxmlService` and `StarterGui` (section 12), `AIService` (answers only when the game
-  turned on AI from Lua, section 16), plus `RunService` and `UserInputService`, whose catalog fallbacks
-  the standard runtime replaces with its live implementations (a bare fallback's error names the
-  missing attachment). Placeholders: `DataStoreService` (MVP16), `ContextActionService` (MVP7),
-  `SoundService` (MVP17), and backlog or unsupported Roblox services such
-  as `Teams`, `PhysicsService`, `ReplicatedFirst`, `PathfindingService`, `MarketplaceService`,
-  `TeleportService` and `BadgeService` (each error says which and gives a workaround).
-- `TweenService:Create(instance, TweenInfo.new(time[, easingStyle, easingDirection, repeatCount,
-  reverses, delayTime]), {Property = goal, ...})` returns a Tween. `:Play()`, `:Pause()`,
-  `:Cancel()`; `.PlaybackState` (Enum.PlaybackState); `.Completed` fires once with the ending
-  state (`Completed` or `Cancelled` — Pause fires nothing, and a second `:Play()` on the same
-  part cancels whatever tween was already running there first). Tweens advance on
-  `RunService.Heartbeat` SCALED time, so a paused world (delta 0) freezes them exactly.
-  `TweenService:GetValue(alpha, easingStyle, easingDirection)` -> eased number clamped to [0,1].
-  `TweenInfo.new()` defaults: time 1, `Enum.EasingStyle.Quad`, `Enum.EasingDirection.Out`,
-  repeatCount 0, reverses false, delayTime 0. `SmoothDamp` is a loud stub (NOT_IMPLEMENTED) —
-  interpolate manually with `GetValue` over `Heartbeat` instead.
-  Create/Play/Pause/Cancel need WorldEdit and write access to the target. Tweenable: number,
-  Vector3, CFrame, Color3, UDim2 (parts, `CurrentCamera.CFrame` and `FieldOfView`, Humanoid numbers,
-  value objects, Lighting's ClockTime/Brightness/Ambient/OutdoorAmbient, a PointLight's
-  Brightness/Color/Range);
-  boolean/EnumItem/UDim/Vector2 members raise NOT_IMPLEMENTED; a NaN/inf goal is BAD_ARGUMENT at
-  Create. With `reverses` every repeat is a forward and a backward leg; time 0 completes at once.
-  A tweened move never fires Touched. A tween that faults is cancelled (Completed(Cancelled)).
-  WRONG: keep one tween and `:Play()` it again much later — an actor keeps only its 256 most
-  recent finished tweens, and an older one raises INSTANCE_DESTROYED. RIGHT: call
-  `TweenService:Create` each time you animate.
-    local tw = game:GetService("TweenService"):Create(part,
-        TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Transparency = 1})
-    tw.Completed:Connect(function(state) print(state) end)  -- Enum.PlaybackState.Completed
-    tw:Play()
+- Finders: `FindFirstChild(name[,recursive])`, `FindFirstChildOfClass(cls)`,
+  `FindFirstChildWhichIsA(cls[,recursive])`, `FindFirstAncestor(name)`,
+  `FindFirstAncestorOfClass(cls)`, `FindFirstAncestorWhichIsA(cls)`, `GetChildren()`,
+  `GetDescendants()`, `GetFullName()`, `IsA(cls)`, `IsDescendantOf(x)` (nil is BAD_ARGUMENT),
+  `IsAncestorOf(x)`. `inst.ChildName` is sugar for an existing child; a missing member errors (use
+  FindFirstChild). `WaitForChild(name)` for an absent child yields through the scheduler bridge.
+- Properties: Name, ClassName (read-only), Parent, Archivable. Setting Name/Parent/Archivable
+  needs WorldEdit. Name keeps its first 100 characters. A Parent deeper than 2,048 levels is
+  BAD_ARGUMENT. A Player cannot be destroyed or re-parented (use `player:Kick()`).
+- `Instance.new("Class", parent)`: the parent argument is deprecated and logs once; set `.Parent` after
+  configuring. The instance budget error names the call that went over it.
+- `inst.Changed(propertyName)` fires on every instance (a value object passes the new Value);
+  `inst:GetPropertyChangedSignal("Name")` fires with no args. It refuses an event or method name
+  and a typo of a known property (wrong case or one letter off: "position" -> "did you mean
+  Position"); a real Roblox property CoreAI does not model yet gets a signal that never fires (logged
+  once; the same signal each time you ask for that name, and `Destroy()` disconnects it). Writes by
+  a script, a tween or PivotTo fire them (derived members too: a CFrame write fires
+  Position/Orientation/Rotation); an equal assignment fires nothing and physics movement never
+  does. `AncestryChanged(movedInstance, newParent)` fires on every descendant.
+  ChildRemoved/DescendantRemoving and a tag's removed-signal handlers fired by `Destroy()` can
+  still read the destroyed instance they were handed (e.g. its Name), as Destroying handlers can.
+  `game:IsLoaded()` is true; `game.Loaded` never fires.
+- Clone is a deep
+  copy: name, attributes, tags and (for parts) Size/CFrame/Color/Anchored/Shape carry across;
+  non-Archivable subtrees are skipped and the copy gets fresh ids; `PrimaryPart` and
+  `ObjectValue.Value` pointing inside the copy point at the copies, and WorldPivot is kept.
+  `game:Clone()`, a service's Clone and `player:Clone()` return nil; `game:Destroy()` errors.
+- `Debris:AddItem(inst[, seconds])` (default 10 s) schedules guaranteed destruction without
+  yielding and survives the scheduling script's death — the idiom for temporary
+  projectiles/effects. WRONG: `task.delay(10, function() part:Destroy() end)` (dies with the
+  script); RIGHT: `game:GetService("Debris"):AddItem(part, 10)`. Past 1,000 queued items the
+  oldest is destroyed instantly, so treat the lifetime as a maximum, not an exact delay.
+  Needs WorldEdit and write access to the whole subtree; services, `game`, the CurrentCamera and a
+  Player are refused (a Player leaves through `player:Kick()`). Re-adding an item replaces its
+  lifetime but keeps its place in the eviction order.
+- The service catalog has 43 registrations. `HttpService`, `Players`, `Debris`, `TweenService`,
+  `CollectionService` and `ScriptContext` are tree-backed (NOT placeholders); `RunService` and
+  `UserInputService` have catalog fallbacks that the standard runtime replaces with its live
+  implementations (a bare fallback's error names the missing attachment). The standard runtime has
+  live tree-backed `Workspace`, `Lighting`, `ReplicatedStorage`, `ServerStorage`,
+  `ServerScriptService`, `StarterPlayer`, `StarterGui`, `Players`, `HttpService`, `UserInputService`,
+  `RunService`, `MaterialService`, `Debris`, `TweenService` and `CollectionService`, plus
+  `UxmlService` (section uxml) and `AIService` (answers only when the game turned on AI from Lua,
+  section ai). Placeholders: `DataStoreService` (MVP16), `ContextActionService` (MVP7),
+  `SoundService` (MVP17), and backlog or unsupported Roblox services such as `Teams`,
+  `PhysicsService`, `ReplicatedFirst`, `PathfindingService`, `MarketplaceService`, `TeleportService`
+  and `BadgeService` (each error says which and gives a workaround). A placeholder's first member
+  read, write, or method lookup raises NOT_IMPLEMENTED and names that service's rung, so top-of-file
+  acquisition does not abort setup; do not add defensive workarounds solely to avoid that obsolete
+  failure. An unknown name raises UNKNOWN_SERVICE with "X is not a valid Service name". Also
+  `game:FindService(name)`. `workspace` is `game:GetService("Workspace")`.
+
+## Model pivots
+
+`model.PrimaryPart` is a BasePart or nil; `model.WorldPivot` is a writable CFrame.
+`model:GetPivot()` uses the PrimaryPart CFrame when set, otherwise WorldPivot (initially the
+contents' bounding-box center). `model:PivotTo(cf)` rigidly moves every descendant PVInstance.
+Pivot/property writes need WorldEdit. BaseParts also support `GetPivot()` and `PivotTo(cf)`
+(which moves the part's descendants too), and so does `workspace.CurrentCamera` (a PVInstance).
+
+## Error messages
+
+```lua
+local ok, err = pcall(function() return Instance.new("Banana") end)
+if not ok then print(err) end   -- "BAD_ARGUMENT: Unable to create ... | fix: ... Part ..."
+
+local part = Instance.new("Part"); part.Parent = workspace
+part:Destroy()
+local ok2, err2 = pcall(function() return part.Position end)
+if not ok2 then print(err2) end  -- "INSTANCE_DESTROYED: ... | fix: ..."
+```
+
+<!-- section: attributes -->
+# Attributes, tags, CollectionService, value objects, leaderstats
+
+- `inst:SetAttribute(name, value)` / `inst:GetAttribute(name)` / `inst:GetAttributes()`.
+  Value must be string, boolean, number, Vector3, Vector2, Color3, or UDim — anything else is
+  rejected with BAD_ARGUMENT. SetAttribute needs WorldEdit. A new attribute name uses only ASCII
+  letters, digits, `.`, `-`, `/` and `_` (at most 100 chars, no "RBX" prefix); anything else is
+  BAD_ARGUMENT.
+- `inst:AddTag(t)` / `RemoveTag(t)` / `HasTag(t)` / `GetTags()`. Add/Remove need WorldEdit. A new tag
+  is at most 100 characters (BAD_ARGUMENT beyond).
+- At most 256 attributes and 256 tags per instance; one more is BAD_ARGUMENT (a world must stay
+  savable).
 - `CollectionService:AddTag(inst, tag)`, `:RemoveTag`, `:HasTag`, `:GetTags(inst)`,
   `:GetTagged(tag)`, `:GetAllTags()`, plus per-tag `:GetInstanceAddedSignal(tag)` /
   `:GetInstanceRemovedSignal(tag)` and the placewide `.TagAdded` / `.TagRemoved` (fire when a tag
@@ -223,79 +321,57 @@ alias).
     local cs = game:GetService("CollectionService")
     cs:AddTag(part, "kill")
     cs:GetInstanceAddedSignal("kill"):Connect(function(inst) inst:Destroy() end)
-- `GetService` for a registered but unimplemented service resolves a placeholder. The first
-  member read, write, or method lookup raises NOT_IMPLEMENTED and names that service's rung.
-  Top-of-file acquisition therefore does not abort setup; do not add defensive workarounds
-  solely to avoid that obsolete failure. An unknown name still raises UNKNOWN_SERVICE with
-  "X is not a valid Service name". Also `game:FindService(name)`. `workspace` is
-  `game:GetService("Workspace")`.
-- Properties: Name, ClassName (read-only), Parent, Archivable. Setting Name/Parent/Archivable
-  needs WorldEdit. Name keeps its first 100 characters. A Parent deeper than 2,048 levels is
-  BAD_ARGUMENT. A Player cannot be destroyed or re-parented (use `player:Kick()`).
-- `inst.Changed(propertyName)` fires on every instance (a value object passes the new Value);
-  `inst:GetPropertyChangedSignal("Name")` fires with no args. It refuses an event or method name
-  and a typo of a known property (wrong case or one letter off: "position" -> "did you mean
-  Position"); a real Roblox property CoreAI does not model yet gets a signal that never fires (logged
-  once; the same signal each time you ask for that name, and `Destroy()` disconnects it). Writes by
-  a script, a tween or PivotTo fire them (derived members too: a CFrame write fires
-  Position/Orientation/Rotation); an equal assignment fires nothing and physics movement never
-  does. `AncestryChanged(movedInstance, newParent)` fires on every descendant.
-  ChildRemoved/DescendantRemoving and a tag's removed-signal handlers fired by `Destroy()` can
-  still read the destroyed instance they were handed (e.g. its Name), as Destroying handlers can.
-  `game:IsLoaded()` is true; `game.Loaded` never fires.
-- Navigation: `FindFirstChild(name[,recursive])`, `FindFirstChildOfClass(cls)`,
-  `FindFirstChildWhichIsA(cls[,recursive])`, `FindFirstAncestor(name)`,
-  `FindFirstAncestorOfClass(cls)`, `FindFirstAncestorWhichIsA(cls)`, `GetChildren()`,
-  `GetDescendants()`, `GetFullName()`, `IsA(cls)`, `IsDescendantOf(x)` (nil is BAD_ARGUMENT),
-  `IsAncestorOf(x)`.
-  `inst.ChildName` is sugar for an existing child; a missing member errors (use FindFirstChild).
-- Lifecycle: `Clone()`, `Destroy()`, `ClearAllChildren()` (all need WorldEdit). Clone is a deep
-  copy: name, attributes, tags and (for parts) Size/CFrame/Color/Anchored/Shape carry across;
-  non-Archivable subtrees are skipped and the copy gets fresh ids; `PrimaryPart` and
-  `ObjectValue.Value` pointing inside the copy point at the copies, and WorldPivot is kept.
-  `game:Clone()`, a service's Clone and `player:Clone()` return nil; `game:Destroy()` errors.
-  After Destroy, any member
-  access errors with INSTANCE_DESTROYED; re-parenting a destroyed instance raises PARENT_LOCKED
-  — drop the reference and make a new one.
-- `Debris:AddItem(inst[, seconds])` (default 10 s) schedules guaranteed destruction without
-  yielding and survives the scheduling script's death — the idiom for temporary
-  projectiles/effects. WRONG: `task.delay(10, function() part:Destroy() end)` (dies with the
-  script); RIGHT: `game:GetService("Debris"):AddItem(part, 10)`. Past 1,000 queued items the
-  oldest is destroyed instantly, so treat the lifetime as a maximum, not an exact delay.
-  Needs WorldEdit and write access to the whole subtree; services, `game`, the CurrentCamera and a
-  Player are refused (a Player leaves through `player:Kick()`). Re-adding an item replaces its
-  lifetime but keeps its place in the eviction order.
 
-### Model pivots
+```lua
+local m = Instance.new("Model")
+m:SetAttribute("Team", "Red")
+m:SetAttribute("Score", 10)
+m:SetAttribute("Spawn", Vector3.new(1, 2, 3))
+m:AddTag("Enemy")
+m.Parent = workspace
+print(m:GetAttribute("Team") .. " " .. tostring(m:GetAttribute("Score")))
+print(tostring(m:HasTag("Enemy")))  -- true
+```
 
-`model.PrimaryPart` is a BasePart or nil; `model.WorldPivot` is a writable CFrame.
-`model:GetPivot()` uses the PrimaryPart CFrame when set, otherwise WorldPivot (initially the
-contents' bounding-box center). `model:PivotTo(cf)` rigidly moves every descendant PVInstance.
-Pivot/property writes need WorldEdit. BaseParts also support `GetPivot()` and `PivotTo(cf)`
-(which moves the part's descendants too), and so does `workspace.CurrentCamera` (a PVInstance).
-`model:MoveTo(pos)` is a loud stub — use `model:PivotTo(CFrame.new(pos))`.
+## Value objects
 
-## 5. Part properties (a Part / any BasePart)
+- `IntValue`, `NumberValue`, `StringValue`, `BoolValue`, `ObjectValue`, `Vector3Value`,
+  `CFrameValue`, `Color3Value` — all `Instance.new`-creatable; every one `IsA("ValueBase")`, the
+  common abstract ancestor (`ValueBase` itself is NOT creatable).
+- One member, `.Value` (read+write, type-checked; numbers and numeric strings convert as in
+  section datatypes): a wrong-type write raises BAD_ARGUMENT and
+  leaves the old value AND revision untouched. Defaults: Int/Number 0, String "", Bool false,
+  Object nil, Vector3/CFrame their datatype's zero/identity, Color3 black (CoreAI's own default;
+  the mirror does not specify one). `.Changed` fires once with the new value on every real change
+  (assigning the SAME value again does not fire).
+- `IntValue.Value` rounds to the nearest integer, halfway away from zero (`2.5`->3, `-2.5`->-3);
+  a value outside -2^63..2^63-1 is BAD_ARGUMENT.
+  `StringValue.Value` is capped at 200,000 characters; longer raises "String too long".
+  `ObjectValue.Value` accepts an Instance or nil.
+- `leaderstats` is CONVENTION, not an API: a `Folder` named exactly `"leaderstats"` parented
+  under a `Player`, holding named Value children — the standard way to show per-player stats.
+    local coins = Instance.new("IntValue")
+    coins.Name = "Coins"; coins.Value = 0
+    local stats = Instance.new("Folder")
+    stats.Name = "leaderstats"
+    coins.Parent = stats
+    stats.Parent = player
 
-Read+write (writes need WorldEdit): `Position`, `Size`, `CFrame` (Vector3/Vector3/CFrame),
-`Color` (Color3), `Transparency` (0..1), `Anchored` (bool), `CanCollide` (bool),
-`Shape` (Enum.PartType), `Material` (Enum.Material), `MaterialVariant` (string, "" for none),
-`Orientation` and `Rotation` (Vector3 of
-degrees; Orientation is YXZ, Rotation is XYZ).
-Setting `Position` keeps the part's rotation; setting `CFrame` sets position AND rotation;
-setting `Orientation` or `Rotation` sets the rotation and keeps the position.
+<!-- section: parts -->
+# Part write rules, Shape, materials, MaterialVariant, Raycast, Touched, Gravity
+
 Booleans accept only true/false; number properties also accept numeric strings; string properties
 accept numbers; Enum properties accept the item, its Name or its Value (part.Material = "Wood"). `Size` is
 clamped to [0.001, 2048] per axis; a NaN or infinite Position/Size/CFrame is BAD_ARGUMENT; a
 written CFrame is orthonormalized. An unanchored part reads its live physics pose. A wrong type
 reads `Part.Anchored expects a boolean, got string | fix: assign a boolean to Part.Anchored`; a read-only
-property says it is read only. Assigning `workspace.CurrentCamera` raises NOT_IMPLEMENTED.
+property says it is read only.
 `Shape` accepts `Enum.PartType.Ball`, `.Block`, `.Cylinder`, `.Wedge`, `.CornerWedge` — every
 one of them materializes its real mesh.
 `Material` accepts any of the 45 `Enum.Material` items and all 45 render. Thirty-six of them
 use textured PBR surfaces shipped inside the package; the rest are procedural.
-`MaterialVariant` is how you use YOUR OWN textures instead of the built-in ones: create a
-`MaterialVariant` under `MaterialService`, point it at your texture paths, then name it on a part.
+`MaterialVariant` (string, "" for none) is how you use YOUR OWN textures instead of the built-in ones:
+create a `MaterialVariant` under `MaterialService`, point it at your texture paths, then name it on a part.
   local mv = Instance.new("MaterialVariant")
   mv.Name = "MossyBrick"; mv.BaseMaterial = Enum.Material.Brick
   mv.ColorMap = "MyGame/Textures/mossy_color"   -- a Resources path in your project
@@ -311,13 +387,13 @@ quietly, so a wrong value is visible at once.
 material's own albedo; assigning `Color` modulates that albedo from then on. `Neon` is the one
 material with no palette of its own — its emission IS `Part.Color`, so set `Color` to pick the glow.
 
-## 6. Physics (Raycast, Gravity, Touched)
+## Physics (Raycast, Gravity, Touched)
 
 - `workspace:Raycast(origin, direction[, raycastParams])` -> RaycastResult or nil. `direction`'s
   length is capped at 15,000 studs inclusive; longer, zero-length, or non-finite origin/direction
   raise BAD_ARGUMENT before the engine is ever queried. RaycastResult fields: `Instance` (the hit
   BasePart), `Position`, `Normal` (both Vector3), `Material` (Enum.Material), `Distance` (number);
-  the result is immutable userdata, read-only.
+  the result is immutable userdata, read-only. A ray can also hit Terrain (section terrain).
 - `RaycastParams.new()` — fields `FilterType` (Enum.RaycastFilterType: only `Exclude` (default)
   and `Include` exist), `FilterDescendantsInstances` (an array of instances), `IgnoreWater` (bool,
   accepted but a no-op), `CollisionGroup` (string; only `"Default"` is accepted — anything else
@@ -344,15 +420,59 @@ material with no palette of its own — its emission IS `Part.Color`, so set `Co
   CanCollide=false part with a Touched handler. Cylinders are hit and touched too. Only parts under
   `workspace` are physical; parts in ReplicatedStorage, ServerStorage or Lighting do nothing.
 
-- A ray can hit Terrain: `RaycastResult.Instance` is then `workspace.Terrain` (not a BasePart in
-  CoreAI), with the cell's `Material` and the face `Normal`; rays pass through Terrain water.
+<!-- section: tweens -->
+# TweenService animation
 
-## 7. Block worlds (workspace.Terrain)
+- `TweenService:Create(instance, TweenInfo.new(time[, easingStyle, easingDirection, repeatCount,
+  reverses, delayTime]), {Property = goal, ...})` returns a Tween. `:Play()`, `:Pause()`,
+  `:Cancel()`; `.PlaybackState` (Enum.PlaybackState); `.Completed` fires once with the ending
+  state (`Completed` or `Cancelled` — Pause fires nothing, and a second `:Play()` on the same
+  part cancels whatever tween was already running there first). Tweens advance on
+  `RunService.Heartbeat` SCALED time, so a paused world (delta 0) freezes them exactly.
+  `TweenService:GetValue(alpha, easingStyle, easingDirection)` -> eased number clamped to [0,1].
+  `TweenInfo.new()` defaults: time 1, `Enum.EasingStyle.Quad`, `Enum.EasingDirection.Out`,
+  repeatCount 0, reverses false, delayTime 0. `SmoothDamp` is a loud stub (NOT_IMPLEMENTED) —
+  interpolate manually with `GetValue` over `Heartbeat` instead.
+  Create/Play/Pause/Cancel need WorldEdit and write access to the target. Tweenable: number,
+  Vector3, CFrame, Color3, UDim2 (parts, `CurrentCamera.CFrame` and `FieldOfView`, Humanoid numbers,
+  value objects, Lighting's ClockTime/Brightness/Ambient/OutdoorAmbient, a PointLight's
+  Brightness/Color/Range);
+  boolean/EnumItem/UDim/Vector2 members raise NOT_IMPLEMENTED; a NaN/inf goal is BAD_ARGUMENT at
+  Create. With `reverses` every repeat is a forward and a backward leg; time 0 completes at once.
+  A tweened move never fires Touched. A tween that faults is cancelled (Completed(Cancelled)).
+  WRONG: keep one tween and `:Play()` it again much later — an actor keeps only its 256 most
+  recent finished tweens, and an older one raises INSTANCE_DESTROYED. RIGHT: call
+  `TweenService:Create` each time you animate.
+    local tw = game:GetService("TweenService"):Create(part,
+        TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Transparency = 1})
+    tw.Completed:Connect(function(state) print(state) end)  -- Enum.PlaybackState.Completed
+    tw:Play()
+
+<!-- section: messaging -->
+# RemoteEvent, RemoteFunction, BindableEvent/Function between mods
+
+- `RemoteEvent`/`UnreliableRemoteEvent` fire one-way; an `UnreliableRemoteEvent` payload over
+  1,000 bytes raises PAYLOAD_TOO_LARGE, in solo too. `RemoteFunction:InvokeServer/InvokeClient`
+  yields for a reply and is bounded to 30 scheduler seconds: a missing or stalled receiver raises
+  an error instead of yielding forever (a deliberate deviation from Roblox). Wrap a fallible
+  invoke in `pcall`.
+- `BindableEvent` (`:Fire(...)`, `.Event`) and `BindableFunction` (`:Invoke(...)`, `.OnInvoke = fn`) work as in
+  Roblox between scripts and mods: use them, not workspace attributes, to talk between mods. `Fire` never
+  yields; `Invoke` yields until the callback returns, runs it as the mod that assigned it, raises the
+  callback's error in the invoker, and waits (no timeout) while no `OnInvoke` is set. `OnInvoke` is write-only.
+  Arguments and results are copied by the RemoteEvent rules: tables copied without metatable, non-string keys
+  become strings, functions arrive as nil; a mixed array/dictionary table or a cycle raises BAD_ARGUMENT, more
+  than 64 KiB PAYLOAD_TOO_LARGE.
+
+<!-- section: terrain -->
+# Block worlds: Terrain cells, FillBlock, FillRegion, WriteVoxels
 
 `workspace.Terrain` is a grid of 4 x 4 x 4-stud cells, each holding one `Enum.Material` and an
 occupancy 0..1. CoreAI draws every non-empty cell as a full cube, so it IS a block (voxel) world: use it
 for ground, caves, walls and anything built from many blocks. One Part per block does not scale (every
-Part is an instance; a world allows a few thousand), a Terrain holds millions of cells.
+Part is an instance; a world allows a few thousand), a Terrain holds millions of cells. In a block world
+use Parts for props, doors, moving things and anything that needs Color or Transparency.
+`workspace.Terrain` exists in every world and cannot be created, destroyed or moved.
 
 - Cells: cell `(x, y, z)` spans studs `x*4 .. x*4+4` (same on y, z). `terrain:WorldToCell(pos)` -> Vector3
   of whole cell numbers; `terrain:CellCenterToWorld(x, y, z)` and `terrain:CellCornerToWorld(x, y, z)` ->
@@ -380,6 +500,8 @@ Part is an instance; a world allows a few thousand), a Terrain holds millions of
   instance. `workspace.Terrain:IsA("BasePart")` is false in CoreAI, so check `hit.Instance == workspace.Terrain`.
 - Writes need WorldEdit. The world has bounds and a cell budget: past them a write raises BAD_ARGUMENT or
   BUDGET_EXCEEDED and changes nothing.
+- Not implemented (NOT_IMPLEMENTED): FillBall, FillCylinder, FillWedge, ReadVoxelChannels,
+  WriteVoxelChannels, CopyRegion, PasteRegion, GetMaterialColor/SetMaterialColor, the Water* properties.
 
 ```lua
 local terrain = workspace.Terrain
@@ -417,6 +539,9 @@ if hit and hit.Instance == terrain then
 end
 ```
 
+<!-- section: building -->
+# Build at the crosshair in cells (sizes, undo); towers of Parts
+
 Building at the crosshair (block worlds). When the player says "here", "this spot" or "where I look", build
 at the crosshair, in cells. Block games publish it as workspace attributes: `CrosshairPlaceCell` (Vector3 of
 whole cell numbers: the empty cell in front of the face the player looks at; build up from it),
@@ -447,7 +572,21 @@ for _, corner in ipairs({ { -2, -2 }, { 2, -2 }, { -2, 2 }, { 2, 2 } }) do
 end
 ```
 
-## 8. Humanoid
+Build a colored tower of parts:
+```lua
+for i = 1, 5 do
+  local p = Instance.new("Part")
+  p.Name = "Block" .. i
+  p.Size = Vector3.new(4, 1, 4)
+  p.Position = Vector3.new(0, i * 1.2, 0)
+  p.Color = Color3.fromRGB(40 * i, 120, 255 - 30 * i)
+  p.Anchored = true
+  p.Parent = workspace
+end
+```
+
+<!-- section: characters -->
+# Humanoid, Players, Player.Character, respawn
 
 - `Instance.new("Humanoid")` — health, movement parameters and a small state machine; NOT a full
   character rig (no body parts, no auto-created Model/Script). Defaults: `MaxHealth` 100, `Health`
@@ -486,7 +625,7 @@ end
 - `humanoid:Clone()` keeps Health, MaxHealth, WalkSpeed, JumpPower, JumpHeight, UseJumpPower and
   DisplayName; a clone of a dead Humanoid (Health 0) dies on its first Heartbeat in `workspace`.
 
-## 9. Players & Characters
+## Players & characters
 
 - `game:GetService("Players")` — `:GetPlayers()` -> array of connected Players; `:GetPlayerByUserId(id)`
   and `:GetPlayerFromCharacter(model)` -> Player or nil (never error on a miss; only live Players
@@ -525,31 +664,8 @@ end
       end)
     end)
 
-## 10. Value objects
-
-- `IntValue`, `NumberValue`, `StringValue`, `BoolValue`, `ObjectValue`, `Vector3Value`,
-  `CFrameValue`, `Color3Value` — all `Instance.new`-creatable; every one `IsA("ValueBase")`, the
-  common abstract ancestor (`ValueBase` itself is NOT creatable).
-- One member, `.Value` (read+write, type-checked; numbers and numeric strings convert as in
-  section 17): a wrong-type write raises BAD_ARGUMENT and
-  leaves the old value AND revision untouched. Defaults: Int/Number 0, String "", Bool false,
-  Object nil, Vector3/CFrame their datatype's zero/identity, Color3 black (CoreAI's own default;
-  the mirror does not specify one). `.Changed` fires once with the new value on every real change
-  (assigning the SAME value again does not fire).
-- `IntValue.Value` rounds to the nearest integer, halfway away from zero (`2.5`->3, `-2.5`->-3);
-  a value outside -2^63..2^63-1 is BAD_ARGUMENT.
-  `StringValue.Value` is capped at 200,000 characters; longer raises "String too long".
-  `ObjectValue.Value` accepts an Instance or nil.
-- `leaderstats` is CONVENTION, not an API: a `Folder` named exactly `"leaderstats"` parented
-  under a `Player`, holding named Value children — the standard way to show per-player stats.
-    local coins = Instance.new("IntValue")
-    coins.Name = "Coins"; coins.Value = 0
-    local stats = Instance.new("Folder")
-    stats.Name = "leaderstats"
-    coins.Parent = stats
-    stats.Parent = player
-
-## 11. Input (UserInputService)
+<!-- section: input -->
+# UserInputService, gameProcessed, ClickDetector, a keyboard game loop
 
 Roblox-1:1 keyboard/mouse. Get it with `game:GetService("UserInputService")`, or use the global
 `UserInputService` (same instance). Reading input is Read-tier — no WorldEdit needed.
@@ -569,7 +685,7 @@ Roblox-1:1 keyboard/mouse. Get it with `game:GetService("UserInputService")`, or
   Thumbstick1/Thumbstick2 and the stick in `input.Position` (x, y in -1..1, y up).
 - `TextBoxFocused` / `TextBoxFocusReleased` fire when CoreAI's chat or Hub field takes / returns the
   keyboard (argument nil); a GUI TextBox does not raise them yet and `GetFocusedTextBox()` returns nil
-  (use the TextBox's own `Focused` / `FocusLost`, section 12).
+  (use the TextBox's own `Focused` / `FocusLost`, section gui).
 - `gameProcessedEvent` (the second argument of InputBegan/InputEnded/InputChanged) is `true` while
   CoreAI UI (the chat, the Hub) or your own UI (a TextBox, a UXML field) has text focus, and for mouse
   input while the pointer is over a button, a TextBox, an `Active` GUI object or a UXML element:
@@ -579,14 +695,96 @@ Roblox-1:1 keyboard/mouse. Get it with `game:GetService("UserInputService")`, or
   `CameraMinZoomDistance` (0.5); writes need WorldEdit. Each Player copies the three camera settings
   when it joins: `player.CameraMode`, `player.CameraMaxZoomDistance`, `player.CameraMinZoomDistance`
   (read+write) are what the camera uses.
+- `ClickDetector` — parent one under a Part to make that 3D part clickable:
+  `local cd = Instance.new("ClickDetector"); cd.Parent = part; cd.MouseClick:Connect(function() ... end)`.
+  MouseClick fires `(playerWhoClicked)` when the user clicks THAT part with the mouse and the
+  player's character is within `cd.MaxActivationDistance` studs of it (default 32; measured from
+  the camera when there is no character). A detector under a Model or Folder covers all of its
+  parts; the deepest detector above the clicked part wins. Only the part under the cursor fires.
 
-## 12. UI (ScreenGui, UxmlService) — needs the Ui capability
+Drive a part with the keyboard and follow it with the camera (a tiny mini-game loop):
+```lua
+local UIS = game:GetService("UserInputService")
+local car = Instance.new("Part")
+car.Size = Vector3.new(4, 1, 8)
+car.Position = Vector3.new(0, 1, 0)
+car.Anchored = true
+car.Parent = workspace
+workspace.CurrentCamera.CameraSubject = car             -- the default camera orbits the part
 
-Two entrances draw on one screen layer: the Roblox GUI classes and CoreAI's UXML screens. Both need the
-`Ui` capability (part of `All`; a header that lists tiers must add `Ui`), both must be made from a mod
-(one-off `execute_lua` chunks cannot own UI), both go away with their mod, and they share the budgets and
-error codes listed under UxmlService below. A ScreenGui's `DisplayOrder` and a screen's `SortOrder` are one
-scale: higher draws on top.
+-- The game loop is RunService.Heartbeat — the Roblox per-frame hook. dt is the frame delta in
+-- seconds; multiply speeds by dt so motion is smooth and frame-rate independent (studs per second).
+local RunService = game:GetService("RunService")
+local SPEED = 12                                         -- studs per second
+RunService.Heartbeat:Connect(function(dt)
+  local move = Vector3.zero
+  if UIS:IsKeyDown(Enum.KeyCode.W) then move = move + Vector3.new(0, 0, -1) end
+  if UIS:IsKeyDown(Enum.KeyCode.S) then move = move + Vector3.new(0, 0, 1) end
+  if UIS:IsKeyDown(Enum.KeyCode.A) then move = move + Vector3.new(-1, 0, 0) end
+  if UIS:IsKeyDown(Enum.KeyCode.D) then move = move + Vector3.new(1, 0, 0) end
+  car.Position = car.Position + move * SPEED * dt
+end)
+
+UIS.InputBegan:Connect(function(input, gameProcessed)
+  if gameProcessed then return end                       -- typing in chat or a UI field
+  if input.KeyCode == Enum.KeyCode.Space then
+    car.Color = Color3.fromRGB(255, 80, 80)               -- flash on the jump key
+  end
+end)
+```
+
+<!-- section: camera -->
+# CurrentCamera, screen rays, the default camera, framing a game
+
+`workspace.CurrentCamera` is the Camera instance. Members: `CFrame` (read+write — the camera
+pose in studs, over the engine camera rig), `CameraType` (Enum.CameraType, read+write),
+`CameraSubject` (a Humanoid or BasePart, read+write; reads the local character's Humanoid until you
+assign one), `FieldOfView` (vertical degrees, read+write, default 70, clamped 1..120),
+`ViewportSize` (Vector2 pixels, read-only). Queries: `cam:ViewportPointToRay(x, y, depth = 0)` and
+`cam:ScreenPointToRay(x, y, depth = 0)` -> a unit `Ray` through a pixel (top-left origin);
+`cam:WorldToViewportPoint(v3)` / `cam:WorldToScreenPoint(v3)` -> `Vector3(x, y, depth), onScreen`.
+No top bar, so the screen and viewport variants agree. `Ray.new(origin, direction)` has `Origin`,
+`Direction`, `Unit`, `:ClosestPoint(p)`, `:Distance(p)`; cast it with
+`workspace:Raycast(ray.Origin, ray.Direction * 500)`. Reads are ungated; writes need WorldEdit.
+Convenience globals (WorldEdit): `camera_set_cframe(cf)` sets the pose and
+`camera_follow(instance_or_nil)` attaches/clears the follow subject — same effect as writing
+`CurrentCamera.CFrame` / `CurrentCamera.CameraSubject`.
+Assigning `workspace.CurrentCamera` raises NOT_IMPLEMENTED, and so do `FieldOfViewMode`, `NearPlaneZ` and `Focus`.
+
+The DEFAULT CAMERA runs while `CameraType` is `Custom` (the default) and there is a subject: it
+orbits the subject's head behind it, right-drag (or a locked pointer, or the right stick) turns it,
+the wheel zooms from 12.5 studs out to the player's `CameraMaxZoomDistance` and in to first person
+(pointer locked to the centre), and a wall pulls it in. `player.CameraMode =
+Enum.CameraMode.LockFirstPerson` forces first person. In `Custom` your own `CFrame` writes are
+overwritten next frame — set `CameraType = Enum.CameraType.Scriptable` first, exactly as in Roblox.
+
+## Camera framing & controls — READ THIS before making a playable mod
+
+With `Scriptable`, `CameraSubject` only FOLLOWS a part's POSITION at a fixed offset; it keeps
+whatever direction the camera already faces. For any game where the player expects
+"press D = move right on screen", take manual control of the angle:
+`CurrentCamera.CameraType = Enum.CameraType.Scriptable` then `CurrentCamera.CFrame =
+CFrame.lookAt(eye, target)`.
+
+CRITICAL rule that trips people up (it behaves the SAME in real Roblox — it is not an engine bug):
+the camera's orientation decides which world axis shows up on screen-left vs screen-right. If your
+player moves along world +X but your camera looks in a direction where +X is on its LEFT, then D
+(which you coded as +X) visibly moves the car LEFT and the controls feel reversed. Two safe fixes:
+- **Frame the camera so +X is on screen-right.** A camera placed on the -Z side looking toward +Z
+  (e.g. `CFrame.lookAt(Vector3.new(0, 9, 14), Vector3.new(0, 2, -18))`) keeps world +X on the right,
+  so `A = -X = left`, `D = +X = right` feel correct. Verify by moving the player +X and checking it
+  goes right on screen.
+- **Or derive movement from the camera:** move along `CurrentCamera.CFrame.RightVector` (right) and
+  `-CurrentCamera.CFrame.LookVector` is forward — then movement always matches the view no matter how
+  the camera is angled.
+
+<!-- section: gui -->
+# Roblox GUI: ScreenGui, Frame, TextLabel, TextButton, PlayerGui
+
+Two entrances draw on one screen layer: the Roblox GUI classes below and CoreAI's UXML screens (section
+uxml). Both need the `Ui` capability and a mod (one-off `execute_lua` chunks cannot own UI), and they share
+the budgets and `UI_*` error codes listed in section uxml. A ScreenGui's `DisplayOrder` and a screen's
+`SortOrder` are one scale: higher draws on top.
 
 Roblox GUI works as in Roblox: `ScreenGui`, `Frame`, `TextLabel`, `TextButton`, `TextBox`, `ImageLabel`,
 `ImageButton`, `ScrollingFrame`, `UICorner`, `UIPadding`, `UIStroke`, `UIScale`, `UIListLayout`,
@@ -594,7 +792,7 @@ Roblox GUI works as in Roblox: `ScreenGui`, `Frame`, `TextLabel`, `TextButton`, 
 defaults, layout and signals; `AbsolutePosition`/`AbsoluteSize` are what is drawn, and TweenService tweens
 their UDim2, Color3 and number properties. Where CoreAI differs:
 - The PlayerGui drawn is this machine's player's. A mod loaded as that player's actor reaches it as
-  `Players.LocalPlayer.PlayerGui`; a mod the host loads (LocalPlayer nil, section 9) uses
+  `Players.LocalPlayer.PlayerGui`; a mod the host loads (LocalPlayer nil, section characters) uses
   `Players:GetPlayers()` / `PlayerAdded`, or puts its ScreenGui in `StarterGui`.
 - `StarterGui` is copied into PlayerGui when the character spawns (`ResetOnSpawn = false`: copied once and
   kept). A child added after the spawn is copied on the next frame; a respawn replaces only the copies, so a
@@ -616,6 +814,9 @@ their UDim2, Color3 and number properties. Where CoreAI differs:
   `gameProcessed` as over an `Active` one.
 - A ScreenGui counts as a screen, each GUI object as an element, a property write of a shown object as an
   element write.
+
+<!-- section: uxml -->
+# UXML/USS screens (UxmlService), UI error codes and budgets, a hotbar HUD
 
 UxmlService (CoreAI-only; Roblox has no markup): interfaces are UXML + USS **text** handed to
 `game:GetService("UxmlService")` while the game runs.
@@ -659,8 +860,6 @@ UxmlService (CoreAI-only; Roblox has no markup): interfaces are UXML + USS **tex
   `UI_UNSUPPORTED_OPERATION` (e.g. `Value` on a Label), `UI_INVALID_ARGUMENT`, and the per-mod budgets
   `UI_BUDGET_SCREENS` (32 screens), `UI_BUDGET_ELEMENTS` (4096 elements), `UI_TEXT_TOO_LARGE` (64 KB per
   call), `UI_BUDGET_WRITES` (8192 element writes per frame — write only what changed).
-- Input over UI arrives with `gameProcessed = true`: keep `if gameProcessed then return end` in input
-  handlers so typing in a field or clicking a slot does not reach the game.
 
 Hotbar, crosshair and block counter:
 ```lua
@@ -726,53 +925,8 @@ end)
 selectSlot(1)
 ```
 
-## 13. Camera
-
-`workspace.CurrentCamera` is the Camera instance. Members: `CFrame` (read+write — the camera
-pose in studs, over the engine camera rig), `CameraType` (Enum.CameraType, read+write),
-`CameraSubject` (a Humanoid or BasePart, read+write; reads the local character's Humanoid until you
-assign one), `FieldOfView` (vertical degrees, read+write, default 70, clamped 1..120),
-`ViewportSize` (Vector2 pixels, read-only). Queries: `cam:ViewportPointToRay(x, y, depth = 0)` and
-`cam:ScreenPointToRay(x, y, depth = 0)` -> a unit `Ray` through a pixel (top-left origin);
-`cam:WorldToViewportPoint(v3)` / `cam:WorldToScreenPoint(v3)` -> `Vector3(x, y, depth), onScreen`.
-No top bar, so the screen and viewport variants agree. `Ray.new(origin, direction)` has `Origin`,
-`Direction`, `Unit`, `:ClosestPoint(p)`, `:Distance(p)`; cast it with
-`workspace:Raycast(ray.Origin, ray.Direction * 500)`. Reads are ungated; writes need WorldEdit.
-Convenience globals (WorldEdit): `camera_set_cframe(cf)` sets the pose and
-`camera_follow(instance_or_nil)` attaches/clears the follow subject — same effect as writing
-`CurrentCamera.CFrame` / `CurrentCamera.CameraSubject`.
-
-The DEFAULT CAMERA runs while `CameraType` is `Custom` (the default) and there is a subject: it
-orbits the subject's head behind it, right-drag (or a locked pointer, or the right stick) turns it,
-the wheel zooms from 12.5 studs out to the player's `CameraMaxZoomDistance` and in to first person
-(pointer locked to the centre), and a wall pulls it in. `player.CameraMode =
-Enum.CameraMode.LockFirstPerson` forces first person. In `Custom` your own `CFrame` writes are
-overwritten next frame — set `CameraType = Enum.CameraType.Scriptable` first, exactly as in Roblox.
-
-### Camera framing & controls — READ THIS before making a playable mod
-
-With `Scriptable`, `CameraSubject` only FOLLOWS a part's POSITION at a fixed offset; it keeps
-whatever direction the camera already faces. For any game where the player expects
-"press D = move right on screen", take manual control of the angle:
-`CurrentCamera.CameraType = Enum.CameraType.Scriptable` then `CurrentCamera.CFrame =
-CFrame.lookAt(eye, target)`.
-
-CRITICAL rule that trips people up (it behaves the SAME in real Roblox — it is not an engine bug):
-the camera's orientation decides which world axis shows up on screen-left vs screen-right. If your
-player moves along world +X but your camera looks in a direction where +X is on its LEFT, then D
-(which you coded as +X) visibly moves the car LEFT and the controls feel reversed. Two safe fixes:
-- **Frame the camera so +X is on screen-right.** A camera placed on the -Z side looking toward +Z
-  (e.g. `CFrame.lookAt(Vector3.new(0, 9, 14), Vector3.new(0, 2, -18))`) keeps world +X on the right,
-  so `A = -X = left`, `D = +X = right` feel correct. Verify by moving the player +X and checking it
-  goes right on screen.
-- **Or derive movement from the camera:** move along `CurrentCamera.CFrame.RightVector` (right) and
-  `-CurrentCamera.CFrame.LookVector` is forward — then movement always matches the view no matter how
-  the camera is angled.
-Anchor gameplay parts (`part.Anchored = true`) unless you WANT physics: an unanchored Part falls
-under gravity and a dense stack shoves itself apart. Drive the whole game from one
-`RunService.Heartbeat:Connect(function(dt) ... end)` and scale motion by `dt`.
-
-## 14. Lighting & lights (day and night, torches)
+<!-- section: lighting -->
+# Day cycle (ClockTime), sun and ambient light, PointLight
 
 - `local L = game:GetService("Lighting")`. Live, with Roblox's names and defaults: `ClockTime` (hours,
   14; any number wraps into 0..24), `TimeOfDay` ("14:00:00"; assign "06:30" or "21:30:00"; always in
@@ -805,24 +959,15 @@ under gravity and a dense stack shoves itself apart. Drive the whole game from o
   `SurfaceLight`, `Sky`, `Atmosphere`, `BloomEffect`, `ColorCorrectionEffect`, `ColorGradingEffect`.
   `LightingStyle`, `PrioritizeLightingQuality` and `Technology` are Roblox-only (unsupported).
 
-## 15. Attributes & tags
-
-- `inst:SetAttribute(name, value)` / `inst:GetAttribute(name)` / `inst:GetAttributes()`.
-  Value must be string, boolean, number, Vector3, Vector2, Color3, or UDim — anything else is
-  rejected with BAD_ARGUMENT. SetAttribute needs WorldEdit. A new attribute name uses only ASCII
-  letters, digits, `.`, `-`, `/` and `_` (at most 100 chars, no "RBX" prefix); anything else is
-  BAD_ARGUMENT.
-- `inst:AddTag(t)` / `RemoveTag(t)` / `HasTag(t)` / `GetTags()`. Add/Remove need WorldEdit. A new tag
-  is at most 100 characters (BAD_ARGUMENT beyond).
-- At most 256 attributes and 256 tags per instance; one more is BAD_ARGUMENT (a world must stay
-  savable).
-
-## 16. AI (TextGenerator, AIService) — only when the game turned it on
+<!-- section: ai -->
+# TextGenerator and AIService agents (NPCs that talk)
 
 AI from Lua is a setting of the GAME, off unless the game turned it on. A world or a mod cannot turn it on.
 When it is off, `CreateAgent`, `Ask`, `Hear` and `GenerateTextAsync` fail with
 `NOT_AUTHORITY: ... framework setting CoreAiLuaAiOptions.AllowAgentsFromLua is false` — tell the player the game
-has AI turned off; do not retry and do not try to work around it.
+has AI turned off; do not retry and do not try to work around it. A game that grants AI to some mods only
+also requires the `Ai` capability (not part of `All`, so a header that lists tiers must name it); without it
+the same calls fail with `NOT_AUTHORITY: ... requires the Ai capability`.
 
 ### TextGenerator (Roblox)
 
@@ -904,127 +1049,4 @@ end)
 task.spawn(function()
     local reply = bob:Ask("Good morning! Any rye bread?", "Steve")
 end)
-```
-
-## 17. Errors
-
-Every failure is a Lua error whose message is `CODE: message | fix: suggestion`; inside a mod
-it starts with `[mod:<id> script:main.lua line:N] ` (one-off execute_lua errors have no prefix).
-Argument numbers do not count `self` (in `part:SetAttribute(name, value)` the name is argument 1). Catch
-with `pcall`; `pcall`, `xpcall` and `coroutine.resume` all receive exactly that one line (no stack
-trace). A budget cut (section 1) is the exception: it cannot be caught. The mod-core functions
-(`store_set`, `hooks_on`, `mods_call`, ...) report a wrong argument the way Lua does —
-`bad argument #1 to 'store_set' (string expected, got table)`. Both surfaces convert arguments and
-property writes like Luau: a string parameter takes a number as `tostring` writes it
-(`store_set(7, 8)` stores "7" = "8"; `FindFirstChild(5)` finds "5"); a number parameter takes a
-string `tonumber` accepts ("0x10", "1e3"); an integer parameter truncates toward zero; a boolean
-parameter takes only true/false, never a truthy value (`FindFirstChild(name, 1)` is BAD_ARGUMENT).
-Codes you will meet: BAD_ARGUMENT, UNKNOWN_SERVICE, INSTANCE_DESTROYED,
-PARENT_LOCKED, NOT_IMPLEMENTED, WORLD_DETACHED, BUDGET_EXCEEDED, SIGNAL_CASCADE,
-CONTEXT_VIOLATION, NOT_AUTHORITY, THREAD_CAP, PAYLOAD_TOO_LARGE. A UI refusal carries an inner code
-(`BAD_ARGUMENT: UI_CAPABILITY_REQUIRED: ...`, section 12); NOT_AUTHORITY also covers "AI from Lua is
-turned off in this game" (section 16).
-
-`WORLD_DETACHED` is not a mistake in your script. The RbxWorldHost that owned the world was
-destroyed — a scene load, a domain reload during play, or leaving play mode — and it took every
-part in that world with it. Nothing you spawn can materialize until the mods are reloaded against
-the current world, so report it instead of retrying the spawn.
-
-## 18. Not implemented (raise NOT_IMPLEMENTED — do not use)
-
-- `Instance.fromExisting` (use `Clone`), `Model:MoveTo` (use `PivotTo`),
-  `Camera.FieldOfViewMode`/`NearPlaneZ`/`Focus`, `Humanoid.Sit`, and the known Roblox classes CoreAI
-  does not build (section 4).
-- The globals `BrickColor` (use `Color3.fromRGB`), `NumberSequence`, `ColorSequence`,
-  `NumberRange`, `Rect`, `PhysicalProperties`,
-  `OverlapParams`, `DateTime` (use `os.time()`) and `shared` (use mods_export/mods_get) exist
-  only as loud stubs: touching them raises NOT_IMPLEMENTED with a fix.
-- Terrain members other than those in section 7 (FillBall, FillCylinder, FillWedge, ReadVoxelChannels,
-  WriteVoxelChannels, CopyRegion, PasteRegion, GetMaterialColor/SetMaterialColor, the Water* properties),
-  and the Lighting members outside section 14 (fog, ColorShift_*, exposure, shadows, the moon; SpotLight,
-  SurfaceLight, Sky, Atmosphere and the post effects are planned for P9).
-- Part `Shape`, `Material`, `Orientation` and `Rotation` ALL work now — see section 5. So does
-  `WaitForChild(name)` for an absent child: it yields through the scheduler bridge.
-- Luau syntax IS accepted and auto-downleveled to Lua 5.2 before compiling: `+=` (and
-  `-=/*=//=/%=/^=/..=`), `continue`, `` `str{}` `` interpolation, if-then-else expressions, and
-  type annotations/casts all work. Plain Lua 5.2 is unaffected. Nesting deeper than 200 levels
-  is a syntax error.
-
-## 19. Examples
-
-Build a colored tower of parts:
-```lua
-for i = 1, 5 do
-  local p = Instance.new("Part")
-  p.Name = "Block" .. i
-  p.Size = Vector3.new(4, 1, 4)
-  p.Position = Vector3.new(0, i * 1.2, 0)
-  p.Color = Color3.fromRGB(40 * i, 120, 255 - 30 * i)
-  p.Anchored = true
-  p.Parent = workspace
-end
-```
-
-Read and modify a part (Position keeps rotation; CFrame sets both):
-```lua
-local p = workspace:FindFirstChild("Block1")
-if p then
-  p.Transparency = 0.5
-  p.Shape = Enum.PartType.Wedge                           -- a ramp
-  p.CFrame = p.CFrame * CFrame.Angles(0, math.pi / 4, 0)  -- rotate 45 deg about Y
-  print(tostring(p.Position))                             -- "x, y, z" in studs
-end
-```
-
-Drive a part with the keyboard and follow it with the camera (a tiny mini-game loop):
-```lua
-local UIS = game:GetService("UserInputService")
-local car = Instance.new("Part")
-car.Size = Vector3.new(4, 1, 8)
-car.Position = Vector3.new(0, 1, 0)
-car.Anchored = true
-car.Parent = workspace
-workspace.CurrentCamera.CameraSubject = car             -- the default camera orbits the part
-
--- The game loop is RunService.Heartbeat — the Roblox per-frame hook. dt is the frame delta in
--- seconds; multiply speeds by dt so motion is smooth and frame-rate independent (studs per second).
-local RunService = game:GetService("RunService")
-local SPEED = 12                                         -- studs per second
-RunService.Heartbeat:Connect(function(dt)
-  local move = Vector3.zero
-  if UIS:IsKeyDown(Enum.KeyCode.W) then move = move + Vector3.new(0, 0, -1) end
-  if UIS:IsKeyDown(Enum.KeyCode.S) then move = move + Vector3.new(0, 0, 1) end
-  if UIS:IsKeyDown(Enum.KeyCode.A) then move = move + Vector3.new(-1, 0, 0) end
-  if UIS:IsKeyDown(Enum.KeyCode.D) then move = move + Vector3.new(1, 0, 0) end
-  car.Position = car.Position + move * SPEED * dt
-end)
-
-UIS.InputBegan:Connect(function(input, gameProcessed)
-  if input.KeyCode == Enum.KeyCode.Space then
-    car.Color = Color3.fromRGB(255, 80, 80)               -- flash on the jump key
-  end
-end)
-```
-
-Attributes round-trip:
-```lua
-local m = Instance.new("Model")
-m:SetAttribute("Team", "Red")
-m:SetAttribute("Score", 10)
-m:SetAttribute("Spawn", Vector3.new(1, 2, 3))
-m:AddTag("Enemy")
-m.Parent = workspace
-print(m:GetAttribute("Team") .. " " .. tostring(m:GetAttribute("Score")))
-print(tostring(m:HasTag("Enemy")))  -- true
-```
-
-Error handling with pcall:
-```lua
-local ok, err = pcall(function() return Instance.new("Banana") end)
-if not ok then print(err) end   -- "BAD_ARGUMENT: Unable to create ... | fix: ... Part ..."
-
-local part = Instance.new("Part"); part.Parent = workspace
-part:Destroy()
-local ok2, err2 = pcall(function() return part.Position end)
-if not ok2 then print(err2) end  -- "INSTANCE_DESTROYED: ... | fix: ..."
 ```

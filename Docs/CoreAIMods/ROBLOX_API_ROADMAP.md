@@ -936,6 +936,14 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   snapshot would ship server sources to clients, and a host-mode server script written by a restricted
   actor would run as "client".
 - **Done so far**:
+  - **2026-11-11:** the design note `dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md` (SC-1 to SC-19; plan decision
+    D1 (c) kept). Written: A1 (the engine-free script model, `ScriptContextRuleTable`, `ScriptRunRules`,
+    the `require` graph and policy), A2 (header keys `context:` and `parent:`, `LuaModManifest.Context`,
+    kept by every package writer) and A3 (a replica restore keeps server ids and revisions), green in
+    Unity EditMode; B1 (creatable `Script`, `LocalScript` and `ModuleScript` instances, `Enum.RunContext`)
+    with portable tests only. Not started: B2 and C1–C6; nothing acts on the declared context yet.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - `RbxNetworkTopology {Solo, Host, DedicatedServer, Client}` (`RbxApi/Instances/Networking/INetworkBridge.cs`)
     and the `IRbxRuntimeTopology` seam (`RbxApi/Instances/RbxRuntimeTopology.cs`).
   - `IsNetworkServer`/`RequireNetworkSide` (`Scripting/LuaCs/LuaCsRbxInstanceBindings.cs`) — derived
@@ -983,6 +991,16 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   a joining client receives the world. Topology order stays Null loopback (solo) → host → dedicated
   (MVP8).
 - **Done so far**:
+  - **2026-11-11, part 1 written in `Assets/CoreAIMirror`** (it compiles in a scratch build only: the
+    Mirror assemblies need the `MIRROR` define, which this project does not set, so none of it has
+    compiled or run in Unity): host mode serving the host's own local client as its Player, per-connection
+    inbound limits (`CoreAiMirrorInboundLimits`, drop and count), the protocol handshake
+    (`CoreAiMirrorProtocol.Version = 1`), a deferred refusal notice, the roster, and a two-process kcp
+    harness that measures S3 (never built or run). The matching To-do items below stay until the Mirror
+    tests run. Migration: host mode serves the local client by default (`CoreAiMirrorHostModePolicy.Refuse`
+    keeps the old refusal), and 7.56.0 peers are refused by name.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - `MirrorNetworkBridge : INetworkBridge` (`Assets/CoreAIMirror/Runtime/MirrorNetworkBridge.cs`) with
     authenticated admission (`CoreAiMirrorAuthenticator`), the session host (`CoreAiMirrorSessionHost`)
     and the scene provider (`CoreAiMirrorNetworkBridgeProvider`): readiness handshake, server clock
@@ -1094,6 +1112,15 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   client writes follow `ClientWritePolicy`, and host grants travel as intents. The identity promise
   (§3.3) is cashed in.
 - **Done so far**:
+  - **2026-11-11, the codec core written:** `ReplicationWireEncoder`/`ReplicationWireDecoder` (format 1:
+    Spawn, Patch and Remove with delta-coded ids and revisions, a per-packet string table, quantized
+    CFrames), a malformed-input decoder that never throws, and the per-tick `ReplicationPublisher` with
+    coalescing (`dev-docs/REPLICATION_CODEC.md`). An engine-free DoD-shaped run measures 18.88 B per patch
+    for free motion and 13.57 B on a grid; the codec, malformed, S2 and publisher fixtures are green in
+    Unity EditMode. Not wired to the bridge, so nothing is measured on a wire; no fragmentation over the
+    packet cap.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - Replication phase 0 (`RbxApi/Instances/Replication/`): `ReplicationDirtySet`, `ReplicationStream`
     (ordered Spawn/Patch/Remove per recipient), `ReplicationApplier` (duplicate/gap/violation handling,
     resync in place with `BeginResync(worldSequence)`), `GuardedReplicationFilter` — tested
@@ -1410,6 +1437,8 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   (`LuaExecution/LuauSourceGate.cs`); one argument/property coercion rule on both surfaces (B2-12,
   RBX-COERCE: numbers ↔ numeric strings, integer truncation, strict booleans, Enum Name/Value on instance
   members; `Scripting/LuaCs/LuaCsValueMarshaller.cs`). Script instances and contexts come from MVP4.
+  2026-11-11: the Luau math slice of RT5 (`math.noise`, `math.clamp`, `math.round`, `math.sign`,
+  `RbxPerlinNoise`), written with P9 and green in Unity EditMode (`LuauMathLibraryEditModeTests`).
 - **To do**:
   - A `.model` package: a subtree of the world codec, with id remapping on insert and scripts carried as
     instances.
@@ -1521,9 +1550,21 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 - **Goal**: tutorial-grade GUI scripts run on host, client and WebGL: `ScreenGui`/`Frame`/`TextLabel`/
   `TextButton`/`ImageLabel`/`TextBox` + `UICorner`/`UIListLayout`, rendered as runtime UI Toolkit
   (UXML/USS interpreted at runtime — RUNTIME-first, the same approach as the Hub).
-- **Done so far**: the class descriptors are planned loud stubs (`ClassCatalog.cs`, phase `MVP14`); the
-  `PlayerGui` container; `UserInputService`. The runtime UI interpreter of `TODO.md` [R4] has not
-  started.
+- **Done so far**: 2026-11-11, the solo half's class set is written over the P18 host: `ScreenGui`,
+  `Frame`, `TextLabel`, `TextButton`, `TextBox`, `ImageLabel`, `ImageButton`, `ScrollingFrame`,
+  `UICorner`, `UIPadding`, `UIStroke`, `UIScale`, `UIListLayout`, `UIGridLayout`, `UIAspectRatioConstraint`
+  and `UISizeConstraint` are creatable, `StarterGui` is a real service copied into a real `PlayerGui` on
+  spawn, and `RbxGuiPresenter` lays them out engine-free (scale and offset, `AnchorPoint`, the
+  constraints, list and grid layouts, `AutomaticSize`) with the budgets, ownership and focus of
+  `UxmlService`; `MouseButton1Click`, `Activated`, `MouseEnter`/`MouseLeave`, the `TextBox` focus signals
+  and `GetPropertyChangedSignal` fire, and every other GUI member is a loud stub. `BindableEvent` and
+  `BindableFunction` between mods came with it (portable tests only). The engine-free and Lua fixtures
+  are green in Unity EditMode; one real-host layout test failed on a wrong test assumption, and its
+  corrected form has not been re-run. Open: scrolling with the wheel or by dragging,
+  `UserInputService.TextBoxFocused` for GUI text boxes, `StarterGui` replication (M3), world-owned GUI in
+  the world package. Deviations: DEV-23, DEV-24, DEV-70 to DEV-82. Before 2026-11-11 the class
+  descriptors were planned loud stubs (`ClassCatalog.cs`, phase `MVP14`) next to the `PlayerGui`
+  container and `UserInputService`.
 - **To do**:
   - The runtime UI Toolkit mapping for the class set above; `UDim2` layout (Scale+Offset → USS
     percent+px); `MouseButton1Click`, `Activated`, `FocusLost(enterPressed)`; `player.PlayerGui`;
@@ -1730,9 +1771,17 @@ unless a path starts with `Assets/` or `Docs/`); P7–P10 are relative to `Asset
 from the repository root, with `RbxApi/...`, `Scripting/...` and `LuaExecution/...` under
 `Assets/CoreAIMods/Runtime/` and `Features/...` under `Assets/CoreAiUnity/Runtime/Source/`. Mirror
 references point into the offline Roblox reference at `D:\Git\RobloxDocs`. A "DEV candidate" is a
-deviation that receives the next free DEV id (§5.1.4 ends at DEV-17) when its package starts. Facts
+deviation that receives the next free DEV id in §2.1 when its package starts (the 2026-11-11 work took
+DEV-18 to DEV-82). Facts
 marked *(research 2026-11-11)* come from `dev-docs/COMPETITIVE_SCAN_2026-11-11.md` and were not checked
 against the providers.
+
+The first bullet under a package's "Done so far", when it is dated 2026-11-11, says what was built that day
+and how far it was checked, in three states that are never blurred: *written* (its engine-free tests pass
+outside Unity), *green in Unity EditMode* (its EditMode fixtures also passed in Unity 6000.6.0f1 that day;
+anything changed after the last run says so), and *PlayMode* or *captures* (checked in Play Mode or by
+looking at captures, on a separate Unity copy). That day nothing was checked against a live model, the
+Mirror assemblies did not compile in Unity, nothing ran in a WebGL player, and nothing was released.
 
 ### P1 — Player controls and camera (L) *(new 2026-11-11)*
 
@@ -1741,6 +1790,20 @@ against the providers.
   creative flight; typing into the chat or the Hub never moves the character. Takes the solo half of
   MVP7's "To do" (MVP7 keeps replication, own-character authority and the speed-hack check).
 - **Done so far**:
+  - **2026-11-11, written (stages A–C):** input focus and pointer lock (`IInputFocusState` sets
+    `gameProcessedEvent`; `IRbxCursorPort`/`UnityCursorPort`; the device mouse delta; the wheel in
+    `Position.Z`), `Humanoid:Move` and flight on the motor, the default control script
+    `coreai_player_controls` (honours `DevComputerMovementMode`; a double-tapped Space toggles flight, also
+    `ChangeState(Flying)`), the camera module for `CameraType.Custom` (orbit, zoom, first person), the
+    `Ray` datatype and the camera queries, the Player camera properties, and the `StarterPlayer` settings
+    (saved in the world package's `starter_player` block). EditMode green in Unity:
+    `P1InputFocusAndPointer`, `P1UiFocusBridge`, `P1CharacterMovement`, `P1PlayerControlsLua`. PlayMode on a
+    separate Unity copy: `P1PlayerControlsPlayModeTests` (W walks, an open chat blocks movement, a double
+    Space flies, the wheel zooms into first person). Not run in Unity: the stage C camera fixtures. Open:
+    spring-smoothed zoom, first-person body hiding, `Humanoid.CameraOffset`, a Unity motor EditMode test, a
+    preset asset for the tuning values. Deviations: DEV-18 to DEV-36.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - `RbxApi/Instances/RbxUserInputService.cs`: `InputBegan`/`InputEnded`/`InputChanged`, `IsKeyDown`,
     `GetKeysPressed`, `GetMouseLocation`, `MouseBehavior`. `gameProcessedEvent` is hardwired `false`
     (`GameNotProcessed`, line 31); `MouseBehavior` is state-only (pointer-lock TODO at line 63); the
@@ -1838,6 +1901,17 @@ against the providers.
   input; NPC lines land in the feed too. The default chat role can build, and the Hub chat stays
   available.
 - **Done so far**:
+  - **2026-11-11, written:** the in-world chat overlay (`Assets/CoreAiUnity/Docs/CHAT_OVERLAY.md`): a UI
+    Toolkit feed and one-line input over `CoreAiChatService`, on by default behind the UI focus gate, an
+    agent status line from tool events, and a C# command registry with `/help`, `/agent`, `/model`,
+    `/stop`, `/undo`, `/redo`, `/fly`, `/autopilot` and `/orchestrator`. Pre-send hooks let a villager hear
+    a line before the player's agent. Answers show as plain text; Markdown bubbles come through an optional
+    adapter for an external renderer package (`CHAT_MARKDOWN.md`; that adapter has not compiled in Unity,
+    the package is not installed here). The Hub chat opens on Programmer when no chat config is wired.
+    EditMode green in Unity (the overlay fixtures); PlayMode `CoreAiChatOverlayPlayModeTests` (2) green.
+    Not built: the `TextChatService` subset and its DEV entries.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - `Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatPanel.cs`: the UI Toolkit chat panel (open
     hotkey C, `CoreAiChatConfig.cs:151`; Escape closes; streaming bubbles; typing dots and a
     tool-progress hint; `StopAgent`; agent and API switching via
@@ -1917,6 +1991,21 @@ against the providers.
   front of it; `/undo` takes back the last AI change; failures say what is missing instead of degrading
   silently.
 - **Done so far**:
+  - **2026-11-11, written:** the write-behind gate (a pre-mutation backup captured and encoded in memory,
+    the edit runs at once, the autosave follows; pending markers report a crash at the next start; a
+    1.5 s startup debounce; the encode moved behind the edit), the AI `/undo` and `/redo` ring (the last 10
+    per actor, `IRbxWorldUndoService`; it restores in place only while nothing else changed the world,
+    Terrain cells included), one rate limiter for `execute_lua`, `manage_mods` and the MCP `manage_mods`,
+    raised world package limits (`RbxWorldPackageLimits`), and the one-click world
+    (`CoreAiPlayWorldBootstrap`, menu **CoreAI/Setup/Create Play + Create World**: controls, look, a
+    transient default-content mod with a baseplate and a spawn pad, overlay chat;
+    `Docs/CoreAIMods/PLAY_WORLD.md`). EditMode green in Unity: `P3InstantEditLoop`, `P3WorldUndo`,
+    `P3PlayWorldBootstrap`, the `ReadyToPlay*` and world package fixtures. Open: the Play Mode acceptance of
+    the one-click world (one player, one character, landing on the pad; a second sun is created when
+    `RenderSettings.sun` is empty although the scene has a directional light), a chunked deferred encode,
+    and operation-level undo (P5), without which a player's own edit blocks `/undo`.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - `ConfirmedWorldMutationGate` (`Infrastructure/LuaCsGameToolExecutor.cs:80`), always composed
     (`Composition/CoreAiModsInstaller.cs:167-179`): single-flight; before every `execute_lua` call and
     every `manage_mods` load/reload/unload/import/forget/revert
@@ -2003,6 +2092,19 @@ against the providers.
   `workspace.Terrain` with Roblox's own names and call shapes, so a block-world script reads like a
   Roblox terrain script.
 - **Done so far**:
+  - **2026-11-11, written:** `workspace.Terrain` as a blocky subset (`FillBlock`, `FillRegion`,
+    `ReadVoxels`, `WriteVoxels`, `Clear`, `ReplaceMaterial`, `WorldToCell`, `CellCenterToWorld`,
+    `CellCornerToWorld`, `CountCells`) over an engine-free store of 16-cubed chunks with desktop and WebGL
+    budgets and copy-on-write snapshots; the `Region3` datatype; face-culled chunk meshes with one collider
+    per chunk (one submesh per material); ray hits that answer `Instance = workspace.Terrain`, `Material`
+    and `Normal`; the `Terrain/voxels.bin` package entry (CAVX v1, run-length; a package with cells
+    declares `minimum_reader_version` 2); `/undo` of cells. EditMode green in Unity: Region3, rasterizer,
+    store, Lua, mesher, raycast, renderer, voxel codec and the world package terrain fixtures. Open:
+    headless raycasts through `TerrainVoxelRaycaster`, cell replication (MVP6; the wire reserves record
+    kind 4 for chunk deltas), the WebGL budget in a browser, `Touched` against Terrain. Deviations: DEV-37
+    to DEV-48.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - Nothing voxel exists. `Workspace.Terrain` is an unsupported property whose message calls voxel
     Terrain "a roadmap non-goal" (`RbxApi/Instances/ClassCatalog.cs:701-703`); §7 lists Terrain among the
     non-goals and MVP14's importer skips `Terrain` with an info diagnostic. This package reverses the
@@ -2159,6 +2261,19 @@ against the providers.
   here" and watches it rise, talks to a villager, and can hand the controls to the autopilot. It proves
   P1-P4 in one scene and is the template for "a game like this".
 - **Done so far**:
+  - **2026-11-11, in progress:** seven `blockworld_*` mods in the folder `Samples/Block World`
+    (`Resources/CoreAIMods/BlockWorld/`, seeded inactive): seeded noise terrain streamed in columns,
+    break and place at the crosshair with a 12-Part outline, a `UxmlService` HUD, an 8-minute day, torches
+    with `PointLight`, three villagers made through `AIService`, a Lua autopilot; they talk only through
+    workspace attributes (`Assets/CoreAI.Demos/BlockWorld/README.md`). Their Lua-tier tests are green in
+    Unity EditMode. The scene `Assets/CoreAI.Demos/BlockWorld/BlockWorld.unity` is built from the
+    play-world preset and is on the frozen G11 list and the smoke test (18 scenes). A first PlayMode run of
+    the scene on a separate Unity copy showed the world, the HUD, break at the crosshair, the day cycle,
+    torches and a scripted "build a watchtower here"; `/undo` after an autopilot run and a line addressed
+    to a villager by name failed. Open: those two, the recorded script, the WebGL run, a real
+    `SelectionBox`.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - No voxel, block-building or Minecraft-like sample exists. The bundled mods are thirteen Lua files in
     `Resources/CoreAIMods/` with `@coreai` headers; all but `sample_welcome` ship `active: false`.
     `sample_tetris3d.lua` and `sample_lane_racer.lua` show `UserInputService` play, `sample_clicker.lua`
@@ -2238,6 +2353,17 @@ Milestone: **M1**.
   and fog, in the Editor and in a built player (WebGL included), without anyone touching a scene.
   The player tunes the look from a Hub **Graphics** page, and the choice survives a restart.
 - **Done so far**:
+  - **2026-11-11, written:** `CoreAiLookProfile` and the look applier (namespace `CoreAI.Look`, folder
+    `Core/Features/Graphics`; tonemapping, HDR-only bloom, sky, ambient, reflection, fog; `LookMode`); the
+    optional URP assembly sets post-processing and anti-aliasing on every base camera, later ones included;
+    the engine-free `GraphicsOptions` resolver with a JSON store under `CoreAiStorageRoot`; the Hub
+    Graphics page. EditMode green in Unity: the look, options and Hub page fixtures. PlayMode on a separate
+    Unity copy: `UrpLookBloomPlayModeTests` and `DefaultLookNoonCapturePlayModeTests` (the look reaches the
+    frame and the Graphics option turns it off). `Skybox/Procedural` is in this project's Always Included
+    Shaders. Open: an EditMode test over the build scenes' cameras, the WebGL reload proof of the Hub
+    page, the WebGL quality tier.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - Two quality levels, `Mobile` and `PC` (`ProjectSettings/QualitySettings.asset`). WebGL defaults
     to `Mobile` (`m_PerPlatformDefaultQuality`), which uses `Settings/Mobile_RPAsset.asset`: render
     scale 0.8, MSAA off, one 1024 shadow cascade, soft shadows off, no depth or opaque texture, and
@@ -2385,6 +2511,18 @@ Milestones: **stage 1 in M1** (what the block world needs), **stage 2 in M2**.
   - Stage 2: every textured material holds up in close-up on desktop, and the whole catalog renders
     correctly in the WebGL player.
 - **Done so far**:
+  - **2026-11-11, stage 1 written:** an animated `CoreAI/Rbx/Water` (refraction and depth tint on the PC
+    tier, an alpha fallback on WebGL, `RbxWaterTime`), the emission slot (`RbxEmissionMode`) with a
+    CrackedLava glow derived from the albedo, Plastic, SmoothPlastic and Salt surface detail, a transparent
+    twin per material for partial `Transparency`, Glass refraction on the PC tier (`RbxSceneTextures`),
+    DepthNormals in the opaque Rbx shaders, and the fog of every lit Rbx shader fixed (it used the device
+    depth, so with fog on every part took the full fog colour). EditMode green in Unity:
+    `RbxMaterialsV2EditModeTests`. PlayMode on a separate Unity copy: `RbxMaterialsV2CapturePlayModeTests`
+    (6) and the seam sheet (4). The fog fix's current vertex-stage form landed after the last recorded
+    run, and nothing ran in WebGL. Open: the Lava004 crack-mask bake, an emission-map sample, the SSAO
+    on/off capture, stage 2. Deviation: DEV-49.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - **Provider chain**: `InstanceGameObjectBinder` (`CoreAIMods/Runtime/RbxApi/Binding/`) defaults
     to `RbxTextureMaterialProvider`, which lays `RbxMaterialTextureCatalog` over
     `RbxProceduralMaterialProvider` (all in `CoreAIMods/Runtime/RbxApi/Unity/`). Part colour and
@@ -2547,6 +2685,17 @@ Milestones: **the day-cycle slice in M1** — `ClockTime`, `TimeOfDay`, `Geograp
   day, ambient, fog, sky, atmosphere, bloom and colour grading, plus `PointLight`, `SpotLight` and
   `SurfaceLight` on parts. The world saves and reloads with that mood.
 - **Done so far**:
+  - **2026-11-11, the day-cycle slice written:** `Lighting.ClockTime`, `TimeOfDay`, `GeographicLatitude`,
+    `Brightness`, `Ambient`, `OutdoorAmbient`, the minutes methods, `GetSunDirection` and `LightingChanged`
+    behind a replaceable `IRbxLightingSink`, applied once a world drives its lighting; `PointLight` with 64
+    lights on desktop and 8 on WebGL, the nearest kept on (`RbxLightReconciler`); the world package's
+    `light` and `lighting` blocks; Lighting claims the ambient from the look (`LookAmbientOwnership`);
+    tweens of Lighting and Light properties. EditMode green in Unity: the lighting fixtures. Captures with
+    the default look on a separate Unity copy: the ground darkens from noon to midnight and a torch lights
+    a wall at night. Open: the rest of P9 (M2), a Lighting baseline for new worlds, the mood section of
+    the skill, the Moon (stubs). Deviations: DEV-50 to DEV-59.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - `Lighting` is a structure-only service (`CoreAIMods/Runtime/RbxApi/Instances/ClassCatalog.cs:625`,
     TODO at 623). `ClockTime`, `Ambient` and `GeographicLatitude` are backlog member stubs
     (`ClassCatalog.cs:772-781`).
@@ -2833,6 +2982,15 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
   a silent stub, never a provider error spoken as an NPC line. Stage 2 makes connecting any API a guided
   two-minute flow in the Hub with automatic checks and a fix hint per failed check.
 - **Done so far**:
+  - **2026-11-11, stage 1 written:** without `COREAI_LLM` every provider mode fails `NotConfigured` with
+    one composition warning and a build guard, and Offline keeps the offline client; one failure rule for
+    the string APIs (`LlmRequestFailedException`) with `*ResultAsync` twins that return `Ok = false`;
+    stream errors surface; backend switches, the Hub's Apply included, are a session overlay that leaves
+    the settings asset alone; the setup menus live in the reference-free `CoreAI.Editor.Setup`; the core
+    package declares Newtonsoft; the Hub chat opens on Programmer when no chat config is wired. EditMode
+    green in Unity. Open: the role dropdown descriptions, the PM build test, and stage 2 (the doctor).
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - Inspector **Test Connection** (`Assets/CoreAiUnity/Editor/CoreAISettingsAssetEditor.uxml:74-75`).
   - Hub **AI Settings** (`Assets/CoreAIHub/Runtime/HubSettingsPage.cs`, 2,282 lines): a legacy backend
     section (Mode / base URL / key / model, **Fetch models**, **Vision** + **Detect vision**, **Apply**,
@@ -2948,6 +3106,17 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
   speak in the in-world chat feed and over their heads, and never stall the game. Stage 2 lets a mod call
   a model as game logic through Roblox's own `TextGenerator` shape, so a Roblox NPC script runs here.
 - **Done so far**:
+  - **2026-11-11, written:** the NPC block `CoreAI.Ai.Npc` (`Assets/CoreAI/Docs/NPC_AGENTS.md`: personas,
+    addressing rules with a who-answers arbiter, cooldowns and budgets, one turn per NPC, a per-NPC memory
+    topic, fallback lines, speech sinks for the in-world chat and UI Toolkit bubbles); villagers hear the
+    chat before the player's agent, and a line addressed to the AI ("ai", "@ai" or its name) always goes to
+    the AI; from Lua, `AIService` agents and the Roblox-shaped `TextGenerator` behind
+    `CoreAiLuaAiOptions.AllowAgentsFromLua` (off by default) and `LuaCapabilities.Ai`. EditMode green in
+    Unity: the NPC and `RbxApi.Ai` fixtures (the AI-address rule came after that run and has passed its
+    portable tests only). Not run: `NpcVillagersPlayModeTests`, any live model. Deviations: DEV-60 to
+    DEV-68.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - The AINpc role and prompt ("in-world NPC voice ... short lines (1-3 sentences)",
     `Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInAgentSystemPromptTexts.cs:57`) with its
     response policy (`Assets/CoreAI/Runtime/Core/Features/Orchestration/AINpcResponsePolicy.cs`); AINpc
@@ -3059,6 +3228,16 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
   brains and a player autopilot run on it, falling back to deterministic behaviour when confidence is low
   or the model is unavailable.
 - **Done so far**:
+  - **2026-11-11, written:** `CoreAI.Decisions` (`Assets/CoreAI/Docs/DECISION_MODELS.md`): `IDecisionClient`
+    with yes/no, choice and score questions, SystemOne, OpenRouter and chat-logprob backends, routing with
+    a capability gate, per-consumer budgets, `NpcDecisionPolicy` and `PlayerAutopilotPolicy`;
+    `LlmEndpointDescriptor.DecisionProtocol`; the Unity installer and the local `llama-server` setup
+    (`Assets/CoreAiUnity/Docs/DECISION_MODELS_LOCAL_SETUP.md`); the autopilot and villager brains over it
+    (`CoreAI.RbxApi.Agents`, `/autopilot`). EditMode green in Unity: the decision fixtures and the installer.
+    Never run against a live endpoint; the wire shapes rest on the providers' documentation. Open: PM tests
+    with a scripted client, the doctor display, usage records, a Hub page.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - Nothing decision-shaped exists. `ILlmClient` is chat completion and streaming only
     (`Assets/CoreAI/Runtime/Core/Features/Orchestration/ILlmClient.cs:879`); no source under
     `Assets/CoreAI`, `Assets/CoreAiUnity` or `Assets/CoreAIMods` mentions logprobs, embeddings, rerank or
@@ -3151,6 +3330,16 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
   and the in-world chat; a new instruction joins the queue instead of derailing the work in progress;
   Stop stops everything it started.
 - **Done so far**:
+  - **2026-11-11, written:** orchestrator mode (`Assets/CoreAiUnity/Docs/ORCHESTRATOR_MODE.md`):
+    `SubAgentDefinition` and the sub-agent runner, the lead turn with its plan and queue,
+    `OrchestratorChatDriver` (instructions queue behind a running plan; Stop empties the queue first), an
+    idle deadline that follows reported progress (`LlmRequestProgress`), the overlay status line and
+    `/orchestrator`; switched on by `enableOrchestratorMode` (off by default), with the default sub-agents
+    builder and scripter from tool profiles. EditMode green in Unity: `SubAgent*`, the lead turn, plan and
+    queue, `OrchestratorChatDriver` and `OrchestrationChatOverlayBridge`. Open: history per conversation
+    (I8 in the memory store), `OrchestratorModeChatPlayModeTests`, a real-model run.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - No orchestrator mode, lead agent or delegation exists. "Orchestrator / Director" appears only as a
     benchmark role-fitness label (`Assets/CoreAI/Runtime/Core/Features/Benchmarking/RoleFitness.cs:90`).
     `SubAgentDefinition`, `IAgentRegistry`, `AgentOrchestrator` and `AgentLlmTool` are not in the code;
@@ -3223,6 +3412,16 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
   every prompt and skill change is checked against a fixture set before it ships, with its token cost
   measured instead of estimated.
 - **Done so far**:
+  - **2026-11-11, first half written:** role definitions and tool profiles as data (`RoleDefinition`,
+    `AgentRoleDefinitionAsset`, `BuiltInRoleDefinitions`; profiles `lua-builder`, `world-builder`,
+    `vision`, `npc`, `observer`, `inventory`), one universal-prefix default, the Merchant's inventory line
+    matching its tools, an empty role on `call_skill_tool` reported as a tool error, a queue for agents
+    built before CoreAI starts, `AgentBuilder.WithModeEnforcement()`, and the token-cost table
+    (`Assets/CoreAI/Docs/PROMPT_TOKEN_COSTS.md`). EditMode green in Unity: the roles fixtures. Open: the
+    second half (the tiered Rbx API skill, one-file skill generation with a CI check, skill
+    self-improvement, per-world overrides) and a real-model run of the prompt fixtures.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - Nine built-in roles (`Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInAgentRoleIds.cs`);
     their memory/history/roundtrip defaults are hard-coded in the `AgentMemoryPolicy` constructor
     (`Assets/CoreAI/Runtime/Core/Features/AgentMemory/AgentMemoryPolicy.cs:539-580`).
@@ -3310,6 +3509,16 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
   a model that cannot read them, and every tool reads well to a small model — short schema, honest
   result, a next step on failure.
 - **Done so far**:
+  - **2026-11-11, the camera half written:** `camera_orbit` next to `camera_capture`, `screenshot`,
+    `camera_look` and `camera_list` (per-action functions kept, because the image lift knows those names),
+    a point target and `fov` on `camera_look`, a free agent camera, an asynchronous GPU readback by default,
+    vision frames through an HDR target; the chat panel attaches the camera only when vision is on.
+    EditMode green in Unity: `AgentCameraRig`, `CameraToolV2`, `AgentFreeCameraOwnership`; PlayMode
+    `CameraFrameReadbackPlayModeTests` (5) green. Not run: `CameraCaptureFrameBudgetPlayModeTests`,
+    `AgentVisionLiveRoundTripPlayModeTests` (needs a vision model). Open: removing the `camera_tool` /
+    `capture_camera` alias, the tool-review half.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - Two camera tools. `CoreAI.Vision.CameraLlmTool`
     (`Assets/CoreAiUnity/Runtime/Source/Features/Vision/CameraLlmTool.cs`), registered as `camera` on
     Programmer by `WorldCommandsInstaller` and on the active chat role by the chat panel:
@@ -3383,6 +3592,15 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
 - **Goal**: the leaderboard never ranks a dead provider route or a partial run as a model result, and the
   verification gates the last waves left open are run once. Deliberately small: no new suite in M2.
 - **Done so far**:
+  - **2026-11-11, written:** the four reporting defects are fixed (an unrated card for a run with no
+    graded scenario, only full runs ranked with the graded count printed, a like-for-like column, a
+    `displayName` separate from the model id); suite 2.1 (only the vision G6 twin changes, with
+    `camera_orbit`); the benchmark gives no free agent camera unless a scenario asks and disposes every
+    camera service. EditMode green in Unity: `BenchmarkReportingHonesty` and the targets, extreme tier, run
+    store and goal score fixtures; `tools/test_benchmark_chart.py` passes. Open: regenerating the published
+    leaderboard images with the new chart.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - Suite 2.0 is current (`SuiteVersion = "2.0"`,
     `Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks/GameCreationBenchmarkPlayModeTests.cs:50`), with
     resume, Environment attribution and provider-stall handling (TODO.md lines 20-39); the first
@@ -3424,6 +3642,17 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
   and HUD are made this way, so the demo is Lua end to end. It works in a built player and in WebGL, and
   a change of the text shows in the next frame.
 - **Done so far**:
+  - **2026-11-11, written:** the engine-free UXML reader and USS subset (`CoreAI.RuntimeUi`), the runtime
+    UI host with theme tokens (`IRuntimeUiHost`/`RuntimeUiHost`, `Assets/CoreAiUnity/Docs/RUNTIME_UI.md`),
+    and `game:GetService("UxmlService")` from Lua behind `LuaCapabilities.Ui` (part of `All`) with per-mod
+    budgets of 32 screens, 4,096 elements and 8,192 writes per frame; focus reaches the input gate. The
+    Roblox GUI classes draw through the same host (MVP15). The Block World HUD is a `UxmlService` screen.
+    EditMode green in Unity: the runtime UI fixtures (the importer parity test included) and
+    `UxmlServiceLua`, except a 200-element timing test on a fully loaded machine. Open: the `FastNoLlm` PM
+    checks, `PushScreen`/`PopScreen`, templates, pointer and focus signals, `QueryAll` on an element, the
+    export lint, and the UI Toolkit cost at the raised ceilings. Deviation: DEV-69.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - Nothing renders UI for a mod today. The Roblox GUI classes are planned stubs whose workaround reads
     "build HUD content in 3D space until the GUI subset lands" (`RbxApi/Instances/ClassCatalog.cs:1269`,
     `:1390-1403`); `PlayerGui` exists as a bare container (`ClassCatalog.cs:591`); the Hub has no Lua API
@@ -3489,6 +3718,18 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
   about speed is a published measurement — frame time, garbage per frame and Lua throughput, taken in
   built players, with the method next to the number.
 - **Done so far**:
+  - **2026-11-11, written:** `tools/perfbench` and the first dated table
+    (`dev-docs/PERF_BASELINE_2026-11.md`, headless CoreCLR and the Mono CLI bundled with Unity). The "158 k
+    instructions/s on Mono" figure below was measured on the SGen collector; on Unity's Boehm collector
+    the production batch of 4 keeps about 30–37% of unguarded throughput, and no batching can gain more than
+    about 3.3x over it (`tools/vmbench/RESULTS.md`; x86 Mono CLI on a loaded machine). Scheduler threads now
+    use the guard's 4-instruction window (3.0x on CoreCLR, 4.0x on Boehm inside a thread); allocations
+    were removed on the guarded call, the resume, the dispatch and the idle frame, with budgets as tests
+    (ignored on Unity's Mono by design). Open: the Unity harness (`ModsPerformancePlayModeTests`) has not
+    run; no Standalone Mono, IL2CPP or WebGL number exists; the guard batch is an owner decision; a
+    multi-operand `CONCAT` can multiply a string about 199 times in one instruction.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - `tools/vmbench` and `tools/vmbench/RESULTS.md` (2026-08-31): the guarded Lua VM runs 24.4 M
     instructions/s on CoreCLR and 158 k on Mono at the production hook batch of 4 — 1.26% of the raw Mono
     VM — and 3.6 M at a batch of 128. IL2CPP and WebGL are not measured (spike S1).
@@ -3551,6 +3792,13 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
   thousand mods is a tree a player browses, searches, folds, rearranges and switches on or off by branch,
   in the Hub and through the AI tools, instead of one endless list.
 - **Done so far**:
+  - **2026-11-11, written:** `category` as a `/`-separated folder path, folder actions in the mod service,
+    the Hub Mods tree and its About panel, `manage_mods` by folder, a shared folder list (`mod_folders` in
+    the world package, `FileModFolderListStore`), and the seeder keeps a moved sample's folder; the Block
+    World samples sit in `Samples/Block World`. EditMode green in Unity: the mod-folder fixtures. Open: the
+    256-source ceiling at 1,000 sources, a Hub refresh after the AI moves a mod, a revision for a move.
+  - *The survey this package started from (release 7.56.0); the lines above supersede it where they
+    differ:*
   - One flat level exists: `LuaModManifest.Category` (`LuaExecution/LuaModManifest.cs:37`), the
     `category:` key of the `@coreai` header (`LuaExecution/LuaModHeader.cs:259`), and the Hub Mods page
     groups rows by category with a name, category and tags search (`HubIntegration/HubModsPage.cs:13`,

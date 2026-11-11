@@ -18,6 +18,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local DAY_SECONDS = 480          -- one whole day, in real seconds
+local START_HOURS = 8.5          -- where a fresh world's clock starts: a low morning sun
 local STEP_SECONDS = 0.1         -- how often the clock is written
 local NAMED = {
     dawn = 6, morning = 8, day = 9, noon = 12, afternoon = 15,
@@ -161,6 +162,12 @@ RunService.Heartbeat:Connect(function(dt)
     applyAmbient(hours)
 end)
 
+-- WHY a mark on the workspace: a reload of this mod (an AI edit, a hot reload) must keep the time of day, and
+-- only a world that never ran the clock starts in the morning.
+if workspace:GetAttribute("BlockWorldClockStarted") ~= true then
+    workspace:SetAttribute("BlockWorldClockStarted", true)
+    Lighting.ClockTime = START_HOURS
+end
 applyAmbient(Lighting.ClockTime)
 print("[blockworld] day and night: " .. describe(Lighting.ClockTime) .. ", a day lasts " .. math.floor(DAY_SECONDS / 60)
     .. " minutes. L changes the time.")

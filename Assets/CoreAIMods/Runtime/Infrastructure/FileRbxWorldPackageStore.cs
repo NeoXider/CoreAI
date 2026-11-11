@@ -1775,7 +1775,7 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>
         /// Counts the collection items and the characters of every string the package encoding writes
         /// for <paramref name="payload"/>: names, ledger metadata, value payloads, Humanoid state,
-        /// attributes, tags, mod sources and manifests, and Part material names.
+        /// attributes, tags, mod sources and manifests, Part material names and GUI text.
         /// </summary>
         internal static void MeasureWebGlWork(
             RbxWorldPackagePayload payload,
@@ -1857,6 +1857,25 @@ namespace CoreAI.Mods.WorldPackages
             {
                 collectionItems++;
                 AddTextLength(ref textCharacters, folder);
+            }
+
+            // WHY the GUI text: a TextLabel's Text has no length limit, so a HUD of long labels would otherwise pass
+            // the two-million-character budget the way StringValues once did.
+            foreach (KeyValuePair<InstanceId, RbxWorldPackageGui> gui in payload.Gui)
+            {
+                for (int index = 0; index < gui.Value.Count; index++)
+                {
+                    RbxGuiValue value = gui.Value.ValueAt(index);
+                    if (value.Kind == RbxGuiValueKind.Text)
+                    {
+                        AddTextLength(ref textCharacters, value.Text);
+                    }
+                }
+            }
+
+            if (payload.StarterGui.HasValue)
+            {
+                collectionItems += payload.StarterGui.Value.CoreGuiDisabled.Count;
             }
 
             if (payload.Parts == null)

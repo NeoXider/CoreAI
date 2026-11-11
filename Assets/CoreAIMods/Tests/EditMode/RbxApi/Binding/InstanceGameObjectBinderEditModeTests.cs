@@ -458,6 +458,29 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         }
 
         [Test]
+        public void LocalTransparencyModifier_HidesThePartHereOnly_AndZeroDrawsItAgain()
+        {
+            RbxInstance part = CreatePartInWorld();
+            Renderer renderer = BoundObject(part).GetComponent<Renderer>();
+            MaterialPropertyBlock block = new();
+            _binder.SetTransparency(part.Id, 0.5f);
+
+            _binder.SetLocalTransparencyModifier(part.Id, 0.5f);
+            renderer.GetPropertyBlock(block);
+            Assert.AreEqual(0.25f, block.GetColor("_Color").a, Epsilon, "1 - (1 - 0.5) * (1 - 0.5) = 0.75 drawn");
+            Assert.AreEqual(0.5f, _binder.GetPartPropertiesOrDefault(part.Id).Transparency, Epsilon,
+                "Transparency is what scripts set, unchanged");
+
+            _binder.SetLocalTransparencyModifier(part.Id, 1f);
+            Assert.IsFalse(renderer.enabled, "the local character in first person is not drawn");
+
+            _binder.SetLocalTransparencyModifier(part.Id, 0f);
+            Assert.IsTrue(renderer.enabled, "twin: back to 0 it is drawn again");
+            renderer.GetPropertyBlock(block);
+            Assert.AreEqual(0.5f, block.GetColor("_Color").a, Epsilon);
+        }
+
+        [Test]
         public void Anchored_TogglesTheRigidbody()
         {
             RbxInstance part = CreatePartInWorld();

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Instances.Terrain;
 
 namespace CoreAI.Mods.Rbx.Instances
 {
@@ -41,6 +42,50 @@ namespace CoreAI.Mods.Rbx.Instances
         internal void FireTouchEnded(RbxInstance otherPart)
         {
             FireSignal("TouchEnded", otherPart);
+        }
+
+        /// <summary>The property name of <see cref="LocalTransparencyModifier"/>.</summary>
+        public const string LocalTransparencyModifierMember = "LocalTransparencyModifier";
+
+        private float _localTransparencyModifier;
+
+        /// <summary>
+        /// Mirror <c>BasePart.LocalTransparencyModifier</c> (default 0): a multiplier on <c>Transparency</c> that only
+        /// this machine draws, as <c>1 - (1 - Transparency) * (1 - LocalTransparencyModifier)</c> clamped to 0..1.
+        /// The default camera raises it on the local character in first person.
+        /// </summary>
+        /// <remarks>
+        /// WHY no revision and no saved state: BasePart.yaml tags it Hidden and NotReplicated and says it is only
+        /// visible to the local client, so it never reaches another machine, a world package or the undo history;
+        /// a clone starts at 0 for the same reason.
+        /// </remarks>
+        public float LocalTransparencyModifier => _localTransparencyModifier;
+
+        /// <summary>Sets <see cref="LocalTransparencyModifier"/>; true when the value changed (its signals then fire).</summary>
+        public bool SetLocalTransparencyModifier(float value)
+        {
+            ThrowIfDestroyed(LocalTransparencyModifierMember);
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                throw RbxError.BadArgument(ClassName + ".LocalTransparencyModifier must be a finite number",
+                    "assign a number from 0 (drawn as Transparency says) to 1 (not drawn here)");
+            }
+
+            if (_localTransparencyModifier.Equals(value))
+            {
+                return false;
+            }
+
+            _localTransparencyModifier = value;
+            NotifyPropertyChanged(LocalTransparencyModifierMember);
+            return true;
+        }
+
+        /// <summary>The transparency this machine draws for <paramref name="transparency"/> and <paramref name="modifier"/>.</summary>
+        public static float EffectiveTransparency(float transparency, float modifier)
+        {
+            float value = 1f - (1f - transparency) * (1f - modifier);
+            return value < 0f ? 0f : value > 1f ? 1f : value;
         }
     }
 
@@ -210,8 +255,20 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             RbxRaycastParams effective = raycastParams ?? new RbxRaycastParams();
-            if (!_port.TryRaycast(origin, direction, effective.RespectCanCollide,
-                    id => IsEligible(id, effective), out RbxPhysicsRaycastHit hit))
+            bool found = _port.TryRaycast(origin, direction, effective.RespectCanCollide,
+                id => IsEligible(id, effective), out RbxPhysicsRaycastHit hit);
+            // WHY the voxel march only behind the null port: a host with a physics engine casts against the
+            // Terrain chunk colliders itself, while a server or a headless tool has no colliders at all and
+            // would miss every block. The march answers there under the filter the Unity port applies.
+            if (_port is NullRbxPhysicsPort
+                && TryRaycastTerrain(origin, direction, effective, out RbxPhysicsRaycastHit terrainHit)
+                && (!found || terrainHit.Distance < hit.Distance))
+            {
+                hit = terrainHit;
+                found = true;
+            }
+
+            if (!found)
             {
                 return null;
             }
@@ -226,6 +283,26 @@ namespace CoreAI.Mods.Rbx.Instances
 
             return new RbxRaycastResult(instance, hit.Position, hit.Normal,
                 hit.Material, hit.Distance);
+        }
+
+        /// <summary>
+        /// The first solid Terrain cell along the ray, by the engine-free march, when the filter accepts
+        /// <c>workspace.Terrain</c>. Terrain always collides, so <c>RespectCanCollide</c> changes nothing here.
+        /// </summary>
+        private bool TryRaycastTerrain(RbxVector3 origin, RbxVector3 direction, RbxRaycastParams raycastParams,
+            out RbxPhysicsRaycastHit hit)
+        {
+            hit = default;
+            if (!(_registry.WorldRoot?.FindFirstChildOfClass("Terrain") is RbxTerrain terrain)
+                || terrain.IsDestroyed || !IsEligible(terrain.Id, raycastParams)
+                || !TerrainVoxelRaycaster.TryRaycast(terrain.Store, origin, direction, out TerrainRaycastHit cell))
+            {
+                return false;
+            }
+
+            hit = new RbxPhysicsRaycastHit(terrain.Id, cell.Position, cell.Normal,
+                TerrainMaterials.ToMaterialId(cell.Material), cell.Distance);
+            return true;
         }
 
         private bool IsEligible(InstanceId id, RbxRaycastParams raycastParams)

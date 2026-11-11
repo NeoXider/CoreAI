@@ -184,23 +184,57 @@ local groundParams = RaycastParams.new()
 groundParams.FilterType = Enum.RaycastFilterType.Include
 groundParams.FilterDescendantsInstances = { terrain }
 
--- The root is held (anchored) until the ground under it is found; then the brain and the motor take over.
+local function groundUnder(spot)
+    return workspace:Raycast(Vector3.new(spot.X, 200, spot.Z), Vector3.new(0, -400, 0), groundParams)
+end
+
+-- Stands the villager on the ground found under its home and lets the motor have it.
+local function letGo(villager, groundY)
+    villager.home = Vector3.new(villager.home.X, groundY + 3, villager.home.Z)
+    villager.model:PivotTo(CFrame.new(villager.home))
+    followBody(villager)
+    -- WHY CanCollide here: the root was made anchored and so without collision; let go without it, the villager
+    -- falls through the Terrain. The legs, head and hair stay anchored decoration that never collides.
+    villager.root.CanCollide = true
+    villager.root.Anchored = false
+    villager.grounded = true
+end
+
+-- The root is held (anchored) until the ground under it exists; then the brain and the motor take over. After the
+-- timeout the villager is shown at the spawn height and its brain is given, still held, until its column is made.
 local function tryPlace(villager, force)
     local spawn = workspace:GetAttribute("BlockWorldSpawn")
     if typeof(spawn) ~= "Vector3" then
         return
     end
     local spot = spawn + villager.offset
-    local hit = workspace:Raycast(Vector3.new(spot.X, 200, spot.Z), Vector3.new(0, -400, 0), groundParams)
-    local groundY = hit and hit.Position.Y or (force and spawn.Y - 4) or nil
-    if not groundY then
+    local hit = groundUnder(spot)
+    if not hit and not force then
         return
     end
-    villager.home = Vector3.new(spot.X, groundY + 3, spot.Z)
+    villager.home = Vector3.new(spot.X, spawn.Y - 1, spot.Z)
     villager.model:PivotTo(CFrame.new(villager.home))
     followBody(villager)
-    villager.root.Anchored = false
+    if hit then
+        letGo(villager, hit.Position.Y)
+    end
     giveBrain(villager)
+end
+
+-- A held villager is let go once its ground exists; one that fell out of the world is held at home again.
+local function keepOnGround(villager)
+    if villager.grounded then
+        if villager.root.Position.Y < villager.home.Y - 40 then
+            villager.root.Anchored = true
+            villager.model:PivotTo(CFrame.new(villager.home))
+            villager.grounded = false
+        end
+        return
+    end
+    local hit = groundUnder(villager.home)
+    if hit then
+        letGo(villager, hit.Position.Y)
+    end
 end
 
 -- ---- talking ----------------------------------------------------------------------------------------
@@ -271,6 +305,7 @@ RunService.Heartbeat:Connect(function(dt)
     waited = waited + dt
     for _, villager in ipairs(VILLAGERS) do
         if villager.home then
+            keepOnGround(villager)
             followBody(villager)
         else
             tryPlace(villager, waited > PLACE_TIMEOUT)

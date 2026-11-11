@@ -15,7 +15,8 @@
   precondition; PR-09-001's `AddHub` menu path is untested.
 - [ ] Owner decision: with Auto tool mode, an empty `AgentRoleId`, a memory store and a skill proxy,
   `CallSkillToolLlmTool` reaches `RoleBinding.RequireRole` and throws. Confirm this refusal is intended or make
-  it a reported tool error.
+  it a reported tool error. 2026-11-11: the second option is implemented as the default (see "Owner decisions"
+  under the plan of record below); open until the owner confirms it.
 
 - [x] Benchmark resume round 3: lossless date/result/trace/Markdown recovery, repetition and hero ownership checks, stable legacy ordering/summary precision, corrupt-run discovery, deferred-target completion, unique backups, credential validation and minimal publishing path edits.
 - [x] Benchmark resume round 3 file-only validation: all four requested Unity-generated projects compile; portable Release suite passes 2602/2602; all-six real-report TEMP repair probe preserves kept JSON/Markdown/trace bytes, metadata, unaffected summaries, row order and repair idempotence.
@@ -105,17 +106,30 @@ sections below keep their items under the rung names they were written for.
       separate `IDecisionClient` seam, not a new `LlmEndpointKind`; the local path is a `llama-server`
       sidecar, since no LLMUnity route was found.
 - [ ] **`CallSkillToolLlmTool` with an empty role.** Default: a reported tool error instead of a throw.
+      2026-11-11: the default is implemented (`CallSkillToolEmptyRoleEditModeTests`, EditMode green in Unity);
+      open until the owner confirms it.
 - [ ] **`TextGenerator` run context (P12 stage 2).** The offline mirror does not say whether it is
       server-only; check the live Roblox reference before the parity path is locked.
 - [ ] **`/undo` without the World Loads confirmation (P3).** Default: yes for an in-session AI snapshot
       when nothing else changed the world since; every other restore keeps the confirmation.
+      2026-11-11: the default is implemented (`IRbxWorldUndoService`, `P3WorldUndoEditModeTests` green in
+      Unity EditMode); open until the owner confirms it.
 - [ ] **Fly from Lua (P1).** Default: `Humanoid:ChangeState(Enum.HumanoidStateType.Flying)` enters fly as
-      a DEV, next to `/fly` and the preset flag.
+      a DEV, next to `/fly` and the preset flag. 2026-11-11: the default is implemented (DEV-18 in
+      `ROBLOX_API_ROADMAP.md` §2.1; `/fly` in the world chat; double Space flies in
+      `P1PlayerControlsPlayModeTests` on a separate Unity copy); open until the owner confirms it.
 - [ ] **Blocky `workspace.Terrain` and the `TextChatService` subset (P4, P2).** Default: both ship as
       Roblox-shaped subsets with their DEV entries (no smoothing, water without swimming, the AI agent
       shown as system messages, no message filtering) rather than as CoreAI-only APIs.
+      2026-11-11: the Terrain half is written that way (P4, its DEV entries in `ROBLOX_API_ROADMAP.md` §2.1);
+      the `TextChatService` half is not built. Open until the owner confirms the Terrain half and the
+      `TextChatService` subset exists.
 - [ ] **Samples active in the one-click world (P3).** Default: `sample_welcome` only; the block world
-      scene activates `sample_block_world`.
+      scene activates `sample_block_world`. 2026-11-11, facts for the decision: the one-click world loads a
+      transient default-content mod (baseplate and spawn pad, never stored or undone) and the bundled
+      `coreai_player_controls`; the Block world is seven `blockworld_*` mods seeded inactive under the
+      folder `Samples/Block World` (there is no `sample_block_world`), and the Block World scene switches that
+      folder on in its own store.
 - [ ] **A valid provider key for the live-model run.** The three OpenRouter scenarios at the top of this
       file wait for a key in `COREAI_TEST_API_KEY`.
 
@@ -124,49 +138,80 @@ sections below keep their items under the rung names they were written for.
 Also in M0, filed further down under their old names: **Spike S1** and **Spike S2**, the IL2CPP/WebGL
 player checks and the **Real WebGL page-reload smoke** ("MVP3 follow-ups").
 
-- [ ] **A missing `COREAI_LLM` fails loudly (P11, A2).** *Owner:* LLM pipeline. *Plan:* the `!COREAI_LLM`
+- [x] **A missing `COREAI_LLM` fails loudly (P11, A2).** *Owner:* LLM pipeline. *Plan:* the `!COREAI_LLM`
       branches of `LlmPipelineInstaller` (`:311-317`) build a failing `NotConfigured` client that names
       the define, Offline keeps the stub, one warning at composition and a build check for HTTP/local
-      modes.
-- [ ] **Provider errors never become reply text (P11, A5).** *Owner:* Facade. *Plan:* add
+      modes. Done 2026-11-11: `LlmErrorCode.NotConfigured`, `LlmModuleGate`, `CoreAILlmModuleBuildGuard`;
+      `LlmModuleGateEditModeTests` and `CoreAILlmModuleBuildGuardEditModeTests` green in Unity EditMode. The
+      build-check by hand (remove the define from one target and build) has not been done.
+- [x] **Provider errors never become reply text (P11, A5).** *Owner:* Facade. *Plan:* add
       `CoreAi.AskResultAsync` / `SmartAskResultAsync` over `SendMessageResultAsync`; the string overloads
       throw or return `null` on failure, decided once and documented in `COREAI_SINGLETON_API.md`.
-- [ ] **Stream errors are surfaced (P11, A6).** *Owner:* Chat. *Plan:* one helper turns a terminal
+      Done 2026-11-11: the string overloads throw `LlmRequestFailedException`, the `*ResultAsync` twins return
+      `Ok = false` ("When a call fails" in `COREAI_SINGLETON_API.md`); `CoreAiTruthfulResultsEditModeTests` green
+      in Unity EditMode. `AgentConfig.AskAsync` still returns `null` on failure.
+- [x] **Stream errors are surfaced (P11, A6).** *Owner:* Chat. *Plan:* one helper turns a terminal
       `{IsDone, Error}` chunk into the `StreamAsync` exception, used by `SendMessageSmartAsync`
       (`CoreAiChatService.cs:913-922`) and the facade adapter; regression with an error-chunk stub.
-- [ ] **Runtime keys stay out of the shared asset (P11, A8).** *Owner:* Settings. *Plan:* a
+      Done 2026-11-11 with A5 (`LlmTurnFailure`; an error chunk with a code but no text throws too, a
+      `Cancelled` chunk becomes `OperationCanceledException`); EditMode green in Unity.
+- [x] **Runtime keys stay out of the shared asset (P11, A8).** *Owner:* Settings. *Plan:* a
       `[NonSerialized]` session overlay behind `CoreAiBackend.SetApiKey` / `SetApiBaseUrl` / `SetModel`;
-      a test that the asset bytes are unchanged after Play Mode.
-- [ ] **Declare Newtonsoft (P11, B2).** *Owner:* Install. *Plan:* add `com.unity.nuget.newtonsoft-json`
-      to `Assets/CoreAI/package.json` and list it in INSTALL.
-- [ ] **Setup menus compile on a broken install (P11, B1).** *Owner:* Install. *Plan:* move
+      a test that the asset bytes are unchanged after Play Mode. Done 2026-11-11: a session overlay reset at
+      Play Mode entry and exit (`CoreAISettingsAsset.HasSessionOverrides` / `ClearSessionOverrides`), the Hub's
+      Apply in ClientLimited and ServerManagedApi included; `CoreAiBackendSessionOverrideEditModeTests` (the
+      serialized asset is unchanged after every switch and at the end of a session) green in Unity EditMode.
+      The by-hand check (apply a key in Play Mode, exit, compare `Resources/CoreAISettings.asset`) is not done.
+- [x] **Declare Newtonsoft (P11, B2).** *Owner:* Install. *Plan:* add `com.unity.nuget.newtonsoft-json`
+      to `Assets/CoreAI/package.json` and list it in INSTALL. Done 2026-11-11: `com.neoxider.coreai` declares
+      3.2.1 and INSTALL §1.1 names it as the one registry dependency.
+- [x] **Setup menus compile on a broken install (P11, B1).** *Owner:* Install. *Plan:* move
       `CoreAIDependencyInstaller` and `CoreAINuGetBootstrapper` into a reference-free editor asmdef;
-      INSTALL shows the manual manifest block first.
+      INSTALL shows the manual manifest block first. Done 2026-11-11: both live in `CoreAI.Editor.Setup` (no
+      references, type forwarders in `CoreAI.Editor`); `CoreAISetupAssemblyEditModeTests` green in Unity
+      EditMode. INSTALL §1.1 keeps the menu first and points a fresh project at the manual block; the check in
+      a fresh project without VContainer or MEAI has not been done by hand.
 - [ ] **The default chat role can build (P11).** *Owner:* Agents. *Plan:* the shipped chat config
       defaults to a role with the Lua and world tools (Programmer or a P15 builder role) and the role
       dropdown says what each role can do; a PM test asks the default chat to build and asserts a world
-      change.
-- [ ] **Deduplicate tools by name (P15, A10).** *Owner:* Agents. *Plan:*
+      change. 2026-11-11, partly: the Hub chat uses Programmer when no chat config is wired
+      (`HubChatPage.DefaultRoleId`, `HubChatPageDefaultRoleEditModeTests` green in Unity EditMode); the
+      standalone panel and the `CoreAiChatConfig` asset default stay SmartChat. Open: the role dropdown
+      descriptions and the PM test that asks the default chat to build.
+- [x] **Deduplicate tools by name (P15, A10).** *Owner:* Agents. *Plan:*
       `AgentMemoryPolicy.AddToolForRole` (`:248-265`) replaces an ordinal name match and reports whether
-      anything changed.
-- [ ] **Gate the chat-panel camera on vision (P16).** *Owner:* Vision. *Plan:*
+      anything changed. Done 2026-11-11: `AddToolForRole` replaces in place, `AddOrReplaceToolForRole` returns
+      `ToolRegistrationChange`; `AgentMemoryPolicyToolRegistrationEditModeTests` green in Unity EditMode.
+- [x] **Gate the chat-panel camera on vision (P16).** *Owner:* Vision. *Plan:*
       `CoreAiChatCameraTools.TryAttachCameraTool` consults the vision gate; correct
       `LLM_TOOLS.md:19,120-122` to the real Auto rule in `VisionCapability.cs:55-90` (the Auto default
-      itself is an owner decision, P16).
-- [ ] **One universal-prefix default (P15).** *Owner:* Prompts. *Plan:* the asset default
+      itself is an owner decision, P16). Done 2026-11-11: the attach uses `CoreAiChatService.IsVisionEnabled()`
+      (`CoreAiChatCameraVisionGateEditModeTests` green in Unity EditMode) and `LLM_TOOLS.md` states the Auto rule
+      of `VisionCapability.AutoAssumesVisionCapable`. The Auto default stays the owner decision above.
+- [x] **One universal-prefix default (P15).** *Owner:* Prompts. *Plan:* the asset default
       (`CoreAISettingsAsset.cs:310`) and the portable default (`CoreAISettings.cs:124`) become one text;
-      `AI_AGENT_ROLES.md` §1.3.5 is corrected.
-- [ ] **Merchant's inventory instruction matches its tools (P15).** *Owner:* Prompts. *Plan:* wire
+      `AI_AGENT_ROLES.md` §1.3.5 is corrected. Done 2026-11-11: a new settings asset starts from
+      `CoreAISettings.DefaultUniversalSystemPromptPrefix` and §1.3.5 describes it
+      (`UniversalPrefixDefaultEditModeTests` green in Unity EditMode). Shipped settings assets keep their stored
+      prefix; whether to rewrite them is a release-time decision.
+- [x] **Merchant's inventory instruction matches its tools (P15).** *Owner:* Prompts. *Plan:* wire
       `InventoryLlmTool` when an inventory provider is registered, else drop the `get_inventory` line
-      from the Merchant prompt.
+      from the Merchant prompt. Done 2026-11-11: `get_inventory` joins the `inventory` tool profile when the
+      container holds an `InventoryTool.IInventoryProvider`, and the prompt asks for it only when it is
+      available; prompt and installer fixtures green in Unity EditMode.
 - [ ] **TODO hygiene for the harness.** *Owner:* Docs. *Plan:* tick newcomer A3 after a real-composition
       test (the code already keeps scope and role, `QueuedAiOrchestrator.cs:713-719`), record A1 as
       partly fixed, drop the stale first sentence of TODO.md:211-213 (the empty-text submit with
-      attachments stays open), retire TODO.md:189 (suite is 2.0), and drop the "mirror of `world_query`"
-      phrase from [R4] (no such tool exists).
+      attachments stays open), retire TODO.md:189 (suite is 2.1 since 2026-11-11), and drop the "mirror of
+      `world_query`" phrase from [R4] (no such tool exists).
 - [ ] **One-click "Play + Create" world (P3).** *Owner:* mods composition. *Plan:* a runtime preset
       asset and prefab (scopes, wired `RbxWorldHost`, overlay chat, controls, camera, look profile) plus
-      a `CoreAI/Setup` menu that only instantiates it; decide which samples start active.
+      a `CoreAI/Setup` menu that only instantiates it; decide which samples start active. 2026-11-11,
+      written: `CoreAiPlayWorldBootstrap` and the menu **CoreAI/Setup/Create Play + Create World** with four
+      modules (controls, look, default content, overlay chat); `P3PlayWorldBootstrapEditModeTests` and the
+      `ReadyToPlay*` fixtures green in Unity EditMode (`Docs/CoreAIMods/PLAY_WORLD.md`). Open: the Play Mode
+      acceptance (the character lands on the spawn pad at (0, 5, 0); exactly one player and one character;
+      one sun when the scene already has a directional light) and the samples decision above.
 
 ### M1 — Block world
 
@@ -183,134 +228,256 @@ Play loop (P1–P4, P6):
 - [ ] **Camera module and camera queries (P1).** *Owner:* Rbx camera. *Plan:* orbit, zoom and first
       person for `CameraType.Custom` behind `IRbxCameraRig`, the `Ray` datatype, `ScreenPointToRay`,
       `ViewportPointToRay`, `WorldToScreenPoint`, `FieldOfView`; drop the shipped rows from
-      `ClassCatalog`.
-- [ ] **Overlay chat, agent HUD and slash commands (P2).** *Owner:* chat UI. *Plan:* a UI Toolkit
+      `ClassCatalog`. 2026-11-11, written with portable tests green; wheel zoom into first person passes in
+      `P1PlayerControlsPlayModeTests` on a separate Unity copy. Open: `P1RayAndProjectionEditModeTests`,
+      `P1CameraModuleEditModeTests` and `P1CameraLuaEditModeTests` have not run in Unity; spring-smoothed
+      zoom, first-person body hiding, `Humanoid.CameraOffset` (still a stub) and replication of the player
+      camera properties (MVP7) are not built. Its deviations are DEV-23 to DEV-36.
+- [x] **Overlay chat, agent HUD and slash commands (P2).** *Owner:* chat UI. *Plan:* a UI Toolkit
       feed and one-line input over `CoreAiChatService`, a status line from tool events, a C# command
       registry with `/undo`, `/fly`, `/agent`, `/model`, `/autopilot`, `/help`; `/stop` waits on the A3
-      cancel fix.
+      cancel fix. Done 2026-11-11: the overlay is on by default behind the UI focus gate, with `/help`,
+      `/agent`, `/model`, `/stop`, `/undo`, `/redo`, `/fly`, `/autopilot` and `/orchestrator`
+      (`Assets/CoreAiUnity/Docs/CHAT_OVERLAY.md`); the overlay fixtures are green in Unity EditMode and
+      `CoreAiChatOverlayPlayModeTests` (2) in PlayMode.
 - [ ] **`TextChatService` subset (P2).** *Owner:* Rbx API. *Plan:* `RBXGeneral`/`RBXSystem`,
       `SendAsync`, `DisplaySystemMessage`, `MessageReceived`, `TextChatCommand`, the two configuration
       objects and `DisplayBubble`, with the agent-as-system-message and no-filter DEV candidates written
       up.
-- [ ] **Write-behind mutation gate (P3).** *Owner:* world packages. *Plan:* in-memory snapshot,
+- [x] **Write-behind mutation gate (P3).** *Owner:* world packages. *Plan:* in-memory snapshot,
       mutate at once, durable autosave written behind it, startup refresh debounced; keep the
       format-limit rules and add fault-injection tests for a crash between mutation and write.
-- [ ] **AI `/undo` ring and configurable rate limit (P3).** *Owner:* mods composition. *Plan:* keep
+      Done 2026-11-11: write-behind pre-mutation backups with pending markers (a crash between edit and write
+      is reported at the next start), the encode moved behind the edit, a 1.5 s startup debounce;
+      `P3InstantEditLoopEditModeTests` green in Unity EditMode. Follow-ups are under "Follow-ups opened on
+      2026-11-11" below.
+- [x] **AI `/undo` ring and configurable rate limit (P3).** *Owner:* mods composition. *Plan:* keep
       the last 10 pre-mutation snapshots per actor and restore in place when nothing else changed; expose
       the limiter's count and window in the preset and apply it to `manage_mods` mutations too.
-- [ ] **`Region3`, chunk store and `Terrain` Lua subset (P4).** *Owner:* Rbx API. *Plan:*
+      Done 2026-11-11: the last 10 per actor (`IRbxWorldUndoService`), one limiter for `execute_lua`,
+      `manage_mods` and the MCP `manage_mods`; `P3WorldUndoEditModeTests` and
+      `McpManageModsRateLimitEditModeTests` green in Unity EditMode. Undo refuses once anything else changed
+      the world, so a player's own edits block it (operation-level undo is P5).
+- [x] **`Region3`, chunk store and `Terrain` Lua subset (P4).** *Owner:* Rbx API. *Plan:*
       engine-free 16-cubed chunks, `workspace.Terrain` with `FillBlock`, `FillRegion`, `ReadVoxels`,
       `WriteVoxels`, `Clear`, `ReplaceMaterial`, `WorldToCell`, `CellCenterToWorld` under the mirror's
-      argument rules.
+      argument rules. Done 2026-11-11, plus `CellCornerToWorld` and `CountCells`; the Region3, chunk store
+      and Terrain Lua fixtures are green in Unity EditMode. Its deviations are DEV-37 to DEV-48.
 - [ ] **Chunk mesher, Terrain raycast and `.world` voxel entry (P4).** *Owner:* Unity binding and
       world packages. *Plan:* face-culled chunk meshes with one collider each and one shared material,
       raycasts answering Terrain and Material, an RLE voxel entry inside the WebGL budget, skill text
-      update.
+      update. 2026-11-11, written and green in Unity EditMode (mesher, raycast, renderer, voxel codec;
+      `Terrain/voxels.bin` in the world package with `minimum_reader_version` 2; `/undo` restores cells);
+      the skill text covers Terrain. Open: the WebGL budget is checked only by the engine-free size tests,
+      not in a browser; headless worlds do not consult the voxel raycaster; one submesh per material per
+      chunk instead of one material (a texture-array renderer can come in through `RendererFactory`).
 - [ ] **Block world demo (P6, with the minimal P5 `SelectionBox`).** *Owner:* demos. *Plan:*
       `sample_block_world` plus a builder-made scene from the P3 preset with hotbar, place and break,
       target outline, "build here" and `/undo`; add it to the G11 list and the smoke test.
+      2026-11-11, in progress: the content is seven `blockworld_*` mods under `Samples/Block World` (not
+      `sample_block_world`; their Lua-tier tests are green in Unity EditMode); the scene
+      `Assets/CoreAI.Demos/BlockWorld/BlockWorld.unity` is built from the play-world preset and the frozen
+      scene list and smoke list went from 17 to 18 scenes. A first PlayMode run of the scene on a separate
+      Unity copy showed the world, the HUD, break at the crosshair, the day cycle and torches working and
+      `/undo` after an autopilot run and one villager address failing. Open: those failures, the remaining
+      scene PlayMode tests, the WebGL run, and a real `SelectionBox` (the outline is 12 Parts).
 
 Look (P7, P8 stage 1), ordered by visual payoff:
 
-- [ ] **Default look profile and applier.** *Owner:* rendering (P7). *Plan:* ship
+- [x] **Default look profile and applier.** *Owner:* rendering (P7). *Plan:* ship
   `CoreAiLookProfile` (Volume with tonemapping and HDR-only bloom, sky, ambient, reflection, fog) and
   an optional URP assembly that applies it from `CoreAILifetimeScope`, so all 18 scenes pick it up
   without edits; `LookMode` `Apply`/`FillMissing`/`Off` plus a replaceable `ICoreAiLookApplier` for
-  hosts that own their rendering.
+  hosts that own their rendering. Done 2026-11-11 (namespace `CoreAI.Look`; the folder stays
+  `Core/Features/Graphics`): the look fixtures are green in Unity EditMode, and `UrpLookBloomPlayModeTests`
+  and `DefaultLookNoonCapturePlayModeTests` pass in PlayMode on a separate Unity copy. Lighting claims the
+  ambient through `LookAmbientOwnership`. A player build that strips `Skybox/Procedural` keeps the scene's
+  skybox (the shader is in this project's Always Included Shaders).
 - [ ] **Post-processing and AA on every demo camera.** *Owner:* rendering (P7). *Plan:* the applier
   ensures `UniversalAdditionalCameraData` with post-processing and SMAA/FXAA on the main camera and on
-  later cameras; an EM test iterates the build scenes and fails on any camera without it.
+  later cameras; an EM test iterates the build scenes and fails on any camera without it. 2026-11-11, partly:
+  `UrpLookApplier` sets post-processing and anti-aliasing on every base camera, later ones included
+  (`UrpLookApplierEditModeTests` green in Unity EditMode). Open: the EditMode test over the build scenes.
 - [ ] **Hub Graphics page with persisted options.** *Owner:* Hub (P7). *Plan:* `HubGraphicsPage` with
   presets and switches (post-processing, shadows, AA, render scale, fog, sky) over an engine-free
   `GraphicsOptions` resolver and a JSON store under `CoreAiStorageRoot` checked by
-  `CoreAiWebGlPersistence.Sync()`; proven in a built WebGL player across a reload.
+  `CoreAiWebGlPersistence.Sync()`; proven in a built WebGL player across a reload. 2026-11-11, written:
+  `HubGraphicsPageEditModeTests`, `FileGraphicsOptionsStoreEditModeTests` and the `GraphicsOptions` fixture
+  green in Unity EditMode. Open: the proof in a built WebGL player across a reload.
 - [ ] **WebGL quality tier.** *Owner:* rendering (P7). *Plan:* ship recommended pipeline assets and a
   `CoreAI/Graphics/Apply recommended quality settings` menu (render scale 1, soft shadows low, two
   cascades, bloom); record frame time per preset on the G11 reference browser.
-- [ ] **Animated water material.** *Owner:* materials (P8 stage 1). *Plan:* `CoreAI/Rbx/Water` with
+- [x] **Animated water material.** *Owner:* materials (P8 stage 1). *Plan:* `CoreAI/Rbx/Water` with
   dual scrolling CC0 normals, Fresnel, depth tint and PC-tier refraction, a WebGL fallback and a test
-  time override; record the BasePart-Water DEV candidate.
+  time override; record the BasePart-Water DEV candidate. Done 2026-11-11: `CoreAI/Rbx/Water` (procedural
+  moving normals, Fresnel; refraction and depth tint on the PC tier, an alpha fallback on WebGL;
+  `RbxWaterTime` test clock), used by `Enum.Material.Water` parts and the voxel water; DEV-49.
+  `RbxMaterialsV2EditModeTests` green in Unity EditMode, `RbxMaterialsV2CapturePlayModeTests` in PlayMode
+  on a separate Unity copy. The WebGL fallback has not run in a browser.
 - [ ] **Emission slot and glowing CrackedLava.** *Owner:* materials (P8 stage 1). *Plan:* optional
   `Emission` texture and strength on the catalog entry and in `RbxTexturedSurface`, plus an editor
-  bake that derives the Lava004 crack mask.
-- [ ] **Plastic and SmoothPlastic surface detail.** *Owner:* materials (P8 stage 1). *Plan:* a small
+  bake that derives the Lava004 crack mask. 2026-11-11, partly: the emission slot (`RbxEmissionMode`,
+  `RbxMaterialEmissionDefaults`) and a CrackedLava glow derived from the albedo at a threshold, proven in
+  `RbxMaterialsV2CapturePlayModeTests` on a separate Unity copy. Open: the editor bake of the Lava004 crack
+  mask and an emission-map sample.
+- [x] **Plastic and SmoothPlastic surface detail.** *Owner:* materials (P8 stage 1). *Plan:* a small
   CC0 micro-normal and roughness variation in the procedural surface shader; prove a normal response
-  under a moving light on masked crops.
-- [ ] **Blend variant for partial Transparency.** *Owner:* materials (P8 stage 1). *Plan:* the provider
+  under a moving light on masked crops. Done 2026-11-11 (Salt too; `_SurfaceDetail`): proven under a
+  grazing light in `RbxMaterialsV2CapturePlayModeTests` on a separate Unity copy.
+- [x] **Blend variant for partial Transparency.** *Owner:* materials (P8 stage 1). *Plan:* the provider
   keeps a transparent twin per material, and the binder selects it for 0 < `Transparency` < 1. Absorbs
   the TODO comment at `InstanceGameObjectBinder.cs:1823` ("MVP1 follow-up — Material catalog with a
-  transparent-blend variant").
-- [ ] **Glass refraction.** *Owner:* materials (P8 stage 1). *Plan:* opaque-texture refraction and
+  transparent-blend variant"). Done 2026-11-11 (`IRbxTransparentMaterialProvider`; the binder's TODO
+  comment is gone); proven in `RbxMaterialsV2CapturePlayModeTests` on a separate Unity copy.
+- [x] **Glass refraction.** *Owner:* materials (P8 stage 1). *Plan:* opaque-texture refraction and
   Fresnel on the PC tier with reduced wobble; WebGL keeps the alpha blend, as Roblox does on mobile.
+  Done 2026-11-11 on the PC tier (`RbxSceneTextures`, global `_RBX_SCENE_TEXTURES`); proven in
+  `RbxMaterialsV2CapturePlayModeTests` on a separate Unity copy. The WebGL alpha blend has not run in a
+  browser.
 - [ ] **SSAO on Rbx parts.** *Owner:* materials (P8 stage 1). *Plan:* confirm with an SSAO on/off
   capture, then add a DepthNormals pass to the four lit Rbx shaders, guarded by a shader-source EM test.
+  2026-11-11, partly: the opaque Rbx shaders draw DepthNormals, guarded by
+  `RbxMaterialsV2EditModeTests.OpaqueRbxShaders_DrawDepthNormals_SoPartsReceiveSsao` (green in Unity
+  EditMode). Open: the SSAO on/off capture.
+- [ ] **Fog on the lit Rbx shaders (found 2026-11-11).** With the default look's fog on, every lit Rbx
+  shader computed its fog from the device depth and drew each part in full fog colour. Fixed in code: the
+  fog factor is computed in the vertex stage from the clip-space z, as URP does
+  (`PROCEDURAL_MATERIALS.md`, "Fog"). An earlier per-pixel form of the fix passed the noon capture on a
+  separate Unity copy; the current vertex-stage form landed after the last recorded Unity run. Open:
+  re-run `DefaultLookNoonCapturePlayModeTests` and `RbxMaterialsV2CapturePlayModeTests` on it.
 
 Harness (P12 stage 1, P13):
 
-- [ ] **NPC agent block with speech sinks (P12 stage 1).** *Owner:* NPC. *Plan:* portable `NpcAgent` over
+- [x] **NPC agent block with speech sinks (P12 stage 1).** *Owner:* NPC. *Plan:* portable `NpcAgent` over
       the AINpc role with per-NPC memory scope, addressing/proximity arbiter, cooldowns, budgets and
       supersede cancellation; Unity sinks for the in-world chat feed and a UI Toolkit speech bubble.
-- [ ] **Decision client seam with protocol backends (P13).** *Owner:* Decisions. *Plan:*
+      Done 2026-11-11 as `CoreAI.Ai.Npc` (`INpcDirector`/`NpcDirector`, `NpcSpeechBubbleView`,
+      `RegisterCoreAiNpcs`; `Assets/CoreAI/Docs/NPC_AGENTS.md`): the NPC fixtures (core and Unity) are green in
+      Unity EditMode, and villagers hear the chat before the player's agent. Not run: `NpcVillagersPlayModeTests`,
+      a live-model run, and the later rule that a line addressed to the AI ("ai", "@ai" or its name) always
+      goes to the AI (`NpcAiAddress`, portable tests only).
+- [x] **Decision client seam with protocol backends (P13).** *Owner:* Decisions. *Plan:*
       `IDecisionClient` in the portable core, `SystemOneHttpDecisionClient` and
       `OpenRouterDecisionClient`, error mapping, budgets and recorded-fixture PT tests; a documented
-      `llama-server` sidecar for `d1-2B`.
-- [ ] **Logprob fallback and decision capability check (P13).** *Owner:* Decisions. *Plan:* `Logprobs` /
+      `llama-server` sidecar for `d1-2B`. Done 2026-11-11 (`Assets/CoreAI/Docs/DECISION_MODELS.md`,
+      `Assets/CoreAiUnity/Docs/DECISION_MODELS_LOCAL_SETUP.md`): the decision fixtures and
+      `CoreAiDecisionsInstallerEditModeTests` are green in Unity EditMode. Never run against a live endpoint;
+      the wire shapes rest on the providers' documentation (the live tests are `Category=LiveDecisions`).
+- [x] **Logprob fallback and decision capability check (P13).** *Owner:* Decisions. *Plan:* `Logprobs` /
       `TopLogprobs` on the request and response parsing, `LogprobDecisionClient` with single-token labels
-      and `Calibrated = false`, and `ListModelsAsync` reading `output_modalities`.
+      and `Calibrated = false`, and `ListModelsAsync` reading `output_modalities`. Done 2026-11-11 with the
+      item above, under the same limits (green in Unity EditMode, no live endpoint).
 - [ ] **NPC brain and player autopilot on decisions (P13).** *Owner:* Decisions + demo. *Plan:* event and
       slow-tick callers, never per frame, a confidence threshold with a deterministic fallback, autopilot
-      through `Humanoid:MoveTo` with hand-back on input; PM tests with a scripted client.
+      through `Humanoid:MoveTo` with hand-back on input; PM tests with a scripted client. 2026-11-11, written:
+      the engine-free assembly `CoreAI.RbxApi.Agents` (listener position, Humanoid actuators, the autopilot
+      with hand-back on real input, villager brains from the `NpcAgent`/`NpcBrain` attributes) and
+      `/autopilot on|off|status`, composed in the mods scope; its fixtures and `AutopilotControllerEditModeTests`
+      are green in Unity EditMode. Open: the PM tests with a scripted client, a live decision endpoint, damage
+      events into the autopilot policy (`Controller.Notify` exists), and turning a character while it walks.
 
 UI from Lua (P18) and performance (P19):
 
-- [ ] **UXML parser, element factory and USS subset interpreter (P18).** *Owner:* runtime UI. *Plan:* an
+- [x] **UXML parser, element factory and USS subset interpreter (P18).** *Owner:* runtime UI. *Plan:* an
       engine-free UXML parser and USS subset (selectors, cascade, `var()`, the documented properties)
       with a Unity element factory; unknown elements and unsupported rules are reported with their line;
-      a parity test against the editor importer on the same source.
-- [ ] **Runtime UI host and theme tokens (P18).** *Owner:* runtime UI. *Plan:* screens with show, hide,
+      a parity test against the editor importer on the same source. Done 2026-11-11 (`CoreAI.RuntimeUi`,
+      `RuntimeUiImporterParityEditModeTests` among the runtime UI fixtures green in Unity EditMode;
+      `Assets/CoreAiUnity/Docs/RUNTIME_UI.md`).
+- [x] **Runtime UI host and theme tokens (P18).** *Owner:* runtime UI. *Plan:* screens with show, hide,
       stack and sort order, one theme of design tokens changeable at runtime, replaceable or switched
-      off by a host; a focused text field raises the P1 input-focus state.
-- [ ] **Lua surface for screens (P18).** *Owner:* Rbx API. *Plan:* a design note fixes the CoreAI-only
+      off by a host; a focused text field raises the P1 input-focus state. Done 2026-11-11
+      (`IRuntimeUiHost`/`RuntimeUiHost`, `RuntimeUiTheme`; focus reported as `coreai.runtime-ui`), green in
+      Unity EditMode except `RuntimeUiBudgetEditModeTests.TwoHundredElementScreen_BuildsWithinTenMilliseconds`
+      (17.9 ms on a machine at full load; re-measure on a quiet machine before changing anything).
+- [x] **Lua surface for screens (P18).** *Owner:* Rbx API. *Plan:* a design note fixes the CoreAI-only
       service and member names first; then create, live-replace, query, set and event signals behind a
       `Ui` capability, screens owned by their mod (removed on unload, rebuilt on hot reload), per-mod
       budgets, the DEV entry and the skill section. Starts after P1's input-focus port lands.
+      Done 2026-11-11: `game:GetService("UxmlService")` behind `LuaCapabilities.Ui` (part of `All`), per-mod
+      budgets of 32 screens, 4,096 elements and 8,192 writes per frame (`RbxUiBudgets`), the skill section,
+      DEV-69 (`dev-docs/RUNTIME_UI_LUA_SURFACE.md`); `UxmlServiceLuaEditModeTests` and the real-host fixture
+      green in Unity EditMode. Not built: `PushScreen`/`PopScreen`, templates, pointer and focus signals,
+      `QueryAll` on an element, the export lint. Open: measure the UI Toolkit cost at the raised ceilings
+      with the P19 harness.
 - [ ] **Performance harness and the first dated table (P19).** *Owner:* performance. *Plan:* reference
       scenes (idle world, bundled sample mods, 2,048 and 16,384 Parts, later the Block world) recording
       frame-time percentiles, garbage per frame, Lua throughput, batches and memory into JSON and a table
       in `dev-docs/`; Editor and Standalone Mono first, WebGL and IL2CPP when their builds exist.
+      2026-11-11, partly: the harness and the first dated table from the headless benchmarks (CoreCLR and
+      the Mono CLI bundled with Unity, `dev-docs/PERF_BASELINE_2026-11.md`); the sample-mods scenario now reads
+      only the top-level samples. Open: the Unity harness (`ModsPerformancePlayModeTests`, with the engine's
+      profiler counters) has not run in the Editor or a player; the Standalone Mono, IL2CPP and WebGL runs; the
+      Block world scenario.
 - [ ] **Spike S1 inside the harness (P19).** *Owner:* Lua runtime + performance. *Plan:* guarded VM
       throughput per hook batch on Mono, IL2CPP and WebGL; this is the "Spike S1" item below, run through
-      the harness; it decides the adaptive batch.
+      the harness; it decides the adaptive batch. 2026-11-11, the premise is corrected: the 158 k
+      instructions/s figure was measured on the SGen collector; on Unity's Boehm collector the production
+      batch of 4 keeps about 30-37% of unguarded throughput, and because the cost is the VM's dispatch into
+      the hook, no batching can gain more than about 3.3x over batch 4 there (`tools/vmbench/RESULTS.md`,
+      `dev-docs/PERF_BASELINE_2026-11.md`; x86 Mono CLI on a loaded machine). Scheduler threads now use the
+      guard's 4-instruction window (3.0x on CoreCLR, 4.0x on Boehm inside a thread). Open: the 64-bit
+      Standalone Mono, IL2CPP and WebGL measurements that decide the adaptive batch.
 - [ ] **Allocation and frame budgets as tests (P19).** *Owner:* performance. *Plan:* zero garbage per
       frame for the idle world, a Heartbeat handler writing part properties, a signal fire, input events
-      and the idle chat overlay; each budget is a test with an allocating negative twin.
+      and the idle chat overlay; each budget is a test with an allocating negative twin. 2026-11-11, partly:
+      budgets with negative twins for the guarded call, the thread resume, the seam call, the idle frame and
+      Part member writes (`LuaCsGuardedPathAllocationBudgetEditModeTests` and the GUI and part-write budgets;
+      the meter reports Ignored on Unity's Mono by design, so they bite on CoreCLR only). Open: input events and
+      the idle chat overlay.
 - [ ] **Optimization passes by measured rank (P19).** *Owner:* performance. *Plan:* take the top rows of
       the table — expected candidates are the guard batch, marshalling and dispatch allocations, the
       per-part property block that defeats the SRP Batcher and the every-instance pre-simulation pass —
-      and record before and after for each on the same harness.
+      and record before and after for each on the same harness. 2026-11-11, partly: the SSE fast path, the
+      scheduler-thread hook window, and fewer allocations on the guarded call, the resume, the dispatch and
+      the idle frame, with before/after numbers in `tools/vmbench/RESULTS.md`. Open: the guard batch itself
+      (an owner decision with the numbers above), the per-part property block, the pre-simulation pass, and
+      re-measuring in a player.
 
 Block world content the owner asked for (P6, with slices of P9, P12 and MVP13):
 
-- [ ] **Agents from Lua behind a framework setting (P12).** *Owner:* Rbx API + agents. *Plan:* a design
+- [x] **Agents from Lua behind a framework setting (P12).** *Owner:* Rbx API + agents. *Plan:* a design
       note fixes `AIService:CreateAgent` (name, persona, memory scope, addressing rules, budgets) and the
       Roblox-shaped `TextGenerator`; the switch is a framework setting of the host game, off by default,
       and when it is on it applies to every world with no per-world switch; the stage-1 `NpcAgent` block
-      is the engine underneath; the refusal with the setting off has its twin test.
-- [ ] **Day-cycle slice of the Lighting API (P9).** *Owner:* Rbx API + rendering. *Plan:* `ClockTime`,
+      is the engine underneath; the refusal with the setting off has its twin test. Done 2026-11-11:
+      `AIService` agents (`CreateAgent`, `Ask`, `Say`, `Hear`) and the Roblox-shaped `TextGenerator` behind
+      `CoreAiLuaAiOptions.AllowAgentsFromLua` (off by default) and `LuaCapabilities.Ai` (not part of `All`);
+      the `RbxApi.Ai` fixtures are green in Unity EditMode; DEV-60 to DEV-68. Never run against a live model;
+      the `TextGenerator` run context is the owner decision above.
+- [x] **Day-cycle slice of the Lighting API (P9).** *Owner:* Rbx API + rendering. *Plan:* `ClockTime`,
       `TimeOfDay`, `GeographicLatitude`, `Brightness`, `Ambient`, `OutdoorAmbient` over the P7 look
       applier, and `PointLight` with a documented light budget per tier; the rest of P9 stays M2.
-- [ ] **Luau math slice (MVP13, RT5).** *Owner:* Rbx API. *Plan:* `math.noise`, `math.clamp`,
+      Done 2026-11-11: the slice behind a replaceable `IRbxLightingSink`, `PointLight` with 64 lights on
+      desktop and 8 on WebGL (nearest kept on), the world package's `light` and `lighting` blocks, and
+      Lighting claiming the ambient from the look. The lighting fixtures are green in Unity EditMode, and the
+      noon-to-midnight and torch captures pass with the default look on a separate Unity copy; DEV-50 to
+      DEV-59. Open: a Lighting baseline for new worlds, the mood section of `RBX_API_SKILL.md`, the Moon
+      (stubs).
+- [x] **Luau math slice (MVP13, RT5).** *Owner:* Rbx API. *Plan:* `math.noise`, `math.clamp`,
       `math.round` and `math.sign` with conformance tests against the mirror's documented behaviour; the
-      rest of RT5 stays with MVP13.
+      rest of RT5 stays with MVP13. Done 2026-11-11 (`RbxPerlinNoise`; `LuauMathLibraryEditModeTests`
+      green in Unity EditMode).
 - [ ] **Procedural world, day and night, torches and villagers in the Block world mod (P6).** *Owner:*
       demos. *Plan:* seeded noise terrain generated in budgeted steps through `Terrain:WriteVoxels`, a
       Lua clock driving `Lighting.ClockTime`, a torch block with a `PointLight`, and villagers created
-      through `AIService`; all of it Lua in `sample_block_world`.
+      through `AIService`; all of it Lua in `sample_block_world`. 2026-11-11, written as seven
+      `blockworld_*` mods under `Samples/Block World` (world, build, HUD, day and night, torches, villagers,
+      autopilot; `Assets/CoreAI.Demos/BlockWorld/README.md`); their Lua-tier tests are green in Unity
+      EditMode. Open: in the scene's first PlayMode run a line addressed to a villager by name reached the AI,
+      and the fixes from that run (the HUD's hidden rule, the autopilot's attribute writes, the crosshair
+      face) have not been re-run.
 - [ ] **Roblox GUI classes on the P18 element factory (the solo half of MVP15).** *Owner:* Rbx API.
       *Plan:* `ScreenGui`, `Frame`, `TextLabel`, `TextButton`, `ImageLabel`, `TextBox`, `UICorner` and
       `UIListLayout` with `UDim2` layout and their events, rendered through the same factory as P18, so
       a Roblox UI script runs unchanged and the AI needs no skill text for it; starts when the P18
-      factory lands.
+      factory lands. 2026-11-11, written: sixteen creatable classes (the eight planned plus `ImageButton`,
+      `ScrollingFrame`, `UIPadding`, `UIStroke`, `UIScale`, `UIGridLayout` and the two size constraints), a
+      real `StarterGui` and `PlayerGui`, laid out engine-free by `RbxGuiPresenter` with the budgets, ownership
+      and focus of `UxmlService`; the engine-free and Lua fixtures are green in Unity EditMode. Open: one
+      real-host layout test failed on a wrong test assumption and its corrected form has not been re-run;
+      scrolling a `ScrollingFrame` with the wheel or by dragging; `UserInputService.TextBoxFocused` for GUI
+      text boxes. Its deviations are DEV-70 to DEV-79, with DEV-23 and DEV-24.
 
 Mods (P20):
 
@@ -318,6 +485,106 @@ Mods (P20):
       (flat categories stay valid), the mod service gains create, rename, move and branch enable or
       disable, the Hub Mods page becomes a collapsible, virtualized tree with search and remembered fold
       state, `manage_mods` works by folder, and the 256-source ceiling is re-measured at 1,000 sources.
+      2026-11-11, written: folder paths, the folder actions in the service, the Hub tree and its About panel,
+      `manage_mods` by folder, a shared folder list in the world package (`mod_folders`) and
+      `FileModFolderListStore`; the mod-folder fixtures are green in Unity EditMode. Open: the 256-source
+      ceiling at 1,000 sources (the P19 harness has not measured it), the Hub does not refresh by itself
+      after the AI moves a mod, and a move records no revision.
+
+### Follow-ups opened on 2026-11-11
+
+The campaign that wrote most of M1 on 2026-11-11 left these. Each is open; where code exists, the item says
+how far it was checked.
+
+Lua runtime and performance (P19):
+
+- [ ] **A multi-operand `CONCAT` multiplies a string in one instruction.** 150 operands compile to 150
+      `MOVE`s and one `CONCAT` (the parser refuses 200), so a single instruction can join about 199 strings
+      of 1,000,000 characters (398 MB) under any budget and any hook batch; the guard trips only afterwards.
+      Needs a cap in the VM or the source rewriter before multiplayer or untrusted mods.
+- [ ] **Owner decisions on the guard window** (numbers in `tools/vmbench/RESULTS.md`, "Allocation exposure of
+      the hook window"): keep the scheduler-thread change (up to three more instructions can run before the
+      heap sample that follows a slow instruction, the window the guard always had), and whether to widen
+      the guard's own batch (8: 1.4x on Boehm, a doubling bomb reaches ten times the run's allocation
+      budget; 16: 1.6-2x, eighty times).
+- [ ] **Allocations left on the scheduler paths:** `ModScheduler`'s argument copies and one
+      `SignalInvocation` per queued invocation, one `WaitEntry` per wait, the thread wrapper per fire, and the
+      `Task<LuaValue[]>` of the chunk entry points.
+- [ ] `NativeStack_EveryChannelStaysWithinItsWeight_AtTheCap` fails when run alone on .NET 8 (JIT tiering).
+
+Dependencies (`dev-docs/DEPENDENCY_VERSIONS_2026-11-11.md`; downloads need the owner's OK):
+
+- [ ] **Lua-CSharp 0.5.6 to 0.5.8** as one isolated change (from the NuGet packages, never from `main`), gated
+      by the portable Lua tests, the sandbox EditMode suites in Unity, a vmbench re-run, the allocation rows,
+      the WebGL Lua self-test and one IL2CPP player run.
+- [ ] **Mirror 96.0.1 to 96.11.4** before MVP5 part 1 is verified (96.11.0 fixed two network-input security
+      bugs).
+- [ ] NeoxiderTools, NGO and Tensors at the dependency pass; remove the stray `VContainer` 1.0.2 and
+      `VContainerCore` 1.0.4 entries from `Assets/packages.config` (unrelated NuGet packages with no DLL) and
+      their folders under `Assets/Packages`.
+- [x] **The consumer VContainer pin matches the project.** The dependency installer and INSTALL §1.1 install
+      tag `1.19.0`, which is commit `5401e5a7`, the one `Packages/manifest.json` pins (checked against the
+      upstream tags on 2026-11-11; the installer menu itself has not been run).
+
+Chat overlay and Markdown (P2):
+
+- [ ] Draw one surface's lines in the other (overlay and panel); Escape on an empty input stops the turn;
+      input history with up and down.
+- [ ] Move the engine-free `ChatMarkdownText` from `Core/Features/ChatOverlay` (namespace
+      `CoreAI.ChatOverlay`) to `Features/ChatMarkdown` before release (mechanical).
+- [ ] Chat Markdown: table cells are plain text, a restored history renders every message at once, copy
+      needs focus, player performance is not measured. The optional adapter `CoreAI.ChatMarkdown.Renderer` has
+      not compiled in Unity (no renderer package here); the manifest line for the renderer package needs the
+      owner's OK, and a shipped build with it must carry its Third Party Notices.
+- [ ] Gaps in the owner's renderer package (`com.neoxider.markdownrenderer`): ordered lists always count from
+      1, code blocks nested in lists are dropped, autolinks, entities and raw HTML are dropped, `{x=5}`
+      attributes swallow text, only Python and C# are highlighted (no Lua), no monospace font.
+
+World package and the one-click world (P3):
+
+- [ ] Chunk the deferred encode (about 45 ms at 2,048 Parts and 0.3-1.9 s at 16,384, a frame after the
+      edit); validation runs twice in front of an edit (about 7 ms); large terrains on WebGL still encode in
+      front of the edit.
+- [ ] A per-session folder file (`.world-sessions/<v>/`).
+- [ ] The undo mark ignores service-only edits: a Lighting or StarterPlayer change records no undo entry
+      (older than this campaign).
+- [ ] World-owned GUI in the world package: an optional `gui` block on each `StarterGui` `ScreenGui` and its
+      descendants (mod-made GUI and `PlayerGui` are not saved); 7.56.0 refuses the new key.
+- [ ] The default content's baseplate is owned by a mod, so an AI edit to it is lost at the next world load.
+- [ ] `CoreAiPlayWorldBootstrap` creates a second sun when `RenderSettings.sun` is empty although the scene
+      has a directional light, so night never gets dark.
+- [ ] The world-agents build callback creates the first world eagerly when the decision block or the NPC
+      relay is present; the NPC composition test builds from the installers, not from `CoreAILifetimeScope`.
+- [ ] An unguarded `Object.Destroy` remains in `HubChatPage`, `CoreAiChatPanel`, `CoreAiWorldCommandExecutor`
+      and `CoreAiComponentCommandExecutor` (errors when they are disposed outside Play Mode).
+- [ ] With the backend Offline, `OfflineLlmClient` answers the Programmer role with a Lua stub instead of
+      saying that a model is needed.
+- [ ] Not yet confirmed: with a mod store root about 100 characters long, the seeder reported the Block World
+      mods installed but none of them loaded.
+
+Roblox surface the Block world needs (P2, P4, P5, MVP4):
+
+- [ ] Switching a mod folder on for a scene's store (the Block World scene does it in its own module).
+- [ ] Lua `TextChatService` and `TextChatCommand` over the chat command registry (`/time` falls back to the
+      L key today); `SelectionBox`; headless raycasts through `TerrainVoxelRaycaster`; joints (`Weld`,
+      `Motor6D`); the chat-turn target cell and operation-level undo (P5); the light tier readable from Lua.
+- [ ] `BindableEvent` and `BindableFunction` between mods: written 2026-11-11 (`RbxBindables`, values copied
+      with the RemoteEvent codec), portable tests green, not run in Unity; DEV-80 to DEV-82. An `Invoke`
+      queued while a failed reload clears `OnInvoke` and puts it back waits until the next assignment.
+- [ ] `Ray` over remotes (`LuaCsRbxNetworkCodec` does not encode it); a host preset switch for the default
+      camera (today only the `CameraModule` property); a Unity motor EditMode test and a preset asset for the
+      P1 tuning values.
+- [ ] GUI: a Lua-tier allocation test (the engine-free budgets hold at 0 B; `BindableEvent:Fire` allocates
+      and is not measured).
+
+Tools and skills (P15, P16):
+
+- [ ] Remove the `camera_tool` / `capture_camera` alias next release; decide per-action functions against one
+      `camera` function and whether `screenshot` is scheduled for removal too; the tool-description length
+      limit is covered for the camera tools only.
+- [ ] The tiered Rbx API skill (the skill pair is about 71,000 characters now), one-file skill generation
+      with a CI check, the skill self-improvement design, per-world overrides, and a real-model run of the
+      prompt fixtures (`PromptRegressionEditModeTests.RealModel_PicksTheExpectedFirstTool`).
 
 ### Existing items these packages absorb or make stale
 
@@ -331,28 +598,35 @@ Mods (P20):
   WebGL material evidence and the near-black Metal finding are re-checked after P7 and close in P8
   stage 2; lazy material textures leave MVP19 for P8 stage 2.
 - Stale, to be corrected when touched: the base64 sentence of the `capture_camera` item (it already
-  returns `LlmToolImageResult`); the suite 1.16 decision (the suite is 2.0); newcomer A3 (kept in code,
-  unticked); the [R4] reference to a `world_query` tool (none exists); the "MVP10" label on
+  returns `LlmToolImageResult`); the suite 1.16 decision (the suite is 2.1 since 2026-11-11); newcomer A3
+  (kept in code, unticked); the [R4] reference to a `world_query` tool (none exists); the "MVP10" label on
   `Humanoid:Move` and the "MVP15" label on `Sound` (the retag item under "Across rungs").
 
 ## Benchmark reporting defects found by the 2026-10-17 free-tier sweep
 
-- [ ] A run with zero graded scenarios must not render a scored model card. When every result is
+- [x] A run with zero graded scenarios must not render a scored model card. When every result is
   attributed to Environment, `BenchmarkReportFormatter.ModelCardScene` still prints
   `Suite score 0.0/100`, grade `Failing`, `Scenario verdicts 0/0 pass` and an empty token footer, so a
   dead provider route produces a card indistinguishable from a model that scored zero. It must say
   "no graded scenarios" (and the suite/group/role tiles must stay unrated) — regression test in
-  CoreAiUnity EditMode.
-- [ ] The chart/leaderboard path must refuse to rank a partial run. `tools/benchmark_chart.py` emits
+  CoreAiUnity EditMode. Done 2026-11-11 (P17): `BenchmarkReport.HasGradedScenarios`; the cards, Markdown, index
+  row and SVG go unrated ("no graded scenarios"); `BenchmarkReportingHonestyEditModeTests` green in Unity
+  EditMode.
+- [x] The chart/leaderboard path must refuse to rank a partial run. `tools/benchmark_chart.py` emits
   one ranked row per `metadata.modelId` regardless of how many scenarios were graded, so a model that
   never ran G6 (the hardest group) is averaged over an easier mix and can outrank a full run. The
   leaderboard's own submission rules already say partial-group runs are not rankable; the generator
-  must mark or exclude such rows and print the graded count next to the score.
-- [ ] Comparison notes should expose a like-for-like mean over the groups every compared model
-  actually ran, so a provider outage cannot silently reorder a table.
-- [ ] Benchmark target labels are the report's `modelId`, so short labels ("beam") leak into report
+  must mark or exclude such rows and print the graded count next to the score. Done 2026-11-11 (P17): only
+  full rows are ranked, partial rows are marked "not ranked", unrated rows draw no bar, every row prints its
+  graded count, and `--ranked-only` leaves the others out (`tools/test_benchmark_chart.py` passes). The
+  published leaderboard SVGs and PNGs in `Docs/Images` have not been regenerated with it.
+- [x] Comparison notes should expose a like-for-like mean over the groups every compared model
+  actually ran, so a provider outage cannot silently reorder a table. Done 2026-11-11 (P17): the comparison
+  adds a like-for-like column over the shared groups (`ModelComparison`).
+- [x] Benchmark target labels are the report's `modelId`, so short labels ("beam") leak into report
   filenames, model cards and charts. `BenchmarkTargetList` should carry the provider's display name
-  separately from the id, or the UI should ask for the display name.
+  separately from the id, or the UI should ask for the display name. Done 2026-11-11 (P17): a `displayName`
+  key (alias `display_name`) and `BenchmarkTarget.ExplicitDisplayName`; the handle names files and filters.
 
 ## Extreme-scenario token budget vs heavy-thinking models
 
@@ -565,6 +839,14 @@ scope)**
       onto the mod source store (versions, revert, quarantine, the package's `Mods/`), what `Enabled` and
       `RunContext` do, whether the package needs a `format_version` bump, and whether an old package without
       contexts loads as `shared` or is refused; the owner may override D1 before the rung starts.
+      Done 2026-11-11 as `dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md` (decisions SC-1 to SC-19, `format_version` 2,
+      packages without contexts load as legacy); D1 (c) stands unless the owner overrides it.
+- [ ] **MVP4 steps after the design note.** 2026-11-11: A1 (engine-free script model, rule table, run rules,
+      `require` graph and policy), A2 (header keys `context:` and `parent:`, `LuaModManifest.Context`) and A3
+      (replica staging keeps server ids and revisions) are written and green in Unity EditMode; B1 (the
+      `Script`, `LocalScript` and `ModuleScript` instance classes and `Enum.RunContext`) is written with
+      portable tests only. Open: B2 (the package v2 reader and writer; it must keep `minimum_reader_version` at
+      2 or more for a format-2 package), C1–C6 (nothing acts on the declared context yet).
 - Existing: **7. Mod system UX** (its contexts part; section "Roblox API ladder … foundation items"); the replica
   `Player` minting in **Two named Phase 0 limits of the replication core** ("the client composition must stop
   minting Players on a replica").
@@ -573,13 +855,24 @@ scope)**
 
 - [ ] **Spike S3: a 5 MB join snapshot over real kcp (risk R3).** *Owner:* multiplayer. *Plan:* two processes on
       localhost kcp; send a 5 MB snapshot as reliable messages; record the time, the peak memory on both sides
-      and the largest message kcp accepts; the result sets the snapshot chunk size.
+      and the largest message kcp accepts; the result sets the snapshot chunk size. 2026-11-11: the
+      two-process kcp harness that measures it is written (`CoreAI.Net.Mirror.Harness`, built only with
+      `COREAI_MIRROR_HARNESS`; commands in `Assets/CoreAIMirror/README.md`) but has never been built or run.
 - [ ] **Player-host preset with a boot test.** *Owner:* composition + multiplayer. *Plan:* a preset (scene or
       profile) that composes the Mirror host, admission and the world; a PlayMode test boots it with 0 errors
       (`Docs/ARCHITECTURE_RULES.md` §2.1, proof by test); MVP10 folds it into the profile.
 - [ ] **Protocol version handshake (risk R9).** *Owner:* Mirror bridge. *Plan:* carry a protocol version in the
       admission request; the server refuses a mismatch with a reason the client can show (after the deferred
-      refusal notice exists); a test with an older and a newer peer stub.
+      refusal notice exists); a test with an older and a newer peer stub. 2026-11-11, written:
+      `CoreAiMirrorProtocol.Version = 1` with tolerant admission readers, a refusal that names both versions on
+      either side, and `MirrorProtocolVersionEditModeTests` (older and newer stubs both ways). Not run: the
+      Mirror assemblies have not compiled in Unity (no `MIRROR` define in this project); they compile only in a
+      scratch build. Admission messages now carry protocol fields, so 7.56.0 peers are refused by name.
+- [ ] **MVP5 part 1 follow-ups (2026-11-11).** With MIRROR installed, run the `CoreAI.Net.Mirror.Tests`
+      assembly (start with `TheWeaverUsesTheTolerantAdmissionReaders`), then the two-process harness, and set
+      the snapshot chunk size from S3; a disconnect policy for a connection that keeps flooding; metering
+      before Mirror's unbatching if the flood measurement shows it matters; the client-side refusal log uses
+      `Debug.LogWarning` (no injected log seam on the client).
 - Existing: **A Mirror HOST has no client-side remotes**; **No inbound rate limit on the server's world
   dispatch**; **A refused client never learns it was refused**; **A runtime world load does not hand live Mirror
   sessions to the new world**; **The join snapshot**; **A two-process over-the-wire run**; **Restart ordering is
@@ -593,9 +886,18 @@ scope)**
 
 **MVP6 — world-state replication + write authority**
 
-- [ ] **Binary revision-stamped delta codec below the bridge.** *Owner:* replication. *Plan:* a PT-tested codec
+- [x] **Binary revision-stamped delta codec below the bridge.** *Owner:* replication. *Plan:* a PT-tested codec
       for Spawn/Patch/Remove with quantized CFrames, sized against S2; the MVP6 DoD measures ≤24 B per CFrame
-      patch on the wire unless S2 sets another bar.
+      patch on the wire unless S2 sets another bar. Done 2026-11-11 (`ReplicationWireEncoder` /
+      `ReplicationWireDecoder`, format version 1, and the per-tick `ReplicationPublisher`;
+      `dev-docs/REPLICATION_CODEC.md`): a DoD-shaped engine-free run measures 18.88 B per patch for free motion
+      and 13.57 B on a grid; the codec, malformed-input, S2 and publisher fixtures are green in Unity EditMode.
+      It is not wired to the bridge yet, so nothing has been measured on a wire.
+- [ ] **Wire the replication codec (2026-11-11).** The wiring list in `dev-docs/REPLICATION_CODEC.md` (the
+      publisher in place of the `FireAllClients` fan-out among it), fragmentation for a batch over the packet
+      cap (a large join packet stops that recipient today), a server tick in the packet header for MVP7, and
+      the portable `ReplicationWire*` projects in CI. The wire never carries owner or ACL metadata; the
+      in-process capture still does (the MP-20 remainder).
 - Existing: **Wiring the gateway to the wire**; **Change notifications on a replica**; **Retire
   `ReplicationDirtySet`'s actor-id overload**; **The tag cap is enforced on `RbxInstance.AddTag` only** (the
   applier's removal order); **MVP6/MVP9 scalability debt** (the synchronous fan-out).
@@ -1361,7 +1663,8 @@ first run on Mono).
       capacity; after a Mirror restart without disconnect reports the bridge may keep stale acknowledged-connection
       state; the scene provider measures server time against the system clock and has no public way to take the
       world's `IRbxClockSource` (a composition with its own clock must build the bridge itself with the `wallClock`
-      argument).
+      argument). 2026-11-11: the first clause has its fix written with the deferred refusal notice of MVP5 part 1
+      (not run in Unity yet); the other clauses are unchanged.
 - [ ] **Test harnesses:** `RungZeroEnvelopeEditModeTests`' `ForgingNetworkBridge` reports `Topology.Host`, so the
       fail-closed identity rule (MP-12) refuses its `ConnectActor` — give the harness an identity source.
 - [ ] **A Mirror stub end to end over the staged bridge** (after B1-01, `9dc55a68`): the clock forwarding of
@@ -1466,7 +1769,9 @@ a panel built on an inactive object never reaches `OnEnable`, and `DeadlineCance
       parameters entirely; wire `LuaCsAiEnvelopeProcessor` into a composition or delete it (nothing constructs
       it); expose custom world-command handlers and `LuaCsModStackOptions.AdditionalGameplayBindings` through
       the standard composition (`TODO(moddableunits-binding-seam)`); `ICoreAISettings.EnableLuaOnWebGl` is
-      serialized but read by nothing; `CircuitBreakerLlmClientDecorator` is public but not composed by the
+      serialized but read by nothing (marked `[Obsolete]` on 2026-11-11: Lua runs on the WebGL player like on
+      every other one, so there is no WebGL Lua switch; removing it is what is left);
+      `CircuitBreakerLlmClientDecorator` is public but not composed by the
       default pipeline; `LoggingLlmClientDecorator.Unwrap` stops at `TimeoutLlmClientDecorator`, not at the
       backend; the default chat UI strings (stop/send/clear tooltips) are Russian;
       `conversationRolledSummaryMaxTokens` is 0 on the asset but 2048 in the portable defaults; `Max Concurrent`
@@ -1497,50 +1802,63 @@ fixed in parallel (`c7b1f44e`) and not listed.
       `CoreAiHubSetupMenu.cs:19-22,75`: from `Packages/com.neoxider.*` README step 3 builds a chat with no UXML
       (Play shows an empty screen), the settings inspector falls back to the default one, and `Add Hub` saves into
       a missing folder then instantiates `null`. Fix: load by GUID or `PackageInfo.FindForAssembly`; see F-22. S–M.
-- [ ] **[A2+B3+D9, MAJOR] A missing `COREAI_LLM` silently swaps the backend for `StubLlmClient` (`Ok = true`).**
+- [x] **[A2+B3+D9, MAJOR] A missing `COREAI_LLM` silently swaps the backend for `StubLlmClient` (`Ok = true`).**
       `LlmPipelineInstaller.cs:271-277,380-381` log nothing and `CoreAiBackend.Status` shows the configured mode;
       the quick starts omit the define (only INSTALL §2.3 names it) and `Enable Providers` sets it for one target,
       so `AskAsync(…, "Blacksmith")` returns `ApplyWaveModifier` JSON as the NPC's line. Fix: warn in the
       `!COREAI_LLM` branches now; then a failing `NotConfigured` client, a build check, a quick-start step. S/M.
+      Done 2026-11-11 with P11 stage 1 (M0 item "A missing `COREAI_LLM` fails loudly"): a `NotConfigured`
+      client, one composition warning, `CoreAILlmModuleBuildGuard`; INSTALL and QUICK_START state the define.
 - [ ] **[A3, MAJOR] `StopAgent(roleId)` and `CancelTasks(scope)` cancel nothing in the default composition.**
       `QueuedAiOrchestrator.cs:1130-1147` gives every task an `ActorContext` (the inner `AiOrchestrator` resolves
       it) and `CreateScopeEntry` (`:1164`) keeps only its session GUID, so `ResolveCurrentScopeKeys` (`:692-708`)
       never matches a role id or a domain scope (broader than the audit's facade-only claim; the queue tests use a
       fake inner). Fix: keep logical scope + role in `ScopeEntry`; test via the real composition. S.
-- [ ] **[A9+C4, MAJOR] `AgentBuilder.Build()` before CoreAI starts registers nothing, and unknown roles run as a
+- [x] **[A9+C4, MAJOR] `AgentBuilder.Build()` before CoreAI starts registers nothing, and unknown roles run as a
       default agent, silently.** `AgentBuilder.cs:505-515` applies only when `CoreAIAgent.Policy` is set, which
       happens in `IStartable.Start` (`CoreAIGameEntryPoint.cs:96`); an unknown or miscased id gets the memory tool
       only (`AgentMemoryPolicy.cs:631-638`). A blacksmith built in `Awake()` answers with no prompt and no tool.
       Fix: queue configs until `Initialize`, warn once per unknown role, README uses `blacksmith.AskAsync`. S–M.
-- [ ] **[A5+C1, MAJOR] `CoreAi.AskAsync` returns a provider error as if it were the reply.** `SourceTag = "Chat"`
+      Done 2026-11-11 (P15): a build before CoreAI starts is queued (`AgentBuilder.ApplyPendingBuilds` from
+      `CoreAIAgent.Initialize`, dropped on reset) and a role with no configuration warns once;
+      `AgentModeAndPendingBuildEditModeTests` green in Unity EditMode. The README sample keeps
+      `CoreAi.AskAsync(..., "Blacksmith")`, which now reaches the queued agent.
+- [x] **[A5+C1, MAJOR] `CoreAi.AskAsync` returns a provider error as if it were the reply.** `SourceTag = "Chat"`
       (`CoreAiChatService.cs:384-394`) makes `AiOrchestrator.RunTaskAsync` (`:317`, `:2932-2952`) return the error
       text, so `"HTTP 401 …"` becomes NPC speech or quest JSON; `StreamAsync` throws and `AgentConfig.AskAsync`
       returns `null` instead. Fix: `CoreAi.AskResultAsync` / `SmartAskResultAsync` over the existing
       `SendMessageResultAsync`; document the string contract in COREAI_SINGLETON_API. S.
-- [ ] **[A6, MAJOR] `SmartAskAsync` drops streaming errors.** `CoreAiChatService.SendMessageSmartAsync`
+      Done 2026-11-11 with P11 stage 1 (M0 item "Provider errors never become reply text").
+- [x] **[A6, MAJOR] `SmartAskAsync` drops streaming errors.** `CoreAiChatService.SendMessageSmartAsync`
       (`:689-709`, `:724-747`) joins `chunk.Text` and never reads `chunk.Error`; the facade adapter
       (`CoreAi.cs:382-400`) forwards text only. After a 500 or a dropped stream the caller saves `""` or half an
       answer (streaming is on by default for tool roles). Fix: throw like `StreamAsync` on a terminal error chunk
       through one shared helper; regression test with an `{IsDone, Error}` stub. S.
+      Done 2026-11-11 with P11 stage 1 (M0 item "Stream errors are surfaced").
 - [ ] **[A7, MAJOR] `AgentMode` is not enforced.** `Mode` is read only for build warnings and the streaming default
       (`AgentBuilder.cs:654-669,858`): `ChatOnly` still offers every tool, memory included, and `ToolsOnly` keeps
       chat history, contrary to the enum docs and AGENT_BUILDER. Fix: carry `Mode` into `PreparedAgentRole`
       (ChatOnly strips tools / `ToolMode = None`, ToolsOnly defaults history off) after one release of warnings, or
       rename/deprecate the modes and fix the docs. M.
+      2026-11-11 (P15): enforcement is available behind `AgentBuilder.WithModeEnforcement()` (ChatOnly sends no
+      tools, ToolsOnly defaults history off); without it `Build` warns (`ChatOnlyModeOffersTools`,
+      `ToolsOnlyModeKeepsChatHistory`). The default flips in the release after this one is verified.
 - [ ] **[A4, MAJOR] `CoreAi` keeps a dead chat service after a scene change.** `TryResolve`
       (`CoreAi.cs:845,878-881`) re-resolves scope and orchestrator (a destroyed scope compares `null`; the audit
       overstated this) but never `_chatService`, which holds the old disposed queue: `IsReady` is true, `AskAsync`
       fails. The documented `Invalidate()` also runs `CoreAIAgent.Reset()`, which nothing re-initialises while the
       new scope owns the facade. Fix: drop caches of a destroyed scope; spare a live owner. S.
-- [ ] **[A8, MAJOR] Runtime key/backend switching writes into the shared `CoreAISettingsAsset`.**
+- [x] **[A8, MAJOR] Runtime key/backend switching writes into the shared `CoreAISettingsAsset`.**
       `CoreAiBackend.SetApiKey` / `Apply*` (`:154-181,326-329`) mutate the Resources asset in place: in the Editor
       a key "supplied at runtime" (QUICK_START) outlives Play Mode, aborts the next build in
       `CoreAIResourcesApiKeyBuildGuard` and is saved by the next inspector edit. Fix: a `[NonSerialized]` session
       overlay the getters prefer, or an Editor clone; see the [R7.5] hot-swap item. M.
-- [ ] **[A10, MINOR] `AgentMemoryPolicy.AddToolForRole` (`:232-250`) appends duplicates.** A
+      Done 2026-11-11 with P11 stage 1 (M0 item "Runtime keys stay out of the shared asset").
+- [x] **[A10, MINOR] `AgentMemoryPolicy.AddToolForRole` (`:232-250`) appends duplicates.** A
       `CoreAi.RegisterGameStateTool()` in `OnEnable` publishes two `game_state` functions after one toggle; nothing
       de-duplicates downstream (`AiToolOrder.Canonical`, `MeaiLlmClient.cs:2878-2915`) and strict providers reject
       duplicate names. Fix: replace by name (ordinal) and return whether anything changed. S.
+      Done 2026-11-11 (M0 item "Deduplicate tools by name").
 - [ ] **[A11, MINOR] `LlmToolBase.JsonParams` (`ILlmTool.cs:184-199`) does not JSON-escape.** A quote, backslash or
       newline in a description yields an unparseable schema: the text path prints it to the model and the
       `ParametersSchema` half of the required-argument union is lost (the bound function's half still applies, so
@@ -1554,16 +1872,18 @@ fixed in parallel (`c7b1f44e`) and not listed.
       `ResetForSubsystemRegistration` (`CoreAi.cs:959-973`) clears `CoreAiEvents` (the [A6] runtime item) but not
       `OnToolExecuted`, `OnToolCall*`, `OnToolCallRecord` or `ToolCallHistory` (replayed by `SubscribeToolCalls`),
       nor `CoreAiBackend.OnBackendChanged`. Fix: null them and call `ClearToolCallHistory()` in that hook only. S.
-- [ ] **[B1, MAJOR] The "fix my install" menus cannot compile until the install is fixed.**
+- [x] **[B1, MAJOR] The "fix my install" menus cannot compile until the install is fixed.**
       `CoreAIDependencyInstaller` / `CoreAINuGetBootstrapper` sit in `CoreAI.Editor`, which needs `CoreAI.Core`,
       `CoreAI.Source` and VContainer, so with MEAI or a Git dependency missing the menus INSTALL §1.1 and
       QUICK_START prescribe do not exist; §1.1 also runs before §1.2 installs CoreAiUnity. Fix: a reference-free
       setup asmdef (Unity-generated `.meta`), manual manifest block first. S–M.
-- [ ] **[B2, MAJOR] `Newtonsoft.Json` is an undeclared dependency.** The `CoreAI.Core` / `Source` / `Editor`
+      Done 2026-11-11 with P11 stage 1 (M0 item "Setup menus compile on a broken install").
+- [x] **[B2, MAJOR] `Newtonsoft.Json` is an undeclared dependency.** The `CoreAI.Core` / `Source` / `Editor`
       asmdefs reference `Newtonsoft.Json.dll`, but no CoreAI `package.json` declares
       `com.unity.nuget.newtonsoft-json`; here it arrives via LLMUnity and others, and INSTALL §1.1 tells HTTP-only
       users to remove `ai.undream.llm`, after which a fresh project fails with CS0246. Fix: declare it in
       `com.neoxider.coreai` and list it in INSTALL. S.
+      Done 2026-11-11 (M0 item "Declare Newtonsoft").
 - [ ] **[B4, MAJOR] `[Inject]` MonoBehaviour samples leave the field null.** QUICK_START_FULL §5.2 Option A,
       EXAMPLES.md (four samples), DEMO_RECORDING_GUIDE: a scene MonoBehaviour is injected only through Auto Inject
       Game Objects, `RegisterComponent` or the resolver, none mentioned, and `CoreAILifetimeScope` is sealed; the
@@ -1894,6 +2214,10 @@ Against the owner's bar, verified against the tree on 2026-09-10:
           handler threads a sender's remotes start are capped at 32 per sender (a `RemoteFunction` over it is answered
           `BUDGET_EXCEEDED`, an event is dropped and counted), and since `5fdfbf17` (MP-16) receive warnings are
           logged once per sender and kind every 10 s — but decoding and dispatch themselves stay unmetered.
+          2026-11-11, written in MVP5 part 1: per-connection token buckets checked before world decode and
+          dispatch (`CoreAiMirrorInboundLimits`; 1,500 remotes/s, 1 MiB/s, 2 s burst; drop and count, a call over
+          the limit answered at once) and `MirrorInboundRateLimitEditModeTests`. Open until the Mirror tests run in
+          Unity with MIRROR defined (they compile only in a scratch build so far).
     - [ ] **A Mirror HOST has no client-side remotes (HIGH).** `MirrorNetworkBridge.AttachHandlers`
           installs the handlers of ONE side, and `CoreAiMirrorNetworkBridgeProvider`'s role guard
           refuses a client bridge while the server is active, so a host - server plus local client in
@@ -1903,6 +2227,11 @@ Against the owner's bar, verified against the tree on 2026-09-10:
           contract, and that it must be rewritten rather than kept green when host mode is fixed.
           (Until 7.42.0 that same test asserted the behaviour as intended.) Since `cdf65b52` actors registered in
           the server process are served in process (`LocalDeliveries`), which is not a local Mirror client.
+          2026-11-11, written in MVP5 part 1: host mode admits the host's own local client through the real
+          authenticator and serves its remotes in process (`BindHostLocalConnection`, `HostPlayerSessions`;
+          `CoreAiMirrorHostModePolicy.Refuse` keeps the old refusal); the known-limitation test is replaced by
+          `HostMode_AServerBridgeServesTheLocalClient_AsTheHostsOwnPlayer_WithItsRemotesInProcess`. Open until the
+          Mirror tests run in Unity with MIRROR defined.
     - [x] **`Player:Kick()` did nothing over the transport — fixed in 7.43.0.** `KickPlayer` fired
           `PlayerRemoving`, removed the `RbxPlayer` and unloaded the character, but never told the bridge:
           the socket stayed open, the connection still resolved to that actor, and the kicked client's NEXT
@@ -1954,6 +2283,9 @@ Against the owner's bar, verified against the tree on 2026-09-10:
           `NetworkLateUpdate` at the END of `PreLateUpdate`, after `MonoBehaviour.LateUpdate`, and the
           batch flush lives there. Verified 2026-09-16 while fixing the loopback harness; the refusal
           itself is sound (the connection IS dropped, no actor and no admission record are created).
+          2026-11-11, written in MVP5 part 1: the authenticator sends the refusal and drops the connection on a
+          later frame (`RefusalDropsPerformed`), and the client keeps the kind and reason (`ClientRefusal`,
+          `ClientRefused`). Open until the Mirror tests run in Unity with MIRROR defined.
     - [ ] **Restart ordering is unproven, not proven.** `CoreAiMirrorNetworkBridgeProvider.HookTransport`
           reattaches during
           `Update`, after Mirror's `NetworkLoop` EarlyUpdate, and the new tests insert a `Frame()`
@@ -2824,7 +3156,19 @@ Open:
       onboarding path. Add EditMode coverage for the top user-facing paths.
 - [ ] **Untested MCP tools**: `GetModLogsMcpTool` (now live — cover it), `ManageModsMcpTool`,
       `WorldCommandMcpTool`, `MainCameraScreenshotSource`. Untested Hub UI: `HubAboutPage`,
-      `HubBuiltInPages`, `HubPageWidgets`.
+      `HubBuiltInPages`, `HubPageWidgets`. 2026-11-11: `GetModLogsMcpTool` and `WorldCommandMcpTool` are
+      covered by `McpRpcDispatcherEditModeTests` and `MainCameraScreenshotSource` by its own fixture (all MCP
+      fixtures green in Unity EditMode); `ManageModsMcpTool` has `McpManageModsRateLimitEditModeTests` (the
+      shared rate limit only, not the folder actions). Still untested: the `manage_mods` folder actions over MCP,
+      `HubAboutPage`, `HubPageWidgets`.
+- [ ] **MCP follow-ups from the 2026-11-11 audit** (they need other packages or an owner decision): support
+      for the stateless 2026-07-28 revision (`server/discover`, per-request `_meta`, `subscriptions/listen`)
+      next to the handshake revisions; `camera_list`, `camera_look` and the free camera over the reworked
+      vision service; asynchronous GPU readback with off-thread PNG encoding and an overlay-UI capture mode; a
+      host-admin tool that confirms world loads; tool annotations (`readOnlyHint`/`destructiveHint`) and titles;
+      reject `id: null` and report a tool's own cancellation as `isError`; throttle the rejection logs; the
+      deprecated `FindObjectsByType` overload through the shared version switch; batch receive if 2025-03-26
+      negotiation is wanted.
 - [ ] **Vision wire-format unverified live**: `VisionSelfProbe.cs:100` image-content shape never checked
       against a real backend; `HubSettingsPage.cs:1381` probe round-trip likewise. Run one live probe per
       supported backend.
@@ -3502,6 +3846,10 @@ Open:
 
 - [ ] PlayMode round-trip `[Explicit]` test against a real vision-capable model (capture → model → assert).
       (Host send path, gate, and tool-result lift already shipped in 4.12.0; FastNoLlm camera test exists.)
+      2026-11-11: the test exists (`AgentVisionLiveRoundTripPlayModeTests`, explicit, needs a vision-capable
+      model) and has not run. Vision frames now render through an HDR target, so they show bloom like the screen
+      (`CameraFrameReadbackPlayModeTests` 5/5 on a separate Unity copy); the frame-budget run of the async
+      readback (`CameraCaptureFrameBudgetPlayModeTests`) has not run.
 
 ### [R9 — lowest priority] Multi-agent / sub-agent orchestration
 
@@ -3511,6 +3859,13 @@ Open:
 - [ ] `IAgentRegistry` + `AgentOrchestrator.ExecuteSubAgentAsync` (clean context isolation) + bounded `ExecuteSubAgentsParallelAsync`.
 - [ ] `AgentLlmTool` (parent-only) returning results as tool_result; DI wiring; per-role exposure; settings.
 - [ ] EditMode tests + docs + CHANGELOG.
+- 2026-11-11 (P14): the four items above are written as orchestrator mode (`SubAgentDefinition` and the
+  sub-agent runner, the lead turn, plan and queue, `/orchestrator` in the world chat;
+  `Assets/CoreAiUnity/Docs/ORCHESTRATOR_MODE.md`), wired into the chat and the scope and off by default
+  (`enableOrchestratorMode`); the `SubAgent*`, lead-turn, plan-and-queue and `OrchestratorChatDriver`
+  fixtures are green in Unity EditMode. Open: history per conversation (I8 in the memory store and the
+  files that consume it; the driver already keys sessions by `AiTaskRequest.ConversationId`), a real-model run,
+  and `OrchestratorModeChatPlayModeTests` (2), which has not run.
 
 ## Audit cleanup & cheap test gaps (from 2026-06-28 audit, non-blocking)
 

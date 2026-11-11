@@ -24,7 +24,7 @@ namespace CoreAI.Editor
         private static readonly (string Key, string Url)[] RequiredDependencies =
         {
             ("jp.hadashikick.vcontainer",
-                "https://github.com/hadashiA/VContainer.git?path=VContainer/Assets/VContainer#1.17.0"),
+                "https://github.com/hadashiA/VContainer.git?path=VContainer/Assets/VContainer#1.19.0"),
             ("com.cysharp.messagepipe",
                 "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe"),
             ("com.cysharp.messagepipe.vcontainer",

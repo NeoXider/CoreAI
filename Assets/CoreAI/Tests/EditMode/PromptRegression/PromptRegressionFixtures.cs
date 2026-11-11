@@ -104,6 +104,17 @@ namespace CoreAI.Core.Tests.EditMode
             new PromptFixtureCase("Programmer_RunsLua", BuiltInAgentRoleIds.Programmer,
                 "Run this Lua: report(tostring(2 + 2))", ProgrammerTools, new[] { "execute_lua" }, false,
                 "You are the Programmer agent"),
+            // WHY these markers: the three turns the tiered Rbx API skill is measured on
+            // (RbxApiSkillTieredReadEditModeTests) need the prompt to say how to read one section of it.
+            new PromptFixtureCase("Programmer_MovesAPart", BuiltInAgentRoleIds.Programmer,
+                "Move the part named Block1 five studs up.", ProgrammerTools, new[] { "read_skill", "execute_lua" },
+                false, "read_skill('Rbx API', section='terrain')"),
+            new PromptFixtureCase("Programmer_BuildsAWatchtowerAtTheCrosshair", BuiltInAgentRoleIds.Programmer,
+                "Build a watchtower at the crosshair.", ProgrammerTools, new[] { "read_skill" }, false,
+                "read only the sections the task needs"),
+            new PromptFixtureCase("Programmer_MakesAHotbarHud", BuiltInAgentRoleIds.Programmer,
+                "Make a HUD with a hotbar of five block slots.", ProgrammerTools, new[] { "read_skill" }, false,
+                "It returns the core rules and a section list"),
             new PromptFixtureCase("AiNpc_News", BuiltInAgentRoleIds.AiNpc,
                 "Greetings, traveller. Any news from the north?", MemoryOnly, Prose, true,
                 "You are an in-world NPC voice"),

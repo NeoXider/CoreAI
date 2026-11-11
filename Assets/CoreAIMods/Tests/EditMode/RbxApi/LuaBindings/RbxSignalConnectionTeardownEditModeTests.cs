@@ -709,7 +709,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     end)
                     local part = Instance.new('Part')
                     part.Parent = model
-                    part:GetPropertyChangedSignal('LocalTransparencyModifier'):Connect(function()
+                    part:GetPropertyChangedSignal('ReceiveAge'):Connect(function()
                         store_set('fired', part.Name)
                     end)
                     model:Destroy()

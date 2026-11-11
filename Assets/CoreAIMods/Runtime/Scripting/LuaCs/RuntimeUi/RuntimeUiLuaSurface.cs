@@ -76,8 +76,10 @@ namespace CoreAI.Ai.LuaCs
             {
                 // WHY the same world: the Roblox GUI entrance draws through the same host and counts
                 // against the same per-mod budgets as UxmlService screens (plan decision D14).
-                world.AttachGuiPresenter(new RbxGuiPresenter(rbxApi.Registry, world, rbxApi.ResolveScreenPlayer,
-                    rbxApi.ReadMouseLocation, rbxApi.CreateGuiClickInput, rbxApi.LogSink, prefix));
+                RbxGuiPresenter presenter = new(rbxApi.Registry, world, rbxApi.ResolveScreenPlayer,
+                    rbxApi.ReadMouseLocation, rbxApi.CreateGuiClickInput, rbxApi.LogSink, prefix);
+                world.AttachGuiPresenter(presenter);
+                rbxApi.UserInputService?.AttachFocusedTextBoxSource(() => presenter.FocusedTextBox);
             }
 
             service.Attach(world);

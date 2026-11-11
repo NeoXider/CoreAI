@@ -51,6 +51,8 @@ namespace CoreAI.Demos.BlockWorld
         private const string EditorOnlyTag = "EditorOnly";
         private const string PlayWorldObjectName = "CoreAI Play World";
         private const int PreviewRadius = 1;
+        private const float FirstViewEyeHeightStuds = 1.5f;
+        private const float FirstViewPitchDegrees = 5f;
         private const int MaxBakeFrames = 4000;
         private const double FrameSeconds = 1d / 60d;
 
@@ -70,7 +72,7 @@ namespace CoreAI.Demos.BlockWorld
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             PreviewBake bake = BakeSpawnArea();
             CreateSun();
-            Camera camera = CreateCamera(bake.Spawn);
+            Camera camera = CreateCamera(bake.Spawn, bake.SpawnLook);
             CreatePlayWorld(camera);
             CreatePreview(bake);
 
@@ -98,7 +100,11 @@ namespace CoreAI.Demos.BlockWorld
             RenderSettings.sun = sun;
         }
 
-        private static Camera CreateCamera(RbxVector3 spawn)
+        /// <remarks>
+        /// WHY at the eyes: the default camera takes its first look direction from the scene camera, so this is the
+        /// first view a player gets, and the view the scene shows in the Editor without Play.
+        /// </remarks>
+        private static Camera CreateCamera(RbxVector3 spawn, RbxVector3 look)
         {
             GameObject cameraObject = new("Main Camera");
             cameraObject.tag = "MainCamera";
@@ -106,9 +112,10 @@ namespace CoreAI.Demos.BlockWorld
             camera.nearClipPlane = 0.05f;
             camera.farClipPlane = 600f;
             cameraObject.AddComponent<AudioListener>();
-            Vector3 target = RbxSpace.ToUnity(spawn);
-            cameraObject.transform.position = RbxSpace.ToUnity(spawn + new RbxVector3(-34f, 30f, -46f));
-            cameraObject.transform.LookAt(target);
+            RbxVector3 eye = spawn + new RbxVector3(0f, FirstViewEyeHeightStuds, 0f);
+            RbxVector3 ahead = eye + look * 10f + new RbxVector3(0f, -10f * Mathf.Tan(FirstViewPitchDegrees * Mathf.Deg2Rad), 0f);
+            cameraObject.transform.position = RbxSpace.ToUnity(eye);
+            cameraObject.transform.LookAt(RbxSpace.ToUnity(ahead));
             return camera;
         }
 
@@ -164,6 +171,7 @@ namespace CoreAI.Demos.BlockWorld
         {
             public readonly List<PreviewChunk> Chunks = new();
             public RbxVector3 Spawn;
+            public RbxVector3 SpawnLook = new(0f, 0f, -1f);
             public int Columns;
         }
 
@@ -254,6 +262,10 @@ namespace CoreAI.Demos.BlockWorld
                 }
 
                 bake.Spawn = (RbxVector3)workspace.GetAttribute("BlockWorldSpawn");
+                if (workspace.GetAttribute("BlockWorldSpawnLook") is RbxVector3 look)
+                {
+                    bake.SpawnLook = look;
+                }
                 RbxTerrain terrain = RbxTerrainBootstrap.Find(workspace);
                 holder = new GameObject("Block World Bake");
                 renderer = new RbxTerrainRenderer(terrain, holder.transform);

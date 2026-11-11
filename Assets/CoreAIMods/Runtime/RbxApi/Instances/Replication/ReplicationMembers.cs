@@ -39,6 +39,23 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
         public const string PrimaryPart = "PrimaryPart";
 
         /// <summary>
+        /// <c>BaseScript.Enabled</c> of a <see cref="Scripts.RbxBaseScript"/>. Recorded in the dirty set only:
+        /// <see cref="EnumerateReplicable"/> does not carry it until the snapshot holds script state (MVP4 step B2).
+        /// </summary>
+        /// <remarks>
+        /// WHY B2 must decide the wire name: BaseScript.yaml tags <c>Enabled</c> NotReplicated and leaves its
+        /// deprecated inverse <c>Disabled</c> untagged, so the state reaches clients in Roblox under the other
+        /// name; carrying <c>Enabled</c> needs a written deviation in GuardedReplicationFilterEditModeTests.
+        /// </remarks>
+        public const string Enabled = "Enabled";
+
+        /// <summary>
+        /// <c>BaseScript.RunContext</c> (untagged in BaseScript.yaml). Recorded in the dirty set only until
+        /// MVP4 step B2, like <see cref="Enabled"/>.
+        /// </summary>
+        public const string RunContext = "RunContext";
+
+        /// <summary>
         /// The stored pivot of a <see cref="RbxModel"/> (<see cref="RbxModel.StoredWorldPivot"/>);
         /// its payload is empty while <see cref="RbxModel.HasStoredWorldPivot"/> is false.
         /// </summary>

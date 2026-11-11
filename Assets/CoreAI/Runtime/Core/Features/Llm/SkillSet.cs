@@ -249,21 +249,116 @@ namespace CoreAI.Ai
             }
 
             string instructions = System.IO.File.ReadAllText(instructionsFilePath);
-            return new SkillSet(name, description, instructions, tools);
+            return FromTextContent(name, description, instructions, tools);
         }
 
         /// <summary>
         /// Creates a skill set from pre-loaded text content (e.g. Unity <c>TextAsset.text</c>,
-        /// embedded resource, or any string source).
+        /// embedded resource, or any string source). A text written in sections — every part opened by a
+        /// <see cref="FormatSectionMarker"/> line — keeps its sections addressable exactly like
+        /// <see cref="FromTextParts"/>; any other text is one document, unchanged.
         /// </summary>
         /// <param name="name">Skill name.</param>
         /// <param name="description">Short one-line description for catalog.</param>
         /// <param name="instructionsContent">Pre-loaded instructions text.</param>
         /// <param name="tools">Tools that belong to this skill.</param>
+        /// <exception cref="ArgumentException">A section marker names an invalid or duplicate section.</exception>
         public static SkillSet FromTextContent(string name, string description,
             string instructionsContent, params ILlmTool[] tools)
         {
-            return new SkillSet(name, description, instructionsContent, tools);
+            IReadOnlyList<KeyValuePair<string, string>> parts = ParseSectionMarkup(instructionsContent);
+            return parts == null
+                ? new SkillSet(name, description, instructionsContent, tools)
+                : FromTextParts(name, description, parts, tools);
+        }
+
+        private const string SectionMarkerPrefix = "<!-- section:";
+        private const string SectionMarkerSuffix = "-->";
+
+        /// <summary>
+        /// The line that opens section <paramref name="sectionName"/> in a single sectioned skill text:
+        /// <c>&lt;!-- section: name --&gt;</c>.
+        /// </summary>
+        /// <remarks>
+        /// WHY a marker line and not a Markdown heading: section bodies carry their own <c>##</c> and
+        /// <c>###</c> headings, so no heading level could tell a section boundary from a sub-heading. The
+        /// shipped built-in texts are generated in this form (<c>tools/generate_skills.py</c>), so a host
+        /// that hands the Resources text to <see cref="FromTextContent"/> gets the same sections as the
+        /// built-in constant.
+        /// </remarks>
+        public static string FormatSectionMarker(string sectionName)
+        {
+            return SectionMarkerPrefix + " " + NormalizeSectionPath(sectionName) + " " + SectionMarkerSuffix;
+        }
+
+        /// <summary>
+        /// Splits a sectioned skill text into ordered (section name, content) parts: each
+        /// <see cref="FormatSectionMarker"/> line opens a section that runs to the next marker, with the
+        /// blank lines around it trimmed. Text before the first marker belongs to the first section.
+        /// Returns null when the text holds no marker line, so a plain text stays one document.
+        /// </summary>
+        public static IReadOnlyList<KeyValuePair<string, string>> ParseSectionMarkup(string text)
+        {
+            if (string.IsNullOrEmpty(text) || text.IndexOf(SectionMarkerPrefix, StringComparison.Ordinal) < 0)
+            {
+                return null;
+            }
+
+            string[] lines = text.Replace("\r\n", "\n").Split('\n');
+            List<KeyValuePair<string, string>> parts = new();
+            System.Text.StringBuilder preamble = new();
+            System.Text.StringBuilder body = null;
+            string current = null;
+            foreach (string line in lines)
+            {
+                if (TryReadSectionMarker(line, out string sectionName))
+                {
+                    if (current != null)
+                    {
+                        parts.Add(new KeyValuePair<string, string>(current, TrimBlankLines(body.ToString())));
+                    }
+
+                    current = sectionName;
+                    body = new System.Text.StringBuilder();
+                    if (parts.Count == 0 && !string.IsNullOrWhiteSpace(preamble.ToString()))
+                    {
+                        body.Append(preamble);
+                    }
+
+                    continue;
+                }
+
+                (body ?? preamble).Append(line).Append('\n');
+            }
+
+            if (current == null)
+            {
+                return null;
+            }
+
+            parts.Add(new KeyValuePair<string, string>(current, TrimBlankLines(body.ToString())));
+            return parts.AsReadOnly();
+        }
+
+        private static bool TryReadSectionMarker(string line, out string sectionName)
+        {
+            string trimmed = line.Trim();
+            if (trimmed.StartsWith(SectionMarkerPrefix, StringComparison.Ordinal) &&
+                trimmed.EndsWith(SectionMarkerSuffix, StringComparison.Ordinal) &&
+                trimmed.Length >= SectionMarkerPrefix.Length + SectionMarkerSuffix.Length)
+            {
+                sectionName = trimmed.Substring(SectionMarkerPrefix.Length,
+                    trimmed.Length - SectionMarkerPrefix.Length - SectionMarkerSuffix.Length).Trim();
+                return true;
+            }
+
+            sectionName = null;
+            return false;
+        }
+
+        private static string TrimBlankLines(string text)
+        {
+            return text.Trim('\n');
         }
 
         /// <summary>

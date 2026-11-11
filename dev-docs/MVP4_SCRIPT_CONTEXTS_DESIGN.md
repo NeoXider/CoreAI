@@ -1,6 +1,8 @@
 # MVP4 — Script contexts and the client runtime: design note
 
-Status: **design, nothing built**. Written 2026-11-11 for the rung "MVP4 — Script contexts & client
+Status (2026-11-11): **steps A1–A3 and B1 written; B2 and C1–C6 not started.** A1–A3 are green in
+Unity 6000.6 EditMode; B1 (the script instance classes and `Enum.RunContext`) has passed its portable tests
+only. Nothing runs on the declared context yet (C1 adds the load refusal). Written 2026-11-11 for the rung "MVP4 — Script contexts & client
 runtime" (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md:929-977`) and the open item "Design note for plan
 decision D1 (c) before any code" (`TODO.md:557-561`). Plan decision D1 (c) — "instances are views over
 the mod source store" — is at `ROBLOX_API_ROADMAP.md:4634`; the owner may still override it.
@@ -784,7 +786,16 @@ changes. Tests: `Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/` (five fixture
 - First test: today's v1 package staged into a replica keeps every captured revision and marks nothing
   diverged; a local write after commit is diverged. This settles the "not verified" point of SC-16.
 
-### B1 (S) — Catalog and enum (files under P1's edits: `ClassCatalog.cs`, `RbxEnum.cs`)
+### B1 (S) — Catalog and enum (files under P1's edits: `ClassCatalog.cs`, `RbxEnum.cs`) — done 2026-11-11
+
+Built in `RbxApi/Instances/Scripts/RbxScriptInstances.cs` (`RbxLuaSourceContainer`, `RbxBaseScript` with
+`Enabled`, `Disabled`, `RunContext` checked by `ScriptContexts.TryGetEffective`, and an internal
+`TryRestoreState(enabled, runContext, out error)` for the B2 reader that counts no change);
+`ReplicationMembers.Enabled`/`RunContext` are dirty-set names only (not in `EnumerateReplicable`: B2 adds the
+snapshot, the wire codes and the transcription verdicts; BaseScript.yaml tags `Enabled` NotReplicated and leaves
+`Disabled` untagged). The script members stay Lua stubs (planned MVP4; `LinkedSource` unsupported) until C2.
+Tests: `Tests/EditMode/RbxApi/Scripts/ScriptInstancesEditModeTests.cs` (portable) and
+`Tests/EditMode/RbxApi/ScriptsLua/ScriptInstancesLuaEditModeTests.cs` (portable Lua tier; the legacy pin).
 
 - Instance classes (from A1): `RbxLuaSourceContainer : RbxInstance` with `string SourceId { get;
   internal set; }` (never copied by `CopyCustomStateTo`) and `RbxBaseScript : RbxLuaSourceContainer`

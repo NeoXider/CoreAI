@@ -345,9 +345,19 @@ namespace CoreAI.Ai
             const string ToolUsage =
                 "Call call_skill_tool(tool_name, arguments_json) to use any tool listed above. " +
                 "arguments_json is a JSON object string with the parameter names and values.";
+            const string StagedUsage =
+                "This skill is written across several documents: the text above is its entry document, and " +
+                "`sections` lists the others. Read one with read_skill(skill_name, section) when you need it; " +
+                "all=true returns every document at once and may be cut short.";
+            const string SectionOnlyUsage =
+                "One document of this skill; read_skill(skill_name) returns its entry document and the others' names.";
 
             IReadOnlyList<SkillSection> sections = skill.Sections;
             bool staged = sections != null && sections.Count > 1;
+            // WHY: a skill without tools has nothing to call, and a sectioned one is read several times per
+            // turn, so the call_skill_tool sentence would be paid on every read for no use. Single-document
+            // skills keep their usage text unchanged.
+            bool hasTools = toolSchemas.Count > 0;
 
             if (all && !string.IsNullOrWhiteSpace(sectionName))
             {
@@ -378,7 +388,7 @@ namespace CoreAI.Ai
                         section = wanted.Name,
                         instructions = wanted.Content,
                         tools = toolSchemas,
-                        usage = ToolUsage
+                        usage = staged && !hasTools ? SectionOnlyUsage : ToolUsage
                     };
                 }
 
@@ -411,10 +421,7 @@ namespace CoreAI.Ai
                 instructions = sections[0].Content,
                 sections = SectionNames(sections, 1),
                 tools = toolSchemas,
-                usage = ToolUsage +
-                        " This skill is written across several documents: the text above is its entry " +
-                        "document, and `sections` lists the rest. Call read_skill(skill_name, section) " +
-                        "for one of them only when you need it, or read_skill(skill_name, all=true) for all documents."
+                usage = hasTools ? ToolUsage + " " + StagedUsage : StagedUsage
             };
         }
 

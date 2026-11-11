@@ -1007,7 +1007,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             ("BasePart", new[]
             {
                 "Shape", "Material", "MaterialVariant", "Position", "Size", "CFrame", "Orientation",
-                "Rotation", "Color", "Transparency", "Anchored", "CanCollide"
+                "Rotation", "Color", "Transparency", "Anchored", "CanCollide", "LocalTransparencyModifier"
             }),
             ("Camera", new[] { "CFrame", "CameraType", "CameraSubject", "FieldOfView", "ViewportSize" }),
             ("Humanoid", new[]

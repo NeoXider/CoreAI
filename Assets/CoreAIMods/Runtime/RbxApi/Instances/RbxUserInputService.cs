@@ -46,6 +46,8 @@ namespace CoreAI.Mods.Rbx.Instances
         private object _pointerProcessedThisStep = GameNotProcessed;
         private readonly RbxVector2[] _thumbsticks = new RbxVector2[2];
         private bool _wasCaptured;
+        private Func<RbxInstance> _focusedTextBoxSource;
+        private RbxInstance _wasFocusedTextBox;
 
         private static readonly string[] ThumbstickKeyCodeNames = { "Thumbstick1", "Thumbstick2" };
 
@@ -68,15 +70,15 @@ namespace CoreAI.Mods.Rbx.Instances
             new("UserInputService.InputChanged");
 
         /// <summary>
-        /// Mirror <c>UserInputService.TextBoxFocused(textBoxThatFocused)</c>: fires when a host text field
-        /// takes the keyboard. CoreAI's own fields are not script-visible TextBoxes, so the argument is nil.
+        /// Mirror <c>UserInputService.TextBoxFocused(textBoxThatFocused)</c>: fires with the GUI <c>TextBox</c> that
+        /// took the keyboard, or with nil when one of CoreAI's own fields (the chat, the Hub) took it.
         /// </summary>
         public RbxScriptSignal TextBoxFocused { get; } =
             new("UserInputService.TextBoxFocused");
 
         /// <summary>
-        /// Mirror <c>UserInputService.TextBoxFocusReleased(textboxReleased)</c>: fires when the host text
-        /// field gives the keyboard back; the argument is nil for the reason <see cref="TextBoxFocused"/> gives.
+        /// Mirror <c>UserInputService.TextBoxFocusReleased(textboxReleased)</c>: fires with the GUI <c>TextBox</c>
+        /// that gave the keyboard back (nil once it is destroyed), or with nil for one of CoreAI's own fields.
         /// </summary>
         public RbxScriptSignal TextBoxFocusReleased { get; } =
             new("UserInputService.TextBoxFocusReleased");
@@ -155,14 +157,28 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         /// <summary>
-        /// Mirror <c>UserInputService:GetFocusedTextBox()</c>. CoreAI's own text fields are not
-        /// script-visible TextBoxes, so this is nil even while one has the keyboard; read
-        /// <see cref="IsGameInputCaptured"/> from C#, or <c>gameProcessedEvent</c> from a script.
+        /// Mirror <c>UserInputService:GetFocusedTextBox()</c>: the GUI <c>TextBox</c> holding the keyboard, else
+        /// nil. CoreAI's own text fields are not script-visible TextBoxes, so it is nil while one of them has the
+        /// keyboard; read <see cref="IsGameInputCaptured"/> from C#, or <c>gameProcessedEvent</c> from a script.
         /// </summary>
         public RbxInstance GetFocusedTextBox()
         {
             ThrowIfDestroyed("GetFocusedTextBox");
-            return null;
+            return ReadFocusedTextBox();
+        }
+
+        /// <summary>
+        /// Attaches the source of the focused GUI TextBox (the Roblox GUI presenter of this world); null detaches it.
+        /// </summary>
+        public void AttachFocusedTextBoxSource(Func<RbxInstance> source)
+        {
+            _focusedTextBoxSource = source;
+        }
+
+        private RbxInstance ReadFocusedTextBox()
+        {
+            RbxInstance box = _focusedTextBoxSource?.Invoke();
+            return box != null && !box.IsDestroyed ? box : null;
         }
 
         /// <summary>
@@ -285,13 +301,32 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private void StepTextFocus(bool captured)
         {
-            if (captured == _wasCaptured)
+            // WHY a focused GUI TextBox is told apart from the host fields: it captures the keyboard too, and
+            // scripts get it as the argument; the nil events belong to CoreAI's chat and Hub fields alone.
+            RbxInstance box = ReadFocusedTextBox();
+            if (!ReferenceEquals(box, _wasFocusedTextBox))
+            {
+                RbxInstance released = _wasFocusedTextBox;
+                _wasFocusedTextBox = box;
+                if (released != null && TextBoxFocusReleased.HasConnections)
+                {
+                    TextBoxFocusReleased.Fire(released.IsDestroyed ? null : released);
+                }
+
+                if (box != null && TextBoxFocused.HasConnections)
+                {
+                    TextBoxFocused.Fire(box);
+                }
+            }
+
+            bool hostCaptured = captured && box == null;
+            if (hostCaptured == _wasCaptured)
             {
                 return;
             }
 
-            _wasCaptured = captured;
-            RbxScriptSignal signal = captured ? TextBoxFocused : TextBoxFocusReleased;
+            _wasCaptured = hostCaptured;
+            RbxScriptSignal signal = hostCaptured ? TextBoxFocused : TextBoxFocusReleased;
             if (signal.HasConnections)
             {
                 signal.Fire((object)null);

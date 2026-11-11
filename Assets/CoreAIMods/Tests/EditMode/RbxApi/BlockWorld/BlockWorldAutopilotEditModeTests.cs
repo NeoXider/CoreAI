@@ -160,5 +160,36 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             Assert.AreEqual(revision, _world.Terrain.Store.Revision, "wander moves the character, it changes no block");
             Assert.AreEqual("wander", _world.Attribute("BlockWorldAutopilot"));
         }
+
+        [Test]
+        public void P6_Autopilot_WhileOff_LeavesThePlayerUntouched_SoUndoStillApplies()
+        {
+            long before = PlayerRevision();
+
+            _world.LoadSource("test_night", "game:GetService('Lighting').ClockTime = 22");
+            _world.Frame(600);
+
+            Assert.AreEqual(before, PlayerRevision(),
+                "ten seconds with the autopilot off write nothing to the Player, which is part of the saved world");
+            StringAssert.StartsWith("It is day", (string)_player.GetAttribute("AutopilotState"));
+        }
+
+        [Test]
+        public void P6_Autopilot_WhileItDrives_KeepsTheFactsFresh_NegativeTwin()
+        {
+            HostDrives("idle");
+
+            _world.LoadSource("test_night", "game:GetService('Lighting').ClockTime = 22");
+            _world.Frame(180);
+
+            StringAssert.StartsWith("It is night", (string)_player.GetAttribute("AutopilotState"),
+                "the facts the model reads follow the world while the autopilot drives");
+        }
+
+        private long PlayerRevision()
+        {
+            Assert.IsTrue(_world.Roblox.Registry.TryGetRecord(_player.Id, out InstanceRecord record));
+            return record.Revision;
+        }
     }
 }

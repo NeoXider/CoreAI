@@ -50,6 +50,11 @@ namespace CoreAI.Tests.PlayMode.RbxApi
         private const int ShotWidth = 640;
         private const int ShotHeight = 360;
 
+        // WHY ten minutes: the first world a fresh Editor composes compiles every shader variant it draws
+        // (the Rbx surfaces, the sky, the look's post-processing); on a loaded batchmode machine that took
+        // 178 s of the default 180 s budget once and went over it the next time.
+        private const int ComposeTimeoutMilliseconds = 600000;
+
         private readonly List<GameObject> _created = new();
         private readonly List<string> _findings = new();
         private readonly List<string> _problems = new();
@@ -62,6 +67,9 @@ namespace CoreAI.Tests.PlayMode.RbxApi
         public override void Setup()
         {
             base.Setup();
+            // WHY cleared here: NUnit reuses one fixture instance for every test in it.
+            _findings.Clear();
+            _problems.Clear();
             _savedCaptureDeltaTime = Time.captureDeltaTime;
             Time.captureDeltaTime = 1f / 60f;
             string projectRoot = Directory.GetParent(Application.dataPath)?.FullName
@@ -87,6 +95,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi
         }
 
         [UnityTest]
+        [Timeout(ComposeTimeoutMilliseconds)]
         public IEnumerator OneClickWorld_IsReadyToPlay()
         {
             yield return ComposeWorld();
@@ -107,6 +116,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi
         }
 
         [UnityTest]
+        [Timeout(ComposeTimeoutMilliseconds)]
         public IEnumerator OneClickWorld_DayCycleAndTorch_UnderTheDefaultLook()
         {
             yield return ComposeWorld();

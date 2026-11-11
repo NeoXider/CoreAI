@@ -216,6 +216,7 @@
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptContextEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptContextEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptContextRuleTableEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptContextRuleTableEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptRunRulesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptRunRulesEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptInstancesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptInstancesEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Unity/RbxShaderClusterLightLoopEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Unity/RbxShaderClusterLightLoopEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Terrain/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Terrain/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/Npc/*.cs" Link="Assets/CoreAI/Tests/EditMode/Npc/%(Filename)%(Extension)" />

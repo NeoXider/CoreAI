@@ -10,6 +10,7 @@ using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
+using CoreAI.Mods.Rbx.Instances.Scripts;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using CoreAI.Scripting.LuaCs;
@@ -3694,6 +3695,8 @@ namespace CoreAI.Ai.LuaCs
         private RbxMouseLock _cameraModuleMouseLock = RbxMouseLock.Default;
         private RbxInstance _cameraInstance;
         private CameraOcclusion _cameraOcclusion;
+        private RbxInstance _localTransparencyBody;
+        private float _localTransparencyValue;
 
         /// <summary>
         /// The behaviour of <c>CameraType.Custom</c>: a <see cref="RbxDefaultCameraModule"/> unless the host
@@ -3807,6 +3810,8 @@ namespace CoreAI.Ai.LuaCs
             }
 
             _cameraModuleActive = true;
+            ApplyLocalCharacterTransparency(EffectiveCameraSubject is RbxHumanoid ? subjectBody : null,
+                (float)output.LocalTransparency);
             if (output.HasCFrame)
             {
                 RbxInstance camera = ResolveCameraInstance();
@@ -3833,6 +3838,78 @@ namespace CoreAI.Ai.LuaCs
             _cameraModuleActive = false;
             _cameraModule?.Reset();
             ApplyCameraModuleMouseLock(RbxMouseLock.Default);
+            ApplyLocalCharacterTransparency(null, 0f);
+        }
+
+        /// <summary>
+        /// Gives the local character's parts the camera's <c>LocalTransparencyModifier</c>, as the PlayerModule's
+        /// TransparencyController does: every BasePart of the character outside a Tool, only on a change of value or
+        /// character, and back to 0 on the character the camera leaves. Other characters are never touched.
+        /// </summary>
+        /// <remarks>
+        /// WHY only on a change: a steady camera then writes and allocates nothing per frame. The cost is that a part
+        /// added to the character while the value holds keeps its own modifier until the value or the character
+        /// changes (the PlayerModule watches DescendantAdded instead).
+        /// </remarks>
+        private void ApplyLocalCharacterTransparency(RbxInstance body, float value)
+        {
+            if (!ReferenceEquals(body, _localTransparencyBody))
+            {
+                SetBodyLocalTransparency(_localTransparencyBody, 0f);
+                _localTransparencyBody = body;
+                _localTransparencyValue = -1f;
+            }
+
+            if (body == null || body.IsDestroyed || value.Equals(_localTransparencyValue))
+            {
+                return;
+            }
+
+            _localTransparencyValue = value;
+            SetBodyLocalTransparency(body, value);
+        }
+
+        private void SetBodyLocalTransparency(RbxInstance body, float value)
+        {
+            if (body == null || body.IsDestroyed)
+            {
+                return;
+            }
+
+            if (body is RbxBasePart single)
+            {
+                SetPartLocalTransparency(single, value);
+            }
+
+            IReadOnlyList<RbxInstance> descendants = body.GetDescendants();
+            for (int index = 0; index < descendants.Count; index++)
+            {
+                if (descendants[index] is RbxBasePart part && !HasToolAncestor(part, body))
+                {
+                    SetPartLocalTransparency(part, value);
+                }
+            }
+        }
+
+        private void SetPartLocalTransparency(RbxBasePart part, float value)
+        {
+            if (!part.IsDestroyed && part.SetLocalTransparencyModifier(value))
+            {
+                _partSink.SetLocalTransparencyModifier(part.Id, value);
+            }
+        }
+
+        private static bool HasToolAncestor(RbxInstance part, RbxInstance body)
+        {
+            for (RbxInstance node = part.Parent; node != null && !ReferenceEquals(node, body); node = node.Parent)
+            {
+                if (string.Equals(node.ClassName, "Tool", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -4514,6 +4591,10 @@ namespace CoreAI.Ai.LuaCs
                     "Script", context.OwnerModId, context.OriginTag,
                     isRuntimeInfrastructure: true);
                 script.Name = context.OwnerModId;
+                // WHY bound but nothing more (MVP4 step B1): the catalog now builds an RbxBaseScript here, and it
+                // names the mod it runs so step C1 can take this site over; its Enabled and RunContext stay at
+                // their defaults (true, Legacy), which is the legacy context of a mod without a header context.
+                ((RbxBaseScript)script).SourceId = context.OwnerModId;
                 script.Parent = container;
                 container.Parent = serverScripts;
 

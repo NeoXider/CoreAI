@@ -89,6 +89,13 @@ namespace CoreAI.Core.Tests.EditMode
                 text.Append(meter.FormatTextRow(name + " instructions (C# literal)", Lf(literal))).Append('\n');
                 text.Append(meter.FormatTextRow(name + " read_skill result",
                     Lf(ReadSkillLlmTool.ReadSkillJson(new[] { skill }, name)))).Append('\n');
+                for (int i = 1; i < skill.Sections.Count; i++)
+                {
+                    string section = skill.Sections[i].Name;
+                    text.Append(meter.FormatTextRow(name + " read_skill result, section " + section,
+                        Lf(ReadSkillLlmTool.ReadSkillJson(new[] { skill }, name, section)))).Append('\n');
+                }
+
                 text.Append(meter.FormatTextRow(name + " catalog entry",
                     Lf("- **" + name + "** - " + description))).Append('\n');
             }

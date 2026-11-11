@@ -1,0 +1,7 @@
+{
+  "name": "Rbx API",
+  "description": "Roblox-compatible Lua surface: Instance.new/game/workspace, datatypes (Vector3/CFrame/Color3/UDim/Random), Enum, Part spatial properties and Shape, UserInputService (keyboard/mouse), Roblox GUI (ScreenGui/Frame/TextLabel/TextButton) and UxmlService screens, workspace.Terrain block worlds, workspace.CurrentCamera, attributes and tags, the CODE|fix error format, and what is not implemented yet. Read before writing any Roblox-style (Rbx) script.",
+  "resources": "Assets/CoreAiUnity/Resources/AgentSkills/RbxApi.txt",
+  "csharp": "Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInRbxApiSkillText.cs",
+  "csharpClass": "BuiltInRbxApiSkillText"
+}

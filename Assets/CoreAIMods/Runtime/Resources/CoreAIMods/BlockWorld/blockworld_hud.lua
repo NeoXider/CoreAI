@@ -48,6 +48,20 @@ for index, item in ipairs(ITEMS) do
         .. '    </ui:Button>\n'
 end
 
+-- The key legend: what a new player needs on screen, one key per line.
+local LEGEND = {
+    { "Left click", "break" }, { "Right click", "place" }, { "1-9, wheel", "choose a block" },
+    { "WASD, Space", "walk, jump" }, { "Space twice", "fly" }, { "T", "talk to the AI" },
+    { "E", "talk to a villager" }, { "P", "autopilot" }, { "L", "time of day" }, { "G", "creative or survival" },
+}
+
+local legendMarkup = {}
+for index, entry in ipairs(LEGEND) do
+    legendMarkup[#legendMarkup + 1] = '    <ui:VisualElement class="legend-row" picking-mode="Ignore">'
+        .. '<ui:Label name="legendkey' .. index .. '" class="legend-key" text="' .. entry[1] .. '" picking-mode="Ignore" />'
+        .. '<ui:Label class="legend-text" text="' .. entry[2] .. '" picking-mode="Ignore" /></ui:VisualElement>\n'
+end
+
 local UXML = [[
 <ui:UXML xmlns:ui="UnityEngine.UIElements">
   <ui:Label name="crosshair" class="crosshair" text="+" picking-mode="Ignore" />
@@ -62,7 +76,9 @@ local UXML = [[
   <ui:VisualElement name="hotbar" class="hotbar">
 ]] .. table.concat(slotMarkup) .. [[
   </ui:VisualElement>
-  <ui:Label name="help" class="help" picking-mode="Ignore" text="Left click break   Right click place   1-9 / wheel choose   G creative   V view   E talk   P autopilot   L time   T chat" />
+  <ui:VisualElement name="help" class="help" picking-mode="Ignore">
+]] .. table.concat(legendMarkup) .. [[
+  </ui:VisualElement>
 </ui:UXML>
 ]]
 
@@ -88,8 +104,11 @@ local USS = [[
 .key { position: absolute; left: 4px; top: 1px; font-size: 11px; color: rgba(255, 255, 255, 0.85); }
 .count { position: absolute; right: 4px; bottom: 1px; font-size: 13px; color: rgb(255, 255, 255); -unity-font-style: bold;
   -unity-text-outline-width: 1px; -unity-text-outline-color: rgb(0, 0, 0); }
-.help { position: absolute; bottom: 16px; left: 16px; max-width: 260px; font-size: 12px; color: rgba(255, 255, 255, 0.8);
-  white-space: normal; text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.9); }
+.help { position: absolute; bottom: 14px; right: 14px; padding: 8px 12px 8px 12px; border-radius: 8px;
+  background-color: rgba(10, 14, 24, 0.6); }
+.legend-row { flex-direction: row; }
+.legend-key { width: 110px; font-size: 16px; color: rgb(255, 214, 120); -unity-font-style: bold; }
+.legend-text { font-size: 16px; color: rgb(240, 240, 240); }
 .is-hidden { display: none; }
 ]]
 

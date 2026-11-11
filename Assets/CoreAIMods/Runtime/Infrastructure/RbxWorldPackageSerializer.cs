@@ -131,6 +131,8 @@ namespace CoreAI.Mods.WorldPackages
 
         private const string StarterPlayerClassName = "StarterPlayer";
 
+        private const string StarterGuiClassName = "StarterGui";
+
         /// <summary>Captures the supported world-owned DataModel projection plus settings and mods.</summary>
         public static RbxWorldPackagePayload Capture(RbxWorldPackageCaptureContext context)
         {
@@ -221,7 +223,9 @@ namespace CoreAI.Mods.WorldPackages
                     PointLights = CapturePointLights(tree, context.Registry),
                     Lighting = CaptureLighting(tree, context.Game),
                     StarterPlayer = CaptureStarterPlayer(tree, context.Game),
-                    ModFolders = CaptureModFolders(context.ModFolderListStore)
+                    ModFolders = CaptureModFolders(context.ModFolderListStore),
+                    Gui = CaptureGui(tree, context.Registry, diagnostics),
+                    StarterGui = CaptureStarterGui(tree, context.Game)
                 });
             ValidatePayload(payload, context.Registry.Catalog);
             return payload;
@@ -307,6 +311,74 @@ namespace CoreAI.Mods.WorldPackages
                 if (node.Id == starterPlayer.Id.Value)
                 {
                     return settings;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// The <c>gui</c> block of every GUI node the projected tree retains (world-owned, wherever it sits; a mod's
+        /// own GUI and every PlayerGui copy are not in the tree), or null when it holds none. A lone UTF-16 surrogate
+        /// in a text property is replaced in the block only, with an <c>ill-formed-text</c> diagnostic, like every
+        /// other text the package writes.
+        /// </summary>
+        private static Dictionary<InstanceId, RbxWorldPackageGui> CaptureGui(
+            InstanceTreeSnapshot tree,
+            InstanceRegistry registry,
+            List<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            Dictionary<InstanceId, RbxWorldPackageGui> blocks = null;
+            foreach (InstanceSnapshot node in tree.Instances)
+            {
+                if (!RbxWorldPackageGui.IsGuiClass(node.ClassName))
+                {
+                    continue;
+                }
+
+                InstanceId id = new(node.Id);
+                if (!registry.TryGet(id, out RbxInstance instance))
+                {
+                    continue;
+                }
+
+                RbxWorldPackageGui block = RbxWorldPackageGui.Of(instance);
+                if (block == null)
+                {
+                    continue;
+                }
+
+                ulong nodeId = node.Id;
+                block = block.WithWellFormedText(member => diagnostics.Add(IllFormedTextDiagnostic(nodeId, member)));
+                blocks ??= new Dictionary<InstanceId, RbxWorldPackageGui>();
+                blocks.Add(id, block);
+            }
+
+            return blocks;
+        }
+
+        /// <summary>
+        /// The StarterGui service's switches when it is in the captured tree and any of them differs from the class
+        /// defaults; null otherwise, so a world that never touched them writes no block.
+        /// </summary>
+        private static RbxWorldPackageStarterGui? CaptureStarterGui(InstanceTreeSnapshot tree, RbxDataModel game)
+        {
+            if (!(game.FindFirstChildOfClass(StarterGuiClassName) is RbxStarterGui starterGui))
+            {
+                return null;
+            }
+
+            RbxWorldPackageStarterGui switches = RbxWorldPackageStarterGui.Of(starterGui);
+            if (switches.IsDefault)
+            {
+                return null;
+            }
+
+            foreach (InstanceSnapshot node in tree.Instances)
+            {
+                if (node.Id == starterGui.Id.Value)
+                {
+                    return switches;
                 }
             }
 
@@ -1294,6 +1366,14 @@ namespace CoreAI.Mods.WorldPackages
                     }
                 }
 
+                foreach (KeyValuePair<InstanceId, RbxWorldPackageGui> entry in payload.Gui)
+                {
+                    if (registry.TryGet(entry.Key, out RbxInstance instance))
+                    {
+                        entry.Value.ApplyTo(instance);
+                    }
+                }
+
                 registry.SetSceneRoot(game);
                 RbxInstance workspace = game.FindFirstChildOfClass("Workspace")
                     ?? throw new RbxWorldPackageException(
@@ -1310,6 +1390,12 @@ namespace CoreAI.Mods.WorldPackages
                     && game.FindFirstChildOfClass(StarterPlayerClassName) is RbxStarterPlayer starterPlayer)
                 {
                     payload.StarterPlayer.Value.ApplyTo(starterPlayer);
+                }
+
+                if (payload.StarterGui.HasValue
+                    && game.FindFirstChildOfClass(StarterGuiClassName) is RbxStarterGui starterGui)
+                {
+                    payload.StarterGui.Value.ApplyTo(starterGui);
                 }
 
                 if (payload.Lighting.HasValue && game.FindFirstChildOfClass(LightingClassName) is RbxLighting lighting)
@@ -1595,6 +1681,11 @@ namespace CoreAI.Mods.WorldPackages
                     };
                 }
 
+                if (payload.Gui.TryGetValue(new InstanceId(node.Id), out RbxWorldPackageGui gui))
+                {
+                    dto.Gui = WorldGuiDto.Of(gui);
+                }
+
                 if (node.Humanoid != null)
                 {
                     dto.Humanoid = new WorldHumanoidDto
@@ -1625,6 +1716,17 @@ namespace CoreAI.Mods.WorldPackages
                     CameraMode = starterPlayer.CameraMode.ToString(),
                     CameraMaxZoomDistance = starterPlayer.CameraMaxZoomDistance,
                     CameraMinZoomDistance = starterPlayer.CameraMinZoomDistance
+                };
+            }
+
+            if (payload.StarterGui.HasValue)
+            {
+                RbxWorldPackageStarterGui starterGui = payload.StarterGui.Value;
+                world.StarterGui = new WorldStarterGuiDto
+                {
+                    ShowDevelopmentGui = starterGui.ShowDevelopmentGui,
+                    ScreenOrientation = starterGui.ScreenOrientation,
+                    CoreGuiDisabled = new List<int>(starterGui.CoreGuiDisabled)
                 };
             }
 
@@ -1714,6 +1816,7 @@ namespace CoreAI.Mods.WorldPackages
             };
             Dictionary<InstanceId, PartProperties> parts = new();
             Dictionary<InstanceId, RbxWorldPackagePointLight> lights = null;
+            Dictionary<InstanceId, RbxWorldPackageGui> gui = null;
             foreach (WorldInstanceDto dto in world.Instances)
             {
                 InstanceSnapshot node = BuildInstanceSnapshot(dto);
@@ -1727,6 +1830,17 @@ namespace CoreAI.Mods.WorldPackages
                 {
                     lights ??= new Dictionary<InstanceId, RbxWorldPackagePointLight>();
                     if (!lights.TryAdd(new InstanceId(node.Id), BuildPointLight(dto.Light)))
+                    {
+                        throw new RbxWorldPackageException("world.json repeats instance id " + node.Id + ".");
+                    }
+                }
+
+                if (dto.Gui != null)
+                {
+                    gui ??= new Dictionary<InstanceId, RbxWorldPackageGui>();
+                    if (!gui.TryAdd(
+                            new InstanceId(node.Id),
+                            RbxWorldPackageGuiSchema.FromEntries(node.ClassName, node.Id, dto.Gui.Entries)))
                     {
                         throw new RbxWorldPackageException("world.json repeats instance id " + node.Id + ".");
                     }
@@ -1766,7 +1880,15 @@ namespace CoreAI.Mods.WorldPackages
                     StarterPlayer = world.StarterPlayer == null
                         ? (RbxWorldPackageStarterPlayer?)null
                         : BuildStarterPlayer(world.StarterPlayer),
-                    ModFolders = manifest.ModFolders
+                    ModFolders = manifest.ModFolders,
+                    Gui = gui,
+                    StarterGui = world.StarterGui == null
+                        ? (RbxWorldPackageStarterGui?)null
+                        : new RbxWorldPackageStarterGui(
+                            world.StarterGui.ShowDevelopmentGui,
+                            world.StarterGui.ScreenOrientation,
+                            world.StarterGui.CoreGuiDisabled
+                            ?? throw new RbxWorldPackageException("starter_gui.core_gui_disabled is nil."))
                 });
         }
 
@@ -2134,6 +2256,8 @@ namespace CoreAI.Mods.WorldPackages
             ValidateLights(payload);
             ValidateLighting(payload, root);
             ValidateStarterPlayer(payload, root);
+            ValidateGui(payload);
+            ValidateStarterGui(payload, root);
 
             string previousModId = null;
             foreach (RbxWorldModSource mod in payload.Mods)
@@ -2265,6 +2389,70 @@ namespace CoreAI.Mods.WorldPackages
 
             throw new RbxWorldPackageException(
                 "World package carries a starter_player block but its tree has no StarterPlayer service.");
+        }
+
+        /// <summary>
+        /// Refuses a <c>gui</c> block on a node that is not of its class, and a value the class's setter would refuse,
+        /// so restore, which puts every block back through the setters, never fails half-way.
+        /// </summary>
+        private static void ValidateGui(RbxWorldPackagePayload payload)
+        {
+            if (payload.Gui.Count == 0)
+            {
+                return;
+            }
+
+            Dictionary<ulong, string> classes = new(payload.Tree.Instances.Count);
+            foreach (InstanceSnapshot node in payload.Tree.Instances)
+            {
+                classes[node.Id] = node.ClassName;
+            }
+
+            foreach (KeyValuePair<InstanceId, RbxWorldPackageGui> entry in payload.Gui)
+            {
+                string id = entry.Key.Value.ToString(CultureInfo.InvariantCulture);
+                if (entry.Value == null
+                    || !classes.TryGetValue(entry.Key.Value, out string className)
+                    || !string.Equals(className, entry.Value.ClassName, StringComparison.Ordinal))
+                {
+                    throw new RbxWorldPackageException(
+                        "World package carries GUI state for instance " + id + ", which is not a "
+                        + (entry.Value?.ClassName ?? "GUI node") + " of the tree.");
+                }
+
+                string problem = RbxWorldPackageGuiSchema.DescribeInvalid(entry.Value);
+                if (problem != null)
+                {
+                    throw new RbxWorldPackageException(
+                        "World package gui block of " + className + " " + id + " is invalid: " + problem + ".");
+                }
+            }
+        }
+
+        private static void ValidateStarterGui(RbxWorldPackagePayload payload, InstanceSnapshot root)
+        {
+            if (!payload.StarterGui.HasValue)
+            {
+                return;
+            }
+
+            string problem = payload.StarterGui.Value.DescribeInvalidList();
+            if (problem != null)
+            {
+                throw new RbxWorldPackageException("World package starter_gui is invalid: " + problem + ".");
+            }
+
+            foreach (InstanceSnapshot node in payload.Tree.Instances)
+            {
+                if (node.ParentId == root.Id
+                    && string.Equals(node.ClassName, StarterGuiClassName, StringComparison.Ordinal))
+                {
+                    return;
+                }
+            }
+
+            throw new RbxWorldPackageException(
+                "World package carries a starter_gui block but its tree has no StarterGui service.");
         }
 
         private static void ValidateSettings(RbxWorldSettings settings)
@@ -2707,9 +2895,13 @@ namespace CoreAI.Mods.WorldPackages
                 MissingMemberHandling = MissingMemberHandling.Error,
                 NullValueHandling = NullValueHandling.Include,
                 DateParseHandling = DateParseHandling.None,
-                FloatParseHandling = FloatParseHandling.Double
+                FloatParseHandling = FloatParseHandling.Double,
+                Converters = { GuiBlocks }
             };
         }
+
+        /// <summary>Constructed here rather than named in an attribute, so no reflection has to create it in a stripped player.</summary>
+        private static readonly GuiBlockConverter GuiBlocks = new();
 
         private static RbxCFrame BuildCFrame(float[] values, string field)
         {
@@ -2958,6 +3150,24 @@ namespace CoreAI.Mods.WorldPackages
             // byte-identical; a reader up to 7.56.0 refuses the key by name.
             [JsonProperty("starter_player", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
             public WorldStarterPlayerDto StarterPlayer;
+
+            // WHY omitted when null: a world that kept the StarterGui switches at their defaults writes no key and
+            // stays byte-identical; a reader up to 7.56.0 refuses the key by name.
+            [JsonProperty("starter_gui", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public WorldStarterGuiDto StarterGui;
+        }
+
+        [Serializable]
+        private sealed class WorldStarterGuiDto
+        {
+            [JsonProperty("show_development_gui", Required = Required.Always)]
+            public bool ShowDevelopmentGui;
+
+            [JsonProperty("screen_orientation", Required = Required.Always)]
+            public int ScreenOrientation;
+
+            [JsonProperty("core_gui_disabled", Required = Required.Always)]
+            public List<int> CoreGuiDisabled;
         }
 
         [Serializable]
@@ -3094,6 +3304,275 @@ namespace CoreAI.Mods.WorldPackages
             // without one stays byte-identical; readers up to 7.56.0 refuse the key by name.
             [JsonProperty("light", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
             public WorldLightDto Light;
+
+            // WHY omitted when null: an instance that is no GUI node writes no key, so every package without GUI
+            // stays byte-identical; readers up to 7.56.0 refuse the key by name.
+            [JsonProperty("gui", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public WorldGuiDto Gui;
+        }
+
+        /// <summary>
+        /// A <c>gui</c> block as its key/value pairs in document order; <see cref="GuiBlockConverter"/> reads and
+        /// writes it, typed by <see cref="RbxWorldPackageGuiSchema"/>.
+        /// </summary>
+        private sealed class WorldGuiDto
+        {
+            public List<KeyValuePair<string, RbxGuiValue>> Entries = new();
+
+            public static WorldGuiDto Of(RbxWorldPackageGui gui)
+            {
+                WorldGuiDto dto = new();
+                for (int index = 0; index < gui.Count; index++)
+                {
+                    dto.Entries.Add(new KeyValuePair<string, RbxGuiValue>(
+                        RbxWorldPackageGuiSchema.KeyAt(gui.ClassName, index), gui.ValueAt(index)));
+                }
+
+                return dto;
+            }
+        }
+
+        /// <summary>
+        /// Reads and writes a <c>gui</c> block. A key no GUI class has is refused by name, as
+        /// <c>MissingMemberHandling.Error</c> refuses one in every other block; a value of the wrong JSON type, an
+        /// offset that is not an integer, NaN, and an infinity outside <c>min_size</c>/<c>max_size</c> are refused.
+        /// </summary>
+        private sealed class GuiBlockConverter : JsonConverter
+        {
+            public override bool CanConvert(Type objectType)
+            {
+                return objectType == typeof(WorldGuiDto);
+            }
+
+            public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
+            {
+                WorldGuiDto dto = (WorldGuiDto)value;
+                writer.WriteStartObject();
+                foreach (KeyValuePair<string, RbxGuiValue> entry in dto.Entries)
+                {
+                    writer.WritePropertyName(entry.Key);
+                    RbxGuiValue item = entry.Value;
+                    switch (item.Kind)
+                    {
+                        case RbxGuiValueKind.Bool:
+                            writer.WriteValue(item.Flag);
+                            break;
+                        case RbxGuiValueKind.Int:
+                            writer.WriteValue(item.First);
+                            break;
+                        case RbxGuiValueKind.Float:
+                            writer.WriteValue(item.X);
+                            break;
+                        case RbxGuiValueKind.Color3:
+                            writer.WriteStartArray();
+                            writer.WriteValue(item.X);
+                            writer.WriteValue(item.Y);
+                            writer.WriteValue(item.Z);
+                            writer.WriteEndArray();
+                            break;
+                        case RbxGuiValueKind.UDim:
+                            writer.WriteStartArray();
+                            writer.WriteValue(item.X);
+                            writer.WriteValue(item.First);
+                            writer.WriteEndArray();
+                            break;
+                        case RbxGuiValueKind.UDim2:
+                            writer.WriteStartArray();
+                            writer.WriteValue(item.X);
+                            writer.WriteValue(item.First);
+                            writer.WriteValue(item.Y);
+                            writer.WriteValue(item.Second);
+                            writer.WriteEndArray();
+                            break;
+                        case RbxGuiValueKind.Vector2:
+                            writer.WriteStartArray();
+                            writer.WriteValue(item.X);
+                            writer.WriteValue(item.Y);
+                            writer.WriteEndArray();
+                            break;
+                        default:
+                            writer.WriteValue(item.Text);
+                            break;
+                    }
+                }
+
+                writer.WriteEndObject();
+            }
+
+            public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
+            {
+                if (reader.TokenType == JsonToken.Null)
+                {
+                    return null;
+                }
+
+                if (reader.TokenType != JsonToken.StartObject)
+                {
+                    throw new JsonSerializationException("A gui block must be a JSON object.");
+                }
+
+                WorldGuiDto dto = new();
+                while (Next(reader) != JsonToken.EndObject)
+                {
+                    if (reader.TokenType != JsonToken.PropertyName)
+                    {
+                        throw new JsonSerializationException("A gui block holds an unexpected " + reader.TokenType + ".");
+                    }
+
+                    string key = (string)reader.Value;
+                    if (!RbxWorldPackageGuiSchema.TryGetKind(key, out RbxGuiValueKind kind))
+                    {
+                        throw new JsonSerializationException("Could not find member '" + key + "' on a gui block.");
+                    }
+
+                    Next(reader);
+                    dto.Entries.Add(new KeyValuePair<string, RbxGuiValue>(key, ReadValue(reader, key, kind)));
+                }
+
+                return dto;
+            }
+
+            private static RbxGuiValue ReadValue(JsonReader reader, string key, RbxGuiValueKind kind)
+            {
+                switch (kind)
+                {
+                    case RbxGuiValueKind.Bool:
+                        if (reader.TokenType != JsonToken.Boolean)
+                        {
+                            throw Wrong(key, "a boolean");
+                        }
+
+                        return RbxGuiValue.OfBool((bool)reader.Value);
+                    case RbxGuiValueKind.Int:
+                        return RbxGuiValue.OfInt(ReadInt(reader, key));
+                    case RbxGuiValueKind.Float:
+                        return RbxGuiValue.OfFloat(ReadFloat(reader, key, false));
+                    case RbxGuiValueKind.Text:
+                        if (reader.TokenType != JsonToken.String)
+                        {
+                            throw Wrong(key, "a string");
+                        }
+
+                        return RbxGuiValue.OfText((string)reader.Value);
+                    default:
+                        return ReadArray(reader, key, kind);
+                }
+            }
+
+            private static RbxGuiValue ReadArray(JsonReader reader, string key, RbxGuiValueKind kind)
+            {
+                if (reader.TokenType != JsonToken.StartArray)
+                {
+                    throw Wrong(key, "an array");
+                }
+
+                bool infinity = RbxWorldPackageGuiSchema.AllowsInfinity(key);
+                RbxGuiValue value;
+                Next(reader);
+                switch (kind)
+                {
+                    case RbxGuiValueKind.Color3:
+                    {
+                        float r = ReadFloat(reader, key, false);
+                        Next(reader);
+                        float g = ReadFloat(reader, key, false);
+                        Next(reader);
+                        value = RbxGuiValue.OfColor(new RbxColor3(r, g, ReadFloat(reader, key, false)));
+                        break;
+                    }
+                    case RbxGuiValueKind.UDim:
+                    {
+                        float scale = ReadFloat(reader, key, false);
+                        Next(reader);
+                        value = RbxGuiValue.OfUDim(new RbxUDim(scale, ReadInt(reader, key)));
+                        break;
+                    }
+                    case RbxGuiValueKind.UDim2:
+                    {
+                        float xScale = ReadFloat(reader, key, false);
+                        Next(reader);
+                        int xOffset = ReadInt(reader, key);
+                        Next(reader);
+                        float yScale = ReadFloat(reader, key, false);
+                        Next(reader);
+                        value = RbxGuiValue.OfUDim2(new RbxUDim2(xScale, xOffset, yScale, ReadInt(reader, key)));
+                        break;
+                    }
+                    default:
+                    {
+                        float x = ReadFloat(reader, key, infinity);
+                        Next(reader);
+                        value = RbxGuiValue.OfVector2(new RbxVector2(x, ReadFloat(reader, key, infinity)));
+                        break;
+                    }
+                }
+
+                if (Next(reader) != JsonToken.EndArray)
+                {
+                    throw Wrong(key, "an array of the property's length");
+                }
+
+                return value;
+            }
+
+            private static int ReadInt(JsonReader reader, string key)
+            {
+                if (reader.TokenType != JsonToken.Integer)
+                {
+                    throw Wrong(key, "an integer");
+                }
+
+                long value = Convert.ToInt64(reader.Value, CultureInfo.InvariantCulture);
+                if (value < int.MinValue || value > int.MaxValue)
+                {
+                    throw Wrong(key, "a 32-bit integer");
+                }
+
+                return (int)value;
+            }
+
+            private static float ReadFloat(JsonReader reader, string key, bool allowInfinity)
+            {
+                double value;
+                switch (reader.TokenType)
+                {
+                    case JsonToken.Integer:
+                    case JsonToken.Float:
+                        value = Convert.ToDouble(reader.Value, CultureInfo.InvariantCulture);
+                        break;
+                    case JsonToken.String when allowInfinity && (string)reader.Value == "Infinity":
+                        value = double.PositiveInfinity;
+                        break;
+                    case JsonToken.String when allowInfinity && (string)reader.Value == "-Infinity":
+                        value = double.NegativeInfinity;
+                        break;
+                    default:
+                        throw Wrong(key, "a number");
+                }
+
+                float narrowed = (float)value;
+                if (double.IsNaN(value) || (!allowInfinity && float.IsInfinity(narrowed)))
+                {
+                    throw Wrong(key, "a finite number");
+                }
+
+                return narrowed;
+            }
+
+            private static JsonToken Next(JsonReader reader)
+            {
+                if (!reader.Read())
+                {
+                    throw new JsonSerializationException("A gui block ends before it is complete.");
+                }
+
+                return reader.TokenType;
+            }
+
+            private static JsonSerializationException Wrong(string key, string expected)
+            {
+                return new JsonSerializationException("gui key '" + key + "' needs " + expected + ".");
+            }
         }
 
         [Serializable]

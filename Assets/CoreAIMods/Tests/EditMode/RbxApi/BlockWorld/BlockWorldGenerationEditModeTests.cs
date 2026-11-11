@@ -144,6 +144,25 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         }
 
         [Test]
+        public void P6_World_TheSpawn_FacesTheSameLevelHeading_ForTheSameSeed()
+        {
+            RbxVector3 first;
+            using (BlockWorldTestWorld world = new())
+            {
+                world.Load(Mod);
+                first = world.Vector("BlockWorldSpawnLook");
+            }
+
+            using BlockWorldTestWorld again = new();
+            again.Load(Mod);
+            RbxVector3 second = again.Vector("BlockWorldSpawnLook");
+
+            Assert.AreEqual(0f, first.Y, 1e-5f, "the heading is level");
+            Assert.AreEqual(1f, first.Magnitude, 1e-4f, "the heading is a unit vector");
+            Assert.AreEqual(first, second, "the same seed faces the same way");
+        }
+
+        [Test]
         public void P6_World_TheSpawn_StandsInTheAirAboveLand()
         {
             using BlockWorldTestWorld world = new();

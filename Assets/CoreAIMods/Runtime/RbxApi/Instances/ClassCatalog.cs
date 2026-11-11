@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Instances.Networking;
+using CoreAI.Mods.Rbx.Instances.Scripts;
 
 namespace CoreAI.Mods.Rbx.Instances
 {
@@ -567,14 +568,21 @@ namespace CoreAI.Mods.Rbx.Instances
             // "will always return true"), and Changed/IsA/GetPropertyChangedSignal are declared on it.
             catalog.Register(new ClassDescriptor("Object", null, true, false, false));
             catalog.Register(new ClassDescriptor("Instance", "Object", true, false, false));
+            // WHY Script, LocalScript and ModuleScript creatable (MVP4 design note SC-17, step B1): a script is an
+            // ordinary instance in Roblox; one made by Instance.new is unbound (no SourceId) and runs nothing until
+            // step C1 binds sources to instances. The abstract rows match LuaSourceContainer.yaml and
+            // BaseScript.yaml, both NotCreatable.
             catalog.Register(new ClassDescriptor(
                 "LuaSourceContainer", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor(
                 "BaseScript", "LuaSourceContainer", true, false, false));
             catalog.Register(new ClassDescriptor(
-                "Script", "BaseScript", false, false, false));
+                "Script", "BaseScript", false, true, false, descriptor => new RbxBaseScript(descriptor)));
             catalog.Register(new ClassDescriptor(
-                "LocalScript", "Script", false, false, false));
+                "LocalScript", "Script", false, true, false, descriptor => new RbxBaseScript(descriptor)));
+            catalog.Register(new ClassDescriptor(
+                "ModuleScript", "LuaSourceContainer", false, true, false,
+                descriptor => new RbxLuaSourceContainer(descriptor)));
             catalog.Register(new ClassDescriptor("BaseRemoteEvent", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor("RemoteEvent", "BaseRemoteEvent", false, true, false,
                 descriptor => new RbxRemoteEvent(descriptor)));
@@ -704,6 +712,25 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.Register(new ClassDescriptor("Light", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor("PointLight", "Light", false, true, false,
                 descriptor => new RbxPointLight(descriptor)));
+
+            // WHY the script members are stubs although RbxBaseScript holds Enabled and RunContext: the Lua surface of
+            // script instances is MVP4 step C2 (with Source as a view over the store), and until then Lua keeps
+            // seeing exactly what it saw before step B1.
+            const string scriptMembers =
+                "a script's Enabled, RunContext and Source reach Lua with MVP4; manage the mod with manage_mods meanwhile";
+            catalog.RegisterKnownUnimplementedMembers("BaseScript",
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("Enabled", "MVP4", scriptMembers),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("Disabled", "MVP4", scriptMembers),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("RunContext", "MVP4", scriptMembers),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("LinkedSource",
+                    "deprecated in Roblox (BaseScript.yaml); keep the source in the mod itself"));
+            catalog.RegisterKnownUnimplementedMembers("Script",
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("Source", "MVP4", scriptMembers));
+            catalog.RegisterKnownUnimplementedMembers("ModuleScript",
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("Source", "MVP4",
+                    "require and ModuleScript sources arrive with MVP4; share code with mods_export/mods_call meanwhile"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("LinkedSource",
+                    "deprecated in Roblox (ModuleScript.yaml); keep the source in the mod itself"));
 
             // WHY Raycast is absent from the WorldRoot table below: it landed in MVP8 slice 8.5, and
             // a stub for a shipped member is worse than none — it fails a call that works.

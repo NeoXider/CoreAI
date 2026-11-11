@@ -384,6 +384,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             yield return P3Fixtures.CapturePayload("Plain", "Second");
             yield return HandBuiltPayload(true);
             yield return HandBuiltPayload(false);
+            yield return WorldPackageGuiWorld.WithHud("worldpkg-encode-gui").Capture(CapturedAtUtc);
         }
 
         private static RbxWorldPackagePayload HandBuiltPayload(bool withOptionalState)

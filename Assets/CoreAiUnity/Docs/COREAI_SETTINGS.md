@@ -364,7 +364,7 @@ When **there is no LLM connection** — the system returns a stub response.
 
 | Role | Response |
 |------|-------|
-| **Programmer** | ` ```lua\n-- Offline: Lua not available\nfunction noop() end\n``` ` |
+| **Programmer** | one sentence a player can act on (`OfflineLlmClient.OfflineProgrammerReply`): "No AI model is set up, so the AI cannot build or script anything yet. Choose a model in the Hub (Settings), then ask again." |
 | **Creator** | `{"created": false, "note": "offline"}` |
 | **CoreMechanicAI** | `{"result": "ok", "value": 0, "note": "offline"}` |
 | **Analyzer** | `{"recommendations": [], "status": "offline"}` |

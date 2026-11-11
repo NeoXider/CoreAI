@@ -134,13 +134,15 @@ at runtime (a quality level with the opaque texture off), or knows better, calls
 `RbxSceneTextures.SetAvailable`; nothing else, the default look included, sets it.
 
 **Fog.** Every lit Rbx shader (Procedural Surface, Procedural Transparent, Textured Surface, Water)
-computes its fog factor in the vertex stage from the clip-space z, the way URP's own vertex fog does, and
-mixes it in the fragment stage. URP's `ComputeFogFactor` fed the fragment-stage `SV_POSITION.z` (device
-depth) instead put every surface near the far plane, so with fog on, which the default look turns on,
-every part took the full fog colour. Computing it per pixel from the view depth also worked, but pushed
-Textured Surface's largest variant (instancing, main and additional light shadows, the clustered light
-loop, both reflection-probe keywords, emission and occlusion, as CrackedLava draws under a shadowed point
-light) past the D3D shader compiler's memory limit.
+passes the view depth from the vertex stage and computes the fog factor from it per pixel, clamped at the
+near plane, as URP's own fragment fog does. Three earlier forms failed in captures: URP's
+`ComputeFogFactor` fed the fragment-stage `SV_POSITION.z` (device depth) put every surface near the far
+plane, so with fog on, which the default look turns on, every part took the full fog colour; a fog factor
+computed per vertex clamps the vertices behind the camera, so the baseplate's far fog spread onto the
+ground in front of the camera; and a per-pixel view transform pushed Textured Surface's largest variant
+(instancing, both shadow keywords, the clustered light loop, both reflection-probe keywords, emission and
+occlusion, as CrackedLava draws under a shadowed point light) past the D3D shader compiler's memory
+limit.
 
 **Surface detail** (`_SurfaceDetail`, set to 1 for Plastic, 0.6 for SmoothPlastic and 0.8 for Salt)
 adds broad handling smudges to the roughness and a footprint-filtered orange-peel relief. The albedo is

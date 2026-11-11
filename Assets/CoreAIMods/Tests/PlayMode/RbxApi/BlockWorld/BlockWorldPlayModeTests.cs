@@ -278,7 +278,9 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
         {
             yield return BuildWorld();
             RbxVector3 eye = RootPosition() + new RbxVector3(0f, 1.5f, 0f);
-            yield return Aim(eye, eye + new RbxVector3(3f, -8f, 3f));
+            // WHY the cell next to the one under the feet: breaking that one drops the character into the hole,
+            // and a block is never placed where the character stands.
+            yield return Aim(eye, eye + new RbxVector3(8f, -6f, 3f));
             Assert.AreEqual(true, Attribute("CrosshairHasTarget"), "the ground next to the character: " + Problems());
             RbxVector3 cell = (RbxVector3)Attribute("CrosshairCell");
 
@@ -307,9 +309,21 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
         public IEnumerator P6_PlayMode_AClickBeyondTheReach_ChangesNothing_NegativeTwin()
         {
             yield return BuildWorld();
+            // WHY a pillar 32 studs from the eyes: the reach is measured from the character's eyes, not from the
+            // camera, so a block straight under a raised camera is still within reach.
             RbxVector3 eye = RootPosition() + new RbxVector3(0f, 1.5f, 0f);
-            yield return Aim(eye + new RbxVector3(0f, 60f, 0f), eye + new RbxVector3(1f, -20f, 1f));
-            Assert.AreEqual(false, Attribute("CrosshairHasTarget"), "the ground is 60 studs below the camera");
+            int px = (int)System.Math.Floor(eye.X / 4f) + 8;
+            int py = (int)System.Math.Floor(eye.Y / 4f) + 3;
+            int pz = (int)System.Math.Floor(eye.Z / 4f);
+            TerrainMaterials.TryGetSlot("Concrete", out byte concrete);
+            for (int y = py - 1; y <= py + 1; y++)
+            {
+                _terrain.Store.SetCell(px, y, pz, concrete, 255);
+            }
+
+            yield return Frames(10);
+            yield return Aim(eye, new RbxVector3((px + 0.5f) * 4f, (py + 0.5f) * 4f, (pz + 0.5f) * 4f));
+            Assert.AreEqual(false, Attribute("CrosshairHasTarget"), "a block 32 studs from the eyes is out of reach");
             // WHY counters and not the store revision: the world keeps streaming columns in while the test runs.
             object placed = Attribute("BlockWorldPlaced");
             object broken = Attribute("BlockWorldBroken");

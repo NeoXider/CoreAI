@@ -217,7 +217,9 @@ local function watch(player)
     publishContract(player)
     player:GetAttributeChangedSignal("AutopilotGoal"):Connect(onGoal)
     player:GetAttributeChangedSignal("Autopilot"):Connect(function()
-        if not engaged() then
+        if engaged() then
+            stateTimer = 0
+        else
             goal, shelter = "", nil
         end
         showBanner()
@@ -240,6 +242,11 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 RunService.Heartbeat:Connect(function(dt)
+    -- WHY only while engaged: the Player is part of the saved world, so a write to it while nobody drives would
+    -- count as an edit after the player's last AI change and /undo would refuse to take that change back.
+    if not engaged() then
+        return
+    end
     stateTimer = stateTimer - dt
     if stateTimer <= 0 then
         stateTimer = STATE_SECONDS
@@ -247,9 +254,6 @@ RunService.Heartbeat:Connect(function(dt)
         if player then
             player:SetAttribute("AutopilotState", describe())
         end
-    end
-    if not engaged() then
-        return
     end
     stepTimer = stepTimer - dt
     if stepTimer > 0 then

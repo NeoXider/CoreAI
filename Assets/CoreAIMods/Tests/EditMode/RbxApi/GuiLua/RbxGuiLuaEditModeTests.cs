@@ -411,5 +411,42 @@ gui.Parent = viaPlayers.PlayerGui");
             Assert.IsNotNull(Presenter.GetScreenPort((RbxScreenGui)playerGui.FindFirstChild("ViaPlayers")),
                 "the same PlayerGui, reached through Players, is drawn");
         }
+
+        private void InputFrame()
+        {
+            _world.Roblox.PumpInput();
+            _world.Frame();
+        }
+
+        [Test]
+        public void MVP15_Lua_UserInputService_ReportsTheFocusedGuiTextBox_AndItsRelease()
+        {
+            NewWorld();
+            _world.Load(Mod, Hud + @"
+local UIS = game:GetService('UserInputService')
+local log = {}
+UIS.TextBoxFocused:Connect(function(b) table.insert(log, 'focused:' .. (b and b.Name or 'nil')) end)
+UIS.TextBoxFocusReleased:Connect(function(b) table.insert(log, 'released:' .. (b and b.Name or 'nil')) end)
+game:GetService('RunService').Heartbeat:Connect(function()
+  local focused = UIS:GetFocusedTextBox()
+  store_set('now', focused and focused.Name or 'nil')
+  store_set('log', table.concat(log, ','))
+end)");
+            InputFrame();
+            Assert.AreEqual("nil", _world.Get(Mod, "now"), "twin: nothing is focused before the capture");
+            Assert.AreEqual("", _world.Get(Mod, "log"));
+
+            Find<RbxTextBox>("Chat").CaptureFocus();
+            InputFrame();
+            InputFrame();
+            Assert.AreEqual("Chat", _world.Get(Mod, "now"));
+            Assert.AreEqual("focused:Chat", _world.Get(Mod, "log"), "the box is the argument, and no nil event");
+
+            Find<RbxTextBox>("Chat").ReleaseFocus(false);
+            InputFrame();
+            InputFrame();
+            Assert.AreEqual("nil", _world.Get(Mod, "now"));
+            Assert.AreEqual("focused:Chat,released:Chat", _world.Get(Mod, "log"));
+        }
     }
 }

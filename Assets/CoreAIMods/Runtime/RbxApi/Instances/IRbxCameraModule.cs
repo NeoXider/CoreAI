@@ -101,5 +101,12 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>The distance actually kept after the pull-in, studs.</summary>
         public double Distance;
+
+        /// <summary>
+        /// The <c>LocalTransparencyModifier</c> the world gives the local character's parts this frame (the
+        /// PlayerModule's TransparencyController): 1 in first person, fading near it, 0 otherwise. A module that
+        /// leaves it at 0 keeps the character drawn.
+        /// </summary>
+        public double LocalTransparency;
     }
 }
