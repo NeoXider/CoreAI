@@ -503,8 +503,8 @@ flagship, with recorded evidence.
 | Milestone | Outcome | Rungs and packages | Gate | Demos |
 |---|---|---|---|---|
 | **M0 Ready to play** | A new project reaches a working world and an honest model connection in minutes | P3 (one-click world), P11 stage 1, spikes S1 and S2, the open MVP3 player checks, one live-model run with a valid provider key | From a fresh checkout: one menu, one key, the first AI-made object; a missing module fails loudly | the one-click world |
-| **M1 Block world** | The Minecraft-style demo, solo: walk and fly, build with blocks and by chat, talk to NPCs, switch on the autopilot | P1, P2, P3, P4, P6, P7, P8 stage 1, P12 stage 1, P13, P18, P19, P20; MVP4 alongside | The Block world demo — Lua end to end, interface included — passes its recorded script in the editor and in a WebGL player; the P19 budgets hold; the bundled sample mods and published demos run on the defaults | Block world |
-| **M2 Whole games from chat** | A complete small game — HUD, sound, saving — made by talking; the harness upgrades | The solo halves of MVP15, MVP16 and MVP17; MVP13; the self-repair and manifest parts of MVP18; P5, P8 stage 2, P9, P10 stage 1, P11 stage 2, P12 stage 2, P14, P15, P16, P17 | A person who writes no code gets a playable game with HUD, sound and saving in 15 minutes; a "whole game" benchmark tier measures it | an obby and a tycoon from templates, an NPC town, an application that is not a game on the same harness |
+| **M1 Block world** | The Minecraft-style demo, solo: walk and fly, build with blocks and by chat, talk to NPCs, switch on the autopilot | P1, P2, P3, P4, P6, P7, P8 stage 1, the day-cycle slice of P9, P12, P13, P18, P19, P20; MVP4, the solo half of MVP15 and the Luau math slice of MVP13 alongside | The Block world demo — Lua end to end, interface included — passes its recorded script in the editor and in a WebGL player; the P19 budgets hold; the bundled sample mods and published demos run on the defaults | Block world |
+| **M2 Whole games from chat** | A complete small game — HUD, sound, saving — made by talking; the harness upgrades | The solo halves of MVP16 and MVP17; MVP13; the self-repair and manifest parts of MVP18; P5, P8 stage 2, the rest of P9, P10 stage 1, P11 stage 2, P14, P15, P16, P17 | A person who writes no code gets a playable game with HUD, sound and saving in 15 minutes; a "whole game" benchmark tier measures it | an obby and a tycoon from templates, an NPC town, an application that is not a game on the same harness |
 | **M3 Together** | Several players create in one room | MVP5, MVP6, the network half of MVP7, MVP11, the network halves of MVP15–MVP17 | Four players in a room, two prompting the AI at once; every edit visible within 1 tick + RTT; the world survives joins and leaves | Block world co-op |
 | **M4 Platform** | Dedicated servers, scale, Roblox import, asset import, hardening | MVP8, MVP9, MVP10, MVP14 (import first), the rest of MVP18, MVP19, P10 stage 2, the flagship's own project | The rungs' own DoDs | the flagship |
 
@@ -1512,9 +1512,11 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 ### MVP15 — GUI + remaining input (L) *(the old MVP14 and the rest of the old MVP10)*
 
-- **Order (2026-11-11)**: the primary UI path is UXML/USS from Lua (P18, M1; plan decision D14). The class
-  set of this rung becomes a compatibility layer over P18's element factory for imported Roblox scripts:
-  its solo half is M2, and `StarterGui` replication with the multi-client fixtures is M3.
+- **Order (2026-11-11)**: game UI has two interchangeable entrances over one element factory (plan
+  decision D14): UXML/USS text from Lua (P18) and this rung's Roblox GUI classes. A Roblox UI script runs
+  unchanged, and the AI builds an interface from its Roblox priors without reading a skill. The solo half
+  of the class set is M1, right after P18's factory lands; `StarterGui` replication with the multi-client
+  fixtures is M3.
 - **Goal**: tutorial-grade GUI scripts run on host, client and WebGL: `ScreenGui`/`Frame`/`TextLabel`/
   `TextButton`/`ImageLabel`/`TextBox` + `UICorner`/`UIListLayout`, rendered as runtime UI Toolkit
   (UXML/USS interpreted at runtime — RUNTIME-first, the same approach as the Hub).
@@ -2182,11 +2184,22 @@ against the providers.
   - **"Build here"**: the chat turn carries the targeted cell and the player's position (P5's context, M1
     slice), and the skill text gains a block-world recipe (`FillBlock`/`WriteVoxels`, sizes in cells), so
     "a watchtower here" lands at the crosshair, then `/undo` (P3) takes it back.
-  - **Integration points, not implementations**: villagers spawn as Humanoid NPCs whose lines go to the
-    feed and `TextChatService:DisplayBubble` (logic in P12); `/autopilot` hands the local Humanoid to the
-    decision model (P13). The demo works with both absent.
-  - **Water** as the P4 transparent block; **optional day cycle** once `Lighting.ClockTime` maps to the
-    sun (a look-profile item).
+  - **Villagers made by the mod**: the mod creates each villager as an agent through `AIService` (P12)
+    with a name, a persona and its own memory; talking to one happens in the in-world chat and in a
+    bubble over its head. `/autopilot` hands the local Humanoid to the decision model (P13). The `Ai`
+    capability is switched on by this demo's preset; with no model configured the villagers stay silent
+    and say why.
+  - **Procedural world**: the mod generates the terrain from a seed with `math.noise` — hills, a water
+    level, sand at the shore, stone below, trees — in budgeted steps around the player through
+    `Terrain:WriteVoxels`, so the first area appears at once and the rest streams in without a hitch;
+    the same seed gives the same world. It needs the Luau math slice of MVP13 (`math.noise`,
+    `math.clamp`, `math.round`, `math.sign`; none is implemented today, `Random.new(seed)` is).
+  - **Day and night**: a Lua clock advances `Lighting.ClockTime`; the sun, the ambient light and the sky
+    follow (the day-cycle slice of P9), and `/time` sets it.
+  - **Torches**: a placeable block that carries a `PointLight` and an emissive flame, so the player
+    lights caves and nights. The light budget is explicit: Forward+ carries many lights on desktop, and
+    the WebGL tier keeps the nearest lights on and says so.
+  - **Water** is the P4 Terrain water drawn with the P8 material.
   - A README beside the scene with the controls, the prompts to try and what needs a model.
 - **Test**: PL (the mod's hotbar, place and break logic against a fake Terrain); PM `FastNoLlm` (scripted
   input places and breaks a block at the crosshair, the outline follows the target, a scripted model's
@@ -2201,6 +2214,12 @@ against the providers.
   - "Build a watchtower here" with a scripted model writes cells only inside a box at the crosshair, and
     `/undo` restores the terrain byte-identically (golden).
   - The demo's saved world reopens identically after a restart, inside the WebGL budget.
+  - The same seed generates a byte-identical world twice (golden), and generating the first visible area
+    keeps the P19 frame budget.
+  - Advancing `ClockTime` from noon to midnight darkens a masked ground crop, and a placed torch lights a
+    masked wall crop at night (twin: with the torch removed the crop is dark).
+  - A villager created by the mod answers the player by name, through a scripted model in PM and a real
+    one in MS; with the `Ai` capability off the same call is refused with a capability error (twin).
   - The G11 list and the smoke test name the scene; the WebGL capture runs at ≥30 fps on the reference
     machine (target, recorded).
 - **Reuses**: P1 (controls, fly, camera), P2 (chat and HUD), P3 (preset, `/undo`), P4 (Terrain), the
@@ -2518,7 +2537,9 @@ Milestones: **stage 1 in M1** (what the block world needs), **stage 2 in M2**.
 
 ### P9 — Lighting API (M) *(new 2026-11-11)*
 
-Milestone: **M2**.
+Milestones: **the day-cycle slice in M1** — `ClockTime`, `TimeOfDay`, `GeographicLatitude`, `Brightness`,
+`Ambient`, `OutdoorAmbient` and `PointLight`, for the Block world's day and night and its torches — and
+**the rest in M2**.
 
 - **Goal**: an AI or a script sets the mood of a world with Roblox's own `Lighting` surface: time of
   day, ambient, fog, sky, atmosphere, bloom and colour grading, plus `PointLight`, `SpotLight` and
@@ -2917,6 +2938,9 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
 
 ### P12 — Gameplay LLM API and talking NPCs (L; stage 1 M) *(new 2026-11-11)*
 
+- **Order (2026-11-11, owner)**: both stages are M1. Agents are created from Lua, so the Block world's
+  villagers are made by its mod. The `Ai` capability that allows it is off by default for every game and
+  switched on by a game's preset; the Block world switches it on.
 - **Goal**: NPCs in the block world talk like people — they answer when addressed, remember the player,
   speak in the in-world chat feed and over their heads, and never stall the game. Stage 2 lets a mod call
   a model as game logic through Roblox's own `TextGenerator` shape, so a Roblox NPC script runs here.
@@ -2977,13 +3001,18 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
       the bubble, a failure shows a short in-character fallback line from data, never provider text (P11
       A5).
     - A C# event surface for game rules (`NpcSaid`, `NpcAddressed`) so quests can react.
-  - **Stage 2 (M2) — model calls from mods**:
+  - **Stage 2 (M1) — model calls and agents from mods**:
     - Parity path: implement `TextGenerator` with the mirror's members and limits — `GenerateTextAsync`
       yields through `ScheduleWaitUntil`, `ContextToken` is an opaque handle to a CoreAI conversation
       (`ConversationId`, P14), `JsonSchema` maps to the request-level schema below, the clamps and
       defaults match the mirror, and the rate limit is a host-configurable per-world quota whose default
       mirrors 100/min. It routes through a host-chosen role/profile (data), so a Roblox NPC script runs
       unchanged.
+    - **Agents from Lua**: `AIService:CreateAgent` takes a name, a persona, a memory scope, addressing
+      rules and budgets, and returns an agent the mod talks to and listens to. It wraps the stage-1
+      `NpcAgent` block, so a villager is created entirely by a mod. The `Ai` capability is off by default
+      for every game; a game's preset switches it on, and a mod that asks for it without the switch gets
+      a capability error.
     - CoreAI-only `AIService` for what Roblox has no shape for (agent with tools, decisions from P13,
       cancellation): the `Ai = 1<<5` capability bit excluded from `All`, origin tags `ai:<modId>` on
       anything an AI call creates, per-mod quotas and budget trips, flagged for the MVP13/MVP14 export
@@ -4611,7 +4640,7 @@ D9 = the clock model), which keep their names.
 | D11 | Scale target (revises D5) | (a) keep 100 players per room frozen as the gated goal; (b) keep the numbers as the aspiration and choose the gated room size after spike S1 | **(b)** | The guarded VM on Mono is estimated at about 63 ms per frame for 100 players against a 33 ms budget and is unmeasured on IL2CPP; Roblox runs 200 to 700 players per server, so scale is not where the flagship differs | MVP9, M3 |
 | D12 | Roblox interchange order | (a) both directions gate one release (the MVP14 DoD of 2026-09-24); (b) import first, export later and not a release gate | **(b)** | Import is the on-ramp for Roblox authors; export needs a manual Roblox Studio gate per release. The owner's round-trip requirement stands as the goal | MVP14 |
 | D13 | Model kinds | (a) chat only; (b) decision models as a first-class kind next to chat, behind their own seam | **(b)** | NPC behaviour and a player autopilot need fast typed decisions with probabilities; one protocol (`/v1/systemone`) is spoken by TypeSafe, OpenRouter, llama.cpp, Ollama and LM Studio, and a logprob fallback covers ordinary chat endpoints (`dev-docs/COMPETITIVE_SCAN_2026-11-11.md` §4) | P13 |
-| D14 | How game UI is authored | (a) the Roblox GUI classes only (`ScreenGui`, `Frame`, ...); (b) UXML/USS text from Lua only; (c) UXML/USS text from Lua as the primary path, with the Roblox GUI classes later as a compatibility layer on the same element factory | **(c)** | Owner decision: interfaces are UXML and USS, changeable from Lua while the game runs. Models write this markup well, one theme keeps screens consistent, and a text change is a live edit. Roblox has no markup (instances plus `StyleSheet` rules), so the surface is CoreAI-only and the GUI classes stay for imported Roblox scripts | P18, MVP15 |
+| D14 | How game UI is authored | (a) the Roblox GUI classes only (`ScreenGui`, `Frame`, ...); (b) UXML/USS text from Lua only; (c) UXML/USS text from Lua as the primary path, with the Roblox GUI classes as a second, interchangeable entrance on the same element factory | **(c)** | Owner decision: interfaces are UXML and USS, changeable from Lua while the game runs. Models write this markup well, one theme keeps screens consistent, and a text change is a live edit. Roblox has no markup (instances plus `StyleSheet` rules), so the surface is CoreAI-only and the GUI classes stay for imported Roblox scripts and for the AI's Roblox priors | P18, MVP15 |
 
 D9–D14 were decided on 2026-11-11 at the owner's request; D2 and D5 stay in the table as the record of
 what they replaced.

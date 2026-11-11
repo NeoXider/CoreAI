@@ -289,6 +289,29 @@ UI from Lua (P18) and performance (P19):
       per-part property block that defeats the SRP Batcher and the every-instance pre-simulation pass —
       and record before and after for each on the same harness.
 
+Block world content the owner asked for (P6, with slices of P9, P12 and MVP13):
+
+- [ ] **Agents from Lua behind an opt-in `Ai` capability (P12).** *Owner:* Rbx API + agents. *Plan:* a
+      design note fixes `AIService:CreateAgent` (name, persona, memory scope, addressing rules, budgets)
+      and the Roblox-shaped `TextGenerator`; `Ai` is off by default for every game and switched on by a
+      preset; the stage-1 `NpcAgent` block is the engine underneath; refusal without the capability has
+      its twin test.
+- [ ] **Day-cycle slice of the Lighting API (P9).** *Owner:* Rbx API + rendering. *Plan:* `ClockTime`,
+      `TimeOfDay`, `GeographicLatitude`, `Brightness`, `Ambient`, `OutdoorAmbient` over the P7 look
+      applier, and `PointLight` with a documented light budget per tier; the rest of P9 stays M2.
+- [ ] **Luau math slice (MVP13, RT5).** *Owner:* Rbx API. *Plan:* `math.noise`, `math.clamp`,
+      `math.round` and `math.sign` with conformance tests against the mirror's documented behaviour; the
+      rest of RT5 stays with MVP13.
+- [ ] **Procedural world, day and night, torches and villagers in the Block world mod (P6).** *Owner:*
+      demos. *Plan:* seeded noise terrain generated in budgeted steps through `Terrain:WriteVoxels`, a
+      Lua clock driving `Lighting.ClockTime`, a torch block with a `PointLight`, and villagers created
+      through `AIService`; all of it Lua in `sample_block_world`.
+- [ ] **Roblox GUI classes on the P18 element factory (the solo half of MVP15).** *Owner:* Rbx API.
+      *Plan:* `ScreenGui`, `Frame`, `TextLabel`, `TextButton`, `ImageLabel`, `TextBox`, `UICorner` and
+      `UIListLayout` with `UDim2` layout and their events, rendered through the same factory as P18, so
+      a Roblox UI script runs unchanged and the AI needs no skill text for it; starts when the P18
+      factory lands.
+
 Mods (P20):
 
 - [ ] **Mod folders (P20).** *Owner:* mods + Hub. *Plan:* `category` becomes a `/`-separated folder path

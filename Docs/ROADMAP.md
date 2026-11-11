@@ -391,8 +391,8 @@ The goal, done-so-far, to-do, tests and DoD of every rung and package are in
 | Milestone | What a player gets | Contents | Gate |
 |---|---|---|---|
 | **M0 Ready to play** | A new project reaches a working world and an honest model connection in minutes | P3 (one-click world), P11 stage 1 (truthful failures, install fixes), spikes S1/S2, the open MVP3 player checks, one live-model run with a valid provider key | From a fresh checkout: one menu, one key, the first AI-made object; a missing module fails loudly |
-| **M1 Block world** | The Minecraft-style demo, solo: walk and fly, build with blocks and by chat, talk to NPCs, switch on the autopilot | P1, P2, P3, P4, P6, P7, P8 stage 1, P12 stage 1, P13, P18, P19, P20; MVP4 alongside | The Block world demo — Lua end to end, interface included — passes its recorded script in the editor and in a WebGL player; the P19 budgets hold; the bundled sample mods and published demos run on the defaults |
-| **M2 Whole games from chat** | A complete small game — HUD, sound, saving — made by talking; the harness upgrades | The solo halves of MVP15, MVP16 and MVP17; MVP13; the self-repair and manifest parts of MVP18; P5, P8 stage 2, P9, P10 stage 1, P11 stage 2, P12 stage 2, P14, P15, P16, P17 | A person who writes no code gets a playable game with HUD, sound and saving in 15 minutes; a "whole game" benchmark tier measures it |
+| **M1 Block world** | The Minecraft-style demo, solo: walk and fly, build with blocks and by chat, talk to NPCs, switch on the autopilot | P1, P2, P3, P4, P6, P7, P8 stage 1, the day-cycle slice of P9, P12, P13, P18, P19, P20; MVP4, the solo half of MVP15 and the Luau math slice of MVP13 alongside | The Block world demo — Lua end to end, interface included — passes its recorded script in the editor and in a WebGL player; the P19 budgets hold; the bundled sample mods and published demos run on the defaults |
+| **M2 Whole games from chat** | A complete small game — HUD, sound, saving — made by talking; the harness upgrades | The solo halves of MVP16 and MVP17; MVP13; the self-repair and manifest parts of MVP18; P5, P8 stage 2, the rest of P9, P10 stage 1, P11 stage 2, P14, P15, P16, P17 | A person who writes no code gets a playable game with HUD, sound and saving in 15 minutes; a "whole game" benchmark tier measures it |
 | **M3 Together** | Several players create in one room | MVP5, MVP6, the network half of MVP7, MVP11, the network halves of MVP15–MVP17 | Four players in a room, two prompting the AI at once; every edit visible within 1 tick + RTT; the world survives joins and leaves |
 | **M4 Platform** | Dedicated servers, scale, Roblox import, asset import, hardening | MVP8, MVP9, MVP10, MVP14 (import first), the rest of MVP18, MVP19, P10 stage 2, the flagship's own project | The rungs' own DoDs |
 
@@ -421,20 +421,20 @@ Rungs and packages on one screen (status at 7.56.0, 2026-11-11):
 | P7 | Default look and the Hub Graphics page | M1 | not started | M |
 | P8 | Materials v2 | M1 (stage 1), M2 (stage 2) | 36 of 45 materials textured with normals | M + M |
 | P11 | Truthful results and the Connect-API doctor | M0 (stage 1), M2 (stage 2) | not started | M |
-| P12 | Gameplay LLM API and talking NPCs | M1 (stage 1), M2 (stage 2) | `AIService` is a stub | M + L |
+| P12 | Gameplay LLM API, agents from Lua and talking NPCs | M1 | `AIService` is a stub | L |
 | P13 | Decision models | M1 | not started | L |
 | P18 | Runtime UI from Lua: UXML and USS | M1 | not started; the [R4] specification | L |
 | P19 | Honest performance: measurement, budgets, optimization | M1 | `tools/vmbench` numbers only | L |
 | P20 | Mod folders | M1 | one flat `category` level | M |
 | P5 | In-play creation tools | M2 | click picking only | L |
-| P9 | Lighting API | M2 | structure only | M |
+| P9 | Lighting API | M1 (day-cycle slice), M2 | structure only | M |
 | P10 | New materials and asset import | M2 (stage 1), M4 (stage 2) | `MaterialVariant` over built-in textures | M + L |
 | P14 | Orchestrator mode | M2 | plan only | L |
 | P15 | Roles, tools, skills and prompts as data | M2 | role table hard-coded | M–L |
 | P16 | Tool review and camera v2 | M2 | camera tools v1 | M |
 | P17 | Benchmark touch-ups | M2 | four reporting defects open | S |
 | MVP13 | Model packages, template library, Luau parity prerequisites | M2 | planned | M–L |
-| MVP15 | GUI + remaining input: the Roblox GUI classes over the P18 element factory | M2 (solo), M3 (network) | planned | L |
+| MVP15 | GUI + remaining input: the Roblox GUI classes over the P18 element factory | M1 (solo), M3 (network) | planned | L |
 | MVP16 | DataStore + leaderstats | M2 (solo), M3 (network) | planned | M |
 | MVP17 | Audio / FX / animation | M2 (solo), M3 (network) | planned | M |
 | MVP18 | Mod UX rest, skill manifest, console + self-repair | M2 (self-repair, manifest), M4 (rest) | planned | M–L |

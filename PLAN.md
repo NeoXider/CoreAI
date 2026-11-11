@@ -36,8 +36,10 @@ open work is filed in `TODO.md` under "Plan of record 2026-11-11".
    - play: P1 (controls, camera, fly) → P2 (in-world chat) → P4 (voxel Terrain) → P6 (the demo), with P3
      (the edit loop) alongside;
    - look: P7 (default look, Hub Graphics page) → P8 stage 1 (Plastic detail, water, glass);
-   - harness: P11 stage 1, then P12 stage 1 (talking NPCs) and P13 (decision models, local `d1-2B`
-     through a `llama-server` sidecar);
+   - harness: P11 stage 1, then P12 (talking NPCs and agents created from Lua behind an opt-in `Ai`
+     capability) and P13 (decision models, local `d1-2B` through a `llama-server` sidecar);
+   - demo content: procedural generation, day and night, torches and mod-made villagers, which pull
+     the day-cycle slice of P9 and the Luau math slice of MVP13 (`math.noise`) into M1;
    - interface: P18 — the interpreter and host first, the Lua surface after P1's input-focus port;
    - performance: P19 — the harness and the first table, then optimization by measured rank;
    - mods: P20 — folders for mods (a tree instead of one flat list), after P19 can measure it;
@@ -55,11 +57,11 @@ package and acceptance by demo; with the three audit rounds per rung used throug
 
 | Milestone | Agent-days | Wall-clock at 3–4 agents |
 |---|---|---|
-| M0 + M1: the single-player Block world with UI from Lua, the performance baseline and mod folders | about 45 | 4–5 weeks; a first playable slice after about 1.5 |
-| M2 Whole games from chat | about 37 | 3–4 weeks |
+| M0 + M1: the single-player Block world with UI and agents from Lua, day and night, procedural generation, the performance baseline and mod folders | about 53 | 5–6 weeks; a first playable slice after about 1.5 |
+| M2 Whole games from chat | about 33 | 3–4 weeks |
 | M3 Together | about 19 | about 3 weeks (the network rungs are sequential) |
 | M4 Platform | about 30 | 4–5 weeks |
-| Total | about 130 | 3.5–4.5 months |
+| Total | about 132 | 3.5–4.5 months |
 
 What moves the ranges: Unity runs are serial on one settled tree; live-model checks need a valid key and
 provider limits; look and feel need the owner's eyes; IL2CPP, WebGL and device checks need builds;
