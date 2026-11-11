@@ -14,24 +14,29 @@ settings `CoreAiModSelfRepairSettings`); each works without the others.
 
 ## What the player sees
 
-One short line in the in-world chat for each step:
+One short line in the in-world chat for each step. The chat names the mod by its header `name:` without a series
+prefix (`Block World 9 - Falling blocks` is `Falling blocks`; a mod with no name is its id) and carries no error text,
+no code and no console or Hub hint. The mod console (and the mod log the model reads) gets the detailed line with all
+of that, as `LuaModSelfRepairCoordinator.PlayerLinePosted` does. Below, the mod `tower` is named `Castle - Tower`:
 
-| Step | Line |
-|---|---|
-| A mod starts failing | `Mod 'tower' is failing: attempt to index a nil value (local 'part') (tower:12).` |
-| The backend is paid | `Mod 'tower' is failing: ... Your AI backend is paid, so nothing is sent to it until you ask. /fixmod tower repairs it.` |
-| The AI starts a repair | `AI is fixing 'tower' (try 1 of 3). /stop cancels.` (the status line shows `loading mod` while it works) |
-| The fix held | `'tower' is fixed; the AI says: The handler now checks that the part exists. /undo takes back your request together with this fix.` |
-| The errors stopped, but code is gone | `'tower' runs without errors now, but the fix removed 1 of its 2 event handlers; the AI says: ... Check that it still does what you asked. /undo ...` |
-| The fix did not hold | `'tower' still fails: ... ; the AI tries again in 10 s.` |
-| Three tries failed | `Could not fix 'tower' after 3 tries. Its code is paused and its objects stay; saving it in the Hub (Mods) runs it again. /fixmod tower tries again; /undo takes back your request together with the AI's tries.` |
-| The player wrote the mod | `... The AI did not write it, so the AI leaves it alone. Its code is paused and its objects stay; ... /fixmod tower asks the AI to fix it.` |
-| `/undo` put back an older version | `... It is the version your /undo or /redo put back, so the AI leaves it alone. ... /fixmod tower asks the AI to fix it.` |
-| `/undo` while a repair runs | `Stopped repairing 'tower': your /undo or /redo took that change back, and the AI leaves the version it put back alone. /fixmod tower asks the AI to fix it.` |
-| No model is configured | `... The AI is offline, so nothing repairs failing mods; one that keeps failing is paused and its objects stay. The mod console (/console) lists them; fix them in the Hub (Mods).` (one line per session; later failing mods go to the mod log only) |
+| Step | Chat | Mod console |
+|---|---|---|
+| A mod starts failing and the AI repairs it | `Something in this world stopped working (Tower). The AI is fixing it.` | `Mod 'tower' is failing: attempt to index a nil value (local 'part') (tower:12).` |
+| The backend is paid | `Something in this world stopped working (Tower). Everything else keeps going. /fixmod tower repairs it.` | `Mod 'tower' is failing: ... Your AI backend is paid, so nothing is sent to it until you ask. /fixmod tower repairs it.` |
+| The AI starts a repair | `AI is fixing 'Tower' (try 1 of 3). /stop cancels.` (the status line shows `loading mod` while it works) | `AI is fixing 'tower' (try 1 of 3).` |
+| The fix held | `'Tower' is fixed; the AI says: The handler now checks that the part exists. /undo takes back your request together with this fix.` | the same with `'tower'` |
+| The errors stopped, but code is gone | `'Tower' runs without errors now, but the fix removed 1 of its 2 event handlers; the AI says: ... Check that it still does what you asked. /undo ...` | the same with `'tower'` |
+| The fix did not hold | `The AI is still fixing Tower.` | `'tower' still fails: ... ; the AI tries again in 10 s.` |
+| A fixed mod fails again | `Something in this world stopped working again (Tower). The AI is fixing it.` | `'tower' fails again: ...` |
+| Three tries failed | `Tower is paused; it could not be fixed this time.` (`Tower keeps running; ...` when it fails only now and then) | `Could not fix 'tower' after 3 tries. Its code is paused and its objects stay; saving it in the Hub (Mods) runs it again. /fixmod tower tries again; /undo takes back your request together with the AI's tries.` |
+| The player wrote the mod | `Something in this world stopped working (Tower) and was paused. Everything else keeps going. /fixmod tower asks the AI to fix it.` | `... The AI did not write it, so the AI leaves it alone. Its code is paused and its objects stay; ... /fixmod tower asks the AI to fix it.` |
+| `/undo` put back an older version | as above | `... It is the version your /undo or /redo put back, so the AI leaves it alone. ... /fixmod tower asks the AI to fix it.` |
+| `/undo` while a repair runs | `Stopped repairing 'tower': your /undo or /redo took that change back, and the AI leaves the version it put back alone. /fixmod tower asks the AI to fix it.` | the same |
+| No model is configured | `Something in this world stopped working (Tower) and was paused. Everything else keeps going.` (one line per session; later failing mods go to the mod log only) | `... The AI is offline, so nothing repairs failing mods; one that keeps failing is paused and its objects stay. The mod console (/console) lists them; fix them in the Hub (Mods).` |
 
-"Its code is paused" is said only for a mod that fails all the time (see [When the loop leaves a mod alone](#when-the-loop-leaves-a-mod-alone));
-a mod that fails now and then at one place while the rest of it works keeps running.
+"Paused" is said only for a mod that fails all the time (see [When the loop leaves a mod alone](#when-the-loop-leaves-a-mod-alone));
+a mod that fails now and then at one place while the rest of it works keeps running. Where the loop leaves a mod alone
+until the player asks, the chat keeps the `/fixmod` hint: it is the player's one way to let the AI repair it.
 
 The repair turn takes the chat's one turn slot, like a line the player typed: `/stop` stops it (`Stopped repairing
 'tower'. /fixmod tower starts again.`), and a line the player types meanwhile gets the usual busy notice. The model's own
@@ -55,8 +60,8 @@ again (authorship is not stored in the mod's manifest yet).
 ## Local or paid: who decides that a repair may start
 
 **Mode** `By Backend` (the default) repairs by itself only when the model costs nothing per request, and otherwise asks
-first: one chat line names the mod and the error, and nothing is sent to the model until the player types `/fixmod
-<id>`. The rule (`LuaModRepairBackendCostRules`) reads the backend the Programmer role uses:
+first: one chat line names the mod (the mod console has the error), and nothing is sent to the model until the player
+types `/fixmod <id>`. The rule (`LuaModRepairBackendCostRules`) reads the backend the Programmer role uses:
 
 | Backend | Counts as |
 |---|---|

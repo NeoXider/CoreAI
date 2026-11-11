@@ -139,7 +139,8 @@ namespace CoreAI.Mods.Rbx.Instances
                     HasStoredWorldPivot = model.HasStoredWorldPivot,
                     StoredWorldPivot = model.HasStoredWorldPivot
                         ? Join(model.StoredWorldPivot.GetComponents())
-                        : null
+                        : null,
+                    Scale = model.Scale
                 };
             }
 
@@ -385,6 +386,12 @@ namespace CoreAI.Mods.Rbx.Instances
                     node.Model.HasStoredWorldPivot = false;
                     node.Model.StoredWorldPivot = null;
                     replaced(node.Id, "WorldPivot");
+                }
+
+                if (node.Model != null && node.Model.Scale != 0d && !RbxModelScaling.IsValidFactor(node.Model.Scale))
+                {
+                    node.Model.Scale = 0d;
+                    replaced(node.Id, "Scale");
                 }
 
                 if (node.ClickDetector != null
@@ -685,6 +692,13 @@ namespace CoreAI.Mods.Rbx.Instances
                     if (node.Model.HasStoredWorldPivot)
                     {
                         model.SetWorldPivot(ParseCFrame(node.Model.StoredWorldPivot));
+                    }
+
+                    // WHY only the factor: the parts were saved at their scaled sizes, so nothing is scaled again; the
+                    // first ScaleTo after a load reads their scale-1 sizes back from this factor.
+                    if (node.Model.Scale > 0d && node.Model.Scale != 1d)
+                    {
+                        model.SetScale(node.Model.Scale);
                     }
 
                     if (node.Model.PrimaryPartId != 0UL)

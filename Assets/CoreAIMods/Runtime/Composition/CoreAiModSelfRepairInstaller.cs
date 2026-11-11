@@ -276,7 +276,7 @@ namespace CoreAI.Composition
             }
 
             if (_consoleKey != null && _consoleKey.WasPressedThisFrame() &&
-                (_focus == null || !_focus.HasTextFocus) && (_chatInput == null || !_chatInput.IsInputOpen))
+                (_focus == null || !_focus.HoldsKeyboard) && (_chatInput == null || !_chatInput.IsInputOpen))
             {
                 Console.Toggle();
             }

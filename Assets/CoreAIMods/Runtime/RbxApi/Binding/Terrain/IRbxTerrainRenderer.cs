@@ -34,6 +34,21 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         /// and whose cells overlap <paramref name="unityBounds"/>; returns the chunks built.
         /// </summary>
         int EnsureColliders(Bounds unityBounds);
+
+        /// <summary>
+        /// As <see cref="EnsureColliders(Bounds)"/>, but builds at most <paramref name="maxBuilds"/> chunks, nearest
+        /// the box's centre first, so a body moving into a field of queued chunks never stalls a frame.
+        /// </summary>
+        int EnsureColliders(Bounds unityBounds, int maxBuilds);
+
+        /// <summary>
+        /// Builds, in the order a ray from <paramref name="origin"/> along <paramref name="direction"/> crosses them,
+        /// at most <paramref name="maxBuilds"/> queued chunks within <paramref name="distance"/> metres.
+        /// </summary>
+        int EnsureCollidersAlong(Vector3 origin, Vector3 direction, float distance, int maxBuilds);
+
+        /// <summary>True while a chunk overlapping <paramref name="unityBounds"/> waits for its faces or collider.</summary>
+        bool IsGeometryPendingIn(Bounds unityBounds);
     }
 
     /// <summary>
@@ -44,6 +59,13 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
     {
         /// <summary>True when cell (x, y, z) holds a material other than Air and Water.</summary>
         bool IsSolidCell(int x, int y, int z);
+    }
+
+    /// <summary>Answers whether a Terrain cell is water: for swimming and for the look under water.</summary>
+    public interface IRbxTerrainWaterCells
+    {
+        /// <summary>True when cell (x, y, z) holds Water.</summary>
+        bool IsWaterCell(int x, int y, int z);
     }
 
     /// <summary>

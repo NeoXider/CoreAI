@@ -7,8 +7,9 @@ namespace CoreAI.Mods.Rbx.Binding
     /// <summary>
     /// Mirrors the CoreAI UI focus (chat panel, Hub, any later surface) into a world's
     /// <see cref="InputFocusState"/> under one holder id, so UserInputService marks input the UI took
-    /// with <c>gameProcessedEvent = true</c>. Other holders of the same state (a host game's own menus)
-    /// are left alone. Dispose to stop mirroring and release the claim.
+    /// with <c>gameProcessedEvent = true</c>: while <see cref="ICoreAiUiFocus.HoldsKeyboard"/> (a focused text
+    /// field, or a Hub open over the game) the input is captured. Other holders of the same state (a host game's
+    /// own menus) are left alone. Dispose to stop mirroring and release the claim.
     /// </summary>
     public sealed class CoreAiUiFocusBridge : IDisposable
     {
@@ -62,7 +63,7 @@ namespace CoreAI.Mods.Rbx.Binding
                 return;
             }
 
-            _worldFocus.SetCaptured(HolderId, _uiFocus.HasTextFocus);
+            _worldFocus.SetCaptured(HolderId, _uiFocus.HoldsKeyboard);
             _worldFocus.SetPointerOverUi(HolderId, _uiFocus.IsPointerOverUi);
         }
     }

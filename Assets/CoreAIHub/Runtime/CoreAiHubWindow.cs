@@ -72,6 +72,12 @@ namespace CoreAI.Hub.UI
         [SerializeField]
         private bool requireVisibleCursor = true;
 
+        [Tooltip("While the Hub is expanded it holds the keyboard as a focused text field does: gameplay input, the " +
+                 "in-world chat's open keys and the mod console key stand down, and a play world frees the " +
+                 "pointer. For a Hub opened over a running game; off keeps the Hub a side panel.")]
+        [SerializeField]
+        private bool captureKeyboardWhileExpanded;
+
         private UIDocument _document;
         private VisualElement _boundUiRoot;
         private VisualElement _root;
@@ -130,6 +136,44 @@ namespace CoreAI.Hub.UI
         /// <summary>Currently active page id, or <c>null</c> when nothing is active.</summary>
         public string ActivePageId => _activePageId;
 
+        /// <summary>True while the Hub shows only its expand button (see <see cref="SetCollapsed"/>).</summary>
+        public bool IsCollapsed => _collapsed;
+
+        /// <summary>
+        /// While true and the Hub is expanded and shown, it reports a keyboard hold to
+        /// <see cref="CoreAI.UiFocus.ICoreAiUiFocus.ReportKeyboardHold"/>, so nothing behind it reacts to keys (a
+        /// game, the chat overlay's open keys, the mod console key) and a play world frees the pointer. Off by default.
+        /// </summary>
+        public bool CaptureKeyboardWhileExpanded
+        {
+            get => captureKeyboardWhileExpanded;
+            set
+            {
+                if (captureKeyboardWhileExpanded == value)
+                {
+                    return;
+                }
+
+                captureKeyboardWhileExpanded = value;
+                if (_uiReady)
+                {
+                    ReportUiFocus();
+                }
+            }
+        }
+
+        /// <summary>True while the Hub holds the keyboard because <see cref="CaptureKeyboardWhileExpanded"/> is on.</summary>
+        public bool HoldsKeyboard => IsHoldingKeyboard(captureKeyboardWhileExpanded, _uiReady, _collapsed);
+
+        /// <summary>
+        /// Whether an expanded Hub holds the keyboard: only with the option on, while its UI is built and expanded.
+        /// Pure for EditMode tests.
+        /// </summary>
+        internal static bool IsHoldingKeyboard(bool captureWhileExpanded, bool uiReady, bool collapsed)
+        {
+            return captureWhileExpanded && uiReady && !collapsed;
+        }
+
         protected virtual void OnEnable()
         {
             // WHY: OnDisable unsubscribes from the registry, but the Registry setter's
@@ -152,6 +196,7 @@ namespace CoreAI.Hub.UI
 
         protected virtual void OnDisable()
         {
+            BlurFocusInside(_root);
             UnsubscribeRegistry();
             _viewGeneration++;
             _resumePageId = _activePageId ?? _resumePageId;
@@ -265,6 +310,7 @@ namespace CoreAI.Hub.UI
             _uiReady = true;
 
             RebuildTabs();
+            ReportUiFocus();
         }
 
         /// <summary>Collapses the Hub to just its toggle button, or restores the full window.</summary>
@@ -282,7 +328,13 @@ namespace CoreAI.Hub.UI
             }
 
             _collapsed = collapsed;
+            if (collapsed)
+            {
+                BlurFocusInside(_content);
+            }
+
             ApplyCollapsedState();
+            ReportUiFocus();
             if (collapsed)
             {
                 _collapseButton?.Focus();
@@ -321,7 +373,7 @@ namespace CoreAI.Hub.UI
         private bool ResolveUiFocusForHotkeys()
         {
             _uiFocus ??= CoreAI.Chat.CoreAiChatPanel.FindSceneUiFocus();
-            return _uiFocus != null && _uiFocus.HasTextFocus;
+            return _uiFocus != null && _uiFocus.HoldsKeyboard;
         }
 
         /// <summary>
@@ -382,6 +434,24 @@ namespace CoreAI.Hub.UI
             }
         }
 
+        /// <summary>
+        /// Takes the keyboard focus away from a field inside <paramref name="container"/> before it is hidden or
+        /// detached, so the field's surface (the embedded chat's input) reports that it no longer types.
+        /// </summary>
+        /// <remarks>
+        /// WHY: the embedded chat panel lives on its own GameObject and reports its input's focus itself; a page
+        /// switch, a collapse or a closed Hub otherwise left its last "typing" report standing, and the world kept
+        /// its input captured behind a Hub that was no longer there.
+        /// </remarks>
+        internal static void BlurFocusInside(VisualElement container)
+        {
+            if (container?.focusController?.focusedElement is VisualElement focused &&
+                (ReferenceEquals(focused, container) || container.Contains(focused)))
+            {
+                focused.Blur();
+            }
+        }
+
         private void OnTabNavigationMove(NavigationMoveEvent evt)
         {
             if (!IsHubInputAllowedNow() || evt.currentTarget is not Button tab ||
@@ -439,7 +509,7 @@ namespace CoreAI.Hub.UI
 
             bool noUitkKeyboardFocus =
                 _root.focusController == null || _root.focusController.focusedElement == null;
-            if (!noUitkKeyboardFocus || IsAnotherSurfaceTyping(ResolveUiFocusForHotkeys(), _hubTextFocused))
+            if (!noUitkKeyboardFocus || IsAnotherSurfaceTyping(ResolveUiFocusForHotkeys(), _hubTextFocused || HoldsKeyboard))
             {
                 return;
             }
@@ -501,7 +571,15 @@ namespace CoreAI.Hub.UI
         private void ReportUiFocus()
         {
             _uiFocus ??= CoreAI.Chat.CoreAiChatPanel.FindSceneUiFocus();
-            _uiFocus?.Report(_uiFocusSurfaceId, _hubTextFocused, _hubPointerOver);
+            if (_uiFocus == null)
+            {
+                return;
+            }
+
+            bool holds = HoldsKeyboard;
+            // WHY the pointer too: a held Hub covers the game, so a click or a drag must not reach the world either.
+            _uiFocus.Report(_uiFocusSurfaceId, _hubTextFocused, _hubPointerOver || holds);
+            _uiFocus.ReportKeyboardHold(_uiFocusSurfaceId, holds);
         }
 
         private bool HandleEscapeRequested()
@@ -776,6 +854,7 @@ namespace CoreAI.Hub.UI
 
             VisualElement content = ResolvePageContent(pageId, page);
 
+            BlurFocusInside(_content);
             _content.Clear();
             ApplyFullBleed(page is IHubFullBleedPage);
             if (content != null)

@@ -798,12 +798,14 @@ namespace CoreAI.Mods.WorldPackages
                     {
                         Success = true,
                         Output = AppendNote(luaResult.Output, note, true),
+                        Printed = luaResult.Printed,
                         Error = luaResult.Error
                     }
                     : new LuaTool.LuaResult
                     {
                         Success = false,
                         Output = luaResult.Output,
+                        Printed = luaResult.Printed,
                         Error = AppendNote(luaResult.Error, note, false)
                     };
                 return (TResult)(object)noted;
@@ -1161,18 +1163,19 @@ namespace CoreAI.Ai.LuaCs
             // WHY: silently buffer this chunk's world commands. Reset before running and abort in the
             // WHY: finally so a leaked transaction can never bleed across runs in either direction.
             (_bindings as ILuaTransactionScope)?.ResetTransactions();
+            LuaCsChunkOutput printed = new();
             try
             {
-                IScriptState state = PrepareState(registerGameplayApis);
+                IScriptState state = PrepareState(registerGameplayApis, printed);
                 object[] results = _engine.RunChunk(
                     state,
                     CompileChunk(code),
                     cancellationToken: cancellationToken);
-                return ReportSuccess(code, results);
+                return ReportSuccess(code, results, printed);
             }
             catch (Exception ex)
             {
-                return CreateFailure(ex.Message);
+                return CreateFailure(ex.Message, printed);
             }
             finally
             {
@@ -1194,19 +1197,20 @@ namespace CoreAI.Ai.LuaCs
             }
 
             (_bindings as ILuaTransactionScope)?.ResetTransactions();
+            LuaCsChunkOutput printed = new();
             try
             {
-                IScriptState state = PrepareState(registerGameplayApis);
+                IScriptState state = PrepareState(registerGameplayApis, printed);
                 object[] results = await _engine.RunChunkAsync(
                     state,
                     CompileChunk(code),
                     frameYielder: FrameYielder,
                     cancellationToken: cancellationToken);
-                return ReportSuccess(code, results);
+                return ReportSuccess(code, results, printed);
             }
             catch (Exception ex)
             {
-                return CreateFailure(ex.Message);
+                return CreateFailure(ex.Message, printed);
             }
             finally
             {
@@ -1223,10 +1227,11 @@ namespace CoreAI.Ai.LuaCs
             };
         }
 
-        private IScriptState PrepareState(Action<LuaCsApiRegistry> registerGameplayApis)
+        private IScriptState PrepareState(Action<LuaCsApiRegistry> registerGameplayApis, LuaCsChunkOutput printed)
         {
             LuaCsApiRegistry registry = new();
             registerGameplayApis(registry);
+            printed.CaptureFrom(registry);
             IScriptState state = _engine.CreateState();
             registry.ApplyTo(state);
             return state;
@@ -1240,22 +1245,22 @@ namespace CoreAI.Ai.LuaCs
             return LuauSourceGate.ToLua52(code, "execute_lua", _engine.TrustedIteratorResolverName);
         }
 
-        private LuaTool.LuaResult ReportSuccess(string code, object[] results)
+        private LuaTool.LuaResult ReportSuccess(string code, object[] results, LuaCsChunkOutput printed)
         {
             string summary = Truncate(Summarize(results), LuaCsAiEnvelopeProcessor.MaxResultSummaryLength,
                 "result summary");
             _observer.OnLuaSuccess(summary);
             LuaExecutedSuccessfully?.Invoke(code ?? "");
-            return new LuaTool.LuaResult { Success = true, Output = summary };
+            return new LuaTool.LuaResult { Success = true, Output = summary, Printed = printed?.Render() };
         }
 
-        private LuaTool.LuaResult CreateFailure(string message)
+        private LuaTool.LuaResult CreateFailure(string message, LuaCsChunkOutput printed = null)
         {
             string flat = Truncate(
                 (message ?? "").Replace("\r", " ").Replace("\n", " ").Trim(),
                 LuaCsAiEnvelopeProcessor.MaxErrorMessageLength, "error");
             _observer.OnLuaFailure(flat);
-            return new LuaTool.LuaResult { Success = false, Error = flat };
+            return new LuaTool.LuaResult { Success = false, Error = flat, Printed = printed?.Render() };
         }
 
         /// <summary>Renders the chunk's first return value into a printable summary (VM-agnostic).</summary>
@@ -1573,6 +1578,91 @@ namespace CoreAI.Mods.WorldPackages
                 world_id = "",
                 error
             });
+        }
+    }
+
+    /// <summary>
+    /// What one <c>execute_lua</c> chunk wrote with <c>report()</c> and <c>print()</c>, for the tool's result next to
+    /// its Output: one line per call, at most <see cref="MaxCharacters"/> characters, the last lines kept and a note
+    /// saying how many earlier ones were cut. A host's own <c>report</c> still runs; <c>print</c>, which in a one-off
+    /// chunk wrote only to the process's standard output, now writes here.
+    /// </summary>
+    internal sealed class LuaCsChunkOutput
+    {
+        /// <summary>The most characters of written lines a result carries.</summary>
+        public const int MaxCharacters = 600;
+
+        private readonly List<string> _lines = new();
+        private int _characters;
+        private int _cut;
+
+        /// <summary>
+        /// Puts the capture into <paramref name="registry"/>: <c>report</c> is wrapped when the bindings registered it
+        /// as a plain string action (and added when they did not), <c>print</c> is added unless they registered one.
+        /// </summary>
+        public void CaptureFrom(LuaCsApiRegistry registry)
+        {
+            if (registry.TryGet("report", out Delegate existing) && existing is Action<string> report)
+            {
+                registry.Register("report", new Action<string>(message =>
+                {
+                    Add(message);
+                    report(message);
+                }));
+            }
+            else if (!registry.Contains("report"))
+            {
+                registry.Register("report", new Action<string>(Add));
+            }
+
+            if (!registry.Contains("print"))
+            {
+                registry.RegisterVarArgs("print", call =>
+                {
+                    string[] parts = new string[call.ArgumentCount];
+                    for (int index = 0; index < call.ArgumentCount; index++)
+                    {
+                        parts[index] = call.DescribeArgument(index);
+                    }
+
+                    Add(string.Join("\t", parts));
+                    return ScriptCallResult.Empty;
+                });
+            }
+        }
+
+        /// <summary>Adds one written line; the earliest lines go once the lines pass <see cref="MaxCharacters"/>.</summary>
+        public void Add(string line)
+        {
+            string text = (line ?? "").Replace("\r", "").Replace("\n", " ");
+            if (text.Length > MaxCharacters)
+            {
+                text = text.Substring(0, MaxCharacters - 3) + "...";
+            }
+
+            _lines.Add(text);
+            _characters += text.Length + 1;
+            while (_characters > MaxCharacters + 1 && _lines.Count > 1)
+            {
+                _characters -= _lines[0].Length + 1;
+                _lines.RemoveAt(0);
+                _cut++;
+            }
+        }
+
+        /// <summary>The written lines, newest last, with the cut note first; null when nothing was written.</summary>
+        public string Render()
+        {
+            if (_lines.Count == 0)
+            {
+                return null;
+            }
+
+            string body = string.Join("\n", _lines);
+            return _cut == 0
+                ? body
+                : "(" + _cut.ToString(CultureInfo.InvariantCulture) + (_cut == 1 ? " earlier line" : " earlier lines")
+                  + " cut)\n" + body;
         }
     }
 }

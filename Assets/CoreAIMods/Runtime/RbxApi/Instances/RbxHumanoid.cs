@@ -19,6 +19,9 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Mirror value 3: rising from a jump.</summary>
         Jumping = 3,
 
+        /// <summary>Mirror value 4: in water, its middle under the surface (<see cref="RbxSwimRules"/>).</summary>
+        Swimming = 4,
+
         /// <summary>Mirror value 5: airborne and falling.</summary>
         Freefall = 5,
 
@@ -181,6 +184,33 @@ namespace CoreAI.Mods.Rbx.Instances
         {
         }
 
+        /// <summary>What the body is in: water round its middle and head, and the surface's height.</summary>
+        /// <remarks>
+        /// WHY a default that is always dry: added after the seam shipped, so a host motor that knows no water keeps
+        /// compiling and its character never swims.
+        /// </remarks>
+        RbxWaterContact Water => RbxWaterContact.Dry;
+
+        /// <summary>
+        /// Enters (true) or leaves (false) swimming: buoyant, moving along the Move direction (its vertical part
+        /// included) at the swim speed. Answers whether the motor swims at all; the default cannot.
+        /// </summary>
+        bool SetSwimming(bool swimming)
+        {
+            return false;
+        }
+
+        /// <summary>While swimming, rises during the next step (Jump held under the surface).</summary>
+        void SwimRise()
+        {
+        }
+
+        /// <summary>
+        /// How long, in seconds, a MoveTo walker has been waiting behind another character without moving; 0 while it
+        /// walks. The default motor never waits.
+        /// </summary>
+        double WalkBlockedSeconds => 0d;
+
         /// <summary>
         /// Mirror <c>Humanoid.AutoRotate</c>: while true the motor turns the character to face the direction it
         /// walks or flies in; false leaves its rotation to scripts.
@@ -293,6 +323,13 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>Mirror: MoveTo gives up after eight seconds and reports reached = false.</summary>
         public const double MoveToTimeoutSeconds = 8d;
+
+        /// <summary>
+        /// How long a MoveTo waits behind another character before it gives up and reports MoveToFinished(false), in
+        /// seconds. DEV candidate: Roblox's walker pushes through or times out at eight seconds; CoreAI's characters
+        /// block each other, so a walker that stays blocked hands the choice back to its script after a second.
+        /// </summary>
+        public const double MoveToBlockedSeconds = 1d;
 
         /// <summary>
         /// How close, in studs on the ground plane, the character has to come to a MoveTo target.
@@ -771,12 +808,26 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
+            // WHY Jump rises under water and jumps only at the surface: a swimmer with its head under water has
+            // nothing to push off from, and Roblox lifts it while Jump is held; with its head out, the jump takes
+            // it out of the water, onto a bank.
+            if (_state == RbxHumanoidState.Swimming && !RbxSwimRules.JumpLeavesWater(_motor.Water))
+            {
+                _motor.SwimRise();
+                return;
+            }
+
             // WHY the state machine stays put on a refusal: the controller declining is a legitimate
             // answer (see IRbxCharacterMotor.TryJump), and Jumping is the state of a character that
             // is actually rising, not of one that asked to.
             if (!_motor.TryJump(_jumpPower, _jumpHeight, _useJumpPower))
             {
                 return;
+            }
+
+            if (_state == RbxHumanoidState.Swimming)
+            {
+                _motor.SetSwimming(false);
             }
 
             EnterState(RbxHumanoidState.Jumping);
@@ -871,7 +922,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
-            if (_walkElapsed >= MoveToTimeoutSeconds)
+            if (_walkElapsed >= MoveToTimeoutSeconds || _motor.WalkBlockedSeconds >= MoveToBlockedSeconds)
             {
                 FinishWalk(reached: false);
             }
@@ -971,6 +1022,11 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
+            if (UpdateSwimmingState())
+            {
+                return;
+            }
+
             if (!_motor.IsGrounded)
             {
                 if (_state != RbxHumanoidState.Freefall)
@@ -995,6 +1051,35 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             EnterState(RbxHumanoidState.Running);
+        }
+
+        /// <summary>
+        /// Enters or leaves Swimming by <see cref="RbxSwimRules.ShouldSwim"/>; true while the Humanoid swims, so
+        /// the grounded states are left alone (no Landed, so water breaks a fall without it counting as a landing).
+        /// </summary>
+        private bool UpdateSwimmingState()
+        {
+            bool swimming = _state == RbxHumanoidState.Swimming;
+            RbxWaterContact water = _motor.Water;
+            bool swim = RbxSwimRules.ShouldSwim(swimming, in water, _motor.IsGrounded);
+            if (swim == swimming)
+            {
+                return swimming;
+            }
+
+            if (swim)
+            {
+                if (!_motor.SetSwimming(true))
+                {
+                    return false;
+                }
+
+                EnterState(RbxHumanoidState.Swimming);
+                return true;
+            }
+
+            _motor.SetSwimming(false);
+            return false;
         }
 
         /// <summary>

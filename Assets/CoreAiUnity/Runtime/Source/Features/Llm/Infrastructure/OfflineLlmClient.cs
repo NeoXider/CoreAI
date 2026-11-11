@@ -16,10 +16,29 @@ namespace CoreAI.Infrastructure.Llm
         private readonly CoreAISettingsAsset _settings;
         private IReadOnlyList<ILlmTool> _tools = Array.Empty<ILlmTool>();
 
-        /// <summary>What the Programmer answers with no model: a line a player can act on.</summary>
-        public const string OfflineProgrammerReply =
-            "No AI model is set up, so the AI cannot build or script anything yet. " +
-            "Choose a model in the Hub (Settings), then ask again.";
+        /// <summary>The first sentence of the Programmer's answer with no model.</summary>
+        public const string OfflineProgrammerReplyStart =
+            "No AI model is set up, so the AI cannot build or script anything yet.";
+
+        /// <summary>
+        /// The second sentence when the scene names no place of its own: it fits a game with the Hub (whose page
+        /// is called AI Settings) and one with its own settings screen.
+        /// </summary>
+        public const string DefaultModelSetupHint = "Choose a model in the AI settings, then ask again.";
+
+        /// <summary>What the Programmer answers with no model when no host set a hint: a line a player can act on.</summary>
+        public const string OfflineProgrammerReply = OfflineProgrammerReplyStart + " " + DefaultModelSetupHint;
+
+        /// <summary>
+        /// The Programmer's answer with no model: <see cref="OfflineProgrammerReplyStart"/> and
+        /// <paramref name="modelSetupHint"/> (a scene's own "press F2 ..." sentence), or
+        /// <see cref="OfflineProgrammerReply"/> when the hint is empty.
+        /// </summary>
+        public static string ProgrammerReplyFor(string modelSetupHint)
+        {
+            string hint = (modelSetupHint ?? "").Trim();
+            return hint.Length == 0 ? OfflineProgrammerReply : OfflineProgrammerReplyStart + " " + hint;
+        }
 
         /// <summary>The error an NPC turn fails with when no model is set up.</summary>
         public const string NpcNoModelError = "No AI model is set up, so an NPC has nothing generated to say.";
@@ -69,7 +88,7 @@ namespace CoreAI.Infrastructure.Llm
             }
             else
             {
-                response = GetStructuredOfflineStub(request);
+                response = GetStructuredOfflineStub(request, _settings.ModelSetupHint);
             }
 
             return Task.FromResult(new LlmCompletionResult
@@ -99,15 +118,15 @@ namespace CoreAI.Infrastructure.Llm
             return false;
         }
 
-        private static string GetStructuredOfflineStub(LlmCompletionRequest request)
+        private static string GetStructuredOfflineStub(LlmCompletionRequest request, string modelSetupHint)
         {
             string role = request.AgentRoleId?.ToLowerInvariant() ?? "";
 
             if (role.Contains("programmer"))
             {
                 // WHY: a sentence and not a code stub - the Programmer answers the in-world chat, so this is what a
-                // player reads when no model is set up.
-                return OfflineProgrammerReply;
+                // player reads when no model is set up; the scene's hint says where to set one up in this scene.
+                return ProgrammerReplyFor(modelSetupHint);
             }
 
             if (role.Contains("mechanic") || role.Contains("coremechanic"))

@@ -26,6 +26,8 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Added
 
+- **Test a server, use it, remember it.** `CoreAiBackend.CheckConnectionAsync` and `ConnectHttpApiAsync` test the typed server, use it for the session and remember the address and the model on the device, never the key (`RestoreRememberedBackend`, `TryGetRememberedBackend`, `ForgetRememberedBackend`; `FileLlmRememberedBackendStore` writes `persistentDataPath/CoreAI/remembered-backend.json`, in a browser through the engine's automatic persistence). Hub AI Settings has a Test connection button, a note that keys are never saved, and the HTTP fields shown while Offline with a first-time line.
+- `CoreAiHubWindow.CaptureKeyboardWhileExpanded`, `IsCollapsed` and `HoldsKeyboard`. The offline Programmer reply no longer names the Hub; a host sets its own second sentence for the session with `CoreAISettingsAsset.SetSessionModelSetupHint`.
 - **Default look: the sky below the horizon and the fog follow the horizon haze** as the sun moves (`CoreAiLookProfile.SkyGroundFollowsHaze`, `FogFollowsHaze`). A fog that a world claimed through `Lighting.FogStart`, `FogEnd` or `FogColor` is left to that world.
 - **Default look: horizon dome.** While fog is on, a dome in the fog colour covers the horizon round every camera (opaque below the horizon and just above it, gone ten degrees up), so the edge of a fogged world cannot be seen against the sky (`CoreAiLookProfile.HorizonFollowsFog`, on by default; one draw call, no shader variant). Whoever owns the fog sets the colour, the look's haze or a world's `Lighting.FogColor`.
 - **Default look: twilight sky.** From a sun about ten degrees high to night the procedural sky thins to a blue-violet atmosphere, so dusk is dusky blue over the warm horizon instead of olive (`ProceduralSkyHaze.TwilightSky`, `CoreAiLookProfile.TwilightSky`, on by default). The day sky is unchanged.
@@ -61,6 +63,8 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Fixed
 
+- `CoreAiBackend.ListModelsAsync` (the Hub's Fetch models) used `System.Net.Http.HttpClient`, which a WebGL player cannot use; it goes through `UnityWebRequest` now and reports failures in the connection check's words.
+- The Hub's embedded chat left its input reported as typing or hovered after a tab change or a closed Hub, so a game's input stayed captured. The embedded `CoreAiChatPanel` clears its focus report when its host detaches, and `CoreAiHubWindow` blurs a focused field in its content before a page switch, a collapse or a disable.
 - **WebGL/IL2CPP: the in-world chat did not appear in a player built from the current tree.** The container did not see `[Inject]` on the audit writer's default constructor in the player, asked for a `string`, and the failed build callback stopped every callback after it. `AuditLogWriter`, `LlmAuditInterceptor` and `ToolCallAuditInterceptor` are now registered through factories (`AuditLogInstaller`), as `IAiGameCommandSink` already was.
 - AI vision frames are rendered through an HDR target, so a captured frame shows bloom and other HDR effects as the screen does instead of clamping at 8 bits.
 - The benchmark gives the model no free agent camera unless a scenario asks for one (`BenchmarkEnvironment.CameraTool(roleId, allowFreeCamera)`), and every camera service is disposed with its scenario.

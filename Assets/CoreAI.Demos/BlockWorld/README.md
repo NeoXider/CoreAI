@@ -24,7 +24,8 @@ the features that need one say so (see [What needs a model](#what-needs-a-model)
   function of the builder (`Editor/BlockWorldDemoSceneBuilder.cs`) and of the world mod.
 
 What the scene holds: one `CoreAI Play World` object, the one-click play world (`Docs/CoreAIMods/PLAY_WORLD.md`)
-with the controls and default camera, the default look and the in-world chat, plus `BlockWorldDemoModule`; one
+with the controls and default camera, the default look and the in-world chat, plus `BlockWorldDemoModule` and
+`CoreAiPlayWorldHubModule` (the Hub on F2, with the Hub prefab); one
 `Sun` (it is `RenderSettings.sun`, the light the clock turns); the camera at the spawn. There is no baseplate:
 the Terrain is the ground. The scene keeps its own mods store (`block-world-demo`), so its saved world never
 opens in another demo.
@@ -37,7 +38,8 @@ the Hub lasts until the next start. It also tells the AI where "here" is: every 
 its world state, that the workspace attribute `CrosshairPlaceCell` is the cell the player looks at, with its value
 now, so a model that has never seen this demo can build "here".
 
-In a WebGL player the module sets `BlockWorldViewRadius` to 3 columns before the world mod loads.
+In a WebGL player the module sets `BlockWorldViewRadius` to 6 columns before the world mod loads (a desktop streams
+8).
 
 ## The world
 
@@ -46,16 +48,20 @@ lowlands with woods (one stands near the spawn) and single trees of three shapes
 and big oaks (a trunk is the Terrain material Mud, which the block look draws as bark). Hills rise in steps a block or two high, and a step's side shows the earth under the grass, as in
 Minecraft. High ground (eleven blocks above the sea and more) and faces too steep to hold soil are bare rock,
 and the highest peaks, fourteen blocks above the sea and more, are snow over rock. Caves run under the hills
-and open onto their sides (see [Caves](#caves)). The land is streamed around you, four columns of 64 studs each
-way on a desktop and three in a WebGL player, the column you look toward first. A fog in the sky's colour hides
-where the land ends: it is whole at 175 studs on a desktop and 137 in WebGL, the nearest the edge can be from
-anywhere in your column (the view radius is a circle of columns, so the land reaches less far along a diagonal).
+and open onto their sides (see [Caves](#caves)). The land is streamed around you, eight columns of 64 studs each
+way on a desktop and six in a WebGL player, nearest first and the way you walk (or look) before the way behind you.
+The generation takes up to about 3 ms of a frame while frames stay under 12 ms and backs off to one step a frame when
+they do not; one seed makes the same land whatever the radius and the order. A fog in the sky's colour hides where
+the land ends: it is whole at 447 studs on a desktop and 314 in WebGL, the nearest the edge can be from anywhere in
+your column (the view radius is a circle of columns, so the land reaches less far along a diagonal).
 
 The three villagers live around the spawn, each on the nearest level ground to their place in the first view, so
 none starts in a pit or on a ledge. A Humanoid does not climb a step a whole block high, so a villager keeps to the
 ground it can walk on and does not go up a hill. A villager is held until the land under its home is made; one that
 sinks into the land is stood back on top within a quarter second, and one that walks onto land not made yet is taken
-home.
+home. Characters block each other and never push: a villager whose walk you (or another villager) block steps a block
+and a half aside, the other side if that is blocked too, and then waits for its brain's next decision instead of
+walking into you again.
 
 ## Controls
 
@@ -64,7 +70,8 @@ The key legend is on screen at the bottom right.
 | Input | What it does |
 |---|---|
 | W A S D / arrows | Walk (the bundled `coreai_player_controls` mod) |
-| Space | Jump; double-tap to fly, then Space rises and Left Shift sinks |
+| Left Control, or W twice | Sprint while going forward (1.3 times the walk); not in water or while swimming. In flight, Left Control flies twice as fast |
+| Space | Jump a block and a quarter; double-tap to fly, then Space rises and Left Shift sinks |
 | Mouse | Look (the pointer is locked) |
 | Left click | Break the outlined block (hold to keep breaking); on a torch, take it back |
 | Right click | Place the hotbar block on the outlined face (hold to keep placing) |
@@ -75,9 +82,12 @@ The key legend is on screen at the bottom right.
 | P, or `/autopilot on`, `/autopilot off`, `/autopilot status` | Autopilot on or off; any movement key also takes the controls back |
 | L | Time of day: noon, dusk, midnight, dawn |
 | T or Enter | Open the chat; `/` opens it with a command started |
-| `/fly`, `/undo`, `/redo` | Chat commands of the play world (flight, and the AI's last change) |
+| F2 | The CoreAI Hub: AI Settings (set up and test the model), Mods, World and the rest; F2 or Escape closes it |
+| `/fly`, `/undo`, `/redo`, `/save` | Chat commands of the play world (flight, the AI's last change, and saving the world now) |
 
-Reach is five blocks, measured from your character's eyes, where the first-person camera is. Bedrock, the bottom
+You are 1.8 blocks tall (the world mod scales the character to 1.44, so 7.2 studs, eyes at 6.5), walk 4.3 blocks a
+second and jump onto a one-block step; the villagers have the same body. Reach is five blocks, measured from your
+character's eyes, where the first-person camera is. Bedrock, the bottom
 layer, cannot be broken, and a block is never placed where you stand. Sand falls when nothing is under it: break the
 block under a sand pillar, or put sand in the air, and it drops a block every tenth of a second until it rests; it
 never falls into you.
@@ -102,7 +112,8 @@ Press G to leave creative. In survival:
 
 - Breaking a block puts it in your hotbar count and placing one takes it; the counts show on the hotbar slots.
 - Your health (the Humanoid's own `Health` of 100) shows at the top left. A fall of up to three blocks is free;
-  each stud beyond costs 2.5 health, so about thirteen blocks kill. Flying never counts as falling.
+  each stud beyond costs 2.5 health, so about thirteen blocks kill. Flying never counts as falling, and a fall into
+  deep water costs nothing (water breaks it, also when you climb out later).
 - At zero health you die: a notice says so and after three seconds you are back at the spawn with full health.
 - Press G again and all of it stops: no damage, endless blocks, health back to full.
 
@@ -123,6 +134,10 @@ do not count. Breaking or placing a block, putting down or taking back a torch, 
 does: then `/undo` changes nothing and says why, and the World Loads page in the Hub restores an autosave
 instead. So try it right after the AI built: "Build a watchtower here", look at it, `/undo`, `/redo`.
 
+## After a reload
+
+The scene keeps its world between starts (`keepWorldBetweenStarts` on `BlockWorldDemoModule`, the play world's **Keep World Between Starts**): the blocks you and the AI changed, the AI's mods and its edits of the nine mods are there after a page reload. The world is recorded after a change (the first at once, then at most once a minute, never while it only streams: the world mod marks its own writes with `CoreAITerrainGenerating`), and `/save` records it at once. A newer version of a bundled mod replaces your copy of it at the next start; your copy stays in the mod's history. See `Docs/CoreAIMods/PLAY_WORLD.md`.
+
 ## What is not built
 
 The game has none of these today and does not pretend to:
@@ -136,10 +151,17 @@ The game has none of these today and does not pretend to:
 
 ## What needs a model
 
+To set one up, press **F2** in the game: the Hub opens on AI Settings. Enter the server's address (LM Studio:
+`http://127.0.0.1:1234/v1`), a key only if the server wants one, and the model, then press **Test connection**. When
+the model answers, the chat and the villagers use it at once, and the next start uses it again without a click (the
+key is never saved: enter it again after a restart). In a browser the server must allow calls from a web page
+(CORS; LM Studio has an Enable CORS switch), or go through a proxy such as `tools/G11Proxy`; the test says which
+failed. See [PLAY_WORLD.md](../../../Docs/CoreAIMods/PLAY_WORLD.md#the-hub-on-f2-ai-settings-in-the-running-world).
+
 | Feature | Without a model | With a model |
 |---|---|---|
 | Walking, flying, building, breaking, hotbar, day and night, torches | works | works |
-| "Build here" and other chat requests | the chat answers that no AI model is set up and where to choose one | the AI writes cells at the crosshair; `/undo` restores them |
+| "Build here" and other chat requests | the chat answers that no AI model is set up and to press F2 | the AI writes cells at the crosshair; `/undo` restores them |
 | Villagers | stand by the spawn and answer that no model answered, in the chat and a bubble | answer by name, in the chat and a bubble, and remember you |
 | Autopilot | a fixed rule keeps the current goal, else wanders | the decision model picks the goal from the mod's list |
 
@@ -156,12 +178,12 @@ reloads on its own.
 
 | Mod | Owns | Talks to the others through |
 |---|---|---|
-| `blockworld_world` | the seeded world: sea and lakes, sandy beaches, grass lowlands with woods and single trees (round oaks, tall narrow trees, big oaks), hills whose steps show earth, rocky ridges and snowy peaks, caves with hillside mouths, bedrock; streamed around you in budgeted steps (your own column first, then the one whose edge is nearest you, what is in front of the camera before what is behind); the spawn and the heading you first face; a new player held until the first view is built | `BlockWorldSeed`, `BlockWorldSpawn`, `BlockWorldSpawnLook`, `BlockWorldReady`, `BlockWorldOpened`, `BlockWorldOpeningColumns`, `BlockWorldColumns`, `BlockWorldViewStuds` (how far the land is sure to reach) |
-| `blockworld_build` | the crosshair target and its outline, breaking and placing, reach, creative or survival, the view | `CrosshairCell`, `CrosshairPlaceCell`, `CrosshairNormal`, `CrosshairPartName`, `CrosshairModelName`, `BlockWorldCreative`, `BlockWorldPlaced`, `BlockWorldBroken`, `BlockWorldCount_<Material>` |
+| `blockworld_world` | the seeded world: sea and lakes, sandy beaches, grass lowlands with woods and single trees (round oaks, tall narrow trees, big oaks), hills whose steps show earth, rocky ridges and snowy peaks, caves with hillside mouths, bedrock; streamed around you in budgeted steps (your own column first, then the one whose edge is nearest you, the way you walk, or else look, before the way behind), one to eight steps a frame as the frame time allows; the spawn and the heading you first face; the body of a block game (1.8 blocks tall, a jump of 1.25 blocks, a walk of 4.3 blocks a second), a new player held until the first view is built | `BlockWorldSeed`, `BlockWorldSpawn`, `BlockWorldSpawnLook`, `BlockWorldReady`, `BlockWorldOpened`, `BlockWorldOpeningColumns`, `BlockWorldColumns`, `BlockWorldViewStuds` (how far the land is sure to reach), `BlockWorldWorkers` (generation steps a frame now) |
+| `blockworld_build` | the crosshair target and its outline, breaking and placing, reach, creative or survival, the view, the sprint (Left Control or W twice) | `CrosshairCell`, `CrosshairPlaceCell`, `CrosshairNormal`, `CrosshairPartName`, `CrosshairModelName`, `BlockWorldCreative`, `BlockWorldPlaced`, `BlockWorldBroken`, `BlockWorldCount_<Material>`, `BlockWorldSprinting` |
 | `blockworld_hud` | the whole interface (UXML and USS text through `UxmlService`), the key legend, health in survival, the hotbar choice and the "Building the world" screen | `BlockWorldSelected`, `BlockWorldSlot` |
 | `blockworld_daynight` | the clock (`Lighting.ClockTime`, a fresh world starts at 10:00), the sky's light (`OutdoorAmbient`: bright by day, warm and still readable at dusk, a dim blue moonlight at night) and the light where the sky does not reach (`Ambient`, low all day, so caves are dark), the fog (pale by day, a dusky blue haze at dawn and dusk, deep blue at night, whole just short of `BlockWorldViewStuds`), `/time` (a `TextChatCommand`) and the L key | `BlockWorldTime` (set it to "noon", "18:30", "stop", "go") |
 | `blockworld_torches` | torches with a PointLight and a flame, the light budget | `BlockWorldTorches` |
-| `blockworld_villagers` | Mira, Tobin and Elda: character Models under `workspace` with Roblox's R6 body (`Head`, `Torso`, `Left Arm` ...), which the platform's character rig animates as it does the player's, in their own clothes, with hair and two eyes that follow the head, placed around the spawn in the frame of the first view (Mira in it) on the nearest level ground, so none starts in a pit or on a ledge, held until the ground under them exists, their `AIService` agents and brains | on each Model `NpcAgent`, `NpcBrain`, `NpcState` (the host writes `NpcAction`); `BlockWorldVillagerReply` |
+| `blockworld_villagers` | Mira, Tobin and Elda: character Models under `workspace` with Roblox's R6 body (`Head`, `Torso`, `Left Arm` ...), which the platform's character rig animates as it does the player's, in their own clothes, with hair and two eyes that follow the head, placed around the spawn in the frame of the first view (Mira in it) on the nearest level ground, so none starts in a pit or on a ledge, held until the ground under them exists, their `AIService` agents and brains | on each Model `NpcAgent`, `NpcBrain`, `NpcState`, `NpcDetour` (a step aside while it lasts; the host writes `NpcAction`); `BlockWorldVillagerReply` |
 | `blockworld_falling` | falling blocks: Sand with air or water under it falls one block every tenth of a second, the whole run above with it, through water (the pool closes over it); the rule is one table (`FALLS`), so another material can join; it watches the land round the player and picks up a fall a saved world was in the middle of | `BlockWorldFalling` (the pillars with a fall in progress) |
 | `blockworld_survival` | health from the Humanoid, fall damage (a fall is read from `Humanoid.StateChanged`), death and the respawn at the spawn; off in creative | `BlockWorldHealth`, `BlockWorldMaxHealth`, `BlockWorldDeaths` |
 | `blockworld_autopilot` | the block world's goals and facts for the game's autopilot, and the goals only a block world knows: gather, build, home | on the Player `Autopilot`, `AutopilotGoals`, `AutopilotState` (the host writes `AutopilotGoal`; the mod writes the Player only while the autopilot drives, so `/undo` keeps working); `BlockWorldAutopilot` |
@@ -173,7 +195,7 @@ wants shown goes to `BlockWorldNotice`, which the HUD displays. So you can drop 
 replace the generator with a flat world, or remove the villagers, and the rest keeps working.
 
 Knobs you can set as workspace attributes before the world mod loads: `BlockWorldSeed` (another world),
-`BlockWorldViewRadius` (1 to 8 columns of 64 studs; smaller for WebGL).
+`BlockWorldViewRadius` (1 to 8 columns of 64 studs; 8 by default, 6 in WebGL).
 
 Not done on purpose today: the mods still share state through workspace attributes. `BindableEvent` and
 `BindableFunction` exist now, and moving the channels onto them is a possible cleanup, not a change this demo needs.
@@ -182,8 +204,10 @@ Not done on purpose today: the mods still share state through workspace attribut
 
 - World generation spends a fixed amount of work per frame, counted in cells before a pillar is filled (a pillar
   costs its cells, twelve more, and up to 24 for its caves; 220 a frame). Trees grow until about 3,000
-  instructions a frame are spent, after a frame that plans them. The fullest frame stays near 4,000
-  instructions, under half the per-resume budget every Heartbeat handler gets (10,000). Nothing is generated
+  instructions a frame are spent, after a frame that plans them. The fullest step stays near 4,000
+  instructions, under half the per-resume budget every Heartbeat handler gets (10,000). A quick machine runs up to
+  eight steps a frame, each in a Heartbeat handler of its own and so in its own budget, while they take under about
+  3 ms together and frames stay under 12 ms; a slow frame brings it back to one step. Nothing is generated
   while the mod loads (a reload must fit an AI tool call); the spawn column comes first, in
   under forty frames (it has no caves and no wood), and a column with caves and a wood takes about eighty.
 - The torch mod keeps at most 48 lit torches and says so when it is full. The host adds its own light budget:
@@ -201,5 +225,13 @@ Not done on purpose today: the mods still share state through workspace attribut
   on masked crops, a scripted model's watchtower and `/undo`, a villager answering by name, the no-model answers,
   a survival fall that hurts and a lethal one that respawns you, a cave at noon with and without a torch, the
   characters in the shoulder view idle and walking, `/time midnight` typed in the chat, and the world from a
-  hilltop, a wood and a cave mouth with and without a torch).
+  hilltop, a wood and a cave mouth with and without a torch). `BlockWorldScenePlaytestPlayModeTests.cs` plays it as
+  a player tries it (falling sand, torches on a floor and four walls, the body beside one- and two-block steps, the
+  sprint and the flight, an audit of a block game's basics, and a live model's build when
+  `COREAI_BLOCKWORLD_LIVE_URL` names an OpenAI-compatible server); `BlockWorldSceneReloadPlayModeTests.cs` stops and
+  starts the world over the same store (the AI's edit of a bundled mod and its new mod come back; a newer bundled
+  version replaces the edit and keeps it in the revision history).
   It writes its frames to `artifacts/blockworld/`.
+- The Hub in this scene: `BlockWorldHubPlayModeTests.cs` next to it (the no-model line names F2; F2 opens the Hub
+  on AI Settings while W, T, E and a click do nothing in the world, and gives them back on close; Test connection
+  against an in-process model server stub; the next chat turn reaches the stub; Escape closes).

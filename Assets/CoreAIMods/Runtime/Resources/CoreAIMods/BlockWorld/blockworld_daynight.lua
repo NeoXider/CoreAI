@@ -53,7 +53,7 @@ local DAY_FOG = Color3.fromRGB(198, 220, 228)
 local DUSK_FOG = Color3.fromRGB(52, 58, 92)
 local NIGHT_FOG = Color3.fromRGB(24, 32, 56)
 local FOG_EDGE = 6               -- studs short of the stream radius where the fog is whole
-local FOG_START_SHARE = 0.7      -- where it begins, as a share of where it is whole: 122 of 175 on a desktop
+local FOG_START_SHARE = 0.7      -- where it begins, as a share of where it is whole: 313 of 447 on a desktop
 
 local paused = false
 local cycleIndex = 0

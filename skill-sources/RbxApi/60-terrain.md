@@ -35,6 +35,8 @@ use Parts for props, doors, moving things and anything that needs Color or Trans
   instance. Rays hit Terrain in every world, also on a server or a headless tool without a physics engine. `workspace.Terrain:IsA("BasePart")` is false in CoreAI, so check `hit.Instance == workspace.Terrain`.
 - Writes need WorldEdit. The world has bounds and a cell budget: past them a write raises BAD_ARGUMENT or
   BUDGET_EXCEEDED and changes nothing.
+- A generator that rebuilds cells from a seed sets `workspace:SetAttribute("CoreAITerrainGenerating", true)`
+  around its writes (false after): a world kept between starts then records only real edits.
 - Not implemented (NOT_IMPLEMENTED): FillBall, FillCylinder, FillWedge, ReadVoxelChannels,
   WriteVoxelChannels, CopyRegion, PasteRegion, GetMaterialColor/SetMaterialColor, the Water* properties.
 

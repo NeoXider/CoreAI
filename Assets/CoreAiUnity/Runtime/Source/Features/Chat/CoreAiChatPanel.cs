@@ -584,6 +584,7 @@ namespace CoreAI.Chat
             // WHY: the chat tree must be attached to a live panel before styles/layout apply, mirroring
             // the UIDocument path where rootVisualElement is already panel-attached in OnEnable.
             _embeddedHost.RegisterCallback<AttachToPanelEvent>(OnEmbeddedHostAttached);
+            _embeddedHost.RegisterCallback<DetachFromPanelEvent>(OnEmbeddedHostDetached);
             if (_embeddedHost.panel != null)
             {
                 BuildEmbeddedChatTree();
@@ -593,6 +594,13 @@ namespace CoreAI.Chat
         private void OnEmbeddedHostAttached(AttachToPanelEvent evt)
         {
             BuildEmbeddedChatTree();
+        }
+
+        private void OnEmbeddedHostDetached(DetachFromPanelEvent evt)
+        {
+            // WHY: a detached host sends no FocusOut or PointerLeave; a Hub tab switch or a closed Hub otherwise left
+            // this panel reported as typing or hovered, and the game behind kept its input captured.
+            ClearUiFocus();
         }
 
         private void BuildEmbeddedChatTree()
@@ -766,6 +774,7 @@ namespace CoreAI.Chat
             if (_embeddedHost != null)
             {
                 _embeddedHost.UnregisterCallback<AttachToPanelEvent>(OnEmbeddedHostAttached);
+                _embeddedHost.UnregisterCallback<DetachFromPanelEvent>(OnEmbeddedHostDetached);
             }
 
 #if UNITY_6000_5_OR_NEWER
@@ -2384,7 +2393,7 @@ namespace CoreAI.Chat
                     Root.focusController == null ||
                     Root.focusController.focusedElement == null;
 
-                if (!noUitkKeyboardFocus || IsAnotherSurfaceTyping(ResolveUiFocus()?.HasTextFocus ?? false, _inputHasFocus))
+                if (!noUitkKeyboardFocus || IsAnotherSurfaceTyping(ResolveUiFocus()?.HoldsKeyboard ?? false, _inputHasFocus))
                 {
                     return;
                 }

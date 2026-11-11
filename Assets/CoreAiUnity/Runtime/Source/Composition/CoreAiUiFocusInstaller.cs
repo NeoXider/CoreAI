@@ -10,8 +10,8 @@ namespace CoreAI.Composition
     /// Registers the scope's one <see cref="ICoreAiUiFocus"/> and connects the surfaces the container builds to it:
     /// the in-world chat overlay reports its open input under <see cref="ChatOverlaySurfaceId"/>, the runtime UI host
     /// its focused field and hovered screens under <see cref="RuntimeUiSurfaceId"/>, and the overlay's open keys are
-    /// gated on <c>!HasTextFocus</c>, so typing in any CoreAI text field never moves a character and never opens the
-    /// chat. The chat panel and the Hub report themselves.
+    /// gated on <c>!HoldsKeyboard</c>, so typing in any CoreAI text field, or a Hub open over the game, never moves a
+    /// character and never opens the chat. The chat panel and the Hub report themselves.
     /// </summary>
     /// <remarks>
     /// A focus service or an <see cref="IChatOverlayOpenGate"/> registered before this call is kept. A scope without

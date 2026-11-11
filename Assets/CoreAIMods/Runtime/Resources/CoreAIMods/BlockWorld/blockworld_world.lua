@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_world
 name: Block World 1 - World
-version: 1.5.0
+version: 1.5.1
 active: false
 capabilities: All
 category: Samples/Block World
@@ -921,7 +921,11 @@ local function streamStep()
             end
         end
     else
+        -- WHY marked: cells made from the seed come back from it, so a play world that keeps the world between
+        -- starts does not record it for them; a block the player or the AI changes is still recorded.
+        workspace:SetAttribute("CoreAITerrainGenerating", true)
         local ok, finishedOrError = pcall(stepJob, job, HEIGHT_BUDGET, PILLAR_BUDGET)
+        workspace:SetAttribute("CoreAITerrainGenerating", false)
         if not ok then
             stopStreaming(tostring(finishedOrError))
         elseif finishedOrError then

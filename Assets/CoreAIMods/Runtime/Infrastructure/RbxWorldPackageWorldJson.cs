@@ -336,6 +336,13 @@ namespace CoreAI.Mods.WorldPackages
                     sink.Null();
                 }
 
+                // WHY only away from 1: an unscaled model writes no key, so a world with no scaled model is unchanged.
+                if (node.Model.Scale > 0d && node.Model.Scale != 1d)
+                {
+                    sink.Name("scale");
+                    sink.Number(node.Model.Scale);
+                }
+
                 sink.EndObject();
             }
             else

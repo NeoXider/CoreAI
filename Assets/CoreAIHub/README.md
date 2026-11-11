@@ -110,7 +110,7 @@ of throwing.
 | Page | Id | Display | Order | Notes |
 |---|---|---|---:|---|
 | Chat | `coreai.hub.chat` | `Chat` | 0 | Hosts the real `CoreAiChatPanel` via `CreateEmbedded` — streaming, tools, history, and hotkeys behave exactly like the standalone chat. Full-bleed; implements `IHubEscapeHandler`. |
-| Settings | `coreai.hub.settings` | `AI Settings` | 100 | Runtime backend switching (Auto / LLMUnity / HTTP API / Offline) with the same surface as `CoreAiBackend`, endpoint/profile management, and an inline health probe. **Fetch models** lists a server's advertised model ids in a dropdown, a **Vision** override (Auto / On / Off) forces the multimodal gate, and the endpoint editor has a mode-aware form with an Advanced foldout and a per-row Remove — see [Runtime Backend Switching §2](../CoreAiUnity/Docs/RUNTIME_BACKEND_SWITCHING.md#2-hub-ai-settings-editor). API keys are write-only in the UI. |
+| Settings | `coreai.hub.settings` | `AI Settings` | 100 | Runtime backend switching (Auto / LLMUnity / HTTP API / Offline) with the same surface as `CoreAiBackend`, endpoint/profile management, and an inline health probe. **Fetch models** lists a server's advertised model ids in a dropdown, a **Vision** override (Auto / On / Off) forces the multimodal gate, and the endpoint editor has a mode-aware form with an Advanced foldout and a per-row Remove — see [Runtime Backend Switching §2](../CoreAiUnity/Docs/RUNTIME_BACKEND_SWITCHING.md#2-hub-ai-settings-editor). **Test connection** tests the typed address, key and model (the model list, then one short answer) and says what is wrong in a player's words; when the model answers, the game uses it at once and the device remembers the address and the model, never the key. API keys are write-only in the UI and are kept for the session only. |
 | Statistics | `coreai.hub.statistics` | `Statistics` | 200 | Orchestration metrics (completions, tool calls, …) from an optional `InMemoryAiOrchestrationMetrics`. |
 | About | `coreai.hub.about` | `About` | 1000 | Opt-in (off by default in `CoreAiHubDemo`) so the tab bar stays focused on functional pages. |
 | World state | `coreai.hub.worldstate` | `World` | 300 | Saved-state status plus Reset World / Save Now controls (see [WORLD_COMMANDS.md](../CoreAiUnity/Docs/WORLD_COMMANDS.md) §7). The page class ships here, but it is registered on demand by `WorldStateHubBinder` in the optional mods package, not by `RegisterAll`. |
@@ -194,6 +194,25 @@ The window can collapse to just its toggle button:
 - **`requireVisibleCursor`** (default **on**) gates Escape and the toggle hotkey behind a visible,
   unlocked cursor, mirroring `CoreAiChatOptions.ChatRequiresVisibleCursor`, so a locked-cursor
   (first-person) game keeps its input.
+- **`captureKeyboardWhileExpanded`** (`CaptureKeyboardWhileExpanded`, default **off**): while the Hub is
+  expanded it reports to the scope's `ICoreAiUiFocus` that it holds the keyboard, as a focused text field
+  does. Nothing behind it reacts to keys then: a play world's input reaches Lua as `gameProcessedEvent = true`
+  (so the default camera frees the pointer), the in-world chat's open keys and the mod console key stand down.
+  Collapsing or disabling the Hub gives the keyboard back. Off keeps the Hub a side panel next to the game.
+
+## In a play world
+
+`CoreAiPlayWorldHubModule` (mods package, `CoreAI.Mods.Hub`) brings this Hub into a one-click play world
+(`Docs/CoreAIMods/PLAY_WORLD.md`): put it in a module slot of `CoreAiPlayWorldBootstrap` and give it the prefab
+`Assets/CoreAIHub/Runtime/CoreAiHub.prefab`. The Hub starts closed; **F2** opens it, F2 or Escape closes it, and a
+small hint at the top of the screen names the key ("F2  Set up the AI model" until a model is set up, then
+"F2  AI settings"). While it is open it holds the keyboard (above) and with no model it opens on **AI Settings**.
+Before the scopes build the module uses the server this device remembers from a successful Test connection, and it
+gives the offline Programmer reply its second sentence ("Press F2 to open the AI settings, enter a model server and
+press Test connection, then ask again."). When the remembered server needed a key (keys are never saved), the
+session stays offline, the reply says the key is missing, and AI Settings opens with the address and the model
+filled in. The scene's reference to the prefab carries every Hub asset into a player build, WebGL included: no
+extra scene, no Resources folder, no extra define beyond `COREAI_HAS_HUB`. The Block World demo uses it.
 
 ## Setup
 

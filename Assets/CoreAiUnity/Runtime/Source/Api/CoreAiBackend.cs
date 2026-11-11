@@ -98,6 +98,44 @@ namespace CoreAI
         public string Error { get; }
     }
 
+    /// <summary>What <see cref="CoreAiBackend.RestoreRememberedBackend"/> did.</summary>
+    public enum CoreAiRememberedBackendRestore
+    {
+        /// <summary>No server is remembered on this device (or the file could not be read); nothing changed.</summary>
+        NothingRemembered = 0,
+
+        /// <summary>The remembered server and model are in use for this session.</summary>
+        Applied = 1,
+
+        /// <summary>
+        /// The remembered server needs a key, which is never kept between starts: the session stays offline, and
+        /// <see cref="CoreAISettingsAsset.PendingKeyBackend"/> holds the server so a settings page asks for the key.
+        /// </summary>
+        NeedsKey = 2
+    }
+
+    /// <summary>Result of <see cref="CoreAiBackend.ConnectHttpApiAsync"/>.</summary>
+    public sealed class CoreAiConnectResult
+    {
+        /// <summary>What the connection check found; its message is the line to show.</summary>
+        public LlmConnectionCheckResult Check { get; set; } = new();
+
+        /// <summary>True when the server answered and is now the backend of this session.</summary>
+        public bool Ok => Check != null && Check.Ok && Applied;
+
+        /// <summary>True when the session switched to the tested server (every role on Automatic routing uses it).</summary>
+        public bool Applied { get; set; }
+
+        /// <summary>True when the running client was hot-swapped, so the very next request uses the server.</summary>
+        public bool IsLive { get; set; }
+
+        /// <summary>True when the address and the model were kept on this device and will be used at the next start.</summary>
+        public bool Remembered { get; set; }
+
+        /// <summary>Why they were not kept; empty when <see cref="Remembered"/> or when remembering was not asked.</summary>
+        public string RememberProblem { get; set; } = "";
+    }
+
     /// <summary>
     /// Runtime backend control for CoreAI: switch between the OpenAI-compatible HTTP API, the LLMUnity
     /// local model, and Offline mode, change the API base URL / key / model, and health-check the
@@ -131,12 +169,52 @@ namespace CoreAI
         /// <summary>Raised after a successful switch/mutation, with the now-active execution mode.</summary>
         public static event Action<CoreAiBackendStatus>? OnBackendChanged;
 
+        private static ILlmConnectionHttp? s_connectionHttp;
+        private static ILlmRememberedBackendStore? s_rememberedStore;
+
         internal static void ResetStaticState()
         {
             lock (SyncRoot)
             {
                 OnBackendChanged = null;
+                s_connectionHttp = null;
+                s_rememberedStore = null;
             }
+        }
+
+        /// <summary>
+        /// The HTTP that <see cref="CheckConnectionAsync"/>, <see cref="ConnectHttpApiAsync"/> and
+        /// <see cref="ListModelsAsync"/> send through. The default goes through <c>UnityWebRequest</c>, which works in
+        /// a WebGL player; a host or a test sets its own; null restores the default. Null when the build has no HTTP
+        /// model support (<c>COREAI_LLM</c> off) and nothing was set.
+        /// </summary>
+        public static ILlmConnectionHttp? ConnectionHttp
+        {
+            get
+            {
+                ILlmConnectionHttp? set = s_connectionHttp;
+                if (set != null)
+                {
+                    return set;
+                }
+#if COREAI_LLM
+                return new UnityWebRequestLlmConnectionHttp();
+#else
+                return null;
+#endif
+            }
+            set => s_connectionHttp = value;
+        }
+
+        /// <summary>
+        /// Where the player's tested server is remembered between starts: by default
+        /// <see cref="FileLlmRememberedBackendStore"/> (a file under CoreAI's persistent data, the page's storage in
+        /// a browser). A host replaces it; null restores the default. It never holds a key.
+        /// </summary>
+        public static ILlmRememberedBackendStore RememberedBackendStore
+        {
+            get => s_rememberedStore ??= new FileLlmRememberedBackendStore();
+            set => s_rememberedStore = value;
         }
 
         /// <summary>Current backend snapshot (settings-level; independent of in-flight requests).</summary>
@@ -474,7 +552,9 @@ namespace CoreAI
         /// model ids. Purely a discovery convenience for the settings UI (so a user can see/copy the exact
         /// model names a local server such as LM Studio or Ollama exposes); it does NOT change any backend
         /// setting. <paramref name="apiKey"/> is optional — sent as a Bearer token only when non-empty (local
-        /// servers usually ignore it).
+        /// servers usually ignore it). It goes through <see cref="ConnectionHttp"/> (<c>UnityWebRequest</c>), so it
+        /// works in a WebGL player too, and a failure reads as the connection check's sentence (unreachable, CORS,
+        /// a refused key, ...).
         /// </summary>
         public static async Task<CoreAiModelListResult> ListModelsAsync(
             string baseUrl,
@@ -488,45 +568,196 @@ namespace CoreAI
                 return new CoreAiModelListResult(false, Array.Empty<string>(), "Base URL is empty.");
             }
 
+            ILlmConnectionHttp? http = ConnectionHttp;
+            if (http == null)
+            {
+                return new CoreAiModelListResult(false, Array.Empty<string>(), NoHttpSupportMessage);
+            }
+
             try
             {
-                using System.Net.Http.HttpClient http = new()
-                {
-                    Timeout = TimeSpan.FromSeconds(timeoutSeconds <= 0 ? 15 : timeoutSeconds)
-                };
-                using System.Net.Http.HttpRequestMessage request =
-                    new(System.Net.Http.HttpMethod.Get, url);
-                if (!string.IsNullOrWhiteSpace(apiKey))
-                {
-                    request.Headers.Authorization =
-                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey.Trim());
-                }
-
-                using System.Net.Http.HttpResponseMessage response =
-                    await http.SendAsync(request, cancellationToken);
-                string payload = await response.Content.ReadAsStringAsync();
-                if (!response.IsSuccessStatusCode)
-                {
-                    return new CoreAiModelListResult(
-                        false,
-                        Array.Empty<string>(),
-                        $"HTTP {(int)response.StatusCode} from {url}. {Truncate(payload, 200)}");
-                }
-
-                IReadOnlyList<string> models = ParseModelIds(payload);
-                return models.Count == 0
-                    ? new CoreAiModelListResult(false, models, "Server returned no models.")
-                    : new CoreAiModelListResult(true, models, "");
+                bool inBrowser = Application.platform == RuntimePlatform.WebGLPlayer;
+                LlmModelListing listing = await LlmConnectionCheck.ListModelsAsync(http, baseUrl, apiKey ?? "",
+                    timeoutSeconds <= 0 ? 15 : timeoutSeconds, inBrowser, inBrowser ? Application.absoluteURL : "",
+                    cancellationToken);
+                return new CoreAiModelListResult(listing.Ok, listing.Models, listing.Message);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 return new CoreAiModelListResult(
                     false, Array.Empty<string>(), $"Request timed out after {timeoutSeconds}s.");
             }
+        }
+
+        /// <summary>The sentence a check answers with when the build has no HTTP model support.</summary>
+        public const string NoHttpSupportMessage =
+            "This build has no HTTP model support (the COREAI_LLM define is off), so no server can be tested.";
+
+        /// <summary>
+        /// Tests the server at <paramref name="baseUrl"/> with <paramref name="model"/> as a player needs it tested
+        /// (see <see cref="LlmConnectionCheck"/>): its model list, then one tiny completion. Changes no setting and
+        /// never throws for a server problem; the result's message says what happened in a player's words. In a
+        /// WebGL player the browser's rules (CORS, mixed content) are named.
+        /// </summary>
+        public static async Task<LlmConnectionCheckResult> CheckConnectionAsync(
+            string baseUrl,
+            string apiKey,
+            string model,
+            int timeoutSeconds = 45,
+            CancellationToken cancellationToken = default)
+        {
+            ILlmConnectionHttp? http = ConnectionHttp;
+            if (http == null)
+            {
+                return new LlmConnectionCheckResult
+                {
+                    Problem = LlmConnectionProblem.ServerError,
+                    Message = NoHttpSupportMessage,
+                    BaseUrl = LlmConnectionCheck.NormalizeBaseUrl(baseUrl),
+                    Model = (model ?? "").Trim()
+                };
+            }
+
+            bool inBrowser = Application.platform == RuntimePlatform.WebGLPlayer;
+            return await LlmConnectionCheck.RunAsync(new LlmConnectionCheckRequest
+            {
+                BaseUrl = baseUrl ?? "",
+                ApiKey = apiKey ?? "",
+                Model = model ?? "",
+                InBrowser = inBrowser,
+                PageUrl = inBrowser ? Application.absoluteURL : "",
+                CompletionTimeoutSeconds = timeoutSeconds <= 0 ? 45 : timeoutSeconds
+            }, http, cancellationToken);
+        }
+
+        /// <summary>
+        /// Tests the server (<see cref="CheckConnectionAsync"/>) and, when it answered, makes it the backend of this
+        /// session at once, as <see cref="ApplyHttpApi(LlmExecutionMode,string,string,string,float?,int?,int?,bool?)"/>
+        /// does (a ClientLimited or ServerManagedApi backend keeps its mode, anything else becomes ClientOwnedApi):
+        /// every role on Automatic routing uses it from the next request. With <paramref name="remember"/> the
+        /// address and the model are also kept on this device (<see cref="RememberedBackendStore"/>) and
+        /// <see cref="RestoreRememberedBackend"/> uses them at the next start. The key is never kept: it lives in
+        /// the session override only, so after a restart a server that needs one asks for it again.
+        /// </summary>
+        public static async Task<CoreAiConnectResult> ConnectHttpApiAsync(
+            string baseUrl,
+            string apiKey,
+            string model,
+            bool remember = true,
+            int timeoutSeconds = 45,
+            CancellationToken cancellationToken = default)
+        {
+            LlmConnectionCheckResult check =
+                await CheckConnectionAsync(baseUrl, apiKey, model, timeoutSeconds, cancellationToken);
+            CoreAiConnectResult result = new() { Check = check };
+            if (!check.Ok)
+            {
+                return result;
+            }
+
+            CoreAISettingsAsset? settings = ResolveSettings();
+            if (settings == null)
+            {
+                result.RememberProblem = "No CoreAI settings asset is available, so the server cannot be used.";
+                return result;
+            }
+
+            LlmExecutionMode current = settings.ExecutionMode;
+            LlmExecutionMode mode = LlmRememberedBackend.IsHttpMode(current) ? current : LlmExecutionMode.ClientOwnedApi;
+            string key = (apiKey ?? "").Trim();
+            result.IsLive = ApplyHttpApi(mode, check.BaseUrl, key, check.Model);
+            result.Applied = true;
+            settings.SetSessionPendingKeyBackend(null);
+            if (!remember)
+            {
+                return result;
+            }
+
+            try
+            {
+                result.Remembered = RememberedBackendStore.Save(new LlmRememberedBackend
+                {
+                    Mode = mode,
+                    BaseUrl = check.BaseUrl,
+                    Model = check.Model,
+                    NeedsKey = key.Length > 0
+                });
+                if (!result.Remembered)
+                {
+                    result.RememberProblem =
+                        "This page cannot keep settings (its storage is off), so the server is used until the page closes.";
+                }
+            }
             catch (Exception ex)
             {
-                return new CoreAiModelListResult(false, Array.Empty<string>(), ex.Message);
+                // WHY contained: the server works; only keeping it for the next start failed, and that is said.
+                result.RememberProblem = "The server could not be kept on this device: " + ex.Message;
             }
+
+            return result;
+        }
+
+        /// <summary>The server remembered on this device; false when there is none.</summary>
+        public static bool TryGetRememberedBackend(out LlmRememberedBackend? backend)
+        {
+            backend = null;
+            try
+            {
+                if (RememberedBackendStore.TryLoad(out LlmRememberedBackend loaded))
+                {
+                    backend = loaded;
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogWarning("Reading the remembered server failed: " + ex.Message);
+            }
+
+            return false;
+        }
+
+        /// <summary>Forgets the remembered server; the current session keeps whatever backend it uses now.</summary>
+        public static void ForgetRememberedBackend()
+        {
+            RememberedBackendStore.Clear();
+            ResolveSettings()?.SetSessionPendingKeyBackend(null);
+        }
+
+        /// <summary>
+        /// Uses the server remembered on this device for this session, without a click: called by a scene that offers
+        /// players a settings surface (the play world's Hub module calls it before the scopes build). A server that
+        /// needed no key is applied as a session override; one that needs a key leaves the session Offline, so the
+        /// Programmer's offline line can say the key is missing, and sets
+        /// <see cref="CoreAISettingsAsset.PendingKeyBackend"/>. Nothing remembered changes nothing.
+        /// </summary>
+        public static CoreAiRememberedBackendRestore RestoreRememberedBackend()
+        {
+            CoreAISettingsAsset? settings = ResolveSettings();
+            if (settings == null || !TryGetRememberedBackend(out LlmRememberedBackend? backend) || backend == null)
+            {
+                return CoreAiRememberedBackendRestore.NothingRemembered;
+            }
+
+            lock (SyncRoot)
+            {
+                ApplySessionHttp(settings, backend.Mode, backend.BaseUrl, "", backend.Model, null, null, null, null);
+                if (backend.NeedsKey)
+                {
+                    // WHY offline and not the server without its key: every request would fail with 401, while the
+                    // offline line tells the player what is missing and where to enter it.
+                    settings.ApplySessionOffline(false, null, null);
+                    settings.SetSessionPendingKeyBackend(backend);
+                }
+                else
+                {
+                    settings.SetSessionPendingKeyBackend(null);
+                }
+
+                RebuildAndNotify(settings);
+            }
+
+            return backend.NeedsKey ? CoreAiRememberedBackendRestore.NeedsKey : CoreAiRememberedBackendRestore.Applied;
         }
 
         /// <summary>
@@ -553,53 +784,9 @@ namespace CoreAI
         /// </summary>
         internal static IReadOnlyList<string> ParseModelIds(string json)
         {
-            List<string> ids = new();
-            if (string.IsNullOrWhiteSpace(json))
-            {
-                return ids;
-            }
-
-            try
-            {
-                Newtonsoft.Json.Linq.JToken root = Newtonsoft.Json.Linq.JToken.Parse(json);
-                Newtonsoft.Json.Linq.JToken? array =
-                    root is Newtonsoft.Json.Linq.JArray ? root : root["data"];
-                if (array is not Newtonsoft.Json.Linq.JArray items)
-                {
-                    return ids;
-                }
-
-                HashSet<string> seen = new(StringComparer.Ordinal);
-                foreach (Newtonsoft.Json.Linq.JToken item in items)
-                {
-                    string id = item is Newtonsoft.Json.Linq.JValue
-                        ? item.ToString()
-                        : (string?)item["id"] ?? "";
-                    id = id.Trim();
-                    if (id.Length > 0 && seen.Add(id))
-                    {
-                        ids.Add(id);
-                    }
-                }
-            }
-            catch (Newtonsoft.Json.JsonException)
-            {
-                // WHY: A non-JSON body (HTML error page, proxy notice) is a normal failure mode for a
-                // mistyped URL; treat it as "no models" and let the caller surface the raw HTTP status.
-            }
-
-            return ids;
-        }
-
-        private static string Truncate(string text, int max)
-        {
-            if (string.IsNullOrEmpty(text))
-            {
-                return "";
-            }
-
-            text = text.Replace("\r", " ").Replace("\n", " ").Trim();
-            return text.Length <= max ? text : text.Substring(0, max) + "…";
+            // WHY empty for a body that is not a list: an HTML error page or a proxy notice is a normal failure of a
+            // mistyped URL; the caller says what answered.
+            return LlmConnectionCheck.TryParseModelIds(json, out List<string> ids) ? ids : new List<string>();
         }
 
         #region Internals

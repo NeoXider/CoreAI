@@ -208,6 +208,43 @@ else
 }
 ```
 
+### Test a server, use it, remember it (the player's path)
+
+`VerifyAsync` probes the backend that is active. A player who typed a server needs the typed one tested, a reason
+they can act on, and the server used at once. That is `ConnectHttpApiAsync`, behind the Hub's **Test connection**:
+
+```csharp
+CoreAiConnectResult result = await CoreAiBackend.ConnectHttpApiAsync(
+    "http://127.0.0.1:1234/v1", apiKey: "", model: "qwen3-4b");
+// result.Check.Message: "Connected: 'qwen3-4b' answered in 840 ms." or the reason it failed
+// result.Applied: the session now uses it (every role on Automatic routing)
+// result.Remembered: the address and the model are kept on this device (never the key)
+```
+
+- `CheckConnectionAsync(baseUrl, apiKey, model)` runs the check alone and changes nothing. It lists the models
+  (`GET {base}/models`), then sends one short completion (`POST {base}/chat/completions`), and turns every failure
+  into one sentence: no address or not a web address; nothing answered (no server, wrong port, refused); a host
+  that cannot be found; in a browser, a server that sends no CORS headers (it names LM Studio's Enable CORS and the
+  repository's `tools/G11Proxy`) or an https page calling an http address on another host (mixed content: a page
+  from `http://localhost` may call http servers, an https page may not); a missing or refused key (401/403); a
+  model the server does not have, with the models it offers; a timeout; an address that is not an OpenAI-compatible
+  API (with the `/v1` hint). With no model typed it uses the server's only model. A model missing from the list
+  still connects when the server answers for it (llama.cpp lists only its loaded file).
+- The engine-free logic is `LlmConnectionCheck` (core, `CoreAI.Ai`); the HTTP is a port, `ILlmConnectionHttp`.
+  `CoreAiBackend.ConnectionHttp` defaults to `UnityWebRequest`, so the check and `ListModelsAsync` (Fetch models)
+  work in a WebGL player too.
+- **Remembered server.** On success `ConnectHttpApiAsync` saves `LlmRememberedBackend` (mode, base URL, model and
+  whether a key was used, never the key) through `CoreAiBackend.RememberedBackendStore`, by default
+  `FileLlmRememberedBackendStore`: `persistentDataPath/CoreAI/remembered-backend.json`, which a WebGL player keeps
+  in IndexedDB through the engine's automatic persistence (`CoreAiWebGlPersistence`; when the page has it off the
+  result says the server is used until the page closes). `RestoreRememberedBackend()` applies it as a session
+  override at the next start; the play world's Hub module calls it before the scopes build. A server that needed
+  a key leaves the session Offline with `CoreAISettingsAsset.PendingKeyBackend` set, so the offline line and the
+  settings page ask for the key again. `ForgetRememberedBackend()` clears it.
+- **Where the key lives.** A key typed for a test lives in the session override only, as with every runtime switch;
+  it is never written to the asset, the remembered file or a build. The Hub reuses the session's key only for the
+  same address, so a key is never sent to another server.
+
 ### Reading state and subscribing to changes
 
 ```csharp
@@ -254,7 +291,7 @@ The endpoint editor itself:
 
 ## 3. Semantics and caveats
 
-- **A switch is a session override.** It never rewrites the serialized fields of `CoreAISettingsAsset`: the switched values sit on top of the asset for this session (`CoreAISettingsAsset.HasSessionOverrides`), are dropped at Play Mode entry and exit and at every domain reload, and `CoreAiBackend.ClearSessionOverrides()` returns to the asset's own fields at once. To change what the next session starts with, edit the asset itself.
+- **A switch is a session override.** It never rewrites the serialized fields of `CoreAISettingsAsset`: the switched values sit on top of the asset for this session (`CoreAISettingsAsset.HasSessionOverrides`), are dropped at Play Mode entry and exit and at every domain reload, and `CoreAiBackend.ClearSessionOverrides()` returns to the asset's own fields at once. To change what the next session starts with, edit the asset itself; for a player, the remembered server of a successful Test connection (above) is the next start's choice, applied as a session override by a host that calls `RestoreRememberedBackend`.
 - **Takes effect on the next request.** A switch sets the session values on the shared `CoreAISettingsAsset` and hot-swaps the routed primary client inside the live `LlmClientRegistry` (rebuilt via `LlmPipelineInstaller.BuildRoutedPrimaryClient`). **In-flight requests keep the old client** and finish on it; only requests started after the switch use the new backend.
 - **Per-role routing manifest profiles are NOT touched.** Only the **legacy-fallback primary client** is swapped. Roles pinned to explicit `LlmRoutingManifest` profiles keep resolving to those profiles; if you use per-role routing, `CoreAiBackend` changes what the fallback path uses, not your manifest mapping.
 - **Pre-bootstrap: returns `false`.** When no live `CoreAILifetimeScope` (with a built container) exists yet, `Apply*` / `Set*` change the session values only and return `false`; the normal bootstrap then builds the pipeline from them. `false` is *not* an error — check `CoreAiBackend.Status.IsLive` to distinguish "no scope yet" from a live scene.

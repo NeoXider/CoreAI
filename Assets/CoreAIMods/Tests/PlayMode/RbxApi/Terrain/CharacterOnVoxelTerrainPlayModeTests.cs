@@ -314,6 +314,155 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
             Assert.Less(blocked.Root.X, 40f, "a one-block-high gap stops it");
         }
 
+        // ---- character against character ----------------------------------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator AWalker_StopsAgainstAStandingCharacter_AndNeverPushesIt_FromAnySide(
+            [Values(0f, 30f, -45f)] float approachDegrees)
+        {
+            yield return Layout(stepBlocks: 0, stepFrom: 30);
+            Walker standing = Spawn(new RbxVector3(60f, 0f, 60f), 1f);
+            float angle = approachDegrees * Mathf.Deg2Rad;
+            RbxVector3 toward = new(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+            Walker walker = Spawn(new RbxVector3(60f - toward.X * 10f, 0f, 60f - toward.Z * 10f), 1f);
+            Settle(0.3f, walker, standing);
+            RbxVector3 before = standing.Root;
+            RunBoth(1.5f, walker, toward, standing, RbxVector3.Zero);
+            float pushed = (standing.Root - before).Magnitude;
+            float gap = (walker.Root - standing.Root).Magnitude;
+            Record("walking into a standing character at " + approachDegrees + " degrees: it moved " + F(pushed)
+                   + " studs, centres " + F(gap) + " studs apart");
+
+            Assert.Less(pushed, 0.1f, "the standing character is not pushed");
+            Assert.GreaterOrEqual(gap, 1.5f, "the walker stops against it (two capsule radii, 1.6 studs)");
+        }
+
+        [UnityTest]
+        public IEnumerator AStandingCharacter_IsNotPushedOffALedge_NorIntoAWall()
+        {
+            yield return Layout(stepBlocks: 0, stepFrom: 10, ledge: true);
+            Walker atEdge = Spawn(new RbxVector3(39.1f, 0f, 32f), 1f, FloorTop + Cell);
+            Walker walker = Spawn(new RbxVector3(30f, 0f, 32f), 1f, FloorTop + Cell);
+            Settle(0.3f, walker, atEdge);
+            RunBoth(1.5f, walker, new RbxVector3(1f, 0f, 0f), atEdge, RbxVector3.Zero);
+            Record("at a ledge: the standing character's feet " + F(atEdge.Feet) + ", x " + F(atEdge.Root.X));
+            Assert.AreEqual(FloorTop + Cell, atEdge.Feet, 0.05f, "not pushed off the ledge");
+            atEdge.Despawn();
+            walker.Despawn();
+            yield return null;
+
+            yield return Layout(stepBlocks: 2, stepFrom: 10);
+            Walker atWall = Spawn(new RbxVector3(39.15f, 0f, 32f), 1f);
+            Walker pusher = Spawn(new RbxVector3(30f, 0f, 32f), 1f);
+            Settle(0.3f, pusher, atWall);
+            float before = atWall.Root.X;
+            RunBoth(1.5f, pusher, new RbxVector3(1f, 0f, 0f), atWall, RbxVector3.Zero);
+            Record("against a wall: the standing character moved " + F(atWall.Root.X - before) + " studs toward it");
+            Assert.LessOrEqual(atWall.Root.X, 40f - 0.75f, "not pushed into the block");
+        }
+
+        [UnityTest]
+        public IEnumerator AMoveToWalker_StopsAndWaits_ThenGoesOnWhenTheWayClears()
+        {
+            yield return Layout(stepBlocks: 0, stepFrom: 30);
+            Walker blocker = Spawn(new RbxVector3(40f, 0f, 32f), 1f);
+            Walker walker = Spawn(new RbxVector3(30f, 0f, 32f), 1f);
+            Settle(0.3f, walker, blocker);
+            RbxVector3 target = new(52f, FloorTop, 32f);
+            walker.Motor.MoveTo(target);
+            RbxVector3 blockerBefore = blocker.Root;
+            RunBoth(1.5f, walker, RbxVector3.Zero, blocker, RbxVector3.Zero);
+            float waitedAt = walker.Root.X;
+            Assert.Less(waitedAt, 39f, "it waits in front of the character in its way");
+            Assert.Less((blocker.Root - blockerBefore).Magnitude, 0.1f, "and does not push it");
+
+            blocker.Despawn();
+            yield return null;
+            RunBoth(1.5f, walker, RbxVector3.Zero, null, RbxVector3.Zero);
+            Record("MoveTo past a character: waited at x " + F(waitedAt) + ", then reached x " + F(walker.Root.X));
+            Assert.Greater(walker.Root.X, 50f, "the way cleared: it walks on to the target");
+        }
+
+        [UnityTest]
+        public IEnumerator AVillagersMoveTo_BlockedByThePlayer_EndsNotReachedAfterASecond()
+        {
+            yield return Layout(stepBlocks: 0, stepFrom: 30);
+            Walker player = Spawn(new RbxVector3(40f, 0f, 32f), 1f);
+            Walker villager = Spawn(new RbxVector3(30f, 0f, 32f), 1f);
+            Settle(0.3f, villager, player);
+            RbxHumanoid humanoid = (RbxHumanoid)_registry.Create("Humanoid");
+            humanoid.AttachHost(null, villager.Motor, null);
+            humanoid.MoveTo(new RbxVector3(52f, FloorTop, 32f));
+            float ended = -1f;
+            for (int step = 0; step < 200 && ended < 0f; step++)
+            {
+                humanoid.Advance(FixedStep);
+                RunBoth(FixedStep, villager, RbxVector3.Zero, player, RbxVector3.Zero);
+                if (!villager.Motor.HasMoveTarget)
+                {
+                    ended = (step + 1) * FixedStep;
+                }
+            }
+
+            Record("a villager's MoveTo blocked by the player ends (MoveToFinished false) after " + F(ended)
+                   + " s, waiting at x " + F(villager.Root.X));
+            Assert.Greater(ended, 0f, "the blocked walk ends");
+            Assert.Less(ended, 2.5f, "after about a second of waiting, not eight");
+        }
+
+        [UnityTest]
+        public IEnumerator InAOneBlockCorridor_ThePlayerWalksIntoAVillager_AndBacksOut()
+        {
+            yield return Layout(stepBlocks: 0, stepFrom: 10, tunnelHeightBlocks: 2);
+            Walker villager = Spawn(new RbxVector3(52f, 0f, 30f), 1f);
+            Walker player = Spawn(new RbxVector3(44f, 0f, 30f), 1f);
+            Settle(0.3f, player, villager);
+            RunBoth(1f, player, new RbxVector3(1f, 0f, 0f), villager, RbxVector3.Zero);
+            float stopped = player.Root.X;
+            RunBoth(0.5f, player, new RbxVector3(-1f, 0f, 0f), villager, RbxVector3.Zero);
+            Record("in a one-block corridor: stopped at x " + F(stopped) + " behind the villager, backed out to x "
+                   + F(player.Root.X));
+
+            Assert.Less(stopped, 52f - 1.5f, "it stops behind the villager");
+            Assert.Less(player.Root.X, stopped - 5f, "and walks back out");
+        }
+
+        [UnityTest]
+        public IEnumerator WithNoOneInTheWay_AWalkerWalksFreely_NegativeTwin()
+        {
+            yield return Layout(stepBlocks: 0, stepFrom: 30);
+            Walker walker = Spawn(new RbxVector3(30f, 0f, 32f), 1f);
+            Settle(0.3f, walker, null);
+            RunBoth(1f, walker, new RbxVector3(1f, 0f, 0f), null, RbxVector3.Zero);
+
+            Assert.Greater(walker.Root.X, 30f + 0.8f * (float)WalkSpeed, "a free walk is not slowed");
+        }
+
+        private void Settle(float seconds, Walker first, Walker second)
+        {
+            RunBoth(seconds, first, RbxVector3.Zero, second, RbxVector3.Zero);
+        }
+
+        /// <summary>Steps both characters together, as the world host steps every character in one fixed step.</summary>
+        private void RunBoth(float seconds, Walker first, RbxVector3 firstDirection, Walker second,
+            RbxVector3 secondDirection)
+        {
+            int steps = Mathf.CeilToInt(seconds / FixedStep);
+            for (int step = 0; step < steps; step++)
+            {
+                _port.ApplyGravity();
+                first.Motor.Move(firstDirection);
+                first.Motor.Step(FixedStep);
+                if (second != null)
+                {
+                    second.Motor.Move(secondDirection);
+                    second.Motor.Step(FixedStep);
+                }
+
+                Physics.Simulate(FixedStep);
+            }
+        }
+
         // ---- the world --------------------------------------------------------------------------------------------
 
         /// <summary>
@@ -409,6 +558,8 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
             }
 
             public RbxCharacterBodyShape Shape { get; }
+
+            public UnityRbxCharacterMotor Motor => _motor;
 
             public RbxVector3 Root => RbxSpace.FromUnity(_body.position);
 

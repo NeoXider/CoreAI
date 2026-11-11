@@ -210,6 +210,7 @@ namespace CoreAI.Ai
                 {
                     Success = result.Success,
                     Output = output,
+                    Printed = string.IsNullOrEmpty(result.Printed) ? null : result.Printed,
                     Error = string.IsNullOrEmpty(result.Error) ? null : result.Error
                 },
                 TrimNulls);
@@ -220,6 +221,13 @@ namespace CoreAI.Ai
         {
             public bool Success { get; set; }
             public string Output { get; set; }
+
+            /// <summary>
+            /// What the chunk wrote with <c>report()</c> and <c>print()</c>, one line each, the last lines first to
+            /// stay when it is long; null when it wrote nothing.
+            /// </summary>
+            public string Printed { get; set; }
+
             public string Error { get; set; }
         }
 

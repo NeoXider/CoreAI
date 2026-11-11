@@ -188,25 +188,45 @@ namespace CoreAI.Infrastructure.Lua
                 return Outcome.Installed;
             }
 
-            // WHY: Never clobber a user-authored mod that happens to share this id (empty Origin = not ours).
-            if (string.IsNullOrEmpty(existing.Origin))
+            if (!TryUpdateInstalled(mod, origin, existingSource, existing, out string updatedSource,
+                    out LuaModManifest updated))
             {
                 return Outcome.Skipped;
             }
 
+            SaveAndConfirm(id, updatedSource, updated);
+            return Outcome.Updated;
+        }
+
+        /// <summary>
+        /// The update rule for one installed copy, in a store or in a world package: the bundled source and its
+        /// manifest when <paramref name="mod"/> is strictly newer than the version the copy was seeded at and the copy
+        /// came from a bundle; false for a same-or-older bundle or a mod a player wrote under the same id.
+        /// </summary>
+        internal static bool TryUpdateInstalled(BundledMod mod, string origin, string existingSource,
+            LuaModManifest existing, out string source, out LuaModManifest manifest)
+        {
+            source = null;
+            manifest = null;
+            // WHY: Never clobber a user-authored mod that happens to share this id (empty Origin = not ours).
+            if (existing == null || string.IsNullOrEmpty(existing.Origin) || string.IsNullOrWhiteSpace(mod.Source))
+            {
+                return false;
+            }
+
             if (CompareVersions(mod.Version, existing.SeededVersion) <= 0)
             {
-                return Outcome.Skipped;
+                return false;
             }
 
             // WHY: A strictly-newer bundled version always wins so "bump the header version and it ships"
             // stays reliable — editing a sample changes its hash but not its version, so a hash-based
             // staleness check alone would leave it stuck on stale content forever.
             BundledMod seeded = KeepPlayerFolder(mod, existingSource, existing);
-            LuaModManifest updated = BuildManifest(seeded, origin, newHash, existing.Active, existing);
-            updated.LoadOrder = existing.LoadOrder;
-            SaveAndConfirm(id, seeded.Source, updated);
-            return Outcome.Updated;
+            manifest = BuildManifest(seeded, origin, Fnv1a(mod.Source), existing.Active, existing);
+            manifest.LoadOrder = existing.LoadOrder;
+            source = seeded.Source;
+            return true;
         }
 
         /// <summary>

@@ -32,6 +32,23 @@ namespace CoreAI.Mods.Rbx.Binding
         private readonly InstanceGameObjectBinder _binder;
         private readonly List<Rigidbody> _bodyScratch = new();
         private readonly List<Collider> _colliderScratch = new();
+
+        /// <summary>Queued Terrain chunks one body may have built in one fixed step, nearest it first.</summary>
+        public const int MaxColliderBuildsPerBody = 4;
+
+        /// <summary>Queued Terrain chunks one ray may have built, in the order it crosses them.</summary>
+        public const int MaxColliderBuildsPerRay = 8;
+
+        /// <summary>Fixed steps a character was held because its next step's chunk was still queued (diagnostics).</summary>
+        public long HeldCharacterSteps { get; private set; }
+
+        /// <summary>The longest a character is held for a queued chunk, in seconds; past it the chunk is built anyway.</summary>
+        public const float MaxCharacterHoldSeconds = 0.25f;
+
+        /// <summary>Times a character's next-step chunks were built past the cap after a full hold (diagnostics).</summary>
+        public long ForcedCharacterBuilds { get; private set; }
+
+        private readonly Dictionary<Rigidbody, float> _heldSeconds = new();
         private RaycastHit[] _hitScratch = new RaycastHit[32];
         private Vector3 _gravityMetres =
             new(0f, -RbxSpace.AccelerationToUnity((float)RbxWorldPhysics.DefaultGravity), 0f);
@@ -87,10 +104,40 @@ namespace CoreAI.Mods.Rbx.Binding
                     continue;
                 }
 
-                terrain?.EnsureColliders(SweptBounds(body));
+                if (terrain != null)
+                {
+                    terrain.EnsureColliders(SweptBounds(body), MaxColliderBuildsPerBody);
+                    // WHY a character waits: past the cap its own next step may still lie in a queued chunk, and a
+                    // body moved into a chunk whose collider appears a step later ends up inside the block.
+                    if (UnityRbxCharacterMotor.TryGetFeet(body, out float _)
+                        && terrain.IsGeometryPendingIn(NextStepBounds(body)))
+                    {
+                        _heldSeconds.TryGetValue(body, out float held);
+                        if (held < MaxCharacterHoldSeconds)
+                        {
+                            _heldSeconds[body] = held + Time.fixedDeltaTime;
+                            body.linearVelocity = Vector3.zero;
+                            HeldCharacterSteps++;
+                            continue;
+                        }
+
+                        // WHY build past the cap after the hold: a queue starved by a burst must never freeze a
+                        // player; after a quarter second its next step's chunks are built now, whatever they cost.
+                        terrain.EnsureColliders(NextStepBounds(body));
+                        ForcedCharacterBuilds++;
+                    }
+
+                    _heldSeconds.Remove(body);
+                }
+
                 if (TerrainHits is CoreAI.Mods.Rbx.Binding.Terrain.IRbxTerrainSolidCells cells)
                 {
                     LiftOutOfTerrain(body, cells);
+                }
+
+                if (TerrainHits is CoreAI.Mods.Rbx.Binding.Terrain.IRbxTerrainWaterCells water)
+                {
+                    SenseWater(body, water);
                 }
 
                 // WHY Acceleration rather than Force: it is mass-independent, so a part's weight
@@ -140,6 +187,65 @@ namespace CoreAI.Mods.Rbx.Binding
             bounds.Encapsulate(min + travel);
             bounds.Encapsulate(max + travel);
             bounds.Expand(RbxSpace.LengthToUnity((float)Instances.Terrain.TerrainBoxRasterizer.CellStuds) * 2f);
+            return bounds;
+        }
+
+        /// <summary>
+        /// Writes what water a character's body is in onto its <see cref="RbxCharacterWater"/>: whether the cell at its
+        /// middle (half way from the feet to the top of the head) and the cell at the top of its head hold Water, and
+        /// the height of the water's surface over its middle.
+        /// </summary>
+        private static void SenseWater(Rigidbody body, CoreAI.Mods.Rbx.Binding.Terrain.IRbxTerrainWaterCells water)
+        {
+            if (!UnityRbxCharacterMotor.TryGetFeet(body, out float feetY)
+                || !body.TryGetComponent(out CapsuleCollider shape))
+            {
+                return;
+            }
+
+            float topY = shape.bounds.max.y;
+            float cell = (float)Instances.Terrain.TerrainBoxRasterizer.CellStuds;
+            RbxVector3 feet = RbxSpace.FromUnity(new Vector3(body.position.x, feetY, body.position.z));
+            RbxVector3 top = RbxSpace.FromUnity(new Vector3(body.position.x, topY, body.position.z));
+            int x = Mathf.FloorToInt(feet.X / cell);
+            int z = Mathf.FloorToInt(feet.Z / cell);
+            float middle = (feet.Y + top.Y) * 0.5f;
+            int middleY = Mathf.FloorToInt(middle / cell);
+            int headY = Mathf.FloorToInt((top.Y - 0.25f) / cell);
+            bool middleWet = water.IsWaterCell(x, middleY, z);
+            bool headWet = water.IsWaterCell(x, headY, z);
+            double surface = double.NegativeInfinity;
+            if (middleWet || headWet)
+            {
+                int y = headWet ? headY : middleY;
+                int limit = y + 64;
+                while (y < limit && water.IsWaterCell(x, y + 1, z))
+                {
+                    y++;
+                }
+
+                surface = (y + 1) * cell;
+            }
+
+            if (!body.TryGetComponent(out RbxCharacterWater sense))
+            {
+                if (!middleWet && !headWet)
+                {
+                    return;
+                }
+
+                sense = body.gameObject.AddComponent<RbxCharacterWater>();
+            }
+
+            sense.Contact = new Instances.RbxWaterContact(middleWet, headWet, surface);
+        }
+
+        /// <summary>The body's enabled colliders stretched along one step of its velocity, with no margin.</summary>
+        private Bounds NextStepBounds(Rigidbody body)
+        {
+            Bounds bounds = SweptBounds(body);
+            float margin = RbxSpace.LengthToUnity((float)Instances.Terrain.TerrainBoxRasterizer.CellStuds) * 2f;
+            bounds.Expand(-margin);
             return bounds;
         }
 
@@ -208,9 +314,9 @@ namespace CoreAI.Mods.Rbx.Binding
 
             if (TerrainHits is CoreAI.Mods.Rbx.Binding.Terrain.IRbxTerrainColliderReadiness terrain)
             {
-                Bounds span = new(origin, Vector3.zero);
-                span.Encapsulate(origin + direction);
-                terrain.EnsureColliders(span);
+                // WHY a walk along the ray and a cap: the ray's box covered every queued chunk in a diagonal
+                // slab, and a long mouse ray built tens of chunks in one call (the 43 ms frames).
+                terrain.EnsureCollidersAlong(origin, direction / distance, distance, MaxColliderBuildsPerRay);
             }
 
             // WHY every hit and not Physics.Raycast: the nearest collider may belong to a part the

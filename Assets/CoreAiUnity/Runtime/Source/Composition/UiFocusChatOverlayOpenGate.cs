@@ -6,8 +6,8 @@ namespace CoreAI.Composition
 {
     /// <summary>
     /// The default <see cref="IChatOverlayOpenGate"/> of a CoreAI scope: the overlay's open keys do nothing while any
-    /// CoreAI surface (the chat panel, a Hub page, a runtime UI screen) has a focused text field, so a T or an Enter
-    /// typed there never opens the chat.
+    /// CoreAI surface holds the keyboard (a focused text field of the chat panel, a Hub page or a runtime UI screen,
+    /// or a Hub open over the game), so a T or an Enter pressed there never opens the chat.
     /// </summary>
     public sealed class UiFocusChatOverlayOpenGate : IChatOverlayOpenGate
     {
@@ -22,7 +22,7 @@ namespace CoreAI.Composition
         /// <inheritdoc />
         public bool IsOpenAllowed()
         {
-            return !_focus.HasTextFocus;
+            return !_focus.HoldsKeyboard;
         }
     }
 }

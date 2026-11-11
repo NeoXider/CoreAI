@@ -26,6 +26,12 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         /// <summary>Total texture builds since the process started (a test counter: each style builds once).</summary>
         public static int BuildCount { get; private set; }
 
+        /// <summary>The longest one style's paint and upload took, in milliseconds (diagnostics).</summary>
+        public static double MaxBuildMilliseconds { get; private set; }
+
+        /// <summary>All styles' paint and upload together, in milliseconds (diagnostics).</summary>
+        public static double TotalBuildMilliseconds { get; private set; }
+
         /// <summary>
         /// The textures of <paramref name="style"/>; false for <see cref="TerrainBlockStyle.Photo"/>. Textures a
         /// scene teardown destroyed are rebuilt.
@@ -44,6 +50,7 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             if (!Sets.TryGetValue(style, out Set set) || set.Albedo == null || set.Normal == null
                 || set.Roughness == null)
             {
+                System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
                 TerrainBlockTile tile = TerrainBlockPainter.Get(style);
                 set = new Set(
                     Build(tile, tile.Albedo, 4, TextureFormat.RGBA32, false, style + " colour"),
@@ -51,6 +58,9 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
                     Build(tile, tile.Roughness, 1, TextureFormat.R8, true, style + " roughness"));
                 Sets[style] = set;
                 BuildCount++;
+                clock.Stop();
+                MaxBuildMilliseconds = System.Math.Max(MaxBuildMilliseconds, clock.Elapsed.TotalMilliseconds);
+                TotalBuildMilliseconds += clock.Elapsed.TotalMilliseconds;
             }
 
             albedo = set.Albedo;

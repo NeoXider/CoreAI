@@ -50,6 +50,8 @@
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/LlmRequestSettingsCompatibilityEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/LlmRequestSettingsCompatibilityEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/ActorAdmissionEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/ActorAdmissionEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/ActorContextEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/ActorContextEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAI/Tests/EditMode/LlmConnectionCheckEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/LlmConnectionCheckEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAI/Tests/EditMode/UiFocusKeyboardHoldEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/UiFocusKeyboardHoldEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/ClientLimitedLlmClientDecoratorEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/ClientLimitedLlmClientDecoratorEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/CoreAuditFindingsEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/CoreAuditFindingsEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/CoreHotPathAuditEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/CoreHotPathAuditEditModeTests.cs" />

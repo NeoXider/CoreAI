@@ -168,6 +168,8 @@ namespace UnityEngine
 
         public Vector3 lossyScale => throw PortableEngine.Unavailable("Transform.lossyScale");
 
+        public Vector3 forward => throw PortableEngine.Unavailable("Transform.forward");
+
         public Transform parent => throw PortableEngine.Unavailable("Transform.parent");
 
         public int childCount => throw PortableEngine.Unavailable("Transform.childCount");
@@ -204,11 +206,23 @@ namespace UnityEngine
 
         public Bounds bounds => throw PortableEngine.Unavailable("Collider.bounds");
 
+        public Rigidbody attachedRigidbody => throw PortableEngine.Unavailable("Collider.attachedRigidbody");
+
         public PhysicsMaterial sharedMaterial
         {
             get => throw PortableEngine.Unavailable("Collider.sharedMaterial");
             set => throw PortableEngine.Unavailable("Collider.sharedMaterial");
         }
+    }
+
+    /// <summary>Compile-time surface of <c>UnityEngine.Camera</c>; no camera exists here, so every member refuses.</summary>
+    public sealed class Camera : Behaviour
+    {
+        private Camera()
+        {
+        }
+
+        public static Camera main => throw PortableEngine.Unavailable("Camera.main");
     }
 
     /// <summary>Compile-time surface of <c>UnityEngine.BoxCollider</c>; nothing can construct one here.</summary>
@@ -356,6 +370,12 @@ namespace UnityEngine
         {
             throw PortableEngine.Unavailable("Rigidbody.AddForce");
         }
+
+        public RaycastHit[] SweepTestAll(Vector3 direction, float maxDistance,
+            QueryTriggerInteraction queryTriggerInteraction)
+        {
+            throw PortableEngine.Unavailable("Rigidbody.SweepTestAll");
+        }
     }
 
     /// <summary>Compile-time surface of <c>UnityEngine.CollisionDetectionMode</c>.</summary>
@@ -403,6 +423,8 @@ namespace UnityEngine
         public float distance => throw PortableEngine.Unavailable("RaycastHit.distance");
 
         public Collider collider => throw PortableEngine.Unavailable("RaycastHit.collider");
+
+        public Vector3 normal => throw PortableEngine.Unavailable("RaycastHit.normal");
     }
 
     /// <summary>Compile-time surface of <c>UnityEngine.Physics</c>; physics needs the engine and is refused.</summary>

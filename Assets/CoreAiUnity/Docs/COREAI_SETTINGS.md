@@ -364,7 +364,7 @@ When **there is no LLM connection** — the system returns a stub response.
 
 | Role | Response |
 |------|-------|
-| **Programmer** | one sentence a player can act on (`OfflineLlmClient.OfflineProgrammerReply`): "No AI model is set up, so the AI cannot build or script anything yet. Choose a model in the Hub (Settings), then ask again." |
+| **Programmer** | two sentences a player can act on: "No AI model is set up, so the AI cannot build or script anything yet." and where to set one up. The second is the scene's own when a host set one for the session (`CoreAISettingsAsset.SetSessionModelSetupHint`; the play world's Hub module says "Press F2 to open the AI settings, enter a model server and press Test connection, then ask again."), otherwise "Choose a model in the AI settings, then ask again." (`OfflineLlmClient.OfflineProgrammerReply`), which reads right with or without a Hub. |
 | **Creator** | `{"created": false, "note": "offline"}` |
 | **CoreMechanicAI** | `{"result": "ok", "value": 0, "note": "offline"}` |
 | **Analyzer** | `{"recommendations": [], "status": "offline"}` |

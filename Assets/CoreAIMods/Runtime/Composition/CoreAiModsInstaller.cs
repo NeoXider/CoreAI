@@ -555,13 +555,15 @@ namespace CoreAI.Composition
                             // falls back to the default world rehydrates shipped mods exactly like
                             // persisted ones, and the restored world's exact source set never sees them.
                             // Best-effort: a seeding failure never blocks the startup.
+                            System.Collections.Generic.List<IBundledModSource> bundledSources = new();
                             try
                             {
                                 System.Collections.Generic.IEnumerable<IBundledModSource> bundled =
                                     container.Resolve<System.Collections.Generic.IEnumerable<IBundledModSource>>();
+                                bundledSources.AddRange(bundled);
                                 BundledModSeeder.SeedResult seeded = new BundledModSeeder(
                                     container.Resolve<WorldSessionSourceBackend>().Store,
-                                    new System.Collections.Generic.List<IBundledModSource>(bundled),
+                                    new System.Collections.Generic.List<IBundledModSource>(bundledSources),
                                     container.ResolveOrDefault<Logging.ILog>()).Seed();
                                 // WHY: without a registered ILog the seeder's own error goes nowhere, and a world
                                 // with no bundled mods looks like a silent empty start.
@@ -583,7 +585,13 @@ namespace CoreAI.Composition
                                 BuiltInAgentRoleIds.Programmer);
                             Logging.ILog startupLog =
                                 container.ResolveOrDefault<Logging.ILog>() ?? Logging.Log.Instance;
-                            await RbxWorldStartupSequence.RunAsync(
+                            CoreAiWorldKeepOptions keep = container.ResolveOrDefault<CoreAiWorldKeepOptions>();
+                            if (keep != null && keep.KeepWorldBetweenStarts)
+                            {
+                                sessionController.KeepWorldBetweenStarts(bundledSources);
+                            }
+
+                            RbxWorldStartupRestoreOutcome startupOutcome = await RbxWorldStartupSequence.RunAsync(
                                 sessionController,
                                 () =>
                                 {
@@ -606,6 +614,11 @@ namespace CoreAI.Composition
                             if (tickerGo == null)
                             {
                                 return;
+                            }
+
+                            if (startupOutcome != RbxWorldStartupRestoreOutcome.Restored)
+                            {
+                                sessionController.AdoptDefaultWorldIfKept();
                             }
 
                             // WHY read only now: a restored startup world replaced the initial session, so

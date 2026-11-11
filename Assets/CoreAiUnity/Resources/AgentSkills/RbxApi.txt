@@ -36,7 +36,7 @@ Sections (read_skill('Rbx API', section='<name>')):
 - Signals are DEFERRED: handlers run at the next script-resumption point, not where the signal fires,
   and the order of several connections is NOT guaranteed. A handler may `task.wait()`. A one-off
   execute_lua chunk has no owning mod: Connect/Once/ConnectParallel/Wait there raise CONTEXT_VIOLATION,
-  so put listeners, UI and AI agents in a mod.
+  so put listeners, UI and AI agents in a mod. Its `report()`/`print()` lines come back as `Printed`.
 - Budgets are per resume: loop forever only if the loop yields (`while true do task.wait() end`). A
   resume that never yields, or keeps too much memory alive, is cut with BUDGET_EXCEEDED, and the cut
   CANNOT be caught (`pcall`/`xpcall` let it through): fix the loop, do not wrap it.
@@ -597,6 +597,8 @@ use Parts for props, doors, moving things and anything that needs Color or Trans
   instance. Rays hit Terrain in every world, also on a server or a headless tool without a physics engine. `workspace.Terrain:IsA("BasePart")` is false in CoreAI, so check `hit.Instance == workspace.Terrain`.
 - Writes need WorldEdit. The world has bounds and a cell budget: past them a write raises BAD_ARGUMENT or
   BUDGET_EXCEEDED and changes nothing.
+- A generator that rebuilds cells from a seed sets `workspace:SetAttribute("CoreAITerrainGenerating", true)`
+  around its writes (false after): a world kept between starts then records only real edits.
 - Not implemented (NOT_IMPLEMENTED): FillBall, FillCylinder, FillWedge, ReadVoxelChannels,
   WriteVoxelChannels, CopyRegion, PasteRegion, GetMaterialColor/SetMaterialColor, the Water* properties.
 

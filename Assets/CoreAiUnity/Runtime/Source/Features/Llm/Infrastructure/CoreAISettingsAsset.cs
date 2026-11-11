@@ -1503,6 +1503,58 @@ namespace CoreAI.Infrastructure.Llm
         private BackendState ActiveSession =>
             _session != null && _session.Generation == s_sessionGeneration ? _session : null;
 
+        /// <summary>What a host told players for this session; not a backend value, so a switch keeps it.</summary>
+        private sealed class SessionNotes
+        {
+            public int Generation;
+            public string ModelSetupHint = "";
+            public LlmRememberedBackend PendingKeyBackend;
+        }
+
+        [System.NonSerialized]
+        private SessionNotes _notes;
+
+        private SessionNotes ActiveNotes =>
+            _notes != null && _notes.Generation == s_sessionGeneration ? _notes : null;
+
+        private SessionNotes WritableNotes()
+        {
+            SessionNotes notes = ActiveNotes;
+            if (notes == null)
+            {
+                notes = new SessionNotes { Generation = s_sessionGeneration };
+                _notes = notes;
+            }
+
+            return notes;
+        }
+
+        /// <summary>
+        /// The sentence that tells a player of this scene where a model is set up, used by the offline Programmer
+        /// reply in place of its generic second sentence (for example "Press F2 to open the AI settings, choose a
+        /// model, then ask again."). Empty unless a host set one for this session; it ends with the session, as
+        /// runtime switches do, and a backend switch keeps it.
+        /// </summary>
+        public string ModelSetupHint => ActiveNotes?.ModelSetupHint ?? "";
+
+        /// <summary>Sets <see cref="ModelSetupHint"/> for this session; null or empty restores the generic sentence.</summary>
+        public void SetSessionModelSetupHint(string hint)
+        {
+            WritableNotes().ModelSetupHint = (hint ?? "").Trim();
+        }
+
+        /// <summary>
+        /// The remembered model server this session could not use because its key is not kept between starts; null
+        /// when there is none. A settings page fills its fields from it so the player only enters the key.
+        /// </summary>
+        public LlmRememberedBackend PendingKeyBackend => ActiveNotes?.PendingKeyBackend;
+
+        /// <summary>Sets or clears (null) <see cref="PendingKeyBackend"/> for this session.</summary>
+        internal void SetSessionPendingKeyBackend(LlmRememberedBackend backend)
+        {
+            WritableNotes().PendingKeyBackend = backend;
+        }
+
         /// <summary>
         /// Ends every asset's session override at once: Play Mode entry (also with Domain Reload off) and, in the
         /// Editor, Play Mode exit, so a runtime key never lingers into edit mode or a build.

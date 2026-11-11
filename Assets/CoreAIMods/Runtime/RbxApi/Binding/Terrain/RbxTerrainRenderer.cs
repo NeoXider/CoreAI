@@ -27,7 +27,8 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
     /// WHY no jobs: the same code runs in a WebGL player, which has no worker threads, and a chunk
     /// meshes in a fraction of a millisecond; baking colliders off-thread is a desktop-only option.
     /// </remarks>
-    public sealed class RbxTerrainRenderer : IRbxTerrainRenderer, IRbxTerrainColliderReadiness, IRbxTerrainSolidCells
+    public sealed class RbxTerrainRenderer : IRbxTerrainRenderer, IRbxTerrainColliderReadiness, IRbxTerrainSolidCells,
+        IRbxTerrainWaterCells
     {
         /// <summary>Material property the terrain copy sets to 1: read the exposure from the vertex colour's alpha.</summary>
         public const string SkyExposureSourceProperty = "_RbxSkyExposureSource";
@@ -63,6 +64,16 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         private readonly TerrainSkyExposure _exposure;
         private readonly TerrainBlockLook _blockLook;
         private readonly Queue<TerrainChunkCoord> _dirty = new();
+        private readonly List<TerrainChunkCoord> _orderScratch = new();
+        private readonly List<double> _distanceScratch = new();
+        private readonly List<TerrainChunkCoord> _buildScratch = new();
+        private bool _hasViewer;
+        private double _viewerX;
+        private double _viewerY;
+        private double _viewerZ;
+        private double _drawDistanceCells = double.PositiveInfinity;
+        private TerrainChunkCoord _visibilityChunk;
+        private double _visibilityDistance = -1d;
         private readonly Dictionary<long, bool> _dirtyFull = new();
         private readonly Dictionary<long, ChunkView> _views = new();
         private readonly Dictionary<Collider, TerrainChunkCoord> _colliders = new();
@@ -121,6 +132,12 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         }
 
         /// <inheritdoc />
+        public bool IsWaterCell(int x, int y, int z)
+        {
+            return _terrain.Store.GetMaterial(x, y, z) == TerrainMaterials.Water;
+        }
+
+        /// <inheritdoc />
         public int PendingChunkCount => _dirtyFull.Count;
 
         /// <summary>The GameObject every chunk object sits under.</summary>
@@ -144,6 +161,104 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         /// <summary>The chunks the last <see cref="ProcessDirty"/> call re-meshed or relit; reused between calls.</summary>
         public IReadOnlyList<TerrainChunkCoord> LastProcessedChunks => _lastProcessed;
 
+        /// <summary>
+        /// Where the viewer is and how far it sees: queued chunks are built nearest it first, and a chunk whose
+        /// nearest point lies past <paramref name="drawDistanceMetres"/> (the end of linear fog) is neither built by
+        /// <see cref="ProcessDirty"/> nor drawn; its collider still comes on demand.
+        /// </summary>
+        /// <remarks>
+        /// WHY past the fog's end: fully fogged land is the fog colour, which the horizon dome already paints, so
+        /// drawing it spends draw calls and triangles on nothing (44 % of them at a four-column radius).
+        /// </remarks>
+        public void SetViewer(Vector3 unityPosition, float drawDistanceMetres)
+        {
+            RbxVector3 studs = RbxSpace.FromUnity(unityPosition);
+            double cell = TerrainBoxRasterizer.CellStuds;
+            _hasViewer = true;
+            _viewerX = studs.X / cell;
+            _viewerY = studs.Y / cell;
+            _viewerZ = studs.Z / cell;
+            _drawDistanceCells = float.IsInfinity(drawDistanceMetres) || drawDistanceMetres <= 0f
+                ? double.PositiveInfinity
+                : RbxSpace.LengthFromUnity(drawDistanceMetres) / cell;
+            TerrainChunkCoord at = TerrainChunkCoord.FromCell((int)Math.Floor(_viewerX), (int)Math.Floor(_viewerY),
+                (int)Math.Floor(_viewerZ));
+            if (at.Key != _visibilityChunk.Key || Math.Abs(_drawDistanceCells - _visibilityDistance) > 0.5d)
+            {
+                _visibilityChunk = at;
+                _visibilityDistance = _drawDistanceCells;
+                foreach (KeyValuePair<long, ChunkView> entry in _views)
+                {
+                    ApplyVisibility(entry.Value);
+                }
+            }
+        }
+
+        /// <summary>Chunks drawn now (with faces and inside the draw distance).</summary>
+        public int VisibleChunkCount
+        {
+            get
+            {
+                int visible = 0;
+                foreach (KeyValuePair<long, ChunkView> entry in _views)
+                {
+                    visible += entry.Value.Renderer.enabled ? 1 : 0;
+                }
+
+                return visible;
+            }
+        }
+
+        private bool WithinDrawDistance(TerrainChunkCoord coord)
+        {
+            return !_hasViewer || double.IsPositiveInfinity(_drawDistanceCells)
+                               || TerrainChunkReach.DistanceSquared(coord, _viewerX, _viewerY, _viewerZ)
+                               <= _drawDistanceCells * _drawDistanceCells;
+        }
+
+        private void ApplyVisibility(ChunkView view)
+        {
+            bool shown = view.HasSolid && WithinDrawDistance(view.Coord);
+            if (view.Renderer.enabled != shown)
+            {
+                view.Renderer.enabled = shown;
+            }
+
+            if (view.Water != null && view.HasWater)
+            {
+                bool water = WithinDrawDistance(view.Coord);
+                if (view.Water.activeSelf != water)
+                {
+                    view.Water.SetActive(water);
+                }
+            }
+        }
+
+        /// <summary>Puts the queue in nearest-first order from the viewer, dropping entries already built out of turn.</summary>
+        private void OrderQueueFromViewer()
+        {
+            if (!_hasViewer || _dirty.Count < 2)
+            {
+                return;
+            }
+
+            _orderScratch.Clear();
+            while (_dirty.Count > 0)
+            {
+                TerrainChunkCoord coord = _dirty.Dequeue();
+                if (_dirtyFull.ContainsKey(coord.Key))
+                {
+                    _orderScratch.Add(coord);
+                }
+            }
+
+            TerrainChunkReach.SortNearestFirst(_orderScratch, _viewerX, _viewerY, _viewerZ, _distanceScratch);
+            for (int index = 0; index < _orderScratch.Count; index++)
+            {
+                _dirty.Enqueue(_orderScratch[index]);
+            }
+        }
+
         /// <inheritdoc />
         public int ProcessDirty(int maxChunks, double maxMilliseconds)
         {
@@ -152,6 +267,8 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             {
                 return 0;
             }
+
+            OrderQueueFromViewer();
 
             double start = Time.realtimeSinceStartupAsDouble;
             int processed = 0;
@@ -165,6 +282,13 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
                 {
                     _dirty.Dequeue();
                     continue;
+                }
+
+                // WHY stop here: the queue is nearest first, so every chunk after this one is past the draw
+                // distance too; they wait, queued, until the viewer comes near or a body needs their colliders.
+                if (!WithinDrawDistance(coord))
+                {
+                    break;
                 }
 
                 bool withinBudget = processed == 0 || (processed < maxChunks
@@ -194,6 +318,9 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
 
             return processed + relitPastBudget;
         }
+
+        /// <summary>Chunks built out of turn for a body or a ray since this renderer was made (diagnostics).</summary>
+        public long OutOfTurnBuildCount { get; private set; }
 
         /// <inheritdoc />
         public int EnsureColliders(Bounds unityBounds)
@@ -227,12 +354,118 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
 
                         _dirtyFull.Remove(coord.Key);
                         Refresh(coord, true);
+                        OutOfTurnBuildCount++;
                         built++;
                     }
                 }
             }
 
             return built;
+        }
+
+        /// <inheritdoc />
+        public int EnsureColliders(Bounds unityBounds, int maxBuilds)
+        {
+            if (_disposed || _dirtyFull.Count == 0 || maxBuilds <= 0)
+            {
+                return 0;
+            }
+
+            CollectPendingIn(unityBounds, _buildScratch);
+            if (_buildScratch.Count == 0)
+            {
+                return 0;
+            }
+
+            RbxVector3 centre = RbxSpace.FromUnity(unityBounds.center);
+            double cell = TerrainBoxRasterizer.CellStuds;
+            TerrainChunkReach.SortNearestFirst(_buildScratch, centre.X / cell, centre.Y / cell, centre.Z / cell,
+                _distanceScratch);
+            int built = 0;
+            for (int index = 0; index < _buildScratch.Count && built < maxBuilds; index++)
+            {
+                TerrainChunkCoord coord = _buildScratch[index];
+                _dirtyFull.Remove(coord.Key);
+                Refresh(coord, true);
+                OutOfTurnBuildCount++;
+                built++;
+            }
+
+            return built;
+        }
+
+        /// <inheritdoc />
+        public int EnsureCollidersAlong(Vector3 origin, Vector3 direction, float distance, int maxBuilds)
+        {
+            if (_disposed || _dirtyFull.Count == 0 || maxBuilds <= 0)
+            {
+                return 0;
+            }
+
+            RbxVector3 from = RbxSpace.FromUnity(origin);
+            RbxVector3 along = RbxSpace.DirectionFromUnity(direction);
+            double cell = TerrainBoxRasterizer.CellStuds;
+            double length = RbxSpace.LengthFromUnity(distance) / cell;
+            _buildScratch.Clear();
+            // WHY a few more chunks than builds: most chunks a ray crosses are built already or empty.
+            TerrainChunkReach.ChunksAlong(from.X / cell, from.Y / cell, from.Z / cell, along.X, along.Y, along.Z,
+                length, 64, _buildScratch);
+            int built = 0;
+            for (int index = 0; index < _buildScratch.Count && built < maxBuilds; index++)
+            {
+                TerrainChunkCoord coord = _buildScratch[index];
+                if (!_dirtyFull.TryGetValue(coord.Key, out bool full) || !full)
+                {
+                    continue;
+                }
+
+                _dirtyFull.Remove(coord.Key);
+                Refresh(coord, true);
+                OutOfTurnBuildCount++;
+                built++;
+            }
+
+            return built;
+        }
+
+        /// <inheritdoc />
+        public bool IsGeometryPendingIn(Bounds unityBounds)
+        {
+            if (_disposed || _dirtyFull.Count == 0)
+            {
+                return false;
+            }
+
+            CollectPendingIn(unityBounds, _buildScratch);
+            return _buildScratch.Count > 0;
+        }
+
+        private void CollectPendingIn(Bounds unityBounds, List<TerrainChunkCoord> into)
+        {
+            into.Clear();
+            RbxVector3 first = RbxSpace.FromUnity(unityBounds.min);
+            RbxVector3 second = RbxSpace.FromUnity(unityBounds.max);
+            double cell = TerrainBoxRasterizer.CellStuds;
+            int minX = (int)Math.Floor(Math.Min(first.X, second.X) / cell) >> TerrainChunkCoord.Shift;
+            int minY = (int)Math.Floor(Math.Min(first.Y, second.Y) / cell) >> TerrainChunkCoord.Shift;
+            int minZ = (int)Math.Floor(Math.Min(first.Z, second.Z) / cell) >> TerrainChunkCoord.Shift;
+            int maxX = (int)Math.Floor(Math.Max(first.X, second.X) / cell) >> TerrainChunkCoord.Shift;
+            int maxY = (int)Math.Floor(Math.Max(first.Y, second.Y) / cell) >> TerrainChunkCoord.Shift;
+            int maxZ = (int)Math.Floor(Math.Max(first.Z, second.Z) / cell) >> TerrainChunkCoord.Shift;
+            for (int cy = minY; cy <= maxY; cy++)
+            {
+                for (int cz = minZ; cz <= maxZ; cz++)
+                {
+                    for (int cx = minX; cx <= maxX; cx++)
+                    {
+                        TerrainChunkCoord coord = new(cx, cy, cz);
+                        if (_dirtyFull.TryGetValue(coord.Key, out bool full) && full)
+                        {
+                            into.Add(coord);
+                        }
+                    }
+                }
+            }
         }
 
         /// <summary>The object of a chunk, or false when the chunk draws nothing.</summary>
@@ -382,7 +615,8 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             _exposure.PrepareChunk(coord);
             int solidFaces = _builder.BuildSolid(_buffers, view.SolidMesh, out int slotMask, _exposure);
             bool hasSolid = solidFaces > 0;
-            view.Renderer.enabled = hasSolid;
+            view.HasSolid = hasSolid;
+            view.Renderer.enabled = hasSolid && WithinDrawDistance(coord);
             if (hasSolid)
             {
                 view.Renderer.sharedMaterials = MaterialsFor(slotMask);
@@ -402,10 +636,12 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             {
                 EnsureWater(view, coord);
                 _builder.BuildWater(_buffers, view.WaterMesh, _exposure);
-                view.Water.SetActive(true);
+                view.HasWater = true;
+                view.Water.SetActive(WithinDrawDistance(coord));
             }
             else if (view.Water != null)
             {
+                view.HasWater = false;
                 view.Water.SetActive(false);
                 view.WaterMesh.Clear();
             }
@@ -417,7 +653,7 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             _mesher.BuildChunk(_terrain.Store, coord, _buffers);
             _exposure.PrepareChunk(coord);
             bool solidMatches = _builder.UpdateSolidExposure(_buffers, view.SolidMesh, _exposure);
-            bool waterMatches = view.WaterMesh == null || !view.Water.activeSelf
+            bool waterMatches = view.WaterMesh == null || !view.HasWater
                 ? _buffers.GetQuads(TerrainMaterials.Water).Count == 0
                 : _builder.UpdateWaterExposure(_buffers, view.WaterMesh, _exposure);
             if (!solidMatches || !waterMatches)
@@ -438,7 +674,7 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             MeshRenderer renderer = solid.AddComponent<MeshRenderer>();
             MeshCollider collider = solid.AddComponent<MeshCollider>();
             _colliders[collider] = coord;
-            return new ChunkView(solid, mesh, renderer, collider);
+            return new ChunkView(solid, mesh, renderer, collider) { Coord = coord };
         }
 
         private void EnsureWater(ChunkView view, TerrainChunkCoord coord)
@@ -708,6 +944,12 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
                 Renderer = renderer;
                 Collider = collider;
             }
+
+            public TerrainChunkCoord Coord { get; set; }
+
+            public bool HasSolid { get; set; }
+
+            public bool HasWater { get; set; }
 
             public GameObject Solid { get; }
 

@@ -575,6 +575,50 @@ Every library call is 3-19 times faster than its loop on both runtimes. A call i
 Lua function. `string.format`'s numeric conversions now print from the exact binary value (BigInteger) to match
 C; that adds about 2.3 us on CoreCLR and 4.4 us on Mono to a `%.2f` over the native path.
 
+## 13. Block World streaming at a view radius of 4 and 8 columns (2026-11-12)
+
+The measurements come from `BlockWorldStreamingBudgetPlayModeTests` on a batchmode copy. That harness loads the
+world, build, day-night and torch mods and runs the Terrain pump inside the loop so it can time it. The numbers go to
+`artifacts/streaming/numbers.txt`.
+
+Batchmode draws no Game view, so the loop is paced by the 20 ms fixed step. A "frame" below is the wall time of one
+fixed step: Lua, physics and the pump on the CPU. Draw numbers are computed from the chunk meshes. The camera render is
+the CPU time of one `Camera.Render` at 1280x720.
+
+| Before the streaming work (stream2) | Radius 4 | Radius 8 |
+|---|---|---|
+| Columns, time to the full radius | 57, 134 s | 165, 269 s |
+| Frame while streaming: median / p95 / max | 18.8 / 50.1 / 1478 ms | 19.8 / 34.3 / 220 ms |
+| Terrain pump: median / p95 / max | 0.07 / 0.53 / 1204 ms | 0.08 / 0.26 / 143 ms |
+| Chunks meshed (per step, most in one step) | 361 (0.07, 5) | 1003 (0.07, 4) |
+| Chunk objects, draw-call bound, triangles | 108, 448, 227k | 299, 1218, 612k |
+| Mesh memory | 14 MB | 39 MB |
+| Drawn past the fog's end | 44 % of triangles (fog 49 m) | 5 % (fog 125 m) |
+| One camera render (CPU) | 4.3 ms | 4.8 ms |
+
+The time to the full radius is set by the Lua generation budget; the pump is a tenth of a millisecond in a median
+step. The engine targets are the spikes and the drawing past the fog. That work is:
+
+- Stage 2: the exposure flood stops at the window's highest column top, and each chunk's levels are kept until a
+  write near it drops them.
+- Stage 3:
+  - An adaptive frame budget (`TerrainFrameBudget`).
+  - Chunks are built nearest the camera first.
+  - Nothing is built or drawn past the end of linear fog.
+  - Collider builds are capped at 4 per body and 8 per ray, with a walk along the ray instead of its bounding box.
+  - A character is held up to 0.25 s while its next step's chunk is queued.
+
+**What the WebGL tier should drop first.** At radius 8 the draw budget is about 1200 draw calls and 610k triangles.
+In order:
+
+- (a) The per-chunk water renderer. Water is a second object with a transparent material in about a quarter of the
+  chunks. It cannot simply join the solid renderer as a submesh, because the transparent queue sorts it separately.
+- (b) The corner shade beyond half the fog distance.
+- (c) The block tiles above 64 px with their mipmaps.
+- Chunk merging (four chunks per draw) would cut draw calls by about four; it is the larger change.
+
+Items (b) and (c) wait for the numbers from the next WebGL build.
+
 ## 10. Files
 
 - `tools/perfbench/` — `CoreAI.PerfBench.csproj`, `Program.cs`, `BenchEnvironment.cs`, `MicroBench.cs`,

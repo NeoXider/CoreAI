@@ -82,6 +82,9 @@ namespace CoreAI.Mods.Rbx.Instances
         public ulong PrimaryPartId;
         public bool HasStoredWorldPivot;
         public string StoredWorldPivot;
+
+        /// <summary>Model:GetScale() at the snapshot; 0 (a snapshot made before it was kept) reads as 1.</summary>
+        public double Scale;
     }
 
     /// <summary>Durable ClickDetector state; the value uses invariant round-trip formatting.</summary>

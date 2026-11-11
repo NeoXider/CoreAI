@@ -671,18 +671,10 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
             }
 
             string modelId = LiveModelId(url);
-            CoreAI.Infrastructure.Llm.OpenAiHttpOptions options = new()
-            {
-                UseOpenAiCompatibleHttp = true,
-                ApiBaseUrl = url,
-                ApiKey = "",
-                Model = modelId,
-                RequestTimeoutSeconds = 170
-            };
-            CoreAI.Ai.ILlmClient live = new CoreAI.Infrastructure.Llm.OpenAiChatLlmClient(options,
-                CoreAI.Infrastructure.Llm.CoreAISettingsAsset.Instance, CoreAI.Infrastructure.Logging.GameLoggerUnscopedFallback.Instance,
-                supportsNativeToolCalling: true);
-            yield return OpenScene(live);
+            // WHY through the settings and not a client of the test's own: the scene then builds the Programmer's
+            // client as a player's game does, with the scope's agent memory store behind its memory tool.
+            _settings.ConfigureHttpApi(url, "", modelId, timeoutSeconds: 170);
+            yield return OpenScene(null);
             yield return WaitUntilStanding();
             yield return SetClock(12d);
 
@@ -805,7 +797,10 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
                 .Append(((top - feet) / Cell).ToString("0.00")).Append(" blocks), eyes ")
                 .Append((EyePosition().Y - feet).ToString("0.00")).Append(" over the feet | ");
 
-            // Onto the one-block step: walk at it and jump, seen from the side, three frames.
+            // Onto the one-block step: walk at it from the cell next to it and jump, seen from the side, three frames.
+            // WHY the cell next to it: from two cells away the jump peaks before the step, as a player's would.
+            StandOnCell(startX + sx, ground, startZ + sz);
+            yield return Frames(20);
             float startY = RootY();
             RunOnce("test_walk_step_", "local h = game:GetService('Players'):GetPlayers()[1].Character.Humanoid "
                                        + "h:Move(Vector3.new(" + Lua(flat.X) + ", 0, " + Lua(flat.Z) + "), false) h.Jump = true");
@@ -871,10 +866,36 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
             Release(_keyboard.spaceKey);
             yield return Frames(3);
             Press(_keyboard.spaceKey);
-            yield return Frames(3);
-            Release(_keyboard.spaceKey);
-            yield return Frames(30);
+            System.Text.StringBuilder afterTap = new();
+            for (int frame = 0; frame < 33; frame++)
+            {
+                if (frame == 3)
+                {
+                    Release(_keyboard.spaceKey);
+                }
+
+                if (frame % 3 == 0)
+                {
+                    afterTap.Append(State()).Append(frame < 30 ? ", " : "");
+                }
+
+                yield return null;
+            }
+
             string flightState = State();
+            if (!Humanoid().IsFlying)
+            {
+                // WHY a direct probe: it tells a refused ChangeState from a flight the motor ends on its own.
+                RunOnce("test_fly_probe_", "local h = game:GetService('Players'):GetPlayers()[1].Character.Humanoid "
+                                           + "local ok, err = pcall(h.ChangeState, h, Enum.HumanoidStateType.Flying) "
+                                           + "workspace:SetAttribute('TestFlyProbe', tostring(ok) .. ' ' .. tostring(err) "
+                                           + ".. ' ' .. h:GetState().Name)");
+                yield return Frames(10);
+                Record("flight probe: the double tap left " + flightState + " (every third frame after the second press: "
+                       + afterTap + "); ChangeState(Flying) from Lua answered " + Workspace().GetAttribute("TestFlyProbe")
+                       + ", ten frames later " + State());
+            }
+
             float hoverA = RootY();
             yield return Hold(_keyboard.spaceKey, 0.5f);
             yield return Frames(30);
@@ -945,6 +966,9 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
             Expect(top - feet > 6.8f && top - feet < 7.6f, "the player is 1.8 blocks tall (7.2 studs)");
             Expect(onStep > 3f, "walking at a one-block step with a jump ends on top of it");
             Expect(sprinted > walked * 1.15f, "a sprint covers more ground than a walk");
+            Expect(flightState.Contains("(flying)"), "Space twice flies");
+            Expect(hoverB - hoverA > 3f && Mathf.Abs((hoverB - hoverA) - (hoverB - hoverC)) <= 0.2f * (hoverB - hoverA),
+                "in flight Left Shift sinks as fast as Space rises");
             Expect(!Equals(Workspace().GetAttribute("TestEyeMaterial"), "LeafyGrass"), "standing under a crown, the eyes are not in the leaves");
             Report();
         }

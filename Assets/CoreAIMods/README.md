@@ -45,7 +45,7 @@ only when it composes `CoreAiModsLifetimeScope`.
 | `CoreAI.RbxApi.Instances` | `Runtime/RbxApi/Instances/` | The Instance/DataModel registry, services, scheduler, signals, networking contracts and the replication core. No engine references. |
 | `CoreAI.RbxApi.Unity` | `Runtime/RbxApi/Unity/` | `RbxSpace` (studs ↔ metres) and the procedural and texture-backed material providers. |
 | `CoreAI.RbxApi.Binding` | `Runtime/RbxApi/Binding/` | The Unity backing of the Rbx world: `RbxWorldHost`, `InstanceGameObjectBinder`, character motor, camera, click, input and physics adapters, network bridge provider. |
-| `CoreAI.Mods.Hub` | `Runtime/HubIntegration/` | Hub pages for mods and worlds. Compiles only when `com.neoxider.coreaihub` is installed (`defineConstraints: COREAI_HAS_HUB`, set by a `versionDefines` entry on that package). |
+| `CoreAI.Mods.Hub` | `Runtime/HubIntegration/` | Hub pages for mods and worlds, and `CoreAiPlayWorldHubModule`, the Hub on F2 inside a play world ([PLAY_WORLD.md](../../Docs/CoreAIMods/PLAY_WORLD.md#the-hub-on-f2-ai-settings-in-the-running-world)). Compiles only when `com.neoxider.coreaihub` is installed (`defineConstraints: COREAI_HAS_HUB`, set by a `versionDefines` entry on that package). |
 | `CoreAI.Mods.Editor` | `Editor/` | The `.luau` importer, the Lua `TextAsset` inspector, **CoreAI → Lua Script Viewer**, and the **CoreAI → Materials** texture tools. |
 | `CoreAI.Mods.Tests`, `CoreAI.Mods.PlayModeTests` | `Tests/` | EditMode and PlayMode tests. |
 

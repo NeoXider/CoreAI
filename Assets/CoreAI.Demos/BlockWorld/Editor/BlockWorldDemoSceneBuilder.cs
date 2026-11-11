@@ -127,6 +127,7 @@ namespace CoreAI.Demos.BlockWorld
             CoreAiPlayWorldLookModule look = root.AddComponent<CoreAiPlayWorldLookModule>();
             CoreAiOverlayChatModule chat = root.AddComponent<CoreAiOverlayChatModule>();
             BlockWorldDemoModule demo = root.AddComponent<BlockWorldDemoModule>();
+            MonoBehaviour hub = AddHub(root);
 
             SerializedObject serialized = new(bootstrap);
             Assign(serialized, "worldCamera", camera);
@@ -137,10 +138,35 @@ namespace CoreAI.Demos.BlockWorld
             SerializedProperty storeId = serialized.FindProperty("modStoreId");
             storeId.stringValue = StoreId;
             SerializedProperty additional = serialized.FindProperty("additionalModules");
-            additional.arraySize = 1;
+            additional.arraySize = hub != null ? 2 : 1;
             additional.GetArrayElementAtIndex(0).objectReferenceValue = demo;
+            if (hub != null)
+            {
+                additional.GetArrayElementAtIndex(1).objectReferenceValue = hub;
+            }
+
             serialized.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(bootstrap);
+        }
+
+        /// <summary>The Hub on F2 (AI settings, Test connection, Mods); null without the Hub package.</summary>
+        private static MonoBehaviour AddHub(GameObject root)
+        {
+#if COREAI_HAS_HUB
+            const string hubPrefabPath = "Assets/CoreAIHub/Runtime/CoreAiHub.prefab";
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(hubPrefabPath);
+            if (prefab == null)
+            {
+                throw new InvalidOperationException("[BlockWorldDemo] The Hub prefab is missing: " + hubPrefabPath);
+            }
+
+            CoreAI.Ai.Hub.CoreAiPlayWorldHubModule hub = root.AddComponent<CoreAI.Ai.Hub.CoreAiPlayWorldHubModule>();
+            hub.SetHubPrefab(prefab);
+            EditorUtility.SetDirty(hub);
+            return hub;
+#else
+            return null;
+#endif
         }
 
         private static void Assign(SerializedObject serialized, string field, Object value)

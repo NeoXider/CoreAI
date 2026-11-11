@@ -20,6 +20,29 @@ Each slot takes any component that implements `ICoreAiPlayWorldModule`; `additio
 `bootstrap.AddModule(...)` add more. A module gets `OnComposing` before the scopes build (it may still configure
 them) and `OnComposed` after.
 
+## The Hub on F2 (AI settings in the running world)
+
+`CoreAiPlayWorldHubModule` (with the Hub package, `COREAI_HAS_HUB`) is the module for "set up the model from inside
+the game". Add it to `additionalModules` and give it the Hub prefab `Assets/CoreAIHub/Runtime/CoreAiHub.prefab`:
+
+- **F2** opens the CoreAI Hub; F2 or Escape closes it. A hint at the top centre of the screen names the key: "F2  Set
+  up the AI model" until a model is set up, then "F2  AI settings". F2 does nothing while the chat input or another
+  CoreAI text field has the keyboard.
+- With no model it opens on **AI Settings**: type the server's address (for LM Studio `http://127.0.0.1:1234/v1`),
+  a key only if the server wants one, and the model, then press **Test connection**. The line under the button
+  says what happened (connected and which model answered, or why not: nothing answering, the browser's CORS or
+  mixed-content rule, a missing or refused key, a model the server does not have, a timeout). When the model
+  answers, the chat (T), the villagers and every other role on Automatic routing use it from the next request.
+- The device remembers the address and the model (`persistentDataPath/CoreAI/remembered-backend.json`, the page's
+  storage in a browser) and the next start uses them before the world builds, without a click. The key is never
+  saved: a server that needs one makes the next start offline, and the chat's line says to press F2 and enter the
+  key again.
+- While the Hub is open it holds the keyboard (`ICoreAiUiFocus.HoldsKeyboard`): the world takes no keys or clicks,
+  the chat's open keys and the mod console key do nothing, and the default camera frees the pointer.
+- The offline Programmer reply in this scene ends with "Press F2 to open the AI settings, enter a model server and
+  press Test connection, then ask again." (`CoreAISettingsAsset.SetSessionModelSetupHint`).
+- A player build needs nothing else: the scene's reference to the prefab brings the Hub's assets, WebGL included.
+
 ## The default content
 
 The baseplate and the pad are built by a preset mod, `coreai_play_world_content`, that is loaded into every
@@ -34,7 +57,7 @@ Edit the sizes and colours on the component. Leave the slot empty for a world th
 
 ## Chat commands
 
-The mods scope adds three commands to the in-world chat (**Chat Commands** on `CoreAiModsLifetimeScope`, on by
+The mods scope adds these commands to the in-world chat (**Chat Commands** on `CoreAiModsLifetimeScope`, on by
 default; a command your game registered first under the same name is kept):
 
 | Command | What it does |
@@ -42,6 +65,7 @@ default; a command your game registered first under the same name is kept):
 | `/undo` | Takes back your latest AI change to the world. With nothing to undo, or after something else changed the world since, it says why and changes nothing. A change the AI's self-repair fixed is taken back together with its repair. |
 | `/redo` | Puts back the change `/undo` took back, under the same rule. |
 | `/fly` | Toggles flight of your character (Space rises, Left Shift descends). |
+| `/save` | Only in a world kept between starts (below): records the world now and says what it saved. |
 
 An AI change is anything one AI call changed that a saved world keeps: world-owned instances and their properties,
 Terrain cells, mod sources, and the settings without a revision of their own (the Lighting day cycle, StarterPlayer
@@ -58,12 +82,35 @@ request and its repair, and `/redo` puts back the repaired version. With another
 own step, named as one ("The AI's repair of mod 'tower' was undone."). A version an undo puts back is never repaired
 again on its own; `/fixmod <id>` asks for it. See [MOD_CONSOLE.md](MOD_CONSOLE.md#repairs-and-undo).
 
+## The world between starts
+
+By default a fresh start opens the default world again: the mods come back from the mod store (they are written at
+every load and reload), but the world itself does not, so a block the player broke or a tower the AI built is gone
+after a page reload unless the player once loaded a save. **Keep World Between Starts** on `CoreAiModsLifetimeScope`
+(`SetKeepWorldBetweenStarts(true)` from code before the scope builds; off by default, the Block World demo turns it
+on) keeps it:
+
+- The default world becomes the world that opens on the next start, recorded as a whole world package (tree, Terrain
+  cells, the exact mod sources) as it changes: a mod source change at once, a Terrain write or an AI change to the
+  world tree at most once a minute (`RbxWorldRuntimeSessionController.KeptWorldRefreshInterval`, unless the host set
+  `StartupRefreshInterval`), the first change after a quiet interval at once. Nothing is recorded while nothing
+  changes. A record captures and encodes the whole world on the main thread, so it is a short hitch; `/save` is
+  the way to record at once.
+- A world generator marks its own Terrain writes by setting the workspace attribute `CoreAITerrainGenerating` to
+  true around them: cells made from a seed come back from it, so streaming alone records nothing. A Terrain write
+  made while it is false (a player's block, a falling block) marks the world for its next record.
+- `/save` records the world now. In a browser the page stores it a moment later: Unity persists the storage on its
+  own since 6.3 and gives no completion signal.
+- A restored world takes a strictly newer version of a bundled sample, by the seeder's rule (a bundle whose
+  `version:` is higher than the one the copy was seeded at replaces it, a mod the player wrote under the same id is
+  never touched); the replaced source stays in the mod's revision history.
+
 ## Typing never moves the character
 
 The chat overlay, the chat panel, the Hub and runtime UI screens all report into the CoreAI scope's
-`ICoreAiUiFocus`. While any of them has a focused text field, the mods scope marks every input event with
-`gameProcessedEvent = true`, so the control script ignores it, and the overlay's open keys do nothing (the T you
-type into the chat panel stays there).
+`ICoreAiUiFocus`. While any of them holds the keyboard (`HoldsKeyboard`: a focused text field, or a Hub open over
+the world), the mods scope marks every input event with `gameProcessedEvent = true`, so the control script ignores
+it, and the overlay's open keys do nothing (the T you type into the chat panel stays there).
 
 ## Configure, replace or leave out
 

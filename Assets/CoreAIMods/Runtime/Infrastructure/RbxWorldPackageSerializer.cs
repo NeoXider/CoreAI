@@ -1922,7 +1922,8 @@ namespace CoreAI.Mods.WorldPackages
                         HasStoredWorldPivot = node.Model.HasStoredWorldPivot,
                         StoredWorldPivot = node.Model.HasStoredWorldPivot
                             ? ParseFloatComponents(node.Model.StoredWorldPivot, 12)
-                            : null
+                            : null,
+                        Scale = node.Model.Scale > 0d && node.Model.Scale != 1d ? node.Model.Scale : (double?)null
                     };
                 }
 
@@ -2307,7 +2308,8 @@ namespace CoreAI.Mods.WorldPackages
                     HasStoredWorldPivot = dto.Model.HasStoredWorldPivot,
                     StoredWorldPivot = dto.Model.HasStoredWorldPivot
                         ? Join(dto.Model.StoredWorldPivot, 12, "stored WorldPivot")
-                        : null
+                        : null,
+                    Scale = dto.Model.Scale ?? 0d
                 };
             }
 
@@ -4301,6 +4303,12 @@ namespace CoreAI.Mods.WorldPackages
 
             [JsonProperty("stored_world_pivot")]
             public float[] StoredWorldPivot;
+
+            // WHY no format_version bump: the key is written only for a Model scaled away from 1, so every package
+            // of a world with no scaled model stays byte-identical; a reader that predates the key refuses a world
+            // that has one (MissingMemberHandling.Error) instead of loading its model at the wrong scale.
+            [JsonProperty("scale", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public double? Scale;
         }
 
         [Serializable]

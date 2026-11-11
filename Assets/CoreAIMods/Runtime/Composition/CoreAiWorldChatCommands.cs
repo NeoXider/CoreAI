@@ -14,8 +14,8 @@ namespace CoreAI.Composition
 {
     /// <summary>
     /// The chat commands the mods package adds to the in-world chat: <c>/undo</c> and <c>/redo</c> take back or put
-    /// back the player's latest AI change to the world (<see cref="IRbxWorldUndoService"/>), and <c>/fly</c> toggles
-    /// free flight of the local character. Each command answers at once; an undo or redo posts its outcome when the
+    /// back the player's latest AI change to the world (<see cref="IRbxWorldUndoService"/>), <c>/fly</c> toggles
+    /// free flight of the local character, and in a world kept between starts <c>/save</c> records it now. Each command answers at once; an undo or redo posts its outcome when the
     /// world restore finished. A command a game registered first under the same name is kept. Dispose to remove them.
     /// </summary>
     public sealed class CoreAiWorldChatCommands : IDisposable
@@ -29,10 +29,14 @@ namespace CoreAI.Composition
         /// <summary>Name of the flight command.</summary>
         public const string FlyName = "fly";
 
+        /// <summary>Name of the command that records a kept world now.</summary>
+        public const string SaveName = "save";
+
         private readonly IRbxWorldUndoService _undo;
         private readonly Func<ActorContext> _actor;
         private readonly Func<RbxHumanoid> _localHumanoid;
         private readonly ILog _log;
+        private readonly Func<UniTask<string>> _saveWorld;
         private readonly List<IDisposable> _handles = new();
         private readonly List<string> _registered = new();
         private bool _disposed;
@@ -46,12 +50,16 @@ namespace CoreAI.Composition
         /// <param name="actor">The player whose AI changes the commands take back (the chat's own actor).</param>
         /// <param name="localHumanoid">The local character's Humanoid now, or null while there is none.</param>
         /// <param name="log">Where a command that could not be registered is reported; null is silent.</param>
+        /// <param name="saveWorld">
+        /// Records a kept world now and answers what was saved (<c>/save</c>); null leaves <c>/save</c> out.
+        /// </param>
         public CoreAiWorldChatCommands(
             IChatCommandRegistry registry,
             IRbxWorldUndoService undo,
             Func<ActorContext> actor,
             Func<RbxHumanoid> localHumanoid,
-            ILog log = null)
+            ILog log = null,
+            Func<UniTask<string>> saveWorld = null)
         {
             if (registry == null)
             {
@@ -62,6 +70,7 @@ namespace CoreAI.Composition
             _actor = actor ?? throw new ArgumentNullException(nameof(actor));
             _localHumanoid = localHumanoid;
             _log = log;
+            _saveWorld = saveWorld;
             if (_undo != null)
             {
                 TryAdd(registry, new ChatCommand(UndoName, "Take back your latest AI change to the world.",
@@ -74,6 +83,12 @@ namespace CoreAI.Composition
             {
                 TryAdd(registry, new ChatCommand(FlyName, "Toggle free flight (Space rises, Left Shift descends).",
                     _ => ToggleFlight()));
+            }
+
+            if (_saveWorld != null)
+            {
+                TryAdd(registry, new ChatCommand(SaveName, "Save the world now, so it opens like this after a reload.",
+                    Save));
             }
         }
 
@@ -145,6 +160,28 @@ namespace CoreAI.Composition
                 : "Walking.");
         }
 
+        /// <summary>The reply to <c>/save</c>: the record runs at once and its answer follows; internal for tests.</summary>
+        internal ChatCommandResult Save(ChatCommandContext context)
+        {
+            RunSaveAsync(context?.Messages).Forget();
+            return ChatCommandResult.Handled("Saving the world...");
+        }
+
+        private async UniTaskVoid RunSaveAsync(IChatOverlayMessages messages)
+        {
+            string answer;
+            try
+            {
+                answer = await _saveWorld();
+            }
+            catch (Exception ex)
+            {
+                answer = "The world was not saved: " + ex.Message;
+            }
+
+            messages?.PostMessage("", answer ?? "", ChatFeedLineKind.Command);
+        }
+
         private async UniTaskVoid RunMoveAsync(ActorContext caller, bool undo, IChatOverlayMessages messages)
         {
             RbxWorldUndoResult result;
@@ -209,12 +246,16 @@ namespace CoreAI.Composition
                     IActorIdentityProvider identity = c.ResolveOrDefault<IActorIdentityProvider>()
                                                       ?? CoreServicesInstaller.DefaultLocalHostIdentityProvider;
                     RbxWorldRuntimeSessionController session = c.ResolveOrDefault<RbxWorldRuntimeSessionController>();
+                    // WHY only for a kept world: elsewhere the world is not recorded between starts, and the
+                    // command list of every other scene stays as it was.
+                    bool keep = c.ResolveOrDefault<CoreAiWorldKeepOptions>()?.KeepWorldBetweenStarts == true;
                     return new CoreAiWorldChatCommandsHolder(new CoreAiWorldChatCommands(
                         registry,
                         c.ResolveOrDefault<IRbxWorldUndoService>(),
                         () => identity.GetActorContext(BuiltInAgentRoleIds.Programmer),
                         session != null ? () => CoreAiLocalPlayer.FindHumanoid(session.CurrentRbxApi) : null,
-                        c.ResolveOrDefault<ILog>()));
+                        c.ResolveOrDefault<ILog>(),
+                        session != null && keep ? (Func<UniTask<string>>)session.SaveKeptWorldNowAsync : null));
                 },
                 Lifetime.Singleton);
             builder.RegisterBuildCallback(container =>

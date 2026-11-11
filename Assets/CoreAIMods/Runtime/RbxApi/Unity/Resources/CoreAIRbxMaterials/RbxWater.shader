@@ -36,7 +36,8 @@ Shader "CoreAI/Rbx/Water"
             Name "ForwardWater"
             Tags { "LightMode" = "UniversalForwardOnly" }
             Blend SrcAlpha OneMinusSrcAlpha
-            Cull Back
+            // WHY both sides: a swimmer under water looks up at the surface, the face's back.
+            Cull Off
             ZWrite Off
             ZTest LEqual
 
@@ -157,7 +158,7 @@ Shader "CoreAI/Rbx/Water"
                 return float3(slope.x, 0.0, slope.y);
             }
 
-            half4 RbxWaterFragment(Varyings input) : SV_Target
+            half4 RbxWaterFragment(Varyings input, FRONT_FACE_TYPE facing : FRONT_FACE_SEMANTIC) : SV_Target
             {
                 UNITY_SETUP_INSTANCE_ID(input);
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
@@ -245,6 +246,14 @@ Shader "CoreAI/Rbx/Water"
                     color = waterColor * (0.3h * scatterLight) * (1.0h - fresnel) + surface;
                     alpha = saturate(lerp((half)_FallbackOpacity, 1.0h, fresnel)) * partOpacity;
                 #endif
+
+                // WHY a tinted underside: seen from below, the surface mirrored the sky above it, a pale sheet over the
+                // swimmer; water seen from inside is its own colour, as dark as the light it scatters.
+                if (!IS_FRONT_VFACE(facing, true, false))
+                {
+                    color = waterColor * (0.35h * scatterLight);
+                    alpha = 0.85h * partOpacity;
+                }
 
                 color = MixFog(color, inputData.fogCoord);
                 return half4(color, alpha);

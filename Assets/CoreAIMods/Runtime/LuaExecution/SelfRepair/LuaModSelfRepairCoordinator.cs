@@ -184,7 +184,11 @@ namespace CoreAI.Ai.SelfRepair
             }
         }
 
-        /// <summary>Raised with every line the loop tells the player (also when no chat is connected).</summary>
+        /// <summary>
+        /// Raised with every line the loop tells, in the wording the mod log has (the error, the mod id and the console
+        /// and Hub hints), also when no chat is connected. The chat gets a short line that names the mod by its header
+        /// name instead (<see cref="PlayerNameOf"/>).
+        /// </summary>
         public event Action<string, string> PlayerLinePosted;
 
         /// <summary>
@@ -316,12 +320,13 @@ namespace CoreAI.Ai.SelfRepair
                         OnIncidentOpenedLocked(incident, false, now);
                         break;
                     case LuaModRepairErrorOutcome.Relapsed:
-                        Say(id, LuaLogLevel.Warn, "'" + id + "' fails again: " + Describe(incident) + ".");
+                        Tell(id, LuaLogLevel.Warn, "'" + id + "' fails again: " + Describe(incident) + ".",
+                            "Something in this world stopped working again (" + DisplayNameLocked(id) + "). The AI is fixing it.");
                         Enqueue(id);
                         break;
                     case LuaModRepairErrorOutcome.AttemptFailed:
-                        Say(id, LuaLogLevel.Warn, "'" + id + "' still fails: " + Describe(incident) + "; the AI tries again in " +
-                                                  Seconds(incident.NextAttemptAt - now) + ".");
+                        Tell(id, LuaLogLevel.Warn, "'" + id + "' still fails: " + Describe(incident) + "; the AI tries again in " +
+                                                   Seconds(incident.NextAttemptAt - now) + ".", StillFixingLine(DisplayNameLocked(id)));
                         Enqueue(id);
                         break;
                     case LuaModRepairErrorOutcome.GaveUp:
@@ -545,7 +550,7 @@ namespace CoreAI.Ai.SelfRepair
             string failing = "Mod '" + id + "' is failing: " + Describe(incident) + ".";
             if (Options.Mode == LuaModRuntimeRepairMode.Off && !consented)
             {
-                Say(id, LuaLogLevel.Warn, failing);
+                Tell(id, LuaLogLevel.Warn, failing, StoppedLine(DisplayNameLocked(id), false));
                 _policy.ParkDetected(id, LuaModRepairGiveUpReason.NotAllowed);
                 return;
             }
@@ -597,18 +602,21 @@ namespace CoreAI.Ai.SelfRepair
                 return;
             }
 
-            Say(id, LuaLogLevel.Warn, failing);
+            Tell(id, LuaLogLevel.Warn, failing,
+                "Something in this world stopped working (" + DisplayNameLocked(id) + "). The AI is fixing it.");
             Enqueue(id);
         }
 
         /// <summary>
         /// One line for a failing mod the loop does not repair now, and the mod is paused when it fails all the time;
         /// a mod that fails now and then keeps running and is watched, so it is paused once it fails all the time.
+        /// The chat keeps the <c>/fixmod</c> hint: it is the player's one way to let the AI repair such a mod.
         /// </summary>
         private void ReportOnlyLocked(LuaModRepairIncident incident, string failing, string reason, string hint, double now)
         {
             bool paused = PauseIfBleedingLocked(incident, now);
-            Say(incident.ModId, LuaLogLevel.Warn, failing + " " + reason + (paused ? PausedSentence : "") + " " + hint);
+            Tell(incident.ModId, LuaLogLevel.Warn, failing + " " + reason + (paused ? PausedSentence : "") + " " + hint,
+                StoppedLine(DisplayNameLocked(incident.ModId), paused) + " " + hint);
             StateOf(incident.ModId).Watch = !paused;
         }
 
@@ -628,9 +636,10 @@ namespace CoreAI.Ai.SelfRepair
             }
 
             _offlineSaid = true;
-            Say(id, LuaLogLevel.Warn, failing + " The AI is offline, so nothing repairs failing mods" +
-                                      (_ports.Pause != null ? "; one that keeps failing is paused and its objects stay" : "") +
-                                      ". The mod console (/console) lists them; fix them in the Hub (Mods).");
+            Tell(id, LuaLogLevel.Warn, failing + " The AI is offline, so nothing repairs failing mods" +
+                                       (_ports.Pause != null ? "; one that keeps failing is paused and its objects stay" : "") +
+                                       ". The mod console (/console) lists them; fix them in the Hub (Mods).",
+                StoppedLine(DisplayNameLocked(id), paused));
         }
 
         private void OnGaveUpLocked(LuaModRepairIncident incident, double now)
@@ -646,9 +655,10 @@ namespace CoreAI.Ai.SelfRepair
                 {
                     bool paused = PauseIfBleedingLocked(incident, now);
                     state.Watch = !paused;
-                    Say(id, LuaLogLevel.Warn, "'" + id + "' keeps failing (" + Describe(incident) +
-                                              "); the AI stops repairing it for this session." +
-                                              (paused ? PausedSentence : "") + " /fixmod " + id + " tries again.");
+                    Tell(id, LuaLogLevel.Warn, "'" + id + "' keeps failing (" + Describe(incident) +
+                                               "); the AI stops repairing it for this session." +
+                                               (paused ? PausedSentence : "") + " /fixmod " + id + " tries again.",
+                        GaveUpLine(DisplayNameLocked(id), paused));
                     break;
                 }
                 case LuaModRepairGiveUpReason.StoppedByPlayer:
@@ -668,7 +678,7 @@ namespace CoreAI.Ai.SelfRepair
                     }
                     else
                     {
-                        Say(id, LuaLogLevel.Warn, line);
+                        Tell(id, LuaLogLevel.Warn, line, GaveUpLine(DisplayNameLocked(id), paused));
                     }
 
                     _offlineSaid = true;
@@ -678,10 +688,11 @@ namespace CoreAI.Ai.SelfRepair
                 {
                     bool paused = PauseIfBleedingLocked(incident, now);
                     state.Watch = !paused;
-                    Say(id, LuaLogLevel.Warn, "Could not fix '" + id + "' after " +
-                                              incident.Attempt.ToString(CultureInfo.InvariantCulture) + " tries." +
-                                              (paused ? PausedSentence : " It keeps running.") +
-                                              " /fixmod " + id + " tries again; " + GaveUpUndoWay(state.UndoRecording));
+                    Tell(id, LuaLogLevel.Warn, "Could not fix '" + id + "' after " +
+                                               incident.Attempt.ToString(CultureInfo.InvariantCulture) + " tries." +
+                                               (paused ? PausedSentence : " It keeps running.") +
+                                               " /fixmod " + id + " tries again; " + GaveUpUndoWay(state.UndoRecording),
+                        GaveUpLine(DisplayNameLocked(id), paused));
                     break;
                 }
             }
@@ -708,8 +719,10 @@ namespace CoreAI.Ai.SelfRepair
             }
 
             LuaModRepairSourceComparison comparison = LuaModRepairChangeReport.Compare(state.FailingSource, repaired);
-            Say(id, LuaLogLevel.Print, LuaModRepairChangeReport.BuildFixedLine(id, state.LastSummary, comparison,
-                LuaModRepairChangeReport.UndoWay(state.UndoRecording)));
+            string undoWay = LuaModRepairChangeReport.UndoWay(state.UndoRecording);
+            Tell(id, LuaLogLevel.Print, LuaModRepairChangeReport.BuildFixedLine(id, state.LastSummary, comparison, undoWay),
+                LuaModRepairChangeReport.BuildFixedLine(PlayerNameOf(LuaModHeader.Parse(repaired ?? "", id).Name, id),
+                    state.LastSummary, comparison, undoWay));
             NoteHistoryLocked(id, state, comparison.IsSuspicious ? "errors stopped, but the fix removed code" : "fixed");
         }
 
@@ -771,7 +784,8 @@ namespace CoreAI.Ai.SelfRepair
             }
             else
             {
-                Say(incident.ModId, LuaLogLevel.Warn, line);
+                Tell(incident.ModId, LuaLogLevel.Warn, line, StoppedLine(DisplayNameLocked(incident.ModId), true) +
+                                                             " /fixmod " + incident.ModId + " asks the AI to fix it.");
             }
         }
 
@@ -900,7 +914,8 @@ namespace CoreAI.Ai.SelfRepair
                             : !changed
                                 ? "The AI did not change '" + id + "'"
                                 : "'" + id + "' still fails: " + Describe(incident);
-                    Say(id, LuaLogLevel.Warn, why + "; it tries again in " + Seconds(incident.NextAttemptAt - now) + ".");
+                    Tell(id, LuaLogLevel.Warn, why + "; it tries again in " + Seconds(incident.NextAttemptAt - now) + ".",
+                        StillFixingLine(DisplayNameLocked(id)));
                     Enqueue(id);
                     break;
                 case LuaModRepairAttemptOutcome.GaveUp:
@@ -1128,7 +1143,8 @@ namespace CoreAI.Ai.SelfRepair
                 MaxAttempts = Options.MaxAttemptsPerIncident,
                 RoleId = BuiltInAgentRoleIds.Programmer,
                 Text = LuaModRepairPromptBuilder.Build(context),
-                Announcement = "AI is fixing '" + id + "' (try " + attempt.ToString(CultureInfo.InvariantCulture) + " of " +
+                Announcement = "AI is fixing '" + PlayerNameOf(LuaModHeader.Parse(source ?? "", id).Name, id) + "' (try " +
+                               attempt.ToString(CultureInfo.InvariantCulture) + " of " +
                                Options.MaxAttemptsPerIncident.ToString(CultureInfo.InvariantCulture) + "). /stop cancels.",
                 TraceId = Guid.NewGuid().ToString("N"),
                 HistoryMode = AiTaskHistoryMode.None
@@ -1239,8 +1255,69 @@ namespace CoreAI.Ai.SelfRepair
 
         private void Say(string modId, LuaLogLevel level, string line)
         {
+            Tell(modId, level, line, line);
+        }
+
+        /// <summary>
+        /// A line in two wordings: the detailed one (the error, the mod id, the console and Hub hints) for the mod log
+        /// and <see cref="PlayerLinePosted"/>, and the player's short one for the chat.
+        /// </summary>
+        private void Tell(string modId, LuaLogLevel level, string line, string chatLine)
+        {
             AppendLogLocked(modId, level, line);
-            _posts.Add(new Post(modId, line, true));
+            _posts.Add(new Post(modId, line, chatLine, true));
+        }
+
+        /// <summary>The name the player knows a running mod by (<see cref="PlayerNameOf"/>); its id when it has none.</summary>
+        private string DisplayNameLocked(string id)
+        {
+            string source = "";
+            try
+            {
+                if (!_runtime.TryGetModSource(_actor, id, out source))
+                {
+                    source = "";
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Warn("[LuaModSelfRepair] Reading the name of '" + id + "' failed: " + ex.Message, LogTag.Lua);
+                source = "";
+            }
+
+            return PlayerNameOf(LuaModHeader.Parse(source ?? "", id).Name, id);
+        }
+
+        /// <summary>
+        /// The mod's header name as a player reads it: a series prefix before the first <c>" - "</c> is left out
+        /// (<c>Block World 9 - Falling blocks</c> is <c>Falling blocks</c>); an empty name is the mod's id.
+        /// </summary>
+        public static string PlayerNameOf(string headerName, string modId)
+        {
+            string name = (headerName ?? "").Trim();
+            int dash = name.IndexOf(" - ", StringComparison.Ordinal);
+            if (dash >= 0 && name.Substring(dash + 3).Trim().Length > 0)
+            {
+                name = name.Substring(dash + 3).Trim();
+            }
+
+            return name.Length > 0 ? name : (modId ?? "").Trim();
+        }
+
+        private static string StoppedLine(string name, bool paused)
+        {
+            return "Something in this world stopped working (" + name + ")" + (paused ? " and was paused" : "") +
+                   ". Everything else keeps going.";
+        }
+
+        private static string StillFixingLine(string name)
+        {
+            return "The AI is still fixing " + name + ".";
+        }
+
+        private static string GaveUpLine(string name, bool paused)
+        {
+            return name + (paused ? " is paused" : " keeps running") + "; it could not be fixed this time.";
         }
 
         private void AppendLogLocked(string modId, LuaLogLevel level, string line)
@@ -1286,7 +1363,7 @@ namespace CoreAI.Ai.SelfRepair
                 {
                     if (post.ToChat)
                     {
-                        _messages?.PostSystemMessage(post.Line);
+                        _messages?.PostSystemMessage(post.ChatLine);
                     }
 
                     PlayerLinePosted?.Invoke(post.ModId, post.Line);
@@ -1312,21 +1389,28 @@ namespace CoreAI.Ai.SelfRepair
         }
 
         /// <summary>
-        /// A line for the player. A turn's announcement is not posted to the chat by a chat runner's turn, which shows
-        /// it as the host turn's own line.
+        /// A line for the player: the detailed wording and the chat's short one. A turn's announcement is not posted to
+        /// the chat by a chat runner's turn, which shows it as the host turn's own line.
         /// </summary>
         private readonly struct Post
         {
-            public Post(string modId, string line, bool toChat)
+            public Post(string modId, string line, bool toChat) : this(modId, line, line, toChat)
+            {
+            }
+
+            public Post(string modId, string line, string chatLine, bool toChat)
             {
                 ModId = modId ?? "";
                 Line = line ?? "";
+                ChatLine = chatLine ?? Line;
                 ToChat = toChat;
             }
 
             public string ModId { get; }
 
             public string Line { get; }
+
+            public string ChatLine { get; }
 
             public bool ToChat { get; }
         }

@@ -107,6 +107,13 @@ namespace CoreAI.Composition
         [SerializeField]
         private bool allowAgentsFromLua;
 
+        [Header("World between starts")]
+        [Tooltip("Keep the world between starts: the default world opens again as the player and the AI left it "
+                 + "(recorded a few seconds after a change; /save records it now), and a newer bundled sample "
+                 + "replaces its older copy. Off by default.")]
+        [SerializeField]
+        private bool keepWorldBetweenStarts;
+
         [Header("Player camera")]
         [Tooltip("The default third-person camera around the local character. Turn it off when the game owns "
                  + "the camera.")]
@@ -139,6 +146,22 @@ namespace CoreAI.Composition
         {
             DemandNotBuilt(nameof(SetAllowAgentsFromLua));
             allowAgentsFromLua = allow;
+        }
+
+        /// <summary>The play world setting <see cref="CoreAiWorldKeepOptions.KeepWorldBetweenStarts"/> this scope registers.</summary>
+        public bool KeepWorldBetweenStarts => keepWorldBetweenStarts;
+
+        /// <summary>
+        /// The options instance this scope registered while it builds (null before, or when the host registered its own);
+        /// an installer that runs after this scope's own configuration may still change it before the container builds.
+        /// </summary>
+        public CoreAiWorldKeepOptions WorldKeepOptions { get; private set; }
+
+        /// <summary>Sets <see cref="KeepWorldBetweenStarts"/> before this scope builds its container.</summary>
+        public void SetKeepWorldBetweenStarts(bool keep)
+        {
+            DemandNotBuilt(nameof(SetKeepWorldBetweenStarts));
+            keepWorldBetweenStarts = keep;
         }
 
         /// <summary>The player camera preset this scope registers when it builds.</summary>
@@ -261,6 +284,12 @@ namespace CoreAI.Composition
             // in this composition reads live — see CoreAiModsInstaller and LuaCsCoroutineBudgetSettings.
             builder.RegisterInstance(coroutineResumeBudget ?? new Sandbox.LuaCs.LuaCsCoroutineBudgetSettings());
 
+            if (!builder.Exists(typeof(CoreAiWorldKeepOptions), false, true))
+            {
+                WorldKeepOptions = new CoreAiWorldKeepOptions { KeepWorldBetweenStarts = keepWorldBetweenStarts };
+                builder.RegisterInstance(WorldKeepOptions);
+            }
+
             if (!builder.Exists(typeof(Ai.LuaCs.CoreAiLuaAiOptions), false, true))
             {
                 builder.RegisterInstance(new Ai.LuaCs.CoreAiLuaAiOptions { AllowAgentsFromLua = allowAgentsFromLua });
@@ -319,5 +348,16 @@ namespace CoreAI.Composition
                 }
             };
         }
+    }
+
+    /// <summary>
+    /// Whether the play world keeps its world between starts: the default world is recorded as the world that opens on
+    /// the next start as the player and the AI change it, and a restored world takes a newer bundled sample
+    /// (<see cref="Mods.WorldPackages.RbxWorldRuntimeSessionController.KeepWorldBetweenStarts"/>). Off by default.
+    /// </summary>
+    public sealed class CoreAiWorldKeepOptions
+    {
+        /// <summary>True keeps the world between starts.</summary>
+        public bool KeepWorldBetweenStarts { get; set; }
     }
 }

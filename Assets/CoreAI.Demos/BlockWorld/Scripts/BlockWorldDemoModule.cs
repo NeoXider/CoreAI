@@ -54,6 +54,11 @@ namespace CoreAI.Demos.BlockWorld
         [SerializeField]
         private bool allowAgentsFromLua = true;
 
+        [Tooltip("Keep the world between starts (the play world setting KeepWorldBetweenStarts): the blocks the player "
+                 + "and the AI changed are there after a reload, and /save records the world now.")]
+        [SerializeField]
+        private bool keepWorldBetweenStarts = true;
+
         [Tooltip("Columns (64 studs each) the world streams around the player in a WebGL player; 0 keeps the mod's "
                  + "own default. Set before the world mod loads, as the workspace attribute BlockWorldViewRadius.")]
         [SerializeField]
@@ -85,6 +90,7 @@ namespace CoreAI.Demos.BlockWorld
             if (mods != null && mods.Container == null)
             {
                 mods.SetAllowAgentsFromLua(allowAgentsFromLua);
+                mods.SetKeepWorldBetweenStarts(keepWorldBetweenStarts);
             }
         }
 

@@ -66,6 +66,10 @@ namespace CoreAI.Mods.Rbx.Binding
         private readonly CapsuleCollider _shape;
         private Vector3 _shapedForScale;
         private RbxCharacterBodyShape _bodyShape;
+        private RbxCharacterWater _water;
+        private bool _swimming;
+        private bool _rise;
+        private double _blockedSeconds;
         private readonly Func<float> _worldGravityMetresPerSecondSquared;
         private float _walkSpeedMetres = RbxSpace.LengthToUnity((float)RbxHumanoid.DefaultWalkSpeed);
         private double _walkSpeedStuds = RbxHumanoid.DefaultWalkSpeed;
@@ -92,6 +96,47 @@ namespace CoreAI.Mods.Rbx.Binding
 
         /// <inheritdoc />
         public bool IsFlying => _flying;
+
+        /// <inheritdoc />
+        public double WalkBlockedSeconds => _blockedSeconds;
+
+        /// <summary>True while the motor walks toward a MoveTo target.</summary>
+        public bool HasMoveTarget => _targetMetres.HasValue;
+
+        /// <summary>True while the motor swims (see <see cref="SetSwimming"/>).</summary>
+        public bool IsSwimming => _swimming;
+
+        /// <inheritdoc />
+        public RbxWaterContact Water
+        {
+            get
+            {
+                if (_water == null && _body != null)
+                {
+                    _body.TryGetComponent(out _water);
+                }
+
+                return _water != null ? _water.Contact : RbxWaterContact.Dry;
+            }
+        }
+
+        /// <inheritdoc />
+        public bool SetSwimming(bool swimming)
+        {
+            _swimming = swimming;
+            if (!swimming)
+            {
+                _rise = false;
+            }
+
+            return true;
+        }
+
+        /// <inheritdoc />
+        public void SwimRise()
+        {
+            _rise = true;
+        }
 
         /// <summary>Drives an existing Rigidbody as a character.</summary>
         /// <param name="body">The Rigidbody this motor moves.</param>
@@ -209,6 +254,68 @@ namespace CoreAI.Mods.Rbx.Binding
             shape.isTrigger = rootBox.isTrigger;
             rootBox.enabled = false;
             return shape;
+        }
+
+        /// <summary>
+        /// The walk velocity <paramref name="planar"/> with the part that would push another character taken out:
+        /// the capsule is swept one step ahead, and for every other character's capsule in the way the push along its
+        /// normal is removed, so the walker stops against it or slides along it. A MoveTo walker
+        /// (<paramref name="waits"/>) stops and waits instead, until the other moves or its MoveTo times out.
+        /// </summary>
+        /// <remarks>
+        /// WHY no pushing between characters: two bodies driven by velocity push each other by their solver contacts,
+        /// harder than any grip, so a villager walking into the player shoved him off a ledge or into a block, and
+        /// how far depended on the frame. The rule now is the same every time: characters block each other, and only
+        /// their own input moves them.
+        /// </remarks>
+        private Vector3 BlockedByCharacters(Vector3 planar, double deltaSeconds, bool waits)
+        {
+            if (_shape == null || planar.sqrMagnitude <= 1e-8f)
+            {
+                return planar;
+            }
+
+            float speed = planar.magnitude;
+            float distance = speed * (float)deltaSeconds + RbxSpace.LengthToUnity(0.5f);
+            RaycastHit[] found = _body.SweepTestAll(planar / speed, distance, QueryTriggerInteraction.Ignore);
+            Vector3 result = planar;
+            for (int index = 0; index < found.Length; index++)
+            {
+                Collider other = found[index].collider;
+                if (other == null || other.attachedRigidbody == _body || !IsCharacterShape(other))
+                {
+                    continue;
+                }
+
+                Vector3 normal = found[index].normal;
+                normal.y = 0f;
+                if (normal.sqrMagnitude <= 1e-6f)
+                {
+                    continue;
+                }
+
+                normal /= Mathf.Sqrt(normal.sqrMagnitude);
+                float into = Vector3.Dot(result, normal);
+                if (into >= 0f)
+                {
+                    continue;
+                }
+
+                if (waits)
+                {
+                    return Vector3.zero;
+                }
+
+                result -= normal * into;
+            }
+
+            return result;
+        }
+
+        private static bool IsCharacterShape(Collider collider)
+        {
+            PhysicsMaterial material = collider.sharedMaterial;
+            return material != null && (material == _characterMaterial || material == _gripMaterial);
         }
 
         /// <summary>
@@ -419,10 +526,14 @@ namespace CoreAI.Mods.Rbx.Binding
         /// </remarks>
         public bool TryJump(double jumpPower, double jumpHeight, bool useJumpPower)
         {
-            if (_body == null || _body.isKinematic || !IsGrounded)
+            // WHY a swimmer with its head out may jump: it pushes off the water to climb onto a bank.
+            bool fromWater = _swimming && RbxSwimRules.JumpLeavesWater(Water);
+            if (_body == null || _body.isKinematic || (!IsGrounded && !fromWater))
             {
                 return false;
             }
+
+            _swimming = false;
 
             // WHY two formulas: the mirror treats JumpPower as an upward impulse and JumpHeight as
             // the height actually reached, so the second has to be solved against current gravity
@@ -446,6 +557,7 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <inheritdoc />
         public void MoveTo(RbxVector3? targetStuds)
         {
+            _blockedSeconds = 0d;
             _targetMetres = targetStuds.HasValue ? RbxSpace.ToUnity(targetStuds.Value) : null;
             if (_body != null && !_body.isKinematic && !_targetMetres.HasValue)
             {
@@ -467,6 +579,12 @@ namespace CoreAI.Mods.Rbx.Binding
             if (_flying)
             {
                 StepFlight(deltaSeconds);
+                return;
+            }
+
+            if (_swimming)
+            {
+                StepSwim(deltaSeconds);
                 return;
             }
 
@@ -494,8 +612,10 @@ namespace CoreAI.Mods.Rbx.Binding
                 RbxVector3 heading = new(_moveDirectionStuds.X, 0f, _moveDirectionStuds.Z);
                 Vector3 direction = RbxSpace.DirectionToUnity(heading);
                 Vector3 walking = _body.linearVelocity;
-                walking.x = direction.x * _walkSpeedMetres;
-                walking.z = direction.z * _walkSpeedMetres;
+                Vector3 planarWalk = BlockedByCharacters(new Vector3(direction.x, 0f, direction.z) * _walkSpeedMetres,
+                    deltaSeconds, false);
+                walking.x = planarWalk.x;
+                walking.z = planarWalk.z;
                 _body.linearVelocity = walking;
                 FaceAlong(heading, deltaSeconds);
                 return;
@@ -511,7 +631,10 @@ namespace CoreAI.Mods.Rbx.Binding
             Vector3 velocity = _body.linearVelocity;
             Vector3 planar = delta.sqrMagnitude <= 1e-6f
                 ? Vector3.zero
-                : delta.normalized * _walkSpeedMetres;
+                : BlockedByCharacters(delta.normalized * _walkSpeedMetres, deltaSeconds, true);
+            _blockedSeconds = delta.sqrMagnitude > 1e-6f && planar.sqrMagnitude <= 1e-8f
+                ? _blockedSeconds + deltaSeconds
+                : 0d;
             velocity.x = planar.x;
             velocity.z = planar.z;
             _body.linearVelocity = velocity;
@@ -546,6 +669,46 @@ namespace CoreAI.Mods.Rbx.Binding
             }
 
             bodyTransform.rotation = RbxSpace.ToUnity(RbxCFrame.Angles(0f, (float)nextYaw, 0f));
+        }
+
+        /// <summary>
+        /// One swimming step: the velocity eases toward <see cref="RbxSwimRules.TargetVelocity"/> (along the Move
+        /// direction, tilted by the camera's pitch while swimming forward, so looking down dives; rising while Jump
+        /// is held; sinking slowly with no input), and the world's gravity on the body is cancelled, as in flight.
+        /// </summary>
+        private void StepSwim(double deltaSeconds)
+        {
+            if (_body == null || _body.isKinematic)
+            {
+                return;
+            }
+
+            FitShape();
+            Grip(false);
+            RbxVector3 heading = new(_moveDirectionStuds.X, 0f, _moveDirectionStuds.Z);
+            RbxVector3 direction = heading;
+            Camera eye = Camera.main;
+            if (eye != null && heading.Magnitude > 1e-4f)
+            {
+                Vector3 look = eye.transform.forward;
+                Vector3 flatLook = new(look.x, 0f, look.z);
+                Vector3 flatMove = RbxSpace.DirectionToUnity(heading.Unit);
+                float along = flatLook.sqrMagnitude > 1e-6f ? Vector3.Dot(flatMove, flatLook.normalized) : 0f;
+                if (along > 0f)
+                {
+                    direction = new RbxVector3(heading.Unit.X, look.y * along, heading.Unit.Z);
+                }
+            }
+
+            RbxVector3 target = RbxSwimRules.TargetVelocity(direction, _rise, _walkSpeedStuds);
+            _rise = false;
+            RbxVector3 current = RbxSpace.VelocityFromUnity(_body.linearVelocity);
+            RbxVector3 next = RbxCharacterControlMath.StepFlightVelocity(current, target, FlightAccelerationStuds,
+                deltaSeconds);
+            _body.linearVelocity = RbxSpace.VelocityToUnity(next);
+            float gravity = _worldGravityMetresPerSecondSquared();
+            _body.AddForce(new Vector3(0f, Mathf.Abs(gravity), 0f), ForceMode.Acceleration);
+            FaceAlong(heading, deltaSeconds);
         }
 
         /// <summary>

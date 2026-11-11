@@ -46,6 +46,8 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
         private RbxTerrainPresenter _presenter;
         private Camera _camera;
         private double _pumpMilliseconds;
+        private double _meshMilliseconds;
+        private double _partMilliseconds;
 
         [TearDown]
         public void TearDown()
@@ -81,18 +83,41 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
             int stable = 0;
             int frames = 0;
             int maxMeshedInAFrame = 0;
+            long outOfTurnStart = renderer.OutOfTurnBuildCount;
+            int maxOutOfTurn = 0;
+            List<(double Ms, string Line)> worst = new();
             for (; frames < 40000 && stable < 150; frames++)
             {
                 long before = renderer.RemeshCount;
+                long outOfTurnBefore = renderer.OutOfTurnBuildCount;
+                int texturesBefore = RbxTerrainBlockTextures.BuildCount;
                 frame.Restart();
                 yield return Frames(1);
                 frame.Stop();
                 streaming.Add(frame.Elapsed.TotalMilliseconds);
                 pump.Add(_pumpMilliseconds);
+                int outOfTurn = (int)(renderer.OutOfTurnBuildCount - outOfTurnBefore);
+                maxOutOfTurn = Math.Max(maxOutOfTurn, outOfTurn);
+                worst.Add((frame.Elapsed.TotalMilliseconds, "frame " + frames + ": "
+                    + F(frame.Elapsed.TotalMilliseconds) + " ms (pump: build " + F(_meshMilliseconds) + ", part light "
+                    + F(_partMilliseconds) + "), chunks " + (renderer.RemeshCount - before) + ", out of turn "
+                    + outOfTurn + ", tile styles painted " + (RbxTerrainBlockTextures.BuildCount - texturesBefore)));
+                if (worst.Count > 8)
+                {
+                    worst.Sort((a, b) => b.Ms.CompareTo(a.Ms));
+                    worst.RemoveAt(worst.Count - 1);
+                }
                 maxMeshedInAFrame = Math.Max(maxMeshedInAFrame, (int)(renderer.RemeshCount - before));
                 double columns = Convert.ToDouble(Workspace.GetAttribute("BlockWorldColumns") ?? 0d);
-                stable = Math.Abs(columns - lastColumns) < 0.5d && renderer.PendingChunkCount == 0 ? stable + 1 : 0;
+                // WHY no meshing rather than an empty queue: chunks past the fog's end stay queued on purpose.
+                stable = Math.Abs(columns - lastColumns) < 0.5d && renderer.RemeshCount == before ? stable + 1 : 0;
                 lastColumns = columns;
+                if (frames % 1000 == 0)
+                {
+                    UnityEngine.Debug.Log("[streaming] radius " + radius + ", step " + frames + ": columns " + columns
+                                          + ", chunks " + renderer.ChunkObjectCount + ", queued "
+                                          + renderer.PendingChunkCount + ", drawn " + renderer.VisibleChunkCount);
+                }
             }
 
             total.Stop();
@@ -124,6 +149,20 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
                    + beyondFog + " chunk renderers, " + trianglesBeyondFog + " triangles");
             Record("  memory: total allocated " + F(Profiler.GetTotalAllocatedMemoryLong() / 1048576d) + " MB, mono heap "
                    + F(GC.GetTotalMemory(false) / 1048576d) + " MB, Lua problems " + _problems.Count);
+            worst.Sort((a, b) => b.Ms.CompareTo(a.Ms));
+            Record("  out-of-turn collider builds " + (renderer.OutOfTurnBuildCount - outOfTurnStart) + " (at most "
+                   + maxOutOfTurn + " in one step); characters held " + _host.PhysicsPort.HeldCharacterSteps
+                   + " steps, built past the cap after a hold " + _host.PhysicsPort.ForcedCharacterBuilds
+                   + "; tile styles painted " + RbxTerrainBlockTextures.BuildCount + ", the slowest "
+                   + F(RbxTerrainBlockTextures.MaxBuildMilliseconds) + " ms, all "
+                   + F(RbxTerrainBlockTextures.TotalBuildMilliseconds) + " ms; drawn chunks "
+                   + renderer.VisibleChunkCount + " of " + renderer.ChunkObjectCount + ", still queued "
+                   + renderer.PendingChunkCount);
+            for (int index = 0; index < Math.Min(5, worst.Count); index++)
+            {
+                Record("  worst " + (index + 1) + ": " + worst[index].Line);
+            }
+
             Assert.Greater(lastColumns, 10d, "the world streamed in");
         }
 
@@ -193,9 +232,12 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
                 _roblox.Scheduler.Advance(Time.fixedDeltaTime);
                 Stopwatch pump = Stopwatch.StartNew();
                 _presenter.Pump();
+                double mesh = pump.Elapsed.TotalMilliseconds;
                 _presenter.PumpPartExposure();
                 pump.Stop();
                 _pumpMilliseconds = pump.Elapsed.TotalMilliseconds;
+                _meshMilliseconds = mesh;
+                _partMilliseconds = _pumpMilliseconds - mesh;
             }
         }
 

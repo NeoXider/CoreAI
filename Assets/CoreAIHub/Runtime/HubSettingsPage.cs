@@ -65,8 +65,25 @@ namespace CoreAI.Hub.UI
         private IntegerField _maxTokens;
         private Label _status;
         private Label _health;
+        private Label _connectionStatus;
         private Button _applyButton;
         private Button _testButton;
+        private Button _testConnectionButton;
+
+        /// <summary>Label of the button that tests the typed server and switches to it when it answers.</summary>
+        public const string TestConnectionLabel = "Test connection";
+
+        /// <summary>Element name of the line that shows what the connection test found.</summary>
+        public const string ConnectionStatusName = "coreai-hub-connection-status";
+
+        /// <summary>What the line under Test connection says while no model is set up.</summary>
+        public const string NoModelNote =
+            "No AI model is set up. Enter the server's address and the model, then press " + TestConnectionLabel + ".";
+
+        /// <summary>What the page says about keys, under the key field.</summary>
+        public const string KeyNote =
+            "The key is used only while the game runs and is never saved: after a restart, enter it again. " +
+            "A local server (LM Studio, llama.cpp, Ollama) needs none: leave it empty.";
         private bool _busy;
         private bool _subscribed;
         private ICoreAiRoutingUiController _routingController;
@@ -268,8 +285,9 @@ namespace CoreAI.Hub.UI
             _apiKey.isPasswordField = true;
             _apiKey.maskChar = '*';
             StyleField(_apiKey);
-            SetPlaceholder(_apiKey, "lm-studio  (or your provider API key)");
+            SetPlaceholder(_apiKey, "empty for a local server, or your provider API key");
             _httpGroup.Add(_apiKey);
+            _httpGroup.Add(HubPageWidgets.MakeNote(KeyNote));
 
             _model = new TextField("HTTP model");
             StyleField(_model);
@@ -283,7 +301,17 @@ namespace CoreAI.Hub.UI
                 "Query GET {API base URL}/models and list the models the server advertises, " +
                 "so you can copy an exact name into HTTP model.";
             modelDiscovery.Add(_fetchModelsButton);
+            _testConnectionButton = MakeButton(TestConnectionLabel, TestConnection);
+            _testConnectionButton.tooltip =
+                "Test this address, key and model: the model list, then one short answer. When the model answers, " +
+                "the game uses it at once and this device remembers the address and the model (never the key).";
+            modelDiscovery.Add(_testConnectionButton);
             _httpGroup.Add(modelDiscovery);
+
+            _connectionStatus = HubPageWidgets.MakeNote("");
+            _connectionStatus.name = ConnectionStatusName;
+            _connectionStatus.AddToClassList("coreai-hub-status");
+            _httpGroup.Add(_connectionStatus);
 
             _modelPicker = new DropdownField("Discovered models", new List<string> { ModelPickerPlaceholder }, 0);
             StyleField(_modelPicker);
@@ -1570,6 +1598,146 @@ namespace CoreAI.Hub.UI
             }
         }
 
+        /// <summary>
+        /// Tests the typed address, key and model (<see cref="CoreAiBackend.ConnectHttpApiAsync"/>) and, when the
+        /// model answers, uses them for this session at once and remembers the address and the model on this device.
+        /// The line under the buttons says what happened in a player's words.
+        /// </summary>
+        private async void TestConnection()
+        {
+            if (_busy || _connectionStatus == null)
+            {
+                return;
+            }
+
+            string baseUrl = (_baseUrl.value ?? "").Trim();
+            string model = (_model.value ?? "").Trim();
+            CoreAISettingsAsset asset = ResolveSettingsAsset();
+            string key = ResolveConnectionKey(_apiKey != null ? _apiKey.value : "", baseUrl,
+                asset != null ? asset.ApiBaseUrl : "", asset != null ? asset.ApiKey : "");
+            _busy = true;
+            SetButtonsEnabled(false);
+            _connectionStatus.text = "Testing " + (baseUrl.Length > 0 ? baseUrl : "the server") + "...";
+            try
+            {
+                CoreAiConnectResult result = await CoreAiBackend.ConnectHttpApiAsync(baseUrl, key, model, true, 45,
+                    PageToken());
+                if (_pageDestroyed)
+                {
+                    return;
+                }
+
+                if (result.Check.Models.Count > 0)
+                {
+                    PopulateModelPicker(_modelPicker, new CoreAiModelListResult(true, result.Check.Models, ""));
+                }
+
+                string routed = _routingController?.GetProfileForRole(BuiltInAgentRoleIds.Programmer) ?? "";
+                if (result.Ok)
+                {
+                    RefreshFromStatus();
+                }
+
+                _connectionStatus.text = DescribeConnectResult(result, key.Length > 0, routed);
+            }
+            catch (OperationCanceledException)
+            {
+                if (!_pageDestroyed)
+                {
+                    _connectionStatus.text = "The connection test was cancelled.";
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!_pageDestroyed)
+                {
+                    _connectionStatus.text = "The connection test failed: " + ex.Message;
+                }
+            }
+            finally
+            {
+                _busy = false;
+                if (!_pageDestroyed)
+                {
+                    SetButtonsEnabled(true);
+                }
+            }
+        }
+
+        /// <summary>
+        /// The key a connection test sends: the typed one; else the session's key only when the address is the one
+        /// the session already uses (a key is never sent to a different server); else none. Pure for EditMode tests.
+        /// </summary>
+        internal static string ResolveConnectionKey(string typedKey, string baseUrl, string currentBaseUrl,
+            string currentKey)
+        {
+            string typed = (typedKey ?? "").Trim();
+            if (typed.Length > 0)
+            {
+                return typed;
+            }
+
+            string target = LlmConnectionCheck.NormalizeBaseUrl(baseUrl);
+            return target.Length > 0 &&
+                   string.Equals(target, LlmConnectionCheck.NormalizeBaseUrl(currentBaseUrl),
+                       StringComparison.OrdinalIgnoreCase)
+                ? (currentKey ?? "").Trim()
+                : "";
+        }
+
+        /// <summary>
+        /// The line a connection test leaves under its button: the check's sentence, then whether the game now uses
+        /// the server, whether it was remembered (never the key), and a pinned Programmer profile that would keep
+        /// the chat elsewhere. Pure for EditMode tests.
+        /// </summary>
+        internal static string DescribeConnectResult(CoreAiConnectResult result, bool usedKey,
+            string programmerProfileId)
+        {
+            if (result == null || result.Check == null)
+            {
+                return "";
+            }
+
+            if (!result.Check.Ok)
+            {
+                return result.Check.Message;
+            }
+
+            if (!result.Applied)
+            {
+                return result.Check.Message + " " + result.RememberProblem;
+            }
+
+            string text = result.Check.Message + " The AI of this game uses it now.";
+            if (!string.IsNullOrWhiteSpace(programmerProfileId))
+            {
+                text += " Note: the Programmer is routed to the API profile '" + programmerProfileId.Trim()
+                        + "' (Agent routing below); set it to Automatic to use this server in the chat.";
+            }
+
+            if (result.Remembered)
+            {
+                text += usedKey
+                    ? " This device remembers the address and the model; the key is not saved, so enter it again after a restart."
+                    : " This device remembers the address and the model, and the next start uses them.";
+            }
+            else if (!string.IsNullOrEmpty(result.RememberProblem))
+            {
+                text += " " + result.RememberProblem;
+            }
+
+            return text;
+        }
+
+        /// <summary>What the page says when a remembered server waits for its key.</summary>
+        internal static string PendingKeyNote(LlmRememberedBackend pending)
+        {
+            return pending == null
+                ? ""
+                : "The server " + pending.BaseUrl + " (model '" + pending.Model + "') needs its API key again: keys " +
+                  "are not saved. Enter the key and press " + TestConnectionLabel + ".";
+        }
+
         private async void DetectVision()
         {
             if (_busy)
@@ -1801,6 +1969,28 @@ namespace CoreAI.Hub.UI
 
             UpdateTemperatureInteractivity();
 
+            LlmRememberedBackend pending = asset?.PendingKeyBackend;
+            if (pending != null && status.Mode == LlmExecutionMode.Offline)
+            {
+                // WHY: the remembered server only lacks its key; show its fields so the player types just the key.
+                if (!IsFocusWithin(_mode))
+                {
+                    _mode.SetValueWithoutNotify(ModeOptions[2]);
+                }
+
+                _baseUrl.SetValueWithoutNotify(pending.BaseUrl);
+                _model.SetValueWithoutNotify(pending.Model);
+                if (_connectionStatus != null && string.IsNullOrEmpty(_connectionStatus.text))
+                {
+                    _connectionStatus.text = PendingKeyNote(pending);
+                }
+            }
+            else if (status.Mode == LlmExecutionMode.Offline && _connectionStatus != null &&
+                     string.IsNullOrEmpty(_connectionStatus.text))
+            {
+                _connectionStatus.text = NoModelNote;
+            }
+
             _status.text = status.Mode == LlmExecutionMode.LocalModel &&
                            !LocalModelPlatformSupport.IsSupported(_runtimePlatform)
                 ? LocalModelPlatformSupport.GetUnavailableMessage(_runtimePlatform)
@@ -1821,7 +2011,9 @@ namespace CoreAI.Hub.UI
             bool http = IsHttpMode(mode);
             bool local = mode == LlmExecutionMode.LocalModel;
             bool localAvailable = LocalModelPlatformSupport.IsSupported(_runtimePlatform);
-            SetVisible(_httpGroup, http);
+            // WHY also while Offline: a player with no model sets one up there, with Test connection, without first
+            // finding the Mode dropdown; Apply on Offline still ignores these fields.
+            SetVisible(_httpGroup, http || mode == LlmExecutionMode.Offline);
             SetVisible(_localGroup, local);
             SetVisible(_limitsGroup, http);
             _localGroup?.SetEnabled(localAvailable);
@@ -2229,6 +2421,11 @@ namespace CoreAI.Hub.UI
             if (_fetchModelsButton != null)
             {
                 _fetchModelsButton.SetEnabled(enabled);
+            }
+
+            if (_testConnectionButton != null)
+            {
+                _testConnectionButton.SetEnabled(enabled);
             }
 
             if (_detectVisionButton != null)

@@ -1840,6 +1840,13 @@ namespace CoreAI.Mods.WorldPackages
         private bool _forceStartupRecordAfterMutation;
         private readonly IReadOnlyList<RbxMissingAutoSave> _missingAutoSavesAtStart;
         private IRbxWorldAutoSaveWriteBehindStore _missingAutoSavesToAcknowledge;
+        private bool _keepWorld;
+        private IReadOnlyList<CoreAI.Infrastructure.Lua.IBundledModSource> _bundledForRestore =
+            Array.Empty<CoreAI.Infrastructure.Lua.IBundledModSource>();
+        private RbxTerrain _watchedTerrain;
+        private RbxInstance _watchedWorkspace;
+        private Action<TerrainChangeSet> _onWatchedTerrainChanged;
+        private string _lastKeptRecord = "";
 
         public RbxWorldRuntimeSessionController(
             IRbxWorldSessionHost host,
@@ -1984,6 +1991,253 @@ namespace CoreAI.Mods.WorldPackages
                     _startupRefreshInterval = value;
                 }
             }
+        }
+
+        /// <summary>
+        /// The workspace attribute a world generator sets to true around its own Terrain writes: cells that come back
+        /// from a seed need no save, so while it is true a Terrain write does not mark a kept world for its next record.
+        /// </summary>
+        public const string TerrainGeneratingAttribute = "CoreAITerrainGenerating";
+
+        /// <summary>The source kind of the startup entry a kept default world is recorded as.</summary>
+        public const string KeptWorldSourceKind = "kept";
+
+        /// <summary>
+        /// True once <see cref="KeepWorldBetweenStarts"/> was called: the default world is recorded for the next start
+        /// as it changes, and a restored world takes a strictly newer bundled version of a seeded mod.
+        /// </summary>
+        public bool KeepsWorldBetweenStarts
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _keepWorld;
+                }
+            }
+        }
+
+        /// <summary>What the last record of a kept world held and cost, in words; empty before the first.</summary>
+        public string LastKeptWorldRecord
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _lastKeptRecord;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Keeps the world between starts (a play world setting, off by default; call before the startup restore):
+        /// a restored world takes a strictly newer version of a mod <paramref name="bundled"/> seeded, with the
+        /// seeder's rule, and once <see cref="AdoptDefaultWorldIfKept"/> made the default world the startup world, the
+        /// player's and the AI's changes to it are recorded as they happen: a change to the mod sources at once, a
+        /// Terrain write outside <see cref="TerrainGeneratingAttribute"/> or a gated change to the world tree at most
+        /// once per <see cref="StartupRefreshInterval"/>.
+        /// </summary>
+        public void KeepWorldBetweenStarts(IReadOnlyList<CoreAI.Infrastructure.Lua.IBundledModSource> bundled)
+        {
+            lock (_gate)
+            {
+                _keepWorld = true;
+                _bundledForRestore = bundled ?? Array.Empty<CoreAI.Infrastructure.Lua.IBundledModSource>();
+                // WHY a longer interval unless the host chose one: a record captures and encodes the whole world on
+                // the main thread (measured 40 ms with 26 Terrain chunks in the editor), so a player who keeps
+                // building would get that hitch every 5 s; /save records at once.
+                if (_startupRefreshInterval == DefaultStartupRefreshInterval)
+                {
+                    _startupRefreshInterval = KeptWorldRefreshInterval;
+                }
+            }
+        }
+
+        /// <summary>The <see cref="StartupRefreshInterval"/> a kept world uses unless the host set its own: 60 s.</summary>
+        public static readonly TimeSpan KeptWorldRefreshInterval = TimeSpan.FromSeconds(60d);
+
+        /// <summary>
+        /// After a start that restored nothing: makes the default world the world that opens on the next start, when
+        /// the world is kept and the package store keeps a startup selection. Its first record follows its first change.
+        /// </summary>
+        public void AdoptDefaultWorldIfKept()
+        {
+            lock (_gate)
+            {
+                if (!_keepWorld || _disposed || _startupStore == null || _liveStartupSource != null)
+                {
+                    return;
+                }
+
+                SetLiveStartupSourceLocked(new StartupSource(KeptWorldSourceKind, "default", null));
+            }
+        }
+
+        /// <summary>
+        /// Records a kept world now (the <c>/save</c> chat command) and answers in one sentence what was saved, or why
+        /// nothing was. Never throws.
+        /// </summary>
+        public async UniTask<string> SaveKeptWorldNowAsync()
+        {
+            bool kept;
+            lock (_gate)
+            {
+                kept = _keepWorld && _startupStore != null && _liveStartupSource != null && !_disposed;
+            }
+
+            if (!kept)
+            {
+                return "This world is not kept between starts, so there is nothing to save; its mods are saved as they change.";
+            }
+
+            string note;
+            try
+            {
+                lock (_gate)
+                {
+                    // WHY forced: /save answers for the world as it is now, even when the last record already holds it.
+                    _forceStartupRecordAfterMutation = false;
+                }
+
+                note = await RefreshStartupSelectionAsync("save", false, true);
+            }
+            catch (Exception ex)
+            {
+                note = ex.Message;
+            }
+
+            if (note.Length > 0)
+            {
+                return "The world was not saved: " + note;
+            }
+
+            return "Saved " + LastKeptWorldRecord + "."
+#if UNITY_WEBGL && !UNITY_EDITOR
+                   + " The browser stores it a moment later."
+#endif
+                ;
+        }
+
+        /// <summary>Follows the current session's Terrain, so a write outside generation marks a kept world.</summary>
+        private void WatchTerrainOf(Session session)
+        {
+            if (!_keepWorld)
+            {
+                return;
+            }
+
+            RbxInstance workspace = session?.RbxApi?.Game?.FindFirstChildOfClass("Workspace");
+            RbxTerrain terrain = workspace != null ? RbxTerrainBootstrap.Find(workspace) : null;
+            if (ReferenceEquals(terrain, _watchedTerrain))
+            {
+                return;
+            }
+
+            _onWatchedTerrainChanged ??= OnWatchedTerrainChanged;
+            if (_watchedTerrain != null)
+            {
+                _watchedTerrain.Store.Changed -= _onWatchedTerrainChanged;
+            }
+
+            _watchedTerrain = terrain;
+            _watchedWorkspace = workspace;
+            if (terrain != null)
+            {
+                terrain.Store.Changed += _onWatchedTerrainChanged;
+            }
+        }
+
+        private void OnWatchedTerrainChanged(TerrainChangeSet changes)
+        {
+            // WHY read at the write: a generator marks its own writes, and Lua runs one handler at a time, so a write
+            // made while the attribute is true is the generator's.
+            if (Equals(_watchedWorkspace?.GetAttribute(TerrainGeneratingAttribute), true))
+            {
+                return;
+            }
+
+            lock (_gate)
+            {
+                if (_liveStartupSource != null && !_disposed)
+                {
+                    _worldRefreshDeferred = true;
+                }
+            }
+        }
+
+        /// <summary>
+        /// A restored package with every seeded mod a strictly newer bundle replaces (the seeder's rule); the payload
+        /// itself when none is newer. The replaced source stays in the mod's revision history.
+        /// </summary>
+        private RbxWorldPackagePayload WithNewerBundledMods(RbxWorldPackagePayload payload, out int replaced)
+        {
+            replaced = 0;
+            IReadOnlyList<CoreAI.Infrastructure.Lua.IBundledModSource> sources;
+            lock (_gate)
+            {
+                sources = _keepWorld ? _bundledForRestore : null;
+            }
+
+            if (sources == null || sources.Count == 0 || payload?.Mods == null || payload.Mods.Count == 0)
+            {
+                return payload;
+            }
+
+            Dictionary<string, (CoreAI.Infrastructure.Lua.BundledMod Mod, string Origin)> bundled =
+                new(StringComparer.Ordinal);
+            foreach (CoreAI.Infrastructure.Lua.IBundledModSource source in sources)
+            {
+                IReadOnlyList<CoreAI.Infrastructure.Lua.BundledMod> mods;
+                try
+                {
+                    mods = source?.Load();
+                }
+                catch (Exception ex)
+                {
+                    ReportDiagnostic("A bundled mod source failed at the startup restore: " + ex.Message);
+                    continue;
+                }
+
+                if (mods == null)
+                {
+                    continue;
+                }
+
+                string origin = string.IsNullOrWhiteSpace(source.Origin) ? "bundled" : source.Origin.Trim();
+                foreach (CoreAI.Infrastructure.Lua.BundledMod mod in mods)
+                {
+                    string id = (mod.Id ?? "").Trim();
+                    if (id.Length > 0 && !bundled.ContainsKey(id))
+                    {
+                        bundled[id] = (mod, origin);
+                    }
+                }
+            }
+
+            List<RbxWorldModSource> updated = new(payload.Mods.Count);
+            foreach (RbxWorldModSource packaged in payload.Mods)
+            {
+                if (packaged?.Manifest != null
+                    && bundled.TryGetValue((packaged.Manifest.Id ?? "").Trim(),
+                        out (CoreAI.Infrastructure.Lua.BundledMod Mod, string Origin) newer)
+                    && CoreAI.Infrastructure.Lua.BundledModSeeder.TryUpdateInstalled(newer.Mod, newer.Origin,
+                        packaged.Source, packaged.Manifest, out string source, out LuaModManifest manifest))
+                {
+                    // WHY recorded before the load: the load records the new source as the current revision, so the
+                    // packaged one stays the revision before it and /revert can bring it back.
+                    _versionStore.RecordSuccessfulExecution(LuaCsModRuntime.VersionKeyPrefix + manifest.Id, packaged.Source);
+                    updated.Add(new RbxWorldModSource(manifest, source));
+                    replaced++;
+                    continue;
+                }
+
+                updated.Add(packaged);
+            }
+
+            return replaced == 0
+                ? payload
+                : new RbxWorldPackagePayload(payload.CapturedAtUtc, payload.Settings, payload.Tree, payload.Parts,
+                    payload.CameraCFrame, updated, payload.Diagnostics, payload.OptionalState);
         }
 
         /// <summary>
@@ -2417,13 +2671,17 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             RbxWorldLoadResult loaded;
+            int replacedByBundles = 0;
             try
             {
+                // WHY a kept world takes newer bundles: its package holds the exact sources of the last start, and
+                // without the seeder's rule a returning player would never get a sample's next version.
+                RbxWorldPackagePayload payload = WithNewerBundledMods(selection.Payload, out replacedByBundles);
                 // WHY no pre-load safety autosave: the outgoing world at boot is the reproducible
                 // default world, and one autosave per boot would evict the real backups from the
                 // bounded ring within a handful of restarts.
                 loaded = await LoadConfirmedCoreAsync(
-                    selection.Payload,
+                    payload,
                     false,
                     null,
                     new StartupSource(
@@ -2443,6 +2701,15 @@ namespace CoreAI.Mods.WorldPackages
                     selection.Sequence,
                     selection.WorldId,
                     loaded?.Error ?? "the staged restore returned no result");
+            }
+
+            if (replacedByBundles > 0)
+            {
+                lock (_gate)
+                {
+                    // WHY recorded on the next frame: the entry on disk still holds the replaced sources.
+                    _startupRefreshPending = true;
+                }
             }
 
             return new RbxWorldStartupRestoreResult(
@@ -2944,6 +3211,7 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             EndAbandonedMutationWatch();
+            WatchTerrainOf(session);
             StartPendingStartupRefresh();
             AcknowledgeReportedMissingAutoSaves();
         }
@@ -3584,7 +3852,7 @@ namespace CoreAI.Mods.WorldPackages
         /// <param name="worldOnly">
         /// True when only the world tree changed; writing its entry starts a new <see cref="StartupRefreshInterval"/>.
         /// </param>
-        private async UniTask<string> RefreshStartupSelectionAsync(string trigger, bool worldOnly)
+        private async UniTask<string> RefreshStartupSelectionAsync(string trigger, bool worldOnly, bool keepStats = false)
         {
             if (_startupStore == null || ReadLiveStartupSource() == null)
             {
@@ -3603,8 +3871,10 @@ namespace CoreAI.Mods.WorldPackages
                 string reason;
                 try
                 {
+                    System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
                     RbxWorldPackagePayload captured = CaptureCurrent();
                     byte[] content = ComputeStartupContent(captured);
+                    double captureMs = watch.Elapsed.TotalMilliseconds;
 
                     // WHY still compared: a call that changed the sources or the world-owned tree may
                     // have left them as the newest entry holds them (a folder created and destroyed
@@ -3612,6 +3882,11 @@ namespace CoreAI.Mods.WorldPackages
                     // while the gate is held.
                     if (source.Holds(content))
                     {
+                        if (keepStats || _keepWorld)
+                        {
+                            NoteKeptRecord(captured, captureMs, -1d);
+                        }
+
                         SetStartupSelectionNote("");
                         return "";
                     }
@@ -3638,6 +3913,11 @@ namespace CoreAI.Mods.WorldPackages
                     if (written != null && written.Success)
                     {
                         ReplaceLiveStartupSource(source, new StartupSource(source.Kind, source.Name, content));
+                        if (keepStats || _keepWorld)
+                        {
+                            NoteKeptRecord(captured, captureMs, watch.Elapsed.TotalMilliseconds);
+                        }
+
                         SetStartupSelectionNote("");
                         return "";
                     }
@@ -3665,6 +3945,23 @@ namespace CoreAI.Mods.WorldPackages
             finally
             {
                 _startupSelectionGate.Release();
+            }
+        }
+
+        /// <summary>Keeps what a record of a kept world held and cost, for <see cref="LastKeptWorldRecord"/>.</summary>
+        private void NoteKeptRecord(RbxWorldPackagePayload captured, double captureMs, double totalMs)
+        {
+            string line = (captured.Mods?.Count ?? 0).ToString(CultureInfo.InvariantCulture) + " mods, "
+                          + (captured.Terrain?.ChunkCount ?? 0).ToString(CultureInfo.InvariantCulture) + " Terrain chunks and "
+                          + (captured.Tree?.Instances?.Count ?? 0).ToString(CultureInfo.InvariantCulture) + " instances ("
+                          + captureMs.ToString("0.0", CultureInfo.InvariantCulture) + " ms to capture, "
+                          + (totalMs < 0d
+                              ? "already on disk"
+                              : totalMs.ToString("0.0", CultureInfo.InvariantCulture) + " ms with the write")
+                          + ")";
+            lock (_gate)
+            {
+                _lastKeptRecord = line;
             }
         }
 
@@ -5002,6 +5299,7 @@ namespace CoreAI.Mods.WorldPackages
                 {
                     Success = false,
                     Output = result.Output,
+                    Printed = result.Printed,
                     Error = IsReplacedWorldFailure(result.Error)
                         ? explanation
                         : (result.Error ?? "").TrimEnd() + "\n" + explanation

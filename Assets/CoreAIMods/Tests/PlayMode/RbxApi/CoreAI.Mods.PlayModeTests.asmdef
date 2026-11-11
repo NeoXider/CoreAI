@@ -9,6 +9,8 @@
     "CoreAI.RbxApi.Binding",
     "CoreAI.RbxApi.Unity",
     "CoreAI.Source",
+    "CoreAI.Hub.UI",
+    "CoreAI.Mods.Hub",
     "VContainer",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner",

@@ -159,7 +159,9 @@ closed, so the Enter or Escape that closed it never reaches the game in the same
 and other controls while the player types. `IChatOverlayOpenGate` is the opposite direction: register one
 that returns false while another text field has the keyboard (a Hub page, the chat panel) and the open
 keys do nothing. `CoreAILifetimeScope` registers both through `RegisterCoreAiUiFocus`: the gate answers
-`!ICoreAiUiFocus.HasTextFocus`, and the open overlay reports itself as a text focus under `coreai.chat-overlay`.
+`!ICoreAiUiFocus.HoldsKeyboard` (a focused text field anywhere, or a screen that holds the keyboard while it is
+open, such as a Hub opened over a play world), and the open overlay reports itself as a text focus under
+`coreai.chat-overlay`.
 
 ## Replacing a block
 

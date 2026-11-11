@@ -20,7 +20,7 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class RbxTerrainPresenter : MonoBehaviour, IRbxTerrainHitResolver, IRbxTerrainColliderReadiness,
-        IRbxTerrainSolidCells
+        IRbxTerrainSolidCells, IRbxTerrainWaterCells
     {
         [SerializeField]
         [Min(1)]
@@ -36,6 +36,8 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         [Min(0)]
         [Tooltip("Part renderers given their sky exposure per frame (0 turns the pass off).")]
         private int _partExposuresPerFrame = 32;
+        private readonly TerrainFrameBudget _frameBudget = new();
+        private readonly RbxUnderwaterView _underwater = new();
 
         private readonly RbxPartSkyExposurePass _partExposure = new();
         private ILog _log;
@@ -64,11 +66,18 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             set => _maxChunksPerFrame = Math.Max(1, value);
         }
 
-        /// <summary>Re-mesh time budget per frame, in milliseconds.</summary>
+        /// <summary>
+        /// Re-mesh time budget per frame, in milliseconds. Setting it fixes the budget at this value
+        /// (<see cref="AdaptiveBudget"/> turns off).
+        /// </summary>
         public float MaxMillisecondsPerFrame
         {
             get => _maxMillisecondsPerFrame;
-            set => _maxMillisecondsPerFrame = Math.Max(0f, value);
+            set
+            {
+                _maxMillisecondsPerFrame = Math.Max(0f, value);
+                AdaptiveBudget = false;
+            }
         }
 
         /// <summary>Part renderers given their sky exposure per frame; 0 turns the pass off.</summary>
@@ -157,10 +166,64 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             return Renderer is IRbxTerrainSolidCells cells && cells.IsSolidCell(x, y, z);
         }
 
-        /// <summary>Runs one budgeted re-mesh pass now; returns the chunks processed.</summary>
+        /// <inheritdoc />
+        public bool IsWaterCell(int x, int y, int z)
+        {
+            return Renderer is IRbxTerrainWaterCells cells && cells.IsWaterCell(x, y, z);
+        }
+
+        /// <summary>The look while the main camera's eye is in a water cell (<see cref="RbxUnderwaterView"/>).</summary>
+        public RbxUnderwaterView Underwater => _underwater;
+
+        /// <inheritdoc />
+        public int EnsureColliders(Bounds unityBounds, int maxBuilds)
+        {
+            return Renderer is IRbxTerrainColliderReadiness readiness ? readiness.EnsureColliders(unityBounds, maxBuilds) : 0;
+        }
+
+        /// <inheritdoc />
+        public int EnsureCollidersAlong(Vector3 origin, Vector3 direction, float distance, int maxBuilds)
+        {
+            return Renderer is IRbxTerrainColliderReadiness readiness
+                ? readiness.EnsureCollidersAlong(origin, direction, distance, maxBuilds)
+                : 0;
+        }
+
+        /// <inheritdoc />
+        public bool IsGeometryPendingIn(Bounds unityBounds)
+        {
+            return Renderer is IRbxTerrainColliderReadiness readiness && readiness.IsGeometryPendingIn(unityBounds);
+        }
+
+        /// <summary>
+        /// True (the default) while the per-frame build budget follows the last frames (<see cref="TerrainFrameBudget"/>);
+        /// setting <see cref="MaxMillisecondsPerFrame"/> fixes it instead.
+        /// </summary>
+        public bool AdaptiveBudget { get; set; } = true;
+
+        /// <summary>The milliseconds this frame's pump may spend.</summary>
+        public double BudgetMilliseconds => AdaptiveBudget ? _frameBudget.Milliseconds : _maxMillisecondsPerFrame;
+
+        /// <summary>
+        /// Runs one budgeted re-mesh pass now; returns the chunks processed. Queued chunks are built nearest the main
+        /// camera first, and none past the end of linear fog is built or drawn (<see cref="RbxTerrainRenderer.SetViewer"/>).
+        /// </summary>
         public int Pump()
         {
-            return Renderer?.ProcessDirty(_maxChunksPerFrame, _maxMillisecondsPerFrame) ?? 0;
+            if (Renderer is RbxTerrainRenderer terrainRenderer)
+            {
+                Camera viewer = Camera.main;
+                if (viewer != null)
+                {
+                    float drawDistance = RenderSettings.fog && RenderSettings.fogMode == FogMode.Linear
+                                         && RenderSettings.fogEndDistance > 0f
+                        ? RenderSettings.fogEndDistance
+                        : float.PositiveInfinity;
+                    terrainRenderer.SetViewer(viewer.transform.position, drawDistance);
+                }
+            }
+
+            return Renderer?.ProcessDirty(_maxChunksPerFrame, BudgetMilliseconds) ?? 0;
         }
 
         /// <summary>Gives up to <see cref="PartExposuresPerFrame"/> part renderers their sky exposure now; returns them.</summary>
@@ -192,12 +255,16 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
 
         private void LateUpdate()
         {
+            _frameBudget.RecordFrame(Time.unscaledDeltaTime * 1000d);
             Pump();
+            Camera eye = Camera.main;
+            _underwater.Update(eye != null ? eye.transform.position : (Vector3?)null, this);
             PumpPartExposure();
         }
 
         private void OnDestroy()
         {
+            _underwater.Dispose();
             Renderer?.Dispose();
             Renderer = null;
         }
