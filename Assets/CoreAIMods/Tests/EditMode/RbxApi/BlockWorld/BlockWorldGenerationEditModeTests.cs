@@ -24,7 +24,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         /// SHA-256 of the Terrain package entry (<c>TerrainVoxelCodec</c>, canonical chunk order) after seed 1337
         /// streamed the 21 columns of view radius 2 around the origin. A change here is a change of the generated world.
         /// </summary>
-        private const string GoldenSeed1337Radius2 = "3269e260ad5fd673252764c4c494b33f47a6f08a2d4122c37364aba5dcb2c49b";
+        private const string GoldenSeed1337Radius2 = "8f65b7ba7611ba07cb9ca9a740fbe481d12e64db77578b1a0b9f02ad6f35a291";
 
         private SynchronizationContext _savedContext;
 
@@ -276,6 +276,155 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             Assert.AreEqual(0, lowlandBare, "and never snow");
             Assert.Greater(shoreSand, 0, "the shore is sand");
             world.AssertHealthy(Mod);
+        }
+
+        /// <summary>
+        /// Leaf cells no trunk holds: a leaf counts as held when it touches (six neighbours, through leaves and trunk
+        /// cells) a trunk whose lowest cell stands on ground. Also counts trunks that stand on nothing.
+        /// </summary>
+        private static (int Leaves, int Floating, int Trunks, int Unrooted, string Example) LooseLeaves(
+            BlockWorldTestWorld world, int radiusColumns)
+        {
+            byte trunk = BlockWorldTestWorld.Slot("Mud");
+            byte leaves = BlockWorldTestWorld.Slot("LeafyGrass");
+            int min = -(radiusColumns + 1) * 16;
+            int max = (radiusColumns + 1) * 16 - 1;
+            HashSet<(int, int, int)> leafCells = new();
+            HashSet<(int, int, int)> held = new();
+            Queue<(int X, int Y, int Z)> open = new();
+            int trunks = 0;
+            int unrooted = 0;
+            string example = "";
+            for (int x = min; x <= max; x++)
+            {
+                for (int z = min; z <= max; z++)
+                {
+                    if (!Generated(world, x, z))
+                    {
+                        continue;
+                    }
+
+                    for (int y = -15; y <= 15; y++)
+                    {
+                        byte material = world.Material(x, y, z);
+                        if (material == leaves)
+                        {
+                            leafCells.Add((x, y, z));
+                        }
+                        else if (material == trunk && world.Material(x, y - 1, z) != trunk)
+                        {
+                            trunks++;
+                            byte under = world.Material(x, y - 1, z);
+                            if (under == TerrainMaterials.Air || under == TerrainMaterials.Water || under == leaves)
+                            {
+                                unrooted++;
+                                example = example.Length == 0 ? "an unrooted trunk at (" + x + ", " + y + ", " + z + "), "
+                                                                + Pillar(world, x, y, z) : example;
+                                continue;
+                            }
+
+                            held.Add((x, y, z));
+                            open.Enqueue((x, y, z));
+                        }
+                    }
+                }
+            }
+
+            (int, int, int)[] steps = { (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1) };
+            while (open.Count > 0)
+            {
+                (int x, int y, int z) = open.Dequeue();
+                foreach ((int dx, int dy, int dz) in steps)
+                {
+                    (int, int, int) next = (x + dx, y + dy, z + dz);
+                    if (held.Contains(next))
+                    {
+                        continue;
+                    }
+
+                    byte material = world.Material(next.Item1, next.Item2, next.Item3);
+                    if (material == leaves || material == trunk)
+                    {
+                        held.Add(next);
+                        open.Enqueue(next);
+                    }
+                }
+            }
+
+            int floating = 0;
+            foreach ((int x, int y, int z) in leafCells)
+            {
+                if (!held.Contains((x, y, z)))
+                {
+                    floating++;
+                    example += floating <= 3 ? "; a loose leaf at (" + x + ", " + y + ", " + z + "), " + Pillar(world, x, y, z) : "";
+                }
+            }
+
+            return (leafCells.Count, floating, trunks, unrooted, example);
+        }
+
+        /// <summary>The pillar's materials from six rows under <paramref name="y"/> to three above, bottom first.</summary>
+        private static string Pillar(BlockWorldTestWorld world, int x, int y, int z)
+        {
+            List<string> rows = new();
+            for (int row = Math.Max(y - 6, -16); row <= Math.Min(y + 3, 15); row++)
+            {
+                rows.Add(row + ":" + TerrainMaterials.GetName(world.Material(x, row, z)));
+            }
+
+            return "pillar " + string.Join(" ", rows);
+        }
+
+        private static BlockWorldTestWorld StreamedWorld(int radiusColumns, int columns, string lookFrom = null)
+        {
+            BlockWorldTestWorld world = new();
+            world.SetAttribute("BlockWorldViewRadius", (double)radiusColumns);
+            if (lookFrom != null)
+            {
+                world.LoadSource("test_look", "local camera = workspace.CurrentCamera "
+                                              + "camera.CameraType = Enum.CameraType.Scriptable "
+                                              + "camera.CFrame = CFrame.lookAt(Vector3.new(32, 40, 32), " + lookFrom + ")");
+            }
+
+            world.Load(Mod);
+            world.FrameUntil(() => world.Number("BlockWorldColumns") >= columns, 12000, "the radius-" + radiusColumns + " world");
+            return world;
+        }
+
+        [TestCase(2, 21)]
+        [TestCase(4, 57)]
+        public void P6_World_EveryLeaf_HangsOnATrunkThatStandsOnTheGround(int radius, int columns)
+        {
+            using BlockWorldTestWorld world = StreamedWorld(radius, columns);
+
+            (int leaves, int floating, int trunks, int unrooted, string example) = LooseLeaves(world, radius);
+
+            TestContext.WriteLine("seed 1337, radius " + radius + ": " + leaves + " leaf cells, " + floating + " loose; "
+                                  + trunks + " trunks, " + unrooted + " standing on nothing" + (example.Length > 0 ? "; " + example : ""));
+            Assert.Greater(leaves, 0, "the world has trees");
+            Assert.AreEqual(0, floating, "no leaf hangs in the air without a trunk of its own: " + example);
+            Assert.AreEqual(0, unrooted, "every trunk stands on the ground: " + example);
+            world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_World_TheOrderColumnsAreMadeIn_DoesNotChangeTheWorld_NegativeTwin()
+        {
+            // WHY nine: the player's column, its eight neighbours and then the one two columns ahead come first; the
+            // one two columns behind is far later.
+            using BlockWorldTestWorld east = StreamedWorld(2, 9, "Vector3.new(600, 40, 32)");
+            using BlockWorldTestWorld west = StreamedWorld(2, 9, "Vector3.new(-600, 40, 32)");
+            bool eastFirst = Generated(east, 40, 8) && !Generated(east, -24, 8);
+            bool westFirst = Generated(west, -24, 8) && !Generated(west, 40, 8);
+            east.FrameUntil(() => east.Number("BlockWorldColumns") >= RadiusTwoColumns, 6000, "the eastward world");
+            west.FrameUntil(() => west.Number("BlockWorldColumns") >= RadiusTwoColumns, 6000, "the westward world");
+
+            Assert.IsTrue(eastFirst && westFirst, "the camera's heading changed the order the columns were made in");
+            CollectionAssert.AreEqual(TerrainVoxelCodec.Encode(east.Terrain.Store), TerrainVoxelCodec.Encode(west.Terrain.Store),
+                "the same seed gives the same world whatever order its columns are made in");
+            east.AssertHealthy(Mod);
+            west.AssertHealthy(Mod);
         }
 
         [Test]

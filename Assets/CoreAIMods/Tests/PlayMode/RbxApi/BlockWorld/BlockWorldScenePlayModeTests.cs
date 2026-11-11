@@ -3,6 +3,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
@@ -16,6 +17,7 @@ using CoreAI.Composition;
 using CoreAI.Infrastructure;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Binding.Terrain;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Terrain;
@@ -373,11 +375,22 @@ return 'watchtower built'";
 
         [UnityTest]
         [Timeout(900000)]
-        public IEnumerator BlockWorldScene_TheWorld_FromAHilltop_AWood_AndACaveMouth()
+        public IEnumerator BlockWorldScene_TheVillagers_StayOnTheLand_ForTwoMinutes()
         {
             yield return OpenScene(null);
             yield return WaitUntilStanding();
             yield return WaitForStreamingToSettle();
+            yield return CheckVillagersOnTheLand();
+            Report();
+        }
+
+        [UnityTest]
+        [Timeout(900000)]
+        public IEnumerator BlockWorldScene_TheWorld_FromAHilltop_AWood_AndACaveMouth()
+        {
+            yield return OpenScene(null);
+            yield return WaitUntilStanding();
+            yield return WaitForStreamingToSettle(scanLeaves: true);
             yield return CheckWorldViews();
             Report();
         }
@@ -393,7 +406,9 @@ return 'watchtower built'";
             TerrainMaterials.TryGetSlot("Mud", out byte trunkSlot);
             TerrainMaterials.TryGetSlot("LeafyGrass", out byte leafSlot);
             Vector3Int peak = new(sx, -16, sz);
-            Dictionary<(int X, int Z), int> trunksByBlock = new();
+            // WHY per world column: the generator offers one tree place per 3 x 3 cells inside each 16 x 16 column
+            // (16 places), so a wood is a column whose places mostly grew a tree.
+            Dictionary<(int X, int Z), int> trunksByColumn = new();
             for (int x = sx - 40; x <= sx + 40; x++)
             {
                 for (int z = sz - 40; z <= sz + 40; z++)
@@ -406,15 +421,13 @@ return 'watchtower built'";
 
                     if (ground < 15 && terrain.Store.GetMaterial(x, ground + 1, z) == trunkSlot)
                     {
-                        (int X, int Z) block = (Mathf.FloorToInt(x / 8f), Mathf.FloorToInt(z / 8f));
-                        trunksByBlock[block] = trunksByBlock.TryGetValue(block, out int count) ? count + 1 : 1;
+                        (int X, int Z) column = (Mathf.FloorToInt(x / 16f), Mathf.FloorToInt(z / 16f));
+                        trunksByColumn[column] = trunksByColumn.TryGetValue(column, out int count) ? count + 1 : 1;
                     }
                 }
             }
 
-            Workspace().SetAttribute("BlockWorldTime", "10:30");
-            yield return Frames(3);
-            Workspace().SetAttribute("BlockWorldTime", "stop");
+            yield return SetClock(12d);
             RbxVector3 peakTop = new((peak.x + 0.5f) * Cell, (peak.y + 1) * Cell, (peak.z + 0.5f) * Cell);
             RbxVector3 toSpawn = new RbxVector3(spawn.X - peakTop.X, 0f, spawn.Z - peakTop.Z).Unit;
             yield return Aim(peakTop + new RbxVector3(0f, 7f, 0f) - toSpawn * 4f,
@@ -422,23 +435,17 @@ return 'watchtower built'";
             yield return Frames(20);
             yield return ShootWithUi("world_hilltop.png");
             // WHY the same view at dusk and at night: the fog takes the sky's colour, and a far view shows it best.
-            foreach ((string time, string shot) in new[] { ("18:45", "world_hilltop_dusk.png"), ("0:00", "world_hilltop_night.png") })
+            foreach ((double hours, string shot) in new[] { (18.6d, "world_hilltop_dusk.png"), (0d, "world_hilltop_night.png") })
             {
-                Workspace().SetAttribute("BlockWorldTime", time);
-                yield return Frames(3);
-                Workspace().SetAttribute("BlockWorldTime", "stop");
-                yield return Frames(10);
+                yield return SetClock(hours);
                 yield return ShootWithUi(shot);
             }
 
-            Workspace().SetAttribute("BlockWorldTime", "10:30");
-            yield return Frames(3);
-            Workspace().SetAttribute("BlockWorldTime", "stop");
-            yield return Frames(10);
+            yield return SetClock(10.5d);
 
-            (int X, int Z) densest = (Mathf.FloorToInt(sx / 8f), Mathf.FloorToInt(sz / 8f));
+            (int X, int Z) densest = (Mathf.FloorToInt(sx / 16f), Mathf.FloorToInt(sz / 16f));
             int most = 0;
-            foreach (KeyValuePair<(int X, int Z), int> pair in trunksByBlock)
+            foreach (KeyValuePair<(int X, int Z), int> pair in trunksByColumn)
             {
                 if (pair.Value > most)
                 {
@@ -447,13 +454,61 @@ return 'watchtower built'";
                 }
             }
 
-            int woodX = densest.X * 8 + 4;
-            int woodZ = densest.Z * 8 + 4;
+            int woodX = densest.X * 16 + 8;
+            int woodZ = densest.Z * 16 + 8;
             int woodGround = GroundTop(terrain, woodX, woodZ, trunkSlot, leafSlot);
             RbxVector3 woodCentre = new((woodX + 0.5f) * Cell, (woodGround + 1) * Cell, (woodZ + 0.5f) * Cell);
-            yield return Aim(woodCentre + new RbxVector3(-34f, 22f, -34f), woodCentre + new RbxVector3(0f, 8f, 0f));
+            // WHY from its edge at eye height: from above a wood is a roof of leaves; from beside it, trunks show.
+            RbxVector3 towardSpawn = new RbxVector3(spawn.X - woodCentre.X, 0f, spawn.Z - woodCentre.Z);
+            towardSpawn = towardSpawn.Magnitude > 0.01f ? towardSpawn.Unit : new RbxVector3(1f, 0f, 0f);
+            RbxVector3 edge = woodCentre + towardSpawn * 40f;
+            int edgeGround = GroundTop(terrain, Mathf.FloorToInt(edge.X / Cell), Mathf.FloorToInt(edge.Z / Cell), trunkSlot,
+                leafSlot);
+            RbxVector3 woodLook = woodCentre + new RbxVector3(0f, 6f, 0f);
+            RbxVector3 woodCamera = new(edge.X, (edgeGround + 1) * Cell + 7f, edge.Z);
+            yield return Aim(ClearView(woodLook, woodCamera), woodLook);
             yield return Frames(20);
             yield return ShootWithUi("world_wood.png");
+
+            // A tree close up: a trunk round the wood with six studs of open air on one side at the height of its
+            // bark, seen level from four studs, so the bark fills the middle and the crown the top.
+            bool hasTree = false;
+            RbxVector3 treeCamera = default;
+            RbxVector3 treeLook = default;
+            for (int x = densest.X * 16 - 16; x < densest.X * 16 + 32 && !hasTree; x++)
+            {
+                for (int z = densest.Z * 16 - 16; z < densest.Z * 16 + 32 && !hasTree; z++)
+                {
+                    int treeGround = GroundTop(terrain, x, z, trunkSlot, leafSlot);
+                    if (treeGround >= 14 || terrain.Store.GetMaterial(x, treeGround + 1, z) != trunkSlot)
+                    {
+                        continue;
+                    }
+
+                    RbxVector3 bark = new((x + 0.5f) * Cell, (treeGround + 1) * Cell + 5f, (z + 0.5f) * Cell);
+                    foreach (RbxVector3 side in new[] { new RbxVector3(1f, 0f, 0f), new RbxVector3(-1f, 0f, 0f),
+                                 new RbxVector3(0f, 0f, 1f), new RbxVector3(0f, 0f, -1f) })
+                    {
+                        // WHY from the trunk's face: the trunk's own cell is solid for its first two studs.
+                        if (ClearLength(terrain, bark + side * 2.1f, side, 6f) >= 6f)
+                        {
+                            treeCamera = bark + side * 6f;
+                            treeLook = bark + new RbxVector3(0f, 1f, 0f);
+                            hasTree = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (hasTree)
+            {
+                yield return Aim(treeCamera, treeLook);
+                yield return Frames(10);
+                yield return ShootWithUi("world_tree_close.png");
+            }
+
+            Expect(hasTree, "a tree near the wood can be seen up close from open ground");
 
             Vector3Int mouth = default;
             Vector3Int outside = default;
@@ -487,27 +542,35 @@ return 'watchtower built'";
                 yield return Aim(camera, into);
                 yield return Frames(10);
                 yield return ShootWithUi("world_cave_mouth.png");
+                // WHY from inside the mouth: outside, the hillside drops below the mouth's floor, and from down there
+                // the lip hides the floor a torch goes on.
+                RbxVector3 inside = floor + new RbxVector3(0f, 3.2f, 0f);
+                RunAsPlayer("test_mouth_inside", "game:GetService('Players'):GetPlayers()[1].Character:PivotTo(CFrame.new("
+                                                 + Lua(inside.X) + ", " + Lua(inside.Y + 1f) + ", " + Lua(inside.Z) + "))");
+                yield return Frames(30);
                 RbxVector3 eye = RootPosition(Humanoid()) + new RbxVector3(0f, 1.5f, 0f);
                 yield return Tap(_keyboard.digit9Key);
                 yield return Aim(eye, floor - outward * (Cell * 1.5f));
                 yield return Click(_mouse.rightButton);
                 torches = Workspace().GetAttribute("BlockWorldTorches");
                 yield return Tap(_keyboard.digit1Key);
-                Workspace().SetAttribute("BlockWorldTime", "21:00");
-                yield return Frames(3);
-                Workspace().SetAttribute("BlockWorldTime", "stop");
+                RunAsPlayer("test_mouth_out", "game:GetService('Players'):GetPlayers()[1].Character:PivotTo(CFrame.new("
+                                              + Lua(stand.X) + ", " + Lua(stand.Y + 4f) + ", " + Lua(stand.Z) + "))");
+                yield return Frames(30);
+                yield return SetClock(19.5d);
                 yield return Aim(camera, into);
                 yield return Frames(10);
                 yield return ShootWithUi("world_cave_mouth_torch_dusk.png");
             }
 
             Record("world: peak " + peak + " (" + (peak.y - GroundTop(terrain, sx, sz, trunkSlot, leafSlot))
-                   + " rows above the spawn), densest wood " + most + " trunks in an 8 x 8 block at (" + woodX + ", " + woodZ
+                   + " rows above the spawn), densest wood " + most + " trunks in a 16 x 16 column at (" + woodX + ", " + woodZ
                    + "), cave mouth " + (found ? mouth + " opening toward " + outside : "none") + ", torches " + torches
                    + "; fog " + FogLine());
             Expect(peak.y >= 11, "a high peak within forty cells of the spawn");
-            Expect(most >= 5, "a wood within forty cells of the spawn");
+            Expect(most >= 10, "a wood within forty cells of the spawn: a column with ten or more of its sixteen trees");
             Expect(found, "a cave mouth opens onto a hillside within 48 cells of the spawn");
+            Expect(!found || Equals(torches, 1d) || Equals(torches, 1), "a torch goes on the floor inside the cave mouth");
         }
 
         /// <summary>
@@ -516,7 +579,7 @@ return 'watchtower built'";
         /// reaches farthest, stopped short of its block.
         /// </summary>
         /// <remarks>WHY: woods and hills now stand round the villagers, and a fixed offset often lands in a crown.</remarks>
-        private RbxVector3 ClearView(RbxVector3 at, RbxVector3 wanted)
+        private RbxVector3 ClearView(RbxVector3 at, RbxVector3 wanted, RbxInstance subject = null)
         {
             RbxTerrain terrain = Terrain();
             RbxVector3 offset = wanted - at;
@@ -531,7 +594,7 @@ return 'watchtower built'";
                 RbxVector3 way = new RbxVector3(offset.X * cos - offset.Z * sin, offset.Y, offset.X * sin + offset.Z * cos)
                                  / length;
                 float clear = ClearLength(terrain, at, way, length + 1f);
-                if (clear >= length + 1f)
+                if (clear >= length + 1f && !PartBetween(at, at + way * (length + 1f), subject))
                 {
                     return at + way * length;
                 }
@@ -544,6 +607,31 @@ return 'watchtower built'";
             }
 
             return best;
+        }
+
+        private int _probes;
+
+        /// <summary>
+        /// True when a Part (a villager, the player, a torch) lies on the segment, Terrain and the
+        /// <paramref name="subject"/> Model left out.
+        /// </summary>
+        /// <remarks>WHY: frame 8 once had another villager's arm flat across the camera; Terrain alone misses that.</remarks>
+        private bool PartBetween(RbxVector3 from, RbxVector3 to, RbxInstance subject)
+        {
+            string probeId = "test_part_between_" + ++_probes;
+            RbxVector3 along = to - from;
+            Workspace().SetAttribute("TestSubject", subject != null ? subject.Name : "");
+            RunAsPlayer(probeId, "local params = RaycastParams.new() "
+                                 + "params.FilterType = Enum.RaycastFilterType.Exclude "
+                                 + "local leaveOut = { workspace.Terrain } "
+                                 + "local subject = workspace:FindFirstChild(workspace:GetAttribute('TestSubject') or '') "
+                                 + "if subject then table.insert(leaveOut, subject) end "
+                                 + "params.FilterDescendantsInstances = leaveOut "
+                                 + "workspace:SetAttribute('TestPartBetween', workspace:Raycast(Vector3.new(" + Lua(from.X) + ", "
+                                 + Lua(from.Y) + ", " + Lua(from.Z) + "), Vector3.new(" + Lua(along.X) + ", " + Lua(along.Y) + ", "
+                                 + Lua(along.Z) + "), params) ~= nil)");
+            Session().CurrentConcreteRuntime.UnloadMod(PlayerActor(), probeId);
+            return Equals(Workspace().GetAttribute("TestPartBetween"), true);
         }
 
         private static float ClearLength(RbxTerrain terrain, RbxVector3 from, RbxVector3 way, float length)
@@ -559,6 +647,35 @@ return 'watchtower built'";
             }
 
             return length;
+        }
+
+        /// <summary>
+        /// The ground crop with the sky's light at 0.6 and 1.6 times what the day-night mod set, then the mod's value
+        /// back: the record of how the ground answers the light, to choose the light from.
+        /// </summary>
+        /// <remarks>WHY direct writes hold: the clock stands, and the mod writes the light only when the daylight changes.</remarks>
+        private IEnumerator SkyTrials(RbxLighting lighting, RectInt ground, string label, StringBuilder record)
+        {
+            RbxColor3 set = lighting.OutdoorAmbient;
+            foreach (float scale in new[] { 0.6f, 1.6f })
+            {
+                lighting.SetOutdoorAmbient(new RbxColor3(set.R * scale, set.G * scale, set.B * scale));
+                yield return Frames(5);
+                record.Append(label).Append(" x").Append(scale.ToString("0.0")).Append(' ')
+                    .Append(Luminance(Shoot("_" + label + "_sky_x" + scale.ToString("0.0") + ".png"), ground).ToString("0.000"))
+                    .Append("; ");
+            }
+
+            lighting.SetOutdoorAmbient(set);
+            yield return Frames(5);
+        }
+
+        /// <summary>Sets the clock directly, as the AI or a script would, so no notice covers a shot.</summary>
+        private IEnumerator SetClock(double hours)
+        {
+            ((RbxLighting)CurrentWorld().Game.FindFirstChildOfClass("Lighting")).SetClockTime(hours);
+            // WHY this many: the day-night mod adopts a clock set elsewhere on its next 0.1 s step, then lights the sky.
+            yield return Frames(40);
         }
 
         private string FogLine()
@@ -610,13 +727,118 @@ return 'watchtower built'";
             return false;
         }
 
+        // ---- the villagers stay on the land ----------------------------------------------------------------------
+
+        private IEnumerator CheckVillagersOnTheLand()
+        {
+            string[] names = { "Mira", "Tobin", "Elda" };
+            TerrainMaterials.TryGetSlot("Mud", out byte trunkSlot);
+            TerrainMaterials.TryGetSlot("LeafyGrass", out byte leafSlot);
+            float[] falling = new float[names.Length];
+            float[] longestFall = new float[names.Length];
+            StringBuilder seen = new();
+            bool allOnTop = true;
+            float start = Time.time;
+            int nextCheck = 0;
+            float[] checks = { 0f, 30f, 120f };
+            while (nextCheck < checks.Length)
+            {
+                float elapsed = Time.time - start;
+                for (int index = 0; index < names.Length; index++)
+                {
+                    RbxInstance model = Workspace().FindFirstChild(names[index]);
+                    RbxHumanoid humanoid = model?.FindFirstChildOfClass("Humanoid") as RbxHumanoid;
+                    if (humanoid != null && humanoid.GetState() == RbxHumanoidState.Freefall)
+                    {
+                        falling[index] += Time.deltaTime;
+                        longestFall[index] = Mathf.Max(longestFall[index], falling[index]);
+                    }
+                    else
+                    {
+                        falling[index] = 0f;
+                    }
+                }
+
+                if (elapsed >= checks[nextCheck])
+                {
+                    seen.Append("at ").Append(checks[nextCheck].ToString("0")).Append(" s:");
+                    foreach (string name in names)
+                    {
+                        RbxInstance model = Workspace().FindFirstChild(name);
+                        RbxInstance root = model?.FindFirstChild("HumanoidRootPart");
+                        if (root == null)
+                        {
+                            seen.Append(' ').Append(name).Append(" missing;");
+                            allOnTop = false;
+                            continue;
+                        }
+
+                        RbxVector3 at = CurrentWorld().PartSink.GetLivePositionStuds(root.Id);
+                        int top = GroundTop(Terrain(), Mathf.FloorToInt(at.X / Cell), Mathf.FloorToInt(at.Z / Cell), trunkSlot,
+                            leafSlot);
+                        float surface = (top + 1) * Cell;
+                        bool onTop = at.Y - 1f >= surface - 0.5f;
+                        allOnTop &= onTop;
+                        seen.Append(' ').Append(name).Append(" root ").Append(at).Append(" over ground ").Append(surface)
+                            .Append(onTop ? "" : " (UNDER IT)").Append(", rescues ").Append(model.GetAttribute("NpcRescues") ?? 0)
+                            .Append(';');
+                    }
+
+                    seen.Append(" | ");
+                    nextCheck++;
+                }
+
+                yield return null;
+            }
+
+            // The three villagers at the end of the two minutes, seen together from above their middle.
+            RbxVector3 middle = new(0f, 0f, 0f);
+            int counted = 0;
+            foreach (string name in names)
+            {
+                RbxInstance root = Workspace().FindFirstChild(name)?.FindFirstChild("HumanoidRootPart");
+                if (root != null)
+                {
+                    middle += CurrentWorld().PartSink.GetLivePositionStuds(root.Id);
+                    counted++;
+                }
+            }
+
+            if (counted > 0)
+            {
+                middle = middle / counted + new RbxVector3(0f, 2f, 0f);
+                yield return Aim(ClearView(middle, middle + new RbxVector3(-20f, 14f, -20f)), middle);
+                yield return Frames(5);
+                yield return ShootWithUi("villagers_on_the_land.png");
+            }
+
+            Record("villagers on the land: " + seen + "longest fall " + string.Join(", ", longestFall.Select(value => value.ToString("0.0")))
+                   + " s");
+            Expect(allOnTop, "every villager stands on top of the land of its column at 0, 30 and 120 s");
+            Expect(longestFall.All(value => value <= 2f), "no villager is in free fall for more than two seconds");
+        }
+
         // ---- how the characters look -------------------------------------------------------------------------------
 
         private IEnumerator CheckCharacterLooks()
         {
+            yield return SetClock(10d);
             yield return Tap(_keyboard.vKey);
             yield return Frames(45);
             yield return ShootWithUi("look_player_shoulder.png");
+            // WHY the torso's own colour: a look tour once drew the player's character pure black.
+            RbxInstance torso = Humanoid()?.Parent?.FindFirstChild("Torso");
+            Color torsoColour = Color.black;
+            if (torso != null)
+            {
+                RbxVector3 torsoAt = CurrentWorld().PartSink.GetLivePositionStuds(torso.Id);
+                RectInt torsoCrop = ProjectedRect(torsoAt + new RbxVector3(-0.5f, -0.5f, 0f), torsoAt + new RbxVector3(0.5f, 0.5f, 0f));
+                torsoColour = Mean(Shoot("_player_torso.png"), torsoCrop);
+                Record("the player in third person at 10:00: torso crop " + torsoCrop + " mean " + torsoColour);
+            }
+
+            Expect(torso != null && 0.2126f * torsoColour.r + 0.7152f * torsoColour.g + 0.0722f * torsoColour.b > 0.03f,
+                "the player's character is drawn in its colours in third person, not black");
             yield return Tap(_keyboard.vKey);
             yield return Frames(10);
 
@@ -629,7 +851,7 @@ return 'watchtower built'";
                 RbxVector3 at = (RbxVector3)Workspace().GetAttribute("TestLookAt");
                 RbxVector3 along = (RbxVector3)Workspace().GetAttribute("TestLookAlong");
                 RbxVector3 face = at + new RbxVector3(0f, 2.5f, 0f);
-                yield return Aim(ClearView(face, at + along * 7f + new RbxVector3(0f, 3f, 0f)), face);
+                yield return Aim(ClearView(face, at + along * 7f + new RbxVector3(0f, 3f, 0f), Workspace().FindFirstChild(name)), face);
                 yield return Frames(5);
                 yield return ShootWithUi("look_" + name.ToLowerInvariant() + "_idle.png");
                 seen.Append(name).Append(" at ").Append(at).Append(" facing ").Append(along).Append("; ");
@@ -666,7 +888,7 @@ return 'watchtower built'";
             RbxVector3 side = new RbxVector3(now.Z - from.Z, 0f, from.X - now.X);
             side = side.Magnitude > 0.01f ? side.Unit : new RbxVector3(1f, 0f, 0f);
             RbxVector3 body = now + new RbxVector3(0f, 2f, 0f);
-            yield return Aim(ClearView(body, now + side * 8f + new RbxVector3(0f, 2.5f, 0f)), body);
+            yield return Aim(ClearView(body, now + side * 8f + new RbxVector3(0f, 2.5f, 0f), Workspace().FindFirstChild("Tobin")), body);
             yield return ShootWithUi("look_tobin_walking.png");
             Record("looks: " + seen + "Tobin walked from " + from + " to " + now + " ("
                    + (now - from).Magnitude.ToString("0.0") + " studs in 24 frames; a clear heading " + clear
@@ -966,6 +1188,16 @@ return 'watchtower built'";
             bool isGrass = terrain.Store.GetMaterial(cellX, top, cellZ) == grassSlot;
             RbxVector3 centre = new((cellX + 0.5f) * Cell, (top + 1) * Cell, (cellZ + 0.5f) * Cell);
             yield return Aim(centre + new RbxVector3(0f, 14f, -6f), centre);
+            RbxTerrainRenderer renderer = Object.FindAnyObjectByType<RbxTerrainPresenter>()?.Renderer as RbxTerrainRenderer;
+            TerrainChunkCoord grassChunk = TerrainChunkCoord.FromCell(cellX, top, cellZ);
+            int pendingFrames = 0;
+            while (renderer != null && renderer.IsGeometryPending(grassChunk) && pendingFrames < 300)
+            {
+                pendingFrames++;
+                yield return null;
+            }
+
+            string chunkMaterials = ChunkMaterialNames(renderer, grassChunk);
             RectInt crop = ProjectedRect(centre + new RbxVector3(-1.5f, 0f, -1.5f), centre + new RbxVector3(1.5f, 0f, 1.5f));
             Color grass = Mean(Shoot("_ground_check.png"), crop);
 
@@ -983,7 +1215,8 @@ return 'watchtower built'";
             yield return Frames(3);
 
             Record("grass beside the spawn: cell (" + cellX + ", " + top + ", " + cellZ + ") grass " + isGrass + ", sunlit at noon "
-                   + sunlit + "; crop " + crop + " mean " + grass + "; as Ground " + dirt + "; restored " + restored
+                   + sunlit + "; chunk " + grassChunk + " meshed after " + pendingFrames + " frame(s), drawn with " + chunkMaterials
+                   + "; crop " + crop + " mean " + grass + "; as Ground " + dirt + "; restored " + restored
                    + ", clock back to " + clockBefore.ToString("0.00"));
             Expect(isGrass, "the ground beside the spawn is the Grass material");
             Expect(sunlit, "a grass cell near the spawn lies in sunlight at noon (nothing between it and the sun)");
@@ -995,22 +1228,250 @@ return 'watchtower built'";
             Expect(restored, "the cell is grass again");
         }
 
-        private IEnumerator WaitForStreamingToSettle()
+        /// <summary>
+        /// What the camera shows at a viewport point: the first Roblox hit along the ray (instance, material, cell) and
+        /// the nearest three Unity renderers whose bounds the ray enters (object, its root, material, distance).
+        /// </summary>
+        private string WhatIsAt(float viewportX, float viewportY)
         {
+            Camera camera = _bootstrap.Composition.Camera;
+            if (camera == null)
+            {
+                return "(no camera)";
+            }
+
+            Ray ray = camera.ViewportPointToRay(new Vector3(viewportX, viewportY, 0f));
+            RbxVector3 origin = RbxSpace.FromUnity(ray.origin);
+            RbxVector3 along = (RbxSpace.FromUnity(ray.origin + ray.direction) - origin).Unit * 400f;
+            string probeId = "test_what_is_at_" + ++_probes;
+            RunAsPlayer(probeId, "local hit = workspace:Raycast(Vector3.new(" + Lua(origin.X) + ", " + Lua(origin.Y)
+                                           + ", " + Lua(origin.Z) + "), Vector3.new(" + Lua(along.X) + ", " + Lua(along.Y)
+                                           + ", " + Lua(along.Z) + ")) "
+                                           + "workspace:SetAttribute('TestWhatIsAt', hit and (hit.Instance:GetFullName() .. ' ' "
+                                           + ".. hit.Material.Name .. ' at ' .. tostring(hit.Position) .. ', cell ' .. "
+                                           + "tostring(workspace.Terrain:WorldToCell(hit.Position - hit.Normal * 0.1)) "
+                                           + ".. ', ' .. math.floor(hit.Distance) .. ' studs') or 'nothing within 400 studs')");
+            Session().CurrentConcreteRuntime.UnloadMod(PlayerActor(), probeId);
+            List<(float Distance, string What)> renderers = new();
+            foreach (Renderer renderer in Object.FindObjectsByType<Renderer>(FindObjectsInactive.Exclude))
+            {
+                if (renderer.enabled && renderer.bounds.IntersectRay(ray, out float distance))
+                {
+                    renderers.Add((distance, renderer.name + " (root " + renderer.transform.root.name + ", "
+                                             + (renderer.sharedMaterial != null ? renderer.sharedMaterial.name : "no material")
+                                             + ") at " + distance.ToString("0.0")));
+                }
+            }
+
+            renderers.Sort((a, b) => a.Distance.CompareTo(b.Distance));
+            List<string> nearest = new();
+            for (int index = 0; index < renderers.Count && index < 3; index++)
+            {
+                nearest.Add(renderers[index].What);
+            }
+
+            return "(" + viewportX + ", " + viewportY + ") Roblox: " + Workspace().GetAttribute("TestWhatIsAt")
+                   + "; renderers: " + string.Join("; ", nearest);
+        }
+
+        /// <summary>The materials (and their base textures) a terrain chunk is drawn with, for the grass record.</summary>
+        private static string ChunkMaterialNames(RbxTerrainRenderer renderer, TerrainChunkCoord coord)
+        {
+            if (renderer == null || !renderer.TryGetChunkObject(coord, out GameObject chunk) || chunk == null)
+            {
+                return "(no chunk)";
+            }
+
+            MeshRenderer meshRenderer = chunk.GetComponent<MeshRenderer>();
+            if (meshRenderer == null)
+            {
+                return "(no renderer)";
+            }
+
+            List<string> names = new();
+            foreach (Material material in meshRenderer.sharedMaterials)
+            {
+                Texture baseMap = material != null && material.HasProperty("_BaseMap") ? material.GetTexture("_BaseMap") : null;
+                names.Add(material == null ? "null" : material.name + "/" + (baseMap != null ? baseMap.name : "-"));
+            }
+
+            return "[" + string.Join(", ", names) + "]";
+        }
+
+        private IEnumerator WaitForStreamingToSettle(bool scanLeaves = false)
+        {
+            bool scannedMidway = false;
             double last = -1d;
             int stable = 0;
-            for (int frame = 0; frame < 6000 && stable < 120; frame++)
+            int frames = 0;
+            float stableSince = Time.realtimeSinceStartup;
+            for (; frames < 6000 && stable < 120; frames++)
             {
                 yield return null;
                 double columns = Convert.ToDouble(Workspace().GetAttribute("BlockWorldColumns") ?? 0d);
-                stable = Math.Abs(columns - last) < 0.5d ? stable + 1 : 0;
+                if (Math.Abs(columns - last) < 0.5d)
+                {
+                    stable++;
+                }
+                else
+                {
+                    stable = 0;
+                    stableSince = Time.realtimeSinceStartup;
+                }
+
                 last = columns;
+                if (scanLeaves && !scannedMidway && columns >= 20d)
+                {
+                    scannedMidway = true;
+                    LeafScan midway = ScanLeaves(Terrain());
+                    Record("leaves while streaming (" + columns + " columns): " + midway);
+                }
             }
 
-            Record("streaming settled at " + last + " columns (stable for " + stable + " frames)");
+            if (scanLeaves)
+            {
+                LeafScan whole = ScanLeaves(Terrain());
+                Record("leaves with the radius full (" + last + " columns): " + whole);
+                Expect(whole.Inside == 0, "no leaf hangs without a trunk inside the streamed land: " + whole);
+            }
+
+            // WHY the stable frames' wall time: the land is whole and the player stands, so it is the standing frame.
+            Record("streaming settled at " + last + " columns after " + (frames - stable) + " frames (stable for "
+                   + stable + " frames, " + ((Time.realtimeSinceStartup - stableSince) * 1000f / Math.Max(stable, 1))
+                   .ToString("0.0") + " ms of wall time per standing frame)");
         }
 
         // ---- HUD ---------------------------------------------------------------------------------------------------
+
+        private readonly struct LeafScan
+        {
+            public LeafScan(int leaves, int inside, int edge, int outside, string example)
+            {
+                Leaves = leaves;
+                Inside = inside;
+                Edge = edge;
+                Outside = outside;
+                Example = example;
+            }
+
+            public int Leaves { get; }
+
+            public int Inside { get; }
+
+            public int Edge { get; }
+
+            public int Outside { get; }
+
+            public string Example { get; }
+
+            public override string ToString()
+            {
+                return Leaves + " leaf cells; not held by a rooted trunk: " + Inside + " inside, " + Edge
+                       + " in a column at the edge of the made land, " + Outside + " in columns not made yet"
+                       + (Example.Length > 0 ? " (" + Example + ")" : "");
+            }
+        }
+
+        /// <summary>
+        /// Leaf cells of the live Terrain that no rooted trunk holds (six neighbours, through leaves and trunk cells),
+        /// within five columns of the spawn's column, split by where their column stands: made with every neighbour
+        /// made, made at the edge of the made land, or not made yet (no bedrock).
+        /// </summary>
+        private LeafScan ScanLeaves(RbxTerrain terrain)
+        {
+            TerrainMaterials.TryGetSlot("Mud", out byte trunk);
+            TerrainMaterials.TryGetSlot("LeafyGrass", out byte leaves);
+            TerrainMaterials.TryGetSlot("Basalt", out byte bedrock);
+            RbxVector3 spawn = (RbxVector3)Workspace().GetAttribute("BlockWorldSpawn");
+            int centreX = Mathf.FloorToInt(spawn.X / Cell / 16f);
+            int centreZ = Mathf.FloorToInt(spawn.Z / Cell / 16f);
+            int min = (Math.Min(centreX, centreZ) - 5) * 16;
+            int max = (Math.Max(centreX, centreZ) + 6) * 16 - 1;
+            HashSet<(int, int, int)> leafCells = new();
+            HashSet<(int, int, int)> held = new();
+            Queue<(int X, int Y, int Z)> open = new();
+            for (int x = min; x <= max; x++)
+            {
+                for (int z = min; z <= max; z++)
+                {
+                    for (int y = -15; y <= 15; y++)
+                    {
+                        byte material = terrain.Store.GetMaterial(x, y, z);
+                        if (material == leaves)
+                        {
+                            leafCells.Add((x, y, z));
+                        }
+                        else if (material == trunk && terrain.Store.GetMaterial(x, y - 1, z) != trunk)
+                        {
+                            byte under = terrain.Store.GetMaterial(x, y - 1, z);
+                            if (under != TerrainMaterials.Air && under != TerrainMaterials.Water && under != leaves)
+                            {
+                                held.Add((x, y, z));
+                                open.Enqueue((x, y, z));
+                            }
+                        }
+                    }
+                }
+            }
+
+            (int, int, int)[] steps = { (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1) };
+            while (open.Count > 0)
+            {
+                (int x, int y, int z) = open.Dequeue();
+                foreach ((int dx, int dy, int dz) in steps)
+                {
+                    (int, int, int) next = (x + dx, y + dy, z + dz);
+                    if (held.Contains(next))
+                    {
+                        continue;
+                    }
+
+                    byte material = terrain.Store.GetMaterial(next.Item1, next.Item2, next.Item3);
+                    if (material == leaves || material == trunk)
+                    {
+                        held.Add(next);
+                        open.Enqueue(next);
+                    }
+                }
+            }
+
+            bool Made(int atX, int atZ)
+            {
+                return terrain.Store.GetMaterial(atX * 16 + 8, -16, atZ * 16 + 8) == bedrock;
+            }
+
+            int inside = 0;
+            int edge = 0;
+            int outside = 0;
+            string example = "";
+            foreach ((int x, int y, int z) in leafCells)
+            {
+                if (held.Contains((x, y, z)))
+                {
+                    continue;
+                }
+
+                int columnX = Mathf.FloorToInt(x / 16f);
+                int columnZ = Mathf.FloorToInt(z / 16f);
+                if (!Made(columnX, columnZ))
+                {
+                    outside++;
+                }
+                else if (!Made(columnX + 1, columnZ) || !Made(columnX - 1, columnZ) || !Made(columnX, columnZ + 1)
+                         || !Made(columnX, columnZ - 1))
+                {
+                    edge++;
+                }
+                else
+                {
+                    inside++;
+                }
+
+                example = example.Length == 0 ? "e.g. (" + x + ", " + y + ", " + z + ")" : example;
+            }
+
+            return new LeafScan(leafCells.Count, inside, edge, outside, example);
+        }
 
         private IEnumerator CheckHud()
         {
@@ -1233,12 +1694,31 @@ return 'watchtower built'";
             Quaternion noonSun = sun != null ? sun.transform.rotation : Quaternion.identity;
             Color[] noon = Shoot("noon.png");
             RectInt ground = ProjectedRect(groundAt + new RbxVector3(-4f, 0f, -4f), groundAt + new RbxVector3(4f, 0f, 4f));
+            RbxLighting lighting = (RbxLighting)CurrentWorld().Game.FindFirstChildOfClass("Lighting");
+
+            // WHY 18:36: the sun is down, so the sky's light is all the land gets, and the land must stay readable.
+            Workspace().SetAttribute("BlockWorldTime", "18:36");
+            yield return Frames(10);
+            float groundDusk = Luminance(Shoot("dusk.png"), ground);
+            StringBuilder trials = new();
+            yield return SkyTrials(lighting, ground, "dusk", trials);
+            // WHY a level view from above the hills: the band just under its horizon lies past the fog's end, so it is
+            // the dusk haze as drawn, which must not outshine the land it covers.
+            RbxVector3 high = groundAt + new RbxVector3(0f, 60f, 0f);
+            yield return Aim(high, high + new RbxVector3(400f, 0f, 0f));
+            yield return Frames(5);
+            RectInt band = new(ShotWidth / 10, Mathf.RoundToInt(ShotHeight * 0.43f), ShotWidth * 8 / 10,
+                Mathf.RoundToInt(ShotHeight * 0.05f));
+            float hazeDusk = Luminance(Shoot("dusk_horizon.png"), band);
+            yield return Aim(groundAt + new RbxVector3(0f, 26f, 14f), groundAt);
+
             Workspace().SetAttribute("BlockWorldTime", "midnight");
             yield return Frames(10);
             Color[] midnight = Shoot("midnight.png");
             Quaternion midnightSun = sun != null ? sun.transform.rotation : Quaternion.identity;
             float groundNoon = Luminance(noon, ground);
             float groundMidnight = Luminance(midnight, ground);
+            yield return SkyTrials(lighting, ground, "midnight", trials);
 
             // The wall: a test fixture written as the player (cells in front of the spawn), lit by a torch placed
             // through the real crosshair and hotbar.
@@ -1257,7 +1737,8 @@ return 'watchtower built'";
             yield return Frames(10);
             object torches = Workspace().GetAttribute("BlockWorldTorches");
             Color[] torchOn = Shoot("night_torch_on.png");
-            RectInt wall = ProjectedRect(face + new RbxVector3(-10f, -3f, -0.1f), face + new RbxVector3(-3f, 5f, -0.1f));
+            // WHY 1.5 to 5 studs beside the torch: where its light falls on the wall, outside the flame's own glow.
+            RectInt wall = ProjectedRect(face + new RbxVector3(-5f, -3f, -0.1f), face + new RbxVector3(-1.5f, 4f, -0.1f));
             float wallOn = Luminance(torchOn, wall);
 
             RbxInstance folder = Workspace().FindFirstChild("BlockWorldTorches");
@@ -1287,6 +1768,8 @@ return 'watchtower built'";
             yield return NightWithTorches(sx, sz, row);
             yield return Tap(_keyboard.digit1Key);
 
+            Record("dusk and night: ground at 18:36 " + groundDusk.ToString("0.000") + ", the haze under the horizon "
+                   + hazeDusk.ToString("0.000") + "; sky light trials " + trials);
             Record("day and night: ground crop " + ground + " noon " + groundNoon.ToString("0.000") + ", midnight "
                    + groundMidnight.ToString("0.000") + "; sun " + (sun != null ? sun.name : "none") + " turned "
                    + Quaternion.Angle(noonSun, midnightSun).ToString("0.0") + " degrees; wall crop " + wall + " torch on "
@@ -1294,6 +1777,10 @@ return 'watchtower built'";
                    + " (torches " + torchesAfter + ")");
             Expect(sun != null && Quaternion.Angle(noonSun, midnightSun) > 30f, "the day cycle turns the scene's one sun");
             Expect(groundMidnight < groundNoon * 0.5f, "midnight darkens the ground crop to under half of noon");
+            Expect(groundDusk >= 0.15f && groundDusk <= 0.25f, "at 18:36, after sunset, the ground reads dim and warm (0.15-0.25)");
+            Expect(hazeDusk <= groundDusk * 1.5f, "the dusk haze is no brighter than one and a half times the land it covers");
+            Expect(groundMidnight >= 0.04f && groundMidnight <= 0.07f,
+                "at midnight the open ground by the player reads in dim moonlight (0.04-0.07), not black");
             Expect(Equals(torches, 1d) || Equals(torches, 1), "slot 9 and a right click put one torch on the wall");
             Expect(Equals(torchesAfter, 0d) || Equals(torchesAfter, 0), "a left click on the torch takes it back");
             Expect(wallOn > wallOff + 0.02f, "the torch lights the wall crop at night, and removing it darkens it");
@@ -1328,30 +1815,63 @@ return 'watchtower built'";
                 yield return null;
             }
 
-            int placed = 0;
-            foreach (Vector2Int offset in offsets)
+            // WHY open ground near the spawn's level, nearest first, and a look before each click: on hilly ground
+            // with woods a cell can be a step up, a trunk or hidden behind a crown or a villager, and the click then
+            // targets that instead; a cell the crosshair does not outline is skipped for the next one.
+            TerrainMaterials.TryGetSlot("Mud", out byte trunkSlot);
+            TerrainMaterials.TryGetSlot("LeafyGrass", out byte leafSlot);
+            List<Vector3Int> open = new();
+            for (int dx = -4; dx <= 4; dx++)
             {
-                int cx = sx + offset.x;
-                int cz = sz + offset.y;
-                int top = row;
-                while (top > row - 6 && Terrain().Store.GetMaterial(cx, top, cz) == TerrainMaterials.Air)
+                for (int dz = -4; dz <= 4; dz++)
                 {
-                    top--;
+                    int cx = sx + dx;
+                    int cz = sz + dz;
+                    int ground = GroundTop(Terrain(), cx, cz, trunkSlot, leafSlot);
+                    if (Math.Max(Math.Abs(dx), Math.Abs(dz)) >= 2 && Math.Abs(ground - (row - 1)) <= 1
+                        && Terrain().Store.GetMaterial(cx, ground + 1, cz) == TerrainMaterials.Air
+                        && Terrain().Store.GetMaterial(cx, ground + 2, cz) == TerrainMaterials.Air)
+                    {
+                        open.Add(new Vector3Int(cx, ground, cz));
+                    }
                 }
+            }
+
+            open.Sort((a, b) => ((a.x - sx) * (a.x - sx) + (a.z - sz) * (a.z - sz))
+                .CompareTo((b.x - sx) * (b.x - sx) + (b.z - sz) * (b.z - sz)));
+            int placed = 0;
+            int skipped = 0;
+            foreach (Vector3Int spot in open)
+            {
+                if (placed == 4)
+                {
+                    break;
+                }
+
+                int cx = spot.x;
+                int cz = spot.z;
+                int top = spot.y;
 
                 RbxVector3 floor = new((cx + 0.5f) * Cell, (top + 1f) * Cell, (cz + 0.5f) * Cell);
                 yield return Aim(eye + new RbxVector3(0f, 2f, 0f), floor);
+                object target = Workspace().GetAttribute("CrosshairPlaceCell");
+                if (!(target is RbxVector3 cell) || (int)cell.X != cx || (int)cell.Y != top + 1 || (int)cell.Z != cz)
+                {
+                    skipped++;
+                    continue;
+                }
+
                 object before = Workspace().GetAttribute("BlockWorldTorches");
                 yield return Click(_mouse.rightButton);
                 placed += Equals(Workspace().GetAttribute("BlockWorldTorches"), before) ? 0 : 1;
             }
 
             RbxVector3 middle = new((sx + 0.5f) * Cell, row * Cell, (sz - 2f) * Cell);
-            yield return Aim(middle + new RbxVector3(0f, 14f, -26f), middle);
+            yield return Aim(ClearView(middle, middle + new RbxVector3(0f, 14f, -26f)), middle);
             yield return Frames(10);
             yield return ShootWithUi("night_torches.png");
-            Record("night view: " + placed + " torches put on the ground, " + Workspace().GetAttribute("BlockWorldTorches")
-                   + " lit");
+            Record("night view: " + placed + " torches put on the ground (" + skipped + " of " + open.Count
+                   + " open cells hidden from the eye), " + Workspace().GetAttribute("BlockWorldTorches") + " lit");
             Expect(placed == 4, "four right clicks with the torch in hand put four torches on the ground");
         }
 
@@ -1848,11 +2368,12 @@ return 'watchtower built'";
             {
                 RbxVector3 at = CurrentWorld().PartSink.GetLivePositionStuds(tobin.FindFirstChild("HumanoidRootPart").Id);
                 RbxVector3 face = at + new RbxVector3(0f, 1.5f, 0f);
-                yield return Aim(ClearView(face, at + new RbxVector3(-7f, 3f, -7f)), face);
+                yield return Aim(ClearView(face, at + new RbxVector3(-7f, 3f, -7f), tobin), face);
                 yield return Frames(3);
             }
 
             yield return ShootWithUi("villager_talking.png");
+            Record("what the villager frame shows at its right edge: " + WhatIsAt(0.9f, 0.45f) + " | " + WhatIsAt(0.95f, 0.25f));
             int drawn = CountShownBubbles("Tobin");
             Record("villager: Tobin's agent " + agent + "; the model was asked as " + model.NpcPersonaSeen
                    + "; chat '" + lines + "'" + probe + "; BlockWorldVillagerReply '" + reply + "'; bubble '" + bubble
@@ -1961,7 +2482,21 @@ return 'watchtower built'";
 
             Workspace().SetAttribute("TestAimFrom", from);
             Workspace().SetAttribute("TestAimAt", at);
-            yield return Frames(4);
+            // WHY wait for the pose and not a fixed count: a shot taken before the camera moved measures the old view.
+            Camera camera = _bootstrap.Composition.Camera;
+            Vector3 wantedAt = RbxSpace.ToUnity(from);
+            Vector3 wantedForward = (RbxSpace.ToUnity(at) - wantedAt).normalized;
+            for (int frame = 0; frame < 120 && camera != null; frame++)
+            {
+                yield return null;
+                if ((camera.transform.position - wantedAt).magnitude < 0.01f
+                    && Vector3.Angle(camera.transform.forward, wantedForward) < 0.5f)
+                {
+                    break;
+                }
+            }
+
+            yield return Frames(2);
         }
 
         private RbxVector3 OutlineCenter()

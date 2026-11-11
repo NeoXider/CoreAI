@@ -9,7 +9,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Terrain
     /// Engine-free: the painted block tiles and the table that picks one per Terrain material. Every style paints a
     /// whole, opaque, deterministic 16-texel tile with unit normals; the tiles read as what they are named (a green
     /// lawn, brown earth, warm sand, leaves with dark gaps, cobbles you can count between their mortar, planks between
-    /// seams, dark brown bark); the default look paints every solid material (Mud as bark) and leaves Air and Water alone; the photo look paints
+    /// seams, oak-brown bark with darker furrows); the default look paints every solid material (Mud as bark) and leaves Air and Water alone; the photo look paints
     /// nothing; and a style given to Water or an unknown material is refused.
     /// </summary>
     [TestFixture]
@@ -103,7 +103,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.Terrain
             Assert.Greater(ShareBrighterThan(TerrainBlockStyle.Leaves, 120f), 0.03f, "and light leaf tips");
             Mean(TerrainBlockStyle.Bark, out float barkR, out float barkG, out float barkB);
             Assert.Greater(barkR, barkB + 15f, "bark is brown");
-            Assert.Less(Luminance(barkR, barkG, barkB), Luminance(earthR, earthG, earthB) + 10f, "and dark");
+            Assert.AreEqual(100f, barkR, 12f, "an oak log's brown (red)");
+            Assert.AreEqual(78f, barkG, 12f, "an oak log's brown (green)");
+            Assert.AreEqual(50f, barkB, 12f, "an oak log's brown (blue)");
+            Assert.Greater(Luminance(barkR, barkG, barkB), 65f, "light enough to read as wood under a crown, not a hole");
+            LuminanceRange(TerrainBlockStyle.Bark, out float furrow, out float _);
+            float ridge = LuminanceAtShare(TerrainBlockStyle.Bark, 0.75f);
+            Assert.AreEqual(0.6f, furrow / ridge, 0.08f, "the furrows sit at about 0.6 of the lit ridges");
             Mean(TerrainBlockStyle.Stone, out float stoneR, out float stoneG, out float stoneB);
             Assert.Less(Math.Abs(stoneR - stoneB), 12f, "stone is grey, not the mossy green of the photo set");
         }
@@ -121,26 +127,42 @@ namespace CoreAI.Tests.EditMode.RbxApi.Terrain
         }
 
         [Test]
-        public void Planks_RunBetweenDarkSeams()
+        public void TheLawn_IsCalm_ItsLightestAndDarkestTexelsStayClose_ButNotFlat()
+        {
+            Mean(TerrainBlockStyle.Grass, out float red, out float green, out float blue);
+            float mean = Luminance(red, green, blue);
+            LuminanceRange(TerrainBlockStyle.Grass, out float darkest, out float lightest);
+            Assert.Less(lightest - darkest, 0.45f * mean, "at eye height the lawn reads as one lawn, not confetti");
+            Assert.Greater(lightest - darkest, 0.2f * mean, "but it still shows tufts and blades");
+            LuminanceRange(TerrainBlockStyle.Leaves, out float _, out float leafTip);
+            Assert.Less(leafTip, lightest + 1f, "no leaf texel is brighter than the brightest blade");
+        }
+
+        [Test]
+        public void Planks_AreFourBoardsBetweenThinDarkerLines_NotBrickwork()
         {
             TerrainBlockTile tile = TerrainBlockPainter.Get(TerrainBlockStyle.Planks);
-            int seams = 0;
+            float[] rows = new float[Size];
             for (int row = 0; row < Size; row++)
             {
-                float sum = 0f;
                 for (int column = 0; column < Size; column++)
                 {
                     int texel = (row * Size + column) * 4;
-                    sum += Luminance(tile.Albedo[texel], tile.Albedo[texel + 1], tile.Albedo[texel + 2]);
-                }
-
-                if (sum / Size < 60f)
-                {
-                    seams++;
+                    rows[row] += Luminance(tile.Albedo[texel], tile.Albedo[texel + 1], tile.Albedo[texel + 2]) / Size;
                 }
             }
 
-            Assert.AreEqual(4, seams, "four boards, each closed by a dark seam");
+            float[] sorted = (float[])rows.Clone();
+            Array.Sort(sorted);
+            float median = sorted[Size / 2];
+            int seams = 0;
+            foreach (float row in rows)
+            {
+                seams += row < median * 0.85f ? 1 : 0;
+            }
+
+            Assert.AreEqual(4, seams, "four boards, each closed by a darker line");
+            Assert.Greater(sorted[0], 45f, "the line between boards is a shade of wood, not black mortar");
         }
 
         [Test]
@@ -231,6 +253,33 @@ namespace CoreAI.Tests.EditMode.RbxApi.Terrain
         private static float Luminance(float red, float green, float blue)
         {
             return 0.2126f * red + 0.7152f * green + 0.0722f * blue;
+        }
+
+        private static void LuminanceRange(TerrainBlockStyle style, out float darkest, out float lightest)
+        {
+            byte[] albedo = TerrainBlockPainter.Get(style).Albedo;
+            darkest = float.MaxValue;
+            lightest = float.MinValue;
+            for (int texel = 0; texel < Size * Size; texel++)
+            {
+                float luminance = Luminance(albedo[texel * 4], albedo[texel * 4 + 1], albedo[texel * 4 + 2]);
+                darkest = Math.Min(darkest, luminance);
+                lightest = Math.Max(lightest, luminance);
+            }
+        }
+
+        /// <summary>The luminance below which <paramref name="share"/> of the tile's texels lie.</summary>
+        private static float LuminanceAtShare(TerrainBlockStyle style, float share)
+        {
+            byte[] albedo = TerrainBlockPainter.Get(style).Albedo;
+            float[] values = new float[Size * Size];
+            for (int texel = 0; texel < values.Length; texel++)
+            {
+                values[texel] = Luminance(albedo[texel * 4], albedo[texel * 4 + 1], albedo[texel * 4 + 2]);
+            }
+
+            Array.Sort(values);
+            return values[Math.Min(values.Length - 1, (int)(share * values.Length))];
         }
 
         private static float ShareDarkerThan(TerrainBlockStyle style, float luminance)

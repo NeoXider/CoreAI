@@ -59,6 +59,12 @@ four boards, Brick, Sand, and so on for all 21 solids). Mud draws as tree bark: 
 block world builds its trunks from Mud cells (the brown material it least needs as itself, Ground being its dirt),
 and a trunk then reads as bark rather than as a post of planks.
 
+The lawn and the leaf clusters are kept calm on purpose: each of their seven colour levels sits a third closer to
+the middle level than a wider palette would put it. That leaves two thirds of the spread at the same hue. The lawn's
+relief is also lower than its colours alone would allow. Seen at eye height, a wider spread read as confetti. A test
+keeps the lawn's lightest-to-darkest texel range between a fifth and 0.45 of its mean luminance. The leaves' dark
+gaps are unchanged, so the crown keeps its depth.
+
 `RbxTerrainBlockTextures` turns each tile into three textures (colour, normal, roughness), every texel
 enlarged to an 8 x 8 block and mip-mapped, so faces stay crisp a few studs away and calm far away (about
 4 MB for all 21). The renderer draws each painted material with a twin of the textured surface (`Terrain
@@ -119,8 +125,11 @@ own environment term and on the light its body scatters back, so cave water stop
 
 Parts and characters: `RbxTerrainPresenter` gives each part renderer the exposure of the cell at its bounds
 centre (`RbxPartSkyExposurePass`, `_RbxSkyExposure` in the renderer's property block, 32 renderers a frame,
-cached per cell until the Terrain changes); a part under the open sky gets nothing written. Only Terrain
-cells block the sky: a roof built of Parts does not darken what is under it.
+cached per cell until the Terrain changes); a part under the open sky gets nothing written. A part that was
+written darker than the open sky is checked on every frame. Once its centre has moved to another cell, it is
+written again at once, outside its turn. Without this, a character back from a cave, or from under the ground,
+stayed black on its shaded side until the sweep reached it. Only Terrain cells block the sky: a roof built of
+Parts does not darken what is under it.
 
 ## Colliders a body or a ray needs are built first
 

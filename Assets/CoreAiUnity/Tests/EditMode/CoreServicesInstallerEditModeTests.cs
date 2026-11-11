@@ -99,6 +99,37 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// A WebGL/IL2CPP player did not see <c>[Inject]</c> on the audit writer's default constructor, so the
+        /// container asked for a <c>string</c> and the failure stopped every later build callback (no in-world
+        /// chat). The audit types are therefore registered through factories, which need no constructor metadata.
+        /// </summary>
+        [Test]
+        public void RegisterCore_RegistersTheAuditTypesThroughFactories_NotConstructorAnalysis()
+        {
+            ContainerBuilder builder = new();
+            builder.Register<DefaultGameLogSettings>(Lifetime.Singleton).As<IGameLogSettings>();
+            builder.RegisterCore();
+
+            IObjectResolver container = builder.Build();
+            try
+            {
+                foreach (Type type in new[]
+                         {
+                             typeof(AuditLogWriter), typeof(LlmAuditInterceptor), typeof(ToolCallAuditInterceptor)
+                         })
+                {
+                    Assert.IsTrue(container.TryGetRegistration(type, out Registration registration), type.Name);
+                    Assert.AreEqual("FuncInstanceProvider", registration.Provider.GetType().Name,
+                        type.Name + " must be built by a factory");
+                }
+            }
+            finally
+            {
+                ((IDisposable)container).Dispose();
+            }
+        }
+
         [Test]
         public void RegisterCore_InitializesAuditInterceptor_AndDisposesWriterWithScope()
         {

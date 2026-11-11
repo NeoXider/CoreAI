@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_world
 name: Block World 1 - World
-version: 1.3.2
+version: 1.3.3
 active: false
 capabilities: All
 category: Samples/Block World
@@ -348,13 +348,21 @@ local function canopyLayer(job, lx, y, lz, radius, random, cut)
     end
 end
 
--- Three shapes: a round oak (trunk 4-5, a crown two wide), a tall narrow tree (trunk 6-7, a crown one wide) and a
--- big oak (trunk 6, a deep crown). Leaves fill only empty cells, so trees in a wood grow into one canopy.
+-- WHY every trunk of the column before any crown: a crown fills only empty cells, so a neighbour's crown grown first
+-- would take the cells of a trunk still to come and leave a leaf inside it, with the rest of the trunk on that leaf.
+local function growTrunks(job)
+    for _, tree in ipairs(job.trees) do
+        for y = tree.ground + 1, tree.ground + tree.trunk do
+            setCell(job, tree.lx, y, tree.lz, TRUNK)
+        end
+    end
+end
+
+-- Three crowns on the trunks growTrunks made: a round oak (trunk 4-5, a crown two wide), a tall narrow tree (trunk
+-- 6-7, a crown one wide) and a big oak (trunk 6, a deep crown). Leaves fill only empty cells, so trees in a wood grow
+-- into one canopy. Every leaf touches the crown below it: the tip sits on the trunk's top or on a leaf layer.
 local function growTree(job, tree, random)
     local top = tree.ground + tree.trunk
-    for y = tree.ground + 1, top do
-        setCell(job, tree.lx, y, tree.lz, TRUNK)
-    end
     if tree.kind == "tall" then
         for y = top - 2, top do
             canopyLayer(job, tree.lx, y, tree.lz, 1, random, 0)
@@ -369,7 +377,8 @@ local function growTree(job, tree, random)
         canopyLayer(job, tree.lx, top, tree.lz, 2, random, 0.5)
         canopyLayer(job, tree.lx, top + 1, tree.lz, 1, random, 0)
     end
-    setCell(job, tree.lx, top + 2, tree.lz, LEAVES)
+    -- WHY one row lower on a tall tree: its leaf layers end at the trunk's top, so a tip two rows up would float.
+    setCell(job, tree.lx, tree.kind == "tall" and top + 1 or top + 2, tree.lz, LEAVES)
 end
 
 -- Chooses this column's trees without writing anything: one place per TREE_GRID cells, jittered, that grows a tree
@@ -457,6 +466,12 @@ local function stepJob(job, heightBudget, pillarBudget)
         if not job.trees then
             job.trees = planTrees(job)
             job.treeRandom = columnRandom(job.cx, job.cz + 4096)
+            return false
+        end
+        -- WHY a frame of their own: planning and every trunk together cost more than one resume may spend.
+        if not job.trunksGrown then
+            growTrunks(job)
+            job.trunksGrown = true
             return false
         end
         local spent = 0

@@ -200,6 +200,86 @@ workspace:SetAttribute('TestHairHeld', body.Hair.Anchored and not body.Hair.CanC
             _world.AssertHealthy(Mod);
         }
 
+        private void FillGround()
+        {
+            TerrainMaterials.TryGetSlot("Basalt", out byte bedrock);
+            TerrainMaterials.TryGetSlot("Grass", out byte grass);
+            for (int x = -8; x <= 10; x++)
+            {
+                for (int z = -8; z <= 6; z++)
+                {
+                    _world.Terrain.Store.SetCell(x, -16, z, bedrock, 255);
+                    for (int y = -15; y <= 1; y++)
+                    {
+                        _world.Terrain.Store.SetCell(x, y, z, grass, 255);
+                    }
+                }
+            }
+        }
+
+        [Test]
+        public void P6_Villagers_BeforeTheirLandIsMade_AreHeldInPlace_ThenStandOnIt()
+        {
+            Start(allowAgents: false);
+
+            Assert.AreEqual(true, RootHeld(), "with no land under its home Tobin is held, never falling");
+            RbxVector3 held = TobinAt();
+            FillGround();
+            _world.Frame(30);
+
+            Assert.AreEqual(false, RootHeld(), "once the land under his home is made, Tobin is let go");
+            RbxVector3 standing = TobinAt();
+            Assert.AreEqual(9d, standing.Y, 0.01d, "and stands on its top (top face 8, root centre one stud up), held at "
+                                                     + held);
+            _world.AssertHealthy(Mod);
+        }
+
+        [TestCase(-20f, 18f, TestName = "P6_Villagers_OnePutUnderTheGround_IsStoodBackOnTop")]
+        [TestCase(-70f, 18f, TestName = "P6_Villagers_OneFallenToTheBedrock_IsStoodBackOnTop")]
+        [TestCase(9f, 300f, TestName = "P6_Villagers_OneOnLandNotMadeYet_IsTakenHome")]
+        public void P6_Villagers_ThatLeaveTheGround_AreStoodBackOnIt(float y, float x)
+        {
+            StartOnGround(pitUnderTobin: false);
+            TobinStands();
+
+            _world.LoadSource("test_bury_tobin", "workspace.Tobin:PivotTo(CFrame.new(" + x + ", " + y + ", -2))");
+            _world.Frame(30);
+
+            RbxVector3 at = TobinAt();
+            Assert.AreEqual(9d, at.Y, 0.01d, "Tobin stands on the top of the land again");
+            Assert.AreEqual(18d, at.X, 0.01d, "on his own column (or at home when the land under him is not made)");
+            Assert.AreEqual(1d, System.Convert.ToDouble(_world.Attribute("TestTobinRescues")), "one rescue");
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_Villagers_OneStandingOnTheGround_IsLeftAlone_NegativeTwin()
+        {
+            StartOnGround(pitUnderTobin: false);
+            TobinStands();
+
+            _world.Frame(60);
+
+            Assert.AreEqual(9d, TobinAt().Y, 0.01d);
+            Assert.IsNull(_world.Attribute("TestTobinRescues"), "nobody moved Tobin");
+            _world.AssertHealthy(Mod);
+        }
+
+        private int _probes;
+
+        private bool RootHeld()
+        {
+            _world.LoadSource("test_tobin_held_" + ++_probes, "workspace:SetAttribute('TestTobinHeld', workspace.Tobin.HumanoidRootPart.Anchored)");
+            return Equals(_world.Attribute("TestTobinHeld"), true);
+        }
+
+        private RbxVector3 TobinAt()
+        {
+            _world.LoadSource("test_tobin_where_" + ++_probes, "workspace:SetAttribute('TestTobinAt', workspace.Tobin.HumanoidRootPart.Position) "
+                                                  + "workspace:SetAttribute('TestTobinRescues', workspace.Tobin:GetAttribute('NpcRescues'))");
+            return (RbxVector3)_world.Attribute("TestTobinAt");
+        }
+
         private double HairGap(string probeId)
         {
             _world.LoadSource(probeId, "local body = workspace.Mira "

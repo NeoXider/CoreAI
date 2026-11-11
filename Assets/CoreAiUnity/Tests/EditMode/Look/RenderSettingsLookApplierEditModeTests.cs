@@ -368,6 +368,76 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void AfterSunset_TheSkyTurnsToTwilight_TheGroundFollowsIt_AndTheFogKeepsTheWarmHaze()
+        {
+            RequireProceduralSkyShader();
+            Light savedSun = RenderSettings.sun;
+            try
+            {
+                RenderSettings.skybox = null;
+                Light sun = NewDirectionalLight(LightShadows.None);
+                RenderSettings.sun = sun;
+                sun.transform.rotation = Quaternion.Euler(50f, 30f, 0f);
+                _applier.Apply(_profile, Options(), LookMode.Apply);
+                Material sky = _applier.ProceduralSkyMaterial;
+                AssertColor(_profile.SkyTint, sky.GetColor("_SkyTint"), 1e-4f, "by day the authored tint");
+                Assert.AreEqual(_profile.SkyAtmosphereThickness, sky.GetFloat("_AtmosphereThickness"), 1e-4f,
+                    "by day the authored thickness");
+
+                sun.transform.rotation = Quaternion.Euler(-7f, 30f, 0f);
+                _applier.Apply(_profile, Options(), LookMode.Apply);
+                Vector3 towardSun = -sun.transform.forward;
+                Color tint = _profile.SkyTint;
+                ProceduralSkyHaze.TwilightSky(towardSun.y, tint.r, tint.g, tint.b, _profile.SkyAtmosphereThickness,
+                    out float twilightR, out float twilightG, out float twilightB, out float twilightThickness);
+                AssertColor(new Color(twilightR, twilightG, twilightB), sky.GetColor("_SkyTint"), 1e-4f,
+                    "the twilight tint");
+                Assert.AreEqual(twilightThickness, sky.GetFloat("_AtmosphereThickness"), 1e-4f, "the twilight thickness");
+                Assert.Greater(twilightB, tint.b, "bluer than the day tint");
+
+                Assert.IsTrue(_applier.TryGetHazeColors(out Color ground, out Color fog));
+                ProceduralSkyHaze.GroundColorMatchingHaze(towardSun.x, towardSun.y, towardSun.z, twilightR, twilightG,
+                    twilightB, twilightThickness, out float red, out float green, out float blue);
+                AssertColor(new Color(red, green, blue), ground, 0.01f, "the ground continues the twilight sky");
+                ProceduralSkyHaze.HorizonHaze(towardSun.x, towardSun.y, towardSun.z, tint.r, tint.g, tint.b,
+                    _profile.SkyAtmosphereThickness, out float hazeR, out float hazeG, out float hazeB);
+                float exposure = _profile.SkyExposure;
+                AssertColor(new Color(Mathf.Clamp01(hazeR * exposure), Mathf.Clamp01(hazeG * exposure),
+                    Mathf.Clamp01(hazeB * exposure)), fog, 0.01f, "the fog keeps the authored sky's warm haze");
+            }
+            finally
+            {
+                RenderSettings.sun = savedSun;
+            }
+        }
+
+        [Test]
+        public void WithTheTwilightSkyOff_TheSkyKeepsTheProfilesTintAfterSunset_NegativeTwin()
+        {
+            RequireProceduralSkyShader();
+            Light savedSun = RenderSettings.sun;
+            try
+            {
+                RenderSettings.skybox = null;
+                Light sun = NewDirectionalLight(LightShadows.None);
+                RenderSettings.sun = sun;
+                sun.transform.rotation = Quaternion.Euler(-7f, 30f, 0f);
+                _profile.TwilightSky = false;
+
+                _applier.Apply(_profile, Options(), LookMode.Apply);
+
+                AssertColor(_profile.SkyTint, _applier.ProceduralSkyMaterial.GetColor("_SkyTint"), 1e-4f,
+                    "the profile's tint");
+                Assert.AreEqual(_profile.SkyAtmosphereThickness,
+                    _applier.ProceduralSkyMaterial.GetFloat("_AtmosphereThickness"), 1e-4f, "the profile's thickness");
+            }
+            finally
+            {
+                RenderSettings.sun = savedSun;
+            }
+        }
+
+        [Test]
         public void WithTheHazeOff_TheSkyAndFogKeepTheProfilesColours_NegativeTwin()
         {
             RequireProceduralSkyShader();
@@ -458,6 +528,40 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(RenderSettings.fog);
             claim.Dispose();
             Assert.AreEqual(Color.green, RenderSettings.fogColor, "nor takes it back when the claim ends");
+        }
+
+        [Test]
+        public void WithFogOn_AHorizonDomePaintsTheFogColour_AndARevertRemovesIt()
+        {
+            RequireProceduralSkyShader();
+            RenderSettings.skybox = null;
+            RenderSettings.fog = false;
+
+            _applier.Apply(_profile, Options(), LookMode.Apply);
+
+            GameObject dome = _applier.HorizonObject;
+            Assert.IsNotNull(dome, "fog on and a sky drawn: the horizon takes the fog colour");
+            Material material = dome.GetComponent<MeshRenderer>().sharedMaterial;
+            Assert.AreEqual("CoreAI/Look/Horizon Fog", material.shader.name);
+            Assert.Greater(dome.GetComponent<MeshFilter>().sharedMesh.bounds.size.x, 1e6f, "never culled");
+
+            _applier.Revert();
+            Assert.IsNull(_applier.HorizonObject);
+            Assert.IsTrue(GameObject.Find(RenderSettingsLookApplier.HorizonObjectName) == null, "the dome is destroyed");
+        }
+
+        [Test]
+        public void WithFogOff_OrTheSwitchOff_ThereIsNoHorizonDome_NegativeTwin()
+        {
+            RequireProceduralSkyShader();
+            RenderSettings.skybox = null;
+
+            _applier.Apply(_profile, Options(GraphicsOptions.Default.WithFog(false)), LookMode.Apply);
+            Assert.IsNull(_applier.HorizonObject, "no fog, nothing to match");
+
+            _profile.HorizonFollowsFog = false;
+            _applier.Apply(_profile, Options(), LookMode.Apply);
+            Assert.IsNull(_applier.HorizonObject, "the profile switched it off");
         }
 
         private static void AssertColor(Color expected, Color actual, float tolerance, string message)

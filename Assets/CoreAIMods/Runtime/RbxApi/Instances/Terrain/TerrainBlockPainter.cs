@@ -154,12 +154,15 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
         // ---- palettes (sRGB, dark to light) ---------------------------------------------------------------
 
         // WHY not lime: the first palette ran to 0x86C84B and the tonemapped lawn read lime and busy at mid range;
-        // these stay as green but sit a little lower and bluer, closer to a summer lawn.
+        // these stay as green but sit a little lower and bluer, closer to a summer lawn. WHY this narrow: at eye
+        // height a lawn spanning 0x3A6A22 to 0x7CBB4D read as confetti, so every level sits a third closer to the
+        // middle one (same hue, two thirds of the spread), and the leaves' clusters likewise; their dark gaps keep
+        // the crown's depth.
         private static readonly uint[] GrassPalette =
-            { 0x3A6A22, 0x437927, 0x4D882D, 0x579633, 0x62A33A, 0x6EAF42, 0x7CBB4D };
+            { 0x447928, 0x4A832B, 0x508D2F, 0x579633, 0x5E9F38, 0x66A73D, 0x70AF44 };
 
         private static readonly uint[] LeafPalette =
-            { 0x1E4414, 0x285619, 0x33681F, 0x3F7B26, 0x4C8E2E, 0x5BA138, 0x6DB345 };
+            { 0x29561A, 0x30621D, 0x376E21, 0x3F7B26, 0x48882B, 0x529432, 0x5EA03B };
 
         private const uint LeafGap = 0x112A0B;
 
@@ -212,13 +215,17 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
 
         private const uint PlankSeam = 0x4A321E;
 
-        private static readonly uint[] BarkPalette = { 0x2E2116, 0x3B2A1C, 0x493423, 0x573F2A, 0x654A32, 0x73563B };
+        // WHY this light: the first bark averaged about rgb(68, 49, 33), and under a crown's shadow a trunk read as a
+        // hole, not as wood. These average about rgb(100, 78, 50), an oak log of a block game, and the furrow level
+        // stays at 0.6 of the lit ridge (level 3), so the grain still reads.
+        private static readonly uint[] BarkPalette = { 0x4A3925, 0x58452C, 0x6A5235, 0x7B603D, 0x8A6B45, 0x96754B };
 
         // ---- styles ---------------------------------------------------------------------------------------
 
         private static Canvas GrassTop()
         {
-            Canvas canvas = new(0.88f, 0.9f);
+            // WHY a lower relief than the first 0.88: the per-texel normals lit the lawn as loudly as its colours did.
+            Canvas canvas = new(0.6f, 0.9f);
             float[] field = Field((x, y) => 0.4f * Fbm(x, y, 4, 2, 11) + 0.22f * Noise(x, y, 8, 8, 12)
                                             + 0.38f * Rnd(x, y, 13));
             float[] ranks = Equalize(field);
@@ -699,22 +706,19 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
 
         private static Canvas Planks()
         {
-            Canvas canvas = new(1.5f, 0.78f);
+            // WHY boards and not courses: a dark seam under every board and a joint in each of them read as brickwork
+            // (two short bricks per row); a block game's planks are four long boards split by a thin, only slightly
+            // darker line, with an end joint in some of them, staggered, and a grain along the board.
+            Canvas canvas = new(1.1f, 0.78f);
             Rng rng = new(171);
-            int[] joints = new int[4];
-            int start = rng.Range(0, S - 1);
-            int[] spread = { 0, 9, 4, 13 };
-            for (int board = 0; board < 4; board++)
-            {
-                joints[board] = (start + spread[board] + rng.Range(-1, 1) + S) % S;
-            }
-
+            int[] joints = { -1, rng.Range(3, 6), -1, rng.Range(10, 13) };
             float[] boardTone = new float[4];
             for (int board = 0; board < 4; board++)
             {
-                boardTone[board] = rng.Next() - 0.5f;
+                boardTone[board] = 0.9f * (rng.Next() - 0.5f);
             }
 
+            uint seam = Mix(PlankPalette[0], PlankSeam, 0.35f);
             for (int i = 0; i < P; i++)
             {
                 int x = i % S;
@@ -723,21 +727,23 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
                 int inBoard = y % 4;
                 if (inBoard == 3)
                 {
-                    canvas.SetColor(i, PlankSeam, 0f, 0.95f);
+                    canvas.SetColor(i, seam, 0.35f, 0.85f);
                     continue;
                 }
 
                 if (x == joints[board])
                 {
-                    canvas.SetColor(i, Mix(PlankSeam, PlankPalette[1], 0.45f), 0.2f, 0.9f);
+                    canvas.SetColor(i, PlankPalette[0], 0.6f, 0.82f);
                     continue;
                 }
 
                 // WHY stretched noise: the grain runs along the board, long streaks across x and short across y.
                 float grain = Noise(x + board * 5, y, 2, 16, 172);
-                float value = 2.6f + boardTone[board] + 2.3f * (grain - 0.5f) + 0.8f * (Rnd(x, y, 173) - 0.5f);
-                value += inBoard == 0 ? 0.7f : inBoard == 2 ? -0.6f : 0f;
-                canvas.Set(i, PlankPalette, (int)Math.Round(value), 0.85f + 0.15f * grain);
+                bool past = joints[board] >= 0 && x > joints[board];
+                float value = 2.6f + boardTone[board] + (past ? 0.5f : 0f) + 2.4f * (grain - 0.5f)
+                              + 0.6f * (Rnd(x, y, 173) - 0.5f);
+                value += inBoard == 0 ? 0.5f : inBoard == 2 ? -0.4f : 0f;
+                canvas.Set(i, PlankPalette, (int)Math.Round(value), 0.9f + 0.1f * grain);
             }
 
             return canvas;

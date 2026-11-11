@@ -161,6 +161,30 @@ IDisposable fog = LookAmbientOwnership.Shared.ClaimFog("weather");
 fog.Dispose();   // the look's own fog comes back
 ```
 
+URP's fog never reaches the sky, which is drawn before the scene. A world fogged to its edge therefore showed
+pale silhouettes against a dark dusk or night sky. While fog is on and a sky is drawn, the look keeps a dome
+named `CoreAI Look Horizon` just inside every camera's far plane (`HorizonFollowsFog`, on by default). It paints
+the current fog colour, whoever owns the fog. The colour is opaque up to about two degrees above the horizon and
+fades out by about ten degrees, so fully fogged land and the sky behind it are one colour.
+
+The Block World was measured from a hilltop at noon, dusk and midnight, looking level and looking down. The gap
+between fully fogged land and the background beside it was at most 0.005 per channel.
+
+At the horizon, Unity's single-scattering sky is lit only by sunlight that has crossed a long stretch of air. That
+light has lost its blue, so at 18:36 the whole upper sky was olive, about sRGB (57, 60, 49), above the peach
+horizon.
+
+With `TwilightSky` on (the default), `ProceduralSkyHaze.TwilightSky` changes the sky's tint and atmosphere
+thickness as the sun sets:
+
+- It starts when the sun is about ten degrees high.
+- Just under the horizon the sky has a violet-blue tint and an atmosphere of 0.4.
+- Well after sunset the atmosphere thins to 0.2.
+
+At 18:00, 18:36 and 19:15 the sky above the dome's band then reads dusky blue to dark blue-violet. The day sky is
+unchanged. The ground below the horizon follows the twilight sky. The look's own fog keeps the authored sky's warm
+haze, and the dome fades it into the blue above.
+
 ### Caves: sky exposure per surface
 
 The ambient and the reflections a world draws come from the sky, so on their own they reach the inside of a

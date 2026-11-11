@@ -134,6 +134,17 @@ namespace CoreAI.Look
         [SerializeField]
         private bool fogFollowsHaze = true;
 
+        [Tooltip("While fog is on, paint the fog colour below the horizon and in a band above it (a dome just inside " +
+                 "the far plane), so fully fogged land and the sky behind it are one colour and the world's edge " +
+                 "cannot be seen.")]
+        [SerializeField]
+        private bool horizonFollowsFog = true;
+
+        [Tooltip("As the sun nears and passes the horizon, draw the procedural sky with a thinner, blue-violet " +
+                 "atmosphere, so twilight is a dusky blue over the warm horizon instead of olive.")]
+        [SerializeField]
+        private bool twilightSky = true;
+
         [Tooltip("Fog falloff.")]
         [SerializeField]
         private FogMode fogMode = FogMode.ExponentialSquared;
@@ -241,6 +252,27 @@ namespace CoreAI.Look
         {
             get => fogFollowsHaze;
             set => fogFollowsHaze = value;
+        }
+
+        /// <summary>
+        /// True: while fog is on, the fog colour (whoever owns the fog) covers the sky below the horizon and fades out
+        /// over a band above it, so the edge of a fogged world disappears into the sky.
+        /// </summary>
+        public bool HorizonFollowsFog
+        {
+            get => horizonFollowsFog;
+            set => horizonFollowsFog = value;
+        }
+
+        /// <summary>
+        /// True: from a sun about ten degrees high down to night, the procedural sky's tint and atmosphere thickness
+        /// move from <see cref="SkyTint"/> and <see cref="SkyAtmosphereThickness"/> to a thinner, blue-violet
+        /// twilight (<c>ProceduralSkyHaze.TwilightSky</c>); the day sky and the fog's haze are unchanged.
+        /// </summary>
+        public bool TwilightSky
+        {
+            get => twilightSky;
+            set => twilightSky = value;
         }
 
         /// <summary>Procedural sky sun disc size.</summary>

@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_villagers
 name: Block World 6 - Villagers
-version: 1.3.0
+version: 1.4.0
 active: false
 capabilities: All
 category: Samples/Block World
@@ -15,6 +15,8 @@ description: Part of the Block World demo. Three villagers live by the spawn - M
 -- The rig owns the six parts: they are unanchored and never collide, and the root (an invisible 2x2x1 box resting
 -- on the floor) is the only collider. The hair is this mod's own and follows the Head after the rig has posed it.
 -- A villager's home is the nearest level ground to its planned spot, so it does not start in a pit or on a ledge.
+-- A villager never stays inside or under the land: one whose root is below the top ground of its column (or near
+-- the bedrock) is stood back on top, and one that walks onto land not made yet is taken home.
 -- The agent comes from AIService:CreateAgent, which only a game that turned AI from
 -- Lua on allows; a refusal is caught, its reason kept, and every greeting then explains it. Chat lines reach the
 -- agents through the host (a line that names a villager, follows up, or is said within its hearing radius goes to
@@ -35,6 +37,7 @@ local terrain = workspace.Terrain
 local TALK_DISTANCE = 14        -- studs: E reaches the nearest villager this close
 local FACE_DISTANCE = 18        -- studs: a villager with no brain turns to a player this close
 local PLACE_TIMEOUT = 2         -- seconds to wait for the ground under a villager before using the spawn height
+local FOOTING_SECONDS = 0.25    -- how often a walking villager's footing is checked
 local STATE_SECONDS = 5         -- how often the villagers' facts (NpcState) are refreshed
 local BRAIN = "idle, wander, greet, face_player, follow_player, go_home"
 
@@ -282,6 +285,31 @@ end
 -- mod's instruction budget.
 local searchesLeft = 0
 
+-- True when the column under `spot` is finished (its bedrock row is laid last).
+local function columnMade(spot)
+    local cell = terrain:WorldToCell(Vector3.new(spot.X, BEDROCK_ROW * 4 + 2, spot.Z))
+    local corner = terrain:CellCornerToWorld(cell.X, BEDROCK_ROW, cell.Z)
+    local materials = terrain:ReadVoxels(Region3.new(corner, corner + Vector3.new(4, 4, 4)), 4)
+    return materials[1][1][1] == Enum.Material.Basalt
+end
+
+-- The height (studs) of the top face of the highest ground cell under `spot`: not air, water, a trunk or a crown,
+-- so a villager under a tree is not taken for one under the ground. Nil when the pillar holds no ground.
+local NOT_GROUND = { [Enum.Material.Air] = true, [Enum.Material.Water] = true, [Enum.Material.LeafyGrass] = true,
+    [Enum.Material.Mud] = true }
+local function topGround(spot)
+    local cell = terrain:WorldToCell(Vector3.new(spot.X, 0, spot.Z))
+    local bottom = terrain:CellCornerToWorld(cell.X, BEDROCK_ROW, cell.Z)
+    local materials = terrain:ReadVoxels(Region3.new(bottom, bottom + Vector3.new(4, 32 * 4, 4)), 4)
+    local pillar = materials[1]
+    for index = #pillar, 1, -1 do
+        if not NOT_GROUND[pillar[index][1]] then
+            return bottom.Y + index * 4
+        end
+    end
+    return nil
+end
+
 -- Stands the villager on the ground found under its home (the root's box on the floor) and lets the motor have it.
 local function letGo(villager, groundY)
     villager.home = Vector3.new(villager.home.X, groundY + 1, villager.home.Z)
@@ -328,13 +356,42 @@ local function tryPlace(villager, force)
     giveBrain(villager)
 end
 
--- A held villager is let go once its ground exists; one that fell out of the world is held at home again.
-local function keepOnGround(villager)
+-- WHY stood back on top and not held: a body the host has no collider under yet sinks into the land, and the
+-- check catches it within a quarter second; a villager on land not made yet is taken home, whose column is made.
+local function checkFooting(villager)
+    local root = villager.root
+    local position = root.Position
+    local spot = position
+    if not columnMade(position) then
+        spot = villager.home
+    end
+    local top = topGround(spot)
+    if spot == position and top and position.Y - 1 >= top - 0.5 and position.Y > (BEDROCK_ROW + 2) * 4 then
+        return
+    end
+    if spot == position and not top then
+        return
+    end
+    top = top or topGround(villager.home)
+    if not top then
+        return
+    end
+    villager.model:PivotTo(CFrame.new(spot.X, top + 1, spot.Z))
+    -- WHY guarded: a host without body velocities still gets the villager back on top.
+    pcall(function()
+        root.AssemblyLinearVelocity = Vector3.zero
+    end)
+    villager.rescues = (villager.rescues or 0) + 1
+    villager.model:SetAttribute("NpcRescues", villager.rescues)
+end
+
+-- A held villager is let go once its ground exists; a walking one keeps its footing (checkFooting).
+local function keepOnGround(villager, dt)
     if villager.grounded then
-        if villager.root.Position.Y < villager.home.Y - 40 then
-            villager.root.Anchored = true
-            villager.model:PivotTo(CFrame.new(villager.home))
-            villager.grounded = false
+        villager.footingIn = (villager.footingIn or 0) - dt
+        if villager.footingIn <= 0 then
+            villager.footingIn = FOOTING_SECONDS
+            checkFooting(villager)
         end
         return
     end
@@ -425,7 +482,7 @@ RunService.Heartbeat:Connect(function(dt)
     searchesLeft = 1
     for _, villager in ipairs(VILLAGERS) do
         if villager.home then
-            keepOnGround(villager)
+            keepOnGround(villager, dt)
         else
             tryPlace(villager, waited > PLACE_TIMEOUT)
         end

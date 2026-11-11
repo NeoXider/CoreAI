@@ -29,6 +29,30 @@ namespace CoreAI.Look
         /// <summary>Largest ground colour channel returned; the sky keeps the colour finite.</summary>
         public const float MaxGroundChannel = 6f;
 
+        /// <summary>Sun elevation (sine) above which <see cref="TwilightSky"/> keeps the authored tint and thickness.</summary>
+        public const float TwilightFrom = 0.17f;
+
+        /// <summary>Sun elevation (sine, just under the horizon) where the sky has its twilight tint and thickness.</summary>
+        public const float TwilightFull = -0.06f;
+
+        /// <summary>Sun elevation (sine) where the sky has thinned to <see cref="NightThickness"/>.</summary>
+        public const float NightFull = -0.2f;
+
+        /// <summary>Atmosphere thickness of the twilight sky (never thicker than the authored one).</summary>
+        public const float TwilightThickness = 0.4f;
+
+        /// <summary>Atmosphere thickness once the sun is well under the horizon (never thicker than the twilight one).</summary>
+        public const float NightThickness = 0.2f;
+
+        /// <summary>Red of the twilight tint (sRGB, as a sky tint is authored).</summary>
+        public const float TwilightTintR = 0.66f;
+
+        /// <summary>Green of the twilight tint.</summary>
+        public const float TwilightTintG = 0.36f;
+
+        /// <summary>Blue of the twilight tint.</summary>
+        public const float TwilightTintB = 0.96f;
+
         private const float OuterRadius = 1.025f;
         private const float InnerRadius = 1f;
         private const float CameraHeight = 0.0001f;
@@ -105,6 +129,32 @@ namespace CoreAI.Look
                 green += g / Azimuths;
                 blue += b / Azimuths;
             }
+        }
+
+        /// <summary>
+        /// The tint (sRGB, 0..1) and atmosphere thickness to draw the procedural sky with while the sine of the sun's
+        /// elevation is <paramref name="sunY"/>: the authored values while the sun is above <see cref="TwilightFrom"/>,
+        /// moving to a violet-blue tint and a thinner atmosphere as it sets (<see cref="TwilightFull"/>), and thinner
+        /// still once it is well under the horizon (<see cref="NightFull"/>). Mirrored at dawn.
+        /// </summary>
+        /// <remarks>
+        /// WHY: with the sun at or under the horizon this single-scattering sky is lit only by sunlight that crossed a
+        /// long stretch of air and lost its blue on the way, so at 18:36 the whole upper sky was olive (sRGB about 57,
+        /// 60, 49) over the peach horizon and at 19:15 a dark khaki. A thinner atmosphere shortens that path and a
+        /// tint that scatters more blue and red and less green keeps twilight a dusky blue-violet; the day sky is
+        /// untouched.
+        /// </remarks>
+        public static void TwilightSky(float sunY, float tintR, float tintG, float tintB, float atmosphereThickness,
+            out float skyTintR, out float skyTintG, out float skyTintB, out float skyThickness)
+        {
+            float dusk = SmoothStep(TwilightFrom, TwilightFull, sunY);
+            float night = SmoothStep(TwilightFull, NightFull, sunY);
+            skyTintR = tintR + (TwilightTintR - tintR) * dusk;
+            skyTintG = tintG + (TwilightTintG - tintG) * dusk;
+            skyTintB = tintB + (TwilightTintB - tintB) * dusk;
+            float twilight = atmosphereThickness
+                             + (Math.Min(atmosphereThickness, TwilightThickness) - atmosphereThickness) * dusk;
+            skyThickness = twilight + (Math.Min(twilight, NightThickness) - twilight) * night;
         }
 
         /// <summary>
@@ -226,6 +276,12 @@ namespace CoreAI.Look
         private static float Dot(Vector a, Vector b)
         {
             return a.X * b.X + a.Y * b.Y + a.Z * b.Z;
+        }
+
+        private static float SmoothStep(float from, float to, float value)
+        {
+            float t = Clamp((value - from) / (to - from), 0f, 1f);
+            return t * t * (3f - 2f * t);
         }
 
         private static float Clamp(float value, float low, float high)

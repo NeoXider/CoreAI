@@ -352,6 +352,68 @@ namespace CoreAI.Tests.EditMode.RbxApi.TerrainUnity
         }
 
         [Test]
+        public void SkyExposure_PartPass_APartThatLeftTheCave_IsWrittenAgainAtOnce_NotOnItsTurn()
+        {
+            Renderer[] parts = CaveWorldWithParts(out Renderer walker);
+            RbxPartSkyExposurePass pass = new();
+            pass.Tick(_renderer.SkyExposure, _terrain.Store.Revision, list => list.AddRange(parts), 8);
+            MaterialPropertyBlock block = new();
+            walker.GetPropertyBlock(block);
+            Assert.AreEqual(0f, block.GetFloat(RbxPartSkyExposurePass.SkyExposureProperty), 1e-3f, "dark in the cave");
+
+            walker.transform.position = RbxSpace.ToUnity(new RbxVector3(-6f * 4f + 2f, 2f, 1f * 4f + 2f));
+            int visited = pass.Tick(_renderer.SkyExposure, _terrain.Store.Revision, list => list.AddRange(parts), 1);
+
+            walker.GetPropertyBlock(block);
+            Assert.AreEqual(1f, block.GetFloat(RbxPartSkyExposurePass.SkyExposureProperty), 1e-3f,
+                "out in the open after one step, though its turn is the last of the sweep");
+            Assert.AreEqual(1, pass.OutOfTurnCount);
+            Assert.AreEqual(2, visited, "the moved part and the one part the budget allows in turn");
+        }
+
+        [Test]
+        public void SkyExposure_PartPass_AnUnmovedPartInTheCave_WaitsForItsTurn_NegativeTwin()
+        {
+            Renderer[] parts = CaveWorldWithParts(out Renderer walker);
+            RbxPartSkyExposurePass pass = new();
+            pass.Tick(_renderer.SkyExposure, _terrain.Store.Revision, list => list.AddRange(parts), 8);
+            long writes = pass.WriteCount;
+
+            walker.transform.position += new Vector3(0.01f, 0f, 0f);
+            int visited = pass.Tick(_renderer.SkyExposure, _terrain.Store.Revision, list => list.AddRange(parts), 1);
+
+            Assert.AreEqual(0, pass.OutOfTurnCount, "still in the same cell: nothing is applied outside its turn");
+            Assert.AreEqual(writes, pass.WriteCount);
+            Assert.AreEqual(1, visited, "only the budget");
+        }
+
+        /// <summary>
+        /// The cave world of <see cref="SkyExposure_PartPass_DimsARendererInACave_AndWritesNothingInTheOpen"/> with
+        /// three parts in the open and <paramref name="walker"/> in the cave, last in the sweep.
+        /// </summary>
+        private Renderer[] CaveWorldWithParts(out Renderer walker)
+        {
+            Fill(-16, -4, -16, 48, 4, 32, Slot("Ground"));
+            Fill(0, 0, -16, 16, 8, 32, Slot("Rock"));
+            Fill(0, 0, 0, 14, 2, 3, TerrainMaterials.Air);
+            Drain();
+            Renderer[] parts = new Renderer[4];
+            for (int index = 0; index < parts.Length; index++)
+            {
+                GameObject part = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                _owned.Add(part);
+                part.transform.localScale = Vector3.one * 0.5f;
+                part.transform.position = index < 3
+                    ? RbxSpace.ToUnity(new RbxVector3((-12f + index) * 4f + 2f, 2f, 1f * 4f + 2f))
+                    : RbxSpace.ToUnity(new RbxVector3(12f * 4f + 2f, 2f, 1f * 4f + 2f));
+                parts[index] = part.GetComponent<Renderer>();
+            }
+
+            walker = parts[3];
+            return parts;
+        }
+
+        [Test]
         public void FaceRule_AGrassCell_DrawsGrassOnTopAndEarthOnTheSides_AndStillHitsAsGrass()
         {
             Fill(0, 0, 0, 1, 1, 1, Slot("Grass"));

@@ -8,8 +8,9 @@ namespace CoreAI.Tests.EditMode
     /// Engine-free contract of <see cref="ProceduralSkyHaze"/>: the ground colour it returns makes the procedural sky
     /// below the horizon equal the haze above it at any sun position, the view further down stays close to the haze,
     /// the old fixed ground colour does not (twin: the brown floor), the haze is pale blue at noon, warmer at dusk and
-    /// dark after sunset, and the result is finite for any sun. Engine-free like the class it tests: it must never
-    /// touch UnityEngine.
+    /// dark after sunset, and the result is finite for any sun; the twilight sky is blue from late afternoon to
+    /// nightfall where the authored one turns olive (twin), and keeps the authored sky by day. Engine-free like the
+    /// class it tests: it must never touch UnityEngine.
     /// </summary>
     public sealed class ProceduralSkyHazeEditModeTests
     {
@@ -71,6 +72,50 @@ namespace CoreAI.Tests.EditMode
             Assert.Less(nightG, noonG * 0.1f, "long after sunset the horizon is dark");
         }
 
+        // WHY these suns: Lighting's sun at the default latitude at 17:30, 18:00, 18:36 and 19:15.
+        [TestCase(5.6f)]
+        [TestCase(0f)]
+        [TestCase(-6.7f)]
+        [TestCase(-13.9f)]
+        public void TheTwilightSky_IsBlueNeverOlive_FromLateAfternoonToNightfall(float sunDegrees)
+        {
+            Sun(sunDegrees, out float x, out float y, out float z);
+            ProceduralSkyHaze.TwilightSky(y, TintR, TintG, TintB, Thickness, out float r, out float g, out float b,
+                out float thickness);
+            Assert.LessOrEqual(GreenOverBlue(x, y, z, r, g, b, thickness), 0f,
+                "no ray above the horizon band has more green than blue");
+        }
+
+        [Test]
+        public void TheAuthoredSky_IsOliveAtDusk_NegativeTwin()
+        {
+            Sun(-6.7f, out float x, out float y, out float z);
+            Assert.Greater(GreenOverBlue(x, y, z, TintR, TintG, TintB, Thickness), 0f,
+                "without the twilight sky the sky over the horizon band is olive at 18:36");
+        }
+
+        [Test]
+        public void TheTwilightSky_KeepsTheAuthoredSkyByDay_AndNeverThickensTheAtmosphere()
+        {
+            ProceduralSkyHaze.TwilightSky(ProceduralSkyHaze.TwilightFrom + 0.01f, TintR, TintG, TintB, Thickness,
+                out float dayR, out float dayG, out float dayB, out float dayThickness);
+            Assert.AreEqual(TintR, dayR, 1e-6f);
+            Assert.AreEqual(TintG, dayG, 1e-6f);
+            Assert.AreEqual(TintB, dayB, 1e-6f);
+            Assert.AreEqual(Thickness, dayThickness, 1e-6f, "the day sky is the authored one");
+
+            ProceduralSkyHaze.TwilightSky(ProceduralSkyHaze.TwilightFull, TintR, TintG, TintB, Thickness,
+                out float duskR, out float duskG, out float duskB, out float duskThickness);
+            Assert.AreEqual(ProceduralSkyHaze.TwilightTintR, duskR, 1e-6f);
+            Assert.AreEqual(ProceduralSkyHaze.TwilightTintG, duskG, 1e-6f);
+            Assert.AreEqual(ProceduralSkyHaze.TwilightTintB, duskB, 1e-6f);
+            Assert.AreEqual(ProceduralSkyHaze.TwilightThickness, duskThickness, 1e-6f, "twilight just under the horizon");
+
+            ProceduralSkyHaze.TwilightSky(-0.5f, TintR, TintG, TintB, 0.1f, out float _, out float _, out float _,
+                out float thin);
+            Assert.AreEqual(0.1f, thin, 1e-6f, "an atmosphere authored thinner than the night one is kept");
+        }
+
         [Test]
         public void AnySun_GivesAFiniteGroundColourWithinItsLimit()
         {
@@ -98,6 +143,30 @@ namespace CoreAI.Tests.EditMode
             x = (float)Math.Cos(radians) * 0.96f;
             y = (float)Math.Sin(radians);
             z = (float)Math.Cos(radians) * 0.28f;
+        }
+
+        /// <summary>
+        /// The largest green-minus-blue (linear) over rays from just above the horizon dome's band (ten degrees) to the
+        /// zenith, all round.
+        /// </summary>
+        private static float GreenOverBlue(float sunX, float sunY, float sunZ, float tintR, float tintG, float tintB,
+            float thickness)
+        {
+            float worst = float.MinValue;
+            for (float degrees = 10f; degrees <= 85f; degrees += 15f)
+            {
+                double elevation = degrees * Math.PI / 180.0;
+                for (int index = 0; index < 16; index++)
+                {
+                    double angle = index * Math.PI / 8.0;
+                    ProceduralSkyHaze.SkyColor((float)(Math.Cos(elevation) * Math.Cos(angle)), (float)Math.Sin(elevation),
+                        (float)(Math.Cos(elevation) * Math.Sin(angle)), sunX, sunY, sunZ, tintR, tintG, tintB, thickness,
+                        0f, 0f, 0f, out float _, out float g, out float b);
+                    worst = Math.Max(worst, g - b);
+                }
+            }
+
+            return worst;
         }
 
         private static void Below(float sunX, float sunY, float sunZ, float elevation, float groundR, float groundG,

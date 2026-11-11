@@ -53,6 +53,21 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             return 0.2126f * color.R + 0.7152f * color.G + 0.0722f * color.B;
         }
 
+        private static float Linear(float channel)
+        {
+            return channel <= 0.04045f ? channel / 12.92f : (float)System.Math.Pow((channel + 0.055f) / 1.055f, 2.4f);
+        }
+
+        /// <summary>
+        /// Linear luminance of the sky's light as the host draws it (<c>OutdoorAmbient</c> after the host's twilight
+        /// scale), which is what lights a face the sun does not reach.
+        /// </summary>
+        private float SkyLight()
+        {
+            RbxColor3 drawn = RbxLightingMapping.EffectiveOutdoorAmbient(Lighting.CaptureState());
+            return 0.2126f * Linear(drawn.R) + 0.7152f * Linear(drawn.G) + 0.0722f * Linear(drawn.B);
+        }
+
         [Test]
         public void P6_DayNight_AFreshWorld_StartsInTheMorning_AndAReloadKeepsTheTime()
         {
@@ -90,12 +105,44 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         public void P6_DayNight_Midnight_IsDarkerThanNoon_UnderTheOpenSky()
         {
             SetTime("noon");
-            float noonOutdoor = Luminance(Lighting.OutdoorAmbient);
+            float noon = SkyLight();
 
             SetTime("midnight");
 
             Assert.AreEqual(0d, Lighting.ClockTime, 0.01d);
-            Assert.Less(Luminance(Lighting.OutdoorAmbient), noonOutdoor * 0.4f, "the sky's light falls at night");
+            Assert.Less(SkyLight(), noon * 0.3f, "the sky's light falls at night");
+        }
+
+        // WHY these bands: measured on the default look's painted grass, a sky light of these linear luminances draws
+        // the ground at about 0.15-0.25 at dusk and 0.04-0.07 at midnight (BlockWorldScenePlayModeTests checks the crops).
+        [Test]
+        public void P6_DayNight_AtDusk_TheLandStaysReadable_AndFallsSmoothlyToAMoonlitNight()
+        {
+            SetTime("noon");
+            float noon = SkyLight();
+            float[] light = new float[7];
+            string[] times = { "18:36", "18:45", "19:00", "19:15", "19:30", "20:00", "midnight" };
+            for (int index = 0; index < times.Length; index++)
+            {
+                SetTime(times[index]);
+                light[index] = SkyLight();
+                TestContext.WriteLine(times[index] + ": sky light " + light[index].ToString("0.000") + " (noon "
+                                      + noon.ToString("0.000") + "), drawn " + RbxLightingMapping.EffectiveOutdoorAmbient(
+                                          Lighting.CaptureState()));
+            }
+
+            Assert.That(light[0], Is.InRange(noon * 0.7f, noon * 1.1f), "at 18:36, after sunset, the land is nearly as lit as by the noon sky");
+            for (int index = 1; index < light.Length - 1; index++)
+            {
+                Assert.LessOrEqual(light[index + 1], light[index] + 0.02f, "the light falls from " + times[index] + " to "
+                                                                           + times[index + 1] + " without a jump up");
+            }
+
+            Assert.That(light[6], Is.InRange(noon * 0.15f, noon * 0.3f), "midnight is a dim moonlit night, not black");
+            RbxColor3 night = RbxLightingMapping.EffectiveOutdoorAmbient(Lighting.CaptureState());
+            Assert.Greater(night.B, night.R, "and blue");
+            Assert.Less(Luminance(Lighting.Ambient), 0.2f, "while a cave keeps only the low Ambient");
+            _world.AssertHealthy(Mod);
         }
 
         [Test]
@@ -118,11 +165,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             SetTime("noon");
             AssertColour(198, 220, 228, Lighting.FogColor, "the day's pale haze at noon");
             SetTime("18:45");
-            AssertColour(222, 176, 140, Lighting.FogColor, "the warm dusk half way through the light's fall");
+            AssertColour(52, 58, 92, Lighting.FogColor, "the dusky blue half way through the light's fall");
             SetTime("6:15");
-            AssertColour(222, 176, 140, Lighting.FogColor, "and the same at dawn");
+            AssertColour(52, 58, 92, Lighting.FogColor, "and the same at dawn");
             SetTime("midnight");
-            AssertColour(12, 16, 28, Lighting.FogColor, "the dark night sky at midnight");
+            AssertColour(24, 32, 56, Lighting.FogColor, "the dark night sky at midnight");
             _world.AssertHealthy(Mod);
         }
 

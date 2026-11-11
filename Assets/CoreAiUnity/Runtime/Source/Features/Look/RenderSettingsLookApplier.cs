@@ -29,6 +29,14 @@ namespace CoreAI.Look
         /// <summary>Name of the object that holds the sky-only reflection probe.</summary>
         public const string ReflectionProbeObjectName = "CoreAI Look Reflection";
 
+        /// <summary>Name of the object that draws the fog colour over the horizon (<see cref="CoreAiLookProfile.HorizonFollowsFog"/>).</summary>
+        public const string HorizonObjectName = "CoreAI Look Horizon";
+
+        /// <summary>Resources path of the horizon dome's shader.</summary>
+        public const string HorizonShaderResource = "CoreAILook/HorizonFog";
+
+        private const string HorizonShaderName = "CoreAI/Look/Horizon Fog";
+
         private const string BuiltInDefaultSkyboxName = "Default-Skybox";
 
         private static readonly int SunSizeId = Shader.PropertyToID("_SunSize");
@@ -58,7 +66,12 @@ namespace CoreAI.Look
         private Vector3 _hazeSun;
         private bool _hazeGroundFollows;
         private bool _hazeFogFollows;
+        private bool _hazeTwilight;
         private bool _ownsFog;
+        private GameObject _horizonObject;
+        private Material _horizonMaterial;
+        private Mesh _horizonMesh;
+        private bool _horizonShaderMissingReported;
 
         /// <summary>
         /// Creates the applier; <paramref name="logger"/> defaults to the unscoped CoreAI logger and
@@ -117,6 +130,7 @@ namespace CoreAI.Look
 
             _hazeValid = false;
             UpdateHaze();
+            UpdateHorizon();
             if (!_hazeSubscribed)
             {
                 RenderPipelineManager.beginContextRendering += HandleBeginContextRendering;
@@ -161,6 +175,12 @@ namespace CoreAI.Look
 
             _hazeValid = false;
             _ownsFog = false;
+            DestroyOwned(_horizonObject);
+            _horizonObject = null;
+            DestroyOwned(_horizonMaterial);
+            _horizonMaterial = null;
+            DestroyOwned(_horizonMesh);
+            _horizonMesh = null;
 
             _lastProfile = null;
             _lastOptions = null;
@@ -264,6 +284,110 @@ namespace CoreAI.Look
         private void HandleBeginContextRendering(ScriptableRenderContext context, List<Camera> cameras)
         {
             UpdateHaze();
+            UpdateHorizon();
+        }
+
+        /// <summary>The horizon dome, or null while the look has none (the profile switched it off, no fog, no sky).</summary>
+        public GameObject HorizonObject => _horizonObject != null && _horizonObject.activeSelf ? _horizonObject : null;
+
+        /// <summary>
+        /// Keeps the horizon dome on exactly while fog is on and a sky is drawn; it reads the fog colour itself, so a
+        /// world that claims the fog (<see cref="LookAmbientOwnership.ClaimFog"/>) is covered as well as the look's haze.
+        /// </summary>
+        private void UpdateHorizon()
+        {
+            CoreAiLookProfile profile = _lastProfile;
+            bool wanted = profile != null && profile.HorizonFollowsFog && _lastMode != LookMode.Off && RenderSettings.fog
+                          && RenderSettings.skybox != null;
+            if (!wanted)
+            {
+                if (_horizonObject != null && _horizonObject.activeSelf)
+                {
+                    _horizonObject.SetActive(false);
+                }
+
+                return;
+            }
+
+            if (_horizonObject == null && !BuildHorizon())
+            {
+                return;
+            }
+
+            if (!_horizonObject.activeSelf)
+            {
+                _horizonObject.SetActive(true);
+            }
+        }
+
+        private bool BuildHorizon()
+        {
+            Shader shader = Resources.Load<Shader>(HorizonShaderResource);
+            shader = shader != null ? shader : Shader.Find(HorizonShaderName);
+            if (shader == null)
+            {
+                if (!_horizonShaderMissingReported)
+                {
+                    _horizonShaderMissingReported = true;
+                    Logger.LogWarning(GameLogFeature.Core,
+                        "[CoreAI.Look] Shader '" + HorizonShaderName + "' is not in this build, so the fog does not " +
+                        "cover the horizon.");
+                }
+
+                return false;
+            }
+
+            _horizonMaterial = new Material(shader) { name = "CoreAI Look Horizon", hideFlags = OwnedHideFlags };
+            _horizonMesh = BuildDome();
+            _horizonObject = new GameObject(HorizonObjectName) { hideFlags = OwnedHideFlags };
+            _horizonObject.AddComponent<MeshFilter>().sharedMesh = _horizonMesh;
+            MeshRenderer renderer = _horizonObject.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = _horizonMaterial;
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            renderer.lightProbeUsage = LightProbeUsage.Off;
+            renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
+            return true;
+        }
+
+        /// <summary>A unit sphere the shader moves to the far plane round each camera; its bounds keep it from being culled.</summary>
+        private static Mesh BuildDome()
+        {
+            const int rings = 12;
+            const int segments = 24;
+            List<Vector3> vertices = new();
+            List<int> triangles = new();
+            for (int ring = 0; ring <= rings; ring++)
+            {
+                float polar = Mathf.PI * ring / rings;
+                for (int segment = 0; segment <= segments; segment++)
+                {
+                    float azimuth = 2f * Mathf.PI * segment / segments;
+                    vertices.Add(new Vector3(Mathf.Sin(polar) * Mathf.Cos(azimuth), Mathf.Cos(polar),
+                        Mathf.Sin(polar) * Mathf.Sin(azimuth)));
+                }
+            }
+
+            for (int ring = 0; ring < rings; ring++)
+            {
+                for (int segment = 0; segment < segments; segment++)
+                {
+                    int a = ring * (segments + 1) + segment;
+                    int b = a + segments + 1;
+                    triangles.Add(a);
+                    triangles.Add(a + 1);
+                    triangles.Add(b);
+                    triangles.Add(b);
+                    triangles.Add(a + 1);
+                    triangles.Add(b + 1);
+                }
+            }
+
+            Mesh mesh = new() { name = "CoreAI Look Horizon Dome", hideFlags = OwnedHideFlags };
+            mesh.SetVertices(vertices);
+            mesh.SetTriangles(triangles, 0);
+            mesh.bounds = new Bounds(Vector3.zero, new Vector3(1e7f, 1e7f, 1e7f));
+            return mesh;
         }
 
         /// <summary>
@@ -288,7 +412,8 @@ namespace CoreAI.Look
             // WHY the switches too: a profile switched on or off while the sun stands still must still take effect.
             if (_hazeValid && Vector3.Dot(towardSun, _hazeSun) > HazeSunTolerance
                            && _hazeGroundFollows == profile.SkyGroundFollowsHaze
-                           && _hazeFogFollows == profile.FogFollowsHaze)
+                           && _hazeFogFollows == profile.FogFollowsHaze
+                           && _hazeTwilight == profile.TwilightSky)
             {
                 return;
             }
@@ -296,13 +421,25 @@ namespace CoreAI.Look
             _hazeSun = towardSun;
             _hazeGroundFollows = profile.SkyGroundFollowsHaze;
             _hazeFogFollows = profile.FogFollowsHaze;
+            _hazeTwilight = profile.TwilightSky;
             _hazeValid = true;
             Color tint = profile.SkyTint;
             float thickness = profile.SkyAtmosphereThickness;
+            Color skyTint = tint;
+            float skyThickness = thickness;
+            if (profile.TwilightSky)
+            {
+                ProceduralSkyHaze.TwilightSky(towardSun.y, tint.r, tint.g, tint.b, thickness, out float twilightR,
+                    out float twilightG, out float twilightB, out skyThickness);
+                skyTint = new Color(twilightR, twilightG, twilightB, tint.a);
+            }
+
+            _proceduralSky.SetColor(SkyTintId, skyTint);
+            _proceduralSky.SetFloat(AtmosphereThicknessId, skyThickness);
             if (profile.SkyGroundFollowsHaze)
             {
-                ProceduralSkyHaze.GroundColorMatchingHaze(towardSun.x, towardSun.y, towardSun.z, tint.r, tint.g, tint.b,
-                    thickness, out float red, out float green, out float blue);
+                ProceduralSkyHaze.GroundColorMatchingHaze(towardSun.x, towardSun.y, towardSun.z, skyTint.r, skyTint.g,
+                    skyTint.b, skyThickness, out float red, out float green, out float blue);
                 // WHY gamma: in a linear project Unity converts a material colour to linear before the shader sees
                 // it, and the sky uses its ground colour as it arrives.
                 _proceduralSky.SetColor(GroundColorId, new Color(red, green, blue, 1f).gamma);
@@ -323,6 +460,8 @@ namespace CoreAI.Look
             }
             else
             {
+                // WHY the authored sky and not the twilight one: its haze keeps the warm dusk horizon, which the
+                // horizon dome then fades into the blue twilight above it.
                 ProceduralSkyHaze.HorizonHaze(towardSun.x, towardSun.y, towardSun.z, tint.r, tint.g, tint.b, thickness,
                     out float red, out float green, out float blue);
                 float exposure = profile.SkyExposure;

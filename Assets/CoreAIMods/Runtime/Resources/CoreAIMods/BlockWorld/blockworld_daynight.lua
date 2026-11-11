@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_daynight
 name: Block World 4 - Day and night
-version: 1.3.0
+version: 1.4.1
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. A day lasts eight minutes and a fresh world starts at 10:00 - the mod advances Lighting.ClockTime and lowers the sky's light (Lighting.OutdoorAmbient) at night, while Lighting.Ambient, the light a surface the sky does not reach gets, stays low all day, so torches matter after dusk and in caves at any hour. The fog (Lighting.FogColor, FogStart, FogEnd) takes the sky's colour - pale blue by day, warm at dawn and dusk, dark at night - and is whole where the streamed land ends, so nobody sees its edge. Set the time with /time noon, /time 18:30, /time stop or /time go where the host offers chat commands, with the L key (noon, dusk, midnight, dawn), or from any script or the AI by setting the workspace attribute BlockWorldTime to the same words. A ClockTime written by someone else is kept: the clock carries on from it.
+description: Part of the Block World demo. A day lasts eight minutes and a fresh world starts at 10:00 - the mod advances Lighting.ClockTime and sets the sky's light (Lighting.OutdoorAmbient): bright by day, warm and still readable at dusk, a dim blue moonlight at night, while Lighting.Ambient, the light a surface the sky does not reach gets, stays low all day, so torches matter after dusk and in caves at any hour. The fog (Lighting.FogColor, FogStart, FogEnd) takes the sky's colour - pale blue by day, warm at dawn and dusk, dark at night - and is whole where the streamed land ends, so nobody sees its edge. Set the time with /time noon, /time 18:30, /time stop or /time go where the host offers chat commands, with the L key (noon, dusk, midnight, dawn), or from any script or the AI by setting the workspace attribute BlockWorldTime to the same words. A ClockTime written by someone else is kept: the clock carries on from it.
 ]]
 
 -- The clock reads Lighting.ClockTime back before every step, so a time set by the AI, another mod or a saved
@@ -31,16 +31,27 @@ local NAMED = {
 }
 local CYCLE = { "noon", "dusk", "midnight", "dawn" }
 
--- WHY this bright by day: the sky's light is all a face turned from the sun gets, so with less the hillsides in
--- shadow read nearly black.
-local DAY_OUTDOOR = Color3.fromRGB(195, 196, 204)
-local NIGHT_OUTDOOR = Color3.fromRGB(34, 40, 74)
--- WHY this low: a torch must matter in a cave; the walls stay just visible, so a player can find the way out.
+-- The sky's light on the land, as a player should see it. WHY this bright by day: it is all a face turned from the
+-- sun gets, so with less the hillsides in shadow read nearly black. WHY this bright at dusk: the sun is down by
+-- 18:30, so this is all the land gets, and the ground stays readable. WHY blue and dim at night: a block game's night
+-- is moonlit, readable near you and far darker than a torch.
+local DAY_SKY = Color3.fromRGB(195, 196, 204)
+local DUSK_SKY = Color3.fromRGB(215, 190, 165)
+local NIGHT_SKY = Color3.fromRGB(80, 100, 150)
+-- The host draws OutdoorAmbient scaled by the sun's height: all of it with the sun 6 degrees up, 15% of it once the
+-- sun is 6 degrees down (CoreAI's twilight). The mod asks for the light it wants seen, so it divides by that share.
+-- TODO: drop the division if the host stops scaling OutdoorAmbient by its own twilight.
+local HOST_NIGHT_SHARE = 0.15
+local HOST_TWILIGHT_DEGREES = 6
+-- WHY this low: a cave is dark at any hour without a torch, so a torch matters there. On the default look the walls
+-- stay black up to about 56,60,80 and show faintly only near 80,84,104, which is brighter than the open night.
 local AMBIENT = Color3.fromRGB(22, 24, 34)
 -- WHY these: the haze of the default look at the horizon by day, a warm dusk, and a night sky dark enough for torches.
 local DAY_FOG = Color3.fromRGB(198, 220, 228)
-local DUSK_FOG = Color3.fromRGB(222, 176, 140)
-local NIGHT_FOG = Color3.fromRGB(12, 16, 28)
+-- WHY this dark at dusk: the fog is drawn unlit, so a bright dusk haze turns far trees into cut-outs over the land.
+-- WHY blue: the haze and the horizon round the camera take this colour, and a dusk sky reads blue, not brown.
+local DUSK_FOG = Color3.fromRGB(52, 58, 92)
+local NIGHT_FOG = Color3.fromRGB(24, 32, 56)
 local FOG_EDGE = 6               -- studs short of the stream radius where the fog is whole
 local FOG_START_SHARE = 0.7      -- where it begins, as a share of where it is whole: 122 of 175 on a desktop
 
@@ -97,6 +108,14 @@ local function applyFogDistance()
     Lighting.FogStart = (reach - FOG_EDGE) * FOG_START_SHARE
 end
 
+-- The share of OutdoorAmbient the host draws at the sun's height now (see HOST_NIGHT_SHARE).
+local function hostSkyShare()
+    local sun = Lighting:GetSunDirection()
+    local elevation = math.deg(math.asin(math.clamp(sun.Y, -1, 1)))
+    return HOST_NIGHT_SHARE
+        + (1 - HOST_NIGHT_SHARE) * smoothstep(-HOST_TWILIGHT_DEGREES, HOST_TWILIGHT_DEGREES, elevation)
+end
+
 local shownDaylight = -1
 local function applyAmbient(hours)
     local light = daylight(hours)
@@ -104,11 +123,14 @@ local function applyAmbient(hours)
         return
     end
     shownDaylight = light
-    Lighting.OutdoorAmbient = NIGHT_OUTDOOR:Lerp(DAY_OUTDOOR, light)
-    Lighting.Ambient = AMBIENT
-    -- WHY dusk peaks half way through the light's fall (18:45, and 6:15 at dawn): the warm colour is reached there.
+    -- WHY dusk peaks half way through the light's fall (18:45, and 6:15 at dawn): the warm colours are reached there.
     local dusk = 1 - math.abs(light * 2 - 1)
-    Lighting.FogColor = NIGHT_FOG:Lerp(DAY_FOG, light):Lerp(DUSK_FOG, dusk)
+    local sky = NIGHT_SKY:Lerp(DAY_SKY, light):Lerp(DUSK_SKY, dusk)
+    local share = hostSkyShare()
+    Lighting.OutdoorAmbient = Color3.new(sky.R / share, sky.G / share, sky.B / share)
+    Lighting.Ambient = AMBIENT
+    -- WHY the day's share squared: the unlit fog must darken faster than the lit land as the light falls.
+    Lighting.FogColor = NIGHT_FOG:Lerp(DAY_FOG, light * light):Lerp(DUSK_FOG, dusk)
 end
 
 local function twoDigits(value)

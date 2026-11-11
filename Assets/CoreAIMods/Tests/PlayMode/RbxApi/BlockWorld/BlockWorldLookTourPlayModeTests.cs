@@ -56,6 +56,11 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
             { "Grass", "Ground", "Rock", "Cobblestone", "WoodPlanks", "Brick", "Sand", "LeafyGrass" };
 
         private readonly StringBuilder _report = new();
+        private float _firstLawnGreen = float.NaN;
+        private readonly List<float> _edgeGaps = new();
+        private readonly List<(string Clock, Color Sky)> _duskSkies = new();
+        private readonly List<(string Part, Color Torso)> _torsos = new();
+        private readonly List<(string File, Color Bark)> _barkCrops = new();
         private CoreAiPlayWorldBootstrap _bootstrap;
         private IDisposable _storageOverride;
         private string _storageRoot;
@@ -169,6 +174,20 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
             RbxVector3 spawn = SpawnPosition();
             int spawnX = Mathf.FloorToInt(spawn.X / Cell);
             int spawnZ = Mathf.FloorToInt(spawn.Z / Cell);
+            // The scene as a player first sees it, before the tour changes anything: the lawn next to the spawn.
+            yield return SetClock(12d);
+            Vector3Int lawnCell = FindNearest(terrain, spawnX + 3, spawnZ + 3, "Grass", 12);
+            if (lawnCell.x != int.MinValue)
+            {
+                RbxVector3 lawnTop = new((lawnCell.x + 0.5f) * Cell, (lawnCell.y + 1f) * Cell, (lawnCell.z + 0.5f) * Cell);
+                Color[] initial = ShootAt(camera, lawnTop + new RbxVector3(0f, 12f, -5f), lawnTop, "initial_lawn.png");
+                Color lawn = Mean(initial, new RectInt(ShotWidth / 2 - 40, ShotHeight / 2 - 40, 80, 80));
+                Record("first scene lawn beside the spawn, cell " + lawnCell + ": " + Describe(lawn) + ", green margin "
+                       + F(lawn.g - (lawn.r + lawn.b) * 0.5f));
+                _firstLawnGreen = lawn.g - (lawn.r + lawn.b) * 0.5f;
+            }
+
+            yield return FogEdge(camera, terrain, spawnX, spawnZ);
             int floor = ColumnTop(terrain, spawnX, spawnZ + 10);
             int wallX0 = spawnX - 16;
             int wallZ = spawnZ + 10;
@@ -230,6 +249,15 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
                         face, look + "_wall_2_" + HotbarBlocks[index] + ".png");
                 }
 
+                // WHY 10:30: the owner judges the bark under a crown at mid-morning.
+                yield return SetClock(10.5d);
+                Color[] treeClose = ShootTreeClose(camera, terrain, spawnX, spawnZ, look + "_tree_close.png");
+                yield return SetClock(TourClock);
+                if (treeClose != null)
+                {
+                    shots["tree_close"] = treeClose;
+                }
+
                 if (tree.x != int.MinValue)
                 {
                     RbxVector3 canopy = new((tree.x + 0.5f) * Cell, (tree.y + 0.5f) * Cell, (tree.z + 0.5f) * Cell);
@@ -255,6 +283,10 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
                 yield return SetClock(TourClock);
                 // WHY last in the pass: every chunk the view needs has been drawn for a while by now.
                 shots["first_view"] = Shoot(camera, firstView.position, firstView.rotation, look + "_first_view.png");
+                if (painted)
+                {
+                    ProbeCharacters(camera, look, (presenter.Renderer as RbxTerrainRenderer)?.SkyExposure);
+                }
                 Record(look + ": materials of the chunk under the walls at the end: "
                        + ChunkMaterials(presenter, wallX0, floor, wallZ));
             }
@@ -321,11 +353,182 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
             File.WriteAllText(Path.Combine(_outputFolder, "blocklook_numbers.txt"), _report.ToString());
             TestContext.WriteLine(_report.ToString());
 
+            Assert.Greater(_firstLawnGreen, 0.05f, "the lawn beside the spawn is green in the first scene of the session");
+            for (int index = 0; index < _edgeGaps.Count; index++)
+            {
+                Assert.LessOrEqual(_edgeGaps[index], 0.03f, "fog edge shot " + index + ": the world's edge cannot be found");
+            }
+
+            foreach ((string file, Color bark) in _barkCrops)
+            {
+                if (!file.StartsWith("blocks", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                float luminance = 0.2126f * bark.r + 0.7152f * bark.g + 0.0722f * bark.b;
+                Assert.GreaterOrEqual(luminance, 0.06f, file + ": the trunk under its crown reads as wood, not a hole");
+                Assert.Greater(bark.r, bark.b + 0.02f, file + ": the trunk is brown (red over blue)");
+                Assert.GreaterOrEqual(bark.r, bark.g, file + ": the trunk is brown (red over green)");
+            }
+
+            foreach ((string clock, Color sky) in _duskSkies)
+            {
+                Assert.GreaterOrEqual(sky.b, sky.g - 0.005f, "the sky at " + clock + " is blue or violet, never olive");
+            }
+
             Assert.Greater(greenAfter, greenBefore, "the painted lawn is greener than the photographed one");
             Assert.Greater(leavesDarkAfter, leavesDarkBefore + 0.05f, "a leaf block shows dark gaps between its leaves");
             Assert.Less(floorGapAfter, 0.1f, "below the horizon the sky continues the haze");
             Assert.Greater(floorGapBefore, floorGapAfter + 0.05f, "where the fixed ground colour drew a darker floor");
             Assert.Less(partChange, 0.03f, "a Cobblestone Part looks the same in both looks");
+        }
+
+        /// <summary>
+        /// From the highest hill near the spawn, a level shot at the horizon and one pitched down, at noon, dusk and
+        /// midnight: crop A is fully fogged land (a ray from the pixel hits Terrain past FogEnd), crop B the background
+        /// beside it (rays that hit nothing, in the same rows); the per-channel gap is recorded.
+        /// </summary>
+        private IEnumerator FogEdge(Camera camera, RbxTerrain terrain, int spawnX, int spawnZ)
+        {
+            int bestX = spawnX;
+            int bestZ = spawnZ;
+            int bestTop = ColumnTop(terrain, spawnX, spawnZ);
+            for (int dx = -12; dx <= 12; dx++)
+            {
+                for (int dz = -12; dz <= 12; dz++)
+                {
+                    int top = ColumnTop(terrain, spawnX + dx, spawnZ + dz);
+                    if (top > bestTop)
+                    {
+                        bestTop = top;
+                        bestX = spawnX + dx;
+                        bestZ = spawnZ + dz;
+                    }
+                }
+            }
+
+            RbxLighting lighting = (RbxLighting)CurrentWorld().Game.FindFirstChildOfClass("Lighting");
+            RbxVector3 eye = new((bestX + 0.5f) * Cell, (bestTop + 3f) * Cell, (bestZ + 0.5f) * Cell);
+            RbxVector3 outward = new(bestX - spawnX + 0.01f, 0f, bestZ - spawnZ + 0.01f);
+            float length = Mathf.Sqrt(outward.X * outward.X + outward.Z * outward.Z);
+            outward = new RbxVector3(outward.X / length, 0f, outward.Z / length);
+            foreach ((string clock, double hours) in new[] { ("noon", 12d), ("dusk", 18.6d), ("midnight", 0d) })
+            {
+                yield return SetClock(hours);
+                yield return null;
+                float fogEnd = RbxSpace.LengthToUnity(lighting.FogEnd);
+                foreach ((string view, float drop) in new[] { ("level", 0f), ("down", 0.45f) })
+                {
+                    RbxVector3 at = eye + new RbxVector3(outward.X * 100f, -drop * 100f, outward.Z * 100f);
+                    string name = "fogedge_" + clock + "_" + view;
+                    Color[] shot = ShootAt(camera, eye, at, name + ".png");
+                    Vector3 from = RbxSpace.ToUnity(eye);
+                    Quaternion rotation = Quaternion.LookRotation(RbxSpace.ToUnity(at) - from);
+                    MeasureEdge(camera, from, rotation, shot, fogEnd, name);
+                }
+            }
+
+            // The sky from late afternoon to nightfall, level at the horizon: the top quarter of each shot is sky.
+            foreach ((string clock, double hours) in new[] { ("1730", 17.5d), ("1800", 18d), ("1836", 18.6d), ("1915", 19.25d) })
+            {
+                yield return SetClock(hours);
+                yield return null;
+                RbxVector3 at = eye + new RbxVector3(outward.X * 100f, 0f, outward.Z * 100f);
+                Color[] shot = ShootAt(camera, eye, at, "dusk_sky_" + clock + ".png");
+                if (clock == "1730")
+                {
+                    ProbeCrowns(camera, terrain, eye, at, shot, "dusk_sky_1730");
+                }
+                Color sky = Mean(shot, new RectInt(0, ShotHeight * 3 / 4, ShotWidth, ShotHeight / 4));
+                _duskSkies.Add((clock, sky));
+                Record("dusk sky " + clock + ", top quarter of a level shot: " + Describe(sky) + ", blue minus green "
+                       + F(sky.b - sky.g));
+            }
+
+            yield return SetClock(TourClock);
+        }
+
+        private void MeasureEdge(Camera camera, Vector3 from, Quaternion rotation, Color[] shot, float fogEnd, string name)
+        {
+            Vector3 savedPosition = camera.transform.position;
+            Quaternion savedRotation = camera.transform.rotation;
+            float savedAspect = camera.aspect;
+            camera.transform.SetPositionAndRotation(from, rotation);
+            camera.aspect = (float)ShotWidth / ShotHeight;
+            double[] fogged = new double[3];
+            double[] background = new double[3];
+            int foggedCount = 0;
+            int minRow = ShotHeight;
+            int maxRow = -1;
+            bool[] open = new bool[ShotWidth * ShotHeight];
+            for (int y = 2; y < ShotHeight; y += 4)
+            {
+                for (int x = 2; x < ShotWidth; x += 4)
+                {
+                    Ray ray = camera.ViewportPointToRay(new Vector3((x + 0.5f) / ShotWidth, (y + 0.5f) / ShotHeight, 0f));
+                    if (!Physics.Raycast(ray, out RaycastHit hit, camera.farClipPlane))
+                    {
+                        open[y * ShotWidth + x] = true;
+                        continue;
+                    }
+
+                    // WHY view depth: the lit shaders fog by the depth along the view axis, not the ray length.
+                    if (Vector3.Dot(hit.point - from, rotation * Vector3.forward) < fogEnd * 1.02f)
+                    {
+                        continue;
+                    }
+
+                    Color pixel = shot[y * ShotWidth + x];
+                    fogged[0] += pixel.r;
+                    fogged[1] += pixel.g;
+                    fogged[2] += pixel.b;
+                    foggedCount++;
+                    minRow = Mathf.Min(minRow, y);
+                    maxRow = Mathf.Max(maxRow, y);
+                }
+            }
+
+            int backgroundCount = 0;
+            for (int y = Mathf.Max(2, minRow - 24); y <= Mathf.Min(ShotHeight - 1, maxRow + 24); y += 4)
+            {
+                for (int x = 2; x < ShotWidth; x += 4)
+                {
+                    if (!open[y * ShotWidth + x])
+                    {
+                        continue;
+                    }
+
+                    Color pixel = shot[y * ShotWidth + x];
+                    background[0] += pixel.r;
+                    background[1] += pixel.g;
+                    background[2] += pixel.b;
+                    backgroundCount++;
+                }
+            }
+
+            camera.transform.SetPositionAndRotation(savedPosition, savedRotation);
+            camera.aspect = savedAspect;
+            if (foggedCount == 0 || backgroundCount == 0)
+            {
+                Record(name + ": no fully fogged land (" + foggedCount + ") or no background (" + backgroundCount
+                       + ") in view; fog end " + F(fogEnd) + " m");
+                return;
+            }
+
+            float gap = 0f;
+            StringBuilder line = new();
+            for (int channel = 0; channel < 3; channel++)
+            {
+                float a = (float)(fogged[channel] / foggedCount);
+                float b = (float)(background[channel] / backgroundCount);
+                gap = Mathf.Max(gap, Mathf.Abs(a - b));
+                line.Append(F(a)).Append('/').Append(F(b)).Append(' ');
+            }
+
+            _edgeGaps.Add(gap);
+            Record(name + ": fogged land A vs background B per channel " + line + "-> gap " + F(gap) + " (" + foggedCount
+                   + " / " + backgroundCount + " samples, fog end " + F(fogEnd) + " m)");
         }
 
         // ---- the world --------------------------------------------------------------------------------------------
@@ -343,6 +546,414 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
                 terrain.Store.FillBox(new TerrainCellBox(x0 + index * 4, floor + 1, z, 3, 3, 1), material,
                     TerrainOccupancy.Full);
             }
+        }
+
+        private static byte SlotOf(string name)
+        {
+            TerrainMaterials.TryGetSlot(name, out byte slot);
+            return slot;
+        }
+
+        /// <summary>
+        /// One tree as a player standing beside it sees it: the nearest tree with a trunk of at least three cells and
+        /// a crown at least three studs over the head, shot from eye height about 3.5 studs from the bark, pitched up
+        /// so the trunk and the underside of the crown are both in frame, from a side where nothing stands between
+        /// the eye and either of them. Null when no tree near the spawn allows that.
+        /// </summary>
+        private Color[] ShootTreeClose(Camera camera, RbxTerrain terrain, int spawnX, int spawnZ, string file)
+        {
+            byte mud = SlotOf("Mud");
+            byte leaves = SlotOf("LeafyGrass");
+            for (int ring = 1; ring <= 48; ring++)
+            {
+                for (int dx = -ring; dx <= ring; dx++)
+                {
+                    for (int dz = -ring; dz <= ring; dz++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dz)) != ring)
+                        {
+                            continue;
+                        }
+
+                        int x = spawnX + dx;
+                        int z = spawnZ + dz;
+                        int top = int.MinValue;
+                        for (int y = 40; y > -16; y--)
+                        {
+                            byte here = terrain.Store.GetMaterial(x, y, z);
+                            if (here == mud)
+                            {
+                                top = y;
+                                break;
+                            }
+
+                            if (here != TerrainMaterials.Air && here != leaves)
+                            {
+                                break;
+                            }
+                        }
+
+                        if (top == int.MinValue)
+                        {
+                            continue;
+                        }
+
+                        int foot = top;
+                        while (foot > top - 12 && terrain.Store.GetMaterial(x, foot - 1, z) == mud)
+                        {
+                            foot--;
+                        }
+
+                        // WHY three cells: a shorter trunk stands inside its own crown at eye height.
+                        if (top - foot + 1 < 3)
+                        {
+                            continue;
+                        }
+
+                        int crownCell = top + 1;
+                        for (int y = foot; y <= top + 1; y++)
+                        {
+                            if (terrain.Store.GetMaterial(x - 1, y, z) == leaves || terrain.Store.GetMaterial(x + 1, y, z) == leaves
+                                || terrain.Store.GetMaterial(x, y, z - 1) == leaves || terrain.Store.GetMaterial(x, y, z + 1) == leaves)
+                            {
+                                crownCell = y;
+                                break;
+                            }
+                        }
+
+                        float groundY = foot * Cell;
+                        float undersideY = crownCell * Cell;
+                        float eyeY = groundY + 5f;
+                        if (undersideY < eyeY + 3f)
+                        {
+                            continue;
+                        }
+
+                        float centreX = (x + 0.5f) * Cell;
+                        float centreZ = (z + 0.5f) * Cell;
+                        float away = Cell * 0.5f + 3.5f;
+                        for (int turn = 0; turn < 8; turn++)
+                        {
+                            // WHY starting towards the spawn: the open lawn the player comes from is the likeliest
+                            // clear spot.
+                            float angle = Mathf.Atan2(spawnZ - z, spawnX - x) + turn * Mathf.PI / 4f;
+                            float dirX = Mathf.Cos(angle);
+                            float dirZ = Mathf.Sin(angle);
+                            RbxVector3 eye = new(centreX + dirX * away, eyeY, centreZ + dirZ * away);
+                            RbxVector3 bark = new(centreX, eyeY, centreZ);
+                            RbxVector3 underside = new(centreX + dirX * (Cell * 0.5f + 0.5f), undersideY - 0.2f,
+                                centreZ + dirZ * (Cell * 0.5f + 0.5f));
+                            if (!InAir(terrain, eye) || !ClearSight(terrain, eye, bark, x, z)
+                                                     || !ClearSight(terrain, eye, underside, x, z))
+                            {
+                                continue;
+                            }
+
+                            RbxVector3 at = new(centreX, (eyeY + undersideY) * 0.5f + 1f, centreZ);
+                            Record("tree close: trunk (" + x + ", " + z + ") " + (top - foot + 1) + " cells from y "
+                                   + F(groundY) + ", crown underside y " + F(undersideY) + ", eye " + F(eye.X) + ", "
+                                   + F(eye.Y) + ", " + F(eye.Z) + " studs");
+                            Color[] shot = ShootAt(camera, eye, at, file);
+                            Color trunkCrop = Mean(shot, new RectInt(ShotWidth / 2 - 16, ShotHeight / 2 - 16, 32, 32));
+                            float luminance = 0.2126f * trunkCrop.r + 0.7152f * trunkCrop.g + 0.0722f * trunkCrop.b;
+                            _barkCrops.Add((file, trunkCrop));
+                            Record("tree close: the trunk in the middle of the frame " + Describe(trunkCrop) + ", luminance "
+                                   + F(luminance));
+                            return shot;
+                        }
+                    }
+                }
+            }
+
+            Record("tree close: no tree near the spawn has a trunk of three cells with a clear view of it");
+            return null;
+        }
+
+        private static bool InAir(RbxTerrain terrain, RbxVector3 point)
+        {
+            return terrain.Store.GetMaterial(Mathf.FloorToInt(point.X / Cell), Mathf.FloorToInt(point.Y / Cell),
+                Mathf.FloorToInt(point.Z / Cell)) == TerrainMaterials.Air;
+        }
+
+        /// <summary>True when every cell from <paramref name="from"/> to <paramref name="to"/> is air until the trunk's column.</summary>
+        private static bool ClearSight(RbxTerrain terrain, RbxVector3 from, RbxVector3 to, int trunkX, int trunkZ)
+        {
+            float dx = to.X - from.X;
+            float dy = to.Y - from.Y;
+            float dz = to.Z - from.Z;
+            int steps = Mathf.CeilToInt(Mathf.Sqrt(dx * dx + dy * dy + dz * dz) / 0.25f);
+            for (int step = 0; step <= steps; step++)
+            {
+                float t = step / (float)steps;
+                RbxVector3 point = new(from.X + dx * t, from.Y + dy * t, from.Z + dz * t);
+                if (Mathf.FloorToInt(point.X / Cell) == trunkX && Mathf.FloorToInt(point.Z / Cell) == trunkZ)
+                {
+                    return true;
+                }
+
+                if (!InAir(terrain, point))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Every character in the scene (a model holding a torso part): how its torso is drawn (renderer, material,
+        /// sky exposure, LocalTransparencyModifier) and its torso's mean colour shot from behind and above, as a
+        /// third-person camera sees it.
+        /// </summary>
+        private void ProbeCharacters(Camera camera, string look, TerrainSkyExposure exposure)
+        {
+            Dictionary<string, float> modifiers = new();
+            RbxInstance workspace = CurrentWorld()?.Game?.FindFirstChildOfClass("Workspace");
+            if (workspace != null)
+            {
+                foreach (RbxInstance instance in workspace.GetDescendants())
+                {
+                    if (instance is RbxBasePart part && (part.Name == "UpperTorso" || part.Name == "Torso"))
+                    {
+                        modifiers[(part.Parent?.Name ?? "?") + "/" + part.Name] = part.LocalTransparencyModifier;
+                    }
+                }
+            }
+
+            int index = 0;
+            foreach (Renderer renderer in Object.FindObjectsByType<Renderer>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                string partName = renderer.gameObject.name;
+                if (partName != "UpperTorso" && partName != "Torso")
+                {
+                    continue;
+                }
+
+                string model = renderer.transform.parent != null ? renderer.transform.parent.name : "?";
+                Material material = renderer.sharedMaterial;
+                MaterialPropertyBlock block = new();
+                renderer.GetPropertyBlock(block);
+                string colour = material != null && material.HasProperty("_BaseColor")
+                    ? Describe(material.GetColor("_BaseColor")) : "-";
+                modifiers.TryGetValue(model + "/" + partName, out float modifier);
+                Vector3 centre = renderer.bounds.center;
+                Vector3 back = -renderer.transform.forward;
+                back.y = 0f;
+                back = back.sqrMagnitude > 1e-6f ? back.normalized : Vector3.back;
+                Vector3 from = centre + back * RbxSpace.LengthToUnity(10f) + Vector3.up * RbxSpace.LengthToUnity(3f);
+                Quaternion rotation = Quaternion.LookRotation(centre - from);
+                Color[] shot = Shoot(camera, from, rotation, look + "_third_person_" + index + ".png");
+                Vector3 savedPosition = camera.transform.position;
+                Quaternion savedRotation = camera.transform.rotation;
+                float savedAspect = camera.aspect;
+                camera.transform.SetPositionAndRotation(from, rotation);
+                camera.aspect = (float)ShotWidth / ShotHeight;
+                Bounds bounds = renderer.bounds;
+                Vector3 low = camera.WorldToViewportPoint(bounds.center - bounds.extents * 0.4f);
+                Vector3 high = camera.WorldToViewportPoint(bounds.center + bounds.extents * 0.4f);
+                camera.transform.SetPositionAndRotation(savedPosition, savedRotation);
+                camera.aspect = savedAspect;
+                int x0 = Mathf.Clamp(Mathf.RoundToInt(Mathf.Min(low.x, high.x) * ShotWidth), 0, ShotWidth - 2);
+                int x1 = Mathf.Clamp(Mathf.RoundToInt(Mathf.Max(low.x, high.x) * ShotWidth), x0 + 1, ShotWidth - 1);
+                int y0 = Mathf.Clamp(Mathf.RoundToInt(Mathf.Min(low.y, high.y) * ShotHeight), 0, ShotHeight - 2);
+                int y1 = Mathf.Clamp(Mathf.RoundToInt(Mathf.Max(low.y, high.y) * ShotHeight), y0 + 1, ShotHeight - 1);
+                Color torso = Mean(shot, new RectInt(x0, y0, x1 - x0, y1 - y0));
+                Vector3 ahead = renderer.transform.forward;
+                ahead.y = 0f;
+                ahead = ahead.sqrMagnitude > 1e-6f ? ahead.normalized : Vector3.forward;
+                Vector3 front = centre + ahead * RbxSpace.LengthToUnity(8f) + Vector3.up * RbxSpace.LengthToUnity(1f);
+                Color[] facing = Shoot(camera, front, Quaternion.LookRotation(centre - front),
+                    look + "_facing_" + index + ".png");
+                Color face = Mean(facing, new RectInt(ShotWidth / 2 - 12, ShotHeight / 2 - 12, 24, 24));
+                RbxVector3 studs = RbxSpace.FromUnity(centre);
+                int cellX = Mathf.FloorToInt(studs.X / Cell);
+                int cellY = Mathf.FloorToInt(studs.Y / Cell);
+                int cellZ = Mathf.FloorToInt(studs.Z / Cell);
+                string written = block.HasFloat("_RbxSkyExposure") ? F(block.GetFloat("_RbxSkyExposure")) : "not written (1)";
+                string sampled = exposure != null ? F(exposure.SampleExposure(cellX, cellY, cellZ)) : "-";
+                Record(look + ": character " + index + " sky exposure written " + written + ", sampled now at cell ("
+                       + cellX + ", " + cellY + ", " + cellZ + ") " + sampled + "; facing it from 8 studs, middle crop "
+                       + Describe(face) + "; ambient mode " + RenderSettings.ambientMode + ", sky "
+                       + Describe(RenderSettings.ambientSkyColor) + ", intensity " + F(RenderSettings.ambientIntensity));
+                Record(look + ": character " + index + " '" + model + "/" + partName + "' at " + centre + ", enabled "
+                       + renderer.enabled + ", shadows " + renderer.shadowCastingMode + ", material "
+                       + (material != null ? material.name + " (" + material.shader.name + ", queue "
+                                             + material.renderQueue + ")" : "none") + ", base colour " + colour
+                       + ", block sky exposure " + F(block.GetFloat("_RbxSkyExposure")) + ", LocalTransparencyModifier "
+                       + F(modifier) + "; third-person torso crop " + new RectInt(x0, y0, x1 - x0, y1 - y0) + " mean "
+                       + Describe(torso));
+                _torsos.Add((model + "/" + partName, torso));
+                index++;
+            }
+
+            if (index == 0)
+            {
+                Record(look + ": no character torso in the scene");
+            }
+        }
+
+        /// <summary>
+        /// Every crown-sized leaf blob (eight cells or more) within 40 cells of the eye: how many nothing holds up
+        /// (no Mud touching it, no solid cell under it) and, for those and for a few held by a trunk, the cells,
+        /// whether the column under them has been generated, and what the shot shows at the crown and where the trunk
+        /// stands or would stand.
+        /// </summary>
+        private void ProbeCrowns(Camera camera, RbxTerrain terrain, RbxVector3 eye, RbxVector3 at, Color[] shot,
+            string name)
+        {
+            const int Radius = 40;
+            byte leaves = SlotOf("LeafyGrass");
+            byte mud = SlotOf("Mud");
+            int eyeX = Mathf.FloorToInt(eye.X / Cell);
+            int eyeZ = Mathf.FloorToInt(eye.Z / Cell);
+            Vector3 from = RbxSpace.ToUnity(eye);
+            Quaternion rotation = Quaternion.LookRotation(RbxSpace.ToUnity(at) - from);
+            Vector3 savedPosition = camera.transform.position;
+            Quaternion savedRotation = camera.transform.rotation;
+            float savedAspect = camera.aspect;
+            camera.transform.SetPositionAndRotation(from, rotation);
+            camera.aspect = (float)ShotWidth / ShotHeight;
+            Vector3Int[] sides =
+            {
+                new(1, 0, 0), new(-1, 0, 0), new(0, 1, 0), new(0, -1, 0), new(0, 0, 1), new(0, 0, -1)
+            };
+            HashSet<Vector3Int> seen = new();
+            int blobs = 0;
+            int floating = 0;
+            int floatingShown = 0;
+            int heldShown = 0;
+            for (int x = eyeX - Radius; x <= eyeX + Radius; x++)
+            {
+                for (int z = eyeZ - Radius; z <= eyeZ + Radius; z++)
+                {
+                    for (int y = -16; y <= 40; y++)
+                    {
+                        Vector3Int start = new(x, y, z);
+                        if (terrain.Store.GetMaterial(x, y, z) != leaves || !seen.Add(start))
+                        {
+                            continue;
+                        }
+
+                        List<Vector3Int> blob = new();
+                        Stack<Vector3Int> stack = new();
+                        stack.Push(start);
+                        bool held = false;
+                        Vector3Int trunk = new(int.MinValue, 0, 0);
+                        while (stack.Count > 0)
+                        {
+                            Vector3Int cell = stack.Pop();
+                            blob.Add(cell);
+                            foreach (Vector3Int side in sides)
+                            {
+                                Vector3Int next = cell + side;
+                                byte material = terrain.Store.GetMaterial(next.x, next.y, next.z);
+                                if (material == leaves)
+                                {
+                                    if (Math.Abs(next.x - eyeX) <= Radius + 8 && Math.Abs(next.z - eyeZ) <= Radius + 8
+                                                                              && seen.Add(next))
+                                    {
+                                        stack.Push(next);
+                                    }
+                                }
+                                else if (material == mud)
+                                {
+                                    held = true;
+                                    if (trunk.x == int.MinValue || next.y < trunk.y)
+                                    {
+                                        trunk = next;
+                                    }
+                                }
+                                else if (side.y == -1 && material != TerrainMaterials.Air && material != TerrainMaterials.Water)
+                                {
+                                    held = true;
+                                }
+                            }
+                        }
+
+                        if (blob.Count < 8)
+                        {
+                            continue;
+                        }
+
+                        blobs++;
+                        if (!held)
+                        {
+                            floating++;
+                        }
+
+                        Vector3Int min = blob[0];
+                        Vector3Int max = blob[0];
+                        foreach (Vector3Int cell in blob)
+                        {
+                            min = Vector3Int.Min(min, cell);
+                            max = Vector3Int.Max(max, cell);
+                        }
+
+                        int midX = (min.x + max.x) / 2;
+                        int midZ = (min.z + max.z) / 2;
+                        RbxVector3 crownCentre = new((midX + 0.5f) * Cell, (min.y + max.y + 1) * 0.5f * Cell, (midZ + 0.5f) * Cell);
+                        string crownPixel = SampleShot(camera, shot, crownCentre);
+                        if (!held && floatingShown < 8)
+                        {
+                            floatingShown++;
+                            int ground = int.MinValue;
+                            for (int below = min.y - 1; below >= -16; below--)
+                            {
+                                byte material = terrain.Store.GetMaterial(midX, below, midZ);
+                                if (material != TerrainMaterials.Air && material != TerrainMaterials.Water)
+                                {
+                                    ground = below;
+                                    break;
+                                }
+                            }
+
+                            string column = ground == int.MinValue
+                                ? "the column under it is empty down to y -16 (not generated)"
+                                : "ground under it at y " + ground + " ("
+                                  + TerrainMaterials.GetName(terrain.Store.GetMaterial(midX, ground, midZ)) + "), "
+                                  + (min.y - ground - 1) + " empty cells between, no Mud in the column";
+                            RbxVector3 trunkPoint = new((midX + 0.5f) * Cell, (min.y - 0.5f) * Cell, (midZ + 0.5f) * Cell);
+                            Record(name + ": crown held by nothing, cells x " + min.x + ".." + max.x + ", y " + min.y + ".."
+                                   + max.y + ", z " + min.z + ".." + max.z + " (" + blob.Count + "), " + column
+                                   + "; shot at the crown " + crownPixel + "; just under it " + SampleShot(camera, shot, trunkPoint));
+                        }
+                        else if (held && trunk.x != int.MinValue && heldShown < 4 && !crownPixel.StartsWith("off"))
+                        {
+                            heldShown++;
+                            RbxVector3 bark = new((trunk.x + 0.5f) * Cell, (trunk.y + 0.5f) * Cell, (trunk.z + 0.5f) * Cell);
+                            Record(name + ": crown on a Mud trunk at cell " + trunk + ", crown cells x " + min.x + ".."
+                                   + max.x + ", y " + min.y + ".." + max.y + ", z " + min.z + ".." + max.z
+                                   + "; shot at the crown " + crownPixel + "; at the top trunk cell "
+                                   + SampleShot(camera, shot, bark));
+                        }
+                    }
+                }
+            }
+
+            camera.transform.SetPositionAndRotation(savedPosition, savedRotation);
+            camera.aspect = savedAspect;
+            Record(name + ": " + blobs + " crown-sized leaf blobs within " + Radius + " cells of the eye, " + floating
+                   + " held by nothing; fog colour " + Describe(RenderSettings.fogColor));
+        }
+
+        /// <summary>The shot's pixel where <paramref name="point"/> projects, what a ray towards it hits first, and its depth.</summary>
+        private static string SampleShot(Camera camera, Color[] shot, RbxVector3 point)
+        {
+            Vector3 world = RbxSpace.ToUnity(point);
+            Vector3 viewport = camera.WorldToViewportPoint(world);
+            if (viewport.z <= 0f || viewport.x < 0f || viewport.x >= 1f || viewport.y < 0f || viewport.y >= 1f)
+            {
+                return "off screen";
+            }
+
+            int px = Mathf.FloorToInt(viewport.x * ShotWidth);
+            int py = Mathf.FloorToInt(viewport.y * ShotHeight);
+            Vector3 origin = camera.transform.position;
+            string hit = Physics.Raycast(origin, world - origin, out RaycastHit first, camera.farClipPlane)
+                ? first.collider.name + " at " + F(first.distance) + " m"
+                : "nothing";
+            return "pixel (" + px + ", " + py + " from the bottom) " + Describe(shot[py * ShotWidth + px]) + ", point "
+                   + F(viewport.z) + " m deep, the ray hits " + hit;
         }
 
         private static int ColumnTop(RbxTerrain terrain, int x, int z)
@@ -381,12 +992,9 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
                                 return new Vector3Int(x + dx, y, z + dz);
                             }
 
-                            if (here != TerrainMaterials.Air && material != TerrainMaterials.Water)
-                            {
-                                break;
-                            }
-
-                            if (here != TerrainMaterials.Air && here != TerrainMaterials.Water)
+                            // WHY on through the crown for Mud: a trunk stands under its leaves.
+                            bool seeThrough = materialName == "Mud" && here == SlotOf("LeafyGrass");
+                            if (here != TerrainMaterials.Air && here != TerrainMaterials.Water && !seeThrough)
                             {
                                 break;
                             }

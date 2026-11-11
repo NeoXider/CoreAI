@@ -19,7 +19,10 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
     /// batching. The pass walks the renderers round-robin under a per-call budget and caches the exposure
     /// of every cell it samples until the Terrain changes, so parts that do not move cost one dictionary
     /// lookup per sweep. A part keeps exposure 1 (nothing written) while it stands under the open sky.
-    /// Parts do not shade the Terrain or each other: only Terrain cells block the sky.
+    /// Parts do not shade the Terrain or each other: only Terrain cells block the sky. A part written darker
+    /// than the open sky is also checked on every call: once its centre is in another cell it is written again
+    /// at once, outside its turn, so a character back from a cave or from under the ground is not drawn
+    /// black in the open until the sweep reaches it.
     /// </remarks>
     public sealed class RbxPartSkyExposurePass
     {
@@ -33,6 +36,8 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
 
         private readonly List<Renderer> _renderers = new();
         private readonly Dictionary<long, byte> _cellExposure = new();
+        private readonly Dictionary<Renderer, long> _dimmedAt = new();
+        private readonly List<Renderer> _moved = new();
         private MaterialPropertyBlock _block;
         private int _cursor;
         private long _cachedRevision = -1;
@@ -42,8 +47,15 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         public long WriteCount { get; private set; }
 
         /// <summary>
-        /// Visits up to <paramref name="budget"/> renderers. When a sweep ends, <paramref name="collect"/>
-        /// fills the next sweep's list. Returns the renderers visited.
+        /// Renderers applied outside their round-robin turn because they were written darker than the open sky
+        /// and have since moved to another cell (a test and diagnostics counter).
+        /// </summary>
+        public long OutOfTurnCount { get; private set; }
+
+        /// <summary>
+        /// Re-applies every dimmed renderer that has moved to another cell, then visits up to
+        /// <paramref name="budget"/> renderers in turn. When a sweep ends, <paramref name="collect"/> fills the
+        /// next sweep's list. Returns the renderers visited, both kinds.
         /// </summary>
         public int Tick(TerrainSkyExposure exposure, long terrainRevision, Action<List<Renderer>> collect, int budget)
         {
@@ -59,6 +71,8 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
                 _cachedRevision = terrainRevision;
             }
 
+            // WHY outside the budget: the budget paces the round-robin; a moved dimmed part costs one cell lookup.
+            int moved = ReapplyMoved(exposure);
             if (_cursor >= _renderers.Count)
             {
                 _renderers.Clear();
@@ -79,7 +93,7 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
                 visited++;
             }
 
-            return visited;
+            return visited + moved;
         }
 
         /// <summary>Samples and writes one renderer now (a part that just moved, a test).</summary>
@@ -90,17 +104,20 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
                 return;
             }
 
-            RbxVector3 centre = RbxSpace.FromUnity(renderer.bounds.center);
-            double cell = TerrainBoxRasterizer.CellStuds;
-            int x = (int)Math.Floor(centre.X / cell);
-            int y = (int)Math.Floor(centre.Y / cell);
-            int z = (int)Math.Floor(centre.Z / cell);
-            long key = (((long)(x + KeyBias) & KeyMask) << 42) | (((long)(y + KeyBias) & KeyMask) << 21)
-                                                                | ((long)(z + KeyBias) & KeyMask);
+            long key = CellKey(renderer, out int x, out int y, out int z);
             if (!_cellExposure.TryGetValue(key, out byte value))
             {
                 value = (byte)Math.Round(exposure.SampleExposure(x, y, z) * TerrainSkyExposure.FullExposure);
                 _cellExposure.Add(key, value);
+            }
+
+            if (value < TerrainSkyExposure.FullExposure)
+            {
+                _dimmedAt[renderer] = key;
+            }
+            else
+            {
+                _dimmedAt.Remove(renderer);
             }
 
             float target = value / (float)TerrainSkyExposure.FullExposure;
@@ -122,6 +139,52 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             _block.SetFloat(SkyExposureId, target);
             renderer.SetPropertyBlock(_block);
             WriteCount++;
+        }
+
+        /// <summary>Applies, outside their turn, the dimmed renderers whose centre left the cell they were written in.</summary>
+        private int ReapplyMoved(TerrainSkyExposure exposure)
+        {
+            if (_dimmedAt.Count == 0)
+            {
+                return 0;
+            }
+
+            _moved.Clear();
+            foreach (KeyValuePair<Renderer, long> dimmed in _dimmedAt)
+            {
+                if (dimmed.Key == null || CellKey(dimmed.Key, out int _, out int _, out int _) != dimmed.Value)
+                {
+                    _moved.Add(dimmed.Key);
+                }
+            }
+
+            int applied = 0;
+            foreach (Renderer renderer in _moved)
+            {
+                if (renderer == null)
+                {
+                    _dimmedAt.Remove(renderer);
+                    continue;
+                }
+
+                Apply(renderer, exposure);
+                OutOfTurnCount++;
+                applied++;
+            }
+
+            _moved.Clear();
+            return applied;
+        }
+
+        private static long CellKey(Renderer renderer, out int x, out int y, out int z)
+        {
+            RbxVector3 centre = RbxSpace.FromUnity(renderer.bounds.center);
+            double cell = TerrainBoxRasterizer.CellStuds;
+            x = (int)Math.Floor(centre.X / cell);
+            y = (int)Math.Floor(centre.Y / cell);
+            z = (int)Math.Floor(centre.Z / cell);
+            return (((long)(x + KeyBias) & KeyMask) << 42) | (((long)(y + KeyBias) & KeyMask) << 21)
+                                                         | ((long)(z + KeyBias) & KeyMask);
         }
     }
 }

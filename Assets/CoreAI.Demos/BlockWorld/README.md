@@ -53,7 +53,9 @@ anywhere in your column (the view radius is a circle of columns, so the land rea
 
 The three villagers live around the spawn, each on the nearest level ground to their place in the first view, so
 none starts in a pit or on a ledge. A Humanoid does not climb a step a whole block high, so a villager keeps to the
-ground it can walk on and does not go up a hill.
+ground it can walk on and does not go up a hill. A villager is held until the land under its home is made; one that
+sinks into the land is stood back on top within a quarter second, and one that walks onto land not made yet is taken
+home.
 
 ## Controls
 
@@ -155,7 +157,7 @@ reloads on its own.
 | `blockworld_world` | the seeded world: sea and lakes, sandy beaches, grass lowlands with woods and single trees (round oaks, tall narrow trees, big oaks), hills whose steps show earth, rocky ridges and snowy peaks, caves with hillside mouths, bedrock; streamed around you in budgeted steps (your own column first, then the one whose edge is nearest you, what is in front of the camera before what is behind); the spawn and the heading you first face; a new player held until the first view is built | `BlockWorldSeed`, `BlockWorldSpawn`, `BlockWorldSpawnLook`, `BlockWorldReady`, `BlockWorldOpened`, `BlockWorldOpeningColumns`, `BlockWorldColumns`, `BlockWorldViewStuds` (how far the land is sure to reach) |
 | `blockworld_build` | the crosshair target and its outline, breaking and placing, reach, creative or survival, the view | `CrosshairCell`, `CrosshairPlaceCell`, `CrosshairNormal`, `CrosshairPartName`, `CrosshairModelName`, `BlockWorldCreative`, `BlockWorldPlaced`, `BlockWorldBroken`, `BlockWorldCount_<Material>` |
 | `blockworld_hud` | the whole interface (UXML and USS text through `UxmlService`), the key legend, health in survival, the hotbar choice and the "Building the world" screen | `BlockWorldSelected`, `BlockWorldSlot` |
-| `blockworld_daynight` | the clock (`Lighting.ClockTime`, a fresh world starts at 10:00), the sky's light (`OutdoorAmbient`, low at night) and the light where the sky does not reach (`Ambient`, low all day, so caves are dark), the fog (pale by day, warm at dawn and dusk, dark at night, whole just short of `BlockWorldViewStuds`), `/time` (a `TextChatCommand`) and the L key | `BlockWorldTime` (set it to "noon", "18:30", "stop", "go") |
+| `blockworld_daynight` | the clock (`Lighting.ClockTime`, a fresh world starts at 10:00), the sky's light (`OutdoorAmbient`: bright by day, warm and still readable at dusk, a dim blue moonlight at night) and the light where the sky does not reach (`Ambient`, low all day, so caves are dark), the fog (pale by day, a dusky blue haze at dawn and dusk, deep blue at night, whole just short of `BlockWorldViewStuds`), `/time` (a `TextChatCommand`) and the L key | `BlockWorldTime` (set it to "noon", "18:30", "stop", "go") |
 | `blockworld_torches` | torches with a PointLight and a flame, the light budget | `BlockWorldTorches` |
 | `blockworld_villagers` | Mira, Tobin and Elda: character Models under `workspace` with Roblox's R6 body (`Head`, `Torso`, `Left Arm` ...), which the platform's character rig animates as it does the player's, in their own clothes, with hair and two eyes that follow the head, placed around the spawn in the frame of the first view (Mira in it) on the nearest level ground, so none starts in a pit or on a ledge, held until the ground under them exists, their `AIService` agents and brains | on each Model `NpcAgent`, `NpcBrain`, `NpcState` (the host writes `NpcAction`); `BlockWorldVillagerReply` |
 | `blockworld_survival` | health from the Humanoid, fall damage (a fall is read from `Humanoid.StateChanged`), death and the respawn at the spawn; off in creative | `BlockWorldHealth`, `BlockWorldMaxHealth`, `BlockWorldDeaths` |
@@ -188,11 +190,11 @@ Not done on purpose today: the mods still share state through workspace attribut
 ## Tests
 
 - Lua tier, no Unity: `Assets/CoreAIMods/Tests/EditMode/RbxApi/BlockWorld/` (generation golden, relief and snowy peaks,
-  woods, hillside cave mouths, build, HUD and its veil, day and night, torches, villagers and their level-ground
+  woods with every leaf on a rooted trunk, the same world whatever order its columns are made in, hillside cave mouths, build, HUD and its veil, day and night, torches, villagers and their level-ground
   homes, autopilot, survival, all eight together, caves).
 - The mods in a running world: `Assets/CoreAIMods/Tests/PlayMode/RbxApi/BlockWorld/BlockWorldPlayModeTests.cs`.
 - This scene as a player opens it: `BlockWorldScenePlayModeTests.cs` next to it (one player on generated ground
-  whose sunlit Grass top is drawn unlike its Ground twin, the HUD from the runtime UI host, place and break with the outline and the reach, noon against midnight and a torch
+  whose sunlit Grass top is drawn unlike its Ground twin, the HUD from the runtime UI host, place and break with the outline and the reach, noon, a readable dusk and a moonlit midnight against a torch
   on masked crops, a scripted model's watchtower and `/undo`, a villager answering by name, the no-model answers,
   a survival fall that hurts and a lethal one that respawns you, a cave at noon with and without a torch, the
   characters in the shoulder view idle and walking, `/time midnight` typed in the chat, and the world from a
