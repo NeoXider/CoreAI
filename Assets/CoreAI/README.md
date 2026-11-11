@@ -258,7 +258,7 @@ on every push as the CI job `portable-core`. Run it yourself for the current cas
 | DLL embedding | [../../tools/portable/README.md](../../tools/portable/README.md) |
 | Release notes | [CHANGELOG.md](CHANGELOG.md) |
 
-License: [PolyForm Small Business 1.0](LICENSE.md) from 7.55.0 on. Free for personal and non-commercial use and for small businesses (fewer than 100 people and under 1,000,000 USD (2019) revenue in the prior tax year); larger companies need a commercial licence: neoxider@gmail.com. Earlier releases keep the license they were published under.
+License: [PolyForm Noncommercial 1.0](LICENSE.md) for everything after 7.56.0. Free for non-commercial use; commercial use of any size needs a commercial licence: neoxider@gmail.com. Releases 7.55.0 and 7.56.0 keep PolyForm Small Business 1.0.0, and earlier releases keep the license they were published under.
 
 ## Gateway Client
 

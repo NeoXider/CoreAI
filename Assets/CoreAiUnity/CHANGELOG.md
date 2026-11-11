@@ -2,6 +2,12 @@
 
 Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, documentation. Depends on **`com.neoxider.coreai`**.
 
+## [Unreleased]
+
+### License
+
+- Everything after 7.56.0 is under the [PolyForm Noncommercial License 1.0.0](LICENSE.md) again (`PolyForm-Noncommercial-1.0.0` in all seven `package.json` files): non-commercial use is free, and commercial use by a company of any size or by a solo developer needs a commercial licence from neoxider@gmail.com. Releases 7.55.0 and 7.56.0 were published under PolyForm Small Business 1.0.0 and keep it; earlier releases keep the license they were published under.
+
 ## [7.56.0] - 2026-10-28
 
 Released on `main` with tag `v7.56.0`. Full EditMode 8,307: 8,292 passed / 0 failed / 15 skipped; hermetic PlayMode 395: 391 passed / 0 failed / 4 skipped. The real-provider (OpenRouter `:free`) demo cases did not run: every request was refused with HTTP 401 because the local test key is not an OpenRouter key. They stay open in the [verification report](../../dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md) together with the manual input/visual and player/IL2CPP/browser/device gates.
