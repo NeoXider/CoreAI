@@ -113,6 +113,29 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
         }
 
         [Test]
+        public void Sink_EnvironmentScales_DimTheSkyAmbient_AndHandTheReflectionScaleToTheLook_UntilRevert()
+        {
+            UnityRbxLightingSink sink = NewSink();
+            RbxLightingState noon = State(12f);
+            RbxLightingState underground = new(12f, 41.7f, 2f, noon.Ambient, noon.OutdoorAmbient, noon.SunDirection,
+                0f, 0.25f);
+
+            sink.Apply(in underground);
+
+            Assert.AreEqual(0.1f, RenderSettings.ambientSkyColor.r, 1e-5f, "no sky share: the sky colour is Ambient");
+            Assert.AreEqual(0.1f, RenderSettings.ambientEquatorColor.r, 1e-5f);
+            Assert.AreEqual(0.25f, sink.AmbientOwnership.SkyReflectionScale, 1e-6f);
+
+            sink.Apply(in noon);
+            Assert.AreEqual(0.6f, RenderSettings.ambientSkyColor.r, 1e-5f, "a new world's scales keep today's ambient");
+            Assert.AreEqual(1f, sink.AmbientOwnership.SkyReflectionScale, 1e-6f);
+
+            sink.Apply(in underground);
+            sink.Revert();
+            Assert.AreEqual(1f, sink.AmbientOwnership.SkyReflectionScale, 1e-6f, "the revert hands the look its scale back");
+        }
+
+        [Test]
         public void Sink_AtMidnight_SwitchesTheSunOff_AndDimsTheOutdoorAmbient_NegativeTwin()
         {
             UnityRbxLightingSink sink = NewSink();

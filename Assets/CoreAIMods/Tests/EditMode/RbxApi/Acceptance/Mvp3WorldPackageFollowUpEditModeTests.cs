@@ -569,8 +569,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             using FileLuaModSourceStore sources = new(
                 root, persistenceSyncAsync: cancellationToken => UniTask.FromResult(true));
             sources.SaveStrict("a", "return 'canonical'", StartupManifest("a", false));
-            const string hexFolder = "id-ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb";
-            Assert.IsTrue(File.Exists(Path.Combine(root, hexFolder, "manifest.json")));
+            const string shortFolder = "m-zklycewkdo64v6wcggzzui64ju";
+            Assert.IsTrue(File.Exists(Path.Combine(root, shortFolder, "manifest.json")),
+                "a new canonical mod gets the short folder name");
             string[] ids = { "A", "a", "a/b", "a_b_3a8e75c1" };
             RbxWorldModSource[] mods = new RbxWorldModSource[ids.Length];
             for (int index = 0; index < ids.Length; index++)
@@ -587,19 +588,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual(1, sessions.Length);
             string sessionDirectory = sessions[0];
             StringAssert.IsMatch("^[a-z2-7]{26}$", Path.GetFileName(sessionDirectory));
-            Assert.AreEqual("sha256-base32-v1", File.ReadAllText(Path.Combine(sessionDirectory, ".source-layout")));
+            Assert.AreEqual("sha256-base32-128-v2", File.ReadAllText(Path.Combine(sessionDirectory, ".source-layout")));
             string[] modDirectories = Directory.GetDirectories(sessionDirectory);
             Assert.AreEqual(ids.Length, modDirectories.Length);
             HashSet<string> caseInsensitiveDirectories = new(StringComparer.OrdinalIgnoreCase);
             foreach (string modDirectory in modDirectories)
             {
-                StringAssert.IsMatch("^id-[a-z2-7]{52}$", Path.GetFileName(modDirectory));
+                StringAssert.IsMatch("^m-[a-z2-7]{26}$", Path.GetFileName(modDirectory));
                 Assert.IsTrue(caseInsensitiveDirectories.Add(modDirectory), "case-insensitive paths must remain distinct");
             }
 
-            Assert.IsTrue(Directory.Exists(Path.Combine(
-                sessionDirectory, "id-zklycewkdo64v6wcggzzui64jwtyn37ycr6e44vzqb3yll7ojc5q")),
-                "the full SHA-256 of 'a' uses unpadded lowercase RFC 4648 Base32");
+            Assert.IsTrue(Directory.Exists(Path.Combine(sessionDirectory, shortFolder)),
+                "the first 128 bits of the SHA-256 of 'a' in unpadded lowercase RFC 4648 Base32");
             using FileLuaModSourceStore reopened = new(
                 sessionDirectory, persistenceSyncAsync: cancellationToken => UniTask.FromResult(true));
             for (int index = 0; index < mods.Length; index++)
@@ -652,7 +652,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             Assert.IsTrue(restartedDefault.TryLoad("a", out string canonical, out _));
             Assert.AreEqual("return 'canonical'", canonical, "world staging must not rename the canonical source folders");
-            Assert.IsTrue(File.Exists(Path.Combine(root, hexFolder, "manifest.json")));
+            Assert.IsTrue(File.Exists(Path.Combine(root, shortFolder, "manifest.json")));
             Assert.IsFalse(File.Exists(Path.Combine(root, ".source-layout")));
             for (int index = 0; index < 4; index++)
             {
@@ -662,20 +662,46 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
         }
 
+        /// <summary>
+        /// Old-name twin: a marker-free session version an earlier build wrote with a hex folder keeps loading and
+        /// updating in place under that name, and gains no marker.
+        /// </summary>
         [Test]
         public void ExactReplacement_LegacySessionWithoutLayoutMarkerKeepsHexFolders()
         {
             string sessionDirectory = Path.Combine(
                 NewTemporaryDirectory(), ".world-sessions", Guid.NewGuid().ToString("N"));
-            using FileLuaModSourceStore original = new(sessionDirectory);
-            original.SaveStrict("a", "return 'legacy-session'", StartupManifest("a", false));
+            string hexFolder = Path.Combine(sessionDirectory,
+                "id-ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb");
+            Directory.CreateDirectory(hexFolder);
+            File.WriteAllText(Path.Combine(hexFolder, "manifest.json"),
+                Newtonsoft.Json.JsonConvert.SerializeObject(StartupManifest("a", false)));
+            File.WriteAllText(Path.Combine(hexFolder, "main.lua"), "return 'legacy-session'");
             using FileLuaModSourceStore reopened = new(sessionDirectory);
 
             Assert.IsTrue(reopened.TryLoad("a", out string source, out LuaModManifest manifest));
             Assert.AreEqual("return 'legacy-session'", source);
             Assert.AreEqual("a", manifest.Id);
-            Assert.IsTrue(File.Exists(Path.Combine(sessionDirectory,
-                "id-ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb", "manifest.json")));
+            reopened.SaveStrict("a", "return 'updated'", manifest);
+            Assert.AreEqual("return 'updated'", File.ReadAllText(Path.Combine(hexFolder, "main.lua")), "updated in place");
+            Assert.AreEqual(1, Directory.GetDirectories(sessionDirectory).Length);
+            Assert.IsFalse(File.Exists(Path.Combine(sessionDirectory, ".source-layout")));
+        }
+
+        /// <summary>New-name twin: a new mod saved into a marker-free session version gets the short folder name.</summary>
+        [Test]
+        public void ExactReplacement_SessionWithoutLayoutMarker_GivesANewModAShortFolder()
+        {
+            string sessionDirectory = Path.Combine(
+                NewTemporaryDirectory(), ".world-sessions", Guid.NewGuid().ToString("N"));
+            using FileLuaModSourceStore original = new(sessionDirectory);
+            original.SaveStrict("a", "return 'new-session-mod'", StartupManifest("a", false));
+            using FileLuaModSourceStore reopened = new(sessionDirectory);
+
+            Assert.IsTrue(reopened.TryLoad("a", out string source, out LuaModManifest manifest));
+            Assert.AreEqual("return 'new-session-mod'", source);
+            Assert.AreEqual("a", manifest.Id);
+            Assert.IsTrue(File.Exists(Path.Combine(sessionDirectory, "m-zklycewkdo64v6wcggzzui64ju", "manifest.json")));
             Assert.IsFalse(File.Exists(Path.Combine(sessionDirectory, ".source-layout")));
         }
 
@@ -792,10 +818,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
 
             string parent = NewTemporaryDirectory();
-            int padding = 143 - parent.Length - 1;
+            // WHY 158: with the short folder names a staged world load needs the root plus 102 characters
+            // without a store id, so 157 is the longest root that fits and 158 gives a 260-character path.
+            int padding = 158 - parent.Length - 1;
             Assert.Greater(padding, 0);
             string root = Path.Combine(parent, new string('x', padding));
-            Assert.AreEqual(143, Path.GetFullPath(root).Length);
+            Assert.AreEqual(158, Path.GetFullPath(root).Length);
             int syncCalls = 0;
             using FileLuaModSourceStore sources = new(root, persistenceSyncAsync: cancellationToken =>
             {

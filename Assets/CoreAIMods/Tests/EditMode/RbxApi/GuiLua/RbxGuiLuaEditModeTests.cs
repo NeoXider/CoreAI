@@ -448,5 +448,102 @@ end)");
             Assert.AreEqual("nil", _world.Get(Mod, "now"));
             Assert.AreEqual("focused:Chat,released:Chat", _world.Get(Mod, "log"));
         }
+
+        private const string Shop = @"
+local player = game:GetService('Players'):GetPlayers()[1]
+local gui = Instance.new('ScreenGui')
+local shop = Instance.new('ScrollingFrame')
+shop.Name = 'Shop'
+shop.Size = UDim2.fromOffset(240, 200)
+shop.CanvasSize = UDim2.new()
+shop.AutomaticCanvasSize = Enum.AutomaticSize.Y
+shop.ScrollBarThickness = 8
+shop.Parent = gui
+Instance.new('UIListLayout').Parent = shop
+for i = 1, 30 do
+  local item = Instance.new('TextButton')
+  item.Name = 'Item' .. i
+  item.Size = UDim2.new(1, 0, 0, 40)
+  item.Text = 'Sword ' .. i
+  item.Parent = shop
+end
+gui.Parent = player.PlayerGui
+";
+
+        [Test]
+        public void MVP15_Lua_AShopList_ScrolledByThePlayer_TellsTheScript()
+        {
+            NewWorld();
+            _world.Load(Mod, Shop + @"
+shop:GetPropertyChangedSignal('CanvasPosition'):Connect(function()
+  store_set('seen', tostring(shop.CanvasPosition))
+end)
+game:GetService('RunService').Heartbeat:Connect(function()
+  store_set('canvas', tostring(shop.AbsoluteCanvasSize))
+  store_set('first', tostring(shop.Item1.AbsolutePosition))
+end)");
+            _world.Frame();
+            _world.Frame();
+            Assert.AreEqual("240, 1200", _world.Get(Mod, "canvas"), "30 items of 40 make the canvas");
+            Assert.IsEmpty(_world.Get(Mod, "seen"), "twin: nothing scrolled, nothing fired");
+
+            Element("Shop").ScrollByPlayer(0f, 120f);
+            _world.Frame();
+            _world.Frame();
+
+            Assert.AreEqual("0, 120", _world.Get(Mod, "seen"), "the script sees the player's scroll");
+            Assert.AreEqual("0, -120", _world.Get(Mod, "first"), "and the items moved up with the canvas");
+        }
+
+        [Test]
+        public void MVP15_Lua_AScriptWritingCanvasPositionEveryFrame_IsCharged_WhileThePlayersScrollIsNot()
+        {
+            NewWorld(new RbxUiBudgets { MaxWritesPerFrame = 2 });
+            _world.Load(Mod, Shop + @"
+local n = 0
+game:GetService('RunService').Heartbeat:Connect(function()
+  n = n + 1
+  shop.CanvasPosition = Vector2.new(0, n)
+  shop.CanvasPosition = Vector2.new(0, n + 100)
+  local ok, err = pcall(function() shop.CanvasPosition = Vector2.new(0, n + 200) end)
+  store_set('third', tostring(ok) .. '|' .. tostring(err))
+end)");
+            _world.Frame();
+            for (int i = 1; i <= 5; i++)
+            {
+                Element("Shop").ScrollByPlayer(0f, 10f * i);
+            }
+
+            _world.Frame();
+
+            StringAssert.StartsWith("false|", _world.Get(Mod, "third"), "the third write of a frame is over budget");
+            StringAssert.Contains(RbxUiErrors.BudgetWrites, _world.Get(Mod, "third"));
+            Assert.AreEqual(new RbxVector2(0f, 102f), Find<RbxScrollingFrame>("Shop").CanvasPosition,
+                "the two writes the budget held went through: five scrolls by the player used none of it");
+        }
+
+        [Test]
+        public void MVP15_Lua_ElasticBehavior_IsALoudStub_WhileTheBarMembersAreReal()
+        {
+            NewWorld();
+            _world.Load(Mod, Shop + @"
+local function try(key, fn) local ok, err = pcall(fn) store_set(key, tostring(ok) .. '|' .. tostring(err)) end
+try('elastic', function() return shop.ElasticBehavior end)
+try('elastic_write', function() shop.ElasticBehavior = Enum.ElasticBehavior.Never end)
+try('bar', function()
+  shop.ScrollBarImageColor3 = Color3.new(0, 0, 0)
+  shop.ScrollBarImageTransparency = 0.5
+  shop.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
+  shop.VerticalScrollBarPosition = Enum.VerticalScrollBarPosition.Left
+  shop.ScrollingDirection = Enum.ScrollingDirection.Y
+  return tostring(shop.VerticalScrollBarInset) .. ',' .. tostring(shop.ScrollingDirection)
+end)
+try('window', function() return tostring(shop.AbsoluteWindowSize) end)");
+
+            StringAssert.Contains("NOT_IMPLEMENTED", _world.Get(Mod, "elastic"));
+            StringAssert.Contains("NOT_IMPLEMENTED", _world.Get(Mod, "elastic_write"));
+            Assert.AreEqual("true|Enum.ScrollBarInset.ScrollBar,Enum.ScrollingDirection.Y", _world.Get(Mod, "bar"));
+            Assert.AreEqual("true|232, 200", _world.Get(Mod, "window"), "the inset bar takes its 8 pixels");
+        }
     }
 }

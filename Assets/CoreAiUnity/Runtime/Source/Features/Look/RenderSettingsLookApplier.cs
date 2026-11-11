@@ -81,6 +81,7 @@ namespace CoreAI.Look
             if (!_ownershipSubscribed)
             {
                 _ambientOwnership.Changed += HandleAmbientOwnershipChanged;
+                _ambientOwnership.SkyReflectionScaleChanged += HandleSkyReflectionScaleChanged;
                 _ownershipSubscribed = true;
             }
 
@@ -106,6 +107,7 @@ namespace CoreAI.Look
             if (_ownershipSubscribed)
             {
                 _ambientOwnership.Changed -= HandleAmbientOwnershipChanged;
+                _ambientOwnership.SkyReflectionScaleChanged -= HandleSkyReflectionScaleChanged;
                 _ownershipSubscribed = false;
             }
 
@@ -193,6 +195,28 @@ namespace CoreAI.Look
             }
         }
 
+        private void HandleSkyReflectionScaleChanged()
+        {
+            if (_snapshot == null || _lastProfile == null || _lastMode == LookMode.Off ||
+                SceneManager.GetActiveScene() != _capturedScene ||
+                !(_lastMode == LookMode.Apply || _snapshot.SkyboxMissing))
+            {
+                return;
+            }
+
+            ApplySkyReflectionScale(_lastProfile);
+        }
+
+        private void ApplySkyReflectionScale(CoreAiLookProfile profile)
+        {
+            float scale = _ambientOwnership.SkyReflectionScale;
+            RenderSettings.reflectionIntensity = profile.ReflectionIntensity * scale;
+            if (_probe != null)
+            {
+                _probe.intensity = scale;
+            }
+        }
+
         private void ApplySky(CoreAiLookProfile profile, ResolvedGraphicsOptions options)
         {
             bool ownsAmbient = !_ambientOwnership.IsClaimed;
@@ -235,9 +259,9 @@ namespace CoreAI.Look
                 }
             }
 
-            RenderSettings.reflectionIntensity = profile.ReflectionIntensity;
             DynamicGI.UpdateEnvironment();
             UpdateReflectionProbe(profile, options.Sky && RenderSettings.skybox != null);
+            ApplySkyReflectionScale(profile);
         }
 
         private Material BuildProceduralSky(CoreAiLookProfile profile)

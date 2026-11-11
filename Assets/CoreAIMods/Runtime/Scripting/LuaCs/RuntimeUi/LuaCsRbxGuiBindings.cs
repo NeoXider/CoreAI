@@ -948,8 +948,6 @@ namespace CoreAI.Ai.LuaCs
                 (s, v) => S(s).SetScrollBarImageTransparency(v));
             EnumItem(c, "AutomaticCanvasSize", "AutomaticSize", s => (int)S(s).AutomaticCanvasSize,
                 (s, v) => S(s).SetAutomaticCanvasSize((RbxAutomaticSize)v));
-            EnumItem(c, "ElasticBehavior", "ElasticBehavior", s => S(s).ElasticBehavior,
-                (s, v) => S(s).SetElasticBehavior(v));
             EnumItem(c, "VerticalScrollBarPosition", "VerticalScrollBarPosition", s => S(s).VerticalScrollBarPosition,
                 (s, v) => S(s).SetVerticalScrollBarPosition(v));
             EnumItem(c, "HorizontalScrollBarInset", "ScrollBarInset", s => S(s).HorizontalScrollBarInset,

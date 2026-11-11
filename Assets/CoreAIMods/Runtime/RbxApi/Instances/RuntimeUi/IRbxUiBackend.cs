@@ -159,6 +159,24 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
         event Action FocusLost;
 
         /// <summary>
+        /// Raised when a scroll view's offset changes by anything but <see cref="SetScrollOffset"/>: the player's
+        /// wheel, drag or scroll bar, or the view clamping the offset to its content.
+        /// </summary>
+        event Action ScrollChanged;
+
+        /// <summary>How far a scroll view's content is scrolled to the left, in pixels; 0 for any other kind.</summary>
+        float ScrollOffsetX { get; }
+
+        /// <summary>How far a scroll view's content is scrolled up, in pixels; 0 for any other kind.</summary>
+        float ScrollOffsetY { get; }
+
+        /// <summary>
+        /// Scrolls a scroll view (the view clamps the offset to its content) without raising
+        /// <see cref="ScrollChanged"/>; false when detached, not a scroll view, or not finite.
+        /// </summary>
+        bool SetScrollOffset(float x, float y);
+
+        /// <summary>
         /// Sets one longhand from a typed value without parsing text: the per-frame safe path. It wins over every
         /// rule like <see cref="SetStyle(string, string)"/>; false when detached or the value does not fit.
         /// </summary>

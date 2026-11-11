@@ -322,7 +322,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             }
 
             yield return Frames(1);
-            RbxVector3 focus = RootPosition() + LuaCsRbxApiBindings.HumanoidCameraSubjectOffset;
+            RbxVector3 focus = RootPosition() + LuaCsRbxApiBindings.RigCameraSubjectOffset;
             float distance = (focus - _rig.GetCFrame().Position).Magnitude;
             TestContext.WriteLine("[P1] camera distance after 8 notches: " + distance);
             Assert.Less(distance, 1f, "first person sits half a stud from the head");

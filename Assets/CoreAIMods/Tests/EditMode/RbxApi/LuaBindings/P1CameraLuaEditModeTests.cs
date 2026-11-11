@@ -331,7 +331,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 local humanoid = game:GetService('Players'):GetPlayers()[1].Character:FindFirstChildOfClass('Humanoid')
                 store_set('subject', tostring(cam.CameraSubject == humanoid))");
 
-            RbxVector3 focus = world.RootPosition() + LuaCsRbxApiBindings.HumanoidCameraSubjectOffset;
+            RbxVector3 focus = world.RootPosition() + LuaCsRbxApiBindings.RigCameraSubjectOffset;
             RbxCFrame camera = world.Rig.GetCFrame();
             Assert.AreEqual("true", world.Get("m", "subject"));
             Assert.AreEqual(12.5f, (focus - camera.Position).Magnitude, 1e-3f, "the default zoom");
@@ -373,7 +373,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 world.Frames(1);
             }
 
-            RbxVector3 focus = world.RootPosition() + LuaCsRbxApiBindings.HumanoidCameraSubjectOffset;
+            RbxVector3 focus = world.RootPosition() + LuaCsRbxApiBindings.RigCameraSubjectOffset;
             Assert.AreEqual(0.5f, (focus - world.Rig.GetCFrame().Position).Magnitude, 1e-3f, "first person");
             Assert.AreEqual(RbxMouseLock.LockCenter, world.Cursor.Applied);
             Assert.AreEqual(RbxMouseLock.LockCenter, world.Roblox.UserInputService.RequestedMouseLock);
@@ -395,7 +395,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 world.Frames(1);
             }
 
-            RbxVector3 focus = world.RootPosition() + LuaCsRbxApiBindings.HumanoidCameraSubjectOffset;
+            RbxVector3 focus = world.RootPosition() + LuaCsRbxApiBindings.RigCameraSubjectOffset;
             Assert.AreEqual(12.5f, (focus - world.Rig.GetCFrame().Position).Magnitude, 1e-3f);
         }
 
@@ -410,7 +410,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 player.CameraMode = Enum.CameraMode.LockFirstPerson");
             world.Frames(1);
 
-            RbxVector3 focus = world.RootPosition() + LuaCsRbxApiBindings.HumanoidCameraSubjectOffset;
+            RbxVector3 focus = world.RootPosition() + LuaCsRbxApiBindings.RigCameraSubjectOffset;
             Assert.AreEqual("true,400,0.5", world.Get("m", "defaults"));
             Assert.AreEqual(0.5f, (focus - world.Rig.GetCFrame().Position).Magnitude, 1e-3f);
             Assert.AreEqual(RbxMouseLock.LockCenter, world.Cursor.Applied);
@@ -427,7 +427,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 world.Frames(1);
             }
 
-            RbxVector3 focus = world.RootPosition() + LuaCsRbxApiBindings.HumanoidCameraSubjectOffset;
+            RbxVector3 focus = world.RootPosition() + LuaCsRbxApiBindings.RigCameraSubjectOffset;
             Assert.AreEqual(20f, (focus - world.Rig.GetCFrame().Position).Magnitude, 1e-3f);
         }
 
@@ -571,7 +571,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             world.Roblox.WorldPhysics.AttachPort(port);
             world.Frames(1);
 
-            RbxVector3 focus = world.RootPosition() + LuaCsRbxApiBindings.HumanoidCameraSubjectOffset;
+            RbxVector3 focus = world.RootPosition() + LuaCsRbxApiBindings.RigCameraSubjectOffset;
             Assert.Greater(port.Casts, 0);
             Assert.AreEqual(4.75f, (focus - world.Rig.GetCFrame().Position).Magnitude, 1e-3f,
                 "the wall at 5 studs, less the clearance; the root and the glass do not occlude");

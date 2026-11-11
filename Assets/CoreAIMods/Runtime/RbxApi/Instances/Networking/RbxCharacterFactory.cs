@@ -19,8 +19,8 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
     /// The body is real instances, so a script finds <c>character.Head</c> and recolours it like any Part;
     /// <see cref="RbxCharacterRigs"/> animates it from the Humanoid, as it animates any Model with those
     /// names. The root keeps the 2x2x1 collidable box the controls are tuned on and is invisible; the other
-    /// parts do not collide (see <see cref="RbxR6Rig.SeedFor"/>). Appearance loading, accessories, joints and
-    /// animation tracks stay loud stubs.
+    /// parts push nothing while the rig holds them (see <see cref="RbxR6Rig.SeedFor"/>). Appearance loading,
+    /// accessories, joints and animation tracks stay loud stubs.
     /// </para>
     /// </remarks>
     public static class RbxCharacterFactory

@@ -153,7 +153,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Frames(2);
             RbxVector3 focus = _roblox.PartSink.GetLivePositionStuds(
                                    Player("local-player").Character.FindFirstChild(RbxCharacterFactory.RootPartName).Id)
-                               + LuaCsRbxApiBindings.HumanoidCameraSubjectOffset;
+                               + LuaCsRbxApiBindings.RigCameraSubjectOffset;
             Assert.AreEqual(1.2f, (focus - _rig.GetCFrame().Position).Magnitude, 1e-3f,
                 "the local character's parts are not view-blocking geometry");
             Assert.Greater(PartsOf("local-player")[0].LocalTransparencyModifier, 0f, "and it fades this close");

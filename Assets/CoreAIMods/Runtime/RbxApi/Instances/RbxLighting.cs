@@ -7,7 +7,8 @@ namespace CoreAI.Mods.Rbx.Instances
     /// <summary>
     /// Roblox <c>Lighting</c>, the day-cycle slice: <c>ClockTime</c> and <c>TimeOfDay</c> (one clock, two
     /// views), <c>GeographicLatitude</c>, <c>Brightness</c>, <c>Ambient</c>, <c>OutdoorAmbient</c>,
-    /// <c>GetMinutesAfterMidnight</c>, <c>SetMinutesAfterMidnight</c>, <c>GetSunDirection</c> and
+    /// <c>EnvironmentDiffuseScale</c>, <c>EnvironmentSpecularScale</c>, <c>GetMinutesAfterMidnight</c>,
+    /// <c>SetMinutesAfterMidnight</c>, <c>GetSunDirection</c> and
     /// <c>LightingChanged</c>. Defaults are the class defaults of <c>Full-API-Dump.json</c>. Every real
     /// change fires <c>Changed</c> with the property name, that property's
     /// <c>GetPropertyChangedSignal</c> and <c>LightingChanged(false)</c>; an equal write fires nothing.
@@ -24,6 +25,19 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary><c>Full-API-Dump.json</c>: <c>Brightness</c> 1.</summary>
         public const float DefaultBrightness = 1f;
 
+        /// <summary>
+        /// <c>EnvironmentDiffuseScale</c> of a new place: 1.
+        /// </summary>
+        /// <remarks>
+        /// WHY 1 and not the dump's class default 0: this service stands for the Lighting of a new place, and
+        /// Roblox's place templates set both environment scales to 1; at 0 every world would lose the sky
+        /// light and sky reflections it has always had.
+        /// </remarks>
+        public const float DefaultEnvironmentDiffuseScale = 1f;
+
+        /// <summary><c>EnvironmentSpecularScale</c> of a new place: 1 (see <see cref="DefaultEnvironmentDiffuseScale"/>).</summary>
+        public const float DefaultEnvironmentSpecularScale = 1f;
+
         private const double SecondsPerDay = 86400d;
         private const double HoursPerDay = 24d;
         private const double MinutesPerDay = 1440d;
@@ -34,6 +48,8 @@ namespace CoreAI.Mods.Rbx.Instances
         private float _brightness = DefaultBrightness;
         private RbxColor3 _ambient = DefaultAmbient;
         private RbxColor3 _outdoorAmbient = DefaultOutdoorAmbient;
+        private float _environmentDiffuseScale = DefaultEnvironmentDiffuseScale;
+        private float _environmentSpecularScale = DefaultEnvironmentSpecularScale;
         private IRbxLightingSink _sink;
         private bool _sinkFaultReported;
         private bool _restoring;
@@ -83,6 +99,12 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>The hue of outdoor areas.</summary>
         public RbxColor3 OutdoorAmbient => _outdoorAmbient;
+
+        /// <summary>Share of the sky's own light in the ambient, [0, 1].</summary>
+        public float EnvironmentDiffuseScale => _environmentDiffuseScale;
+
+        /// <summary>Share of the sky's reflections on smooth and metal surfaces, [0, 1].</summary>
+        public float EnvironmentSpecularScale => _environmentSpecularScale;
 
         /// <summary>Attaches the sink (null detaches); a world that already drives its lighting pushes to it at once.</summary>
         public void AttachSink(IRbxLightingSink sink)
@@ -199,18 +221,46 @@ namespace CoreAI.Mods.Rbx.Instances
             Changed(nameof(OutdoorAmbient));
         }
 
+        /// <summary>Sets <c>EnvironmentDiffuseScale</c>; Roblox clamps it into [0, 1].</summary>
+        public void SetEnvironmentDiffuseScale(double scale)
+        {
+            RequireFinite(scale, "EnvironmentDiffuseScale");
+            float next = (float)Math.Max(0d, Math.Min(1d, scale));
+            if (_environmentDiffuseScale.Equals(next))
+            {
+                return;
+            }
+
+            _environmentDiffuseScale = next;
+            Changed(nameof(EnvironmentDiffuseScale));
+        }
+
+        /// <summary>Sets <c>EnvironmentSpecularScale</c>; Roblox clamps it into [0, 1].</summary>
+        public void SetEnvironmentSpecularScale(double scale)
+        {
+            RequireFinite(scale, "EnvironmentSpecularScale");
+            float next = (float)Math.Max(0d, Math.Min(1d, scale));
+            if (_environmentSpecularScale.Equals(next))
+            {
+                return;
+            }
+
+            _environmentSpecularScale = next;
+            Changed(nameof(EnvironmentSpecularScale));
+        }
+
         /// <summary>The current state as a sink receives it.</summary>
         public RbxLightingState CaptureState()
         {
             return new RbxLightingState(_clockTime, _geographicLatitude, _brightness, _ambient,
-                _outdoorAmbient, GetSunDirection());
+                _outdoorAmbient, GetSunDirection(), _environmentDiffuseScale, _environmentSpecularScale);
         }
 
         /// <summary>What the world package stores in its <c>lighting</c> block.</summary>
         public RbxLightingDurableState CaptureDurableState()
         {
             return new RbxLightingDurableState(_clockTime, _geographicLatitude, _brightness, _ambient,
-                _outdoorAmbient);
+                _outdoorAmbient, _environmentDiffuseScale, _environmentSpecularScale);
         }
 
         /// <summary>
@@ -233,6 +283,8 @@ namespace CoreAI.Mods.Rbx.Instances
                 SetBrightness(state.Brightness);
                 SetAmbient(state.Ambient);
                 SetOutdoorAmbient(state.OutdoorAmbient);
+                SetEnvironmentDiffuseScale(state.EnvironmentDiffuseScale);
+                SetEnvironmentSpecularScale(state.EnvironmentSpecularScale);
             }
             finally
             {

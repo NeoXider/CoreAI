@@ -295,6 +295,42 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         }
 
         [Test]
+        public void P9_EnvironmentScales_ReachTheSink_TheDurableState_AndClamp()
+        {
+            RecordingSink sink = new();
+            _lighting.AttachSink(sink);
+
+            _lighting.SetEnvironmentDiffuseScale(0.25);
+            _lighting.SetEnvironmentSpecularScale(7);
+            _lighting.SetEnvironmentSpecularScale(0.5);
+
+            Assert.AreEqual(2, sink.States.Count, "7 clamps to the default 1, an equal value, and calls nothing");
+            Assert.AreEqual(0.25f, sink.States[1].EnvironmentDiffuseScale, 1e-6f);
+            Assert.AreEqual(0.5f, sink.States[1].EnvironmentSpecularScale, 1e-6f);
+            RbxLightingDurableState saved = _lighting.CaptureDurableState();
+            Assert.AreEqual(0.25f, saved.EnvironmentDiffuseScale, 1e-6f);
+            Assert.AreEqual(1f, new RbxLightingDurableState(12f, 0f, 1f, RbxLighting.DefaultAmbient,
+                RbxLighting.DefaultOutdoorAmbient).EnvironmentDiffuseScale, "a block saved before the scales reads 1");
+            Assert.Throws<RbxError>(() => _lighting.SetEnvironmentDiffuseScale(double.NaN));
+        }
+
+        [Test]
+        public void P9_Mapping_EnvironmentDiffuseScale_BlendsTheSkyFacingAmbientDownToAmbient()
+        {
+            RbxColor3 ambient = new(0.1f, 0.1f, 0.1f);
+            RbxColor3 outdoor = new(0.5f, 0.5f, 0.5f);
+            RbxVector3 noonSun = RbxSunModel.SunDirection(12f, 0f);
+            RbxLightingState full = new(12f, 0f, 1f, ambient, outdoor, noonSun, 1f, 1f);
+            RbxLightingState none = new(12f, 0f, 1f, ambient, outdoor, noonSun, 0f, 1f);
+            RbxLightingState half = new(12f, 0f, 1f, ambient, outdoor, noonSun, 0.5f, 1f);
+
+            Assert.AreEqual(RbxLightingMapping.EffectiveOutdoorAmbient(full), RbxLightingMapping.SkyFacingAmbient(full),
+                "at 1 the sky-facing ambient is today's outdoor ambient");
+            Assert.AreEqual(ambient, RbxLightingMapping.SkyFacingAmbient(none), "at 0 only Ambient remains");
+            Assert.AreEqual(0.3f, RbxLightingMapping.SkyFacingAmbient(half).R, 1e-5f);
+        }
+
+        [Test]
         public void P9_DurableState_AScriptWriteAfterTheRestore_AdvancesTheRevision_NegativeTwin()
         {
             _lighting.RestoreDurableState(new RbxLightingDurableState(6f, 10f, 2f, RbxLighting.DefaultAmbient,

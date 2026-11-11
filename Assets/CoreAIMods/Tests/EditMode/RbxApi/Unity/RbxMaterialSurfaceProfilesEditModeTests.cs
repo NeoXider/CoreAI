@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using CoreAI.Editor.RbxMaterials;
+using CoreAI.Mods.Rbx.Rendering;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace CoreAI.Tests.EditMode.RbxApi
 {
@@ -123,6 +125,46 @@ namespace CoreAI.Tests.EditMode.RbxApi
             Assert.AreEqual(1.1f, entry.NormalStrength, 0.001f);
             Assert.AreEqual(0.72f, entry.RoughnessScale, 0.001f);
             Assert.AreEqual(0.7f, entry.PartColorInfluence, 0.001f);
+        }
+
+        [Test]
+        public void ApplyPackagedRelief_LiftsOnlyTheDarkLeafyGrassMap_WithAGreyThatKeepsItsHue()
+        {
+            RbxTextureCatalogEntryData leaves = new() { MaterialName = "LeafyGrass" };
+            RbxTextureCatalogEntryData grass = new() { MaterialName = "Grass" };
+
+            RbxMaterialSurfaceProfiles.ApplyPackagedRelief(leaves);
+            RbxMaterialSurfaceProfiles.ApplyPackagedRelief(grass);
+
+            Assert.AreEqual(1.2f, leaves.IntrinsicColor.r, 0.001f);
+            Assert.AreEqual(leaves.IntrinsicColor.r, leaves.IntrinsicColor.g, 0.001f);
+            Assert.AreEqual(leaves.IntrinsicColor.r, leaves.IntrinsicColor.b, 0.001f);
+            Assert.AreEqual(Color.white, grass.IntrinsicColor, "a map without a gain keeps the neutral colour");
+        }
+
+        [TestCase("Grass")]
+        [TestCase("LeafyGrass")]
+        [TestCase("Ground")]
+        [TestCase("Sand")]
+        public void PackagedCatalog_AgreesWithTheTable_SoARetuneChangesNothing(string name)
+        {
+            RbxMaterialTextureCatalog catalog = Resources.Load<RbxMaterialTextureCatalog>(
+                RbxTextureMaterialProvider.DefaultCatalogResource);
+            Assert.IsNotNull(catalog, "the packaged catalog loads from Resources");
+            RbxMaterialTextureCatalog.Entry entry = null;
+            foreach (RbxMaterialTextureCatalog.Entry candidate in catalog.Entries)
+            {
+                if (candidate.MaterialName == name)
+                {
+                    entry = candidate;
+                }
+            }
+
+            Assert.IsNotNull(entry, name + " is in the packaged catalog");
+            RbxMaterialSurfaceProfiles.Profile profile = RbxMaterialSurfaceProfiles.For(name);
+            float gain = RbxMaterialSurfaceProfiles.ReliefFor(name).AlbedoGain;
+            Assert.AreEqual(profile.RoughnessScale, entry.RoughnessScale, 0.001f, name + " roughness scale");
+            Assert.AreEqual(gain, entry.IntrinsicColor.r, 0.001f, name + " intrinsic colour");
         }
 
         [Test]

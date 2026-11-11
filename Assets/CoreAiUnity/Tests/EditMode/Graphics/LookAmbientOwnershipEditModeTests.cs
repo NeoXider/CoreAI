@@ -49,6 +49,26 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void SkyReflectionScale_StartsAtOne_ClampsBelowZero_AndRaisesOnlyOnAChange()
+        {
+            LookAmbientOwnership ownership = new();
+            int changes = 0;
+            ownership.SkyReflectionScaleChanged += () => changes++;
+
+            Assert.AreEqual(1f, ownership.SkyReflectionScale);
+            ownership.SetSkyReflectionScale(1f);
+            Assert.AreEqual(0, changes, "an equal value is not a change");
+
+            ownership.SetSkyReflectionScale(0.25f);
+            ownership.SetSkyReflectionScale(-3f);
+            ownership.SetSkyReflectionScale(float.NaN);
+
+            Assert.AreEqual(0f, ownership.SkyReflectionScale);
+            Assert.AreEqual(2, changes, "0.25, then 0; NaN is 0 as well and changes nothing");
+            Assert.IsFalse(ownership.IsClaimed, "the scale is not a claim");
+        }
+
+        [Test]
         public void AClaimNeedsAnOwner()
         {
             LookAmbientOwnership ownership = new();

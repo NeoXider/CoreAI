@@ -864,6 +864,13 @@ namespace CoreAI.Infrastructure.Lua
                 }
             }
 
+            // WHY the staging path too: a first save stages under a longer name than the short mod folder, so the
+            // admission check and every save must refuse by the same, longest path.
+            if (forWrite && !Directory.Exists(destination))
+            {
+                EnsureSourcePaths(Path.Combine(_dir, StagingDirectoryPrefix + new string('0', 32)), includeTemporaryPaths: true);
+            }
+
             return destination;
         }
 

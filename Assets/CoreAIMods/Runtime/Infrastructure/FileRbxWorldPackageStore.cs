@@ -1878,6 +1878,12 @@ namespace CoreAI.Mods.WorldPackages
                 collectionItems += payload.StarterGui.Value.CoreGuiDisabled.Count;
             }
 
+            foreach (KeyValuePair<InstanceId, RbxWorldPackageTextChatCommand> command in payload.TextChatCommands)
+            {
+                AddTextLength(ref textCharacters, command.Value.PrimaryAlias);
+                AddTextLength(ref textCharacters, command.Value.SecondaryAlias);
+            }
+
             if (payload.Parts == null)
             {
                 return;

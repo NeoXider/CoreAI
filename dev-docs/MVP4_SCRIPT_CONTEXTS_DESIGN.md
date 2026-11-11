@@ -1,8 +1,8 @@
 # MVP4 — Script contexts and the client runtime: design note
 
-Status (2026-11-11): **steps A1–A3 and B1 written; B2 and C1–C6 not started.** A1–A3 are green in
-Unity 6000.6 EditMode; B1 (the script instance classes and `Enum.RunContext`) has passed its portable tests
-only. Nothing runs on the declared context yet (C1 adds the load refusal). Written 2026-11-11 for the rung "MVP4 — Script contexts & client
+Status (2026-11-11): **steps A1–A3, B1 and B2 written; C1–C6 not started.** A1–A3 are green in
+Unity 6000.6 EditMode; B1 (the script instance classes and `Enum.RunContext`) and B2 (the package v2 reader) have
+passed their portable tests only. Nothing runs on the declared context yet (C1 adds the load refusal). Written 2026-11-11 for the rung "MVP4 — Script contexts & client
 runtime" (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md:929-977`) and the open item "Design note for plan
 decision D1 (c) before any code" (`TODO.md:557-561`). Plan decision D1 (c) — "instances are views over
 the mod source store" — is at `ROBLOX_API_ROADMAP.md:4634`; the owner may still override it.
@@ -809,7 +809,33 @@ Tests: `Tests/EditMode/RbxApi/Scripts/ScriptInstancesEditModeTests.cs` (portable
   path; script members are not bound to Lua yet, so Lua still sees what it sees today.
 - Run the catalog fixtures; update a creatable-class golden if one exists (none found by search).
 
-### B2 (M) — Package v2 reader and codec (the writer stays v1 until C1)
+### B2 (M) — Package v2 reader and codec (the writer stays v1 until C1) — done 2026-11-11
+
+Built as listed below, portable tests only so far (`ScriptSnapshotEditModeTests` in the engine-free suite,
+`WorldPackageScriptsEditModeTests` in the Lua tier; both need a Unity EditMode run). Where the code differs from this
+entry:
+
+- **`minimum_reader_version` 2, not a new number.** Reader version 2 was taken today by Terrain cells (format 1 plus
+  `Terrain/voxels.bin`); both ship in the first release after 7.56.0, so a version 2 package declares 2 and
+  `CurrentReaderVersion` stays 2. The reader refuses a version 2 manifest that declares 1.
+- **Strict block rule per version.** Version 1 refuses any `script` block; version 2 requires one on every script node
+  (`""` = unbound), so each version has one spelling. The tree serializer itself accepts a script node without a block
+  (unbound, class defaults), because a replication spawn never carries one.
+- **`ScriptSnapshot.Enabled`/`RunContext` are nullable**: null on a ModuleScript, required on a BaseScript; the
+  ModuleScript block is `{"source_id": ...}` alone.
+- **Capture takes the format version** (`RbxWorldPackageSerializer.Capture(context, formatVersion)`, internal; the
+  public `Capture` uses `CurrentFormatVersion` = 1). Version 1 capture drops every block and reports nothing about
+  bindings, so v1 output is byte-identical by construction; C1 raises `CurrentFormatVersion` to 2.
+- **Duplicate and disagreeing bindings are not repaired by capture** (only SC-7's `missing`/`mod-ephemeral` are): only
+  the runtime binds, so either is a runtime defect, and a version 2 capture fails on it in `ValidatePayload`. C1 must
+  hold both invariants (see its plan).
+- **Not in B2:** the replication wire codes and transcription verdicts for `Enabled`/`RunContext` that the B1 entry
+  expected (`ReplicationMembers` remark) — the wire still never carries script state or `SourceId`, which is what SC-16
+  needs until C5 decides the client form; and the replica source checks, which `WORLD_PACKAGE.md` now places in C5.
+- **Also in this step:** `InstanceSnapshot.IsRuntimeInfrastructure` and `InstanceRegistry.RestoreInstance(...,
+  isRuntimeInfrastructure)`, because a raw tree round trip turned the bootstrap Terrain into charged content (the
+  failing `LuaCs_RegisteredInstanceQuota_ChargesRestoredHostContentButNotTheWorldSkeleton`, already failing at
+  `7182019a`).
 
 - `RbxApi/Instances/InstanceSnapshot.cs`: `ScriptSnapshot Script` with `SourceId`, `Enabled`,
   `RunContext`.

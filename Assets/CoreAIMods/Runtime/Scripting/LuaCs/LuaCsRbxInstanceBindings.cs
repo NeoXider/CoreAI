@@ -1097,6 +1097,7 @@ namespace CoreAI.Ai.LuaCs
                     case "JumpPower": return Ok(humanoid.JumpPower, out value);
                     case "JumpHeight": return Ok(humanoid.JumpHeight, out value);
                     case "UseJumpPower": return Ok(humanoid.UseJumpPower, out value);
+                    case "AutoRotate": return Ok(humanoid.AutoRotate, out value);
                     case "DisplayName": return Ok(humanoid.DisplayName ?? "", out value);
                     case "MoveDirection":
                         return Ok(LuaCsRbxDatatypeBindings.Wrap(humanoid.MoveDirection), out value);
@@ -1331,6 +1332,12 @@ namespace CoreAI.Ai.LuaCs
                         context.RequireWorldEditForWrite(instance, "UseJumpPower");
                         humanoidTarget.UseJumpPower = ReadAssignedBoolean(
                             value, instance.ClassName, "UseJumpPower");
+                        context.RecordMutation(instance);
+                        return true;
+                    case "AutoRotate":
+                        context.RequireWorldEditForWrite(instance, "AutoRotate");
+                        humanoidTarget.AutoRotate = ReadAssignedBoolean(
+                            value, instance.ClassName, "AutoRotate");
                         context.RecordMutation(instance);
                         return true;
                     case "DisplayName":
@@ -2262,7 +2269,7 @@ namespace CoreAI.Ai.LuaCs
                 "LocalTransparencyModifier")),
             ("Camera", Names("CFrame", "CameraType", "CameraSubject", "FieldOfView", "ViewportSize")),
             ("Humanoid", Names("Health", "MaxHealth", "WalkSpeed", "JumpPower", "JumpHeight",
-                "UseJumpPower", "DisplayName", "MoveDirection", "RootPart", "Jump")),
+                "UseJumpPower", "AutoRotate", "DisplayName", "MoveDirection", "RootPart", "Jump")),
             ("Player", Names("UserId", "DisplayName", "Character", "CameraMode", "CameraMaxZoomDistance",
                 "CameraMinZoomDistance")),
             ("Players", Names("LocalPlayer", "CharacterAutoLoads", "RespawnTime", "MaxPlayers")),
@@ -2273,7 +2280,7 @@ namespace CoreAI.Ai.LuaCs
             ("MaterialVariant", Names("BaseMaterial", "ColorMap", "NormalMap", "RoughnessMap",
                 "MetalnessMap", "StudsPerTile")),
             ("Lighting", Names("ClockTime", "TimeOfDay", "GeographicLatitude", "Brightness", "Ambient",
-                "OutdoorAmbient")),
+                "OutdoorAmbient", "EnvironmentDiffuseScale", "EnvironmentSpecularScale")),
             ("Light", Names("Brightness", "Color", "Enabled", "Shadows")),
             ("PointLight", Names("Range")),
             ("ValueBase", Names("Value")),
@@ -4006,6 +4013,12 @@ namespace CoreAI.Ai.LuaCs
                 case "OutdoorAmbient":
                     value = LuaCsRbxDatatypeBindings.Wrap(lighting.OutdoorAmbient);
                     return true;
+                case "EnvironmentDiffuseScale":
+                    value = (double)lighting.EnvironmentDiffuseScale;
+                    return true;
+                case "EnvironmentSpecularScale":
+                    value = (double)lighting.EnvironmentSpecularScale;
+                    return true;
                 case "LightingChanged":
                     value = LuaCsRbxDatatypeBindings.Wrap(lighting.LightingChanged, context);
                     return true;
@@ -4048,6 +4061,14 @@ namespace CoreAI.Ai.LuaCs
                 case "OutdoorAmbient":
                     context.RequireWorldEditForWrite(self, key);
                     lighting.SetOutdoorAmbient(ReadAssignedColor3(value, self.ClassName, key));
+                    return true;
+                case "EnvironmentDiffuseScale":
+                    context.RequireWorldEditForWrite(self, key);
+                    lighting.SetEnvironmentDiffuseScale(ReadAssignedNumber(value, self.ClassName, key));
+                    return true;
+                case "EnvironmentSpecularScale":
+                    context.RequireWorldEditForWrite(self, key);
+                    lighting.SetEnvironmentSpecularScale(ReadAssignedNumber(value, self.ClassName, key));
                     return true;
                 default:
                     return false;

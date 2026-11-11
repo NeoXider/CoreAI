@@ -157,20 +157,21 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.RegisterKnownUnimplementedMembers("ImageButton",
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty("HoverImageContent", content),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty("PressedImageContent", content));
+            const string bar =
+                "the scroll bar is a flat bar; color it with ScrollBarImageColor3 and ScrollBarImageTransparency";
             catalog.RegisterKnownUnimplementedMembers("ScrollingFrame",
                 RbxKnownUnimplementedMemberDescriptor.BacklogMethod("GetScrollVelocity",
                     "compare CanvasPosition between frames"),
                 RbxKnownUnimplementedMemberDescriptor.BacklogMethod("ResetScrollVelocity",
                     "set CanvasPosition to stop where you want"),
-                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("TopImage", "the scroll bar uses the host style"),
-                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("MidImage", "the scroll bar uses the host style"),
-                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("BottomImage", "the scroll bar uses the host style"),
-                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("TopImageContent",
-                    "the scroll bar uses the host style"),
-                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("MidImageContent",
-                    "the scroll bar uses the host style"),
-                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("BottomImageContent",
-                    "the scroll bar uses the host style"));
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("ElasticBehavior",
+                    "the canvas always stops at its ends (as with Enum.ElasticBehavior.Never); leave this property out"),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("TopImage", bar),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("MidImage", bar),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("BottomImage", bar),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("TopImageContent", bar),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("MidImageContent", bar),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("BottomImageContent", bar));
             catalog.RegisterKnownUnimplementedMembers("BasePlayerGui",
                 RbxKnownUnimplementedMemberDescriptor.PlannedMethod("GetGuiObjectsAtPosition", Phase,
                     "compare the point with each object's AbsolutePosition and AbsoluteSize"));

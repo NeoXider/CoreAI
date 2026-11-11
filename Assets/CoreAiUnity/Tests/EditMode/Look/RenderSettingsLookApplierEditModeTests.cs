@@ -279,6 +279,30 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void SkyReflectionScale_ScalesTheLooksSkyReflections_AndFollowsLaterChanges()
+        {
+            RequireProceduralSkyShader();
+            RenderSettings.skybox = null;
+            _ownership.SetSkyReflectionScale(0.5f);
+
+            _applier.Apply(_profile, Options(), LookMode.Apply);
+
+            Assert.AreEqual(_profile.ReflectionIntensity * 0.5f, RenderSettings.reflectionIntensity, 1e-5f);
+            if (_applier.ReflectionProbe != null)
+            {
+                Assert.AreEqual(0.5f, _applier.ReflectionProbe.intensity, 1e-5f, "the sky probe is scaled too");
+            }
+
+            _ownership.SetSkyReflectionScale(0f);
+            Assert.AreEqual(0f, RenderSettings.reflectionIntensity, 1e-5f, "a change after the apply reaches the scene");
+
+            _applier.Revert();
+            float restored = RenderSettings.reflectionIntensity;
+            _ownership.SetSkyReflectionScale(1f);
+            Assert.AreEqual(restored, RenderSettings.reflectionIntensity, 1e-5f, "a reverted look no longer listens");
+        }
+
+        [Test]
         public void Revert_WhileTheAmbientIsClaimed_LeavesTheOwnersAmbient_AndRestoresTheRest()
         {
             RenderSettings.skybox = null;

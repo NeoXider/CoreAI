@@ -32,6 +32,29 @@ namespace CoreAI.Look
         public event Action Changed;
 
         /// <summary>
+        /// Multiplier on the look's sky reflections (its sky reflection probe and the environment reflection
+        /// intensity), at least 0; 1 leaves the look as authored. A world's <c>Lighting.EnvironmentSpecularScale</c>
+        /// drives it while that world claims the ambient.
+        /// </summary>
+        public float SkyReflectionScale { get; private set; } = 1f;
+
+        /// <summary>Raised when <see cref="SkyReflectionScale"/> changes.</summary>
+        public event Action SkyReflectionScaleChanged;
+
+        /// <summary>Sets <see cref="SkyReflectionScale"/>; negative or non-finite values become 0.</summary>
+        public void SetSkyReflectionScale(float scale)
+        {
+            float next = float.IsNaN(scale) || scale < 0f ? 0f : float.IsInfinity(scale) ? 0f : scale;
+            if (next.Equals(SkyReflectionScale))
+            {
+                return;
+            }
+
+            SkyReflectionScale = next;
+            SkyReflectionScaleChanged?.Invoke();
+        }
+
+        /// <summary>
         /// Claims the ambient for <paramref name="owner"/> until the returned handle is disposed. Claims
         /// nest; disposing a handle twice releases it once.
         /// </summary>

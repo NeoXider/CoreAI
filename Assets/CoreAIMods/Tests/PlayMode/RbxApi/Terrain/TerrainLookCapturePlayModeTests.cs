@@ -197,8 +197,8 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             Color[] magentaGround = Shoot("terrain_sea_grazing_magenta_ground.png");
             profile.SkyGroundColor = groundColor;
             RbxWaterTime.ClearOverride();
-            float notBlue = Share(seaShot, sea, pixel => pixel.b - pixel.r < 0.08f);
-            float notBlueFar = Share(seaShot, farSea, pixel => pixel.b - pixel.r < 0.08f);
+            float notBlue = Share(seaShot, sea, IsDullGreyOrBrown);
+            float notBlueFar = Share(seaShot, farSea, IsDullGreyOrBrown);
             float magenta = Share(magentaGround, sea, pixel => pixel.r - pixel.g > 0.1f);
             TestContext.WriteLine("[TerrainLook] sea grey-or-brown share " + notBlue + " (far band " + notBlueFar +
                                   "), mean " + Mean(seaShot, sea) + " | flat water mean " + Mean(flatSea, sea) +
@@ -207,9 +207,11 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             Assert.Less(nearShimmer, nearShimmerGlossy * 0.6f,
                 "grass as shipped glitters less when the camera moves than the glossy grass it replaced");
             Assert.Less(nearShimmer, 0.015f, "a near lawn under a low sun barely changes when the camera moves");
-            Assert.Greater(sunlitLeaves, 0.15f, "a sunlit LeafyGrass face is not dark");
+            // WHY these ratios: before the LeafyGrass gain they were 0.74 sunlit and 0.62 in shade.
+            Assert.Greater(sunlitLeaves, sunlitGrass * 0.85f, "sunlit LeafyGrass is about as bright as the lawn");
+            Assert.Greater(shadedLeaves, shadedGrass * 0.75f, "LeafyGrass in shade is not black next to the grass");
             Assert.Less(magenta, 0.005f, "no wave reflects the sky's ground hemisphere");
-            Assert.Less(notBlue, 0.03f, "a sea seen from a grazing angle stays blue, without grey or brown blotches");
+            Assert.Less(notBlue, 0.01f, "a sea seen from a grazing angle stays blue, without grey or brown blotches");
         }
 
         [UnityTest]
@@ -234,7 +236,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi
         {
             string[] names = { "WoodPlanks", "Grass", "Sand" };
             float[] sharedLeft = { 4f, 24f, 44f };
-            float[] aloneLeft = { 132f, 212f, 276f };
+            float[] aloneLeft = { 84f, 148f, 212f };
             for (int index = 0; index < names.Length; index++)
             {
                 _terrain.FillBlock(RbxCFrame.FromPosition(sharedLeft[index] + 8f, 2f, 32f),
@@ -251,8 +253,8 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             yield return null;
             RenderSettings.sun.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
             _camera.orthographic = true;
-            _camera.orthographicSize = (float)(64d * RbxSpace.MetersPerStud * 0.5d);
-            Aim(new RbxVector3(160f, 60f, 32f), new RbxVector3(160f, 0f, 32.001f));
+            _camera.orthographicSize = (float)(256d / _camera.aspect * RbxSpace.MetersPerStud * 0.5d);
+            Aim(new RbxVector3(128f, 60f, 32f), new RbxVector3(128f, 0f, 32.001f));
             _camera.transform.rotation = Quaternion.LookRotation(Vector3.down, Vector3.forward);
             Color[] shot = Shoot("terrain_chunk_materials_" + label + ".png");
             List<string> lines = new();
@@ -428,6 +430,12 @@ namespace CoreAI.Tests.PlayMode.RbxApi
                 Object.Destroy(linear);
                 Object.Destroy(png);
             }
+        }
+
+        /// <summary>A pixel that is neither blue nor bright: the brown-grey blotches of a sea mirroring the sky's ground.</summary>
+        private static bool IsDullGreyOrBrown(Color pixel)
+        {
+            return pixel.b - pixel.r < 0.08f && Luminance(pixel) < 0.5f;
         }
 
         private static float Share(Color[] shot, RectInt crop, System.Func<Color, bool> predicate)

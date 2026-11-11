@@ -1090,11 +1090,13 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>
         /// Snapshot restore: recreates an instance under its serialized id (stable-id contract,
-        /// roadmap §2 world file) and advances the allocator past it.
+        /// roadmap §2 world file) and advances the allocator past it. <paramref name="isRuntimeInfrastructure"/>
+        /// puts back the flag of a node the runtime rebuilds itself (a world's Terrain), so a snapshot round
+        /// trip neither charges it to a quota nor turns it into authored content.
         /// </summary>
         public RbxInstance RestoreInstance(string className, InstanceId id, string ownerModId = null,
             string originTag = null, string ownerActorId = null,
-            InstanceAccessScope? accessScope = null)
+            InstanceAccessScope? accessScope = null, bool isRuntimeInfrastructure = false)
         {
             if (!id.IsValid)
             {
@@ -1111,7 +1113,7 @@ namespace CoreAI.Mods.Rbx.Instances
             ClassDescriptor descriptor = ResolveConcrete(className);
             Allocator.EnsureNotBelow(id);
             return RegisterNew(Instantiate(descriptor), id, ownerModId, originTag, ownerActorId,
-                accessScope, false, CreationPath.Restore, null);
+                accessScope, isRuntimeInfrastructure, CreationPath.Restore, null);
         }
 
         private ClassDescriptor ResolveConcrete(string className)

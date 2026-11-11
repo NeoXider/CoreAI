@@ -284,6 +284,8 @@ namespace CoreAI.Mods.Rbx.Instances.CharacterRig
 
             RbxHumanoid humanoid = rig.Humanoid;
             double speed = MeasureSpeed(humanoid);
+            // TODO: pass Humanoid.Sit as seated once Seat and Humanoid.Sit/SeatPart land (the character-rig
+            // slice in ClassCatalog); until then nothing seats a character and the Sit pose is never chosen.
             RbxRigPoseKind kind = RbxRigPoseSelector.Select(humanoid.GetState(), speed, rootAnchored, false,
                 rig.Poser.IsWalking);
             rig.Poser.Step(dt, kind, speed);

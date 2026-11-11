@@ -57,6 +57,26 @@ namespace CoreAI.Mods.Rbx.Instances.Adornments
             NotifyPropertyChanged(member);
         }
 
+        /// <summary>A restore's write: like <see cref="Set{T}"/> without the revision advance.</summary>
+        private protected void Restore<T>(ref T field, T value, string member)
+        {
+            ThrowIfDestroyed(member);
+            if (EqualityComparer<T>.Default.Equals(field, value))
+            {
+                return;
+            }
+
+            field = value;
+            NotifyPropertyChanged(member);
+        }
+
+        private protected void RestoreBase3d(RbxColor3 color3, float transparency, bool visible)
+        {
+            Restore(ref _color3, color3, nameof(Color3));
+            Restore(ref _transparency, transparency, nameof(Transparency));
+            Restore(ref _visible, visible, nameof(Visible));
+        }
+
         private protected float RequireFinite(float value, string member)
         {
             if (float.IsNaN(value) || float.IsInfinity(value))
@@ -94,6 +114,11 @@ namespace CoreAI.Mods.Rbx.Instances.Adornments
         {
             get => _adornee != null && !_adornee.IsDestroyed ? _adornee : null;
             set => Set(ref _adornee, value, nameof(Adornee));
+        }
+
+        private protected void RestoreAdornee(RbxInstance adornee)
+        {
+            Restore(ref _adornee, adornee, nameof(Adornee));
         }
 
         /// <inheritdoc />
@@ -140,6 +165,25 @@ namespace CoreAI.Mods.Rbx.Instances.Adornments
         {
             get => _surfaceTransparency;
             set => Set(ref _surfaceTransparency, RequireFinite(value, nameof(SurfaceTransparency)),
+                nameof(SurfaceTransparency));
+        }
+
+        /// <summary>
+        /// Puts a saved <c>selection_box</c> block back: the same values the setters take, the property signals of
+        /// what changed, and no revision advance.
+        /// </summary>
+        /// <remarks>
+        /// WHY no revision advance: the revision is part of the saved world, so advancing it made a load followed by a
+        /// save differ from the file it loaded (as for Lighting); a restore reproduces saved state, it is not a change.
+        /// </remarks>
+        public void RestoreDurableState(RbxInstance adornee, RbxColor3 color3, float transparency, bool visible,
+            float lineThickness, RbxColor3 surfaceColor3, float surfaceTransparency)
+        {
+            RestoreBase3d(color3, RequireFinite(transparency, nameof(Transparency)), visible);
+            RestoreAdornee(adornee);
+            Restore(ref _lineThickness, RequireFinite(lineThickness, nameof(LineThickness)), nameof(LineThickness));
+            Restore(ref _surfaceColor3, surfaceColor3, nameof(SurfaceColor3));
+            Restore(ref _surfaceTransparency, RequireFinite(surfaceTransparency, nameof(SurfaceTransparency)),
                 nameof(SurfaceTransparency));
         }
 

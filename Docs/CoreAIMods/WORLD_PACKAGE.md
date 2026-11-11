@@ -11,7 +11,9 @@ Version 1 contains deterministic `manifest.json`, `world.json`, and indexed
 `Mods/NNNN/manifest.json` plus `Mods/NNNN/main.lua` entries. The manifest declares the format/API/
 minimum-reader versions, UTC capture time, world entry, and sorted mod index. The world entry contains
 settings, DataModel tree, external BasePart state, and optional camera state. IDs and revisions are
-decimal strings so WebGL does not lose 64-bit precision. Only server-authority IDs are accepted.
+decimal strings so WebGL does not lose 64-bit precision. Only server-authority IDs are accepted. Version 2 has the
+same entries and gives every script instance a `script` block; this reader reads both, and the writer still writes
+version 1 (see "Script instances" below).
 
 A mod manifest may carry `LoadOrder` (an integer, omitted when `0`): the order the mod was loaded in its
 world (`mod-system.md` §2). Capture keeps the entries in id order, so the bytes stay deterministic;
@@ -44,7 +46,11 @@ refuse a package that carries either key by name ("Could not find member 'lighti
 refuses an unknown key in `manifest.json`, `world.json` or an instance (`MissingMemberHandling.Error`), so no
 release opens such a world without them. The reader refuses a `light` block on a node that is not a
 PointLight, a range outside [0, 60], a `clock_time` outside [0, 24), a non-finite value, and a `lighting`
-block in a tree without a `Lighting` service. Tests: `WorldPackageLightingEditModeTests`. Known limit:
+block in a tree without a `Lighting` service. The block also carries `environment_diffuse_scale` and
+`environment_specular_scale` (`Lighting.EnvironmentDiffuseScale`, `EnvironmentSpecularScale`), each only when it
+differs from its default of 1, so a block whose scales were never changed is written exactly as before they existed
+and a block without them reads 1; the reader refuses a scale outside [0, 1], the range the setters clamp to, and
+the undo mark folds both in. Tests: `WorldPackageLightingEditModeTests`, `WorldPackageEnvironmentScalesEditModeTests`. Known limit:
 `RbxLighting.RestoreDurableState` advances the Lighting service's revision, so a world with a `lighting`
 block re-saves with a higher revision on that one node.
 
@@ -82,6 +88,20 @@ reader-version change: readers up to 7.56.0 refuse either key by name. Tests: `W
 literal golden, a HUD reaching every class that round-trips byte-identically through the setters, an old package
 without blocks, and drift guards that fail when a GUI class or a public GUI setter is added without persistence).
 
+**Chat commands and outlines.** A world-owned `TextChatCommand` carries an optional `text_chat_command` block
+(`primary_alias`, `secondary_alias`, `enabled`, `autocomplete_visible`) and a world-owned `SelectionBox` an optional
+`selection_box` block (`adornee_id` as a decimal string, `"0"` for nil; `color3` and `surface_color3` [r, g, b];
+`transparency`, `visible`, `line_thickness`, `surface_transparency`). Restore puts them back without advancing a
+revision (`RestoreDurableState` on both classes), so a load followed by a save is byte-identical; their setters do
+advance revisions, so an AI edit of only them is an undoable AI change. An adornee the package does not keep (a mod's
+own part, a character, a destroyed instance) is captured as nil with a `mod-ephemeral` or `missing` diagnostic (member
+`Adornee`), and an `adornee_id` that names no instance of the package is read as nil with a `missing` diagnostic
+rather than refused: the outline loses its target, not the world its save. A non-finite colour is captured as the
+class default with a `non-finite-value` diagnostic; the reader refuses non-finite values, a block on another class,
+a missing field and an unknown key by name. A world without either class writes neither key; readers up to 7.56.0
+refuse either key by name. `BasePart.LocalTransparencyModifier` is local to each machine and never saved. Tests:
+`WorldPackageAdornmentsEditModeTests`.
+
 **Terrain cells.** The Workspace `Terrain` node is runtime infrastructure (every data model bootstrap
 creates it, so it is not in `world.json`), but its cells are durable: a world with at least one cell writes
 them in a last entry `Terrain/voxels.bin` (`TerrainVoxelCodec`, CAVX v1, canonical run-length chunks; save,
@@ -115,11 +135,45 @@ keys are additive without a `format_version` bump: readers up to 7.56.0 refuse a
 name, as they refuse every unknown key (`WorldPackageLightingEditModeTests.UnknownKeys_*`). Tests:
 `WorldPackageModFoldersEditModeTests`, `Mvp4ScriptManifestEditModeTests`.
 
+**Script instances: format version 2 (MVP4 SC-7, reader only).** `Script`, `LocalScript` and `ModuleScript` are
+ordinary instances whose `SourceId` names the mod they are bound to (MVP4 design note SC-1). A format version 2
+package gives every such node a `script` block: `source_id` (the mod id, `""` when unbound) and, on a Script or
+LocalScript only, `enabled` and `run_context` (the `Enum.RunContext` number); a ModuleScript's block holds
+`source_id` alone. The meaning of `Mods/` changes with it: in version 1 every active mod starts at the legacy
+placement (`ServerScriptService/<id>/<id>`), in version 2 a source no instance is bound to is detached and does not
+start, which is why the format version is raised and a version 2 package declares `minimum_reader_version: 2`. The
+reader accepts `format_version` 1 and 2 (`RbxWorldPackageSerializer.SupportedFormatVersions`); a payload carries
+its `FormatVersion`, and `RbxWorldPackageRestoreResult.LegacyScriptPlacement` is true for version 1. It refuses, by
+name: a version 2 package that declares a lower `minimum_reader_version`; a `script` block in a version 1 package;
+in version 2, a script node without a block, a binding to a mod the package does not hold (dangling), two nodes
+bound to one mod (duplicate), a bound node whose class and `run_context` disagree with its mod's `Context` by the
+SC-4 table, and a bound node whose mod declares a context that is not server, client or shared; in any version, a
+block on a class that is no script, `run_context` 3 (`Plugin`) or an undefined number, a `run_context` other than 0
+on a LocalScript, and `enabled` or `run_context` on a ModuleScript. **The writer stays at version 1** until the mod
+runtime binds sources to instances (MVP4 step C1): capture drops every script block, so a world written today is
+byte-identical to one written before script instances existed (a Script's `Enabled` and `RunContext` are not saved
+yet). A version 2 capture, which C1 makes the default, repairs in the snapshot only what its reader would refuse: a
+binding to a source the package does not hold is saved unbound (`missing`, member `SourceId`), and a world-owned
+bound script inside a mod-ephemeral subtree is left out (`mod-ephemeral`, member `Script`), so its source loads
+detached; a mod's own legacy script, mod-owned runtime infrastructure until C1, is left out without one. Two
+instances bound to one source, or a binding that disagrees with its source's context, can only come from a runtime
+defect, so a version 2 capture fails on it instead of saving another script than the one running. Readers up to
+7.56.0, and every reader before this one, accept `format_version` 1 only and refuse a version 2 package by its
+version ("Unsupported world package format version 2"). Until C1 a session that loads a hand-written version 2
+package still starts its active mods the version 1 way, every one at the legacy placement. Tests:
+`WorldPackageScriptsEditModeTests`, `ScriptSnapshotEditModeTests`.
+
+An in-memory instance snapshot also keeps the runtime-infrastructure flag (`InstanceSnapshot.IsRuntimeInfrastructure`,
+`InstanceRegistry.RestoreInstance(..., isRuntimeInfrastructure)`), so a world restored straight through
+`InstanceTreeSerializer` keeps its Terrain as infrastructure: it is no authored content and costs no instance quota
+after the round trip. `world.json` has no key for the flag; its projection leaves such nodes out. Tests:
+`RuntimeInfrastructureSnapshotEditModeTests`.
+
 **Client staging.** `RbxWorldPackageRestoreOptions.RegistryAuthority = Replica` restores into a replica registry
 inside one replication-apply scope, so a client's copy keeps the server's ids and every captured revision and
 nothing is marked diverged; a later local write is. `ReplicaRbxWorldSessionHost` stages and commits such
 worlds like the headless host (MVP4 SC-16; the checks that keep server sources out of a client payload come with
-step B2). Tests: `Mvp4ReplicaStagingEditModeTests`.
+step C5, the client composition, and read the version 2 bindings). Tests: `Mvp4ReplicaStagingEditModeTests`.
 
 The durable v1 surface is class/name/Archivable, world-owned origin/ACL/revision metadata, attributes,
 tags, BasePart properties, Model PrimaryPart/stored WorldPivot, ClickDetector distance, camera CFrame,
@@ -392,7 +446,8 @@ and the declared mutating actions of both tool contracts are covered.
 ### Startup selection (the world that opens on the next start)
 
 A player-confirmed load survives a process restart. `FileRbxWorldPackageStore` keeps a startup area
-`Saves/Startup/` (namespaced as `Startup/Stores/<storeId>/` when the composition has a mods store id,
+`Saves/Startup/` (namespaced as `Startup/Stores/s-<26>/` when the composition has a mods store id, or under
+the `id-<64 hex>` folder an earlier build created, see `CoreAiStorageNames` in `mod-system.md` §8,
 so a world selected in one composition never opens in another with a different Lua tier; manual slots
 and autosaves are not namespaced). It holds create-once entries: `<N>.world`, an exact copy of the
 confirmed package; `<N>.default`, a marker meaning "start with the default world"; and an

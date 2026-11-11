@@ -767,8 +767,8 @@ namespace CoreAI.Mods.Rbx.Instances
                     "signal mode is Deferred-only; use task.defer when explicit ordering is needed"));
 
             string humanoidRigWorkaround =
-                "CoreAI's character is a motor, not a full R15 rig; these members land with the "
-                + "character-rig slice";
+                "CoreAI's character is an R6 body posed by the built-in rig (no joints or animation "
+                + "tracks yet); these members land with the character-rig slice";
             string physicsWorkaround =
                 "keep the part Anchored and animate CFrame, or use host physics until this bridge lands";
             // WHY this wording: CanCollide = false lets bodies pass through a part but still fires
@@ -970,8 +970,6 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "PlatformStand", humanoidRigWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
-                    "AutoRotate", humanoidRigWorkaround),
-                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "HipHeight", humanoidRigWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "MaxSlopeAngle", humanoidRigWorkaround),
@@ -1016,8 +1014,9 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             const string phase = "P9";
             const string lookWorkaround =
-                "set Lighting.ClockTime, Brightness, Ambient and OutdoorAmbient, which are live; the rest "
-                + "of the look is the host's until this member lands";
+                "set Lighting.ClockTime, Brightness, Ambient, OutdoorAmbient, EnvironmentDiffuseScale and "
+                + "EnvironmentSpecularScale, which are live; the rest of the look is the host's until this member "
+                + "lands";
             const string fogWorkaround =
                 "fog follows the host's look settings until the fog members land";
             const string moonWorkaround =
@@ -1028,10 +1027,6 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.RegisterKnownUnimplementedMembers("Lighting",
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty("ColorShift_Bottom", phase, lookWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty("ColorShift_Top", phase, lookWorkaround),
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
-                    "EnvironmentDiffuseScale", phase, lookWorkaround),
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
-                    "EnvironmentSpecularScale", phase, lookWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
                     "ExposureCompensation", phase, lookWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty("FogColor", phase, fogWorkaround),

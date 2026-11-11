@@ -95,6 +95,9 @@ namespace CoreAI.Mods.Rbx.Binding
             _worldGravityMetresPerSecondSquared =
                 worldGravityMetresPerSecondSquared ?? DefaultWorldGravityMetresPerSecondSquared;
             _body.freezeRotation = true;
+            // WHY continuous: a long fall reaches tens of metres per second, and a discrete body passes through
+            // a terrain chunk's mesh collider in one step (seen: a 90-stud drop left the world).
+            _body.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
         }
 
         /// <inheritdoc />

@@ -161,6 +161,28 @@ capture('text_box', function() hud:CreateElement('VisualElement').Text = 'x' end
         }
 
         [Test]
+        public void P18_AUxmlScrollView_HasNoScrollOffsetForLua_ButTakesItsScrollAttributes()
+        {
+            _world = UxmlServiceTestWorld.WithFake();
+            _world.Load(Mod, Capture + @"
+local log = game:GetService('UxmlService'):CreateScreen('log',
+  '<ui:ScrollView name=""lines""><ui:Label text=""one"" /><ui:Label text=""two"" /></ui:ScrollView>')
+local lines = log:GetElement('lines')
+store_set('value', tostring(lines.Value))
+capture('write', function() lines.Value = 40 end)
+capture('offset', function() return lines.ScrollOffset end)
+store_set('mode', tostring(lines:SetAttribute('mode', 'VerticalAndHorizontal')))");
+
+            Assert.AreEqual("nil", _world.Get(Mod, "value"), "a ScrollView has no Value to read");
+            Assert.AreEqual("false", _world.Get(Mod, "write_ok"));
+            StringAssert.Contains(RbxUiErrors.UnsupportedOperation, _world.Get(Mod, "write_err"),
+                "nor one to write: Lua cannot set its offset");
+            Assert.AreEqual("false", _world.Get(Mod, "offset_ok"), "there is no ScrollOffset member");
+            Assert.AreEqual("true", _world.Get(Mod, "mode"), "twin: its UXML attributes are writable");
+            Assert.AreEqual("VerticalAndHorizontal", _world.Fake.Get("m/log").Find("lines").Attributes["mode"]);
+        }
+
+        [Test]
         public void P18_SetUss_RestylesTheSameTree_AndSetUxml_KeepsNamedElementsAndDetachesTheRest()
         {
             _world = UxmlServiceTestWorld.WithFake();

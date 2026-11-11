@@ -327,6 +327,30 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.AreEqual(0f, world.Roblox.Lighting.OutdoorAmbient.R, 1e-6f);
         }
 
+        [Test]
+        public void P9_Lighting_EnvironmentScales_StartAtOne_ClampToZeroOne_AndTween()
+        {
+            World world = BuildWorld();
+            world.Load("m", @"
+                local L = game:GetService('Lighting')
+                store_set('defaults', tostring(L.EnvironmentDiffuseScale) .. '|' .. tostring(L.EnvironmentSpecularScale))
+                L.EnvironmentDiffuseScale = 2
+                L.EnvironmentSpecularScale = -1
+                store_set('clamped', tostring(L.EnvironmentDiffuseScale) .. '|' .. tostring(L.EnvironmentSpecularScale))
+                local changed = {}
+                L.Changed:Connect(function(name) table.insert(changed, name); store_set('changed', table.concat(changed, ',')) end)
+                game:GetService('TweenService'):Create(L, TweenInfo.new(0.5, Enum.EasingStyle.Linear),
+                    {EnvironmentDiffuseScale = 0, EnvironmentSpecularScale = 1}):Play()");
+            world.Frames(45);
+
+            Assert.AreEqual("1|1", world.Get("m", "defaults"), "a new world's Lighting starts both at 1");
+            Assert.AreEqual("1|0", world.Get("m", "clamped"), "writes clamp into 0..1");
+            Assert.AreEqual(0f, world.Roblox.Lighting.EnvironmentDiffuseScale, 1e-4f);
+            Assert.AreEqual(1f, world.Roblox.Lighting.EnvironmentSpecularScale, 1e-4f);
+            StringAssert.Contains("EnvironmentDiffuseScale", world.Get("m", "changed"));
+            StringAssert.Contains("EnvironmentSpecularScale", world.Get("m", "changed"));
+        }
+
         // ---- PointLight --------------------------------------------------------------------------
 
         [Test]

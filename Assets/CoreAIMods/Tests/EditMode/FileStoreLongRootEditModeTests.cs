@@ -28,10 +28,11 @@ namespace CoreAI.Tests.EditMode
         private const string DemoStoreId = "block-world-demo";
 
         /// <summary>
-        /// What the store adds below <c>CoreAiStorageRoot</c> for a store id, the longest file it writes included:
-        /// <c>\CoreAI\Mods\Stores\id-&lt;64 hex&gt;\id-&lt;64 hex&gt;\manifest.json.tmp</c>.
+        /// What a new store adds below <c>CoreAiStorageRoot</c> for a store id, the longest file of a mod's first save
+        /// included, which is staged first: <c>\CoreAI\Mods\Stores\s-&lt;26&gt;\.staging-&lt;32 hex&gt;\manifest.json.tmp</c>
+        /// (it was 173 with the long names).
         /// </summary>
-        private const int StoreSuffixLength = 173;
+        private const int StoreSuffixLength = 108;
 
         private const int WindowsMaximumPathLength = 259;
 
@@ -61,14 +62,15 @@ namespace CoreAI.Tests.EditMode
         }
 
         /// <summary>
-        /// The defect as the demo agent found it: a 93-character storage root, the demo's store id, a save. It is now
+        /// A storage root one character too long for a mod save with the demo's store id (the defect the demo agent
+        /// found at 93 characters, before the short names, now needs 152). It is
         /// refused with the named error (by the best-effort save and the strict one alike, and by the admission check),
         /// nothing is written, and nothing pretends to be stored.
         /// </summary>
         [Test]
         public void LongRoot_EverySave_IsRefusedWithANamedError_NeverSilently()
         {
-            string root = NewRoot(93);
+            string root = NewRoot(WindowsMaximumPathLength - StoreSuffixLength + 1);
             using IDisposable scope = CoreAiStorageRoot.Override(root);
             FileLuaModSourceStore store = new(storeId: DemoStoreId, persistenceSyncAsync: _ => UniTask.FromResult(true));
 
@@ -115,7 +117,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Seeder_UnderALongRoot_CountsFailures_AndUnderAShortRootInstalls()
         {
-            string longRoot = NewRoot(93);
+            string longRoot = NewRoot(WindowsMaximumPathLength - StoreSuffixLength + 1);
             BundledModSeeder.SeedResult refused;
             using (CoreAiStorageRoot.Override(longRoot))
             {
@@ -124,7 +126,7 @@ namespace CoreAI.Tests.EditMode
                     new IBundledModSource[] { new ThreeMods() }).Seed();
             }
 
-            string shortRoot = NewRoot(WindowsMaximumPathLength - StoreSuffixLength);
+            string shortRoot = NewRoot(93);
             BundledModSeeder.SeedResult installed;
             FileLuaModSourceStore kept;
             using (CoreAiStorageRoot.Override(shortRoot))
@@ -249,7 +251,7 @@ namespace CoreAI.Tests.EditMode
             string root = length > 0 && parent.Length + 1 < length
                 ? Path.Combine(parent, new string('r', length - parent.Length - 1))
                 : parent;
-            if (length > 0 && root.Length > length && length < 93)
+            if (length > 0 && root.Length > length && length <= 93)
             {
                 Assert.Ignore("the temporary folder '" + Path.GetTempPath() + "' is too long for a short-root twin");
             }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances.Networking;
+using CoreAI.Mods.Rbx.Instances.Scripts;
 
 namespace CoreAI.Mods.Rbx.Instances
 {
@@ -34,6 +35,10 @@ namespace CoreAI.Mods.Rbx.Instances
         public const int MaximumSnapshotDepth = 2048;
         public const int MaximumAttributesPerInstance = 256;
         public const int MaximumTagsPerInstance = 256;
+
+        private const string ScriptContainerClassName = "LuaSourceContainer";
+
+        private const string BaseScriptClassName = "BaseScript";
 
         /// <summary>Captures <paramref name="root"/> and its whole subtree in preorder.</summary>
         public static InstanceTreeSnapshot Capture(RbxInstance root)
@@ -122,6 +127,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 OriginTag = record?.OriginTag,
                 OwnerActorId = record?.OwnerActorId,
                 AccessScope = record?.AccessScope,
+                IsRuntimeInfrastructure = record?.IsRuntimeInfrastructure ?? false,
                 Revision = record?.Revision ?? 0L
             };
 
@@ -195,6 +201,17 @@ namespace CoreAI.Mods.Rbx.Instances
                     UserId = player.UserId,
                     DisplayName = player.DisplayName ?? string.Empty,
                     CharacterId = player.Character?.Id.Value ?? 0UL
+                };
+            }
+
+            if (instance is RbxLuaSourceContainer container)
+            {
+                RbxBaseScript baseScript = container as RbxBaseScript;
+                node.Script = new ScriptSnapshot
+                {
+                    SourceId = container.SourceId ?? string.Empty,
+                    Enabled = baseScript?.Enabled,
+                    RunContext = baseScript?.RunContext
                 };
             }
 
@@ -621,7 +638,7 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             return registry.RestoreInstance(node.ClassName,
                 new InstanceId(node.Id), node.OwnerModId, node.OriginTag,
-                node.OwnerActorId, node.AccessScope);
+                node.OwnerActorId, node.AccessScope, node.IsRuntimeInfrastructure);
         }
 
         private static void ApplyNodeState(RbxInstance instance, InstanceSnapshot node)
@@ -700,6 +717,11 @@ namespace CoreAI.Mods.Rbx.Instances
                 {
                     RestorePlayer((RbxPlayer)instance, node, restored);
                 }
+
+                if (node.Script != null)
+                {
+                    RestoreScript((RbxLuaSourceContainer)instance, node);
+                }
             }
 
             foreach (InstanceSnapshot node in snapshot.Instances)
@@ -731,6 +753,23 @@ namespace CoreAI.Mods.Rbx.Instances
                 && restored.TryGetValue(identity.CharacterId, out RbxInstance character))
             {
                 player.Character = character;
+            }
+        }
+
+        /// <summary>
+        /// Puts an already-validated script payload back without counting it as a change: the binding, and on a
+        /// BaseScript its Enabled and RunContext (<see cref="RbxBaseScript.TryRestoreState"/>, no revision, no signal).
+        /// </summary>
+        private static void RestoreScript(RbxLuaSourceContainer container, InstanceSnapshot node)
+        {
+            ScriptSnapshot script = node.Script;
+            container.SourceId = script.SourceId ?? string.Empty;
+            if (container is RbxBaseScript baseScript
+                && !baseScript.TryRestoreState(
+                    script.Enabled ?? true, script.RunContext ?? RunContextValues.Legacy, out string error))
+            {
+                throw RbxError.BadArgument("snapshot " + node.ClassName + " " + node.Id + ": " + error,
+                    "use RunContext Legacy, Server or Client on a Script and Legacy on a LocalScript");
             }
         }
 
@@ -1138,6 +1177,65 @@ namespace CoreAI.Mods.Rbx.Instances
             if (node.Player != null)
             {
                 ValidatePlayerPayload(node);
+            }
+
+            // WHY a script node may carry NO payload: it then restores unbound with the class defaults, which is
+            // what a snapshot taken before the block existed and a replication spawn (whose wire never carries a
+            // binding) mean. A payload on any other class is refused.
+            bool isScript = catalog.IsA(node.ClassName, ScriptContainerClassName);
+            if (node.Script != null && !isScript)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot class '" + node.ClassName + "' has mismatched Script state",
+                    "remove Script state from this class");
+            }
+
+            if (node.Script != null)
+            {
+                ValidateScriptPayload(node, catalog.IsA(node.ClassName, BaseScriptClassName));
+            }
+        }
+
+        /// <summary>
+        /// Strict check of a shape-matched script payload: a non-null binding, Enabled and RunContext exactly on a
+        /// BaseScript, and a RunContext the class may hold (SC-4: an Enum.RunContext value, never Plugin, and only
+        /// Legacy on a LocalScript, R1.8).
+        /// </summary>
+        private static void ValidateScriptPayload(InstanceSnapshot node, bool isBaseScript)
+        {
+            ScriptSnapshot script = node.Script;
+            if (script.SourceId == null)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot " + node.ClassName + " " + node.Id + " has a nil SourceId",
+                    "serialize an empty SourceId for a script bound to no source");
+            }
+
+            if (!isBaseScript)
+            {
+                if (script.Enabled.HasValue || script.RunContext.HasValue)
+                {
+                    throw RbxError.BadArgument(
+                        "snapshot " + node.ClassName + " " + node.Id + " carries Enabled or RunContext",
+                        "a ModuleScript has neither; remove them from its script state");
+                }
+
+                return;
+            }
+
+            if (!script.Enabled.HasValue || !script.RunContext.HasValue)
+            {
+                throw RbxError.BadArgument(
+                    "snapshot " + node.ClassName + " " + node.Id + " is missing Enabled or RunContext",
+                    "serialize both for every Script and LocalScript");
+            }
+
+            if (!ScriptContexts.TryGetEffective(node.ClassName, script.RunContext.Value, ScriptContext.Legacy,
+                    out ScriptContext _, out string error))
+            {
+                throw RbxError.BadArgument(
+                    "snapshot " + node.ClassName + " " + node.Id + ": " + error,
+                    "use RunContext Legacy, Server or Client on a Script and Legacy on a LocalScript");
             }
         }
 

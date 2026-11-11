@@ -994,18 +994,26 @@ namespace CoreAI.Mods.Rbx.Binding
 
         /// <summary>
         /// Holds (or lets go of) a part for the character rig. While held, an unanchored part's Rigidbody is
-        /// kinematic: it keeps its collider and contacts but takes no gravity or velocity, so it stays where
-        /// the rig poses it, as a Motor6D's Part1 rides its assembly in Roblox. Let go, it simulates again.
-        /// The flag survives Anchored toggles and is dropped when the part is destroyed.
+        /// kinematic and its collider a trigger: it takes no gravity or velocity and pushes no body, so it stays
+        /// where the rig poses it, as a Motor6D's Part1 rides its assembly in Roblox, while it still reports
+        /// contacts and answers rays. Let go, it simulates and collides as its properties say. The flag
+        /// survives Anchored, CanCollide and Shape writes and is dropped when the part is destroyed.
         /// </summary>
         public void SetPoseDriven(InstanceId id, bool driven)
         {
             bool changed = driven ? _poseDriven.Add(id) : _poseDriven.Remove(id);
-            if (changed && _bindings.TryGetValue(id, out BindingEntry entry) && entry.IsPart
-                && entry.OwnsGameObject && entry.Rigidbody != null)
+            if (!changed || !_bindings.TryGetValue(id, out BindingEntry entry) || !entry.IsPart
+                || !entry.OwnsGameObject || entry.GameObject == null)
+            {
+                return;
+            }
+
+            if (entry.Rigidbody != null)
             {
                 entry.Rigidbody.isKinematic = driven;
             }
+
+            ApplyCanCollide(entry, GetPartPropertiesOrDefault(id).CanCollide);
         }
 
         /// <inheritdoc />
@@ -1934,11 +1942,14 @@ namespace CoreAI.Mods.Rbx.Binding
         /// trigger lets bodies through while the contact relay still hears OnTrigger events, and
         /// RespectCanCollide reads isTrigger back in the physics port.
         /// </summary>
-        private static void ApplyCanCollide(BindingEntry entry, bool canCollide)
+        private void ApplyCanCollide(BindingEntry entry, bool canCollide)
         {
             if (entry.Collider != null)
             {
-                entry.Collider.isTrigger = !canCollide;
+                // WHY a held part is always a trigger: it is posed over the character's root every frame, and
+                // without joints it cannot join the root's body, so a solid collider there would shove the
+                // root it follows. As a trigger it still reports contacts and answers rays.
+                entry.Collider.isTrigger = !canCollide || _poseDriven.Contains(entry.Id);
             }
         }
 

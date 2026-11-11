@@ -129,10 +129,11 @@ namespace CoreAI.Editor.RbxMaterials
         /// <summary>Relief that belongs to the packaged CC0 set of a material, not to any imported set.</summary>
         internal readonly struct PackagedRelief
         {
-            public PackagedRelief(float cavityStrength, float metalAlbedoLift)
+            public PackagedRelief(float cavityStrength, float metalAlbedoLift, float albedoGain = 1f)
             {
                 CavityStrength = cavityStrength;
                 MetalAlbedoLift = metalAlbedoLift;
+                AlbedoGain = albedoGain;
             }
 
             /// <summary>
@@ -143,6 +144,12 @@ namespace CoreAI.Editor.RbxMaterials
 
             /// <summary>Reflectance lift for a photographed metal colour map; 0 for dielectrics.</summary>
             public float MetalAlbedoLift { get; }
+
+            /// <summary>
+            /// Grey intrinsic colour (sRGB, so 1.2 is about 1.5 in linear) that brightens a colour map
+            /// photographed darker than the surface it stands for; 1 leaves the map as it is.
+            /// </summary>
+            public float AlbedoGain { get; }
         }
 
         // WHY: these only apply to the CC0 sets this package ships or fetches (RbxCc0TextureSets). A
@@ -172,7 +179,11 @@ namespace CoreAI.Editor.RbxMaterials
                 ["Mud"] = new PackagedRelief(0.45f, 0f),
                 ["Sand"] = new PackagedRelief(0.35f, 0f),
                 ["Grass"] = new PackagedRelief(0.45f, 0f),
-                ["LeafyGrass"] = new PackagedRelief(0.45f, 0f),
+                // WHY 1.2: Grass001's colour map averages a linear luminance of 0.091 against Grass004's
+                // 0.14 with the same occlusion, so LeafyGrass leaves drew a third darker than the lawn and
+                // read as black in shade (0.043 against 0.070 under the default look). Roblox's own palette
+                // has LeafyGrass no darker than Grass; 1.2 sRGB is about 1.5 linear, level with Grass004.
+                ["LeafyGrass"] = new PackagedRelief(0.45f, 0f, 1.2f),
                 ["Snow"] = new PackagedRelief(0f, 0f),
                 ["CrackedLava"] = new PackagedRelief(0.5f, 0f),
                 ["ClayRoofTiles"] = new PackagedRelief(0.55f, 0f),
@@ -216,6 +227,7 @@ namespace CoreAI.Editor.RbxMaterials
             entry.MetalAlbedoLift = string.IsNullOrEmpty(entry.MetalnessAssetPath)
                 ? 0f
                 : relief.MetalAlbedoLift;
+            entry.IntrinsicColor = new UnityEngine.Color(relief.AlbedoGain, relief.AlbedoGain, relief.AlbedoGain, 1f);
         }
 
         /// <summary>The tuning for a material, or the generic default when the name is unknown.</summary>

@@ -164,7 +164,7 @@ namespace CoreAI.Mods.WorldPackages
             sink.StartArray();
             foreach (InstanceSnapshot node in payload.Tree.Instances)
             {
-                Instance(sink, node, payload.Parts, payload.PointLights, payload.Gui);
+                Instance(sink, node, payload);
             }
 
             sink.EndArray();
@@ -183,6 +183,18 @@ namespace CoreAI.Mods.WorldPackages
                 Vector(sink, lighting.Ambient.R, lighting.Ambient.G, lighting.Ambient.B);
                 sink.Name("outdoor_ambient");
                 Vector(sink, lighting.OutdoorAmbient.R, lighting.OutdoorAmbient.G, lighting.OutdoorAmbient.B);
+                if (!lighting.EnvironmentDiffuseScale.Equals(RbxLighting.DefaultEnvironmentDiffuseScale))
+                {
+                    sink.Name("environment_diffuse_scale");
+                    sink.Number(lighting.EnvironmentDiffuseScale);
+                }
+
+                if (!lighting.EnvironmentSpecularScale.Equals(RbxLighting.DefaultEnvironmentSpecularScale))
+                {
+                    sink.Name("environment_specular_scale");
+                    sink.Number(lighting.EnvironmentSpecularScale);
+                }
+
                 sink.EndObject();
             }
 
@@ -226,10 +238,11 @@ namespace CoreAI.Mods.WorldPackages
         private static void Instance(
             Sink sink,
             InstanceSnapshot node,
-            IReadOnlyDictionary<InstanceId, PartProperties> parts,
-            IReadOnlyDictionary<InstanceId, RbxWorldPackagePointLight> lights,
-            IReadOnlyDictionary<InstanceId, RbxWorldPackageGui> gui)
+            RbxWorldPackagePayload payload)
         {
+            IReadOnlyDictionary<InstanceId, PartProperties> parts = payload.Parts;
+            IReadOnlyDictionary<InstanceId, RbxWorldPackagePointLight> lights = payload.PointLights;
+            IReadOnlyDictionary<InstanceId, RbxWorldPackageGui> gui = payload.Gui;
             if (node.Tags == null)
             {
                 throw new ArgumentNullException(nameof(node.Tags));
@@ -401,6 +414,26 @@ namespace CoreAI.Mods.WorldPackages
                 sink.Null();
             }
 
+            if (node.Script != null)
+            {
+                sink.Name("script");
+                sink.StartObject();
+                Required(sink, "source_id", node.Script.SourceId);
+                if (node.Script.Enabled.HasValue)
+                {
+                    sink.Name("enabled");
+                    sink.Bool(node.Script.Enabled.Value);
+                }
+
+                if (node.Script.RunContext.HasValue)
+                {
+                    sink.Name("run_context");
+                    sink.Number(node.Script.RunContext.Value);
+                }
+
+                sink.EndObject();
+            }
+
             if (lights.TryGetValue(new InstanceId(node.Id), out RbxWorldPackagePointLight light))
             {
                 sink.Name("light");
@@ -422,6 +455,40 @@ namespace CoreAI.Mods.WorldPackages
             {
                 sink.Name("gui");
                 Gui(sink, block);
+            }
+
+            if (payload.TextChatCommands.TryGetValue(new InstanceId(node.Id), out RbxWorldPackageTextChatCommand command))
+            {
+                sink.Name("text_chat_command");
+                sink.StartObject();
+                Required(sink, "primary_alias", command.PrimaryAlias);
+                Required(sink, "secondary_alias", command.SecondaryAlias);
+                sink.Name("enabled");
+                sink.Bool(command.Enabled);
+                sink.Name("autocomplete_visible");
+                sink.Bool(command.AutocompleteVisible);
+                sink.EndObject();
+            }
+
+            if (payload.SelectionBoxes.TryGetValue(new InstanceId(node.Id), out RbxWorldPackageSelectionBox box))
+            {
+                sink.Name("selection_box");
+                sink.StartObject();
+                sink.Name("adornee_id");
+                sink.Decimal(box.AdorneeId);
+                sink.Name("color3");
+                Vector(sink, box.Color3.R, box.Color3.G, box.Color3.B);
+                sink.Name("transparency");
+                sink.Number(box.Transparency);
+                sink.Name("visible");
+                sink.Bool(box.Visible);
+                sink.Name("line_thickness");
+                sink.Number(box.LineThickness);
+                sink.Name("surface_color3");
+                Vector(sink, box.SurfaceColor3.R, box.SurfaceColor3.G, box.SurfaceColor3.B);
+                sink.Name("surface_transparency");
+                sink.Number(box.SurfaceTransparency);
+                sink.EndObject();
             }
 
             sink.EndObject();

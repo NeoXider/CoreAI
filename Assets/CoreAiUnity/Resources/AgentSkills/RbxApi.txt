@@ -16,6 +16,7 @@ Sections (read_skill('Rbx API', section='<name>')):
 - terrain: Block worlds: Terrain cells, FillBlock, FillRegion, WriteVoxels
 - building: Build at the crosshair in cells (sizes); towers of Parts; SelectionBox outlines; what a save keeps, what /undo takes back
 - characters: Humanoid, Players, Player.Character, respawn
+- rig: R6 body parts, built-in animation
 - input: UserInputService, gameProcessed, ClickDetector, a keyboard game loop
 - camera: CurrentCamera, screen rays, the default camera, framing a game
 - gui: Roblox GUI: ScreenGui, Frame, TextLabel, TextButton, PlayerGui
@@ -661,8 +662,8 @@ agent changed the world since, and you cannot call it: tell the player to type `
   Replacing an existing character fires `CharacterRemoving` for the outgoing one BEFORE
   `CharacterAdded` for its replacement.
 - `player:LoadCharacterAsync()` — builds (or rebuilds) the character: a Model named after the player,
-  parented to `workspace`, holding a `Humanoid` and a `HumanoidRootPart` (`humanoid.RootPart` resolves
-  to it). YIELDS until the deferred CharacterAdded/CharacterRemoving handlers have run, so code after
+  parented to `workspace`, holding a `Humanoid` and the R6 body (section `rig`;
+  `humanoid.RootPart` is its `HumanoidRootPart`). YIELDS until the deferred CharacterAdded/CharacterRemoving handlers have run, so code after
   the call sees the finished character and its signals already delivered. `player:LoadCharacter()` is
   a deprecated non-yielding alias (logs once per mod) with the same effect.
 - `player:DistanceFromCharacter(point)` -> studs from the character's root part to `point`, or `0`
@@ -678,6 +679,26 @@ agent changed the world since, and you cannot call it: tell the player to type `
         character.Humanoid.Died:Connect(function() print(player.Name .. " died") end)
       end)
     end)
+
+<!-- section: rig -->
+# R6 body parts, built-in animation
+
+- A player's character is the classic R6 body, real Parts in its Model: `HumanoidRootPart` (the
+  invisible 2x2x1 box the motor moves; `character.PrimaryPart`), `Torso`, `Head`, `Left Arm`,
+  `Right Arm`, `Left Leg`, `Right Leg`, and the `Humanoid`. Reach them as in Roblox
+  (`character.Head`, `character:FindFirstChild("Left Arm")`) and recolour them like any Part.
+- ANY Model in `workspace` with a `Humanoid` and those part names animates by itself (idle, walk with
+  a stride that follows the speed, jump, fall, land, fly); no Animate script. For an NPC: an
+  UNANCHORED `HumanoidRootPart`, limbs unanchored with `CanCollide = false`, then walk it with
+  `Humanoid:MoveTo`/`:Move`. Never write limb CFrames each frame: the rig owns them. An anchored root
+  stands idle, an anchored limb is left where it is, other part names are left alone.
+- The Torso sits 2 studs above the root, the Head 3.5 (the root's box rests on the floor); the camera looks at the head.
+- A walking character turns to face where it goes; `humanoid.AutoRotate = false` leaves the heading to you.
+- `humanoid.StateChanged:Connect(function(old, new) if new == Enum.HumanoidStateType.Freefall ...)`
+  is the way to react to a jump or a fall; do not poll GetState.
+- Not built yet (NOT_IMPLEMENTED): `Motor6D`/`Weld` joints, `Animator`, `Animation`,
+  `Humanoid:LoadAnimation` and its tracks (planned with MVP17), `HipHeight`, `RigType`. R15 and
+  accessories are not planned.
 
 <!-- section: input -->
 # UserInputService, gameProcessed, ClickDetector, a keyboard game loop
@@ -988,6 +1009,9 @@ command.Parent = TextChatService
 - The sun rises due east (+X) at 06:00, is highest at 12:00 and sets due west at 18:00. At night the
   sun is off and the outdoor ambient dims; `Ambient` stays as set. Until a script (or a saved world)
   sets a Lighting property, the host scene keeps its own lighting.
+- `EnvironmentDiffuseScale` and `EnvironmentSpecularScale` (0..1, clamped; 1 in a new world) are the
+  sky's share of the ambient and of reflections. 0 leaves only `Ambient` and no sky reflections, which
+  is how an underground area reads dark: tween both down when the player goes below ground.
 - A day cycle: `RunService.Heartbeat:Connect(function(dt) L.ClockTime = L.ClockTime + dt * 24 / 600 end)`
   (a ten-minute day), or `TweenService:Create(L, TweenInfo.new(5), {ClockTime = 18}):Play()`.
 - `Instance.new("PointLight")` parented to a Part in the Workspace lights around that part:
@@ -1003,7 +1027,7 @@ command.Parent = TextChatService
     light.Range = 16; light.Brightness = 2; light.Color = Color3.fromRGB(255, 180, 90)
     light.Parent = torch
 - Not yet (NOT_IMPLEMENTED, planned for P9): `FogStart`/`FogEnd`/`FogColor`, `ColorShift_Top`/
-  `ColorShift_Bottom`, `EnvironmentDiffuseScale`/`EnvironmentSpecularScale`, `ExposureCompensation`,
+  `ColorShift_Bottom`, `ExposureCompensation`,
   `GlobalShadows`, `ShadowSoftness`, `GetMoonDirection`, `GetMoonPhase`, and the classes `SpotLight`,
   `SurfaceLight`, `Sky`, `Atmosphere`, `BloomEffect`, `ColorCorrectionEffect`, `ColorGradingEffect`.
   `LightingStyle`, `PrioritizeLightingQuality` and `Technology` are Roblox-only (unsupported).

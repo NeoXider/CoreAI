@@ -62,12 +62,12 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("original", replacement.Get("mod", "key"));
         }
 
+        /// <summary>A new namespace folder gets the short name: the first 128 bits of the digest in lowercase base32.</summary>
         [Test]
         public void StoreNamespace_ValidSupplementaryIdentifierPreservesItsPublishedDigest()
         {
             const string id = "tenant-\uD83D\uDE00";
-            string expected = Path.Combine(_root, "Stores",
-                "id-73aad52b6b4992a247bd37e0c6041a3a461d9e2f957a708dea63ec3110457b49");
+            string expected = Path.Combine(_root, "Stores", "s-oovnkk3ljgjker55g7qmmba2hi");
             Assert.AreEqual(expected, LuaModStoreId.ApplyTo(_root, id));
             using (FileLuaModStore writer = new(_root, storeId: id))
             {
@@ -76,6 +76,29 @@ namespace CoreAI.Tests.EditMode
             using FileLuaModStore reopened = new(_root, storeId: id);
             Assert.AreEqual("supplementary", reopened.Get("mod", "key"));
             Assert.IsTrue(Directory.Exists(expected));
+        }
+
+        /// <summary>
+        /// Old-name twin: a namespace folder an earlier build created under the full digest keeps being used for reads
+        /// and writes, and no short folder appears beside it.
+        /// </summary>
+        [Test]
+        public void StoreNamespace_FolderAnEarlierBuildCreated_KeepsItsFullDigestName()
+        {
+            const string id = "tenant-\uD83D\uDE00";
+            string legacy = Path.Combine(_root, "Stores",
+                "id-73aad52b6b4992a247bd37e0c6041a3a461d9e2f957a708dea63ec3110457b49");
+            Directory.CreateDirectory(legacy);
+
+            Assert.AreEqual(legacy, LuaModStoreId.ApplyTo(_root, id));
+            using (FileLuaModStore writer = new(_root, storeId: id))
+            {
+                writer.Set("mod", "key", "kept-under-the-old-name");
+            }
+
+            using FileLuaModStore reopened = new(_root, storeId: id);
+            Assert.AreEqual("kept-under-the-old-name", reopened.Get("mod", "key"));
+            Assert.IsFalse(Directory.Exists(Path.Combine(_root, "Stores", "s-oovnkk3ljgjker55g7qmmba2hi")));
         }
 
         [Test]

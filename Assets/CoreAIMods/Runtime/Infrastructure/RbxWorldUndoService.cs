@@ -214,6 +214,8 @@ namespace CoreAI.Mods.WorldPackages
                     state = Combine(Combine(Combine(Combine(Combine(Combine(identity, lighting.IsDriven ? 1UL : 2UL), Bits(durable.ClockTime)),
                         Bits(durable.GeographicLatitude)), Bits(durable.Brightness)), Bits(durable.Ambient)),
                         Bits(durable.OutdoorAmbient));
+                    state = Combine(Combine(state, Bits(durable.EnvironmentDiffuseScale)),
+                        Bits(durable.EnvironmentSpecularScale));
                     break;
                 }
                 case RbxStarterPlayer starterPlayer:

@@ -395,7 +395,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             }
 
             yield return Frames(5);
-            RbxVector3 focus = RootPosition(world, humanoid) + LuaCsRbxApiBindings.HumanoidCameraSubjectOffset;
+            RbxVector3 focus = RootPosition(world, humanoid) + LuaCsRbxApiBindings.RigCameraSubjectOffset;
             float distance = (focus - world.CameraRig.GetCFrame().Position).Magnitude;
             Record("wheel: camera " + distance + " studs from the head after 10 notches");
             Expect(distance < 1f, "the wheel zooms the default camera into first person");
@@ -429,7 +429,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             }
 
             yield return Frames(10);
-            RbxVector3 focus = RootPosition(world, humanoid) + LuaCsRbxApiBindings.HumanoidCameraSubjectOffset;
+            RbxVector3 focus = RootPosition(world, humanoid) + LuaCsRbxApiBindings.RigCameraSubjectOffset;
             float distance = (focus - world.CameraRig.GetCFrame().Position).Magnitude;
             int hiddenInThirdPerson = CountHiddenCharacterParts(world, humanoid, out int _);
             Color[] thirdPerson = Shoot(observer, "body_third_person.png");

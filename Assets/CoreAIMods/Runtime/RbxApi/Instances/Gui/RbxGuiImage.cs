@@ -194,9 +194,14 @@ namespace CoreAI.Mods.Rbx.Instances
 
     /// <summary>
     /// Roblox <c>ScrollingFrame</c>: a box whose children sit on a canvas of <c>CanvasSize</c> (default
-    /// {0, 0}, {2, 0}) clipped by its box; <c>CanvasPosition</c> is the scroll offset, moved by scripts. The
-    /// player's own scrolling (wheel, drag) does not move it yet, and the scroll bar (<c>ScrollBarThickness</c>,
-    /// <c>ScrollingDirection</c>, <c>ScrollingEnabled</c>, its images and insets) is recorded, not drawn.
+    /// {0, 0}, {2, 0}, grown to fit the children by <c>AutomaticCanvasSize</c>) clipped by its window.
+    /// <c>CanvasPosition</c> is the scroll offset: a script moves it (a charged write), and the player's wheel,
+    /// touch drag or scroll bar moves it too (a layout result: never charged, the property signal fires). The layout
+    /// keeps it between zero and <c>AbsoluteCanvasSize - AbsoluteWindowSize</c>. <c>ScrollingEnabled</c> and
+    /// <c>ScrollingDirection</c> decide which axes the player may scroll; <c>ScrollBarThickness</c>,
+    /// <c>ScrollBarImageColor3</c>, <c>ScrollBarImageTransparency</c>, the two insets and
+    /// <c>VerticalScrollBarPosition</c> shape the drawn bars, which are flat bars of that color (the bar images are
+    /// not drawn). <c>ElasticBehavior</c> is kept for saved worlds only: the canvas always stops at its ends.
     /// </summary>
     public sealed class RbxScrollingFrame : RbxGuiObject
     {
@@ -237,16 +242,22 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary><c>Enum.AutomaticSize</c> value of the canvas.</summary>
         public RbxAutomaticSize AutomaticCanvasSize => (RbxAutomaticSize)_automaticCanvasSize;
 
-        /// <summary><c>Enum.ElasticBehavior</c> value; recorded.</summary>
+        /// <summary>
+        /// <c>Enum.ElasticBehavior</c> value; saved with the world, never drawn (no overscroll), and a loud stub for
+        /// Lua.
+        /// </summary>
         public int ElasticBehavior => _elasticBehavior;
 
-        /// <summary><c>Enum.VerticalScrollBarPosition</c> value; recorded.</summary>
+        /// <summary><c>Enum.VerticalScrollBarPosition</c> value: 0 draws the vertical bar on the right, 1 on the left.</summary>
         public int VerticalScrollBarPosition => _verticalScrollBarPosition;
 
-        /// <summary><c>Enum.ScrollBarInset</c> value; recorded.</summary>
+        /// <summary>
+        /// <c>Enum.ScrollBarInset</c> value of the horizontal bar: 0 draws it over the canvas, 1 takes its strip from
+        /// the window while it shows, 2 always takes it.
+        /// </summary>
         public int HorizontalScrollBarInset => _horizontalScrollBarInset;
 
-        /// <summary><c>Enum.ScrollBarInset</c> value; recorded.</summary>
+        /// <summary><c>Enum.ScrollBarInset</c> value of the vertical bar, as <see cref="HorizontalScrollBarInset"/>.</summary>
         public int VerticalScrollBarInset => _verticalScrollBarInset;
 
         /// <summary>The canvas size in pixels after layout.</summary>
@@ -276,12 +287,13 @@ namespace CoreAI.Mods.Rbx.Instances
 
         public void SetCanvasPosition(RbxVector2 value)
         {
-            SetField(ref _canvasPosition, value, nameof(CanvasPosition), RbxGuiChange.Scroll);
+            SetField(ref _canvasPosition, value, nameof(CanvasPosition), RbxGuiChange.Layout | RbxGuiChange.Scroll);
         }
 
         public void SetScrollBarThickness(int value)
         {
-            SetField(ref _scrollBarThickness, value, nameof(ScrollBarThickness), RbxGuiChange.Scroll);
+            SetField(ref _scrollBarThickness, value, nameof(ScrollBarThickness),
+                RbxGuiChange.Layout | RbxGuiChange.Scroll);
         }
 
         public void SetScrollingDirection(RbxScrollingDirection value)
@@ -293,22 +305,23 @@ namespace CoreAI.Mods.Rbx.Instances
                     "assign Enum.ScrollingDirection.X, Y or XY");
             }
 
-            SetField(ref _scrollingDirection, (int)value, nameof(ScrollingDirection), RbxGuiChange.Scroll);
+            SetField(ref _scrollingDirection, (int)value, nameof(ScrollingDirection),
+                RbxGuiChange.Layout | RbxGuiChange.Scroll);
         }
 
         public void SetScrollingEnabled(bool value)
         {
-            SetField(ref _scrollingEnabled, value, nameof(ScrollingEnabled), RbxGuiChange.Scroll);
+            SetField(ref _scrollingEnabled, value, nameof(ScrollingEnabled), RbxGuiChange.Layout | RbxGuiChange.Scroll);
         }
 
         public void SetScrollBarImageColor3(RbxColor3 value)
         {
-            SetField(ref _scrollBarImageColor3, value, nameof(ScrollBarImageColor3), RbxGuiChange.None);
+            SetField(ref _scrollBarImageColor3, value, nameof(ScrollBarImageColor3), RbxGuiChange.Scroll);
         }
 
         public void SetScrollBarImageTransparency(double value)
         {
-            SetField(ref _scrollBarImageTransparency, value, nameof(ScrollBarImageTransparency), RbxGuiChange.None);
+            SetField(ref _scrollBarImageTransparency, value, nameof(ScrollBarImageTransparency), RbxGuiChange.Scroll);
         }
 
         public void SetAutomaticCanvasSize(RbxAutomaticSize value)
@@ -324,17 +337,20 @@ namespace CoreAI.Mods.Rbx.Instances
 
         public void SetVerticalScrollBarPosition(int value)
         {
-            SetField(ref _verticalScrollBarPosition, value, nameof(VerticalScrollBarPosition), RbxGuiChange.None);
+            SetField(ref _verticalScrollBarPosition, value, nameof(VerticalScrollBarPosition),
+                RbxGuiChange.Layout | RbxGuiChange.Scroll);
         }
 
         public void SetHorizontalScrollBarInset(int value)
         {
-            SetField(ref _horizontalScrollBarInset, value, nameof(HorizontalScrollBarInset), RbxGuiChange.None);
+            SetField(ref _horizontalScrollBarInset, value, nameof(HorizontalScrollBarInset),
+                RbxGuiChange.Layout | RbxGuiChange.Scroll);
         }
 
         public void SetVerticalScrollBarInset(int value)
         {
-            SetField(ref _verticalScrollBarInset, value, nameof(VerticalScrollBarInset), RbxGuiChange.None);
+            SetField(ref _verticalScrollBarInset, value, nameof(VerticalScrollBarInset),
+                RbxGuiChange.Layout | RbxGuiChange.Scroll);
         }
 
         /// <summary>Stores the canvas the layout computed; fires the property signals of what changed.</summary>
@@ -355,7 +371,10 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
-        /// <summary>Stores a scroll offset the player produced: only the property signals fire.</summary>
+        /// <summary>
+        /// Stores a scroll offset the player produced (wheel, drag, scroll bar): no budget is charged, the property
+        /// signal fires and the children are laid out again at their new <c>AbsolutePosition</c>.
+        /// </summary>
         internal void ApplyScrolledPosition(RbxVector2 position)
         {
             if (position == _canvasPosition || IsDestroyed)
@@ -364,7 +383,19 @@ namespace CoreAI.Mods.Rbx.Instances
             }
 
             _canvasPosition = position;
-            AfterWrite(nameof(CanvasPosition), RbxGuiChange.None);
+            AfterWrite(nameof(CanvasPosition), RbxGuiChange.Layout);
+        }
+
+        /// <summary>Stores the offset the layout clamped into the canvas; only the property signal fires.</summary>
+        internal void ApplyClampedPosition(RbxVector2 position)
+        {
+            if (position == _canvasPosition || IsDestroyed)
+            {
+                return;
+            }
+
+            _canvasPosition = position;
+            NotifyPropertyChanged(nameof(CanvasPosition));
         }
 
         /// <inheritdoc />

@@ -418,6 +418,7 @@ namespace CoreAI.Ai.LuaCs
             private readonly Action<RuntimeUiElement> _onPointerExited;
             private readonly Action<RuntimeUiElement> _onFocusGained;
             private readonly Action<RuntimeUiElement> _onFocusLost;
+            private readonly Action<RuntimeUiElement> _onScrollChanged;
             private Action _clicked;
             private Action _valueChanged;
             private Action _submitted;
@@ -425,6 +426,7 @@ namespace CoreAI.Ai.LuaCs
             private Action _pointerExited;
             private Action _focusGained;
             private Action _focusLost;
+            private Action _scrollChanged;
 
             public ElementPort(ScreenPort screen, RuntimeUiElement handle)
             {
@@ -437,6 +439,7 @@ namespace CoreAI.Ai.LuaCs
                 _onPointerExited = _ => _pointerExited?.Invoke();
                 _onFocusGained = _ => _focusGained?.Invoke();
                 _onFocusLost = _ => _focusLost?.Invoke();
+                _onScrollChanged = _ => _scrollChanged?.Invoke();
             }
 
             public RuntimeUiElement Handle { get; }
@@ -482,6 +485,16 @@ namespace CoreAI.Ai.LuaCs
                 add => Subscribe(ref _focusLost, value, h => Handle.FocusLost += h, _onFocusLost);
                 remove => Unsubscribe(ref _focusLost, value, h => Handle.FocusLost -= h, _onFocusLost);
             }
+
+            public event Action ScrollChanged
+            {
+                add => Subscribe(ref _scrollChanged, value, h => Handle.ScrollChanged += h, _onScrollChanged);
+                remove => Unsubscribe(ref _scrollChanged, value, h => Handle.ScrollChanged -= h, _onScrollChanged);
+            }
+
+            public float ScrollOffsetX => Handle.ScrollOffset.x;
+
+            public float ScrollOffsetY => Handle.ScrollOffset.y;
 
             public bool IsAlive => Handle.IsAlive;
 
@@ -564,6 +577,11 @@ namespace CoreAI.Ai.LuaCs
             public bool SetZOrder(int zOrder)
             {
                 return Handle.SetZOrder(zOrder);
+            }
+
+            public bool SetScrollOffset(float x, float y)
+            {
+                return Handle.SetScrollOffset(new UnityEngine.Vector2(x, y));
             }
 
             public bool AddClass(string className)
@@ -696,6 +714,12 @@ namespace CoreAI.Ai.LuaCs
                 {
                     Handle.FocusLost -= _onFocusLost;
                     _focusLost = null;
+                }
+
+                if (_scrollChanged != null)
+                {
+                    Handle.ScrollChanged -= _onScrollChanged;
+                    _scrollChanged = null;
                 }
             }
 

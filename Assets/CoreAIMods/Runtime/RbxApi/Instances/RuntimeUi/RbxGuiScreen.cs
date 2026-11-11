@@ -13,6 +13,17 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
     {
         private const float HoverShade = 0.8f;
         private const float MaxTextSize = 100f;
+        private const string ScrollModeHorizontal = "Horizontal";
+        private const string ScrollModeVertical = "Vertical";
+        private const string ScrollModeBoth = "VerticalAndHorizontal";
+        private const string ScrollerAuto = "Auto";
+        private const string ScrollerHidden = "Hidden";
+
+        /// <summary>The class that puts a ScrollingFrame's vertical bar on its left side.</summary>
+        internal const string ScrollLeftClass = "rbx-scroll-left";
+
+        /// <summary>The class that puts a ScrollingFrame's vertical bar on its right side.</summary>
+        internal const string ScrollRightClass = "rbx-scroll-right";
 
         private readonly Action _onResized;
         private float _viewportW = -1f;
@@ -147,10 +158,12 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
 
             float innerX = node.X - node.Outline + node.Border;
             float innerY = node.Y - node.Outline + node.Border;
-            if (node.Gui is RbxScrollingFrame scrolling)
+            if (node.Gui is RbxScrollingFrame)
             {
-                innerX -= scrolling.CanvasPosition.X;
-                innerY -= scrolling.CanvasPosition.Y;
+                // WHY add the offset back: the layout moved the children by it (their AbsolutePosition), while the
+                // host moves the canvas they are drawn on, so each child is placed on the canvas unscrolled.
+                innerX -= node.ScrollX;
+                innerY -= node.ScrollY;
             }
 
             for (int i = 0; i < node.Children.Count; i++)
@@ -217,6 +230,92 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
             if (gui is RbxTextBox box && (change & RbxGuiChange.Field) != 0)
             {
                 PushField(node, box);
+            }
+
+            if (gui is RbxScrollingFrame scrolling)
+            {
+                PushScroll(node, scrolling);
+            }
+        }
+
+        /// <summary>
+        /// Pushes a ScrollingFrame's scroll state: the canvas size (the host's scroll range), the bars (which axes,
+        /// thickness, side, color) and the offset the layout kept in range. Only what differs from the last push is
+        /// written, and none of it is charged: the script already paid for the property writes behind it.
+        /// </summary>
+        private static void PushScroll(RbxGuiNode node, RbxScrollingFrame frame)
+        {
+            IRbxUiElement element = node.Element;
+            IRbxUiElement canvas = node.Canvas;
+            float canvasW = node.CanvasW + node.InsetV;
+            float canvasH = node.CanvasH + node.InsetH;
+            if (canvas != null && canvas.IsAlive && (!canvasW.Equals(node.PushedCanvasW) || !canvasH.Equals(node.PushedCanvasH)))
+            {
+                canvas.SetStyle(RbxUiStyleProperty.Width, RbxUiStyleValue.Pixels(canvasW));
+                canvas.SetStyle(RbxUiStyleProperty.Height, RbxUiStyleValue.Pixels(canvasH));
+                node.PushedCanvasW = canvasW;
+                node.PushedCanvasH = canvasH;
+            }
+
+            RbxScrollingDirection direction = frame.ScrollingDirection;
+            string mode = direction == RbxScrollingDirection.X ? ScrollModeHorizontal
+                : direction == RbxScrollingDirection.Y ? ScrollModeVertical : ScrollModeBoth;
+            if (!ReferenceEquals(mode, node.PushedMode))
+            {
+                element.SetAttribute("mode", mode);
+                node.PushedMode = mode;
+            }
+
+            int thickness = Math.Max(0, frame.ScrollBarThickness);
+            bool drawn = frame.ScrollingEnabled && thickness > 0;
+            string barX = drawn && direction != RbxScrollingDirection.Y ? ScrollerAuto : ScrollerHidden;
+            string barY = drawn && direction != RbxScrollingDirection.X ? ScrollerAuto : ScrollerHidden;
+            if (!ReferenceEquals(barX, node.PushedBarX))
+            {
+                element.SetAttribute("horizontal-scroller-visibility", barX);
+                node.PushedBarX = barX;
+            }
+
+            if (!ReferenceEquals(barY, node.PushedBarY))
+            {
+                element.SetAttribute("vertical-scroller-visibility", barY);
+                node.PushedBarY = barY;
+            }
+
+            if (thickness != node.PushedBarSize)
+            {
+                element.SetStyle("--rbx-scroll-bar-size", thickness.ToString(CultureInfo.InvariantCulture) + "px");
+                node.PushedBarSize = thickness;
+            }
+
+            RbxColor3 tint = frame.ScrollBarImageColor3;
+            float alpha = Clamp01(1f - frame.ScrollBarImageTransparency);
+            if (!node.PushedBarTintSet || tint != node.PushedBarTint || !alpha.Equals(node.PushedBarAlpha))
+            {
+                element.SetStyle("--rbx-scroll-bar-color", RbxUiStyleValue.Color(tint.R, tint.G, tint.B, alpha).ToString());
+                node.PushedBarTintSet = true;
+                node.PushedBarTint = tint;
+                node.PushedBarAlpha = alpha;
+            }
+
+            string side = frame.VerticalScrollBarPosition == 1 ? ScrollLeftClass : ScrollRightClass;
+            if (!ReferenceEquals(side, node.PushedBarSide))
+            {
+                if (node.PushedBarSide != null)
+                {
+                    element.RemoveClass(node.PushedBarSide);
+                }
+
+                element.AddClass(side);
+                node.PushedBarSide = side;
+            }
+
+            if (!node.PushedScrollSet || !node.ScrollX.Equals(node.PushedScrollX) || !node.ScrollY.Equals(node.PushedScrollY))
+            {
+                element.SetScrollOffset(node.ScrollX, node.ScrollY);
+                node.PushedScrollSet = true;
+                node.PushedScrollX = node.ScrollX;
+                node.PushedScrollY = node.ScrollY;
             }
         }
 

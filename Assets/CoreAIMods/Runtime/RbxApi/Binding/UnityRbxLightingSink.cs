@@ -11,7 +11,9 @@ namespace CoreAI.Mods.Rbx.Binding
     /// The default <see cref="IRbxLightingSink"/>: points the scene's sun light along
     /// <c>Lighting:GetSunDirection()</c> with <c>Brightness</c> times daylight as its intensity, makes it
     /// <c>RenderSettings.sun</c> so the sky follows it, and sets a trilight ambient (sky and equator from
-    /// the daylight-scaled <c>OutdoorAmbient</c>, ground from <c>Ambient</c>; DEV P9-a). It touches only
+    /// the daylight-scaled <c>OutdoorAmbient</c> blended towards <c>Ambient</c> as <c>EnvironmentDiffuseScale</c>
+    /// falls, ground from <c>Ambient</c>; DEV P9-a) and hands <c>EnvironmentSpecularScale</c> to the look as
+    /// its sky reflection scale. It touches only
     /// <c>RenderSettings</c> and that one light, records what it changes on the first apply and puts it
     /// back in <see cref="Revert"/>. From the first apply until that revert it holds a
     /// <see cref="LookAmbientOwnership"/> claim, so the default look leaves the ambient to the day cycle and
@@ -98,14 +100,17 @@ namespace CoreAI.Mods.Rbx.Binding
                 RenderSettings.sun = sun;
             }
 
-            RbxColor3 outdoor = RbxLightingMapping.EffectiveOutdoorAmbient(state);
+            RbxColor3 skyFacing = RbxLightingMapping.SkyFacingAmbient(state);
             // WHY: while the world drives its lighting the ambient is the day cycle's; the default look leaves it
             // alone until Revert releases the claim, and then puts its own ambient back.
             _ambientClaim ??= _ambientOwnership.Claim(AmbientOwnerName);
             RenderSettings.ambientMode = AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = ToColor(outdoor);
-            RenderSettings.ambientEquatorColor = ToColor(outdoor);
+            RenderSettings.ambientSkyColor = ToColor(skyFacing);
+            RenderSettings.ambientEquatorColor = ToColor(skyFacing);
             RenderSettings.ambientGroundColor = ToColor(state.Ambient);
+            // WHY through the ownership seam: the sky reflections are the look's probe, which this sink does not
+            // own; the look scales them by this value for as long as the claim is held.
+            _ambientOwnership.SetSkyReflectionScale(state.EnvironmentSpecularScale);
         }
 
         /// <summary>Puts the last applied state on screen again, after a host pass rewrote <c>RenderSettings</c>.</summary>
@@ -138,6 +143,11 @@ namespace CoreAI.Mods.Rbx.Binding
                 _sun.transform.rotation = _originalSunRotation;
                 _sun.intensity = _originalSunIntensity;
                 _sun.enabled = _originalSunEnabled;
+            }
+
+            if (_ambientClaim != null)
+            {
+                _ambientOwnership.SetSkyReflectionScale(1f);
             }
 
             _ambientClaim?.Dispose();

@@ -214,6 +214,12 @@ namespace UnityEngine
             set => throw PortableEngine.Unavailable("Rigidbody.freezeRotation");
         }
 
+        public CollisionDetectionMode collisionDetectionMode
+        {
+            get => throw PortableEngine.Unavailable("Rigidbody.collisionDetectionMode");
+            set => throw PortableEngine.Unavailable("Rigidbody.collisionDetectionMode");
+        }
+
         public bool useGravity
         {
             get => throw PortableEngine.Unavailable("Rigidbody.useGravity");
@@ -230,6 +236,15 @@ namespace UnityEngine
         {
             throw PortableEngine.Unavailable("Rigidbody.AddForce");
         }
+    }
+
+    /// <summary>Compile-time surface of <c>UnityEngine.CollisionDetectionMode</c>.</summary>
+    public enum CollisionDetectionMode
+    {
+        Discrete = 0,
+        Continuous = 1,
+        ContinuousDynamic = 2,
+        ContinuousSpeculative = 3
     }
 
     /// <summary>Unity's force modes, with Unity's numeric values.</summary>

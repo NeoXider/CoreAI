@@ -128,10 +128,12 @@ namespace CoreAI.Mods.Rbx.Instances.CharacterRig
         /// </summary>
         /// <remarks>
         /// The root keeps the box the controls were tuned on (2x2x1, collidable) and is invisible, as Roblox's
-        /// HumanoidRootPart is (Transparency 1). WHY every other part has CanCollide off (a DEV candidate:
-        /// Roblox's R6 Torso and Head collide): without joints a part cannot join the root's physical body, and
-        /// a colliding Torso placed over the root by the poser would shove the root it is meant to follow. The
-        /// limbs are unanchored, as in Roblox; the poser drives them, and an anchored limb is left where it is.
+        /// HumanoidRootPart is (Transparency 1). The Torso and Head report CanCollide true and the arms and legs
+        /// false, as R6's do, so a camera occlusion test or a script sees Roblox's values; every part is
+        /// unanchored, as in Roblox. DEV candidate: while the rig holds them none of them pushes a body — the
+        /// engine runs a held part as a kinematic trigger — because without joints a part cannot join the root's
+        /// physical body, and a solid Torso posed over the root would shove the root it follows. The root stays
+        /// the character's only collider.
         /// </remarks>
         public static RbxCharacterPartSeed SeedFor(RbxR6Part part, RbxCFrame rootCFrame)
         {
@@ -144,8 +146,9 @@ namespace CoreAI.Mods.Rbx.Instances.CharacterRig
             RbxColor3 color = part == RbxR6Part.Torso ? TorsoColor
                 : part == RbxR6Part.RightLeg || part == RbxR6Part.LeftLeg ? LegColor
                 : SkinColor;
+            bool canCollide = part == RbxR6Part.Torso || part == RbxR6Part.Head;
             return new RbxCharacterPartSeed(PartSizes[index], rootCFrame * RestOffsets[index], color, true, 0f,
-                false, false);
+                canCollide, false);
         }
 
         private static RbxCFrame[] BuildRestOffsets()

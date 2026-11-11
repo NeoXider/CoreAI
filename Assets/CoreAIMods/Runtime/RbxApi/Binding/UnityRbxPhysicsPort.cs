@@ -143,7 +143,7 @@ namespace CoreAI.Mods.Rbx.Binding
                     continue;
                 }
 
-                if (respectCanCollide && !CollidesWithQueries(candidate.collider))
+                if (respectCanCollide && !CollidesWithQueries(candidate.collider, isPart ? id : InstanceId.None))
                 {
                     continue;
                 }
@@ -185,8 +185,18 @@ namespace CoreAI.Mods.Rbx.Binding
         /// RespectCanCollide asks the query to use CanCollide instead of CanQuery. The binder keeps a
         /// CanCollide=false part's collider as a trigger, so the collider's own flag is the answer.
         /// </summary>
-        private static bool CollidesWithQueries(Collider collider)
+        /// <remarks>
+        /// WHY a part the character rig holds answers from its property: the binder keeps a held part a trigger
+        /// whatever its CanCollide, so the trigger flag would make a held R6 Torso (CanCollide true) invisible
+        /// to a RespectCanCollide ray.
+        /// </remarks>
+        private bool CollidesWithQueries(Collider collider, InstanceId part)
         {
+            if (part.IsValid && _binder.IsPoseDriven(part))
+            {
+                return _binder.TryGetPartProperties(part, out PartProperties properties) && properties.CanCollide;
+            }
+
             return !collider.isTrigger;
         }
 

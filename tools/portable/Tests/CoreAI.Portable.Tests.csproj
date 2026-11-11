@@ -184,6 +184,7 @@
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/InstanceHierarchyEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/InstanceHierarchyEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/InstanceIdAuthorityPartitionEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/InstanceIdAuthorityPartitionEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/InstanceTreeSerializationEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/InstanceTreeSerializationEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/RuntimeInfrastructureSnapshotEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/RuntimeInfrastructureSnapshotEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/P1InputFocusAndPointerEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/P1InputFocusAndPointerEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/P1CharacterMovementEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/P1CharacterMovementEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/P1CameraModuleEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/P1CameraModuleEditModeTests.cs" />
@@ -218,6 +219,7 @@
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptContextRuleTableEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptContextRuleTableEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptRunRulesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptRunRulesEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptInstancesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptInstancesEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptSnapshotEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptSnapshotEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Unity/RbxShaderClusterLightLoopEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Unity/RbxShaderClusterLightLoopEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Terrain/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Terrain/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/TextChat/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/TextChat/%(Filename)%(Extension)" />
@@ -229,5 +231,6 @@
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/RuntimeUi/FakeRbxUiBackend.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/RuntimeUi/FakeRbxUiBackend.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/Performance/AllocationMeter.cs" Link="Assets/CoreAIMods/Tests/EditMode/Performance/AllocationMeter.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Agents/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Agents/%(Filename)%(Extension)" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/CharacterRig/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/CharacterRig/%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
@@ -11,8 +12,11 @@ using CoreAI.Mods.Folders;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Adornments;
 using CoreAI.Mods.Rbx.Instances.Replication;
+using CoreAI.Mods.Rbx.Instances.Scripts;
 using CoreAI.Mods.Rbx.Instances.Terrain;
+using CoreAI.Mods.Rbx.Instances.TextChat;
 using Newtonsoft.Json;
 
 namespace CoreAI.Mods.WorldPackages
@@ -23,11 +27,40 @@ namespace CoreAI.Mods.WorldPackages
     /// </summary>
     public static class RbxWorldPackageSerializer
     {
-        public const int CurrentFormatVersion = 1;
+        /// <summary>
+        /// The format version <see cref="Capture(RbxWorldPackageCaptureContext)"/> writes. It stays 1 until the mod
+        /// runtime binds sources to script instances (MVP4 step C1): a version 2 package written before that would
+        /// declare every mod detached. The reader accepts every one of <see cref="SupportedFormatVersions"/>.
+        /// </summary>
+        public const int CurrentFormatVersion = LegacyScriptPlacementFormatVersion;
+
+        /// <summary>
+        /// Format version 1: no instance carries a <c>script</c> block, and every active mod of the package starts at
+        /// the legacy placement (MVP4 SC-7, SC-8).
+        /// </summary>
+        public const int LegacyScriptPlacementFormatVersion = 1;
+
+        /// <summary>
+        /// Format version 2 (MVP4 SC-7): every <c>Script</c>, <c>LocalScript</c> and <c>ModuleScript</c> carries a
+        /// <c>script</c> block naming the source it is bound to, and a source no instance is bound to is detached.
+        /// </summary>
+        public const int ScriptBindingsFormatVersion = 2;
+
+        /// <summary>The <c>minimum_reader_version</c> a format version 2 package declares.</summary>
+        /// <remarks>
+        /// WHY 2 and not a new number: reader version 2 (Terrain cells) and the format version 2 reader ship in the
+        /// same release, the first after 7.56.0, so no released reader knows the Terrain entry without knowing
+        /// format version 2. Every reader up to 7.56.0 refuses format version 2 by its <c>format_version</c> first.
+        /// </remarks>
+        public const int ScriptBindingsMinimumReaderVersion = 2;
+
+        /// <summary>The <c>format_version</c> values this reader accepts: 1 and 2.</summary>
+        public static readonly IReadOnlyList<int> SupportedFormatVersions =
+            Array.AsReadOnly(new[] { LegacyScriptPlacementFormatVersion, ScriptBindingsFormatVersion });
 
         /// <summary>
         /// The newest <c>minimum_reader_version</c> this reader accepts. Readers up to 7.56.0 accept 1 only;
-        /// 2 is format 1 with a <see cref="TerrainEntryName"/> entry.
+        /// 2 is format 1 with a <see cref="TerrainEntryName"/> entry, and every format version 2 package.
         /// </summary>
         public const int CurrentReaderVersion = 2;
 
@@ -133,14 +166,29 @@ namespace CoreAI.Mods.WorldPackages
 
         private const string StarterGuiClassName = "StarterGui";
 
+        private const string TextChatCommandClassName = "TextChatCommand";
+
+        private const string SelectionBoxClassName = "SelectionBox";
+
         /// <summary>Captures the supported world-owned DataModel projection plus settings and mods.</summary>
         public static RbxWorldPackagePayload Capture(RbxWorldPackageCaptureContext context)
+        {
+            return Capture(context, CurrentFormatVersion);
+        }
+
+        /// <summary>
+        /// Captures the world as <paramref name="formatVersion"/> writes it: version 1 drops every script block,
+        /// version 2 keeps them with the SC-7 repairs (<see cref="ProjectScriptState"/>). Production capture is
+        /// <see cref="CurrentFormatVersion"/>; the other version is for tests until step C1 raises it.
+        /// </summary>
+        internal static RbxWorldPackagePayload Capture(RbxWorldPackageCaptureContext context, int formatVersion)
         {
             if (context == null)
             {
                 throw new ArgumentNullException(nameof(context));
             }
 
+            RequireSupportedFormatVersion(formatVersion);
             if (!context.Registry.TryGet(context.Game.Id, out RbxInstance registeredGame)
                 || !ReferenceEquals(registeredGame, context.Game))
             {
@@ -209,6 +257,7 @@ namespace CoreAI.Mods.WorldPackages
                 ? ProjectFiniteCameraCFrame(context.CameraRig.GetCFrame(), tree, diagnostics)
                 : (RbxCFrame?)null;
             IReadOnlyList<RbxWorldModSource> mods = CaptureMods(context.ModSourceStore, diagnostics);
+            ProjectScriptState(capturedTree, tree, context.Registry, mods, formatVersion, diagnostics);
             RbxWorldPackagePayload payload = new(
                 capturedAtUtc,
                 CloneSettings(settings),
@@ -219,13 +268,16 @@ namespace CoreAI.Mods.WorldPackages
                 diagnostics,
                 new RbxWorldPackageOptionalState
                 {
+                    FormatVersion = formatVersion,
                     Terrain = CaptureTerrain(context.Game),
                     PointLights = CapturePointLights(tree, context.Registry),
                     Lighting = CaptureLighting(tree, context.Game),
                     StarterPlayer = CaptureStarterPlayer(tree, context.Game),
                     ModFolders = CaptureModFolders(context.ModFolderListStore),
                     Gui = CaptureGui(tree, context.Registry, diagnostics),
-                    StarterGui = CaptureStarterGui(tree, context.Game)
+                    StarterGui = CaptureStarterGui(tree, context.Game),
+                    TextChatCommands = CaptureTextChatCommands(tree, context.Registry, diagnostics),
+                    SelectionBoxes = CaptureSelectionBoxes(tree, context.Registry, diagnostics)
                 });
             ValidatePayload(payload, context.Registry.Catalog);
             return payload;
@@ -361,6 +413,93 @@ namespace CoreAI.Mods.WorldPackages
         /// The StarterGui service's switches when it is in the captured tree and any of them differs from the class
         /// defaults; null otherwise, so a world that never touched them writes no block.
         /// </summary>
+        /// <summary>The block of every retained TextChatCommand, or null when the tree holds none.</summary>
+        private static Dictionary<InstanceId, RbxWorldPackageTextChatCommand> CaptureTextChatCommands(
+            InstanceTreeSnapshot tree,
+            InstanceRegistry registry,
+            List<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            Dictionary<InstanceId, RbxWorldPackageTextChatCommand> commands = null;
+            foreach (InstanceSnapshot node in tree.Instances)
+            {
+                InstanceId id = new(node.Id);
+                if (!string.Equals(node.ClassName, TextChatCommandClassName, StringComparison.Ordinal)
+                    || !registry.TryGet(id, out RbxInstance instance) || !(instance is RbxTextChatCommand command))
+                {
+                    continue;
+                }
+
+                ulong nodeId = node.Id;
+                commands ??= new Dictionary<InstanceId, RbxWorldPackageTextChatCommand>();
+                commands.Add(id, RbxWorldPackageTextChatCommand.Of(command)
+                    .WithWellFormedText(member => diagnostics.Add(IllFormedTextDiagnostic(nodeId, member))));
+            }
+
+            return commands;
+        }
+
+        /// <summary>
+        /// The block of every retained SelectionBox, or null when the tree holds none. An adornee the package does not
+        /// keep (a mod's own part, a character, a destroyed or unparented instance) is captured as nil with one
+        /// diagnostic, and a non-finite colour as the class default with one, in the snapshot only.
+        /// </summary>
+        private static Dictionary<InstanceId, RbxWorldPackageSelectionBox> CaptureSelectionBoxes(
+            InstanceTreeSnapshot tree,
+            InstanceRegistry registry,
+            List<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            Dictionary<InstanceId, RbxWorldPackageSelectionBox> boxes = null;
+            HashSet<ulong> retained = null;
+            foreach (InstanceSnapshot node in tree.Instances)
+            {
+                InstanceId id = new(node.Id);
+                if (!string.Equals(node.ClassName, SelectionBoxClassName, StringComparison.Ordinal)
+                    || !registry.TryGet(id, out RbxInstance instance) || !(instance is RbxSelectionBox box))
+                {
+                    continue;
+                }
+
+                if (retained == null)
+                {
+                    retained = new HashSet<ulong>();
+                    foreach (InstanceSnapshot kept in tree.Instances)
+                    {
+                        retained.Add(kept.Id);
+                    }
+                }
+
+                RbxWorldPackageSelectionBox state = RbxWorldPackageSelectionBox.Of(box);
+                if (state.AdorneeId != 0UL && !retained.Contains(state.AdorneeId))
+                {
+                    string reason = registry.TryGetRecord(new InstanceId(state.AdorneeId), out InstanceRecord record)
+                                    && (record.OwnerModId != null || record.IsRuntimeInfrastructure)
+                        ? ModEphemeralReason
+                        : MissingReason;
+                    diagnostics.Add(new RbxWorldPackageDiagnostic(node.Id, 0UL, reason, "Adornee"));
+                    state = state.WithAdorneeId(0UL);
+                }
+
+                RbxColor3 color = state.Color3;
+                if (!IsFinite(color.R) || !IsFinite(color.G) || !IsFinite(color.B))
+                {
+                    diagnostics.Add(NonFiniteValueDiagnostic(node.Id, "Color3"));
+                    color = RbxGuiBase3d.DefaultColor;
+                }
+
+                RbxColor3 surface = state.SurfaceColor3;
+                if (!IsFinite(surface.R) || !IsFinite(surface.G) || !IsFinite(surface.B))
+                {
+                    diagnostics.Add(NonFiniteValueDiagnostic(node.Id, "SurfaceColor3"));
+                    surface = RbxGuiBase3d.DefaultColor;
+                }
+
+                boxes ??= new Dictionary<InstanceId, RbxWorldPackageSelectionBox>();
+                boxes.Add(id, state.WithColors(color, surface));
+            }
+
+            return boxes;
+        }
+
         private static RbxWorldPackageStarterGui? CaptureStarterGui(InstanceTreeSnapshot tree, RbxDataModel game)
         {
             if (!(game.FindFirstChildOfClass(StarterGuiClassName) is RbxStarterGui starterGui))
@@ -1016,6 +1155,92 @@ namespace CoreAI.Mods.WorldPackages
             return !float.IsNaN(value) && !float.IsInfinity(value);
         }
 
+        /// <summary>
+        /// Puts the script state of the projected <paramref name="tree"/> in the form <paramref name="formatVersion"/>
+        /// writes. Version 1 has no <c>script</c> block, so every one is dropped and the bytes are those of a package
+        /// written before script instances existed. Version 2 keeps them and repairs, in the snapshot only, what its
+        /// reader would refuse (MVP4 SC-7): a binding to a source the package does not hold is saved unbound
+        /// (<c>missing</c>, member <c>SourceId</c>), and a world-owned bound script the projection left out because it
+        /// sits inside a mod-ephemeral subtree is reported (<c>mod-ephemeral</c>, member <c>Script</c>), so its source
+        /// loads detached.
+        /// </summary>
+        /// <remarks>
+        /// WHY a mod's own legacy script is left out without a diagnostic: until step C1 it is mod-owned runtime
+        /// infrastructure the mod re-creates when it starts, like every startup object. WHY two instances bound to one
+        /// source, or a bound instance whose class disagrees with its source's context, are not repaired: only the
+        /// runtime binds a source, so either is a runtime defect, and the capture fails on it in the payload
+        /// validation instead of saving a world that would start a different script than the one running.
+        /// </remarks>
+        private static void ProjectScriptState(
+            InstanceTreeSnapshot capturedTree,
+            InstanceTreeSnapshot tree,
+            InstanceRegistry registry,
+            IReadOnlyList<RbxWorldModSource> mods,
+            int formatVersion,
+            List<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            if (formatVersion < ScriptBindingsFormatVersion)
+            {
+                foreach (InstanceSnapshot node in tree.Instances)
+                {
+                    node.Script = null;
+                }
+
+                return;
+            }
+
+            HashSet<string> heldSources = new(StringComparer.Ordinal);
+            foreach (RbxWorldModSource mod in mods)
+            {
+                heldSources.Add(mod.Manifest.Id);
+            }
+
+            HashSet<ulong> retained = new();
+            foreach (InstanceSnapshot node in tree.Instances)
+            {
+                retained.Add(node.Id);
+                if (node.Script == null || node.Script.SourceId.Length == 0
+                    || heldSources.Contains(node.Script.SourceId))
+                {
+                    continue;
+                }
+
+                diagnostics.Add(new RbxWorldPackageDiagnostic(node.Id, 0UL, MissingReason, "SourceId"));
+                node.Script.SourceId = string.Empty;
+            }
+
+            foreach (InstanceSnapshot node in capturedTree.Instances)
+            {
+                if (node.Script == null || node.Script.SourceId.Length == 0 || node.OwnerModId != null
+                    || retained.Contains(node.Id)
+                    || (registry.TryGetRecord(new InstanceId(node.Id), out InstanceRecord record)
+                        && record.IsRuntimeInfrastructure))
+                {
+                    continue;
+                }
+
+                diagnostics.Add(new RbxWorldPackageDiagnostic(node.Id, 0UL, ModEphemeralReason, "Script"));
+            }
+        }
+
+        /// <summary>True for a <c>format_version</c> in <see cref="SupportedFormatVersions"/>.</summary>
+        internal static bool IsSupportedFormatVersion(int formatVersion)
+        {
+            return formatVersion == LegacyScriptPlacementFormatVersion || formatVersion == ScriptBindingsFormatVersion;
+        }
+
+        private static void RequireSupportedFormatVersion(int formatVersion)
+        {
+            if (!IsSupportedFormatVersion(formatVersion))
+            {
+                throw new RbxWorldPackageException(
+                    "Unsupported world package format version "
+                    + formatVersion.ToString(CultureInfo.InvariantCulture) + "; this reader supports versions "
+                    + LegacyScriptPlacementFormatVersion.ToString(CultureInfo.InvariantCulture) + " and "
+                    + ScriptBindingsFormatVersion.ToString(CultureInfo.InvariantCulture) + ".");
+            }
+        }
+
         /// <summary>Join-snapshot entry point; returns the disk codec's world-owned payload.</summary>
         public static RbxWorldPackagePayload ExportSnapshot(RbxWorldPackageCaptureContext context)
         {
@@ -1374,6 +1599,26 @@ namespace CoreAI.Mods.WorldPackages
                     }
                 }
 
+                foreach (KeyValuePair<InstanceId, RbxWorldPackageTextChatCommand> entry in payload.TextChatCommands)
+                {
+                    if (registry.TryGet(entry.Key, out RbxInstance instance) && instance is RbxTextChatCommand command)
+                    {
+                        entry.Value.ApplyTo(command);
+                    }
+                }
+
+                foreach (KeyValuePair<InstanceId, RbxWorldPackageSelectionBox> entry in payload.SelectionBoxes)
+                {
+                    if (registry.TryGet(entry.Key, out RbxInstance instance) && instance is RbxSelectionBox box)
+                    {
+                        RbxInstance adornee = entry.Value.AdorneeId != 0UL
+                                              && registry.TryGet(new InstanceId(entry.Value.AdorneeId), out RbxInstance target)
+                            ? target
+                            : null;
+                        entry.Value.ApplyTo(box, adornee);
+                    }
+                }
+
                 registry.SetSceneRoot(game);
                 RbxInstance workspace = game.FindFirstChildOfClass("Workspace")
                     ?? throw new RbxWorldPackageException(
@@ -1411,7 +1656,8 @@ namespace CoreAI.Mods.WorldPackages
                 }
 
                 return new RbxWorldPackageRestoreResult(
-                    registry, game, partSink, CloneMods(payload.Mods));
+                    registry, game, partSink, CloneMods(payload.Mods),
+                    payload.FormatVersion < ScriptBindingsFormatVersion);
             }
             catch
             {
@@ -1498,13 +1744,33 @@ namespace CoreAI.Mods.WorldPackages
             return mods;
         }
 
+        /// <summary>
+        /// The <c>minimum_reader_version</c> the writer declares: 2 for a format version 2 package or one with Terrain
+        /// cells, else 1, so a version 1 package without cells is byte-identical to one written by 7.56.0.
+        /// </summary>
+        private static int MinimumReaderVersionOf(RbxWorldPackagePayload payload)
+        {
+            int version = LegacyScriptPlacementFormatVersion;
+            if (HasTerrainCells(payload))
+            {
+                version = Math.Max(version, TerrainMinimumReaderVersion);
+            }
+
+            if (payload.FormatVersion >= ScriptBindingsFormatVersion)
+            {
+                version = Math.Max(version, ScriptBindingsMinimumReaderVersion);
+            }
+
+            return version;
+        }
+
         private static PackageManifestDto BuildManifest(RbxWorldPackagePayload payload)
         {
             PackageManifestDto manifest = new()
             {
                 Format = PackageFormat,
-                FormatVersion = CurrentFormatVersion,
-                MinimumReaderVersion = HasTerrainCells(payload) ? TerrainMinimumReaderVersion : CurrentFormatVersion,
+                FormatVersion = payload.FormatVersion,
+                MinimumReaderVersion = MinimumReaderVersionOf(payload),
                 ApiVersion = CurrentApiVersion,
                 CreatedUtc = payload.CapturedAtUtc.ToString("O", CultureInfo.InvariantCulture),
                 WorldEntry = WorldEntryName,
@@ -1686,6 +1952,31 @@ namespace CoreAI.Mods.WorldPackages
                     dto.Gui = WorldGuiDto.Of(gui);
                 }
 
+                if (payload.TextChatCommands.TryGetValue(new InstanceId(node.Id), out RbxWorldPackageTextChatCommand command))
+                {
+                    dto.TextChatCommand = new WorldTextChatCommandDto
+                    {
+                        PrimaryAlias = command.PrimaryAlias,
+                        SecondaryAlias = command.SecondaryAlias,
+                        Enabled = command.Enabled,
+                        AutocompleteVisible = command.AutocompleteVisible
+                    };
+                }
+
+                if (payload.SelectionBoxes.TryGetValue(new InstanceId(node.Id), out RbxWorldPackageSelectionBox box))
+                {
+                    dto.SelectionBox = new WorldSelectionBoxDto
+                    {
+                        AdorneeId = U(box.AdorneeId),
+                        Color3 = new[] { box.Color3.R, box.Color3.G, box.Color3.B },
+                        Transparency = box.Transparency,
+                        Visible = box.Visible,
+                        LineThickness = box.LineThickness,
+                        SurfaceColor3 = new[] { box.SurfaceColor3.R, box.SurfaceColor3.G, box.SurfaceColor3.B },
+                        SurfaceTransparency = box.SurfaceTransparency
+                    };
+                }
+
                 if (node.Humanoid != null)
                 {
                     dto.Humanoid = new WorldHumanoidDto
@@ -1701,6 +1992,16 @@ namespace CoreAI.Mods.WorldPackages
                             node.Humanoid.JumpHeight, CultureInfo.InvariantCulture),
                         UseJumpPower = node.Humanoid.UseJumpPower,
                         DisplayName = node.Humanoid.DisplayName ?? string.Empty
+                    };
+                }
+
+                if (node.Script != null)
+                {
+                    dto.Script = new WorldScriptDto
+                    {
+                        SourceId = node.Script.SourceId,
+                        Enabled = node.Script.Enabled,
+                        RunContext = node.Script.RunContext
                     };
                 }
 
@@ -1739,7 +2040,9 @@ namespace CoreAI.Mods.WorldPackages
                     GeographicLatitude = lighting.GeographicLatitude,
                     Brightness = lighting.Brightness,
                     Ambient = new[] { lighting.Ambient.R, lighting.Ambient.G, lighting.Ambient.B },
-                    OutdoorAmbient = new[] { lighting.OutdoorAmbient.R, lighting.OutdoorAmbient.G, lighting.OutdoorAmbient.B }
+                    OutdoorAmbient = new[] { lighting.OutdoorAmbient.R, lighting.OutdoorAmbient.G, lighting.OutdoorAmbient.B },
+                    EnvironmentDiffuseScale = lighting.EnvironmentDiffuseScale,
+                    EnvironmentSpecularScale = lighting.EnvironmentSpecularScale
                 };
             }
 
@@ -1817,6 +2120,8 @@ namespace CoreAI.Mods.WorldPackages
             Dictionary<InstanceId, PartProperties> parts = new();
             Dictionary<InstanceId, RbxWorldPackagePointLight> lights = null;
             Dictionary<InstanceId, RbxWorldPackageGui> gui = null;
+            Dictionary<InstanceId, RbxWorldPackageTextChatCommand> commands = null;
+            Dictionary<InstanceId, RbxWorldPackageSelectionBox> boxes = null;
             foreach (WorldInstanceDto dto in world.Instances)
             {
                 InstanceSnapshot node = BuildInstanceSnapshot(dto);
@@ -1841,6 +2146,26 @@ namespace CoreAI.Mods.WorldPackages
                     if (!gui.TryAdd(
                             new InstanceId(node.Id),
                             RbxWorldPackageGuiSchema.FromEntries(node.ClassName, node.Id, dto.Gui.Entries)))
+                    {
+                        throw new RbxWorldPackageException("world.json repeats instance id " + node.Id + ".");
+                    }
+                }
+
+                if (dto.TextChatCommand != null)
+                {
+                    commands ??= new Dictionary<InstanceId, RbxWorldPackageTextChatCommand>();
+                    if (!commands.TryAdd(new InstanceId(node.Id), new RbxWorldPackageTextChatCommand(
+                            dto.TextChatCommand.PrimaryAlias, dto.TextChatCommand.SecondaryAlias,
+                            dto.TextChatCommand.Enabled, dto.TextChatCommand.AutocompleteVisible)))
+                    {
+                        throw new RbxWorldPackageException("world.json repeats instance id " + node.Id + ".");
+                    }
+                }
+
+                if (dto.SelectionBox != null)
+                {
+                    boxes ??= new Dictionary<InstanceId, RbxWorldPackageSelectionBox>();
+                    if (!boxes.TryAdd(new InstanceId(node.Id), BuildSelectionBox(dto.SelectionBox)))
                     {
                         throw new RbxWorldPackageException("world.json repeats instance id " + node.Id + ".");
                     }
@@ -1870,10 +2195,16 @@ namespace CoreAI.Mods.WorldPackages
                 ? BuildCFrame(world.CameraCFrame, "camera_cframe")
                 : (RbxCFrame?)null;
             IReadOnlyList<RbxWorldPackageDiagnostic> diagnostics = BuildDiagnostics(manifest.Diagnostics);
+            if (boxes != null)
+            {
+                diagnostics = ResolveSelectionBoxAdornees(tree, boxes, diagnostics);
+            }
+
             return new RbxWorldPackagePayload(
                 NormalizeUtc(capturedAtUtc), settings, tree, parts, cameraCFrame, mods, diagnostics,
                 new RbxWorldPackageOptionalState
                 {
+                    FormatVersion = manifest.FormatVersion,
                     Terrain = terrain,
                     PointLights = lights,
                     Lighting = world.Lighting == null ? (RbxLightingDurableState?)null : BuildLighting(world.Lighting),
@@ -1882,6 +2213,8 @@ namespace CoreAI.Mods.WorldPackages
                         : BuildStarterPlayer(world.StarterPlayer),
                     ModFolders = manifest.ModFolders,
                     Gui = gui,
+                    TextChatCommands = commands,
+                    SelectionBoxes = boxes,
                     StarterGui = world.StarterGui == null
                         ? (RbxWorldPackageStarterGui?)null
                         : new RbxWorldPackageStarterGui(
@@ -1990,6 +2323,16 @@ namespace CoreAI.Mods.WorldPackages
                 };
             }
 
+            if (dto.Script != null)
+            {
+                node.Script = new ScriptSnapshot
+                {
+                    SourceId = dto.Script.SourceId,
+                    Enabled = dto.Script.Enabled,
+                    RunContext = dto.Script.RunContext
+                };
+            }
+
             return node;
         }
 
@@ -2032,6 +2375,54 @@ namespace CoreAI.Mods.WorldPackages
                 dto.Brightness, new RbxColor3(dto.Color[0], dto.Color[1], dto.Color[2]), dto.Enabled, dto.Shadows, dto.Range);
         }
 
+        private static RbxWorldPackageSelectionBox BuildSelectionBox(WorldSelectionBoxDto dto)
+        {
+            RequireLength(dto.Color3, 3, "selection_box.color3");
+            RequireLength(dto.SurfaceColor3, 3, "selection_box.surface_color3");
+            return new RbxWorldPackageSelectionBox(
+                ParseUlong(dto.AdorneeId, "selection_box adornee id"),
+                new RbxColor3(dto.Color3[0], dto.Color3[1], dto.Color3[2]),
+                dto.Transparency,
+                dto.Visible,
+                dto.LineThickness,
+                new RbxColor3(dto.SurfaceColor3[0], dto.SurfaceColor3[1], dto.SurfaceColor3[2]),
+                dto.SurfaceTransparency);
+        }
+
+        /// <summary>
+        /// Sets to nil every adornee that names no instance of the package, with one <c>missing</c> diagnostic each.
+        /// </summary>
+        /// <remarks>
+        /// WHY repaired here, where the reader refuses everything else: an adornee is a pointer for drawing only, and a
+        /// world whose outline lost its target is still the world; refusing would lose the whole save for it.
+        /// </remarks>
+        private static IReadOnlyList<RbxWorldPackageDiagnostic> ResolveSelectionBoxAdornees(
+            InstanceTreeSnapshot tree,
+            Dictionary<InstanceId, RbxWorldPackageSelectionBox> boxes,
+            IReadOnlyList<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            HashSet<ulong> ids = new();
+            foreach (InstanceSnapshot node in tree.Instances)
+            {
+                ids.Add(node.Id);
+            }
+
+            List<RbxWorldPackageDiagnostic> result = null;
+            foreach (KeyValuePair<InstanceId, RbxWorldPackageSelectionBox> entry in new List<KeyValuePair<InstanceId, RbxWorldPackageSelectionBox>>(boxes))
+            {
+                if (entry.Value.AdorneeId == 0UL || ids.Contains(entry.Value.AdorneeId))
+                {
+                    continue;
+                }
+
+                result ??= new List<RbxWorldPackageDiagnostic>(diagnostics);
+                result.Add(new RbxWorldPackageDiagnostic(entry.Key.Value, 0UL, MissingReason, "Adornee"));
+                boxes[entry.Key] = entry.Value.WithAdorneeId(0UL);
+            }
+
+            return result ?? diagnostics;
+        }
+
         private static RbxWorldPackageStarterPlayer BuildStarterPlayer(WorldStarterPlayerDto dto)
         {
             if (!Enum.TryParse(dto.DevComputerMovementMode, false, out RbxDevComputerMovementMode movement)
@@ -2063,7 +2454,9 @@ namespace CoreAI.Mods.WorldPackages
                 dto.GeographicLatitude,
                 dto.Brightness,
                 new RbxColor3(dto.Ambient[0], dto.Ambient[1], dto.Ambient[2]),
-                new RbxColor3(dto.OutdoorAmbient[0], dto.OutdoorAmbient[1], dto.OutdoorAmbient[2]));
+                new RbxColor3(dto.OutdoorAmbient[0], dto.OutdoorAmbient[1], dto.OutdoorAmbient[2]),
+                dto.EnvironmentDiffuseScale,
+                dto.EnvironmentSpecularScale);
         }
 
         private static PartProperties BuildPartProperties(WorldPartDto dto)
@@ -2258,6 +2651,8 @@ namespace CoreAI.Mods.WorldPackages
             ValidateStarterPlayer(payload, root);
             ValidateGui(payload);
             ValidateStarterGui(payload, root);
+            ValidateTextChatCommands(payload);
+            ValidateSelectionBoxes(payload);
 
             string previousModId = null;
             foreach (RbxWorldModSource mod in payload.Mods)
@@ -2291,6 +2686,100 @@ namespace CoreAI.Mods.WorldPackages
 
                 previousModId = mod.Manifest.Id;
             }
+
+            ValidateScriptBindings(payload, catalog);
+        }
+
+        /// <summary>
+        /// Refuses script state the payload's format version cannot hold or a reader cannot decide (MVP4 SC-7): a
+        /// <c>script</c> block in a version 1 payload; in version 2, a script instance without one, a binding to a mod
+        /// the package does not hold (dangling), two instances bound to one mod (duplicate), and a bound instance whose
+        /// class and <c>RunContext</c> disagree with its mod's declared <c>Context</c> or whose mod declares a context
+        /// that is not server, client or shared. The tree validation has already refused a block on a class that is
+        /// no script, a <c>Plugin</c> or undefined <c>RunContext</c> and a <c>LocalScript</c> with a non-Legacy one.
+        /// </summary>
+        private static void ValidateScriptBindings(RbxWorldPackagePayload payload, ClassCatalog catalog)
+        {
+            RequireSupportedFormatVersion(payload.FormatVersion);
+            bool bindings = payload.FormatVersion >= ScriptBindingsFormatVersion;
+            Dictionary<string, LuaModManifest> manifests = null;
+            Dictionary<string, ulong> boundInstances = null;
+            foreach (InstanceSnapshot node in payload.Tree.Instances)
+            {
+                if (!bindings)
+                {
+                    if (node.Script != null)
+                    {
+                        throw new RbxWorldPackageException(
+                            "World package format version 1 cannot carry the script block of " + node.ClassName
+                            + " instance id " + node.Id + "; a script binding needs format version 2.");
+                    }
+
+                    continue;
+                }
+
+                if (!catalog.IsA(node.ClassName, "LuaSourceContainer"))
+                {
+                    continue;
+                }
+
+                if (node.Script == null)
+                {
+                    throw new RbxWorldPackageException(
+                        "World package format version 2 requires a script block on " + node.ClassName
+                        + " instance id " + node.Id + "; an unbound script carries an empty source_id.");
+                }
+
+                string sourceId = node.Script.SourceId;
+                if (sourceId.Length == 0)
+                {
+                    continue;
+                }
+
+                manifests ??= IndexManifests(payload.Mods);
+                if (!manifests.TryGetValue(sourceId, out LuaModManifest manifest))
+                {
+                    throw new RbxWorldPackageException(
+                        node.ClassName + " instance id " + node.Id + " is bound to mod '" + sourceId
+                        + "', which the package does not hold (a dangling script binding).");
+                }
+
+                boundInstances ??= new Dictionary<string, ulong>(StringComparer.Ordinal);
+                if (boundInstances.TryGetValue(sourceId, out ulong firstId))
+                {
+                    throw new RbxWorldPackageException(
+                        "Mod '" + sourceId + "' is bound to two script instances, ids " + firstId + " and " + node.Id
+                        + "; a source is bound to at most one instance.");
+                }
+
+                boundInstances.Add(sourceId, node.Id);
+                if (!ScriptContexts.TryParseDeclared(manifest.Context, out ScriptContext declared, out string parseError))
+                {
+                    throw new RbxWorldPackageException(
+                        "Mod '" + sourceId + "', bound to " + node.ClassName + " instance id " + node.Id + ": "
+                        + parseError + ".");
+                }
+
+                int runContext = node.Script.RunContext ?? RunContextValues.Legacy;
+                if (!ScriptContexts.TryGetEffective(node.ClassName, runContext, declared, out ScriptContext _,
+                        out string disagreement))
+                {
+                    throw new RbxWorldPackageException(
+                        node.ClassName + " instance id " + node.Id + " disagrees with the context of mod '" + sourceId
+                        + "' it is bound to: " + disagreement + ".");
+                }
+            }
+        }
+
+        private static Dictionary<string, LuaModManifest> IndexManifests(IReadOnlyList<RbxWorldModSource> mods)
+        {
+            Dictionary<string, LuaModManifest> manifests = new(mods.Count, StringComparer.Ordinal);
+            foreach (RbxWorldModSource mod in mods)
+            {
+                manifests[mod.Manifest.Id] = mod.Manifest;
+            }
+
+            return manifests;
         }
 
         private static void ValidateLights(RbxWorldPackagePayload payload)
@@ -2328,6 +2817,15 @@ namespace CoreAI.Mods.WorldPackages
             }
         }
 
+        /// <summary>
+        /// True for a finite value within [0, 1]: the range <c>Lighting.EnvironmentDiffuseScale</c> and
+        /// <c>EnvironmentSpecularScale</c> clamp to, so a value outside it would not survive a load and a save.
+        /// </summary>
+        private static bool IsUnitScale(float value)
+        {
+            return IsFinite(value) && value >= 0f && value <= 1f;
+        }
+
         private static void ValidateLighting(RbxWorldPackagePayload payload, InstanceSnapshot root)
         {
             if (!payload.Lighting.HasValue)
@@ -2340,10 +2838,12 @@ namespace CoreAI.Mods.WorldPackages
                 || !IsFinite(lighting.GeographicLatitude) || !IsFinite(lighting.Brightness)
                 || !IsFinite(lighting.Ambient.R) || !IsFinite(lighting.Ambient.G) || !IsFinite(lighting.Ambient.B)
                 || !IsFinite(lighting.OutdoorAmbient.R) || !IsFinite(lighting.OutdoorAmbient.G)
-                || !IsFinite(lighting.OutdoorAmbient.B))
+                || !IsFinite(lighting.OutdoorAmbient.B)
+                || !IsUnitScale(lighting.EnvironmentDiffuseScale) || !IsUnitScale(lighting.EnvironmentSpecularScale))
             {
                 throw new RbxWorldPackageException(
-                    "World package lighting needs finite values and a clock_time within [0, 24).");
+                    "World package lighting needs finite values, a clock_time within [0, 24) and environment scales "
+                    + "within [0, 1].");
             }
 
             foreach (InstanceSnapshot node in payload.Tree.Instances)
@@ -2425,6 +2925,72 @@ namespace CoreAI.Mods.WorldPackages
                 {
                     throw new RbxWorldPackageException(
                         "World package gui block of " + className + " " + id + " is invalid: " + problem + ".");
+                }
+            }
+        }
+
+        private static Dictionary<ulong, string> ClassesById(RbxWorldPackagePayload payload)
+        {
+            Dictionary<ulong, string> classes = new(payload.Tree.Instances.Count);
+            foreach (InstanceSnapshot node in payload.Tree.Instances)
+            {
+                classes[node.Id] = node.ClassName;
+            }
+
+            return classes;
+        }
+
+        private static void ValidateTextChatCommands(RbxWorldPackagePayload payload)
+        {
+            if (payload.TextChatCommands.Count == 0)
+            {
+                return;
+            }
+
+            Dictionary<ulong, string> classes = ClassesById(payload);
+            foreach (KeyValuePair<InstanceId, RbxWorldPackageTextChatCommand> entry in payload.TextChatCommands)
+            {
+                if (!classes.TryGetValue(entry.Key.Value, out string className)
+                    || !string.Equals(className, TextChatCommandClassName, StringComparison.Ordinal))
+                {
+                    throw new RbxWorldPackageException(
+                        "World package carries TextChatCommand state for instance " + entry.Key.Value
+                        + ", which is not a TextChatCommand of the tree.");
+                }
+            }
+        }
+
+        private static void ValidateSelectionBoxes(RbxWorldPackagePayload payload)
+        {
+            if (payload.SelectionBoxes.Count == 0)
+            {
+                return;
+            }
+
+            Dictionary<ulong, string> classes = ClassesById(payload);
+            foreach (KeyValuePair<InstanceId, RbxWorldPackageSelectionBox> entry in payload.SelectionBoxes)
+            {
+                if (!classes.TryGetValue(entry.Key.Value, out string className)
+                    || !string.Equals(className, SelectionBoxClassName, StringComparison.Ordinal))
+                {
+                    throw new RbxWorldPackageException(
+                        "World package carries SelectionBox state for instance " + entry.Key.Value
+                        + ", which is not a SelectionBox of the tree.");
+                }
+
+                RbxWorldPackageSelectionBox box = entry.Value;
+                if (box.AdorneeId != 0UL && !classes.ContainsKey(box.AdorneeId))
+                {
+                    throw new RbxWorldPackageException(
+                        "SelectionBox " + entry.Key.Value + " names adornee " + box.AdorneeId + ", which is not in the package.");
+                }
+
+                if (!IsFinite(box.Color3.R) || !IsFinite(box.Color3.G) || !IsFinite(box.Color3.B)
+                    || !IsFinite(box.SurfaceColor3.R) || !IsFinite(box.SurfaceColor3.G) || !IsFinite(box.SurfaceColor3.B)
+                    || !IsFinite(box.Transparency) || !IsFinite(box.LineThickness) || !IsFinite(box.SurfaceTransparency))
+                {
+                    throw new RbxWorldPackageException(
+                        "SelectionBox " + entry.Key.Value + " needs finite colours, transparencies and line thickness.");
                 }
             }
         }
@@ -2616,18 +3182,22 @@ namespace CoreAI.Mods.WorldPackages
                     "Unsupported world package format '" + manifest.Format + "'.");
             }
 
-            if (manifest.FormatVersion != CurrentFormatVersion)
-            {
-                throw new RbxWorldPackageException(
-                    "Unsupported world package format version " + manifest.FormatVersion
-                    + "; this reader supports version " + CurrentFormatVersion + ".");
-            }
-
+            RequireSupportedFormatVersion(manifest.FormatVersion);
             if (manifest.MinimumReaderVersion > CurrentReaderVersion)
             {
                 throw new RbxWorldPackageException(
                     "World package requires reader version " + manifest.MinimumReaderVersion
                     + "; this reader is version " + CurrentReaderVersion + ".");
+            }
+
+            // WHY refused rather than read: no writer declares a lower one, and the reader never repairs input.
+            if (manifest.FormatVersion >= ScriptBindingsFormatVersion
+                && manifest.MinimumReaderVersion < ScriptBindingsMinimumReaderVersion)
+            {
+                throw new RbxWorldPackageException(
+                    "World package format version " + manifest.FormatVersion + " declares minimum_reader_version "
+                    + manifest.MinimumReaderVersion + "; a format version 2 package declares "
+                    + ScriptBindingsMinimumReaderVersion + ".");
             }
 
             if (!string.Equals(manifest.ApiVersion, CurrentApiVersion, StringComparison.Ordinal))
@@ -3203,6 +3773,16 @@ namespace CoreAI.Mods.WorldPackages
 
             [JsonProperty("outdoor_ambient", Required = Required.Always)]
             public float[] OutdoorAmbient;
+
+            // WHY omitted at its default of 1: a lighting block written before the two scales existed, and every
+            // block whose scales were never changed, stay byte-identical; a block without the key reads 1.
+            [JsonProperty("environment_diffuse_scale", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            [DefaultValue(RbxLighting.DefaultEnvironmentDiffuseScale)]
+            public float EnvironmentDiffuseScale = RbxLighting.DefaultEnvironmentDiffuseScale;
+
+            [JsonProperty("environment_specular_scale", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            [DefaultValue(RbxLighting.DefaultEnvironmentSpecularScale)]
+            public float EnvironmentSpecularScale = RbxLighting.DefaultEnvironmentSpecularScale;
         }
 
         [Serializable]
@@ -3300,6 +3880,11 @@ namespace CoreAI.Mods.WorldPackages
             [JsonProperty("humanoid")]
             public WorldHumanoidDto Humanoid;
 
+            // WHY omitted when null: only format version 2 writes the block (MVP4 SC-7), so every version 1 package
+            // stays byte-identical; readers up to 7.56.0 refuse a version 2 package by its format_version first.
+            [JsonProperty("script", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public WorldScriptDto Script;
+
             // WHY omitted when null: an instance that is no PointLight writes no key, so every package
             // without one stays byte-identical; readers up to 7.56.0 refuse the key by name.
             [JsonProperty("light", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
@@ -3309,6 +3894,55 @@ namespace CoreAI.Mods.WorldPackages
             // stays byte-identical; readers up to 7.56.0 refuse the key by name.
             [JsonProperty("gui", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
             public WorldGuiDto Gui;
+
+            // WHY omitted when null: an instance that is no TextChatCommand or SelectionBox writes neither key, so every
+            // package without one stays byte-identical; readers up to 7.56.0 refuse either key by name.
+            [JsonProperty("text_chat_command", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public WorldTextChatCommandDto TextChatCommand;
+
+            [JsonProperty("selection_box", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public WorldSelectionBoxDto SelectionBox;
+        }
+
+        [Serializable]
+        private sealed class WorldTextChatCommandDto
+        {
+            [JsonProperty("primary_alias", Required = Required.Always)]
+            public string PrimaryAlias;
+
+            [JsonProperty("secondary_alias", Required = Required.Always)]
+            public string SecondaryAlias;
+
+            [JsonProperty("enabled", Required = Required.Always)]
+            public bool Enabled;
+
+            [JsonProperty("autocomplete_visible", Required = Required.Always)]
+            public bool AutocompleteVisible;
+        }
+
+        [Serializable]
+        private sealed class WorldSelectionBoxDto
+        {
+            [JsonProperty("adornee_id", Required = Required.Always)]
+            public string AdorneeId;
+
+            [JsonProperty("color3", Required = Required.Always)]
+            public float[] Color3;
+
+            [JsonProperty("transparency", Required = Required.Always)]
+            public float Transparency;
+
+            [JsonProperty("visible", Required = Required.Always)]
+            public bool Visible;
+
+            [JsonProperty("line_thickness", Required = Required.Always)]
+            public float LineThickness;
+
+            [JsonProperty("surface_color3", Required = Required.Always)]
+            public float[] SurfaceColor3;
+
+            [JsonProperty("surface_transparency", Required = Required.Always)]
+            public float SurfaceTransparency;
         }
 
         /// <summary>
@@ -3680,6 +4314,23 @@ namespace CoreAI.Mods.WorldPackages
 
             [JsonProperty("display_name", Required = Required.Always)]
             public string DisplayName;
+        }
+
+        /// <summary>
+        /// The <c>script</c> block of a script instance in a format version 2 package: <c>source_id</c> (empty when
+        /// unbound) and, on a Script or LocalScript only, <c>enabled</c> and <c>run_context</c>.
+        /// </summary>
+        [Serializable]
+        private sealed class WorldScriptDto
+        {
+            [JsonProperty("source_id", Required = Required.Always)]
+            public string SourceId;
+
+            [JsonProperty("enabled", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public bool? Enabled;
+
+            [JsonProperty("run_context", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public int? RunContext;
         }
 
         [Serializable]

@@ -25,6 +25,14 @@ namespace CoreAI.Mods.Rbx.Instances
     {
         public RbxLightingState(float clockTime, float geographicLatitude, float brightness,
             RbxColor3 ambient, RbxColor3 outdoorAmbient, RbxVector3 sunDirection)
+            : this(clockTime, geographicLatitude, brightness, ambient, outdoorAmbient, sunDirection,
+                RbxLighting.DefaultEnvironmentDiffuseScale, RbxLighting.DefaultEnvironmentSpecularScale)
+        {
+        }
+
+        public RbxLightingState(float clockTime, float geographicLatitude, float brightness,
+            RbxColor3 ambient, RbxColor3 outdoorAmbient, RbxVector3 sunDirection, float environmentDiffuseScale,
+            float environmentSpecularScale)
         {
             ClockTime = clockTime;
             GeographicLatitude = geographicLatitude;
@@ -32,6 +40,8 @@ namespace CoreAI.Mods.Rbx.Instances
             Ambient = ambient;
             OutdoorAmbient = outdoorAmbient;
             SunDirection = sunDirection;
+            EnvironmentDiffuseScale = environmentDiffuseScale;
+            EnvironmentSpecularScale = environmentSpecularScale;
         }
 
         /// <summary>Hours after midnight, [0, 24).</summary>
@@ -52,6 +62,12 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Unit vector from the origin towards the sun, in Roblox space (<c>Lighting:GetSunDirection()</c>).</summary>
         public RbxVector3 SunDirection { get; }
 
+        /// <summary>Share of the sky's own light in the ambient, [0, 1].</summary>
+        public float EnvironmentDiffuseScale { get; }
+
+        /// <summary>Share of the sky's reflections, [0, 1].</summary>
+        public float EnvironmentSpecularScale { get; }
+
         public bool Equals(RbxLightingState other)
         {
             return ClockTime.Equals(other.ClockTime)
@@ -59,7 +75,9 @@ namespace CoreAI.Mods.Rbx.Instances
                    && Brightness.Equals(other.Brightness)
                    && Ambient == other.Ambient
                    && OutdoorAmbient == other.OutdoorAmbient
-                   && SunDirection == other.SunDirection;
+                   && SunDirection == other.SunDirection
+                   && EnvironmentDiffuseScale.Equals(other.EnvironmentDiffuseScale)
+                   && EnvironmentSpecularScale.Equals(other.EnvironmentSpecularScale);
         }
 
         public override bool Equals(object obj)
@@ -82,12 +100,22 @@ namespace CoreAI.Mods.Rbx.Instances
     {
         public RbxLightingDurableState(float clockTime, float geographicLatitude, float brightness,
             RbxColor3 ambient, RbxColor3 outdoorAmbient)
+            : this(clockTime, geographicLatitude, brightness, ambient, outdoorAmbient,
+                RbxLighting.DefaultEnvironmentDiffuseScale, RbxLighting.DefaultEnvironmentSpecularScale)
+        {
+        }
+
+        public RbxLightingDurableState(float clockTime, float geographicLatitude, float brightness,
+            RbxColor3 ambient, RbxColor3 outdoorAmbient, float environmentDiffuseScale,
+            float environmentSpecularScale)
         {
             ClockTime = clockTime;
             GeographicLatitude = geographicLatitude;
             Brightness = brightness;
             Ambient = ambient;
             OutdoorAmbient = outdoorAmbient;
+            EnvironmentDiffuseScale = environmentDiffuseScale;
+            EnvironmentSpecularScale = environmentSpecularScale;
         }
 
         /// <summary>Hours after midnight; <c>TimeOfDay</c> is derived from it and not stored.</summary>
@@ -101,7 +129,13 @@ namespace CoreAI.Mods.Rbx.Instances
 
         public RbxColor3 OutdoorAmbient { get; }
 
-        /// <summary>The class defaults of <c>Full-API-Dump.json</c>.</summary>
+        /// <summary><c>EnvironmentDiffuseScale</c>; a block saved before it existed reads 1.</summary>
+        public float EnvironmentDiffuseScale { get; }
+
+        /// <summary><c>EnvironmentSpecularScale</c>; a block saved before it existed reads 1.</summary>
+        public float EnvironmentSpecularScale { get; }
+
+        /// <summary>The class defaults of <c>Full-API-Dump.json</c>, with the new-place environment scales.</summary>
         public static RbxLightingDurableState Defaults => new(
             RbxLighting.DefaultClockTime, RbxLighting.DefaultGeographicLatitude, RbxLighting.DefaultBrightness,
             RbxLighting.DefaultAmbient, RbxLighting.DefaultOutdoorAmbient);
@@ -180,6 +214,25 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             float brightness = state.Brightness > 0f ? state.Brightness : 0f;
             return brightness * Daylight(state);
+        }
+
+        /// <summary>
+        /// The ambient colour of surfaces that face the sky: <c>Ambient</c> blended towards the daylight-scaled
+        /// outdoor ambient by <c>EnvironmentDiffuseScale</c>.
+        /// </summary>
+        /// <remarks>
+        /// WHY a blend and not an added sky term: this mapping has no measured sky irradiance, and the
+        /// daylight-scaled <c>OutdoorAmbient</c> is already the sky light it draws. At 0 the sky's share is gone
+        /// and a surface keeps only <c>Ambient</c>, the hue the mirror gives areas the sky does not reach.
+        /// </remarks>
+        public static RbxColor3 SkyFacingAmbient(in RbxLightingState state)
+        {
+            RbxColor3 outdoor = EffectiveOutdoorAmbient(state);
+            RbxColor3 ambient = state.Ambient;
+            float share = state.EnvironmentDiffuseScale < 0f ? 0f
+                : state.EnvironmentDiffuseScale > 1f ? 1f : state.EnvironmentDiffuseScale;
+            return new RbxColor3(ambient.R + (outdoor.R - ambient.R) * share,
+                ambient.G + (outdoor.G - ambient.G) * share, ambient.B + (outdoor.B - ambient.B) * share);
         }
 
         /// <summary>The outdoor ambient after daylight: full by day, <see cref="NightOutdoorAmbientFloor"/> at night.</summary>

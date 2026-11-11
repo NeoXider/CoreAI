@@ -127,6 +127,35 @@ namespace CoreAI.Mods.Rbx.Instances.TextChat
             command._autocompleteVisible = _autocompleteVisible;
         }
 
+        /// <summary>
+        /// Puts a saved <c>text_chat_command</c> block back: the same values the setters take, the property signals of
+        /// what changed and the chat's update, and no revision advance (the revision is part of the saved world).
+        /// </summary>
+        public void RestoreDurableState(string primaryAlias, string secondaryAlias, bool enabled, bool autocompleteVisible)
+        {
+            ThrowIfDestroyed(nameof(PrimaryAlias));
+            bool changed = Restore(ref _primaryAlias, primaryAlias ?? string.Empty, nameof(PrimaryAlias));
+            changed |= Restore(ref _secondaryAlias, secondaryAlias ?? string.Empty, nameof(SecondaryAlias));
+            changed |= Restore(ref _enabled, enabled, nameof(Enabled));
+            changed |= Restore(ref _autocompleteVisible, autocompleteVisible, nameof(AutocompleteVisible));
+            if (changed)
+            {
+                StateChanged?.Invoke(this);
+            }
+        }
+
+        private bool Restore<T>(ref T field, T value, string member)
+        {
+            if (EqualityComparer<T>.Default.Equals(field, value))
+            {
+                return false;
+            }
+
+            field = value;
+            NotifyPropertyChanged(member);
+            return true;
+        }
+
         private void SetText(ref string field, string value, string member)
         {
             ThrowIfDestroyed(member);

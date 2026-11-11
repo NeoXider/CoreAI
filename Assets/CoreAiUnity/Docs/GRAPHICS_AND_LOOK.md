@@ -124,7 +124,13 @@ intensity alone; the sky, reflections, fog, shadows and post-processing still fo
 Graphics page. When the last claim is released, the look applies its own ambient again. Reverting the look
 (leaving Play Mode, disposing the scope) never writes over an ambient that is still claimed.
 `LookAmbientOwnership` is engine-free (`CoreAI.Look` in `com.neoxider.coreai`), so the claimant does not
-reference the look assembly. Both appliers take an optional `LookAmbientOwnership` in their constructor;
+reference the look assembly.
+
+The sky reflections stay the look's (its sky reflection probe), but their strength follows
+`LookAmbientOwnership.SkyReflectionScale` (default 1): the look multiplies the probe's intensity and the
+environment reflection intensity by it and follows every change at once. A world's
+`Lighting.EnvironmentSpecularScale` sets it while the world drives its lighting, and the Lighting sink puts
+it back to 1 when it reverts. Both appliers take an optional `LookAmbientOwnership` in their constructor;
 `Shared` is the default.
 
 ## Render pipelines

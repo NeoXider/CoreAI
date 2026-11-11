@@ -1645,6 +1645,7 @@ namespace CoreAI.Ai.LuaCs
                 case RbxInstance instance: return context.WrapInstance(instance);
                 case RbxInputObject input: return Wrap(input);
                 case RbxEnumItem item: return Wrap(item);
+                case RbxHumanoidState state: return MarshalHumanoidState(context, state);
                 case RbxVector3 v3: return Wrap(v3);
                 case RbxVector2 v2: return Wrap(v2);
                 case RbxRay ray: return Wrap(ray);
@@ -1653,6 +1654,24 @@ namespace CoreAI.Ai.LuaCs
                 case LuaCsRbxNetworkTable table: return BuildSignalTable(context, table, 0);
                 default: return LuaValue.Nil;
             }
+        }
+
+        /// <summary>
+        /// A Humanoid state crossing a signal (<c>StateChanged(old, new)</c>) as the world's own
+        /// <c>Enum.HumanoidStateType</c> item, so <c>new == Enum.HumanoidStateType.Freefall</c> holds.
+        /// </summary>
+        /// <remarks>
+        /// WHY resolved here and not fired as an item: the engine-free Humanoid has no enum registry, and an
+        /// EnumItem compares by identity with the one <c>Enum</c> hands the script. Before this case the state
+        /// fell to the default branch and every handler received nil, nil.
+        /// </remarks>
+        private static LuaValue MarshalHumanoidState(LuaCsRbxModContext context, RbxHumanoidState state)
+        {
+            RbxEnumRegistry enums = context?.Bindings?.Enums;
+            return enums != null && enums.TryGet("HumanoidStateType", out RbxEnum stateType)
+                                 && stateType.TryGetItemByValue((int)state, out RbxEnumItem item)
+                ? Wrap(item)
+                : LuaValue.Nil;
         }
 
         /// <summary>

@@ -430,18 +430,26 @@ call, which is exactly why it must stay off per-frame paths.
 - WebGL: the `Resources` source works. File stores such as `FileLuaModSourceStore` confirm durability
   through `CoreAiWebGlPersistence` (the engine's automatic `persistentDataPath` persistence) instead of
   driving IDBFS by hand. The seeder is synchronous.
-- Windows path length: `FileLuaModSourceStore` writes paths of at most 259 characters on every runtime. With a
-  store id the longest one is the storage root plus 173 characters (`\CoreAI\Mods\Stores\id-<64 hex>\id-<64 hex>\
-  manifest.json.tmp`: the two SHA-256 folders keep store ids and mod ids case-safe and collision-free), so a storage
-  root longer than 86 characters cannot keep a mod (161 without a store id); the exact source set a confirmed world
-  load stages under `.world-sessions` needs 117 more characters below the store folder, so such a load is refused
-  loudly from a root longer than 55 characters with a store id (130 without). Every save there, the
-  best-effort `Save` included, throws `LuaModSourceStorageRootTooLongException`, which names the folder and says to
-  point `CoreAiStorageRoot.Override` at a shorter one or shorten the company or product name `persistentDataPath` is
-  built from; the session's admission check refuses the mod before it runs, the Hub shows the message, and the
-  seeder counts such a mod in `SeedResult.Failed` (with `FirstFailure`) and logs an error instead of counting it as
-  installed. The seeder also reads every save back, so a host store that drops a save silently is reported the same
-  way. Stores written before keep their folder names and load unchanged. Tests: `FileStoreLongRootEditModeTests`.
+- Windows path length: the file stores write paths of at most 259 characters on every runtime (whether Unity's
+  Mono on Windows would accept longer ones when the OS allows them is not verified, and nothing relies on it). The
+  folders they name after an id use `CoreAiStorageNames`: a new store namespace is `Stores\s-<26>` and a new mod
+  folder `m-<26>` (the first 128 bits of the id's SHA-256 in lowercase base32: case-safe on Windows, a collision
+  about 2^-64 likely at a billion ids); a folder an earlier build wrote under its long name (`id-<64 hex>`, or
+  `id-<52 base32>` in a version-1 session) keeps loading, updating in place and deleting under that name, and a
+  confirmed world load stages its sources in a version-2 session (`.source-layout` = `sha256-base32-128-v2`) with
+  short folders only. With a store id the longest paths below the storage root are: a confirmed world load's staged
+  sources 138 characters (`\CoreAI\Mods\Stores\s-<26>\.world-sessions\<26>\m-<26>\manifest.json.tmp`), a mod's
+  first save 108 (it stages in `.staging-<32 hex>`), the startup selection 111, mod data and a 64-character manual
+  slot 128; so every store works from a storage root of up to 121 characters (157 without a store id), where the
+  long names allowed 55. Past that a save, the best-effort `Save` included, throws
+  `LuaModSourceStorageRootTooLongException`, which names the folder and says to point `CoreAiStorageRoot.Override`
+  at a shorter one or shorten the company or product name `persistentDataPath` is built from; the session's
+  admission check refuses the mod before it runs, the Hub shows the message, and the seeder counts such a mod in
+  `SeedResult.Failed` (with `FirstFailure`) and logs an error instead of counting it as installed. The seeder also
+  reads every save back, so a host store that drops a save silently is reported the same way. A build older than the
+  short names sees an empty store under a store id and cannot load (and so refuses to capture) a mod saved here in
+  the default store; it never reads a wrong mod. Tests: `FileStoreLongRootEditModeTests`,
+  `StoragePathBudgetEditModeTests`.
 - The `COREAI_LUA` define gates the Lua demos, benchmark scenarios and Lua-dependent tests; the
   Lua-CSharp runtime ships bundled as `Lua.dll`/`Lua.Annotations.dll` in this package (see
   [the package README](../../Assets/CoreAIMods/README.md)).

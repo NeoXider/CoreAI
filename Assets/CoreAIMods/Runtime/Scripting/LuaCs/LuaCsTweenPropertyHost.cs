@@ -492,6 +492,10 @@ namespace CoreAI.Ai.LuaCs
                     return TweenPropertySample.SupportedValue(lighting.Ambient, "Color3");
                 case "OutdoorAmbient":
                     return TweenPropertySample.SupportedValue(lighting.OutdoorAmbient, "Color3");
+                case "EnvironmentDiffuseScale":
+                    return TweenPropertySample.SupportedValue((double)lighting.EnvironmentDiffuseScale, "number");
+                case "EnvironmentSpecularScale":
+                    return TweenPropertySample.SupportedValue((double)lighting.EnvironmentSpecularScale, "number");
                 case "TimeOfDay":
                     return TweenPropertySample.Unsupported("string");
                 default:
@@ -525,6 +529,12 @@ namespace CoreAI.Ai.LuaCs
                     break;
                 case "OutdoorAmbient":
                     lighting.SetOutdoorAmbient((RbxColor3)value);
+                    break;
+                case "EnvironmentDiffuseScale":
+                    lighting.SetEnvironmentDiffuseScale((double)value);
+                    break;
+                case "EnvironmentSpecularScale":
+                    lighting.SetEnvironmentSpecularScale((double)value);
                     break;
             }
         }

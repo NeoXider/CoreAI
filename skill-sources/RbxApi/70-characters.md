@@ -58,8 +58,8 @@
   Replacing an existing character fires `CharacterRemoving` for the outgoing one BEFORE
   `CharacterAdded` for its replacement.
 - `player:LoadCharacterAsync()` — builds (or rebuilds) the character: a Model named after the player,
-  parented to `workspace`, holding a `Humanoid` and a `HumanoidRootPart` (`humanoid.RootPart` resolves
-  to it). YIELDS until the deferred CharacterAdded/CharacterRemoving handlers have run, so code after
+  parented to `workspace`, holding a `Humanoid` and the R6 body (section `rig`;
+  `humanoid.RootPart` is its `HumanoidRootPart`). YIELDS until the deferred CharacterAdded/CharacterRemoving handlers have run, so code after
   the call sees the finished character and its signals already delivered. `player:LoadCharacter()` is
   a deprecated non-yielding alias (logs once per mod) with the same effect.
 - `player:DistanceFromCharacter(point)` -> studs from the character's root part to `point`, or `0`

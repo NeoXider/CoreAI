@@ -88,6 +88,13 @@ namespace CoreAI.Mods.WorldPackages
     /// </summary>
     public sealed class RbxWorldPackageOptionalState
     {
+        /// <summary>
+        /// The package format version the payload is written as (MVP4 SC-7): 1, in which no instance carries a
+        /// script binding and every active mod starts at the legacy placement, or 2, in which every script instance
+        /// carries its <c>script</c> block and a source without a bound instance is detached. 1 by default.
+        /// </summary>
+        public int FormatVersion { get; set; } = RbxWorldPackageSerializer.LegacyScriptPlacementFormatVersion;
+
         /// <summary>The Workspace Terrain's cells, or null for a world without any.</summary>
         public TerrainSnapshot Terrain { get; set; }
 
@@ -115,17 +122,26 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>The StarterGui service's recorded switches; null means the class defaults.</summary>
         public RbxWorldPackageStarterGui? StarterGui { get; set; }
 
+        /// <summary>The properties of every world-owned TextChatCommand, by instance id; missing ids are class defaults.</summary>
+        public IReadOnlyDictionary<InstanceId, RbxWorldPackageTextChatCommand> TextChatCommands { get; set; }
+
+        /// <summary>The properties of every world-owned SelectionBox, by instance id; missing ids are class defaults.</summary>
+        public IReadOnlyDictionary<InstanceId, RbxWorldPackageSelectionBox> SelectionBoxes { get; set; }
+
         internal RbxWorldPackageOptionalState Clone()
         {
             return new RbxWorldPackageOptionalState
             {
+                FormatVersion = FormatVersion,
                 Terrain = Terrain,
                 PointLights = PointLights,
                 Lighting = Lighting,
                 StarterPlayer = StarterPlayer,
                 ModFolders = ModFolders,
                 Gui = Gui,
-                StarterGui = StarterGui
+                StarterGui = StarterGui,
+                TextChatCommands = TextChatCommands,
+                SelectionBoxes = SelectionBoxes
             };
         }
     }
@@ -286,6 +302,12 @@ namespace CoreAI.Mods.WorldPackages
         private static readonly IReadOnlyDictionary<InstanceId, RbxWorldPackagePointLight> EmptyPointLights =
             new Dictionary<InstanceId, RbxWorldPackagePointLight>();
 
+        private static readonly IReadOnlyDictionary<InstanceId, RbxWorldPackageTextChatCommand> EmptyTextChatCommands =
+            new Dictionary<InstanceId, RbxWorldPackageTextChatCommand>();
+
+        private static readonly IReadOnlyDictionary<InstanceId, RbxWorldPackageSelectionBox> EmptySelectionBoxes =
+            new Dictionary<InstanceId, RbxWorldPackageSelectionBox>();
+
         private static readonly IReadOnlyDictionary<InstanceId, RbxWorldPackageGui> EmptyGui =
             new Dictionary<InstanceId, RbxWorldPackageGui>();
 
@@ -349,6 +371,12 @@ namespace CoreAI.Mods.WorldPackages
 
         public IReadOnlyList<RbxWorldPackageDiagnostic> Diagnostics { get; }
 
+        /// <summary>
+        /// The package format version this payload is written as: 1 without script bindings, 2 with them
+        /// (<see cref="RbxWorldPackageOptionalState.FormatVersion"/>).
+        /// </summary>
+        public int FormatVersion => _optional.FormatVersion;
+
         /// <summary>The Workspace Terrain's cells, or null for a world without any.</summary>
         public TerrainSnapshot Terrain => _optional.Terrain;
 
@@ -370,6 +398,14 @@ namespace CoreAI.Mods.WorldPackages
 
         /// <summary>The StarterGui switches, or null when they are the class defaults.</summary>
         public RbxWorldPackageStarterGui? StarterGui => _optional.StarterGui;
+
+        /// <summary>The properties of every TextChatCommand the package stores, by instance id; never null.</summary>
+        public IReadOnlyDictionary<InstanceId, RbxWorldPackageTextChatCommand> TextChatCommands =>
+            _optional.TextChatCommands ?? EmptyTextChatCommands;
+
+        /// <summary>The properties of every SelectionBox the package stores, by instance id; never null.</summary>
+        public IReadOnlyDictionary<InstanceId, RbxWorldPackageSelectionBox> SelectionBoxes =>
+            _optional.SelectionBoxes ?? EmptySelectionBoxes;
 
         /// <summary>A copy of the optional blocks, for a caller that builds a payload from this one.</summary>
         public RbxWorldPackageOptionalState OptionalState => _optional.Clone();
@@ -463,13 +499,22 @@ namespace CoreAI.Mods.WorldPackages
             InstanceRegistry registry,
             RbxDataModel game,
             IPartPropertySink partSink,
-            IReadOnlyList<RbxWorldModSource> mods)
+            IReadOnlyList<RbxWorldModSource> mods,
+            bool legacyScriptPlacement)
         {
             Registry = registry;
             Game = game;
             PartSink = partSink;
             Mods = mods;
+            LegacyScriptPlacement = legacyScriptPlacement;
         }
+
+        /// <summary>
+        /// True for a format version 1 payload (MVP4 SC-7): no restored instance is bound to a source, so every active
+        /// mod starts at the legacy placement (<c>ServerScriptService/&lt;id&gt;/&lt;id&gt;</c>), exactly as before
+        /// script instances existed. False for version 2, whose script instances were restored with their bindings.
+        /// </summary>
+        public bool LegacyScriptPlacement { get; }
 
         public InstanceRegistry Registry { get; }
 

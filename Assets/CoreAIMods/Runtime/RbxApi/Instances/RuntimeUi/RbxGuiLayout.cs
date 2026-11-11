@@ -55,6 +55,34 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
         /// <summary>The element that draws the node; null for the screen root and for a node the budget refused.</summary>
         public IRbxUiElement Element;
 
+        /// <summary>
+        /// A ScrollingFrame's canvas: the element inside its scroll view that holds the children's elements and
+        /// whose size is the scroll range the host lets the player move through.
+        /// </summary>
+        public IRbxUiElement Canvas;
+
+        /// <summary>The element the children's elements are created in.</summary>
+        public IRbxUiElement ChildContainer => Canvas ?? Element;
+
+        /// <summary>A ScrollingFrame's layout result: canvas and window sizes and the offset kept in range.</summary>
+        public float CanvasW;
+        public float CanvasH;
+        public float WindowW;
+        public float WindowH;
+        public float ScrollX;
+        public float ScrollY;
+
+        /// <summary>The strips the vertical and horizontal bars take from the window, and how far a left bar moves the children.</summary>
+        public float InsetV;
+        public float InsetH;
+        public float ShiftX;
+
+        /// <summary>Which bars the layout expects to show, and the canvas the children measured (AutomaticCanvasSize).</summary>
+        public bool ShowBarX;
+        public bool ShowBarY;
+        public float AutoW;
+        public float AutoH;
+
         /// <summary>The last value pushed per typed style property.</summary>
         public RbxUiStyleValue[] Pushed;
 
@@ -75,6 +103,21 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
         public bool PushedOrderSet;
         public int PushedOrder;
 
+        /// <summary>What was last pushed for a ScrollingFrame: canvas size, offset and the scroll bar settings.</summary>
+        public float PushedCanvasW = float.NaN;
+        public float PushedCanvasH = float.NaN;
+        public bool PushedScrollSet;
+        public float PushedScrollX;
+        public float PushedScrollY;
+        public string PushedMode;
+        public string PushedBarX;
+        public string PushedBarY;
+        public string PushedBarSide;
+        public int PushedBarSize = -1;
+        public bool PushedBarTintSet;
+        public RbxColor3 PushedBarTint;
+        public float PushedBarAlpha;
+
         public RbxGuiChange Dirty;
         public int Generation;
         public bool Hovered;
@@ -87,6 +130,21 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
         public Action OnFocusLost;
         public Action OnSubmitted;
         public Action OnValueChanged;
+        public Action OnScrolled;
+
+        /// <summary>Forgets what was pushed to a scroll view, so a new element gets everything.</summary>
+        public void ResetScrollPushes()
+        {
+            PushedCanvasW = float.NaN;
+            PushedCanvasH = float.NaN;
+            PushedScrollSet = false;
+            PushedMode = null;
+            PushedBarX = null;
+            PushedBarY = null;
+            PushedBarSide = null;
+            PushedBarSize = -1;
+            PushedBarTintSet = false;
+        }
     }
 
     /// <summary>
@@ -101,9 +159,16 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
     /// </summary>
     internal static class RbxGuiLayout
     {
+        private const float ScrollEpsilon = 0.5f;
+        private const int MaxScrollPasses = 4;
+
         // WHY [ThreadStatic] scratch: a layout pass runs on the main thread only, and sorting the children of a
         // list must not allocate per frame; the list is cleared before every use.
         [ThreadStatic] private static List<RbxGuiNode> _sortScratch;
+
+        // WHY a pass-wide flag: before the host's first layout a screen is 0 by 0, and clamping CanvasPosition
+        // against that empty window would throw away the offset a script set while building its GUI.
+        [ThreadStatic] private static bool _clampScroll;
 
         /// <summary>Lays out a whole screen against a viewport of the given size.</summary>
         public static void LayoutScreen(RbxGuiNode root, float width, float height)
@@ -113,6 +178,7 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
             root.W = Math.Max(0f, width);
             root.H = Math.Max(0f, height);
             root.Rotation = 0f;
+            _clampScroll = root.W > 0f && root.H > 0f;
             root.Gui.ApplyLayout(new RbxVector2(0f, 0f), new RbxVector2(root.W, root.H), 0f);
             LayoutChildren(root);
         }
@@ -120,7 +186,19 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
         /// <summary>Places the children of <paramref name="parent"/>, whose box is already known, and recurses.</summary>
         private static void LayoutChildren(RbxGuiNode parent)
         {
+            if (parent.Gui is RbxScrollingFrame scrolling)
+            {
+                LayoutScrolling(parent, scrolling);
+                return;
+            }
+
             ResolveContentBox(parent);
+            ArrangeChildren(parent);
+        }
+
+        /// <summary>Places the children inside the content box already resolved, then lays out each of them.</summary>
+        private static void ArrangeChildren(RbxGuiNode parent)
+        {
             if (parent.Layout is RbxUiListLayout list)
             {
                 ArrangeList(parent, list);
@@ -146,20 +224,24 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
                     GrowToContent(child);
                 }
             }
-
-            if (parent.Gui is RbxScrollingFrame scrolling)
-            {
-                scrolling.ApplyCanvasLayout(new RbxVector2(parent.ContentW, parent.ContentH),
-                    new RbxVector2(parent.W, parent.H));
-            }
         }
 
         private static void ResolveContentBox(RbxGuiNode node)
         {
-            float left = 0f;
-            float top = 0f;
-            float right = 0f;
-            float bottom = 0f;
+            ResolvePadding(node, out float left, out float top, out float right, out float bottom);
+            node.ContentX = node.X + left;
+            node.ContentY = node.Y + top;
+            node.ContentW = Math.Max(0f, node.W - left - right);
+            node.ContentH = Math.Max(0f, node.H - top - bottom);
+        }
+
+        private static void ResolvePadding(RbxGuiNode node, out float left, out float top, out float right,
+            out float bottom)
+        {
+            left = 0f;
+            top = 0f;
+            right = 0f;
+            bottom = 0f;
             if (node.Padding != null)
             {
                 left = Resolve(node.Padding.PaddingLeft, node.W);
@@ -167,36 +249,122 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
                 top = Resolve(node.Padding.PaddingTop, node.H);
                 bottom = Resolve(node.Padding.PaddingBottom, node.H);
             }
+        }
 
-            node.ContentX = node.X + left;
-            node.ContentY = node.Y + top;
-            node.ContentW = Math.Max(0f, node.W - left - right);
-            node.ContentH = Math.Max(0f, node.H - top - bottom);
-            if (node.Gui is RbxScrollingFrame scrolling)
+        /// <summary>
+        /// Lays out a ScrollingFrame: the window is the box less the strips its inset bars take, the canvas is the
+        /// largest of the window, <c>CanvasSize</c> and (with <c>AutomaticCanvasSize</c>) what the children need,
+        /// padding insets the children inside the canvas, and the offset is <c>CanvasPosition</c> kept between zero
+        /// and canvas minus window. Whether a bar shows and what the children need both depend on the result, so the
+        /// frame is laid out again until they settle; the last frame's answers are the first guess, so a steady GUI
+        /// takes one pass.
+        /// </summary>
+        private static void LayoutScrolling(RbxGuiNode node, RbxScrollingFrame frame)
+        {
+            ResolvePadding(node, out float left, out float top, out float right, out float bottom);
+            float thickness = Math.Max(0, frame.ScrollBarThickness);
+            bool barX = frame.ScrollingEnabled && thickness > 0f && frame.ScrollingDirection != RbxScrollingDirection.Y;
+            bool barY = frame.ScrollingEnabled && thickness > 0f && frame.ScrollingDirection != RbxScrollingDirection.X;
+            bool autoX = (frame.AutomaticCanvasSize & RbxAutomaticSize.X) != 0;
+            bool autoY = (frame.AutomaticCanvasSize & RbxAutomaticSize.Y) != 0;
+            bool showX = barX && node.ShowBarX;
+            bool showY = barY && node.ShowBarY;
+            float needW = autoX ? node.AutoW : 0f;
+            float needH = autoY ? node.AutoH : 0f;
+            RbxUDim2 canvasSize = frame.CanvasSize;
+            for (int pass = 0; pass < MaxScrollPasses; pass++)
             {
-                RbxUDim2 canvas = scrolling.CanvasSize;
-                float canvasW = Math.Max(node.ContentW, canvas.X.Scale * node.W + canvas.X.Offset);
-                float canvasH = Math.Max(node.ContentH, canvas.Y.Scale * node.H + canvas.Y.Offset);
-                if ((scrolling.AutomaticCanvasSize & RbxAutomaticSize.X) != 0
-                    || (scrolling.AutomaticCanvasSize & RbxAutomaticSize.Y) != 0)
-                {
-                    RbxVector2 extent = MeasureChildren(node);
-                    if ((scrolling.AutomaticCanvasSize & RbxAutomaticSize.X) != 0)
-                    {
-                        canvasW = Math.Max(canvasW, extent.X);
-                    }
+                node.InsetV = Inset(frame.VerticalScrollBarInset, showY, thickness);
+                node.InsetH = Inset(frame.HorizontalScrollBarInset, showX, thickness);
+                node.WindowW = Math.Max(0f, node.W - node.InsetV);
+                node.WindowH = Math.Max(0f, node.H - node.InsetH);
+                node.CanvasW = Math.Max(node.WindowW,
+                    Math.Max(canvasSize.X.Scale * node.W + canvasSize.X.Offset, needW));
+                node.CanvasH = Math.Max(node.WindowH,
+                    Math.Max(canvasSize.Y.Scale * node.H + canvasSize.Y.Offset, needH));
+                node.ScrollX = Clamp(frame.CanvasPosition.X, 0f, node.CanvasW - node.WindowW);
+                node.ScrollY = Clamp(frame.CanvasPosition.Y, 0f, node.CanvasH - node.WindowH);
+                node.ShiftX = frame.VerticalScrollBarPosition == 1 ? node.InsetV : 0f;
+                node.ContentX = node.X + node.ShiftX + left - node.ScrollX;
+                node.ContentY = node.Y + top - node.ScrollY;
+                node.ContentW = Math.Max(0f, node.CanvasW - left - right);
+                node.ContentH = Math.Max(0f, node.CanvasH - top - bottom);
+                ArrangeChildren(node);
 
-                    if ((scrolling.AutomaticCanvasSize & RbxAutomaticSize.Y) != 0)
-                    {
-                        canvasH = Math.Max(canvasH, extent.Y);
-                    }
+                bool again = false;
+                if (autoX || autoY)
+                {
+                    RbxVector2 extent = MeasureArranged(node);
+                    float measuredW = autoX ? extent.X + left + right : 0f;
+                    float measuredH = autoY ? extent.Y + top + bottom : 0f;
+                    again = Math.Abs(measuredW - needW) > ScrollEpsilon || Math.Abs(measuredH - needH) > ScrollEpsilon;
+                    needW = measuredW;
+                    needH = measuredH;
                 }
 
-                node.ContentX -= scrolling.CanvasPosition.X;
-                node.ContentY -= scrolling.CanvasPosition.Y;
-                node.ContentW = canvasW;
-                node.ContentH = canvasH;
+                bool nextX = barX && node.CanvasW > node.WindowW + ScrollEpsilon;
+                bool nextY = barY && node.CanvasH > node.WindowH + ScrollEpsilon;
+                again |= (nextX != showX && frame.HorizontalScrollBarInset == 1)
+                         || (nextY != showY && frame.VerticalScrollBarInset == 1);
+                showX = nextX;
+                showY = nextY;
+                if (!again)
+                {
+                    break;
+                }
             }
+
+            node.ShowBarX = showX;
+            node.ShowBarY = showY;
+            node.AutoW = needW;
+            node.AutoH = needH;
+            frame.ApplyCanvasLayout(new RbxVector2(node.CanvasW, node.CanvasH),
+                new RbxVector2(node.WindowW, node.WindowH));
+            if (_clampScroll)
+            {
+                frame.ApplyClampedPosition(new RbxVector2(node.ScrollX, node.ScrollY));
+            }
+        }
+
+        /// <summary>The strip a bar takes from the window: always with Inset Always, while it shows with Inset ScrollBar.</summary>
+        private static float Inset(int inset, bool shown, float thickness)
+        {
+            return inset == 2 || (inset == 1 && shown) ? thickness : 0f;
+        }
+
+        /// <summary>How far the laid-out children reach from the content origin; a layout's own content size first.</summary>
+        private static RbxVector2 MeasureArranged(RbxGuiNode node)
+        {
+            if (node.Layout != null && !node.Layout.IsDestroyed)
+            {
+                return node.Layout.LaidOutContentSize;
+            }
+
+            float right = 0f;
+            float bottom = 0f;
+            for (int i = 0; i < node.Children.Count; i++)
+            {
+                RbxGuiNode child = node.Children[i];
+                if (child.Object == null || !child.Object.Visible)
+                {
+                    continue;
+                }
+
+                right = Math.Max(right, child.X + Math.Max(0f, child.W) - node.ContentX);
+                bottom = Math.Max(bottom, child.Y + Math.Max(0f, child.H) - node.ContentY);
+            }
+
+            return new RbxVector2(right, bottom);
+        }
+
+        private static float Clamp(float value, float min, float max)
+        {
+            if (max < min)
+            {
+                max = min;
+            }
+
+            return value < min ? min : value > max ? max : value;
         }
 
         /// <summary>The size a child takes from the parent's content area, before any layout object moves it.</summary>

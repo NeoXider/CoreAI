@@ -106,6 +106,34 @@ namespace CoreAI.Tests.EditMode.RbxApi.Gui
         }
 
         [Test]
+        public void MVP15_CanvasPositionWritesAndPlayerScrolls_AllocateNothing()
+        {
+            RbxScrollingFrame list = _world.Create<RbxScrollingFrame>("ScrollingFrame");
+            list.SetSize(new RbxUDim2(0f, 200, 0f, 100));
+            list.SetCanvasSize(new RbxUDim2(0f, 0, 0f, 1000));
+            list.Parent = _world.Screen();
+            _world.Create<RbxUiListLayout>("UIListLayout", list);
+            for (int i = 0; i < 20; i++)
+            {
+                _world.Create<RbxTextLabel>("TextLabel", list).TextState.SetText("item " + i);
+            }
+
+            _world.Presenter.Flush();
+            CoreAI.Tests.EditMode.RbxApi.RuntimeUi.FakeRbxUiBackend.FakeElement view = _world.Element(list);
+            RbxVector2[] positions = { new(0f, 100f), new(0f, 300f) };
+            AllocationMeter.AssertWithinBudget("CanvasPosition write + relayout + push, then a player scroll", count =>
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    list.SetCanvasPosition(positions[i & 1]);
+                    _world.Presenter.Flush();
+                    view.ScrollByPlayer(0f, 50f + (i & 1));
+                    _world.Presenter.Flush();
+                }
+            }, Operations / 10, 0);
+        }
+
+        [Test]
         public void MVP15_TheBudget_CatchesAnAllocatingWrite_NegativeTwin()
         {
             string[] texts = { "Score: 1", "Score: 2" };

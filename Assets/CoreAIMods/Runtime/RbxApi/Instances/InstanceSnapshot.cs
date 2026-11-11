@@ -51,6 +51,14 @@ namespace CoreAI.Mods.Rbx.Instances
         public string OriginTag;
         public string OwnerActorId;
         public InstanceAccessScope? AccessScope;
+
+        /// <summary>
+        /// True for a node the runtime rebuilds itself (a world's Terrain, a mod's legacy script folder), which is
+        /// neither authored content nor charged to an instance quota. Only an in-memory snapshot carries the flag:
+        /// a world package's projection leaves such nodes out, and <c>world.json</c> has no key for it.
+        /// </summary>
+        public bool IsRuntimeInfrastructure;
+
         public long Revision;
         public ModelSnapshot Model;
         public ClickDetectorSnapshot ClickDetector;
@@ -58,6 +66,10 @@ namespace CoreAI.Mods.Rbx.Instances
         public ValueSnapshot Value;
         public HumanoidSnapshot Humanoid;
         public PlayerSnapshot Player;
+
+        /// <summary>Script state of a <c>Script</c>, <c>LocalScript</c> or <c>ModuleScript</c>; null on every other class.</summary>
+        public ScriptSnapshot Script;
+
         public List<string> Tags = new();
         public List<AttributeSnapshot> Attributes = new();
     }
@@ -134,6 +146,29 @@ namespace CoreAI.Mods.Rbx.Instances
         public long UserId;
         public string DisplayName;
         public ulong CharacterId;
+    }
+
+    /// <summary>
+    /// Durable state of a script instance (MVP4 design note, SC-1, SC-3 and SC-4): the store entry it is bound to and,
+    /// on a <c>BaseScript</c> (<c>Script</c>, <c>LocalScript</c>), <c>Enabled</c> and the <c>Enum.RunContext</c>
+    /// value. A <c>ModuleScript</c> has neither, so both are null on its snapshot. The instance never holds source
+    /// text: the source stays in the mod store entry <see cref="SourceId"/> names.
+    /// </summary>
+    /// <remarks>
+    /// A script node without this block restores with the class defaults (unbound, enabled, <c>Legacy</c>), so a
+    /// snapshot taken before the block existed and a replication spawn, whose wire never carries it, stay valid.
+    /// </remarks>
+    [Serializable]
+    public sealed class ScriptSnapshot
+    {
+        /// <summary>The mod id of the bound store entry; empty for an unbound script, never null.</summary>
+        public string SourceId;
+
+        /// <summary><c>BaseScript.Enabled</c>; null on a <c>ModuleScript</c>.</summary>
+        public bool? Enabled;
+
+        /// <summary><c>BaseScript.RunContext</c> as its <c>Enum.RunContext</c> value; null on a <c>ModuleScript</c>.</summary>
+        public int? RunContext;
     }
 
     /// <summary>Durable ValueBase payload. Scalars and datatypes encode into

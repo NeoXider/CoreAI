@@ -1013,7 +1013,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             ("Humanoid", new[]
             {
                 "Health", "MaxHealth", "WalkSpeed", "JumpPower", "JumpHeight", "UseJumpPower",
-                "DisplayName", "MoveDirection", "RootPart", "Jump"
+                "AutoRotate", "DisplayName", "MoveDirection", "RootPart", "Jump"
             }),
             ("Player", new[]
             {
@@ -1033,7 +1033,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }),
             ("Lighting", new[]
             {
-                "ClockTime", "TimeOfDay", "GeographicLatitude", "Brightness", "Ambient", "OutdoorAmbient"
+                "ClockTime", "TimeOfDay", "GeographicLatitude", "Brightness", "Ambient", "OutdoorAmbient",
+                "EnvironmentDiffuseScale", "EnvironmentSpecularScale"
             }),
             ("Light", new[] { "Brightness", "Color", "Enabled", "Shadows" }),
             ("PointLight", new[] { "Range" }),

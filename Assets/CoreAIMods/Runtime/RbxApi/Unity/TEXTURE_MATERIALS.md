@@ -93,6 +93,13 @@ scale Grass by 3.2, LeafyGrass and Ground by 1.6 and Sand by 1.9, which puts all
 Measured under the default look with a low sun ahead: the frame difference of a near lawn when the
 camera moves by 0.02 studs fell from 0.023 to 0.0085. The scale may go up to 4 for such maps.
 
+LeafyGrass uses Grass001, whose colour map averages a linear luminance of 0.091 against Grass004's
+0.14 with the same occlusion, so leaves drew a third darker than the lawn and read as black in shade.
+The packaged relief table gives it a grey intrinsic colour of 1.2 (sRGB, about 1.5 linear), which
+`ApplyPackagedRelief` and the retuner write into the entry; every other set keeps white. Catalogs
+imported before this change keep their values until **CoreAI > Materials > Retune surface profiles**
+runs (the roughness for both catalogs, the intrinsic colour for the packaged one).
+
 ## Relief that survives distance: baked cavity maps
 
 A normal map carries its relief in bevels one or two texels wide (a Bricks104 mortar joint is 13

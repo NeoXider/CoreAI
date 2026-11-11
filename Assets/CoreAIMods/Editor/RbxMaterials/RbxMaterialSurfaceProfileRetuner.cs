@@ -99,6 +99,8 @@ namespace CoreAI.Editor.RbxMaterials
                         hasOcclusion ? relief.CavityStrength : 0f;
                     entry.FindPropertyRelative("_metalAlbedoLift").floatValue =
                         hasMetalness ? relief.MetalAlbedoLift : 0f;
+                    entry.FindPropertyRelative("_intrinsicColor").colorValue =
+                        new Color(relief.AlbedoGain, relief.AlbedoGain, relief.AlbedoGain, 1f);
                 }
 
                 changed++;

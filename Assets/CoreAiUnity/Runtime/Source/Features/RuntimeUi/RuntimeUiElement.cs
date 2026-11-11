@@ -29,6 +29,7 @@ namespace CoreAI.RuntimeUi
         private readonly EventCallback<PointerLeaveEvent> _onPointerLeave;
         private readonly EventCallback<FocusInEvent> _onFocusIn;
         private readonly EventCallback<FocusOutEvent> _onFocusOut;
+        private readonly Action<float> _onScrollerValueChanged;
 
         private Action<RuntimeUiElement> _clicked;
         private Action<RuntimeUiElement> _valueChanged;
@@ -37,6 +38,7 @@ namespace CoreAI.RuntimeUi
         private Action<RuntimeUiElement> _pointerExited;
         private Action<RuntimeUiElement> _focusGained;
         private Action<RuntimeUiElement> _focusLost;
+        private Action<RuntimeUiElement> _scrollChanged;
         private EventGroups _registered;
         private VisualElement _registeredOn;
         private string _textOverride;
@@ -48,6 +50,8 @@ namespace CoreAI.RuntimeUi
         private Background _image;
         private bool _hasImage;
         private bool _focused;
+        private Vector2 _knownScroll;
+        private bool _applyingScroll;
 
         internal RuntimeUiElement(RuntimeUiScreen screen, RuntimeUiNodeRecord record)
         {
@@ -67,6 +71,7 @@ namespace CoreAI.RuntimeUi
             _onPointerLeave = OnPointerLeave;
             _onFocusIn = OnFocusIn;
             _onFocusOut = OnFocusOut;
+            _onScrollerValueChanged = OnScrollerValueChanged;
         }
 
         [Flags]
@@ -77,7 +82,8 @@ namespace CoreAI.RuntimeUi
             Value = 2,
             Submit = 4,
             Pointer = 8,
-            Focus = 16
+            Focus = 16,
+            Scroll = 32
         }
 
         /// <summary>Raised when the element is clicked (a button also on keyboard or gamepad submit).</summary>
@@ -127,6 +133,17 @@ namespace CoreAI.RuntimeUi
         {
             add => Subscribe(ref _focusLost, value);
             remove => Unsubscribe(ref _focusLost, value);
+        }
+
+        /// <summary>
+        /// Raised when a scroll view's offset changes by anything but <see cref="SetScrollOffset"/>: the mouse
+        /// wheel, a touch drag, a scroll bar, the keyboard, or the view clamping the offset after its content
+        /// shrank. Any other kind never raises it.
+        /// </summary>
+        public event Action<RuntimeUiElement> ScrollChanged
+        {
+            add => Subscribe(ref _scrollChanged, value);
+            remove => Unsubscribe(ref _scrollChanged, value);
         }
 
         /// <summary>The screen the element belongs to.</summary>
@@ -186,6 +203,13 @@ namespace CoreAI.RuntimeUi
 
         /// <summary>Stacking order among siblings: higher draws on top; equal values keep document order.</summary>
         public int ZOrder => _zOrder;
+
+        /// <summary>
+        /// How far a scroll view's content is scrolled, in pixels (x moves it left, y up); zero for any other kind.
+        /// The view's range is its content's extent minus its viewport, so a layer that places elements itself gives
+        /// the content its size.
+        /// </summary>
+        public Vector2 ScrollOffset => Record?.Element is ScrollView view ? view.scrollOffset : Vector2.zero;
 
         /// <summary>The parent element's handle, or null at the screen root.</summary>
         public RuntimeUiElement Parent
@@ -572,6 +596,34 @@ namespace CoreAI.RuntimeUi
             return true;
         }
 
+        /// <summary>
+        /// Scrolls a scroll view to <paramref name="offset"/> (the view clamps it to its range) without raising
+        /// <see cref="ScrollChanged"/>.
+        /// </summary>
+        /// <returns>False when the element is detached, is not a scroll view, or the offset is not finite.</returns>
+        public bool SetScrollOffset(Vector2 offset)
+        {
+            if (!IsAlive || !(Record.Element is ScrollView view) || !IsFinite(offset.x) || !IsFinite(offset.y))
+            {
+                return false;
+            }
+
+            // WHY the flag and the read-back: the scrollers raise their change for this write too, synchronously
+            // or after the event being dispatched, and only a value different from the known one is the player's.
+            _applyingScroll = true;
+            try
+            {
+                view.scrollOffset = offset;
+            }
+            finally
+            {
+                _applyingScroll = false;
+            }
+
+            _knownScroll = view.scrollOffset;
+            return true;
+        }
+
         /// <summary>Moves the element after all its siblings (drawn on top).</summary>
         public bool BringToFront()
         {
@@ -686,6 +738,7 @@ namespace CoreAI.RuntimeUi
                 _pointerExited = null;
                 _focusGained = null;
                 _focusLost = null;
+                _scrollChanged = null;
             }
         }
 
@@ -696,7 +749,7 @@ namespace CoreAI.RuntimeUi
             get
             {
                 return Count(_clicked) + Count(_valueChanged) + Count(_submitted) + Count(_pointerEntered) +
-                       Count(_pointerExited) + Count(_focusGained) + Count(_focusLost);
+                       Count(_pointerExited) + Count(_focusGained) + Count(_focusLost) + Count(_scrollChanged);
             }
         }
 
@@ -896,6 +949,11 @@ namespace CoreAI.RuntimeUi
                 wanted |= EventGroups.Focus;
             }
 
+            if (_scrollChanged != null)
+            {
+                wanted |= EventGroups.Scroll;
+            }
+
             return wanted;
         }
 
@@ -990,6 +1048,13 @@ namespace CoreAI.RuntimeUi
                 element.RegisterCallback(_onFocusIn);
                 element.RegisterCallback(_onFocusOut);
             }
+
+            if ((groups & EventGroups.Scroll) != 0 && element is ScrollView view)
+            {
+                view.horizontalScroller.valueChanged += _onScrollerValueChanged;
+                view.verticalScroller.valueChanged += _onScrollerValueChanged;
+                _knownScroll = view.scrollOffset;
+            }
         }
 
         private void Unregister(VisualElement element, EventGroups groups)
@@ -1032,6 +1097,12 @@ namespace CoreAI.RuntimeUi
             {
                 element.UnregisterCallback(_onFocusIn);
                 element.UnregisterCallback(_onFocusOut);
+            }
+
+            if ((groups & EventGroups.Scroll) != 0 && element is ScrollView view)
+            {
+                view.horizontalScroller.valueChanged -= _onScrollerValueChanged;
+                view.verticalScroller.valueChanged -= _onScrollerValueChanged;
             }
         }
 
@@ -1114,6 +1185,28 @@ namespace CoreAI.RuntimeUi
 
             _focused = false;
             Screen.Raise(_focusLost, this, "FocusLost");
+        }
+
+        private void OnScrollerValueChanged(float value)
+        {
+            if (_applyingScroll || !(Record?.Element is ScrollView view))
+            {
+                return;
+            }
+
+            Vector2 offset = view.scrollOffset;
+            if (Mathf.Approximately(offset.x, _knownScroll.x) && Mathf.Approximately(offset.y, _knownScroll.y))
+            {
+                return;
+            }
+
+            _knownScroll = offset;
+            Screen.Raise(_scrollChanged, this, "ScrollChanged");
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
         }
 
         private static int Count(Action<RuntimeUiElement> handlers)

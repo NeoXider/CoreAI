@@ -20,8 +20,9 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
 
 ## Recorded deviations / notes
 
-- `Players.CharacterAutoLoads` creates a minimal runtime character on join: a `Model` with a
-  `Humanoid` and `HumanoidRootPart`, created with `Archivable = false` as in Roblox (so
+- `Players.CharacterAutoLoads` creates a runtime character on join: a `Model` with a `Humanoid` and a
+  `HumanoidRootPart` (plus the R6 body where parts can be seeded, see "Character body" below), created
+  with `Archivable = false` as in Roblox (so
   `character:Clone()` is nil until a script sets `Archivable = true`). `Player:LoadCharacterAsync()`
   replaces it and yields; `LoadCharacter()` is a deprecated alias. Replacement checks ownership of
   the outgoing character as well as the player. Disconnect removes the character and its signal
@@ -38,8 +39,28 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
   retain character health and state without requiring Unity physics.
 - A character whose `Humanoid` dies is reloaded `Players.RespawnTime` seconds later while
   `CharacterAutoLoads` is still true (scheduled by the Lua bindings layer, not by this assembly).
-- This character slice does not implement avatar rigs, animation, or appearance loading. The network
-  transport is the optional `com.neoxider.coreaimirror` package, not this assembly.
+- Character body (`CharacterRig/`): where the world can seed part state (`Players.CharacterPartSeeder`,
+  wired by the Lua bindings over the part sink), the factory builds the classic R6 body instead of the
+  minimal one: `HumanoidRootPart` (the invisible 2x2x1 collidable box the motor moves, the Model's
+  `PrimaryPart`), `Torso`, `Head`, `Right Arm`, `Left Arm`, `Right Leg`, `Left Leg`, sizes and BodyColors
+  defaults from the mirror, all unanchored; Torso and Head report CanCollide true, the limbs false.
+  `RbxCharacterRigs` animates every Model inside the Workspace that holds a Humanoid and a part named
+  `Torso`, with no code in the mod: idle, walk (stride matched to the speed), jump, fall, land, fly and
+  sit, from the Humanoid's state and running speed, posed at PreRender through `IRbxRigPosePort`
+  (`PartSinkCharacterRigPort` in `../Binding/CharacterRig/`). The joints are implicit, keyed by Roblox's
+  part names, with Roblox's R6 Motor6D C0/C1 (`RbxR6Rig.Joints`); the poser writes what a
+  `Motor6D.Transform` will hold, so real joints and animation tracks replace the poser, not the maths.
+  A pose moves a part as physics does (no Changed, no revision, no replication); an anchored root stands
+  idle, an anchored limb is left where it is, a model with other part names is left alone. A frame
+  allocates nothing. `Humanoid.AutoRotate` (default true) makes the motor face the walk direction.
+  Recorded deviations: the RootJoint lifts the Torso one leg length above the root, because the root's
+  box rests on the floor where Roblox's Humanoid holds the root at hip height; a part the rig holds
+  pushes nothing (the Unity binder runs it as a kinematic trigger), so the root stays the only
+  collider; limbs are posed at PreRender, so a Heartbeat handler reads last frame's limb pose; a dead
+  character holds its last pose (no BreakJointsOnDeath). Not implemented yet: `Motor6D`/`Weld`
+  joints, `Animator`/`Animation`/`AnimationTrack` and `Humanoid:LoadAnimation` (MVP17), seats,
+  appearance loading. The network transport is the optional `com.neoxider.coreaimirror` package, not
+  this assembly.
 - `Clone()` copies external part state through the backing binder and removes partially created
   copies if that binder fails. C# `Clone()` preserves source actor ownership and access scope;
   the ownership-override overload and Lua clones receive the calling actor's ownership recursively.

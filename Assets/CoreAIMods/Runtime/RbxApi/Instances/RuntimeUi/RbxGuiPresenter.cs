@@ -26,7 +26,9 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
     {
         /// <summary>
         /// The USS every GUI screen is built with: it neutralizes the control theme so a Roblox box draws only
-        /// what its properties say, and routes a TextBox's text style into the field's inner input.
+        /// what its properties say, routes a TextBox's text style into the field's inner input, and turns a
+        /// ScrollingFrame's scroll view into Roblox's: a canvas that holds the children, and flat bars of the frame's
+        /// thickness and color drawn over the canvas on the side it names, without arrow buttons.
         /// </summary>
         public const string ScreenUss =
             ".rbx-gui { position: absolute; margin: 0; padding: 0; border-width: 0; border-radius: 0; "
@@ -35,11 +37,37 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
             + ".rbx-textbox .unity-base-text-field__input { margin: 0; padding: 0; border-width: 0; "
             + "background-color: rgba(0, 0, 0, 0); flex-grow: 1; color: var(--rbx-text-color, rgb(27, 42, 53)); "
             + "font-size: var(--rbx-font-size, 8px); -unity-text-align: var(--rbx-text-align, middle-center); }\n"
-            + ".rbx-textbox .unity-label { display: none; }\n";
+            + ".rbx-textbox .unity-label { display: none; }\n"
+            + ".rbx-canvas { position: relative; margin: 0; padding: 0; border-width: 0; flex-grow: 0; "
+            + "flex-shrink: 0; overflow: hidden; background-color: rgba(0, 0, 0, 0); }\n"
+            + ".rbx-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroller--vertical { "
+            + "position: absolute; top: 0; bottom: 0; width: var(--rbx-scroll-bar-size, 12px); min-width: 0; "
+            + "margin: 0; }\n"
+            + ".rbx-scroll-right > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroller--vertical"
+            + " { right: 0; }\n"
+            + ".rbx-scroll-left > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroller--vertical"
+            + " { left: 0; }\n"
+            + ".rbx-scroll > .unity-scroller--horizontal { position: absolute; left: 0; right: 0; bottom: 0; "
+            + "height: var(--rbx-scroll-bar-size, 12px); min-height: 0; margin: 0; }\n"
+            + ".rbx-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroller--vertical "
+            + ".unity-scroller__low-button, "
+            + ".rbx-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroller--vertical "
+            + ".unity-scroller__high-button, "
+            + ".rbx-scroll > .unity-scroller--horizontal .unity-scroller__low-button, "
+            + ".rbx-scroll > .unity-scroller--horizontal .unity-scroller__high-button { display: none; }\n"
+            + ".rbx-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroller--vertical "
+            + ".unity-base-slider__tracker, "
+            + ".rbx-scroll > .unity-scroller--horizontal .unity-base-slider__tracker { "
+            + "background-color: rgba(0, 0, 0, 0); border-width: 0; }\n"
+            + ".rbx-scroll > .unity-scroll-view__content-and-vertical-scroll-container > .unity-scroller--vertical "
+            + ".unity-base-slider__dragger, "
+            + ".rbx-scroll > .unity-scroller--horizontal .unity-base-slider__dragger { "
+            + "background-color: var(--rbx-scroll-bar-color, rgb(255, 255, 255)); border-width: 0; }\n";
 
         private const string ElementClass = "rbx-gui";
         private const string TextBoxClass = "rbx-textbox";
         private const string ScrollClass = "rbx-scroll";
+        private const string CanvasClass = "rbx-canvas";
         private const string Member = "ScreenGui";
 
         private readonly InstanceRegistry _registry;
@@ -602,7 +630,7 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
             }
 
             RbxGuiObject gui = node.Object;
-            IRbxUiElement parentElement = node.Parent.Element ?? screen.Port.Root;
+            IRbxUiElement parentElement = node.Parent.ChildContainer ?? screen.Port.Root;
             if (node.Parent.Parent != null && node.Parent.Element == null)
             {
                 return false;
@@ -617,6 +645,17 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
             }
 
             IRbxUiElement element = screen.Port.CreateElement(KindOf(gui), parentElement, null);
+            IRbxUiElement canvas = null;
+            if (element != null && gui is RbxScrollingFrame)
+            {
+                canvas = element.CreateChild("VisualElement", null);
+                if (canvas == null)
+                {
+                    element.Remove();
+                    element = null;
+                }
+            }
+
             if (element == null)
             {
                 ReportOnce(gui, "[CoreAI.RbxGui] " + gui.ClassName + " \"" + gui.Name
@@ -626,16 +665,20 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
 
             _world.ReserveExternalElements(screen.OwnerModId, 1, Member);
             node.Element = element;
+            node.Canvas = canvas;
             node.Pushed = new RbxUiStyleValue[(int)RbxUiStyleProperty.Count];
+            node.ResetScrollPushes();
             node.Dirty = (RbxGuiChange)int.MaxValue;
             element.AddClass(ElementClass);
             if (gui is RbxTextBox)
             {
                 element.AddClass(TextBoxClass);
             }
-            else if (gui is RbxScrollingFrame)
+            else if (canvas != null)
             {
                 element.AddClass(ScrollClass);
+                canvas.AddClass(CanvasClass);
+                canvas.SetAttribute("picking-mode", "Ignore");
             }
 
             Subscribe(node);
@@ -667,6 +710,7 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
                 }
 
                 node.Element = null;
+                node.Canvas = null;
                 screen.ElementCount--;
                 _world.ReleaseExternalElements(screen.OwnerModId, 1);
             }
@@ -803,6 +847,12 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
                 element.ValueChanged += node.OnValueChanged;
                 box.FocusRequest = _onFocusRequest;
             }
+
+            if (gui is RbxScrollingFrame)
+            {
+                node.OnScrolled = () => OnScrolled(node);
+                element.ScrollChanged += node.OnScrolled;
+            }
         }
 
         private static void Unsubscribe(RbxGuiNode node)
@@ -827,6 +877,12 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
                 element.ValueChanged -= node.OnValueChanged;
             }
 
+            if (node.OnScrolled != null)
+            {
+                element.ScrollChanged -= node.OnScrolled;
+            }
+
+            node.OnScrolled = null;
             node.OnEntered = null;
             node.OnExited = null;
             node.OnClicked = null;
@@ -956,6 +1012,47 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
             {
                 node.Element.Blur();
             }
+        }
+
+        /// <summary>
+        /// The player scrolled a ScrollingFrame (wheel, drag, scroll bar), or the host clamped its offset: an axis the
+        /// player may scroll (<c>ScrollingEnabled</c>, <c>ScrollingDirection</c>) keeps the new offset inside the
+        /// canvas, an axis they may not snaps back, and <c>CanvasPosition</c> takes the result as a layout result:
+        /// its signal fires and no budget is charged.
+        /// </summary>
+        private static void OnScrolled(RbxGuiNode node)
+        {
+            IRbxUiElement element = node.Element;
+            if (!(node.Gui is RbxScrollingFrame frame) || frame.IsDestroyed || element == null || !element.IsAlive)
+            {
+                return;
+            }
+
+            float x = element.ScrollOffsetX;
+            float y = element.ScrollOffsetY;
+            bool allowX = frame.ScrollingEnabled && frame.ScrollingDirection != RbxScrollingDirection.Y;
+            bool allowY = frame.ScrollingEnabled && frame.ScrollingDirection != RbxScrollingDirection.X;
+            float keptX = allowX ? ClampScroll(x, node.CanvasW - node.WindowW) : node.ScrollX;
+            float keptY = allowY ? ClampScroll(y, node.CanvasH - node.WindowH) : node.ScrollY;
+            if (!keptX.Equals(x) || !keptY.Equals(y))
+            {
+                element.SetScrollOffset(keptX, keptY);
+            }
+
+            node.PushedScrollSet = true;
+            node.PushedScrollX = keptX;
+            node.PushedScrollY = keptY;
+            frame.ApplyScrolledPosition(new RbxVector2(keptX, keptY));
+        }
+
+        private static float ClampScroll(float value, float max)
+        {
+            if (float.IsNaN(value) || value < 0f)
+            {
+                return 0f;
+            }
+
+            return max > 0f && value > max ? max : max <= 0f ? 0f : value;
         }
 
         // ---- helpers -----------------------------------------------------------------------------

@@ -6,8 +6,10 @@ using System.Threading;
 using CoreAI.Ai.Logging;
 using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Binding;
+using CoreAI.Mods.Rbx.Binding.CharacterRig;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.CharacterRig;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Mods.Rbx.Instances.Scripts;
@@ -699,6 +701,9 @@ namespace CoreAI.Ai.LuaCs
             _players.NetworkBridge = _networkBridge;
             _players.PartPositionReader = ReadPartPositionStuds;
             _players.RootPartSpawnSeeder = SeedCharacterRootPart;
+            PartSinkCharacterRigPort characterRigPort = new(_partSink);
+            _players.CharacterPartSeeder = characterRigPort;
+            CharacterRigs = new RbxCharacterRigs(_registry, _scheduler, characterRigPort);
             _networkRequestSignal = new RbxScriptSignal("NetworkBridge.RequestReceived");
             _networkRequestSignal.BindScheduler(_scheduler);
             _networkRequestConnection = _networkRequestSignal.Connect(
@@ -741,6 +746,12 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>The shared instance world every registered script operates on.</summary>
         public InstanceRegistry Registry => _registry;
+
+        /// <summary>
+        /// Animates every R6 character in this world; a host switches it off with
+        /// <see cref="RbxCharacterRigs.Enabled"/>.
+        /// </summary>
+        public RbxCharacterRigs CharacterRigs { get; }
 
         /// <summary>The shared DataModel root exposed as the <c>game</c> global.</summary>
         public RbxDataModel Game => _game;
@@ -1814,6 +1825,7 @@ namespace CoreAI.Ai.LuaCs
             _registry.Unregistered -= OnInstanceUnregistered;
             _registry.Registered -= OnInstanceRegisteredForCharacter;
             _registry.SceneMembershipChanged -= OnCharacterSceneMembershipChanged;
+            CharacterRigs?.Dispose();
             // WHY: the motors leave this class's ownership before any host Release runs, so a
             // Release that throws is contained per motor and every later teardown step still runs.
             List<KeyValuePair<RbxHumanoid, IRbxCharacterMotor>> motors = new(_characterMotors);
@@ -1837,7 +1849,13 @@ namespace CoreAI.Ai.LuaCs
             _tweenService?.DetachHost();
             _scheduler.PhaseReached -= PumpSchedulerPhase;
             _networkRequestConnection.Disconnect();
-            (_game?.FindFirstChildOfClass("TextChatService") as RbxTextChatService)?.DetachCommandSink();
+            // WHY the destroyed check: a world torn down before its bindings has destroyed the service, which
+            // detached its own sink; FindFirstChildOfClass throws on a destroyed DataModel.
+            if (_game != null && !_game.IsDestroyed)
+            {
+                (_game.FindFirstChildOfClass("TextChatService") as RbxTextChatService)?.DetachCommandSink();
+            }
+
             _textSources.Clear();
             _bindableInvokeConnection?.Disconnect();
             _pendingBindableInvokes.Clear();
@@ -2450,7 +2468,8 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public void AttachChatCommands(IRbxChatCommandSink sink)
         {
-            if (!(_game?.FindFirstChildOfClass("TextChatService") is RbxTextChatService service))
+            if (_game == null || _game.IsDestroyed
+                || !(_game.FindFirstChildOfClass("TextChatService") is RbxTextChatService service))
             {
                 return;
             }
@@ -3735,6 +3754,23 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>Studs above a Humanoid subject's root part that the default camera orbits (its head).</summary>
         public static readonly RbxVector3 HumanoidCameraSubjectOffset = new(0f, 1.5f, 0f);
 
+        /// <summary>
+        /// The head of the R6 body above its root (<see cref="RbxR6Rig.HeadOffsetFromRoot"/>, 3.5 studs): where the
+        /// default camera looks for a Humanoid whose model has a <c>Torso</c>, so the first-person eye sits at
+        /// head height (4.5 studs above the floor) as Roblox's does. The minimal character keeps
+        /// <see cref="HumanoidCameraSubjectOffset"/>.
+        /// </summary>
+        public static readonly RbxVector3 RigCameraSubjectOffset = RbxR6Rig.HeadOffsetFromRoot;
+
+        /// <summary>The focus offset above <paramref name="humanoid"/>'s root part the default camera uses.</summary>
+        public static RbxVector3 CameraSubjectOffsetFor(RbxHumanoid humanoid)
+        {
+            RbxInstance model = humanoid?.Parent;
+            return model != null && !model.IsDestroyed && model.FindFirstChild("Torso") is RbxBasePart
+                ? RigCameraSubjectOffset
+                : HumanoidCameraSubjectOffset;
+        }
+
         private IRbxCameraModule _cameraModule = new RbxDefaultCameraModule();
         private bool _cameraModuleActive;
         private bool _cameraModuleFaultReported;
@@ -3985,7 +4021,7 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>
         /// The point the default camera orbits and the body its pull-in ray ignores: a Humanoid subject's
-        /// root part plus <see cref="HumanoidCameraSubjectOffset"/> (its character ignored), or a BasePart
+        /// root part plus <see cref="CameraSubjectOffsetFor"/> (its character ignored), or a BasePart
         /// subject's centre (the part ignored). False when no subject resolves to a part in the world.
         /// </summary>
         private bool TryResolveCameraFocus(out RbxVector3 focus, out RbxInstance subjectBody)
@@ -3996,7 +4032,7 @@ namespace CoreAI.Ai.LuaCs
                 RbxInstance root = humanoid.RootPart;
                 if (root != null && !root.IsDestroyed && root.IsA("BasePart"))
                 {
-                    focus = _partSink.GetLivePositionStuds(root.Id) + HumanoidCameraSubjectOffset;
+                    focus = _partSink.GetLivePositionStuds(root.Id) + CameraSubjectOffsetFor(humanoid);
                     subjectBody = humanoid.Parent != null && !humanoid.Parent.IsDestroyed ? humanoid.Parent : root;
                     return true;
                 }

@@ -391,7 +391,7 @@ MonoBehaviour:
     _metalness: {fileID: 0}
     _ambientOcclusion: {fileID: 2800000, guid: e70277c7b1b3da34ea522b692d501233, type: 3}
     _tileWidthStuds: 5
-    _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
+    _intrinsicColor: {r: 1.2, g: 1.2, b: 1.2, a: 1}
     _partColorInfluence: 0.7
     _roughnessScale: 1.6
     _normalStrength: 1.2

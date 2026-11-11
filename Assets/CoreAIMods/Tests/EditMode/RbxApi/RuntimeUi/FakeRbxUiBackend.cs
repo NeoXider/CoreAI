@@ -471,6 +471,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.RuntimeUi
             private Action _pointerExited;
             private Action _focusGained;
             private Action _focusLost;
+            private Action _scrollChanged;
             private bool _apiText;
 
             public FakeElement(FakeScreen screen, string kind, string name, FakeElement parent)
@@ -524,6 +525,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.RuntimeUi
                 remove => _focusLost -= value;
             }
 
+            public event Action ScrollChanged
+            {
+                add => _scrollChanged += value;
+                remove => _scrollChanged -= value;
+            }
+
+            public float ScrollOffsetX { get; private set; }
+
+            public float ScrollOffsetY { get; private set; }
+
+            /// <summary>How many scroll offsets the API set (the player's scrolling is not counted).</summary>
+            public int ScrollWrites { get; private set; }
+
             /// <summary>Every typed style written through the per-frame path, last value per property.</summary>
             public Dictionary<RbxUiStyleProperty, RbxUiStyleValue> TypedStyles { get; } = new();
 
@@ -564,7 +578,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.RuntimeUi
 
             public int SubscriberCount => Count(_clicked) + Count(_valueChanged) + Count(_submitted)
                                           + Count(_pointerEntered) + Count(_pointerExited) + Count(_focusGained)
-                                          + Count(_focusLost);
+                                          + Count(_focusLost) + Count(_scrollChanged);
 
             public bool SetStyle(RbxUiStyleProperty property, RbxUiStyleValue value)
             {
@@ -646,6 +660,20 @@ namespace CoreAI.Tests.EditMode.RbxApi.RuntimeUi
             {
                 ZOrder = zOrder;
                 return IsAlive;
+            }
+
+            public bool SetScrollOffset(float x, float y)
+            {
+                if (!IsAlive || Kind != "ScrollView" || float.IsNaN(x) || float.IsNaN(y) || float.IsInfinity(x)
+                    || float.IsInfinity(y))
+                {
+                    return false;
+                }
+
+                ScrollOffsetX = x;
+                ScrollOffsetY = y;
+                ScrollWrites++;
+                return true;
             }
 
             public bool AddClass(string className)
@@ -816,6 +844,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.RuntimeUi
                 _pointerExited?.Invoke();
             }
 
+            /// <summary>The player scrolls a scroll view (wheel, drag or scroll bar) to an offset.</summary>
+            public void ScrollByPlayer(float x, float y)
+            {
+                if (!IsAlive || Kind != "ScrollView")
+                {
+                    return;
+                }
+
+                ScrollOffsetX = x;
+                ScrollOffsetY = y;
+                _scrollChanged?.Invoke();
+            }
+
             internal bool Matches(string selector)
             {
                 string[] parts = selector.Replace(">", " > ").Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
@@ -931,6 +972,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.RuntimeUi
                 _pointerExited = null;
                 _focusGained = null;
                 _focusLost = null;
+                _scrollChanged = null;
             }
 
             private bool MatchesCompound(string compound)
