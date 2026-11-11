@@ -75,6 +75,7 @@
     <Compile Include="$(TestsRoot)/CoreAiChatExamplesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/CoreAiChatExamplesEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/DemoModProductionSurfaceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/DemoModProductionSurfaceEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/FileLuaModSourceStoreEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/FileLuaModSourceStoreEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/FileStoreLongRootEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/FileStoreLongRootEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/FileLuaModStoreEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/FileLuaModStoreEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/ImguiBanRatchetEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/ImguiBanRatchetEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LoggingSeamHonestyEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LoggingSeamHonestyEditModeTests.cs" />
@@ -92,6 +93,7 @@
     <Compile Include="$(TestsRoot)/P3InstantEditFixtures.cs" Link="Assets/CoreAIMods/Tests/EditMode/P3InstantEditFixtures.cs" />
     <Compile Include="$(TestsRoot)/P3InstantEditLoopEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/P3InstantEditLoopEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/P3WorldUndoEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/P3WorldUndoEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/WorldUndoRevisionFreeStateEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/WorldUndoRevisionFreeStateEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaLogFormatterEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaLogFormatterEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaLogServiceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaLogServiceEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaModHeaderEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaModHeaderEditModeTests.cs" />
@@ -178,6 +180,8 @@
     <Compile Include="$(TestsRoot)/RbxApi/GuiLua/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/GuiLua/%(Filename)%(Extension)" />
     <Compile Include="$(TestsRoot)/RbxApi/Bindables/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Bindables/%(Filename)%(Extension)" />
     <Compile Include="$(TestsRoot)/RbxApi/ScriptsLua/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/ScriptsLua/%(Filename)%(Extension)" />
+    <Compile Include="$(TestsRoot)/RbxApi/TextChatLua/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/TextChatLua/%(Filename)%(Extension)" />
+    <Compile Include="$(TestsRoot)/RbxApi/AdornmentsLua/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/AdornmentsLua/%(Filename)%(Extension)" />
     <Compile Include="$(TestsRoot)/RbxApi/Networking/BridgeTopologyAndClockEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/BridgeTopologyAndClockEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RecordingLog.cs" Link="Assets/CoreAIMods/Tests/EditMode/RecordingLog.cs" />
     <Compile Include="$(TestsRoot)/ScriptEngineSeamEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/ScriptEngineSeamEditModeTests.cs" />

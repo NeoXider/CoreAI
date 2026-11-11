@@ -16,9 +16,9 @@ Roblox-1:1 keyboard/mouse. Get it with `game:GetService("UserInputService")`, or
   default 1). The mouse wheel fires `InputChanged` with UserInputType MouseWheel and the direction in
   `input.Position.Z` (+1 forward, -1 back). The gamepad sticks fire `InputChanged` with KeyCode
   Thumbstick1/Thumbstick2 and the stick in `input.Position` (x, y in -1..1, y up).
-- `TextBoxFocused` / `TextBoxFocusReleased` fire when CoreAI's chat or Hub field takes / returns the
-  keyboard (argument nil); a GUI TextBox does not raise them yet and `GetFocusedTextBox()` returns nil
-  (use the TextBox's own `Focused` / `FocusLost`, section gui).
+- `TextBoxFocused(textBox)` / `TextBoxFocusReleased(textBox)` fire when a GUI TextBox takes / returns the
+  keyboard, and `GetFocusedTextBox()` returns it (section gui). CoreAI's own chat and Hub fields are no
+  TextBox: for them the argument is nil and `GetFocusedTextBox()` stays nil.
 - `gameProcessedEvent` (the second argument of InputBegan/InputEnded/InputChanged) is `true` while
   CoreAI UI (the chat, the Hub) or your own UI (a TextBox, a UXML field) has text focus, and for mouse
   input while the pointer is over a button, a TextBox, an `Active` GUI object or a UXML element:

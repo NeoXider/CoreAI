@@ -43,7 +43,10 @@ namespace CoreAI.Editor.RbxMaterials
             /// <summary>Multiplier on the normal map: above 1 deepens relief, below 1 flattens it.</summary>
             public float NormalStrength { get; }
 
-            /// <summary>Multiplier on the roughness map; below 1 makes the surface glossier.</summary>
+            /// <summary>
+            /// Multiplier on the roughness map (the shader saturates the product); below 1 makes the surface
+            /// glossier, above 1 lifts a map whose average sits far under the real surface's roughness.
+            /// </summary>
             public float RoughnessScale { get; }
 
             /// <summary>
@@ -84,12 +87,17 @@ namespace CoreAI.Editor.RbxMaterials
             ["Pavement"] = new Profile(12f, 1.1f, 0.8f, 0.7f),
             ["Pebble"] = new Profile(9f, 1.2f, 0.8f, 0.7f),
             ["Rock"] = new Profile(18f, 1.2f, 0.85f, 0.65f),
-            ["Sand"] = new Profile(7f, 1.05f, 0.9f, 0.75f),
+            // WHY Sand, Ground, Grass and LeafyGrass scale up: their CC0 roughness maps average 0.46, 0.54,
+            // 0.26 and 0.55, so the earlier 0.78-0.9 left a lawn at an effective roughness of 0.21 and soil
+            // and sand near 0.45. Under a low sun the field glinted like wet glass and its specular glitter
+            // shimmered with every camera step (near-field frame difference 0.023, 0.0085 when matte).
+            // Scaled, all four sit at 0.83-0.88.
+            ["Sand"] = new Profile(7f, 1.05f, 1.9f, 0.75f),
             ["Mud"] = new Profile(15f, 1.15f, 0.85f, 0.7f),
-            ["Ground"] = new Profile(16f, 1.15f, 0.88f, 0.7f),
+            ["Ground"] = new Profile(16f, 1.15f, 1.6f, 0.7f),
             ["Asphalt"] = new Profile(8f, 1.1f, 0.85f, 0.6f),
-            ["Grass"] = new Profile(4.5f, 1.2f, 0.78f, 0.7f),
-            ["LeafyGrass"] = new Profile(5f, 1.2f, 0.8f, 0.7f),
+            ["Grass"] = new Profile(4.5f, 1.2f, 3.2f, 0.7f),
+            ["LeafyGrass"] = new Profile(5f, 1.2f, 1.6f, 0.7f),
             ["Snow"] = new Profile(9f, 1f, 0.8f, 0.8f),
             ["CrackedLava"] = new Profile(13f, 1.2f, 0.85f, 0.6f),
 

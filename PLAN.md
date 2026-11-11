@@ -17,36 +17,40 @@ open work is filed in `TODO.md` under "Plan of record 2026-11-11".
 
 - MVP0–MVP3 are closed. No rung moved between 2026-09-25 and 2026-10-28: nine releases went to the
   benchmark, audits, repairs, the code editor and the gateway client.
-- MVP4 (script contexts) is not started. Spikes S1 and S2, the IL2CPP/WebGL player checks, the WebGL
-  page-reload smoke and one live-model run with a valid provider key are still open.
-- The 2026-11-11 repository survey found what a first session lacks: no default controls, mouse look or
-  fly; no menu that builds a world scene; a chat whose default role cannot build; every AI edit behind
-  a full world capture and a durable autosave; 15 of 16 demo scenes without post-processing; the default
-  Plastic without normals and static water; no way for a mod to call a model; chat-only model kinds;
-  a connection test that pings one role with plain text.
+- **2026-11-11, written in one day by parallel agents** (two checkpoint commits on `demo`; not a release,
+  no version bump): most of M1 — P1, P2, P3, P4, P7, P8 stage 1, the day-cycle slice of P9, P11 stage 1,
+  P12, P13, P18, P19's baseline, P20, the solo half of MVP15 and the Luau math slice of MVP13 — with P6 (the
+  Block world demo) in progress; from M2, P14, the first half of P15, the camera half of P16 and P17; MVP4
+  steps A1–A3 and B1; MVP5 part 1 in the Mirror package; the MVP6 codec core. Per-package state:
+  `Docs/ROADMAP.md` §4 and `TODO.md`.
+- **How far it is checked.** Unity 6000.6 EditMode: five targeted batches passed 5,641 of 5,694 tests;
+  anything changed after the last batch's tree (15:38) has not been re-run, among it the GUI classes'
+  last fixes, `BindableEvent`/`BindableFunction`, the rule that a line addressed to the AI goes to the AI,
+  and the final form of the fog fix. PlayMode or captures, on a separate Unity copy: the default look and
+  bloom, materials v2, the player controls, and the day/night and torch captures; the chat overlay and
+  camera readback PlayMode tests passed on the main verification copy. The Block World scene has had its first PlayMode runs, with
+  open failures. Not checked at all: any live model, the Mirror assemblies in Unity (no `MIRROR` define; a strict
+  compile of a tree copy with `MIRROR` defined, 45 assemblies and 0 errors outside Unity, is the only check),
+  any WebGL or IL2CPP player.
+- Still open from before: spike S1 in a Standalone Mono x64 and an IL2CPP player (§6 R1 has the CLI numbers;
+  S2 is measured), the IL2CPP/WebGL player checks, the WebGL page-reload smoke, and one live-model run with
+  a valid provider key.
 
 ### Next steps
 
-1. **M0 Ready to play** (overlaps the start of M1): the one-click play-and-create world (P3), truthful
-   results and a loud failure when a module is missing (P11 stage 1), the open MVP3 player checks, the
-   live-model run once the owner supplies a valid key.
-2. **M1 Block world — single-player, finished and measured.** The owner decided on 2026-11-11 that
-   multiplayer comes after the demo, that game UI is UXML/USS text from Lua (P18, plan decision D14) and
-   that optimization starts from honest measurements (P19). Tracks:
-   - play: P1 (controls, camera, fly) → P2 (in-world chat) → P4 (voxel Terrain) → P6 (the demo), with P3
-     (the edit loop) alongside;
-   - look: P7 (default look, Hub Graphics page) → P8 stage 1 (Plastic detail, water, glass);
-   - harness: P11 stage 1, then P12 (talking NPCs and agents created from Lua, behind a framework
-     setting of the host game that is off by default) and P13 (decision models, local `d1-2B` through a `llama-server` sidecar);
-   - demo content: procedural generation, day and night, torches and mod-made villagers, which pull
-     the day-cycle slice of P9 and the Luau math slice of MVP13 (`math.noise`) into M1;
-   - interface: P18 — the interpreter and host first, the Lua surface after P1's input-focus port;
-   - performance: P19 — the harness and the first table, then optimization by measured rank;
-   - mods: P20 — folders for mods (a tree instead of one flat list), after P19 can measure it;
-   - MVP4 alongside on the mods runtime.
-   First wave, started 2026-11-11: P1, P7, P11 stage 1, the P18 interpreter and the P19 harness.
-3. **M2 Whole games from chat** follows M1: the owner set the goal on 2026-11-11 — everything before
-   multiplayer comes first. **M3 Together** and **M4 Platform** come after, as listed in §4.0.
+1. **Verify what was written**: re-run in Unity what changed after the last batch, then the PlayMode list
+   (the one-click world's acceptance, the NPC villagers, the orchestrator chat, the Block World scene);
+   run the Mirror tests with `MIRROR` defined (after Mirror 96.11.4); a first WebGL player run.
+2. **Finish M1 Block world — single-player, finished and measured**: the Block World demo's open PlayMode
+   failures and its recorded script in the editor and in a WebGL player; the Roblox surface it still lacks
+   (`TextChatService`, `SelectionBox`, headless voxel raycasts); MVP4 B2 and C1–C6; the P19 measurements in
+   players and the budgets that are left. The owner's 2026-11-11 decisions stand: multiplayer after the
+   demo, game UI as UXML/USS text from Lua (plan decision D14), optimization from honest measurements.
+3. **M0 gates**: the live-model run once the owner supplies a valid key, the open MVP3 player checks.
+4. **Release** once the release rule's gate holds (`Docs/ROADMAP.md` §4); the open owner decisions are at the
+   top of `TODO.md`'s plan of record.
+5. **M2 Whole games from chat** follows M1 (the rest of P15 among it); **M3
+   Together** and **M4 Platform** come after, as listed in §4.0.
 
 ### Estimates (2026-11-11, in AI working time)
 

@@ -1,4 +1,4 @@
-# Build at the crosshair in cells (sizes, undo); towers of Parts
+# Build at the crosshair in cells (sizes); towers of Parts; SelectionBox outlines; what a save keeps, what /undo takes back
 
 Building at the crosshair (block worlds). When the player says "here", "this spot" or "where I look", build
 at the crosshair, in cells. Block games publish it as workspace attributes: `CrosshairPlaceCell` (Vector3 of
@@ -30,6 +30,13 @@ for _, corner in ipairs({ { -2, -2 }, { 2, -2 }, { -2, 2 }, { 2, 2 } }) do
 end
 ```
 
+Outline what the player targets with a `SelectionBox` (works as in Roblox), not with twelve Parts: set
+`Adornee` (a Part, or a Model: the box around all its parts), `Color3`, `LineThickness` (studs, default 0.15),
+`Transparency`, `SurfaceColor3`/`SurfaceTransparency` (faces; default 1 = none) and `Visible`, and parent it
+to `workspace` (or a PlayerGui). It follows the adornee, is never hit by a ray and needs no `Ui` capability.
+To outline a Terrain cell, adorn one anchored `Transparency = 1`, `CanCollide = false` Part moved to the cell,
+and leave that Part out of your own rays (`RaycastParams`), because a ray still hits a non-colliding Part.
+
 Build a colored tower of parts:
 ```lua
 for i = 1, 5 do
@@ -42,3 +49,10 @@ for i = 1, 5 do
   p.Parent = workspace
 end
 ```
+
+Saving and `/undo`. A saved world keeps every world-owned instance with its properties, Terrain cells, mod
+sources, the Lighting day cycle, StarterPlayer and StarterGui settings, and GUI under `StarterGui` (copied into
+each player's PlayerGui on spawn). It does not keep what a mod creates (the mod rebuilds it when it starts), the
+PlayerGui copies or characters. The player's `/undo` takes back everything one of your calls changed, settings
+alone included ("make it night"), so make one request in one call; it refuses once a player, a mod or another
+agent changed the world since, and you cannot call it: tell the player to type `/undo`.

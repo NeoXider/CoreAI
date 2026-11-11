@@ -1754,6 +1754,7 @@ namespace CoreAI.Mods.WorldPackages
         private InstanceRegistry _watchedRegistry;
         private bool _mutationWatchActive;
         private int _worldChangedDuringMutation;
+        private ulong _valuesAtMutationStart;
         private string _startupSelectionNote = "";
         private Task _startupRefreshAfterSourceChanges = Task.CompletedTask;
         private byte[] _lastRefusedStartupContent;
@@ -3365,6 +3366,9 @@ namespace CoreAI.Mods.WorldPackages
                 return;
             }
 
+            // WHY a value fingerprint as well as the events: a PointLight, GUI or StarterPlayer setter raises no
+            // registry event, so an AI edit of only those would never reach the next start.
+            _valuesAtMutationStart = RbxWorldStateMark.Of(registry, 0L).Values;
             registry.Registered += OnWatchedInstanceRegisteredOrRemoved;
             registry.Unregistered += OnWatchedInstanceRegisteredOrRemoved;
             registry.RevisionAdvanced += OnWatchedRevisionAdvanced;
@@ -3392,6 +3396,7 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             return Volatile.Read(ref _worldChangedDuringMutation) != 0
+                   || (registry != null && RbxWorldStateMark.Of(registry, 0L).Values != _valuesAtMutationStart)
                 ? MutationChange.World
                 : MutationChange.None;
         }

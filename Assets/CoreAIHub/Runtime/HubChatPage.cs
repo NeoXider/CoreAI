@@ -90,7 +90,16 @@ namespace CoreAI.Hub.UI
         {
             if (_panel != null)
             {
-                UnityEngine.Object.Destroy(_panel.gameObject);
+                // WHY: Destroy logs an error outside Play Mode (the Hub opened by an EditMode host or test).
+                if (UnityEngine.Application.isPlaying)
+                {
+                    UnityEngine.Object.Destroy(_panel.gameObject);
+                }
+                else
+                {
+                    UnityEngine.Object.DestroyImmediate(_panel.gameObject);
+                }
+
                 _panel = null;
             }
 

@@ -773,7 +773,16 @@ namespace CoreAI.Infrastructure.World
                 return false;
             }
 
-            UnityEngine.Object.Destroy(go);
+            // WHY: Destroy logs an error outside Play Mode (an EditMode host or test); the object goes at once there.
+            if (Application.isPlaying)
+            {
+                UnityEngine.Object.Destroy(go);
+            }
+            else
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+
             return true;
         }
 

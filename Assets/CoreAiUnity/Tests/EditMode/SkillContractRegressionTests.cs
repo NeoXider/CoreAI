@@ -156,7 +156,18 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(resolver.TryResolveInvocation(Call("tracked_tool", "{}"), out _, out _));
             using CancellationTokenSource cancelled = new CancellationTokenSource();
             cancelled.Cancel();
-            Assert.CatchAsync<OperationCanceledException>(async () => { await capturedReplacement.InvokeAsync(cancelled.Token); });
+            // WHY await-and-catch: Assert.CatchAsync blocks the editor's main thread and hangs an EditMode run.
+            bool refused = false;
+            try
+            {
+                await capturedReplacement.InvokeAsync(cancelled.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                refused = true;
+            }
+
+            Assert.IsTrue(refused, "a cancelled captured call is refused");
             Assert.AreEqual(1, replacement.BodyCalls, "A cancelled captured call must not enter the removed tool's body.");
             Assert.AreEqual("replacement body", (await capturedReplacement.InvokeAsync(CancellationToken.None)).ToString());
             Assert.AreEqual(2, replacement.BodyCalls);

@@ -36,12 +36,13 @@ Sections (read_skill('Rbx API', section='<name>')):
 - tweens: TweenService animation
 - messaging: RemoteEvent, RemoteFunction, BindableEvent/Function between mods
 - terrain: Block worlds: Terrain cells, FillBlock, FillRegion, WriteVoxels
-- building: Build at the crosshair in cells (sizes, undo); towers of Parts
+- building: Build at the crosshair in cells (sizes); towers of Parts; SelectionBox outlines; what a save keeps, what /undo takes back
 - characters: Humanoid, Players, Player.Character, respawn
 - input: UserInputService, gameProcessed, ClickDetector, a keyboard game loop
 - camera: CurrentCamera, screen rays, the default camera, framing a game
 - gui: Roblox GUI: ScreenGui, Frame, TextLabel, TextButton, PlayerGui
 - uxml: UXML/USS screens (UxmlService), UI error codes and budgets, a hotbar HUD
+- chat: TextChatService and TextChatCommand: slash commands for the in-world chat
 - lighting: Day cycle (ClockTime), sun and ambient light, PointLight
 - ai: TextGenerator and AIService agents (NPCs that talk)
 
@@ -68,7 +69,7 @@ Sections (read_skill('Rbx API', section='<name>')):
   Creatable: Part, Folder, Model, Backpack (a plain container), ClickDetector (section input),
   RemoteEvent, UnreliableRemoteEvent, RemoteFunction, BindableEvent, BindableFunction (messaging),
   MaterialVariant (parts), Humanoid (characters), PointLight (lighting), TextGenerator (ai), the value
-  objects (attributes) and the GUI classes (gui). A real Roblox class CoreAI does not build yet
+  objects (attributes), the GUI classes (gui), SelectionBox (building) and TextChatCommand (chat). A real Roblox class CoreAI does not build yet
   (WedgePart, SpawnLocation, Weld, Attachment, ...) raises NOT_IMPLEMENTED; any other name errors. A
   Camera is not creatable: use `workspace.CurrentCamera`. `workspace.Terrain` exists in every world
   (terrain): build ground and many blocks with it, not one Part per block.
@@ -288,8 +289,8 @@ alias).
   live tree-backed `Workspace`, `Lighting`, `ReplicatedStorage`, `ServerStorage`,
   `ServerScriptService`, `StarterPlayer`, `StarterGui`, `Players`, `HttpService`, `UserInputService`,
   `RunService`, `MaterialService`, `Debris`, `TweenService` and `CollectionService`, plus
-  `UxmlService` (section uxml) and `AIService` (answers only when the game turned on AI from Lua,
-  section ai). Placeholders: `DataStoreService` (MVP16), `ContextActionService` (MVP7),
+  `UxmlService` (section uxml), `TextChatService` (its `TextChatCommand`s, section chat) and `AIService`
+  (answers only when the game turned on AI from Lua, section ai). Placeholders: `DataStoreService` (MVP16), `ContextActionService` (MVP7),
   `SoundService` (MVP17), and backlog or unsupported Roblox services such as `Teams`,
   `PhysicsService`, `ReplicatedFirst`, `PathfindingService`, `MarketplaceService`, `TeleportService`
   and `BadgeService` (each error says which and gives a workaround). A placeholder's first member
@@ -519,7 +520,7 @@ use Parts for props, doors, moving things and anything that needs Color or Trans
 - `workspace:Raycast` on a block answers `Instance == workspace.Terrain`, the cell's `Material` and the
   face `Normal` (an axis vector): add `Normal * 2` to `Position` and call `WorldToCell` to get the cell to
   place into, subtract it to get the cell to break. Filter Terrain in or out with RaycastParams like any
-  instance. `workspace.Terrain:IsA(""BasePart"")` is false in CoreAI, so check `hit.Instance == workspace.Terrain`.
+  instance. Rays hit Terrain in every world, also on a server or a headless tool without a physics engine. `workspace.Terrain:IsA(""BasePart"")` is false in CoreAI, so check `hit.Instance == workspace.Terrain`.
 - Writes need WorldEdit. The world has bounds and a cell budget: past them a write raises BAD_ARGUMENT or
   BUDGET_EXCEEDED and changes nothing.
 - Not implemented (NOT_IMPLEMENTED): FillBall, FillCylinder, FillWedge, ReadVoxelChannels,
@@ -562,7 +563,7 @@ end
 ```
 
 <!-- section: building -->
-# Build at the crosshair in cells (sizes, undo); towers of Parts
+# Build at the crosshair in cells (sizes); towers of Parts; SelectionBox outlines; what a save keeps, what /undo takes back
 
 Building at the crosshair (block worlds). When the player says ""here"", ""this spot"" or ""where I look"", build
 at the crosshair, in cells. Block games publish it as workspace attributes: `CrosshairPlaceCell` (Vector3 of
@@ -594,6 +595,13 @@ for _, corner in ipairs({ { -2, -2 }, { 2, -2 }, { -2, 2 }, { 2, 2 } }) do
 end
 ```
 
+Outline what the player targets with a `SelectionBox` (works as in Roblox), not with twelve Parts: set
+`Adornee` (a Part, or a Model: the box around all its parts), `Color3`, `LineThickness` (studs, default 0.15),
+`Transparency`, `SurfaceColor3`/`SurfaceTransparency` (faces; default 1 = none) and `Visible`, and parent it
+to `workspace` (or a PlayerGui). It follows the adornee, is never hit by a ray and needs no `Ui` capability.
+To outline a Terrain cell, adorn one anchored `Transparency = 1`, `CanCollide = false` Part moved to the cell,
+and leave that Part out of your own rays (`RaycastParams`), because a ray still hits a non-colliding Part.
+
 Build a colored tower of parts:
 ```lua
 for i = 1, 5 do
@@ -606,6 +614,13 @@ for i = 1, 5 do
   p.Parent = workspace
 end
 ```
+
+Saving and `/undo`. A saved world keeps every world-owned instance with its properties, Terrain cells, mod
+sources, the Lighting day cycle, StarterPlayer and StarterGui settings, and GUI under `StarterGui` (copied into
+each player's PlayerGui on spawn). It does not keep what a mod creates (the mod rebuilds it when it starts), the
+PlayerGui copies or characters. The player's `/undo` takes back everything one of your calls changed, settings
+alone included (""make it night""), so make one request in one call; it refuses once a player, a mod or another
+agent changed the world since, and you cannot call it: tell the player to type `/undo`.
 
 <!-- section: characters -->
 # Humanoid, Players, Player.Character, respawn
@@ -705,9 +720,9 @@ Roblox-1:1 keyboard/mouse. Get it with `game:GetService(""UserInputService"")`, 
   default 1). The mouse wheel fires `InputChanged` with UserInputType MouseWheel and the direction in
   `input.Position.Z` (+1 forward, -1 back). The gamepad sticks fire `InputChanged` with KeyCode
   Thumbstick1/Thumbstick2 and the stick in `input.Position` (x, y in -1..1, y up).
-- `TextBoxFocused` / `TextBoxFocusReleased` fire when CoreAI's chat or Hub field takes / returns the
-  keyboard (argument nil); a GUI TextBox does not raise them yet and `GetFocusedTextBox()` returns nil
-  (use the TextBox's own `Focused` / `FocusLost`, section gui).
+- `TextBoxFocused(textBox)` / `TextBoxFocusReleased(textBox)` fire when a GUI TextBox takes / returns the
+  keyboard, and `GetFocusedTextBox()` returns it (section gui). CoreAI's own chat and Hub fields are no
+  TextBox: for them the argument is nil and `GetFocusedTextBox()` stays nil.
 - `gameProcessedEvent` (the second argument of InputBegan/InputEnded/InputChanged) is `true` while
   CoreAI UI (the chat, the Hub) or your own UI (a TextBox, a UXML field) has text focus, and for mouse
   input while the pointer is over a button, a TextBox, an `Active` GUI object or a UXML element:
@@ -779,6 +794,9 @@ the wheel zooms from 12.5 studs out to the player's `CameraMaxZoomDistance` and 
 (pointer locked to the centre), and a wall pulls it in. `player.CameraMode =
 Enum.CameraMode.LockFirstPerson` forces first person. In `Custom` your own `CFrame` writes are
 overwritten next frame — set `CameraType = Enum.CameraType.Scriptable` first, exactly as in Roblox.
+Close to first person the default camera hides the local character on this machine only, as Roblox does:
+it sets `LocalTransparencyModifier` (a local, never replicated BasePart property, drawn as
+`1 - (1 - Transparency) * (1 - LocalTransparencyModifier)`) on that character's parts; other characters stay drawn.
 
 ## Camera framing & controls — READ THIS before making a playable mod
 
@@ -945,6 +963,37 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 selectSlot(1)
+```
+
+<!-- section: chat -->
+# TextChatService and TextChatCommand: slash commands for the in-world chat
+
+`TextChatCommand` works as in Roblox. Parent one under `game:GetService(""TextChatService"")` (or a Folder
+under it) with `PrimaryAlias` (`""/time""`; the slash is optional), an optional `SecondaryAlias` and
+`Enabled` (default true). When the player sends a matching line, `Triggered(textSource, text)` fires with
+the sender's `TextSource` (`UserId`; `Players:GetPlayerByUserId(textSource.UserId)` finds the player) and
+the whole line (`""/time night""`), and the line never reaches the model. Where CoreAI differs:
+- A command the chat already has keeps it: the game's own (`/undo`, `/fly`, `/agent`, ...) or another mod's
+  earlier one. Yours is then not added at all (one log line); pick another alias.
+- A command lives as long as its instance: it goes away with its mod, a reload adds it again, `Enabled =
+  false` or moving it out of TextChatService removes it.
+- A world without the in-world chat (a server, a headless tool) keeps the commands but never triggers them.
+- The rest of TextChatService (`TextChannels`, `SendAsync`, `DisplaySystemMessage`, `MessageReceived`,
+  `OnIncomingMessage`, bubbles) raises NOT_IMPLEMENTED (planned P2); `ChatVersion` is always
+  `Enum.ChatVersion.TextChatService`. The legacy `Chat` service is unsupported.
+
+```lua
+local TextChatService = game:GetService(""TextChatService"")
+local Lighting = game:GetService(""Lighting"")
+local command = Instance.new(""TextChatCommand"")
+command.Name = ""TimeCommand""
+command.PrimaryAlias = ""/time""
+command.SecondaryAlias = ""/t""
+command.Triggered:Connect(function(textSource, text)
+  local word = string.match(text, ""^%S+%s+(%a+)"")
+  Lighting.ClockTime = (word == ""night"") and 0 or 12
+end)
+command.Parent = TextChatService
 ```
 
 <!-- section: lighting -->

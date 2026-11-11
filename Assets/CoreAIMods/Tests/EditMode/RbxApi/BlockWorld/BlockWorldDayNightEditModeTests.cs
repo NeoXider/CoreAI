@@ -1,6 +1,9 @@
 using System.Threading;
+using CoreAI.Ai.LuaCs;
+using CoreAI.ChatOverlay;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.TextChat;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
@@ -147,10 +150,26 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             }
         }
 
+        // WHY rewritten: TextChatCommand works now, so the mod registers /time the Roblox way and its "press L"
+        // fallback note (for a host without Lua chat commands) no longer prints.
         [Test]
-        public void P6_DayNight_WithoutLuaChatCommands_TheModSaysHowToSetTheTime()
+        public void P6_DayNight_TheTimeCommand_IsATextChatCommand_ThatTheChatRuns()
         {
-            Assert.IsTrue(_world.Logger.Contains("press L"), "the host has no TextChatService: " + _world.Logger.Describe());
+            RbxInstance service = _world.Roblox.Game.FindFirstChildOfClass("TextChatService");
+            RbxTextChatCommand command = service.FindFirstChild("BlockWorldTime", true) as RbxTextChatCommand;
+            Assert.IsNotNull(command, "the mod registered its command under TextChatService");
+            Assert.AreEqual("/time", command.PrimaryAlias);
+            Assert.IsFalse(_world.Logger.Contains("press L"), "no fallback note: " + _world.Logger.Describe());
+
+            ChatCommandRegistry registry = new();
+            _world.Roblox.AttachChatCommands(new ChatCommandRegistrySink(registry));
+            Assert.IsTrue(registry.TryResolve("time", out IChatCommand time));
+            ChatCommandParser.Classify("/time midnight", ChatCommandParser.DefaultPrefix,
+                out ChatCommandInvocation invocation, out string _);
+            time.Execute(new ChatCommandContext(invocation, registry, null, ChatCommandParser.DefaultPrefix));
+            _world.Frame();
+
+            Assert.AreEqual(0d, Lighting.ClockTime, 0.01d, "/time midnight from the chat set the clock");
             _world.AssertHealthy(Mod);
         }
     }

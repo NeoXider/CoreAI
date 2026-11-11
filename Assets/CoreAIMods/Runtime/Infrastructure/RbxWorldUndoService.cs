@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Authority;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Terrain;
 using Cysharp.Threading.Tasks;
@@ -54,8 +55,9 @@ namespace CoreAI.Mods.WorldPackages
 
     /// <summary>
     /// A fingerprint of a published world: which registry it is, every world-owned instance's id and
-    /// revision, the Terrain cells' revision, and how many times its mod sources were written. Two marks
-    /// are equal only when nothing a world package holds can have changed in between.
+    /// revision, the Terrain cells' revision, how many times its mod sources were written, and
+    /// (<see cref="Values"/>) the package state that carries no revision of its own. Two marks are equal only
+    /// when nothing a world package holds can have changed in between.
     /// </summary>
     /// <remarks>
     /// WHY revisions and not a capture digest: a capture also holds every Part's pose and the camera,
@@ -63,21 +65,24 @@ namespace CoreAI.Mods.WorldPackages
     /// Every scripted change to an instance advances its revision; physics and the camera do not.
     /// WHY the DataModel and its services count by id only: their revision also advances when a mod
     /// parents one of its own instances to them (the Children member), which no world package holds, so a
-    /// mod spawning a coin into Workspace would otherwise refuse every undo. A package holds no service
-    /// property, so only a script's attribute or tag on a service itself goes unseen.
-    /// Instances outside the DataModel are left out, as a package leaves them out.
+    /// mod spawning a coin into Workspace would otherwise refuse every undo. What a package holds of a service
+    /// (the Lighting day cycle, StarterPlayer and StarterGui settings) is in <see cref="Values"/> instead,
+    /// with the PointLight and GUI properties, whose setters advance no revision.
+    /// Instances outside the DataModel, and instances below a mod's own or a runtime instance (a Player's
+    /// PlayerGui copies of StarterGui, a character), are left out, as a package leaves them out.
     /// </remarks>
     public readonly struct RbxWorldStateMark : IEquatable<RbxWorldStateMark>
     {
         private readonly object _world;
 
-        private RbxWorldStateMark(object world, long sourceChanges, int instances, ulong sum, ulong mix)
+        private RbxWorldStateMark(object world, long sourceChanges, int instances, ulong sum, ulong mix, ulong values)
         {
             _world = world;
             SourceChanges = sourceChanges;
             Instances = instances;
             Sum = sum;
             Mix = mix;
+            Values = values;
         }
 
         /// <summary>True for the default mark, which equals no published world.</summary>
@@ -91,10 +96,32 @@ namespace CoreAI.Mods.WorldPackages
 
         public ulong Mix { get; }
 
+        /// <summary>
+        /// A fingerprint of the package state that carries no revision: the Lighting day cycle (and whether the
+        /// world drives it), the StarterPlayer and StarterGui settings, and the properties of every retained
+        /// PointLight and GUI node. Their setters advance no revision (or, for Lighting, only the service's, which
+        /// mod children churn), so they are compared by value.
+        /// </summary>
+        public ulong Values { get; }
+
         /// <summary>True when both marks were taken of the same published world object.</summary>
         public bool IsSameWorldAs(RbxWorldStateMark other)
         {
             return _world != null && ReferenceEquals(_world, other._world);
+        }
+
+        /// <summary>
+        /// True when both marks hold the same instances, revisions, cells and source writes; <see cref="Values"/> is
+        /// not compared.
+        /// </summary>
+        public bool HasSameRevisionsAs(RbxWorldStateMark other)
+        {
+            return _world != null
+                   && ReferenceEquals(_world, other._world)
+                   && SourceChanges == other.SourceChanges
+                   && Instances == other.Instances
+                   && Sum == other.Sum
+                   && Mix == other.Mix;
         }
 
         /// <summary>Marks <paramref name="registry"/>: a walk over its live instances, no allocation per instance.</summary>
@@ -108,6 +135,7 @@ namespace CoreAI.Mods.WorldPackages
             int instances = 0;
             ulong sum = 0UL;
             ulong mix = 0UL;
+            ulong values = 1469598103934665603UL;
             RbxInstance dataModel = registry.WorldRoot?.Parent;
             IReadOnlyList<RbxInstance> live = registry.GetLiveInstances();
             for (int index = 0; index < live.Count; index++)
@@ -137,7 +165,8 @@ namespace CoreAI.Mods.WorldPackages
                 }
 
                 RbxInstance parent = instance.Parent;
-                if (dataModel != null && !ReferenceEquals(instance, dataModel) && !IsInside(parent, dataModel))
+                if (dataModel != null && !ReferenceEquals(instance, dataModel)
+                                      && !IsRetainedBelow(parent, dataModel, registry))
                 {
                     continue;
                 }
@@ -148,19 +177,15 @@ namespace CoreAI.Mods.WorldPackages
                 instances++;
                 sum = unchecked(sum + hash);
                 mix ^= Spread(hash ^ 0xD6E8FEB86659FD93UL);
+                values = FoldValues(values, instance, identity);
             }
 
-            return new RbxWorldStateMark(registry, sourceChanges, instances, sum, mix);
+            return new RbxWorldStateMark(registry, sourceChanges, instances, sum, mix, values);
         }
 
         public bool Equals(RbxWorldStateMark other)
         {
-            return _world != null
-                   && ReferenceEquals(_world, other._world)
-                   && SourceChanges == other.SourceChanges
-                   && Instances == other.Instances
-                   && Sum == other.Sum
-                   && Mix == other.Mix;
+            return HasSameRevisionsAs(other) && Values == other.Values;
         }
 
         public override bool Equals(object obj)
@@ -170,10 +195,78 @@ namespace CoreAI.Mods.WorldPackages
 
         public override int GetHashCode()
         {
-            return unchecked((int)(Sum ^ (Mix >> 7)) ^ Instances);
+            return unchecked((int)(Sum ^ (Mix >> 7) ^ Values) ^ Instances);
         }
 
-        private static bool IsInside(RbxInstance ancestorOrSelf, RbxInstance dataModel)
+        /// <summary>
+        /// Folds what a package stores of <paramref name="instance"/> without a revision into the running value hash.
+        /// The walk visits instances in no fixed order, so each contribution is mixed with the instance's identity and
+        /// added, which does not depend on the order.
+        /// </summary>
+        private static ulong FoldValues(ulong values, RbxInstance instance, ulong identity)
+        {
+            ulong state;
+            switch (instance)
+            {
+                case RbxLighting lighting:
+                {
+                    RbxLightingDurableState durable = lighting.CaptureDurableState();
+                    state = Combine(Combine(Combine(Combine(Combine(Combine(identity, lighting.IsDriven ? 1UL : 2UL), Bits(durable.ClockTime)),
+                        Bits(durable.GeographicLatitude)), Bits(durable.Brightness)), Bits(durable.Ambient)),
+                        Bits(durable.OutdoorAmbient));
+                    break;
+                }
+                case RbxStarterPlayer starterPlayer:
+                    state = Combine(Combine(Combine(Combine(identity, (ulong)starterPlayer.DevComputerMovementMode),
+                        (ulong)starterPlayer.CameraMode), (ulong)BitConverter.DoubleToInt64Bits(starterPlayer.CameraMaxZoomDistance)),
+                        (ulong)BitConverter.DoubleToInt64Bits(starterPlayer.CameraMinZoomDistance));
+                    break;
+                case RbxStarterGui starterGui:
+                    state = Combine(Combine(identity, starterGui.ShowDevelopmentGui ? 1UL : 2UL), unchecked((ulong)starterGui.ScreenOrientation));
+                    for (int type = 0; type < RbxWorldPackageStarterGui.CoreGuiTypeCount; type++)
+                    {
+                        if (type != RbxStarterGui.CoreGuiTypeAll)
+                        {
+                            state = Combine(state, starterGui.GetCoreGuiEnabled(type) ? 3UL : 5UL);
+                        }
+                    }
+
+                    break;
+                case RbxPointLight light:
+                    state = Combine(Combine(Combine(Combine(Combine(identity, Bits(light.Brightness)), Bits(light.Color)),
+                        light.Enabled ? 1UL : 2UL), light.Shadows ? 3UL : 5UL), Bits(light.Range));
+                    break;
+                case RbxGuiBase2d _:
+                case RbxUiBase _:
+                    state = RbxWorldPackageGuiSchema.Fold(identity, instance);
+                    break;
+                default:
+                    return values;
+            }
+
+            return unchecked(values + Spread(state));
+        }
+
+        private static ulong Combine(ulong hash, ulong data)
+        {
+            return unchecked((hash ^ data) * 1099511628211UL);
+        }
+
+        private static ulong Bits(float value)
+        {
+            return unchecked((uint)BitConverter.SingleToInt32Bits(value));
+        }
+
+        private static ulong Bits(RbxColor3 color)
+        {
+            return Combine(Combine(Bits(color.R), Bits(color.G)), Bits(color.B));
+        }
+
+        /// <summary>
+        /// True when <paramref name="ancestorOrSelf"/> is <paramref name="dataModel"/> or sits below it with no mod's
+        /// own or runtime instance on the way, so a package would keep a child of it.
+        /// </summary>
+        private static bool IsRetainedBelow(RbxInstance ancestorOrSelf, RbxInstance dataModel, InstanceRegistry registry)
         {
             RbxInstance current = ancestorOrSelf;
             while (current != null)
@@ -181,6 +274,12 @@ namespace CoreAI.Mods.WorldPackages
                 if (ReferenceEquals(current, dataModel))
                 {
                     return true;
+                }
+
+                if (registry.TryGetRecord(current.Id, out InstanceRecord record)
+                    && (!string.IsNullOrEmpty(record.OwnerModId) || record.IsRuntimeInfrastructure))
+                {
+                    return false;
                 }
 
                 current = current.Parent;
@@ -286,9 +385,12 @@ namespace CoreAI.Mods.WorldPackages
     /// the gate (so the world before the undo is itself autosaved and can be redone).
     /// </summary>
     /// <remarks>
-    /// An AI change is a gated mutation that changed the world-owned instances or the mod sources and
-    /// whose snapshot exists; a completed <c>manage_mods</c> load, reload, unload, import, forget or revert
-    /// always counts. A gated call that changed nothing (a read-only <c>execute_lua</c>) leaves the history
+    /// An AI change is a gated mutation that changed the world-owned instances, the mod sources or the
+    /// revision-free package state (<see cref="RbxWorldStateMark.Values"/>: the Lighting day cycle, StarterPlayer
+    /// and StarterGui settings, PointLight and GUI properties) and whose snapshot exists; a completed
+    /// <c>manage_mods</c> load, reload, unload, import, forget or revert always counts. The revision-free state
+    /// counts only across a gated mutation: a script that drives it every frame changes it outside the gate, which
+    /// neither records an entry nor refuses an undo, and an undo puts back the value its snapshot holds. A gated call that changed nothing (a read-only <c>execute_lua</c>) leaves the history
     /// alone, so <c>/undo</c> never "undoes" a lookup. In the world a composition starts with, a mod source
     /// edited outside the gate (in the Hub) is not seen by the "nothing changed since" check; in a world
     /// loaded or restored later it is. Undo restores the whole snapshot, which is
@@ -316,6 +418,12 @@ namespace CoreAI.Mods.WorldPackages
         private PendingMove _pendingMove;
         private string _lastChangeActor = "";
         private long _lastChangeSequence;
+
+        /// <summary>
+        /// How many gated mutations (other than undo and redo) changed <see cref="RbxWorldStateMark.Values"/>: what
+        /// "nothing changed since" compares for that state instead of its values.
+        /// </summary>
+        private long _valueEdits;
         private bool _disposed;
 
         /// <summary>Creates the service over <paramref name="host"/>.</summary>
@@ -374,6 +482,7 @@ namespace CoreAI.Mods.WorldPackages
             Entry redoTop;
             int undoCount;
             int redoCount;
+            long valueEdits;
             lock (_gate)
             {
                 if (!_histories.TryGetValue(id, out ActorHistory history))
@@ -385,11 +494,12 @@ namespace CoreAI.Mods.WorldPackages
                 redoCount = history.Redo.Count;
                 undoTop = undoCount > 0 ? history.Undo[undoCount - 1] : null;
                 redoTop = redoCount > 0 ? history.Redo[redoCount - 1] : null;
+                valueEdits = _valueEdits;
             }
 
             RbxWorldStateMark now = TryMarkNow();
-            bool canUndo = undoTop != null && now.Equals(undoTop.After);
-            bool canRedo = redoTop != null && now.Equals(redoTop.After);
+            bool canUndo = undoTop != null && IsUnchangedSince(undoTop, now, valueEdits);
+            bool canRedo = redoTop != null && IsUnchangedSince(redoTop, now, valueEdits);
             string reason = undoTop != null && !canUndo ? DescribeWorldChanged(id, undoTop, now) : "";
             return new RbxWorldUndoStatus(id, undoCount, redoCount, canUndo, canRedo, reason);
         }
@@ -474,7 +584,12 @@ namespace CoreAI.Mods.WorldPackages
             // writes mod sources straight to its store, which no mark can see without reading every source,
             // so the trigger is the evidence there (a world loaded later also counts each write in the mark).
             bool changedSources = completed && IsModSourceTrigger(mutation.Trigger);
-            if (after.IsEmpty || (after.Equals(start) && !changedSources))
+            // WHY the values count only between the start and the end of a gated mutation: a day-cycle or flicker
+            // script writes ClockTime or Brightness every frame on the frame pump, outside the gate, so a value
+            // that differs across one gated call is that call's edit (one that yields frames may also carry a
+            // script's write of those frames, once, never once per frame).
+            bool changedValues = !after.IsEmpty && after.IsSameWorldAs(start) && after.Values != start.Values;
+            if (after.IsEmpty || (after.HasSameRevisionsAs(start) && !changedValues && !changedSources))
             {
                 return;
             }
@@ -482,6 +597,12 @@ namespace CoreAI.Mods.WorldPackages
             string actorId = mutation.ActorId;
             lock (_gate)
             {
+                long valueEditsAtStart = _valueEdits;
+                if (changedValues)
+                {
+                    _valueEdits++;
+                }
+
                 _lastChangeActor = actorId;
                 _lastChangeSequence = mutation.Sequence;
                 if (before == null || actorId.Length == 0 || _disposed)
@@ -490,8 +611,9 @@ namespace CoreAI.Mods.WorldPackages
                 }
 
                 ActorHistory history = GetOrCreateHistoryLocked(actorId);
-                bool chained = history.Undo.Count > 0 && history.Undo[history.Undo.Count - 1].After.Equals(start);
-                history.Undo.Add(new Entry(before, after, chained, mutation.Trigger, mutation.Sequence));
+                bool chained = history.Undo.Count > 0
+                               && IsUnchangedSince(history.Undo[history.Undo.Count - 1], start, valueEditsAtStart);
+                history.Undo.Add(new Entry(before, after, chained, mutation.Trigger, mutation.Sequence, _valueEdits));
                 TrimLocked(history.Undo, true);
                 history.Redo.Clear();
             }
@@ -583,6 +705,7 @@ namespace CoreAI.Mods.WorldPackages
             CancellationToken cancellationToken)
         {
             Entry top;
+            long valueEdits;
             lock (_gate)
             {
                 _pendingMove = null;
@@ -598,6 +721,7 @@ namespace CoreAI.Mods.WorldPackages
                 }
 
                 top = from[from.Count - 1];
+                valueEdits = _valueEdits;
             }
 
             IRbxWorldUndoHost host = ResolveHost();
@@ -608,7 +732,7 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             RbxWorldStateMark now = host.MarkPublishedWorld();
-            if (!now.Equals(top.After))
+            if (!IsUnchangedSince(top, now, valueEdits))
             {
                 return new RbxWorldUndoResult(
                     false,
@@ -656,16 +780,16 @@ namespace CoreAI.Mods.WorldPackages
                     // else ran between the two changes is the rebuilt world the one that entry left.
                     if (undo && top.ChainedToPrevious && history.Undo.Count > 0)
                     {
-                        history.Undo[history.Undo.Count - 1].After = restoredMark;
+                        history.Undo[history.Undo.Count - 1].MarkAfter(restoredMark, _valueEdits);
                     }
 
                     if (!undo && history.Redo.Count > 0)
                     {
-                        history.Redo[history.Redo.Count - 1].After = restoredMark;
+                        history.Redo[history.Redo.Count - 1].MarkAfter(restoredMark, _valueEdits);
                     }
                 }
 
-                _pendingMove = new PendingMove(actorId, undo, top, restoredMark);
+                _pendingMove = new PendingMove(actorId, undo, top, restoredMark, _valueEdits);
             }
 
             return new RbxWorldUndoResult(
@@ -705,7 +829,8 @@ namespace CoreAI.Mods.WorldPackages
                         move.RestoredMark,
                         move.Entry.ChainedToPrevious,
                         move.Entry.Trigger,
-                        move.Entry.Sequence));
+                        move.Entry.Sequence,
+                        move.ValueEdits));
                     TrimLocked(to, !move.Undo);
                 }
             }
@@ -716,6 +841,7 @@ namespace CoreAI.Mods.WorldPackages
         private RbxWorldUndoResult RefuseIfTheWorldMoved(string actorId, bool undo)
         {
             Entry top;
+            long valueEdits;
             lock (_gate)
             {
                 if (!_histories.TryGetValue(actorId, out ActorHistory history))
@@ -725,6 +851,7 @@ namespace CoreAI.Mods.WorldPackages
 
                 List<Entry> from = undo ? history.Undo : history.Redo;
                 top = from.Count > 0 ? from[from.Count - 1] : null;
+                valueEdits = _valueEdits;
             }
 
             if (top == null)
@@ -733,7 +860,7 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             RbxWorldStateMark now = TryMarkNow();
-            if (now.IsEmpty || now.Equals(top.After))
+            if (now.IsEmpty || IsUnchangedSince(top, now, valueEdits))
             {
                 return null;
             }
@@ -745,6 +872,21 @@ namespace CoreAI.Mods.WorldPackages
                 actorId,
                 0,
                 0);
+        }
+
+        /// <summary>
+        /// True when nothing that refuses a move happened since <paramref name="entry"/>'s change: the revisions,
+        /// cells and source writes are as it left them, and no other gated mutation edited the revision-free state.
+        /// </summary>
+        /// <remarks>
+        /// WHY that state counts by gated edits and not by value here: a day-cycle script moves ClockTime every
+        /// frame, so comparing the value would refuse every undo in a world that has one. A change of it outside the
+        /// gate is treated like physics moving a Part: it never refuses an undo, and the undo puts the snapshot's
+        /// value back. A gated change of it by anyone (another agent's "make it day") still does.
+        /// </remarks>
+        private static bool IsUnchangedSince(Entry entry, RbxWorldStateMark now, long valueEdits)
+        {
+            return now.HasSameRevisionsAs(entry.After) && entry.AfterValueEdits == valueEdits;
         }
 
         private bool HasEntries(string actorId, bool undo)
@@ -951,20 +1093,36 @@ namespace CoreAI.Mods.WorldPackages
 
         private sealed class Entry
         {
-            public Entry(RbxWorldSnapshot before, RbxWorldStateMark after, bool chainedToPrevious, string trigger, long sequence)
+            public Entry(
+                RbxWorldSnapshot before,
+                RbxWorldStateMark after,
+                bool chainedToPrevious,
+                string trigger,
+                long sequence,
+                long afterValueEdits)
             {
                 Before = before;
                 After = after;
                 ChainedToPrevious = chainedToPrevious;
                 Trigger = trigger ?? "";
                 Sequence = sequence;
+                AfterValueEdits = afterValueEdits;
             }
 
             /// <summary>The world before the change; restoring it takes the change back.</summary>
             public RbxWorldSnapshot Before { get; }
 
             /// <summary>The world as the change left it; the entry can move only while the world still is.</summary>
-            public RbxWorldStateMark After { get; set; }
+            public RbxWorldStateMark After { get; private set; }
+
+            /// <summary>The service's count of gated value edits right after the change.</summary>
+            public long AfterValueEdits { get; private set; }
+
+            public void MarkAfter(RbxWorldStateMark after, long valueEdits)
+            {
+                After = after;
+                AfterValueEdits = valueEdits;
+            }
 
             /// <summary>True when nothing changed the world between the entry below and this one.</summary>
             public bool ChainedToPrevious { get; set; }
@@ -976,13 +1134,16 @@ namespace CoreAI.Mods.WorldPackages
 
         private sealed class PendingMove
         {
-            public PendingMove(string actorId, bool undo, Entry entry, RbxWorldStateMark restoredMark)
+            public PendingMove(string actorId, bool undo, Entry entry, RbxWorldStateMark restoredMark, long valueEdits)
             {
                 ActorId = actorId;
                 Undo = undo;
                 Entry = entry;
                 RestoredMark = restoredMark;
+                ValueEdits = valueEdits;
             }
+
+            public long ValueEdits { get; }
 
             public string ActorId { get; }
 

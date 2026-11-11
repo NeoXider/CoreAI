@@ -448,8 +448,9 @@ lives *in* the server:
    action semantics, coordinate units).
 2. `read_skill` returns the **same** skill documents the in-game Programmer agent uses (for example
    `Lua Modding` and `Rbx API`) — one source of truth, no duplicated docs. An external agent calls
-   `read_skill` with `name: "Rbx API"` and gets the exact datatypes/instances API the running game
-   supports.
+   `read_skill` with `name: "Rbx API"` and gets the reference's core document plus the list of its
+   sections (`datatypes`, `instances`, `terrain`, `gui`, ...); `section` reads one of them and `all: true`
+   reads every one, so the agent fetches the part of the API the running game supports that it needs.
 
 ## Connecting from clients
 
@@ -570,7 +571,9 @@ $ claude mcp add --transport http coreai http://127.0.0.1:8590/mcp \
 
 # 3. The agent learns the world API before touching the game
 -> tools/call read_skill { "name": "Rbx API" }
-<- { "success": true, "skill": "Rbx API", "instructions": "<full Roblox-style API reference...>", "tools": [...], "usage": "..." }
+<- { "success": true, "skill": "Rbx API", "section": "core", "instructions": "<the core of the Roblox-style API reference...>", "sections": ["scripting", "datatypes", "instances", ...], "tools": [...], "usage": "..." }
+-> tools/call read_skill { "name": "Rbx API", "section": "parts" }
+<- { "success": true, "skill": "Rbx API", "section": "parts", "instructions": "<the parts section...>", "tools": [...], "usage": "..." }
 
 # 4. It spawns a part with Lua, using globals from the reference
 -> tools/call execute_lua { "code": "local p = Instance.new('Part') p.Name = 'Box' p.Position = Vector3.new(0, 1, 0) p.Parent = workspace return 'spawned Box'" }

@@ -547,10 +547,17 @@ namespace CoreAI.Composition
                             {
                                 System.Collections.Generic.IEnumerable<IBundledModSource> bundled =
                                     container.Resolve<System.Collections.Generic.IEnumerable<IBundledModSource>>();
-                                new BundledModSeeder(
+                                BundledModSeeder.SeedResult seeded = new BundledModSeeder(
                                     container.Resolve<WorldSessionSourceBackend>().Store,
                                     new System.Collections.Generic.List<IBundledModSource>(bundled),
                                     container.ResolveOrDefault<Logging.ILog>()).Seed();
+                                // WHY: without a registered ILog the seeder's own error goes nowhere, and a world
+                                // with no bundled mods looks like a silent empty start.
+                                if (seeded.Failed > 0)
+                                {
+                                    Logging.Log.Instance.Error(
+                                        "[CoreAI] Bundled mods were not installed: " + seeded);
+                                }
                             }
                             catch (System.Exception ex)
                             {
@@ -835,6 +842,14 @@ namespace CoreAI.Composition
             }
 
             RuntimeUiLuaInstaller.AttachRuntimeUi(c, rbxApi);
+            // WHY: without a chat (a headless world) TextChatCommands still register; nothing runs them.
+            CoreAI.ChatOverlay.IChatCommandRegistry chatCommands =
+                c.ResolveOrDefault<CoreAI.ChatOverlay.IChatCommandRegistry>();
+            if (chatCommands != null)
+            {
+                rbxApi.AttachChatCommands(new ChatCommandRegistrySink(chatCommands));
+            }
+
             CoreAiPlayerCameraSettings camera = c.ResolveOrDefault<CoreAiPlayerCameraSettings>();
             if (camera != null)
             {

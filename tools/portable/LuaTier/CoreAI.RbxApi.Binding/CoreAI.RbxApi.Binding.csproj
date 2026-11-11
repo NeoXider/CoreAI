@@ -31,6 +31,8 @@
     <Compile Include="$(SourceRoot)/UnityRbxCharacterMotor.cs" Link="Binding/UnityRbxCharacterMotor.cs" />
     <Compile Include="$(SourceRoot)/CoreAiUiFocusBridge.cs" Link="Binding/CoreAiUiFocusBridge.cs" />
     <Compile Include="$(SourceRoot)/RuntimeUi/RuntimeUiFocusReporter.cs" Link="Binding/RuntimeUi/RuntimeUiFocusReporter.cs" />
+    <Compile Include="$(SourceRoot)/CharacterRig/IRbxPoseDrivenParts.cs" Link="Binding/CharacterRig/IRbxPoseDrivenParts.cs" />
+    <Compile Include="$(SourceRoot)/CharacterRig/PartSinkCharacterRigPort.cs" Link="Binding/CharacterRig/PartSinkCharacterRigPort.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="$(PortableRoot)/CoreAI.Core.csproj" />

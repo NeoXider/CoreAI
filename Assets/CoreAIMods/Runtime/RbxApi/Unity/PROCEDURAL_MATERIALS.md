@@ -103,6 +103,12 @@ chop moving another way, give moving waves with analytical slopes, so there is n
 `_WaveSpeed` the drift. The surface reflects the sky, the reflection probes and the sun through URP's
 lighting. Each layer fades out once a pixel covers its wavelength, so distant water stays calm.
 
+The water computes its environment reflection itself instead of leaving it to URP: a wave tilted towards a
+low camera reflects a ray that points below the horizon, and the sky cubemap answers such a ray with the
+procedural sky's ground colour. A sea seen from a few studs above it then showed brown blotches ringed by
+the white horizon. The shader lifts such a ray onto the water plane, where it meets the sky at the horizon,
+as the next wave it would hit does; the Fresnel weight still follows the wave normal.
+
 - With scene textures (the PC tier, see below), the water refracts what lies beneath it through the
   camera opaque texture. It tints that view by depth through the camera depth texture, so shallow water
   shows the bottom and deep water takes the water colour. Its edge fades out where it meets geometry.

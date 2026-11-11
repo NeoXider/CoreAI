@@ -82,6 +82,17 @@ guard epsilon only protects a zero-length frame, so a packaged normal map keeps 
 distance (a fixed `1e-6` floor would be larger than the squared frame length at ordinary distances
 and leave about 5% of the strength at 10 m and almost nothing at 1 m).
 
+## Roughness of natural ground
+
+The shader reads roughness as `saturate(map * RoughnessScale)`. Several CC0 ground sets ship roughness
+maps far darker than the surface they photograph: Grass004 averages 0.26, Ground025 (Sand) 0.46,
+Ground110 (Ground) 0.54 and Grass001 (LeafyGrass) 0.55. With the earlier scales of 0.78-0.9 a lawn
+rendered at roughness 0.21, so a low sun drew a glint across the field and the specular glitter changed
+with every camera step. The profile table (`RbxMaterialSurfaceProfiles`) and the packaged catalog now
+scale Grass by 3.2, LeafyGrass and Ground by 1.6 and Sand by 1.9, which puts all four at 0.83-0.88.
+Measured under the default look with a low sun ahead: the frame difference of a near lawn when the
+camera moves by 0.02 studs fell from 0.023 to 0.0085. The scale may go up to 4 for such maps.
+
 ## Relief that survives distance: baked cavity maps
 
 A normal map carries its relief in bevels one or two texels wide (a Bricks104 mortar joint is 13

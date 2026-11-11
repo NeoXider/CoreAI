@@ -29,7 +29,7 @@ feature this core names a section for, read that section; read only the sections
   Creatable: Part, Folder, Model, Backpack (a plain container), ClickDetector (section input),
   RemoteEvent, UnreliableRemoteEvent, RemoteFunction, BindableEvent, BindableFunction (messaging),
   MaterialVariant (parts), Humanoid (characters), PointLight (lighting), TextGenerator (ai), the value
-  objects (attributes) and the GUI classes (gui). A real Roblox class CoreAI does not build yet
+  objects (attributes), the GUI classes (gui), SelectionBox (building) and TextChatCommand (chat). A real Roblox class CoreAI does not build yet
   (WedgePart, SpawnLocation, Weld, Attachment, ...) raises NOT_IMPLEMENTED; any other name errors. A
   Camera is not creatable: use `workspace.CurrentCamera`. `workspace.Terrain` exists in every world
   (terrain): build ground and many blocks with it, not one Part per block.

@@ -437,6 +437,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
             ["ServerScriptService"] = true,
             ["StarterPlayer"] = false,
             ["StarterGui"] = false,
+            ["TextChatService"] = false,
             ["Terrain"] = false,
             ["Players"] = false,
             ["UserInputService"] = true,

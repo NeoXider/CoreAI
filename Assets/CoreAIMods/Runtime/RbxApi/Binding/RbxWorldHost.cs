@@ -3,6 +3,7 @@ using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Spatial;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Adornments;
 using UnityEngine;
 
 namespace CoreAI.Mods.Rbx.Binding
@@ -90,6 +91,12 @@ namespace CoreAI.Mods.Rbx.Binding
 
         /// <summary>The Unity lights behind <see cref="Lights"/>; null when switched off.</summary>
         public UnityRbxLightBackend LightBackend { get; private set; }
+
+        /// <summary>Keeps SelectionBox instances drawn around their adornees; null before a world is bound.</summary>
+        public RbxSelectionBoxReconciler SelectionBoxes { get; private set; }
+
+        /// <summary>The Unity objects behind <see cref="SelectionBoxes"/>.</summary>
+        public UnityRbxSelectionBoxBackend SelectionBoxBackend { get; private set; }
 
         /// <summary>The light budget of this host's tier, or the configured override.</summary>
         public RbxLightBudget LightBudget => _lightBudget > 0
@@ -203,6 +210,8 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private void LateUpdate()
         {
+            // WHY after Update, like the lights: the boxes follow the parts the scripts and the physics just moved.
+            SelectionBoxes?.Tick();
             if (Lights == null)
             {
                 return;
@@ -234,6 +243,20 @@ namespace CoreAI.Mods.Rbx.Binding
                 Lights = new RbxLightReconciler(Registry, LightBackend, binder.GetLivePositionStuds,
                     LightBudget, message => Logger.Warn(message, LogTag.World));
             }
+
+            if (Registry != null && Binder != null)
+            {
+                InstanceGameObjectBinder boxBinder = Binder;
+                SelectionBoxBackend = new UnityRbxSelectionBoxBackend();
+                SelectionBoxes = new RbxSelectionBoxReconciler(Registry, SelectionBoxBackend,
+                    (InstanceId id, out RbxCFrame cframe, out RbxVector3 size) =>
+                    {
+                        PartProperties part = boxBinder.GetPartPropertiesOrDefault(id);
+                        cframe = part.CFrame;
+                        size = part.Size;
+                        return true;
+                    });
+            }
         }
 
         private void DetachLighting()
@@ -249,6 +272,10 @@ namespace CoreAI.Mods.Rbx.Binding
             Lights = null;
             LightBackend?.Dispose();
             LightBackend = null;
+            SelectionBoxes?.Dispose();
+            SelectionBoxes = null;
+            SelectionBoxBackend?.Dispose();
+            SelectionBoxBackend = null;
         }
 
         /// <summary>Publishes an already restored replacement and retires the outgoing host state.</summary>

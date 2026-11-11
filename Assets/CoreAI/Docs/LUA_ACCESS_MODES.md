@@ -19,6 +19,8 @@ when the composition withholds them (see the `WorldEdit` row).
 | WorldEdit | `WorldEdit` | The [Rbx API](RBX_API.md) mutations — `Instance.new`, property writes, `instance:Destroy()` — are how a mod spawns/moves/destroys world objects. The classic `coreai_world_*` build commands (spawn/change/destroy, scenes, batch/grid, transactions, sound/animation) are **not registered in the default production composition** (`RegisterWorldEditBuildBindings = false`): each one is a stub that raises an error pointing at the Rbx API. They only work on a host that composes its own stack with `LuaCsModStackOptions.RegisterWorldEditBuildBindings = true` |
 | Logic | `LogicOverride` | `logic_define`/`logic_reset`/`logic_list` |
 | Full | `Full` | Reflection-style access to `GameObject`/components through `unity_*` APIs |
+| UI | `Ui` | `game:GetService("UxmlService")` screens built from UXML and USS text, and `Instance.new` of the Roblox GUI classes (`ScreenGui`, `Frame`, `TextLabel`, ...); see [RUNTIME_UI.md](../../CoreAiUnity/Docs/RUNTIME_UI.md). Part of `All`, so an ordinary gameplay mod draws its HUD; a host keeps mods off the screen with `All & ~Ui` |
+| AI | `Ai` | `AIService` agents and `TextGenerator` ([NPC_AGENTS.md](NPC_AGENTS.md)), only when the host game turns AI from Lua on (`CoreAiLuaAiOptions.AllowAgentsFromLua`, off by default); with `RequireAiCapability` set, only mods that carry the `Ai` bit get it. Not part of `All` |
 
 The mod-runtime surface itself — `hooks_on`/`hooks_every`, `store_set`/`store_get`, `print`/`report`,
 `events_emit`, `mods_export`/`mods_get`/`mods_call`/`mods_list_exports`, `mod_id` — is **available to
@@ -27,7 +29,7 @@ These are not game bindings gated by `LuaCsGameplayBindings`; `LuaCsModRuntime` 
 them unconditionally when it builds a mod's script. The capability tier only controls which *game*
 APIs (`coreai_world_*`, `time_*`, `input_*`, `unity_*`, ...) a mod's hooks and timers can then call.
 
-`LuaCapabilities.All` includes standard tiers except `Full`. Full mode is enabled explicitly through
+`LuaCapabilities.All` includes standard tiers except `Full` and `Ai`. Full mode is enabled explicitly through
 the **Enable Full Lua Access** checkbox (`enableFullLuaAccess`) on `CoreAiModsLifetimeScope`. That
 host grant is what `execute_lua`, `manage_mods` and rehydrated mods receive; a C#
 `LoadMod(caller, id, code, caps | Full)` gets `Full` only when the host grant already contains it,

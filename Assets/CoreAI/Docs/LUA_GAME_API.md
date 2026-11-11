@@ -19,7 +19,8 @@ All bindings run on the Unity main thread.
 
 ## Capability Levels
 
-`LuaCapabilities` (flags): `Read`, `Gameplay`, `WorldEdit`, `LogicOverride`, `Full`, `All`.
+`LuaCapabilities` (flags): `Read`, `Gameplay`, `WorldEdit`, `LogicOverride`, `Full`, `Ui`, `Ai`, `All`
+(`All` = every tier except `Full` and `Ai`).
 
 `LuaCsGameplayBindings` registers a function group only if its level is granted: a script
 with `Read` physically has no world-editing functions in globals. By default (DI), `All` is granted
@@ -42,6 +43,8 @@ output is needed.
 | `WorldEdit` | `Instance.new` and every other [Rbx API](RBX_API.md) mutation; the classic `coreai_world_spawn`/`coreai_world_change`/`coreai_world_set_color`/`coreai_world_destroy` build functions, scenes, batches and transactions **only where the host opts in** (see the note below) |
 | `LogicOverride` | `logic_define/reset/list` |
 | `Full` | `unity_find`, `unity_get/set_member`, `unity_call`, ... (reflection, opt-in) |
+| `Ui` | `game:GetService("UxmlService")` screens from UXML and USS text and `Instance.new` of the Roblox GUI classes ([RUNTIME_UI.md](../../CoreAiUnity/Docs/RUNTIME_UI.md)); part of `All`, masked by a host with `All & ~Ui` |
+| `Ai` | `AIService` agents and `TextGenerator` ([NPC_AGENTS.md](NPC_AGENTS.md)), only when the host game sets `CoreAiLuaAiOptions.AllowAgentsFromLua` (off by default); not part of `All` |
 
 Mod APIs (`hooks_on`/`hooks_every`, `store_set`/`store_get`, `events_emit`, `mods_export`/`mods_get`/`mods_call`/`mods_list_exports`, `print`/`report`, `mod_id`) are **not gated by a capability tier** — every loaded mod gets them regardless of its `LuaCapabilities`, since they are the mod-runtime surface itself rather than a game binding. See [LUA_ACCESS_MODES.md](LUA_ACCESS_MODES.md).
 

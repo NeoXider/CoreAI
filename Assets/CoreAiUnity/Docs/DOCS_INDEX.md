@@ -82,6 +82,7 @@ Package manifests:
 | [LUA_SANDBOX_SECURITY](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, escape tests, binding rules, host checklist. |
 | [FIRST_MOD](../../CoreAI/Docs/FIRST_MOD.md) | Your first Lua mod in 5 minutes: load via agent/C#/TextAsset, persistence, sharing. |
 | [RBX_API](../../CoreAI/Docs/RBX_API.md) | The Roblox-style API a mod builds with: `Instance.new`, datatypes, services, `BasePart.Material` / `Part.Color`, saving and loading a world, bundled samples. |
+| [PLAY_WORLD](../../../Docs/CoreAIMods/PLAY_WORLD.md) | The one-click play world: `CoreAI/Setup/Create Play + Create World`, the default controls and camera, the chat commands (`/undo`, `/redo`, `/fly`), instant AI edits and what `/undo` covers and what refuses it. |
 | [WORLD_PACKAGE](../../../Docs/CoreAIMods/WORLD_PACKAGE.md) | The `.world` package format, validation limits, manual slots vs. the autosave ring, the confirm/reject load flow, and runtime session replacement. |
 | [PROCEDURAL_MATERIALS](../../CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md) · [TEXTURE_MATERIALS](../../CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md) | The `Enum.Material` render catalogs: all 45 items render; a catalog-driven texture provider (thirty-six packaged CC0 sets, any item overridable from a project-local 2K–4K catalog via the Editor menus) plus procedural surfaces and the magenta diagnostic fallback. |
 | [LUA_GAME_API](../../CoreAI/Docs/LUA_GAME_API.md) | Capabilities, mods, world API, Full tier, `execute_lua` / `manage_mods`, persistence & sharing. |

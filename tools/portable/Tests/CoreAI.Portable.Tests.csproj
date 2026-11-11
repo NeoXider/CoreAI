@@ -68,6 +68,7 @@
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/UniversalPrefixDefaultEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/UniversalPrefixDefaultEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/PromptRegression/*.cs" Link="Assets/CoreAI/Tests/EditMode/PromptRegression/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/PromptTokenCostTableEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/PromptTokenCostTableEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAI/Tests/EditMode/Skills/*.cs" Link="Assets/CoreAI/Tests/EditMode/Skills/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/LlmToolArgumentNormalizerEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/LlmToolArgumentNormalizerEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/LlmToolChannelPolicyEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/LlmToolChannelPolicyEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/MeaiToolTaskBridgeEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/MeaiToolTaskBridgeEditModeTests.cs" />
@@ -219,6 +220,8 @@
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptInstancesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptInstancesEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Unity/RbxShaderClusterLightLoopEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Unity/RbxShaderClusterLightLoopEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Terrain/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Terrain/%(Filename)%(Extension)" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/TextChat/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/TextChat/%(Filename)%(Extension)" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Adornments/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Adornments/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/Npc/*.cs" Link="Assets/CoreAI/Tests/EditMode/Npc/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/Npc/NpcArchitectureFitnessEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/Npc/NpcArchitectureFitnessEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Ai/RbxTextGenerationLimitsEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Ai/RbxTextGenerationLimitsEditModeTests.cs" />

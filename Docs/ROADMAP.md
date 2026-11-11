@@ -124,7 +124,10 @@ services, datatypes) so the in-game LLM authors them from its training priors, a
 with Roblox. Luau syntax is downleveled to Lua 5.2 for the bundled Lua-CSharp VM; studs and
 right-handed math live inside mods, with exactly one conversion boundary (`RbxSpace`).
 
-**Current state.** MVP0 (the engine seam), MVP1 (the instance core, 6.3.0) and the MVP2 surface have
+**Current state.** *2026-11-11: P1's `Humanoid:Move` and camera members, P4's `workspace.Terrain` subset, the day-cycle
+slice of `Lighting` (P9), the Luau math slice, `UxmlService` and the Roblox GUI classes (P18, MVP15),
+`BindableEvent`/`BindableFunction`, and MVP4 steps A1–A3 and B1 were written that day; their state is in
+§4. The rest of this paragraph describes 7.56.0.* MVP0 (the engine seam), MVP1 (the instance core, 6.3.0) and the MVP2 surface have
 landed: the scheduler (`task.*`, the R4.2 frame pipeline, deferred signals at the nine R5.5
 resumption points), the service catalog with loud stubs, the shared JSON contract, the clocks on
 `IRbxClockSource`, loopback remotes, the `Model` pivot slice and all 45 `Enum.Material` items. MVP2 is
@@ -161,7 +164,11 @@ topology order is Null loopback (solo) → host mode (listen server) → dedicat
 pure client or creator-mode client — it never hosts (plan decision D6). The room target is ~100
 players (plan decision D5, §4).
 
-**Current state.** `INetworkBridge` is topology-agnostic; `NullNetworkBridge` is the solo loopback.
+**Current state.** *2026-11-11: MVP5 part 1 (host mode, inbound limits, the version handshake, the refusal notice, the
+roster, a two-process harness) was written in the Mirror package and has passed only a strict compile with
+`MIRROR` defined, outside Unity (no Mirror test has run), and
+MVP6's binary codec core is written and green in Unity EditMode; state in §4. The rest of this
+paragraph describes 7.56.0.* `INetworkBridge` is topology-agnostic; `NullNetworkBridge` is the solo loopback.
 Since 7.42.0 a scene can switch Mirror on: the optional `com.neoxider.coreaimirror` package (`MIRROR`
 define) provides `CoreAiMirrorNetworkBridgeProvider`, which `CoreAiModsLifetimeScope` registers as the
 `INetworkBridge`, so `RemoteEvent`/`UnreliableRemoteEvent`/`RemoteFunction` traffic runs through
@@ -201,7 +208,9 @@ player-owned slots plus an autosave before every AI mutation. Model packages and
 let the AI and Creators start from templates; Roblox interchange makes existing Roblox content an
 on-ramp and an export target.
 
-**Current state.** **MVP3 is closed (2026-09-25, released in 7.47.0)** on the Unity gate (Unity
+**Current state.** *2026-11-11: the world package gained Terrain cells and the `light`, `lighting`, `starter_player`,
+`mod_folders`, `gui` and `starter_gui` blocks (7.56.0 refuses a package that uses any of them), and AI edits now write
+their backup behind the edit; state in §4. The rest of this paragraph describes 7.56.0.* **MVP3 is closed (2026-09-25, released in 7.47.0)** on the Unity gate (Unity
 6000.3.14f1, 2026-09-25): EditMode full 6550 total / 6539 passed / 0 failed / 11 skipped, the `core`,
 `llm` and `lua` legs 0 failed (5266, 6234 and 5582 total), the Mirror leg 6550 / 0 failed; PlayMode
 `FastNoLlm` 95 total / 94 passed / 0 failed / 1 skipped; the engine-free portable suite 2172 passed /
@@ -241,7 +250,9 @@ community-gallery proposal).
 logs → self-repair. The AI can read what it broke and fix it without a human in the loop — and, in a
 multiplayer room, each player has their own AI under their own identity.
 
-**Current state.** Shipped and battle-tested: orchestrator with parallel tool execution, agent
+**Current state.** *2026-11-11: truthful failures (P11 stage 1), NPC agents and the Lua AI surface (P12), decision models
+(P13), orchestrator mode (P14) and roles as data (P15) were written that day; their state is in §4, and
+none of it ran against a live model. The rest of this paragraph describes 7.56.0.* Shipped and battle-tested: orchestrator with parallel tool execution, agent
 memory, self-service skills (`read_skill`/`manage_skills`; about 91% fewer tool-definition tokens in the
 documented 50-tool example, an estimate that P15 replaces with a measurement),
 runtime multi-endpoint LLM routing (dynamic endpoint/profile CRUD, per-role/per-agent/per-request
@@ -312,7 +323,9 @@ integration profile", "Units / scale", "Assets under scale") and §MVP10 ·
 in-world chat and in-play creation tools instead of a Studio, a runtime-first UI path where editor
 tooling is convenience, never a requirement, and readable mod sources everywhere.
 
-**Current state.** Shipped: a runtime Lua editor page in the Hub (highlighting, history, Save & run = a
+**Current state.** *2026-11-11: default controls with flight and a camera (P1), the in-world chat with slash commands
+(P2), the AI undo ring and a one-click world menu (P3), runtime UI from Lua (P18) and mod folders (P20)
+were written that day; their state is in §4. The rest of this paragraph describes 7.56.0.* Shipped: a runtime Lua editor page in the Hub (highlighting, history, Save & run = a
 reload that cleans the previous run's startup objects unless **Keep objects on Save & run** is on; the
 Mods and Logs tabs rebuild at most once per panel update, on the main thread); Hub pages for mods,
 world loads, settings and statistics; `.lua`/`.luau` importers, the highlighted read-only `TextAsset`
@@ -343,7 +356,9 @@ Budgets bound every mod: per-resume step/time/allocation guards, coroutine resum
 rate limits. Speed is stated only as a published measurement (P19). The room size is chosen after spike
 S1; 100 players per room stays the aspiration (§4).
 
-**Current state.** Lua-CSharp is managed and AOT/WebGL-safe; sandbox budgets and the coroutine guard
+**Current state.** *2026-11-11: the default look and the Hub Graphics page (P7), materials v2 stage 1 (P8) and the P19
+baseline were written that day; their state is in §4. The Mono figure below was measured on the SGen
+collector (§6 R1 has the Boehm numbers), and the look sentence describes 7.56.0.* Lua-CSharp is managed and AOT/WebGL-safe; sandbox budgets and the coroutine guard
 are shipped and adversarially audited (a budget trip cannot be caught by `pcall` and never disarms the
 guard; a nested run gets at most what its enclosing run has left; library calls back into Lua share a
 128-level weighted cap that keeps native stack use at most 428 KB on CoreCLR and about 1.38 MB on Mono,
@@ -404,7 +419,12 @@ changelogs written, and all seven packages bumped together (`python tools/bump_v
 Patch releases carry fixes only. Work outside the plan is capped: between two releases that move a
 milestone, at most one release may carry only out-of-plan work (risk R15).
 
-Rungs and packages on one screen (status at 7.56.0, 2026-11-11):
+Rungs and packages on one screen (status on 2026-11-11, at the end of the day's work; nothing is released
+after 7.56.0). Status words: *written* means its engine-free tests pass outside Unity; *EditMode green*
+means its EditMode fixtures also passed in Unity 6000.6; *PlayMode* or *captures* means it was checked in
+Play Mode or by looking at captures, on a separate Unity copy. Nothing was checked against a live model or
+in a WebGL player that day. The detail is under each package in `ROBLOX_API_ROADMAP.md` (its first "Done
+so far" bullet) and in `TODO.md`.
 
 | Id | Name | Milestone | Status | Size |
 |---|---|---|---|---|
@@ -413,36 +433,36 @@ Rungs and packages on one screen (status at 7.56.0, 2026-11-11):
 | MVP2 | Scheduler, signals, clocks, services | — | surface landed; G10 and `BindToRenderStep` open | L |
 | MVP2.5 | Online foundation + persistence release | — | landed 7.3.0–7.43.0 (history) | — |
 | — | Gameplay services I | — | landed slice | L |
-| MVP3 | World/place package + backups | M0 (follow-ups) | closed 2026-09-25 (7.47.0); S1/S2, the player checks and one live run open | S |
-| MVP4 | Script contexts & client runtime | M1 (alongside) | not started | M |
-| P1 | Player controls and camera | M1 | not started | L |
-| P2 | In-world chat and agent HUD | M1 | not started | M |
-| P3 | Instant edit loop and one-click world | M0–M1 | not started | M |
-| P4 | Voxel Terrain | M1 | not started | L |
-| P6 | Block world demo | M1 | not started | M |
-| P7 | Default look and the Hub Graphics page | M1 | not started | M |
-| P8 | Materials v2 | M1 (stage 1), M2 (stage 2) | 36 of 45 materials textured with normals | M + M |
-| P11 | Truthful results and the Connect-API doctor | M0 (stage 1), M2 (stage 2) | not started | M |
-| P12 | Gameplay LLM API, agents from Lua and talking NPCs | M1 | `AIService` is a stub | L |
-| P13 | Decision models | M1 | not started | L |
-| P18 | Runtime UI from Lua: UXML and USS | M1 | not started; the [R4] specification | L |
-| P19 | Honest performance: measurement, budgets, optimization | M1 | `tools/vmbench` numbers only | L |
-| P20 | Mod folders | M1 | one flat `category` level | M |
+| MVP3 | World/place package + backups | M0 (follow-ups) | closed 2026-09-25 (7.47.0); S2 measured engine-free (2026-11-11); S1 measured on the Mono CLI only (§6 R1); the player checks and one live run open | S |
+| MVP4 | Script contexts & client runtime | M1 (alongside) | design note done; A1–A3 written, EditMode green; B1 written (portable only); B2, C1–C6 not started | M |
+| P1 | Player controls and camera | M1 | written (stages A–C); EditMode green except the stage C camera fixtures (not run); controls checked in PlayMode | L |
+| P2 | In-world chat and agent HUD | M1 | overlay, HUD line and slash commands written, EditMode and PlayMode green; `TextChatService` subset not started | M |
+| P3 | Instant edit loop and one-click world | M0–M1 | write-behind gate, AI undo ring, one-click world written, EditMode green; the one-click world's acceptance passed in PlayMode on a copy (its second-sun fix not re-run) | M |
+| P4 | Voxel Terrain | M1 | Terrain subset, mesher, raycast and package entry written, EditMode green; headless raycasts and replication open | L |
+| P6 | Block world demo | M1 | in progress: seven `blockworld_*` mods (EditMode green); the scene is built and in its first PlayMode runs on a copy, with open failures | M |
+| P7 | Default look and the Hub Graphics page | M1 | look, applier, options and Hub page written, EditMode green; look and bloom checked in PlayMode; WebGL reload proof and quality tier open | M |
+| P8 | Materials v2 | M1 (stage 1), M2 (stage 2) | stage 1 written, EditMode green and checked by captures (the fog fix's final form not re-run); Lava bake and SSAO capture open | M + M |
+| P11 | Truthful results and the Connect-API doctor | M0 (stage 1), M2 (stage 2) | stage 1 written, EditMode green; the default-chat-role item partly; stage 2 not started | M |
+| P12 | Gameplay LLM API, agents from Lua and talking NPCs | M1 | NPC block and the Lua AI surface written, EditMode green; no PlayMode or live-model run | L |
+| P13 | Decision models | M1 | decision seam, three backends, autopilot and villager brains written, EditMode green; no live endpoint | L |
+| P18 | Runtime UI from Lua: UXML and USS | M1 | UXML/USS interpreter, host and `UxmlService` written, EditMode green (one timing test failed under load) | L |
+| P19 | Honest performance: measurement, budgets, optimization | M1 | harness and first table (headless CoreCLR and Mono CLI); Lua runtime pass; the Unity harness has not run | L |
+| P20 | Mod folders | M1 | folders, Hub tree and `manage_mods` by folder written, EditMode green; the 1,000-source ceiling open | M |
 | P5 | In-play creation tools | M2 | click picking only | L |
-| P9 | Lighting API | M1 (day-cycle slice), M2 | structure only | M |
+| P9 | Lighting API | M1 (day-cycle slice), M2 | day-cycle slice and `PointLight` written, EditMode green and checked by captures; the rest is M2 | M |
 | P10 | New materials and asset import | M2 (stage 1), M4 (stage 2) | `MaterialVariant` over built-in textures | M + L |
-| P14 | Orchestrator mode | M2 | plan only | L |
-| P15 | Roles, tools, skills and prompts as data | M2 | role table hard-coded | M–L |
-| P16 | Tool review and camera v2 | M2 | camera tools v1 | M |
-| P17 | Benchmark touch-ups | M2 | four reporting defects open | S |
-| MVP13 | Model packages, template library, Luau parity prerequisites | M2 | planned | M–L |
-| MVP15 | GUI + remaining input: the Roblox GUI classes over the P18 element factory | M1 (solo), M3 (network) | planned | L |
+| P14 | Orchestrator mode | M2 | orchestrator mode written, wired, off by default, EditMode green; history per conversation and a model run open | L |
+| P15 | Roles, tools, skills and prompts as data | M2 | first half written (roles and tool profiles as data), EditMode green; the Rbx API skill read in sections, from one generated source, written (not run in Unity); self-improvement and per-world overrides open | M–L |
+| P16 | Tool review and camera v2 | M2 | camera half written, EditMode green, readback checked in PlayMode; live vision and the tool review open | M |
+| P17 | Benchmark touch-ups | M2 | four reporting defects fixed and suite 2.1 written, EditMode green; leaderboard images not regenerated | S |
+| MVP13 | Model packages, template library, Luau parity prerequisites | M2 | planned; the Luau math slice written (EditMode green) | M–L |
+| MVP15 | GUI + remaining input: the Roblox GUI classes over the P18 element factory | M1 (solo), M3 (network) | solo class set written over the P18 host, EditMode green except one re-run pending; network half planned | L |
 | MVP16 | DataStore + leaderstats | M2 (solo), M3 (network) | planned | M |
 | MVP17 | Audio / FX / animation | M2 (solo), M3 (network) | planned | M |
 | MVP18 | Mod UX rest, skill manifest, console + self-repair | M2 (self-repair, manifest), M4 (rest) | planned | M–L |
-| MVP5 | Host mode over a real socket + join snapshot | M3 | planned | L |
-| MVP6 | World-state replication + write authority | M3 | planned | L |
-| MVP7 | Networked characters & controls | M1 (controls, as P1), M3 (network) | planned | L |
+| MVP5 | Host mode over a real socket + join snapshot | M3 | part 1 written in the Mirror package; a strict compile with `MIRROR` defined passed outside Unity; not compiled or run in Unity, no Mirror test run | L |
+| MVP6 | World-state replication + write authority | M3 | codec core and publisher written, EditMode green; not wired to the bridge | L |
+| MVP7 | Networked characters & controls | M1 (controls, as P1), M3 (network) | controls as P1; network half planned | L |
 | MVP11 | Roles (Creator/Player) & per-player AI over the network | M3 | planned | M |
 | MVP8 | Dedicated server + WebGL client | M4 | planned | M–L |
 | MVP9 | Scale | M4 | planned; the room size is set after S1 | XL |
@@ -461,7 +481,7 @@ frozen release promise: 100 players per room; a 30 Hz server tick with p99 frame
 ≤8 ms); downstream per client average ≤50 KB/s and p99 ≤100 KB/s; upstream ≤10 KB/s; join ≤10 s on LAN;
 a 10,000-instance place for 30 min with 0 disconnects and a retained heap delta ≤100 MB; on a reference
 8-vCPU Linux server. Spike S1 measures the guarded VM on Mono and IL2CPP first — the estimate in §6 for
-100 players on Mono is about 63 ms per frame — and the room size MVP9 gates on is chosen from that
+100 players on Mono is about 63 ms per frame, made from the SGen figure that §6 R1 corrects — and the room size MVP9 gates on is chosen from that
 measurement. M3 gates on a small room (2–8 players). No concurrency number is claimed publicly before it
 is measured (owner decision 4).
 
@@ -554,7 +574,7 @@ into measured numbers early ([`ROBLOX_API_ROADMAP.md` §4.3](CoreAIMods/ROBLOX_A
 
 | Risk | What could go wrong | Evidence | Mitigation (rung) |
 |---|---|---|---|
-| R1 | Guarded Lua CPU on a Mono/IL2CPP server makes 100 players infeasible | The production guard fires every 4 instructions and reads the heap each time: Mono 148–158 k instructions/s vs 24.4 M on CoreCLR ([`tools/vmbench/RESULTS.md`](../tools/vmbench/RESULTS.md)); the N=100 workload is 9,434 guarded steps per frame (`dev-docs/SCALE_CHARACTERIZATION.md`), ≈63 ms per frame on Mono (estimate). **Corrected by the P19 baseline (2026-11-11):** those Mono figures were taken on the SGen collector; Unity's Mono uses Boehm, where the same guard at batch 4 runs 5.27 M instructions/s (36.6% of unguarded; measured with Unity's bundled x86 Mono, still to be confirmed in a 64-bit Standalone player), and the hot spot there is the scheduler-thread hook that fires at count 1 (≈1.40 M/s) — `dev-docs/PERF_BASELINE_2026-11.md` | **Spike S1** (open MVP3 follow-up, gates the next networked rung); an adaptive batch with an allocation bound or per-thread accounting, thin-Lua guidance in the skill (MVP9); the server-only native Luau fallback (plan decision D8) |
+| R1 | Guarded Lua CPU on a Mono/IL2CPP server makes 100 players infeasible | The production guard fires every 4 instructions and reads the heap each time: Mono 148–158 k instructions/s vs 24.4 M on CoreCLR ([`tools/vmbench/RESULTS.md`](../tools/vmbench/RESULTS.md)); the N=100 workload is 9,434 guarded steps per frame (`dev-docs/SCALE_CHARACTERIZATION.md`), ≈63 ms per frame on Mono (estimate). **Corrected by the P19 baseline (2026-11-11):** those Mono figures were taken on the SGen collector; Unity's Mono uses Boehm, where the same guard at batch 4 runs 5.27 M instructions/s (36.6% of unguarded; measured with Unity's bundled x86 Mono, still to be confirmed in a 64-bit Standalone player), and the hot spot there was the scheduler-thread hook that fired at count 1 (≈1.40 M/s) — `dev-docs/PERF_BASELINE_2026-11.md`. Since the Lua runtime pass of the same day scheduler threads use the guard's 4-instruction window (3.0x on CoreCLR, 4.0x on Boehm inside a thread); a second, more loaded run put batch 4 at 30% of unguarded, so about 30–37%; and because on Boehm the cost is the VM's dispatch into the hook, not the hook body, no batching can gain more than about 3.3x over batch 4 (`tools/vmbench/RESULTS.md`) | **Spike S1** (open MVP3 follow-up, gates the next networked rung): a 64-bit Standalone Mono player and an IL2CPP player decide the adaptive batch, whose ceiling on Boehm is about 3.3x; per-thread accounting, thin-Lua guidance in the skill (MVP9); the server-only native Luau fallback (plan decision D8) |
 | R2 | Replication bandwidth | JSON codec, no interest management, whole-node marks, synchronous `FireAllClients`; ~30–50 MB/s server out with JSON at 100 players (estimate) | **Spike S2** (open MVP3 follow-up, gates the next networked rung); binary quantized deltas (MVP6); interest tiers (MVP9) |
 | R3 | Join snapshot size and time | Non-incremental JSON/ZIP; WebGL budget 4 MiB / 4,032 instances; kcp's reliable message size unverified | A chunked, streamed snapshot (MVP5); incremental decode (MVP19); **spike S3**: a 5 MB snapshot over real kcp (MVP5) |
 | R4 | Character feel with server-owned physics | Owner decision 5; `SetNetworkOwner` is a loud stub | Client-owned own character with server validation (plan decision D3, MVP7) |

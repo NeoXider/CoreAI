@@ -30,7 +30,7 @@ use Parts for props, doors, moving things and anything that needs Color or Trans
 - `workspace:Raycast` on a block answers `Instance == workspace.Terrain`, the cell's `Material` and the
   face `Normal` (an axis vector): add `Normal * 2` to `Position` and call `WorldToCell` to get the cell to
   place into, subtract it to get the cell to break. Filter Terrain in or out with RaycastParams like any
-  instance. `workspace.Terrain:IsA("BasePart")` is false in CoreAI, so check `hit.Instance == workspace.Terrain`.
+  instance. Rays hit Terrain in every world, also on a server or a headless tool without a physics engine. `workspace.Terrain:IsA("BasePart")` is false in CoreAI, so check `hit.Instance == workspace.Terrain`.
 - Writes need WorldEdit. The world has bounds and a cell budget: past them a write raises BAD_ARGUMENT or
   BUDGET_EXCEEDED and changes nothing.
 - Not implemented (NOT_IMPLEMENTED): FillBall, FillCylinder, FillWedge, ReadVoxelChannels,

@@ -32,8 +32,10 @@ namespace CoreAI.Tests.PlayMode.RbxApi
     /// look, default content and overlay chat slots filled), composed in Play Mode with virtual Input System
     /// devices, checked for what a player notices: one player with one character, standing on the baseplate,
     /// W walks, a double-tapped Space flies, the wheel zooms to first person, the overlay opens on T and typing
-    /// moves nothing, <c>/fly</c> toggles flight and <c>/undo</c> on a fresh world answers why it cannot. The
-    /// first frame and a day-cycle pair under the default look are written to <c>artifacts/playworld/</c>.
+    /// moves nothing, <c>/fly</c> toggles flight and <c>/undo</c> on a fresh world answers why it cannot, and in
+    /// first person the local character is hidden from every camera of this machine and comes back in third
+    /// person. The first frame, the first- and third-person body crops and a day-cycle pair under the default look
+    /// are written to <c>artifacts/playworld/</c>.
     /// </summary>
     /// <remarks>
     /// WHY one world per test and soft findings: composing the world is the expensive part, and a player's
@@ -111,6 +113,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             yield return CheckDoubleTapFlies(humanoid);
             yield return CheckChatCommands(humanoid);
             yield return CheckWheelZoom(world, humanoid);
+            yield return CheckFirstPersonHidesTheBody(world, humanoid);
 
             Report();
         }
@@ -398,6 +401,74 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             Expect(distance < 1f, "the wheel zooms the default camera into first person");
         }
 
+        /// <summary>
+        /// Shoots the character from an observer camera beside it while the player's camera is in first person,
+        /// then again after the wheel zoomed back out: LocalTransparencyModifier hides the parts on this machine,
+        /// so the observer sees the body vanish and return.
+        /// </summary>
+        private IEnumerator CheckFirstPersonHidesTheBody(LuaCsRbxApiBindings world, RbxHumanoid humanoid)
+        {
+            RbxVector3 root = RootPosition(world, humanoid);
+            GameObject observerObject = new("First-person observer");
+            _created.Add(observerObject);
+            Camera observer = observerObject.AddComponent<Camera>();
+            observer.fieldOfView = 40f;
+            observer.aspect = (float)ShotWidth / ShotHeight;
+            observer.depth = -100f;
+            observer.transform.position = RbxSpace.ToUnity(root + new RbxVector3(9f, 2f, 9f));
+            observer.transform.LookAt(RbxSpace.ToUnity(root));
+            RectInt body = ProjectedBox(observer, root + new RbxVector3(-1.5f, -3f, -1.5f),
+                root + new RbxVector3(1.5f, 2.5f, 1.5f));
+            yield return Frames(5);
+            int hiddenInFirstPerson = CountHiddenCharacterParts(world, humanoid, out int characterParts);
+            Color[] firstPerson = Shoot(observer, "body_first_person.png");
+            for (int notch = 0; notch < 12; notch++)
+            {
+                Set(_mouse.scroll, new Vector2(0f, -120f));
+                yield return Frames(2);
+            }
+
+            yield return Frames(10);
+            RbxVector3 focus = RootPosition(world, humanoid) + LuaCsRbxApiBindings.HumanoidCameraSubjectOffset;
+            float distance = (focus - world.CameraRig.GetCFrame().Position).Magnitude;
+            int hiddenInThirdPerson = CountHiddenCharacterParts(world, humanoid, out int _);
+            Color[] thirdPerson = Shoot(observer, "body_third_person.png");
+            float change = MeanAbsoluteDifference(firstPerson, thirdPerson, body);
+            Record("first person: " + hiddenInFirstPerson + " of " + characterParts + " character parts hidden; after " +
+                   "zooming out to " + distance + " studs, " + hiddenInThirdPerson + " hidden; observer body crop " + body +
+                   " mean " + Mean(firstPerson, body) + " -> " + Mean(thirdPerson, body) + ", change " + change);
+            Expect(characterParts > 0 && hiddenInFirstPerson == characterParts,
+                "first person hides every part of the local character");
+            Expect(distance > 4f && hiddenInThirdPerson == 0, "zooming back out shows the whole character again");
+            Expect(change > 0.03f, "an observer sees the body vanish in first person and come back in third person");
+        }
+
+        private static int CountHiddenCharacterParts(LuaCsRbxApiBindings world, RbxHumanoid humanoid, out int parts)
+        {
+            parts = 0;
+            int hidden = 0;
+            RbxInstance character = humanoid.Parent;
+            if (character == null)
+            {
+                return 0;
+            }
+
+            foreach (RbxInstance descendant in character.GetDescendants())
+            {
+                if (descendant is RbxBasePart part && world.PartSink.TryGetPartProperties(part.Id, out PartProperties drawn)
+                    && drawn.Transparency < 1f)
+                {
+                    parts++;
+                    if (part.LocalTransparencyModifier >= 0.99f)
+                    {
+                        hidden++;
+                    }
+                }
+            }
+
+            return hidden;
+        }
+
         private IEnumerator Hold(ButtonControl button, int frames)
         {
             Press(button);
@@ -434,7 +505,11 @@ namespace CoreAI.Tests.PlayMode.RbxApi
         /// <summary>Renders the composed camera into a half-float target and returns the frame as a display shows it.</summary>
         private Color[] Shoot(string fileName)
         {
-            Camera camera = _bootstrap.Composition.Camera;
+            return Shoot(_bootstrap.Composition.Camera, fileName);
+        }
+
+        private Color[] Shoot(Camera camera, string fileName)
+        {
             RenderTexture target = new(ShotWidth, ShotHeight, 24, RenderTextureFormat.DefaultHDR);
             Texture2D linear = new(ShotWidth, ShotHeight, TextureFormat.RGBAFloat, false, true);
             Texture2D png = new(ShotWidth, ShotHeight, TextureFormat.RGBA32, false);
@@ -480,6 +555,49 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             int yMax = Mathf.Clamp(Mathf.RoundToInt(Mathf.Max(first.y, second.y) * ShotHeight), yMin + 1,
                 ShotHeight);
             return new RectInt(xMin, yMin, xMax - xMin, yMax - yMin);
+        }
+
+        /// <summary>The screen rectangle around the eight corners of a box given by two opposite corners in studs.</summary>
+        private static RectInt ProjectedBox(Camera camera, RbxVector3 minStuds, RbxVector3 maxStuds)
+        {
+            float xMin = 1f;
+            float xMax = 0f;
+            float yMin = 1f;
+            float yMax = 0f;
+            for (int corner = 0; corner < 8; corner++)
+            {
+                RbxVector3 point = new((corner & 1) == 0 ? minStuds.X : maxStuds.X,
+                    (corner & 2) == 0 ? minStuds.Y : maxStuds.Y, (corner & 4) == 0 ? minStuds.Z : maxStuds.Z);
+                Vector3 viewport = camera.WorldToViewportPoint(RbxSpace.ToUnity(point));
+                xMin = Mathf.Min(xMin, viewport.x);
+                xMax = Mathf.Max(xMax, viewport.x);
+                yMin = Mathf.Min(yMin, viewport.y);
+                yMax = Mathf.Max(yMax, viewport.y);
+            }
+
+            int left = Mathf.Clamp(Mathf.RoundToInt(xMin * ShotWidth), 0, ShotWidth - 1);
+            int right = Mathf.Clamp(Mathf.RoundToInt(xMax * ShotWidth), left + 1, ShotWidth);
+            int bottom = Mathf.Clamp(Mathf.RoundToInt(yMin * ShotHeight), 0, ShotHeight - 1);
+            int top = Mathf.Clamp(Mathf.RoundToInt(yMax * ShotHeight), bottom + 1, ShotHeight);
+            return new RectInt(left, bottom, right - left, top - bottom);
+        }
+
+        private static float MeanAbsoluteDifference(Color[] first, Color[] second, RectInt crop)
+        {
+            double sum = 0d;
+            int count = 0;
+            for (int y = crop.yMin; y < crop.yMax; y++)
+            {
+                for (int x = crop.xMin; x < crop.xMax; x++)
+                {
+                    int index = y * ShotWidth + x;
+                    sum += Mathf.Abs(first[index].r - second[index].r) + Mathf.Abs(first[index].g - second[index].g) +
+                           Mathf.Abs(first[index].b - second[index].b);
+                    count++;
+                }
+            }
+
+            return count == 0 ? 0f : (float)(sum / (3d * count));
         }
 
         private static Color Mean(Color[] shot, RectInt crop)

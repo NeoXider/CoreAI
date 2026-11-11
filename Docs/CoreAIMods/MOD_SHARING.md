@@ -197,6 +197,8 @@ service is constructed with this ceiling; see `HubModServiceBase` /
 | `WorldEdit` | Creating, changing and destroying Rbx instances (`Instance.new`, properties, `:Destroy()`); the classic `coreai_world_*` build calls only on hosts that opt in | **The sensible default ceiling for imported mods** — visible, revertible game-world effects |
 | `LogicOverride` | Redefines logic slots (formulas, loot tables) | Review what it overrides before granting |
 | `Full` | Reflection over GameObjects/components (`unity_*`) | **Dev-only. Never grant to untrusted imports.** Not part of `All`; opt-in per host |
+| `Ui` | Screens and HUD: `UxmlService` (UXML and USS text) and the Roblox GUI classes | Low risk: it draws on the screen only, and its screens go when the mod unloads; part of `All`; a host masks it with `All & ~Ui` |
+| `Ai` | `AIService` agents and `TextGenerator`, which spend the host's model budget | Only on hosts that turn AI from Lua on (`CoreAiLuaAiOptions.AllowAgentsFromLua`, off by default); not part of `All` |
 
 Functions outside the granted tiers are *physically absent* from the mod's globals — a
 `WorldEdit` mod does not have `unity_*` to call.

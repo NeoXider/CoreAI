@@ -43,6 +43,15 @@ default; a command your game registered first under the same name is kept):
 | `/redo` | Puts back the change `/undo` took back, under the same rule. |
 | `/fly` | Toggles flight of your character (Space rises, Left Shift descends). |
 
+An AI change is anything one AI call changed that a saved world keeps: world-owned instances and their properties,
+Terrain cells, mod sources, and the settings without a revision of their own (the Lighting day cycle, StarterPlayer
+and StarterGui settings, PointLight and GUI properties), so "make it night" alone can be undone. A read-only call
+is not one. `/undo` refuses when the world changed since: a player, a mod script or the Hub edited an instance, or
+another agent made an AI change (its name is in the reason). A script that changes those settings every frame (a
+day cycle, a flickering torch) does not refuse it and is not recorded; the undo puts back the values of the moment
+before your change, and the script carries on from there. Copies of StarterGui in a player's PlayerGui and the
+player's character are not part of the world, so a respawn never refuses an undo.
+
 ## Typing never moves the character
 
 The chat overlay, the chat panel, the Hub and runtime UI screens all report into the CoreAI scope's

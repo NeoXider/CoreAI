@@ -1,6 +1,7 @@
 ﻿using System;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.CharacterRig;
 using CoreAI.Mods.Rbx.Spatial;
 using UnityEngine;
 
@@ -20,6 +21,12 @@ namespace CoreAI.Mods.Rbx.Binding
     /// Velocity is driven directly rather than through forces: a walking character is not a physical
     /// body being pushed, and force-driven walking makes speed depend on mass and friction — the two
     /// things a scripted <c>WalkSpeed</c> must not depend on.
+    /// </para>
+    /// <para>
+    /// The body's rotation is frozen against physics and turned by the motor instead: with
+    /// <c>Humanoid.AutoRotate</c> on (the default) each fixed step turns it toward the direction it is told to
+    /// walk or fly in (<see cref="RbxCharacterFacing"/>), yaw only, so a character faces where it goes; a
+    /// character standing still keeps its heading.
     /// </para>
     /// </remarks>
     public sealed class UnityRbxCharacterMotor : IRbxCharacterMotor
@@ -48,6 +55,16 @@ namespace CoreAI.Mods.Rbx.Binding
         private RbxVector3 _moveDirectionStuds = RbxVector3.Zero;
         private bool _flying;
         private bool _noclip;
+        private bool _autoRotate = true;
+
+        /// <summary>
+        /// How fast the character turns toward its heading, per second (see
+        /// <see cref="RbxCharacterFacing.DefaultTurnResponsePerSecond"/>).
+        /// </summary>
+        public double TurnResponsePerSecond { get; set; } = RbxCharacterFacing.DefaultTurnResponsePerSecond;
+
+        /// <summary>Mirror <c>Humanoid.AutoRotate</c> as this motor last heard it.</summary>
+        public bool AutoRotate => _autoRotate;
 
         /// <summary>Flight speed as a multiple of <c>WalkSpeed</c> (default 2, creative-mode feel).</summary>
         public double FlySpeedMultiplier { get; set; } = 2d;
@@ -196,6 +213,12 @@ namespace CoreAI.Mods.Rbx.Binding
         }
 
         /// <inheritdoc />
+        public void SetAutoRotate(bool autoRotate)
+        {
+            _autoRotate = autoRotate;
+        }
+
+        /// <inheritdoc />
         public void Jump(double jumpPower, double jumpHeight, bool useJumpPower)
         {
             TryJump(jumpPower, jumpHeight, useJumpPower);
@@ -248,9 +271,9 @@ namespace CoreAI.Mods.Rbx.Binding
 
         /// <inheritdoc />
         /// <remarks>
-        /// WHY the step length is ignored: this motor drives velocity rather than integrating a
-        /// position, so the physics step itself does the integrating. The parameter exists for
-        /// host motors that do integrate.
+        /// WHY the step length only times the turn: this motor drives velocity rather than integrating a
+        /// position, so the physics step itself does the integrating; the AutoRotate turn is the one thing
+        /// the motor eases on its own clock.
         /// </remarks>
         public void Step(double deltaSeconds)
         {
@@ -260,18 +283,17 @@ namespace CoreAI.Mods.Rbx.Binding
                 return;
             }
 
-            Step();
+            StepWalk(deltaSeconds);
         }
 
         /// <summary>Advances the walk by one fixed step. Call from the fixed-step pump.</summary>
         public void Step()
         {
-            if (_flying)
-            {
-                StepFlight(Time.fixedDeltaTime);
-                return;
-            }
+            Step(Time.fixedDeltaTime);
+        }
 
+        private void StepWalk(double deltaSeconds)
+        {
             if (_body == null || _body.isKinematic)
             {
                 return;
@@ -279,12 +301,13 @@ namespace CoreAI.Mods.Rbx.Binding
 
             if (_moveDirectionStuds.Magnitude > 1e-4f)
             {
-                Vector3 direction = RbxSpace.DirectionToUnity(
-                    new RbxVector3(_moveDirectionStuds.X, 0f, _moveDirectionStuds.Z));
+                RbxVector3 heading = new(_moveDirectionStuds.X, 0f, _moveDirectionStuds.Z);
+                Vector3 direction = RbxSpace.DirectionToUnity(heading);
                 Vector3 walking = _body.linearVelocity;
                 walking.x = direction.x * _walkSpeedMetres;
                 walking.z = direction.z * _walkSpeedMetres;
                 _body.linearVelocity = walking;
+                FaceAlong(heading, deltaSeconds);
                 return;
             }
 
@@ -302,6 +325,37 @@ namespace CoreAI.Mods.Rbx.Binding
             velocity.x = planar.x;
             velocity.z = planar.z;
             _body.linearVelocity = velocity;
+            FaceAlong(RbxSpace.DirectionFromUnity(delta), deltaSeconds);
+        }
+
+        /// <summary>
+        /// Turns the body one step toward facing <paramref name="headingStuds"/> (a Roblox-space direction; only
+        /// its horizontal part counts), when AutoRotate is on.
+        /// </summary>
+        /// <remarks>
+        /// WHY the commanded direction and not the measured velocity: the mirror's character faces
+        /// <c>MoveDirection</c>, the input, so one walking into a wall still faces the wall instead of turning
+        /// along whatever the solver let it slide. WHY the Transform and not a Rigidbody rotation write: rotation
+        /// is frozen against physics, the motor steps right before the physics step that syncs transforms, and
+        /// the Transform is the member every CoreAI build target exposes for it.
+        /// </remarks>
+        private void FaceAlong(RbxVector3 headingStuds, double deltaSeconds)
+        {
+            if (!_autoRotate || _body == null
+                || !RbxCharacterFacing.TryYawOfDirection(headingStuds, out double targetYaw))
+            {
+                return;
+            }
+
+            Transform bodyTransform = _body.transform;
+            double currentYaw = RbxCharacterFacing.YawOf(RbxSpace.RotationFromUnity(bodyTransform.rotation).LookVector);
+            double nextYaw = RbxCharacterFacing.StepYaw(currentYaw, targetYaw, deltaSeconds, TurnResponsePerSecond);
+            if (Math.Abs(RbxCharacterFacing.WrapAngle(nextYaw - currentYaw)) < RbxCharacterFacing.SnapRadians * 0.01d)
+            {
+                return;
+            }
+
+            bodyTransform.rotation = RbxSpace.ToUnity(RbxCFrame.Angles(0f, (float)nextYaw, 0f));
         }
 
         /// <summary>
@@ -327,6 +381,7 @@ namespace CoreAI.Mods.Rbx.Binding
             _body.linearVelocity = RbxSpace.VelocityToUnity(next);
             float gravity = _worldGravityMetresPerSecondSquared();
             _body.AddForce(new Vector3(0f, Mathf.Abs(gravity), 0f), ForceMode.Acceleration);
+            FaceAlong(_moveDirectionStuds, deltaSeconds);
         }
     }
 }

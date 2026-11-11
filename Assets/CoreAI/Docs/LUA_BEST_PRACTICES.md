@@ -119,6 +119,8 @@ From Lua (WorldEdit): publish an envelope through the existing sink or add a thi
 | Spawn / level edit | `Read \| WorldEdit` |
 | Formulas / mods | `+ LogicOverride` |
 | Arbitrary components | `+ Full` (dev / trusted builds only) |
+| Screens and HUD (`UxmlService`, the Roblox GUI classes) | `+ Ui` (part of `All`) |
+| Agents and model calls (`AIService`, `TextGenerator`) | `+ Ai`, and only where the host game turns AI from Lua on |
 
 Configuration: caps on the stack (`LuaCsModStackOptions.Capabilities`), `LoadMod(..., caps)`, and the
 `CoreAiModsLifetimeScope` inspector (**Enable Full Lua Access**, **Enable Full Lua Private Access**).

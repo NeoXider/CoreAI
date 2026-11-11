@@ -350,6 +350,71 @@ Conscious deviations (running list — additions require an entry here):
 | DEV-16 | `Humanoid.MaxHealth = math.huge` stores infinity (a common "invincible" idiom) | accepted, but stored as the largest finite double, so `Health == math.huge` is false (compare with `MaxHealth`); `TakeDamage(math.huge)` still kills; NaN is refused | a non-finite value cannot be saved in a world package; the idiom keeps working without making the world unsavable |
 | DEV-14 | members carrying `security: PluginSecurity` are unreachable from a running game — they exist for Studio and plugins, and the shipped experience never sees them (e.g. `ScriptContext:SetTimeout`, which limits how long a script may run without yielding) | the same members are reachable at RUNTIME, gated to the elevated actor tier (`ActorContext.Grants.IsUnrestricted`); an ordinary mod is refused exactly as it is for any other privileged member | CoreAI's Studio is the running game itself (the in-game creator mode, MVP12): authoring and playing are ONE application, so "Studio-only" has no separate place to live. Mapping these to "unavailable" would delete a control the creator legitimately needs while the game runs; mapping them to "anyone" would let a mod raise its own execution budget. The elevated tier is the only honest reading, and it is the same tier that already gates the rest of the privileged surface. Sibling of DEV-12, which made the same call for one-shot execution |
 | DEV-17 | `tostring(number)` prints Luau's shortest round-trip text (`1e+21`, `inf`, `nan`, `0.1`), and a number passed where a string is expected becomes that text | this VM's `tostring` formats with .NET rules (`1E+21`, `Infinity`, `NaN`; 15 significant digits on Mono), and the argument coercion of both surfaces (`LuaCsValueMarshaller`) inherits it, so `part.Name = 1e21` is `"1E+21"`; the sandbox's own `tonumber` also refuses `"inf"`/`"nan"`/hex floats that the host-side coercion accepts | temporary, not a decision to keep: one Luau-style formatter for `tostring` and the coercion, and one parser for `tonumber`, are open in `TODO.md` (audit R3 C1-06); until then scripts that turn very large, non-finite or long-fraction numbers into names, attribute keys or store keys see different text than in Roblox |
+| DEV-18 | `HumanoidStateType.Flying` has no locomotion of its own: the Humanoid is not animated, as with `PlatformStand`, while the player flies | `Humanoid:ChangeState(Enum.HumanoidStateType.Flying)` gives real flight: the motor flies, and `Move` keeps the height while flying; the default control script toggles it on a double-tapped Space and the world chat has `/fly` | creative flight in a block world without a CoreAI-only API; the owner decision "Fly from Lua" in `TODO.md` takes this as its default |
+| DEV-19 | `MouseBehavior.LockCurrentPosition` locks the cursor where it is at the time of locking | the cursor is locked at the centre of the window | Unity's cursor lock always centres; there is no lock in place |
+| DEV-20 | for mouse-wheel input `InputObject.Position.Z` says whether the wheel moved forward (positive), backward (negative) or not at all; the mirror gives no magnitude | `Position.Z` is exactly 1 or -1 per wheel event; a smooth or multi-notch scroll collapses to its sign | the mirror documents only the sign |
+| DEV-21 | the mirror does not say what `Humanoid:Move` does to a running `MoveTo` | a non-zero `Move` ends a running `MoveTo`, and `MoveToFinished` fires with `false` | player input wins over a scripted walk; the behaviour is ours |
+| DEV-22 | the control scripts are LocalScripts, so `Players.LocalPlayer` is always set where they run | while `LocalPlayer` is nil (a solo world before MVP4's client context) `coreai_player_controls` drives the first player | solo play needs controls before MVP4 brings real client contexts; retire when MVP4 lands |
+| DEV-23 | the top bar reserves a GUI inset (`GuiService:GetGuiInset`, `ScreenGui.IgnoreGuiInset`), so the Screen and Viewport variants of the camera queries differ | the inset is always zero, so `ScreenPointToRay` and `ViewportPointToRay` (and the `WorldTo*` pair) give the same answer; the core-GUI switches are recorded but nothing is drawn (DEV-72) | CoreAI draws no top bar |
+| DEV-24 | `UserInputService.TextBoxFocused` / `TextBoxFocusReleased` pass the focused `TextBox`, and `GetFocusedTextBox()` returns it | while one of CoreAI's own text fields (the chat, the Hub) has the keyboard the text-focus signals pass nil and `GetFocusedTextBox()` returns nil; a focused GUI `TextBox` is passed and returned (added late on 2026-11-11, not run in Unity yet) | CoreAI's own text fields are not script-visible TextBoxes |
+| DEV-25 | every `CameraType` (Fixed, Attach, Watch, Track, Follow, Custom, Scriptable, Orbital) has its own behaviour in the PlayerModule | only `Custom` (orbit, zoom, first person) and `Scriptable` behave; the other types leave the camera to scripts | first slice; the play loop needs `Custom` |
+| DEV-26 | zoom and the pull-in in front of an obstacle are smoothed by the PlayerModule's spring and Poppercam | zoom and pull-in are instant | first slice; spring-smoothed zoom is open in `TODO.md` |
+| DEV-27 | the camera focus follows the subject Humanoid with `Humanoid.CameraOffset` applied | the focus is the root part plus 1.5 studs straight up; `Humanoid.CameraOffset` is a stub | first slice; the offset is open in `TODO.md` |
+| DEV-28 | the default PlayerModule also turns the camera from the arrow keys | the arrow keys walk and never turn the camera | first slice |
+| DEV-29 | in first person the character turns with the camera (`Humanoid.AutoRotate`) and the local character is hidden (`LocalTransparencyModifier`) | in first person the character does not turn with the camera; its body is hidden through `BasePart.LocalTransparencyModifier`, driven by the default camera module (added late on 2026-11-11, not run in Unity yet) | first slice |
+| DEV-30 | the camera scripts write `UserInputService.MouseBehavior` every frame while they need it | the camera writes `MouseBehavior` only when its own wish changes, so a script's own setting stands until then | a mod that sets the cursor keeps it without fighting the camera each frame |
+| DEV-31 | `Camera.CameraSubject` is assigned to the local Humanoid at spawn, and `Changed("CameraSubject")` fires | `CameraSubject` resolves to the local Humanoid when it is read; the engine does not assign it at spawn, so no `Changed("CameraSubject")` fires | no client spawn sequence exists before MVP4/MVP7 |
+| DEV-32 | `Camera.ViewportSize` is the size of the client's window | a headless `InMemoryCameraRig` reports 1920x1080; a rig without a lens reports (1, 1) and refuses `FieldOfView` writes | headless worlds and tests need a defined viewport |
+| DEV-33 | the Player camera properties (`CameraMode`, the zoom distances) replicate from the server to the client | they are not replicated yet | replication of player state is MVP7 |
+| DEV-34 | first-person mouse look starts with the cursor locked | on WebGL first-person look applies before the browser grants pointer lock, from the cursor's position difference | a browser grants pointer lock only after a user gesture; the look must not wait for it |
+| DEV-35 | (not in the mirror) the `Ray` tostring text, the Poppercam pull-in opacity threshold, the camera turn rates and the thumbstick dead zone | taken from observation (`Ray` prints `{origin}, {direction}`), from Poppercam (0.95) and from the PlayerModule (turn rates, dead zone) | the mirror gives no numbers; these sources are the closest available and are recorded so a change is visible |
+| DEV-36 | thumbstick input arrives as `Gamepad1` to `Gamepad8` | thumbstick events report only `Gamepad1` | first slice |
+| DEV-37 | smooth terrain: occupancy shapes the surface between cells | blocky cells: any occupancy above 0 draws a full cube | a block world is the M1 target; smoothing is not in this subset |
+| DEV-38 | terrain water has swimming and is hit by rays unless `RaycastParams.IgnoreWater` is set | water is a transparent block with no collider and no swimming, and rays pass through it as if `IgnoreWater` were always true | first slice |
+| DEV-39 | `Terrain` inherits `BasePart`, so `IsA("BasePart")` is true, the BasePart members exist and parts touching it fire `Touched` | `Terrain` sits under `PVInstance`: `IsA("BasePart")` is false, the BasePart members are absent, and parts touching it fire no `Touched` | every BasePart path (binder, part sink, serializer, tweens) would give it a 4x1x2 part body |
+| DEV-40 | `Terrain:FillBlock` fills an oriented box with smooth terrain; the mirror gives no cell rule | it fills the cells whose centres are inside or on the box; one call sweeps at most 4,194,304 cells and skips cells outside the bounds | a block world needs a predictable cell rule and a bounded call |
+| DEV-41 | occupancy is a number from 0 to 1 | occupancy is stored in 1/255 steps, and any positive value keeps at least one step | one byte per cell in the chunk store and the package entry |
+| DEV-42 | a non-Terrain material in a Terrain call is an error (the mirror gives no text) | it raises `BAD_ARGUMENT` with CoreAI's wording | the structured error format of §5.2.7 |
+| DEV-43 | the engine's own terrain extents and memory | fixed bounds and budgets: desktop ±32,768 studs across and ±4,096 up and down, 16.7 M cells, 16,384 chunks; WebGL ±8,192 and ±2,048, 4.19 M cells, 4,096 chunks; a region call outside the bounds raises `BAD_ARGUMENT`, and a write past the cell or chunk budget raises `BUDGET_EXCEEDED` and changes nothing | a WebGL tab has a hard memory ceiling, and a budget error is something the AI can repair |
+| DEV-44 | the mirror documents a limit of 4,194,304 voxels for the voxel calls (`ReadVoxels`, `WriteVoxels`) | `FillRegion` and `ReplaceMaterial` use the same limit | one limit for every region call |
+| DEV-45 | `WriteVoxels` takes 3D arrays of materials and occupancies | elements must be EnumItems and numbers; occupancy is clamped and NaN is refused | a cell store must never hold a value it cannot draw or save |
+| DEV-46 | water is a terrain channel with its own properties (`ReadVoxelChannels`/`WriteVoxelChannels`, material colours, `WaterColor`, `WaterWaveSize` and the other `Water*` properties) | water is one material cell; the channel calls, material colours and `Water*` properties are stubs | first slice |
+| DEV-47 | (not in the mirror) what a fractional cell or count argument does | whole-number arguments truncate; error texts are CoreAI's | the coercion rule of the rest of the surface |
+| DEV-48 | `Terrain` is an instance of the place: saved with it and replicated like any other instance | Terrain is runtime infrastructure: it is not in the package tree (its cells have their own entry, `Terrain/voxels.bin`), and it is never replicated as an instance, because each side creates its own; cell replication is planned as a chunk-delta record of the MVP6 wire (record kind 4 is reserved, not built) | replicated as an ordinary instance, a client would be told to create a second Terrain beside its own |
+| DEV-49 | `Enum.Material.Water` (like `Air`) is Terrain-only and not browsable for parts (`Material.yaml`) | `Part.Material = Enum.Material.Water` draws animated water on a BasePart | parts are the only water outside the voxel Terrain, and a block world's part-built water must look the same as its terrain water |
+| DEV-50 | `OutdoorAmbient` is the hue of outdoor areas and `Ambient` the hue of areas occluded from the sky | `OutdoorAmbient` maps to the trilight sky and equator colours, `Ambient` to the ground colour | the closest mapping onto Unity's trilight ambient, which has no sky-occlusion term |
+| DEV-51 | the sun follows `ClockTime` and `GeographicLatitude`; the mirror documents neither the day of the year nor the axes | the equinox: the sun rises at 06:00 due east at +X and sets at 18:00 due west, and north is -Z | a fixed, documented model is testable; the mirror leaves both open |
+| DEV-52 | (not in the mirror) how daylight fades around sunrise and sunset | daylight is a smooth step from -6 to +6 degrees of sun elevation; at night the outdoor ambient keeps 15%, `Ambient` is unchanged, and the sun light is off | the mirror gives no curve; the floor keeps a night readable |
+| DEV-53 | `Lighting` always drives the place's lighting | lazy application: the sink is not called until a script, a tween or a restore drives Lighting, so a host scene keeps its own lighting | CoreAI runs inside host games that own their lighting |
+| DEV-54 | `PointLight.Range` is capped by the engine (the API dump's `ExtendLightRangeTo120` flag implies 60 studs, 120 with the flag) | the range is capped at 60 studs | the cap the dump implies without the flag; the flag is not modelled |
+| DEV-55 | `Lighting.Brightness` is the intensity of the sun or moon light; the mirror gives no clamp | it is stored unclamped and drawn as at least 0 | a round trip keeps what the script wrote |
+| DEV-56 | (not in the mirror) what a malformed `TimeOfDay` string does | it raises `BAD_ARGUMENT` | a loud error is something the AI can repair |
+| DEV-57 | Luau's math functions report `invalid argument #n to '...'` | the sandbox keeps its `bad argument` prefix; the reason texts match Luau's | one prefix for every sandbox argument error |
+| DEV-58 | every light is drawn by the engine | a light budget per tier (64 on desktop, 8 on WebGL): the nearest lights stay on, the rest are switched off, logged once | per-pixel lights are expensive, most of all on WebGL; nearest-N is a CoreAI policy |
+| DEV-59 | `Lighting:GetMoonDirection()` and `GetMoonPhase()` describe the moon | both are stubs; there is no moon | the day-cycle slice; the rest of the Lighting API is M2 |
+| DEV-60 | Roblox has `TextGenerator` but no agent service | CoreAI-only `game:GetService("AIService")`: `CreateAgent`, `Ask`, `Say`, `Hear`, `Replied`/`Addressed`, without the `Async` suffix Roblox gives yielding methods; the service is detached (`Parent` is nil), so world packages and replication never see it; behind `AllowAgentsFromLua` and `LuaCapabilities.Ai` | NPC agents need per-NPC memory, addressing and budgets that `TextGenerator` does not have; the MVP13/MVP14 export lint must flag `AIService` |
+| DEV-61 | `ContextToken` carries a summary of the conversation and restores its state in a later request | the token is an in-memory host handle (256 conversations of 16 exchanges, the least recently used dropped); it does not survive a restart, and an older token branches the conversation | no server-side conversation store exists |
+| DEV-62 | `GenerateTextAsync` documents `UserPrompt`, `ContextToken`, `MaxTokens` and `JsonSchema`; the mirror does not say what an unknown key does | unknown request keys and unknown agent config keys are refused | a typo must fail loudly instead of being ignored |
+| DEV-63 | `Temperature` and `TopP` values outside their ranges are clamped; the mirror does not say whether a read returns the clamped value | they are clamped on write, so a read returns the clamped value | the stored value is the one used |
+| DEV-64 | with `JsonSchema` the response conforms to the requested format | the schema is enforced by validating the response afterwards against a subset of its keywords | a check after the fact works with any provider |
+| DEV-65 | generated text in an experience is subject to Roblox's moderation (the mirror's `TextGenerator` page does not describe it) | pass-through unless the host plugs a filter in | moderation belongs to the host game and its platform |
+| DEV-66 | requests are limited to 100 per minute, scaling up with the number of concurrent users | a fixed 100 per minute per world | a solo world has no concurrent-user count |
+| DEV-67 | `TextGenerator` is an ordinary instance any script can create and call | `Instance.new("TextGenerator")` and its property writes need `WorldEdit`, and `GenerateTextAsync` must run on a scheduler thread | the sandbox's rules for every instance and every yielding call |
+| DEV-68 | (not in the mirror) the text of a failed `GenerateTextAsync` | the failure text uses CoreAI's structured error format | the AI self-repair contract (§5.2.7) |
+| DEV-69 | Roblox has no markup: interfaces are instance trees (`ScreenGui`, `Frame`, `TextLabel`, ...) built in Studio or with `Instance.new` and styled by properties and `StyleSheet`/`StyleRule` | `game:GetService("UxmlService")` builds screens from UXML and USS text while the game runs (`UiScreen`, `UiElement`, `Clicked`/`ValueChanged`/`Submitted`), behind the `Ui` capability, owned by the creating mod | the AI writes UI text far more reliably than instance trees, and a text change shows in the next frame; the MVP13 export lint should flag `GetService("UxmlService")` and every `UiScreen`/`UiElement` member; the Roblox GUI classes (MVP15) stay the compatible entrance on the same factory |
+| DEV-70 | each client draws its own player's `PlayerGui`, and every LocalScript sees `Players.LocalPlayer` | the `PlayerGui` drawn is this machine's player's; a mod loaded as that player's actor reaches it through `LocalPlayer`, while a host-loaded mod sees `LocalPlayer` as nil and uses `Players` or `StarterGui` | solo before MVP4: mods are not yet split into client and server contexts |
+| DEV-71 | on each spawn (`ResetOnSpawn`) `PlayerGui` is refilled with copies of `StarterGui`, LocalScripts included | a respawn replaces only the copies; a child added to `StarterGui` after the spawn is copied on the next frame; destroying an original removes its copies; scripts are never copied | a mod loads into a running session and does not re-run on respawn |
+| DEV-72 | `StarterGui:SetCoreGuiEnabled` switches the built-in chat, player list, backpack and top bar | the switches are recorded, but no core GUI is drawn | CoreAI has its own chat and Hub and no core GUI |
+| DEV-73 | every `Font`/`FontFace` family draws in its own typeface | every family draws in the host font; `Font` gives bold and italic | first slice |
+| DEV-74 | text is measured: `TextScaled` fits the box, `AutomaticSize` grows to the text, `TextBounds` and `TextFits` report the measurement | text is not measured: `TextScaled` is an estimate, `AutomaticSize` fits children only, and `TextBounds`/`TextFits` raise `NOT_IMPLEMENTED` | first slice; the engine-free layout does not measure text |
+| DEV-75 | `RichText` supports font, size, colour, stroke, line breaks and more | `RichText` draws `<b>`, `<i>`, `<u>` and `<s>` only | first slice |
+| DEV-76 | `rbxassetid://` images load, and nine-slice (`SliceCenter`), `UIGradient` and `HoverImage`/`PressedImage` draw | `rbxassetid://` images draw nothing; nine-slice, `UIGradient` and the hover and pressed images are not drawn | there is no Roblox asset service; first slice |
+| DEV-77 | `ZIndexBehavior.Global` orders every element of a `ScreenGui` by `ZIndex` | `Global` draws as `Sibling` | first slice |
+| DEV-78 | a `ScrollingFrame` scrolls with the wheel, by dragging and by touch, and draws scroll bars | it scrolls only from a script (`CanvasPosition`), and no scroll bar is drawn | first slice; player scrolling is open in `TODO.md` |
+| DEV-79 | whether input over a GUI object counts as game-processed depends on the object (`Active`, buttons), not on scripts listening to it | listening to `MouseEnter` makes an object take the pointer, so input over it is game-processed | a hover listener needs the pointer in the runtime UI host |
+| DEV-80 | a mixed table of numeric and string keys can lose elements, and a table's identity and metatable are not kept | a mixed array/dictionary table or a cyclic table raises `BAD_ARGUMENT`; values are copied with the RemoteEvent codec | a loud error instead of silently dropped elements |
+| DEV-81 | (not in the mirror) a size limit for a bindable payload | more than 64 KiB raises `PAYLOAD_TOO_LARGE` | the RemoteEvent codec's limit |
+| DEV-82 | (not in the mirror) what a function passed to `Fire` or `Invoke` becomes | a function arrives as nil, even at the top level | functions cannot be copied between mods |
 
 ---
 
@@ -991,9 +1056,10 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   a joining client receives the world. Topology order stays Null loopback (solo) → host → dedicated
   (MVP8).
 - **Done so far**:
-  - **2026-11-11, part 1 written in `Assets/CoreAIMirror`** (it compiles in a scratch build only: the
-    Mirror assemblies need the `MIRROR` define, which this project does not set, so none of it has
-    compiled or run in Unity): host mode serving the host's own local client as its Player, per-connection
+  - **2026-11-11, part 1 written in `Assets/CoreAIMirror`** (the Mirror assemblies need the `MIRROR`
+    define, which this project does not set, so none of it has compiled or run in Unity; a strict compile
+    of a copy of the tree with `MIRROR` defined, 45 assemblies and 0 errors outside Unity, is the only
+    check, and no Mirror test has run): host mode serving the host's own local client as its Player, per-connection
     inbound limits (`CoreAiMirrorInboundLimits`, drop and count), the protocol handshake
     (`CoreAiMirrorProtocol.Version = 1`), a deferred refusal notice, the roster, and a two-process kcp
     harness that measures S3 (never built or run). The matching To-do items below stay until the Mirror
@@ -1560,9 +1626,10 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   and `GetPropertyChangedSignal` fire, and every other GUI member is a loud stub. `BindableEvent` and
   `BindableFunction` between mods came with it (portable tests only). The engine-free and Lua fixtures
   are green in Unity EditMode; one real-host layout test failed on a wrong test assumption, and its
-  corrected form has not been re-run. Open: scrolling with the wheel or by dragging,
-  `UserInputService.TextBoxFocused` for GUI text boxes, `StarterGui` replication (M3), world-owned GUI in
-  the world package. Deviations: DEV-23, DEV-24, DEV-70 to DEV-82. Before 2026-11-11 the class
+  corrected form has not been re-run. Added later the same day and not run in Unity: `UserInputService`
+  reporting a focused GUI `TextBox`, and world-owned GUI in the world package (a `gui` block per node and
+  `starter_gui` for the switches). Open: scrolling with the wheel or by dragging, `StarterGui` replication
+  (M3). Deviations: DEV-23, DEV-24, DEV-70 to DEV-82. Before 2026-11-11 the class
   descriptors were planned loud stubs (`ClassCatalog.cs`, phase `MVP14`) next to the `PlayerGui`
   container and `UserInputService`.
 - **To do**:
@@ -1781,7 +1848,8 @@ and how far it was checked, in three states that are never blurred: *written* (i
 outside Unity), *green in Unity EditMode* (its EditMode fixtures also passed in Unity 6000.6.0f1 that day;
 anything changed after the last run says so), and *PlayMode* or *captures* (checked in Play Mode or by
 looking at captures, on a separate Unity copy). That day nothing was checked against a live model, the
-Mirror assemblies did not compile in Unity, nothing ran in a WebGL player, and nothing was released.
+Mirror assemblies did not compile in Unity (only a strict compile with `MIRROR` defined, outside Unity, and no
+Mirror test ran), nothing ran in a WebGL player, and nothing was released.
 
 ### P1 — Player controls and camera (L) *(new 2026-11-11)*
 
@@ -1799,8 +1867,9 @@ Mirror assemblies did not compile in Unity, nothing ran in a WebGL player, and n
     (saved in the world package's `starter_player` block). EditMode green in Unity:
     `P1InputFocusAndPointer`, `P1UiFocusBridge`, `P1CharacterMovement`, `P1PlayerControlsLua`. PlayMode on a
     separate Unity copy: `P1PlayerControlsPlayModeTests` (W walks, an open chat blocks movement, a double
-    Space flies, the wheel zooms into first person). Not run in Unity: the stage C camera fixtures. Open:
-    spring-smoothed zoom, first-person body hiding, `Humanoid.CameraOffset`, a Unity motor EditMode test, a
+    Space flies, the wheel zooms into first person). Not run in Unity: the stage C camera fixtures, and the
+    later first-person body hiding (`BasePart.LocalTransparencyModifier`) and GUI `TextBox` focus in
+    `UserInputService`. Open: spring-smoothed zoom, `Humanoid.CameraOffset`, a Unity motor EditMode test, a
     preset asset for the tuning values. Deviations: DEV-18 to DEV-36.
   - *The survey this package started from (release 7.56.0); the lines above supersede it where they
     differ:*
@@ -2000,10 +2069,11 @@ Mirror assemblies did not compile in Unity, nothing ran in a WebGL player, and n
     (`CoreAiPlayWorldBootstrap`, menu **CoreAI/Setup/Create Play + Create World**: controls, look, a
     transient default-content mod with a baseplate and a spawn pad, overlay chat;
     `Docs/CoreAIMods/PLAY_WORLD.md`). EditMode green in Unity: `P3InstantEditLoop`, `P3WorldUndo`,
-    `P3PlayWorldBootstrap`, the `ReadyToPlay*` and world package fixtures. Open: the Play Mode acceptance of
-    the one-click world (one player, one character, landing on the pad; a second sun is created when
-    `RenderSettings.sun` is empty although the scene has a directional light), a chunked deferred encode,
-    and operation-level undo (P5), without which a player's own edit blocks `/undo`.
+    `P3PlayWorldBootstrap`, the `ReadyToPlay*` and world package fixtures. PlayMode on a separate Unity
+    copy: the one-click world's acceptance (one player and one character, walking, flight, zoom, chat focus,
+    `/fly`, `/undo`); the second sun it found is fixed in code and not re-run. Open: which samples start
+    active (an owner decision), a chunked deferred encode, and operation-level undo (P5), without which a
+    player's own edit blocks `/undo`.
   - *The survey this package started from (release 7.56.0); the lines above supersede it where they
     differ:*
   - `ConfirmedWorldMutationGate` (`Infrastructure/LuaCsGameToolExecutor.cs:80`), always composed
@@ -2099,10 +2169,10 @@ Mirror assemblies did not compile in Unity, nothing ran in a WebGL player, and n
     per chunk (one submesh per material); ray hits that answer `Instance = workspace.Terrain`, `Material`
     and `Normal`; the `Terrain/voxels.bin` package entry (CAVX v1, run-length; a package with cells
     declares `minimum_reader_version` 2); `/undo` of cells. EditMode green in Unity: Region3, rasterizer,
-    store, Lua, mesher, raycast, renderer, voxel codec and the world package terrain fixtures. Open:
-    headless raycasts through `TerrainVoxelRaycaster`, cell replication (MVP6; the wire reserves record
-    kind 4 for chunk deltas), the WebGL budget in a browser, `Touched` against Terrain. Deviations: DEV-37
-    to DEV-48.
+    store, Lua, mesher, raycast, renderer, voxel codec and the world package terrain fixtures. Headless
+    `workspace:Raycast` marching the voxels came later and has not run in Unity. Open: cell replication
+    (MVP6; the wire reserves record kind 4 for chunk deltas), the WebGL budget in a browser, `Touched`
+    against Terrain. Deviations: DEV-37 to DEV-48.
   - *The survey this package started from (release 7.56.0); the lines above supersede it where they
     differ:*
   - Nothing voxel exists. `Workspace.Terrain` is an unsupported property whose message calls voxel
@@ -2518,8 +2588,8 @@ Milestones: **stage 1 in M1** (what the block world needs), **stage 2 in M2**.
     DepthNormals in the opaque Rbx shaders, and the fog of every lit Rbx shader fixed (it used the device
     depth, so with fog on every part took the full fog colour). EditMode green in Unity:
     `RbxMaterialsV2EditModeTests`. PlayMode on a separate Unity copy: `RbxMaterialsV2CapturePlayModeTests`
-    (6) and the seam sheet (4). The fog fix's current vertex-stage form landed after the last recorded
-    run, and nothing ran in WebGL. Open: the Lava004 crack-mask bake, an emission-map sample, the SSAO
+    (6) and the seam sheet (4). The fog fix's final form (view depth from the vertex stage, fog factor per
+    pixel) landed after the last recorded run, and nothing ran in WebGL. Open: the Lava004 crack-mask bake, an emission-map sample, the SSAO
     on/off capture, stage 2. Deviation: DEV-49.
   - *The survey this package started from (release 7.56.0); the lines above supersede it where they
     differ:*
@@ -3417,9 +3487,13 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
     `vision`, `npc`, `observer`, `inventory`), one universal-prefix default, the Merchant's inventory line
     matching its tools, an empty role on `call_skill_tool` reported as a tool error, a queue for agents
     built before CoreAI starts, `AgentBuilder.WithModeEnforcement()`, and the token-cost table
-    (`Assets/CoreAI/Docs/PROMPT_TOKEN_COSTS.md`). EditMode green in Unity: the roles fixtures. Open: the
-    second half (the tiered Rbx API skill, one-file skill generation with a CI check, skill
-    self-improvement, per-world overrides) and a real-model run of the prompt fixtures.
+    (`Assets/CoreAI/Docs/PROMPT_TOKEN_COSTS.md`). EditMode green in Unity: the roles fixtures. Later the same
+    day, not run in Unity: the Rbx API skill is read in sections (`read_skill("Rbx API")` returns a core and
+    the section list; every read fits the default tool-result cap, where the whole text used to be cut to
+    its first 8,000 characters), generated with its shipped copies from one source (`skill-sources/RbxApi/`,
+    `tools/generate_skills.py`, checked in CI). Open: the Lua Modding and Full Lua skills (still hand-kept
+    pairs), the history preload (still the whole text), skill self-improvement, per-world overrides, and a
+    real-model run of the prompt fixtures and of the section list.
   - *The survey this package started from (release 7.56.0); the lines above supersede it where they
     differ:*
   - Nine built-in roles (`Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInAgentRoleIds.cs`);
@@ -4886,10 +4960,10 @@ D9 = the clock model), which keep their names.
 | D5 | Scale target and release promise (revisits owner decision 4) | (a) keep the 20-client bar; (b) adopt the scale targets (100 per room, 30 Hz, ≤50 KB/s/client) as the gated product goal; (c) no numbers | **(b)** | The flagship goal needs a target the plan can be judged against; the numbers (§4.3) are frozen before measuring and published only when the staircase passes | MVP9 |
 | D6 | WebGL role | (a) solo + pure client; (b) plus creator-mode client of a server; (c) plus a browser-hosted listen server | **(b)** | Creator edits travel as intents, so no hosting is needed; (c) is impossible (no listen sockets in browsers) | MVP8, MVP12 |
 | D7 | Where the flagship lives | (a) a separate Unity project consuming the packages via UPM; (b) a demo in this repo; (c) a package sample | **(a)** | It enforces the framework/product split and dogfoods the Git-URL install (broken today, `TODO.md`); this repo keeps packages, presets, samples, bots and harnesses | all |
-| D8 | Server Lua VM if S1 is bad | (a) keep Lua-CSharp with a cheaper guard (adaptive batch / accounting); (b) native Luau on the server only, behind `IScriptEngine` (WebGL keeps Lua-CSharp); (c) cap per-player server script work | **(a) first, (b) as the fallback** | The seam exists (§2, engine abstraction), so (b) is one adapter, but two VMs double the conformance surface | MVP9 |
+| D8 | Server Lua VM if S1 is bad | (a) keep Lua-CSharp with a cheaper guard (adaptive batch / accounting); (b) native Luau on the server only, behind `IScriptEngine` (WebGL keeps Lua-CSharp); (c) cap per-player server script work | **(a) first, (b) as the fallback** | The seam exists (§2, engine abstraction), so (b) is one adapter, but two VMs double the conformance surface. Measured 2026-11-11 (P19, `dev-docs/PERF_BASELINE_2026-11.md`, `tools/vmbench/RESULTS.md`): the 158 k instructions/s Mono figure behind S1 was taken on the SGen collector; on Unity's Boehm collector the production batch of 4 keeps about 30–37% of unguarded throughput, and because the cost is the VM's dispatch into the hook, no batching gains more than about 3.3x over batch 4. Those numbers come from the x86 Mono CLI bundled with Unity on a loaded machine; a 64-bit Standalone Mono player and an IL2CPP player decide the adaptive batch | MVP9 |
 | D9 | The flagship's creator workflow (supersedes D2) | (a) Studio and Play with a mode switch; (b) live edit plus a per-creator Play/Stop test run (D2); (c) one play-and-create mode, no Studio | **(c)** | The owner's flagship is a realtime game in which everything is instant and convenient by default; creation tools are in-play actions over the same Instance operations, and a mode switch or a publish step is the friction Roblox has | P1, P2, P5, MVP12 |
 | D10 | Order of work (supersedes "strictly sequential, multiplayer first") | (a) the sequential ladder; (b) demo-gated product milestones with parallel packages | **(b)** | Under (a) the first complete game stood behind twelve rungs, and nine releases moved no rung; a milestone ends with a playable demo, and the solo halves of GUI, sound and saving precede the network | all |
-| D11 | Scale target (revises D5) | (a) keep 100 players per room frozen as the gated goal; (b) keep the numbers as the aspiration and choose the gated room size after spike S1 | **(b)** | The guarded VM on Mono is estimated at about 63 ms per frame for 100 players against a 33 ms budget and is unmeasured on IL2CPP; Roblox runs 200 to 700 players per server, so scale is not where the flagship differs | MVP9, M3 |
+| D11 | Scale target (revises D5) | (a) keep 100 players per room frozen as the gated goal; (b) keep the numbers as the aspiration and choose the gated room size after spike S1 | **(b)** | The guarded VM on Mono is estimated at about 63 ms per frame for 100 players against a 33 ms budget (an estimate from the SGen figure that D8's 2026-11-11 measurement corrects) and is unmeasured on IL2CPP; Roblox runs 200 to 700 players per server, so scale is not where the flagship differs | MVP9, M3 |
 | D12 | Roblox interchange order | (a) both directions gate one release (the MVP14 DoD of 2026-09-24); (b) import first, export later and not a release gate | **(b)** | Import is the on-ramp for Roblox authors; export needs a manual Roblox Studio gate per release. The owner's round-trip requirement stands as the goal | MVP14 |
 | D13 | Model kinds | (a) chat only; (b) decision models as a first-class kind next to chat, behind their own seam | **(b)** | NPC behaviour and a player autopilot need fast typed decisions with probabilities; one protocol (`/v1/systemone`) is spoken by TypeSafe, OpenRouter, llama.cpp, Ollama and LM Studio, and a logprob fallback covers ordinary chat endpoints (`dev-docs/COMPETITIVE_SCAN_2026-11-11.md` §4) | P13 |
 | D14 | How game UI is authored | (a) the Roblox GUI classes only (`ScreenGui`, `Frame`, ...); (b) UXML/USS text from Lua only; (c) UXML/USS text from Lua as the primary path, with the Roblox GUI classes as a second, interchangeable entrance on the same element factory | **(c)** | Owner decision: interfaces are UXML and USS, changeable from Lua while the game runs. Models write this markup well, one theme keeps screens consistent, and a text change is a live edit. Roblox has no markup (instances plus `StyleSheet` rules), so the surface is CoreAI-only and the GUI classes stay for imported Roblox scripts and for the AI's Roblox priors | P18, MVP15 |

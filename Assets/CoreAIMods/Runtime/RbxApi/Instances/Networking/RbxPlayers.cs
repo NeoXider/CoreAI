@@ -251,6 +251,13 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
         /// </remarks>
         public Action<RbxInstance, RbxVector3, RbxVector3> RootPartSpawnSeeder { get; set; }
 
+        /// <summary>
+        /// Seeds every part of a newly built R6 character into the external part sink. With one set (here or on
+        /// the <see cref="RbxPlayers"/> service), the factory builds the R6 body; without one, the minimal
+        /// character of a root part and a Humanoid. See <see cref="RbxPlayers.CharacterPartSeeder"/>.
+        /// </summary>
+        public CharacterRig.IRbxCharacterPartSeeder CharacterPartSeeder { get; set; }
+
         private RbxInstance ResolveRootPart()
         {
             if (Character == null || Character.IsDestroyed)
@@ -445,6 +452,19 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             get;
             set;
         }
+
+        /// <summary>
+        /// Seeds the parts of every character the factory builds for this service's players: set, a spawned
+        /// character is the R6 body (<see cref="CharacterRig.RbxR6Rig"/>); null, the minimal one of a root part
+        /// and a Humanoid. A Player's own <see cref="RbxPlayer.CharacterPartSeeder"/> wins over this one.
+        /// </summary>
+        /// <remarks>
+        /// WHY the presence of a seeder decides the body: limbs need their size, colour and collision in the
+        /// part sink before they enter the world, and a world without a sink (a raw registry, a storage-only
+        /// tool) would materialize six colliding grey default blocks on top of the root. A host that wants
+        /// the minimal character in a world that has a sink assigns null.
+        /// </remarks>
+        public CharacterRig.IRbxCharacterPartSeeder CharacterPartSeeder { get; set; }
 
         /// <summary>
         /// Returns the real Player registered for an actor, creating it once if needed. Refuses,

@@ -7,31 +7,41 @@ it needs to write Roblox-style scripts (`Instance.new`, `game`/`workspace`, `Vec
 
 ## What a skill is
 
-Skills keep the Programmer system prompt small. The prompt only *names* the skill; the full
-reference is loaded lazily. The agent calls the meta-tool:
+Skills keep the Programmer system prompt small. The prompt only *names* the skill; the
+reference is loaded lazily, and in parts. The agent calls the meta-tool:
 
 ```
-read_skill('Rbx API')
+read_skill('Rbx API')                       -- the core rules and the section list
+read_skill('Rbx API', section='terrain')    -- one section
 ```
 
-and receives the whole reference back as text. The classic Lua surface is a sibling skill,
-`read_skill('Lua Modding')`; the Rbx skill covers only the Roblox-style API and assumes the
-classic one for timers/persistence/events.
+A bare read returns the **core**: the rules every Roblox-style script needs (studs, the shared world,
+WorldEdit, deferred signals, budgets, creating and finding instances, the Part properties, the services
+that are placeholders, what is not implemented, the error format) and one line per section saying what it
+covers. Each section (`scripting`, `datatypes`, `instances`, `attributes`, `parts`, `tweens`, `messaging`,
+`terrain`, `building`, `characters`, `input`, `camera`, `gui`, `uxml`, `lighting`, `ai`) is read only when
+the task uses it. Every read stays under the default tool-result cap (`MaxToolResultChars`, 8,000
+characters): before the split the skill was one 71,000-character text, and the in-game agent saw only its
+first 8,000 characters. `all=true` still returns everything at once, for an external client without that
+cap. The classic Lua surface is a sibling skill, `read_skill('Lua Modding')`; the Rbx skill covers only the
+Roblox-style API and assumes the classic one for timers/persistence/events.
 
 ## How it is wired
 
-Same pattern as the Lua Modding skill:
-
-- **Canonical text** — `Assets/CoreAiUnity/Resources/AgentSkills/RbxApi.txt`. Editor/Resources
-  hosts load this override.
-- **Built-in fallback** — `BuiltInRbxApiSkillText` in
-  `Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInRbxApiSkillText.cs`. Code-only hosts
-  (no Resources) fall back to this constant. The two are byte-identical, pinned by an EditMode
-  test (`LuaModdingSkillEditModeTests`; its phrase checks also run on Linux in the portable
-  Lua-tier suite, `tools/portable/LuaTests`, while the `Resources` comparison needs Unity).
-- **Registration** — `CoreAiModsInstaller.RegisterCoreAiMods` adds the skill to the built-in
-  Programmer role (`AddSkillForRole`), loading the Resources override if present and the built-in
-  constant otherwise. `read_skill` resolves the skill by its name, `"Rbx API"`.
+- **Source** — `skill-sources/RbxApi/` at the repository root: `skill.json` (name, catalog description,
+  output paths) and one `NN-name.md` file per section, in file-name order; `00-core.md` is the entry and
+  holds a `<!-- sections -->` line that the generator replaces with the section list. To add a section,
+  write a file and run `python tools/generate_skills.py`.
+- **Generated copies** — `Assets/CoreAiUnity/Resources/AgentSkills/RbxApi.txt` (Editor/Resources hosts
+  load it) and `BuiltInRbxApiSkillText` in
+  `Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInRbxApiSkillText.cs` (the fallback for code-only
+  hosts). Both hold the same text, every section opened by a `<!-- section: name -->` line, and are never
+  edited by hand: `SkillSourceCopiesEditModeTests` (portable CI) and `python tools/generate_skills.py
+  --check` fail when a copy and its source disagree.
+- **Registration** — `CoreAiModsInstaller.RegisterCoreAiMods` adds the skill to the `lua-builder` tool
+  profile (the Programmer's), loading the Resources text if present and the built-in constant otherwise,
+  through `SkillSet.FromTextContent`, which splits a marked text into its sections (a host override
+  without markers stays one document). `read_skill` resolves the skill by its name, `"Rbx API"`.
 
 The Rbx Lua bindings themselves live in `Assets/CoreAIMods/Runtime/Scripting/LuaCs/LuaCsRbx*`
 (namespaces `CoreAI.Mods.Rbx.*`, assemblies `CoreAI.RbxApi.*`) and are enabled through
@@ -61,21 +71,26 @@ For the full picture of what has landed and what is planned, see
 
 ## What the skill text currently claims
 
-Keep these in step with the runtime when the skill text is edited:
+Keep these in step with the runtime when the skill text is edited. Each claim names the section of
+`skill-sources/RbxApi/` that makes it (`core` is the entry document a bare `read_skill('Rbx API')`
+returns):
 
-- Section 4 lists the core creatable classes: `Part`, `Folder`, `Model`, `ClickDetector`,
-  `MaterialVariant`, `RemoteEvent`, `UnreliableRemoteEvent`, and `RemoteFunction`. `Camera` is not
-  creatable — a mod reaches the world camera through `workspace.CurrentCamera`. `Humanoid` (section 7)
-  and the eight value objects `IntValue`, `NumberValue`, `StringValue`, `BoolValue`, `ObjectValue`,
-  `Vector3Value`, `CFrameValue`, `Color3Value` (section 9) are creatable too, and so is `Backpack` (a
-  plain container). A real Roblox class that is not built yet (`WedgePart`, `SpawnLocation`, `Weld`,
-  `Attachment`, …) raises `NOT_IMPLEMENTED` instead of "Unable to create".
-- Section 4 describes the service catalog as 42 registrations: the tree-backed `HttpService`,
-  `Players`, `Debris`, `TweenService`, `CollectionService` and `ScriptContext`, the `RunService` /
-  `UserInputService` fallbacks the standard runtime replaces, and loud placeholders with a rung
-  (`DataStoreService`, `ContextActionService`, `SoundService`, `StarterGui`, `AIService`) or a
+- The `core` section lists every creatable class with the section that explains it: `Part`, `Folder`,
+  `Model`, `Backpack` (a plain container), `ClickDetector` (`input`), `RemoteEvent`,
+  `UnreliableRemoteEvent`, `RemoteFunction`, `BindableEvent`, `BindableFunction` (`messaging`),
+  `MaterialVariant` (`parts`), `Humanoid` (`characters`), `PointLight` (`lighting`), `TextGenerator`
+  (`ai`), the eight value objects `IntValue`, `NumberValue`, `StringValue`, `BoolValue`, `ObjectValue`,
+  `Vector3Value`, `CFrameValue`, `Color3Value` (`attributes`), the GUI classes (`gui`), `SelectionBox`
+  (`building`) and `TextChatCommand` (`chat`). `Camera` is not creatable — a mod reaches the world camera
+  through `workspace.CurrentCamera`. A real Roblox class that is not built yet (`WedgePart`,
+  `SpawnLocation`, `Weld`, `Attachment`, …) raises `NOT_IMPLEMENTED` instead of "Unable to create".
+- The `instances` section describes the service catalog: the tree-backed `HttpService`, `Players`,
+  `Debris`, `TweenService`, `CollectionService` and `ScriptContext`, the `RunService` /
+  `UserInputService` fallbacks the standard runtime replaces, the live `StarterGui`, `UxmlService`,
+  `TextChatService` and `AIService` (which answers only when the game turned AI from Lua on), and loud
+  placeholders with a rung (`DataStoreService`, `ContextActionService`, `SoundService`) or a
   backlog/unsupported status (`Teams`, `PhysicsService`, `PathfindingService`, `MarketplaceService`, …).
-- Section 1 carries the scheduler and signal rules: `ConnectParallel` is `Connect` (DEV-5, a note
+- The `scripting` section carries the scheduler and signal rules: `ConnectParallel` is `Connect` (DEV-5, a note
   once per mod); a one-off `execute_lua` chunk gets `CONTEXT_VIOLATION` from
   `Connect`/`Once`/`ConnectParallel`/`Wait`; every handler receives its own copy of a table argument;
   a self-re-firing handler is cut after 10 generations (`SIGNAL_CASCADE`) and more than 16,384 handler
@@ -83,7 +98,7 @@ Keep these in step with the runtime when the skill text is edited:
   a NaN duration is `BAD_ARGUMENT`, `task.cancel` of a finished task is a no-op; a thread may loop
   forever as long as it yields, memory is budgeted per resume, string patterns stop after 5,000,000
   steps per call and `gsub`/`format` results at 1,000,000 characters.
-- Section 1 also states the task-handle rules (`task.spawn/defer/delay` accept a handle the mod's own
+- The `scripting` section also states the task-handle rules (`task.spawn/defer/delay` accept a handle the mod's own
   `task.*` call returned and `task.spawn(t) == t`; a finished task, one inside a scheduler wait,
   another mod's task or a `coroutine.create` thread is `BAD_ARGUMENT`), native `coroutine.yield`
   (parks a task until `task.spawn(t, ...)`, whose arguments it returns; `CONTEXT_VIOLATION` in a
@@ -106,20 +121,21 @@ Keep these in step with the runtime when the skill text is edited:
   states the reload rule: `manage_mods reload` and the Hub's Save & run remove the previous run's
   startup objects first, `keep_objects=true` keeps them, and two budget cuts in a row quarantine the
   mod and keep it from starting with the next game.
-- Section 2 lists `Vector2:Angle`, the CFrame `components`/`ToEulerAngles`/`ToOrientation`/
+- The `datatypes` section lists `Vector2:Angle`, the CFrame `components`/`ToEulerAngles`/`ToOrientation`/
   `ToAxisAngle`/`AngleBetween` family and `CFrame.fromRotationBetweenVectors`, `Color3.toHSV`, the
   argument coercion rule (Luau's: number ↔ numeric string, constructor numbers 0 when nil, booleans
   never converted), 32-bit
-  UDim offsets and the ±(2^53−1) `NextInteger` bounds. Section 3 lists `Enum.X:FromName` /
+  UDim offsets and the ±(2^53−1) `NextInteger` bounds. It also lists `Enum.X:FromName` /
   `:FromValue`, `Enum.KeyCode.None = 0` with `Unknown` as its alias, and that an Enum property or
   instance-method argument takes the item, its Name or its Value while datatype members need the
   `EnumItem`.
-- Section 4 also states that an `UnreliableRemoteEvent` payload over 1,000 bytes is
-  `PAYLOAD_TOO_LARGE` in solo as well as online, that `ClickDetector.MouseClick` passes the clicking
+- The `messaging` section states that an `UnreliableRemoteEvent` payload over 1,000 bytes is
+  `PAYLOAD_TOO_LARGE` in solo as well as online; the `input` section that `ClickDetector.MouseClick` passes the clicking
   player, measures `MaxActivationDistance` from that player's character (from the camera when there
-  is none) and works for a detector under a `Model` or `Folder` (the deepest detector wins), and that
-  `CollectionService.TagAdded`/`TagRemoved`/`GetAllTags` count only holders inside the DataModel.
-- Section 4 also states the instance-core rules: the per-actor instance quota (2,048; 4,032 per
+  is none) and works for a detector under a `Model` or `Folder` (the deepest detector wins); and the
+  `attributes` section that `CollectionService.TagAdded`/`TagRemoved`/`GetAllTags` count only holders
+  inside the DataModel.
+- The `instances` section states the instance-core rules: the per-actor instance quota (2,048; 4,032 per
   WebGL world) and its `BUDGET_EXCEEDED` refusal naming the call, `Instance.Changed` on every instance
   and `GetPropertyChangedSignal` refusing an event, a method or a near-miss typo of a known property
   while a real unmodelled property gets a never-firing signal (the same signal for a name, disconnected by
@@ -127,32 +143,32 @@ Keep these in step with the runtime when the skill text is edited:
   nothing), removal handlers of a destroyed
   instance reading the instance they were handed, `AncestryChanged` on every descendant, `game:IsLoaded()`, the 100-character `Name`, the 2,048-level depth limit, `Clone`
   remapping `PrimaryPart`/`ObjectValue.Value` onto the copies, `game:Clone()`/`player:Clone()` → nil,
-  the Debris refusals (services, `game`, the camera, a `Player`) and the TweenService rules
-  (WorldEdit, tweenable types, per-actor retention of 256 finished tweens with the WRONG/RIGHT pair).
-- Sections 5 and 6 state the Part write rules (strict booleans, numbers for strings and numeric
+  the Debris refusals (services, `game`, the camera, a `Player`); the `tweens` section the TweenService
+  rules (WorldEdit, tweenable types, per-actor retention of 256 finished tweens with the WRONG/RIGHT pair).
+- The `parts` section states the Part write rules (strict booleans, numbers for strings and numeric
   strings for numbers, Enum properties by Name or Value, `Size` clamped to [0.001, 2048], non-finite
   spatial values refused, the `Part.Anchored expects a boolean, got string` error shape) and
   `CanCollide = false` as in Roblox (bodies pass through, `Touched` and `Raycast` still see the part;
-  only `workspace` content is physical). Section 7 states the Humanoid rules (`Died` only inside
+  only `workspace` content is physical). The `characters` section states the Humanoid rules (`Died` only inside
   `workspace`, `JumpPower` in [0, 1000], `math.huge` health, write authority for
   `TakeDamage`/`MoveTo`/`ChangeState`, a ~1-stud arrival radius on the ground plane, `MoveTo` ending
   with `false` when a script or a tween moves the `HumanoidRootPart`, `Humanoid:Clone` keeping the
-  health and movement values). Section 8 adds the non-archivable character (`character:Clone()` is
+  health and movement values), the non-archivable character (`character:Clone()` is
   nil until the script sets `Archivable = true`) and `Player:Kick(message)` (the text reaches the
   kicked client, cut to 1,024 UTF-8 bytes; a number is sent as its `tostring` text, any other
-  non-string is `BAD_ARGUMENT`). Section 9 says that `.Value` writes convert like arguments and that
-  `IntValue.Value` refuses a value outside -2^63..2^63-1. Section 12 caps
+  non-string is `BAD_ARGUMENT`). The `attributes` section says that `.Value` writes convert like arguments
+  and that `IntValue.Value` refuses a value outside -2^63..2^63-1, and caps
   attributes and tags at 256 per instance, limits a new attribute name to ASCII letters, digits,
-  `.`, `-`, `/` and `_`, and a new tag to 100 characters. Section 13 documents the
+  `.`, `-`, `/` and `_`, and a new tag to 100 characters. The `core` section documents the
   `[mod:<id> script:main.lua line:N]` prefix on errors raised inside a mod, argument numbers that do
   not count `self`, that `pcall`, `xpcall` and `coroutine.resume` all receive exactly that one line
   (a budget cut excepted), the Lua-style `bad argument #n to 'fn' (x expected, got y)` of the
   mod-core functions, and the one coercion rule of both surfaces: a string parameter takes a number as
   `tostring` writes it (`store_set(7, 8)`, `FindFirstChild(5)`), a number parameter a string `tonumber`
   accepts, an integer parameter truncates toward zero, and a boolean parameter takes only
-  `true`/`false` (`FindFirstChild(name, 1)` is `BAD_ARGUMENT`). Section 14 adds that Luau nesting
-  deeper than 200 levels is a syntax error. Section 14 lists the loud global stubs
-  (`BrickColor`, `NumberSequence`, `ColorSequence`, `NumberRange`, `Ray`, `Region3`, `Rect`,
+  `true`/`false` (`FindFirstChild(name, 1)` is `BAD_ARGUMENT`). The `scripting` section adds that Luau
+  nesting deeper than 200 levels is a syntax error, and the `core` section lists the loud global stubs
+  (`BrickColor`, `NumberSequence`, `ColorSequence`, `NumberRange`, `Rect`,
   `PhysicalProperties`, `OverlapParams`, `DateTime`, `shared`), each with its workaround.
 - `BasePart` exposes `Shape`, `Material`, `MaterialVariant` (string; `""` for none), `Orientation`, and `Rotation` in addition to the MVP1
   set. All 45 `Enum.Material` items render; an unmapped id resolves to a magenta diagnostic
@@ -170,7 +186,7 @@ Keep these in step with the runtime when the skill text is edited:
   read-only `MaxPlayers`; assigning `MaxPlayers` from a mod is refused rather than ignored.
   `Player:LoadCharacterAsync()` (yielding; `LoadCharacter()` is its deprecated alias),
   `CharacterAdded` / `CharacterRemoving`, `DistanceFromCharacter` and the respawn after
-  `RespawnTime` are described in section 8.
+  `RespawnTime` are described in the `characters` section.
 - `BasePart`'s network-ownership family (`SetNetworkOwner`, `GetNetworkOwner`,
   `SetNetworkOwnershipAuto`, `GetNetworkOwnershipAuto`, `CanSetNetworkOwnership`) is a loud stub:
   the server simulates every part, and ownership is deferred to the replication rung.

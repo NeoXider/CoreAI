@@ -420,7 +420,10 @@ made after the confirmation reopen too. What triggers a record (`RbxWorldRuntime
   source store from anywhere else — the Hub **Mods** page, host code — is recorded by the frame pump at
   the next frame (so it needs the pump), never under the shared gate, and at most once per frame.
 - **A change to the world tree alone** — a world-owned instance created, removed, re-parented or
-  written, seen through the registry's events while a gated call runs — is recorded at most once per
+  written, seen through the registry's events while a gated call runs, or a change across that call of the
+  state whose setters raise no event (the `lighting`, `starter_player` and `starter_gui` blocks and the
+  PointLight and GUI properties, compared by `RbxWorldStateMark.Values` at its start and end; a day-cycle
+  script writing ClockTime between calls is not seen) — is recorded at most once per
   `StartupRefreshInterval` (5 s by default; `TimeSpan.Zero` records every change at once). The first
   change after a quiet interval is recorded at once; a change inside the interval is recorded by the
   frame pump once it has passed, together with every change made meanwhile. A change made within the

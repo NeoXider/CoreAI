@@ -51,6 +51,12 @@ tags: movement, camera
   (`INVALID_CHARACTER`, `EMPTY_SEGMENT`, `SEGMENT_TOO_LONG`, `TOO_DEEP`, `PATH_TOO_LONG`, `RESERVED_NAME`).
   Moving a mod rewrites only this line (`Assets/CoreAIMods/Runtime/ModFolders/README.md`).
 - `tags` — optional, comma-separated.
+- `context` — optional, the script context the mod declares for MVP4: `server`, `client` or `shared`
+  (any case). It is parsed and stored, and nothing acts on it yet: every mod still runs as a legacy
+  script whatever it declares, and a value that is not a context is not refused yet (MVP4 step C1 adds
+  that refusal; `dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md`, SC-5).
+- `parent` — optional, the `/`-separated instance path from `game` where the mod's script is meant to
+  live (SC-6). It is parsed and kept on the header only; nothing places a script by it yet.
 
 Parsing rules:
 - The block form must be the first thing in the file: the source starts with `--[[@coreai` and the
@@ -97,6 +103,13 @@ name, description, version, author, owner, capabilities, `Active` and `Entry`, i
   next one is stamped, and a world package that carries one is refused. A first load while the store
   cannot be listed (`ILuaModSourceStore.List` throws, or the file store answers a listing it marks
   unreadable) stores the mod without an order instead of stamping it first.
+- `string Context = "";` — the context the header declares, in its canonical spelling (`server`,
+  `client`, `shared`) when it is valid, otherwise the value the manifest already held, otherwise empty
+  (a legacy script). Every manifest writer derives it the same way (`LuaModManifest.ResolveContext`), and
+  the world package's mod entries carry it. Omitted from JSON when empty, so the manifest of a mod that
+  declares nothing is byte-identical to one written before the field existed; a 7.56.0 reader refuses a
+  package whose mod manifest carries it. Stored only: nothing reads it to decide where or whether a mod
+  runs yet (MVP4 steps C1–C6).
 - `bool SuspendedAfterBudgetTrips = false;` — set together with `Active = false` when the runtime
   quarantined the mod after repeated budget trips (§5a), so neither a restart nor a world restore starts
   it again; a successful load or reload by hand writes a manifest without it. Omitted from JSON when
@@ -417,6 +430,18 @@ call, which is exactly why it must stay off per-frame paths.
 - WebGL: the `Resources` source works. File stores such as `FileLuaModSourceStore` confirm durability
   through `CoreAiWebGlPersistence` (the engine's automatic `persistentDataPath` persistence) instead of
   driving IDBFS by hand. The seeder is synchronous.
+- Windows path length: `FileLuaModSourceStore` writes paths of at most 259 characters on every runtime. With a
+  store id the longest one is the storage root plus 173 characters (`\CoreAI\Mods\Stores\id-<64 hex>\id-<64 hex>\
+  manifest.json.tmp`: the two SHA-256 folders keep store ids and mod ids case-safe and collision-free), so a storage
+  root longer than 86 characters cannot keep a mod (161 without a store id); the exact source set a confirmed world
+  load stages under `.world-sessions` needs 117 more characters below the store folder, so such a load is refused
+  loudly from a root longer than 55 characters with a store id (130 without). Every save there, the
+  best-effort `Save` included, throws `LuaModSourceStorageRootTooLongException`, which names the folder and says to
+  point `CoreAiStorageRoot.Override` at a shorter one or shorten the company or product name `persistentDataPath` is
+  built from; the session's admission check refuses the mod before it runs, the Hub shows the message, and the
+  seeder counts such a mod in `SeedResult.Failed` (with `FirstFailure`) and logs an error instead of counting it as
+  installed. The seeder also reads every save back, so a host store that drops a save silently is reported the same
+  way. Stores written before keep their folder names and load unchanged. Tests: `FileStoreLongRootEditModeTests`.
 - The `COREAI_LUA` define gates the Lua demos, benchmark scenarios and Lua-dependent tests; the
   Lua-CSharp runtime ships bundled as `Lua.dll`/`Lua.Annotations.dll` in this package (see
   [the package README](../../Assets/CoreAIMods/README.md)).

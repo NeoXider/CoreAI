@@ -238,7 +238,8 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             const string platformWorkaround =
                 "this is a Roblox platform backend service; CoreAI worlds have no such backend";
-            const string chatWorkaround = "chat is TextChatService, which CoreAI does not support";
+            const string chatWorkaround =
+                "the legacy Chat service is deprecated in Roblox; use TextChatService and TextChatCommand";
 
             catalog.RegisterBacklogStub("StarterPack",
                 "per-player tools land with the Backpack contents slice; give items from "
@@ -268,7 +269,7 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.RegisterBacklogStub("LocalizationService",
                 "keep translated strings in a table keyed by locale");
             catalog.RegisterBacklogStub("VRService", "VR input is not supported yet");
-            catalog.RegisterUnsupportedStub("TextChatService", chatWorkaround);
+            catalog.RegisterImplementedFallback("TextChatService");
             catalog.RegisterUnsupportedStub("Chat", chatWorkaround);
             catalog.RegisterUnsupportedStub("TeleportService",
                 "a CoreAI world is one place; move the character with PivotTo instead");

@@ -40,9 +40,12 @@ Moved here from `Assets/CoreAiUnity/Docs/` on 2026-10-15.
 > WebGL-active Lua binding types). Lua-CSharp uses source-generated marshalling rather than a reflection-based
 > interpreter fallback, so host-callback marshalling works without emitted IL. The `Full` reflection tier
 > (`unity_*` bindings) is granted only by `CoreAiModsLifetimeScope.FullLuaAccessEnabled`. See the
-> `WebGlLuaSelfTest` demo (`WebGlLuaSelfTest.TryRunSelfTest`) for an in-player smoke test. Open questions:
-> `ICoreAISettings.EnableLuaOnWebGl` is serialized but not read by the Lua runtime (wire it or remove it);
-> binary-size impact and how a host can prune unused bindings for the smallest web build.
+> `WebGlLuaSelfTest` demo (`WebGlLuaSelfTest.TryRunSelfTest`) for an in-player smoke test.
+> `ICoreAISettings.EnableLuaOnWebGl` is `[Obsolete]` since 2026-11-11: Lua runs on the WebGL player like on every
+> other one, so there is no WebGL Lua switch; a build without Lua leaves `CoreAiModsLifetimeScope` out of the scene
+> (or builds without `COREAI_LUA`), and a game that keeps mods but not AI-written Lua leaves the `lua-builder` tool
+> profile off its roles. Removing the member is what is left. Open questions: binary-size impact and how a host can
+> prune unused bindings for the smallest web build.
 
 ## Skill System (before MVP2)
 

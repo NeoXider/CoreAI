@@ -118,7 +118,15 @@ namespace CoreAI.Infrastructure.World
             Component component = entry.Get(go);
             if (component != null)
             {
-                UnityEngine.Object.Destroy(component);
+                // WHY: Destroy logs an error outside Play Mode (an EditMode host or test).
+                if (Application.isPlaying)
+                {
+                    UnityEngine.Object.Destroy(component);
+                }
+                else
+                {
+                    UnityEngine.Object.DestroyImmediate(component);
+                }
             }
 
             return true;

@@ -53,7 +53,8 @@ namespace CoreAI.Mods.Rbx.Binding
     /// axis; Cylinder → CapsuleCollider with rounded ends); swap to exact colliders with physics.
     /// TODO: MVP8 — velocity read-back (AssemblyLinearVelocity) for simulated parts.
     /// </summary>
-    public sealed class InstanceGameObjectBinder : IInstanceBackingBinder, IPartPropertySink
+    public sealed class InstanceGameObjectBinder : IInstanceBackingBinder, IPartPropertySink,
+        CharacterRig.IRbxPoseDrivenParts
     {
         private static readonly int ColorPropertyId = Shader.PropertyToID("_Color");
         private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
@@ -88,6 +89,9 @@ namespace CoreAI.Mods.Rbx.Binding
 
         /// <summary>BasePart.LocalTransparencyModifier by part, local to this machine; absent means 0.</summary>
         private readonly Dictionary<InstanceId, float> _localTransparency = new();
+
+        /// <summary>Parts the character rig holds: an unanchored one runs a kinematic body (see <see cref="SetPoseDriven"/>).</summary>
+        private readonly HashSet<InstanceId> _poseDriven = new();
 
         // WHY an index by variant name (A3-08): editing a MaterialVariant repaints the parts wearing
         // it, and finding them used to walk every binding in the world — a whole-world pass for each
@@ -733,6 +737,7 @@ namespace CoreAI.Mods.Rbx.Binding
         public void OnPartDestroyed(InstanceId id)
         {
             _localTransparency.Remove(id);
+            _poseDriven.Remove(id);
             bool boundPart = _bindings.TryGetValue(id, out BindingEntry entry) && entry.IsPart;
             if (!boundPart && !_partProperties.ContainsKey(id))
             {
@@ -985,6 +990,28 @@ namespace CoreAI.Mods.Rbx.Binding
             PartProperties properties = GetPartPropertiesOrDefault(id);
             properties.CanCollide = canCollide;
             Store(id, properties, PartAspect.CanCollide);
+        }
+
+        /// <summary>
+        /// Holds (or lets go of) a part for the character rig. While held, an unanchored part's Rigidbody is
+        /// kinematic: it keeps its collider and contacts but takes no gravity or velocity, so it stays where
+        /// the rig poses it, as a Motor6D's Part1 rides its assembly in Roblox. Let go, it simulates again.
+        /// The flag survives Anchored toggles and is dropped when the part is destroyed.
+        /// </summary>
+        public void SetPoseDriven(InstanceId id, bool driven)
+        {
+            bool changed = driven ? _poseDriven.Add(id) : _poseDriven.Remove(id);
+            if (changed && _bindings.TryGetValue(id, out BindingEntry entry) && entry.IsPart
+                && entry.OwnsGameObject && entry.Rigidbody != null)
+            {
+                entry.Rigidbody.isKinematic = driven;
+            }
+        }
+
+        /// <inheritdoc />
+        public bool IsPoseDriven(InstanceId id)
+        {
+            return _poseDriven.Contains(id);
         }
 
         public void SetShape(InstanceId id, RbxPartShape shape)
@@ -1874,7 +1901,7 @@ namespace CoreAI.Mods.Rbx.Binding
                 : resolved;
         }
 
-        private static void ApplyAnchored(BindingEntry entry, bool anchored)
+        private void ApplyAnchored(BindingEntry entry, bool anchored)
         {
             if (anchored)
             {
@@ -1895,6 +1922,7 @@ namespace CoreAI.Mods.Rbx.Binding
                 // WHY: DEV-6 — Roblox gravity is applied per-body as a custom force (MVP8);
                 // Unity's global Physics.gravity must never move Roblox parts.
                 entry.Rigidbody.useGravity = false;
+                entry.Rigidbody.isKinematic = _poseDriven.Contains(entry.Id);
             }
         }
 

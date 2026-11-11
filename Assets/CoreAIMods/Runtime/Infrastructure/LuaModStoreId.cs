@@ -1,6 +1,5 @@
 using System.IO;
 using System;
-using System.Security.Cryptography;
 using System.Text;
 
 namespace CoreAI.Infrastructure.Lua
@@ -8,9 +7,10 @@ namespace CoreAI.Infrastructure.Lua
     /// <summary>
     /// Maps an optional store id (a composition-level namespace) onto a file store's root directory.
     /// An empty id keeps the shared default root unchanged — the main game's persisted mods stay
-    /// exactly where they are today. A non-empty id resolves to a <c>Stores/id-&lt;sha256&gt;</c>
-    /// subdirectory, so compositions with different ids (e.g. demo scenes with different Lua tiers)
-    /// persist and rehydrate fully isolated mod sets.
+    /// exactly where they are today. A non-empty id resolves to a <c>Stores/s-&lt;digest&gt;</c>
+    /// subdirectory (<see cref="CoreAiStorageNames.StoreFolderName"/>), or to the <c>Stores/id-&lt;sha256&gt;</c>
+    /// one an earlier build created when it exists, so compositions with different ids (e.g. demo scenes with
+    /// different Lua tiers) persist and rehydrate fully isolated mod sets.
     /// </summary>
     public static class LuaModStoreId
     {
@@ -18,7 +18,9 @@ namespace CoreAI.Infrastructure.Lua
 
         /// <summary>
         /// Returns <paramref name="rootDirectory"/> untouched for an empty id, otherwise the
-        /// id-specific subdirectory under it.
+        /// id-specific subdirectory under it: the long-named one when an earlier build created it, else the short one.
+        /// A lone UTF-16 surrogate in the id throws before any I/O (the strict encoder would otherwise alias
+        /// distinct malformed ids).
         /// </summary>
         public static string ApplyTo(string rootDirectory, string storeId)
         {
@@ -28,22 +30,10 @@ namespace CoreAI.Infrastructure.Lua
                 return rootDirectory;
             }
 
-            byte[] digest;
-            using (SHA256 algorithm = SHA256.Create())
-            {
-                // WHY: unpaired UTF-16 surrogates must be rejected before any I/O. The permissive
-                // UTF-8 encoder replaces them with the same replacement bytes, which would alias
-                // distinct malformed ids; the strict encoder throws instead.
-                digest = algorithm.ComputeHash(new UTF8Encoding(false, true).GetBytes(id));
-            }
-
-            StringBuilder name = new("id-");
-            foreach (byte value in digest)
-            {
-                name.Append(value.ToString("x2"));
-            }
-
-            return Path.Combine(rootDirectory, StoresFolderName, name.ToString());
+            string legacy = Path.Combine(rootDirectory, StoresFolderName, CoreAiStorageNames.LegacyStoreFolderName(id));
+            return Directory.Exists(legacy)
+                ? legacy
+                : Path.Combine(rootDirectory, StoresFolderName, CoreAiStorageNames.StoreFolderName(id));
         }
 
         /// <summary>Migrates a legacy namespace only after the host proves its exact identity; never merges or overwrites.</summary>

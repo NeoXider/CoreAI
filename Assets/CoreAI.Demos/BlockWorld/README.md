@@ -110,8 +110,8 @@ reloads on its own.
 | `blockworld_autopilot` | the block world's goals and facts for the game's autopilot, and the goals only a block world knows: gather, build, home | on the Player `Autopilot`, `AutopilotGoals`, `AutopilotState` (the host writes `AutopilotGoal`; the mod writes the Player only while the autopilot drives, so `/undo` keeps working); `BlockWorldAutopilot` |
 
 Why this cut: each mod is one thing a player can see and one thing you might want to replace. The mods never
-call each other (Lua mods have no `require` here, and `BindableEvent` is not built yet); they share state the
-Roblox way, as attributes on `workspace`, written by exactly one owner and read by anyone. Any notice a mod
+call each other (Lua mods have no `require` here, and they do not use `BindableEvent`, which mods can use
+between them now); they share state the Roblox way, as attributes on `workspace`, written by exactly one owner and read by anyone. Any notice a mod
 wants shown goes to `BlockWorldNotice`, which the HUD displays. So you can drop the HUD and write your own,
 replace the generator with a flat world, or remove the villagers, and the rest keeps working.
 

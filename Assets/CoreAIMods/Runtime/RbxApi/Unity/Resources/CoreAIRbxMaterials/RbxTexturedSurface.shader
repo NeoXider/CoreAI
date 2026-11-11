@@ -11,7 +11,7 @@ Shader "CoreAI/Rbx/Textured Surface"
         [Normal] _BumpMap("Normal Map", 2D) = "bump" {}
         _BumpScale("Normal Strength", Range(0,2)) = 1.0
         _RoughnessMap("Roughness Map", 2D) = "white" {}
-        _RoughnessScale("Roughness Scale", Range(0,2)) = 1.0
+        _RoughnessScale("Roughness Scale", Range(0,4)) = 1.0
         [Toggle] _InvertRoughness("Map Stores Smoothness", Float) = 0
         _MetallicMap("Metalness Map", 2D) = "black" {}
         _OcclusionMap("Ambient Occlusion Map", 2D) = "white" {}

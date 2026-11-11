@@ -11,6 +11,7 @@ using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Mods.Rbx.Instances.Scripts;
+using CoreAI.Mods.Rbx.Instances.TextChat;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using CoreAI.Scripting.LuaCs;
@@ -425,6 +426,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly Dictionary<IRbxScriptThread, long>
             _remoteFunctionWaitGenerations = new();
         private readonly Dictionary<InstanceId, List<PendingBindableInvoke>> _pendingBindableInvokes = new();
+        private readonly Dictionary<RbxPlayer, RbxTextSource> _textSources = new();
         private RbxScriptSignal _bindableInvokeSignal;
         private RbxScriptConnection _bindableInvokeConnection;
         private readonly HashSet<string> _legacySchedulerDeprecationOwners =
@@ -1835,6 +1837,8 @@ namespace CoreAI.Ai.LuaCs
             _tweenService?.DetachHost();
             _scheduler.PhaseReached -= PumpSchedulerPhase;
             _networkRequestConnection.Disconnect();
+            (_game?.FindFirstChildOfClass("TextChatService") as RbxTextChatService)?.DetachCommandSink();
+            _textSources.Clear();
             _bindableInvokeConnection?.Disconnect();
             _pendingBindableInvokes.Clear();
 
@@ -2437,6 +2441,48 @@ namespace CoreAI.Ai.LuaCs
             }
 
             clientCallbacks[context.ActorContext.ActorId] = registration;
+        }
+
+        /// <summary>
+        /// Connects this world's <c>TextChatService</c> to the in-world chat's command list: every
+        /// <c>TextChatCommand</c> under it becomes a slash command of that chat, and <c>Triggered</c> receives the
+        /// local player's <c>TextSource</c>. The mods composition calls it for every world it builds; null detaches.
+        /// </summary>
+        public void AttachChatCommands(IRbxChatCommandSink sink)
+        {
+            if (!(_game?.FindFirstChildOfClass("TextChatService") is RbxTextChatService service))
+            {
+                return;
+            }
+
+            if (sink == null)
+            {
+                service.DetachCommandSink();
+                return;
+            }
+
+            service.AttachCommandSink(sink, ResolveLocalTextSource, LogSink);
+        }
+
+        /// <summary>The local player's TextSource, made once per player; null without a local player.</summary>
+        private RbxInstance ResolveLocalTextSource()
+        {
+            RbxPlayer player = ResolveLocalCameraPlayer();
+            if (player == null || player.IsDestroyed)
+            {
+                return null;
+            }
+
+            if (_textSources.TryGetValue(player, out RbxTextSource known) && !known.IsDestroyed)
+            {
+                return known;
+            }
+
+            RbxTextSource source = (RbxTextSource)_registry.Create("TextSource", isRuntimeInfrastructure: true);
+            source.Name = player.Name;
+            source.UserId = player.UserId;
+            _textSources[player] = source;
+            return source;
         }
 
         /// <summary>

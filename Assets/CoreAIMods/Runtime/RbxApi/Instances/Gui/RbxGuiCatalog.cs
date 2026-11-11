@@ -13,6 +13,12 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             catalog.Register(new ClassDescriptor("GuiBase", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor("GuiBase2d", "GuiBase", true, false, false));
+            // WHY the 3D adornments here: GuiBase3d derives from GuiBase in the mirror, so they share the GUI root,
+            // but they are drawn in the world by the binder rather than by the runtime UI host.
+            catalog.Register(new ClassDescriptor("GuiBase3d", "GuiBase", true, false, false));
+            catalog.Register(new ClassDescriptor("InstanceAdornment", "GuiBase3d", true, false, false));
+            catalog.Register(new ClassDescriptor("SelectionBox", "InstanceAdornment", false, true, false,
+                descriptor => new CoreAI.Mods.Rbx.Instances.Adornments.RbxSelectionBox(descriptor)));
             catalog.Register(new ClassDescriptor("LayerCollector", "GuiBase2d", true, false, false));
             catalog.Register(new ClassDescriptor("ScreenGui", "LayerCollector", false, true, false,
                 descriptor => new RbxScreenGui(descriptor)));

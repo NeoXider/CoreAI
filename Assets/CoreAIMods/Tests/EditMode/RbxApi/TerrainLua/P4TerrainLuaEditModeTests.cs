@@ -16,7 +16,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.TerrainLua
     [TestFixture]
     public sealed class P4TerrainLuaEditModeTests
     {
-        /// <summary>The example of the skill's block-world section (dev-docs/TERRAIN_SKILL_SECTION.md), verbatim.</summary>
+        /// <summary>The example of the skill's block-world section (skill-sources/RbxApi, the terrain section), verbatim.</summary>
         internal const string SkillExample =
             "local terrain = workspace.Terrain\n"
             + "\n"

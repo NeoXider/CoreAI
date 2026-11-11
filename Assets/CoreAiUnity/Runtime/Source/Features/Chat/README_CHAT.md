@@ -11,6 +11,12 @@ Regardless of UI, you can call the LLM from any script via the static **`CoreAi`
 
 The “UI vs code” table is in [COREAI_SINGLETON_API](../../../../Docs/COREAI_SINGLETON_API.md) (subsection *Sending messages: convenient from UI and from code*).
 
+**Other surfaces over the same chat service**
+
+- [In-world chat overlay](../../../../Docs/CHAT_OVERLAY.md) — a one-line chat over the running game with an agent status line and slash commands (`/help`, `/agent`, `/model`, `/stop`, …).
+- [Chat Markdown](../../../../Docs/CHAT_MARKDOWN.md) — optional Markdown rendering of assistant answers in this panel (and the Hub chat) when the renderer package is installed.
+- [Orchestrator mode](../../../../Docs/ORCHESTRATOR_MODE.md) — off by default; the agent you chat with plans and hands tasks to sub-agents.
+
 ## Example (Play Mode + Console)
 
 ![AI Chat next to Unity Console — streaming logs and the panel in Play Mode](./chat-readme-example.png)

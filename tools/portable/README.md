@@ -35,15 +35,28 @@ The [portable NUnit suite](Tests/README.md) runs existing engine-free tests agai
 
 It is the **first** CI job (`portable-core`, `ubuntu-latest`, no Unity license) and must finish with 0 failures. That is what makes "the core does not depend on Unity" checkable rather than aspirational: this project references no Unity assembly at all, so one `using UnityEngine;` in `Assets/CoreAI/Runtime/Core/**` breaks the build. Re-run the command above to see the current case count yourself; it is not a badge.
 
-The same job also builds and tests the three engine-free assemblies of the Mods package, each from its own project next to this one:
+The same job also builds and tests the engine-free assemblies of the Mods package, each from its own project next to this one:
 
 | Project | Sources (Unity asmdef) | What its tests cover |
 |---|---|---|
 | [`CoreAI.RbxApi.Datatypes`](CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj) | `Assets/CoreAIMods/Runtime/RbxApi/Datatypes` | `Vector3`, `Vector2`, `CFrame` golden fixtures, `Color3`, `UDim`/`UDim2`, `Random` and the enum registry |
 | [`CoreAI.RbxApi.Instances`](CoreAI.RbxApi.Instances/CoreAI.RbxApi.Instances.csproj) | `Assets/CoreAIMods/Runtime/RbxApi/Instances` (with `Scheduling`, `Networking`, `Replication`) | instance tree, attributes, tags, `Destroy`, the world ACL, the mod scheduler, replication, network intents and write grants |
 | [`CoreAI.LuauDownlevel`](CoreAI.LuauDownlevel/CoreAI.LuauDownlevel.csproj) | `Assets/CoreAIMods/Runtime/LuauDownlevel` | the Luau-to-Lua 5.2 source rewriter (`LuauDownleveler`) |
+| [`CoreAI.Mods.Folders`](CoreAI.Mods.Folders/CoreAI.Mods.Folders.csproj) | `Assets/CoreAIMods/Runtime/ModFolders/Domain` | mod folder paths, the folder tree, the folder operations and the header line a move rewrites |
+| [`CoreAI.RbxApi.Agents`](CoreAI.RbxApi.Agents/CoreAI.RbxApi.Agents.csproj) | `Assets/CoreAIMods/Runtime/RbxApi/Agents` | the character agents: the local player's listener position, Humanoid actuators and state providers, the player autopilot with hand-back on real input, villager brains |
 
 Each project keeps the Unity assembly name and references only what the asmdef references, and compiles as C# 9 with nullable off, like Unity does. A C# 10 feature or a `UnityEngine` reference in those folders therefore breaks the Linux build too. They exist for this gate, not as a library for plain .NET apps: in a game the Rbx API is only reachable through the Lua binding and the Unity world backing, which stay in the Unity packages.
+
+Two more test projects cover the replication wire and are **not** part of the CI jobs yet (folding them into
+`Tests/CoreAI.Portable.Tests.csproj` is open in `TODO.md`):
+
+| Project | What it runs |
+|---|---|
+| [`ReplicationWire`](ReplicationWire/CoreAI.Portable.ReplicationWire.Tests.csproj) | the binary delta codec, its malformed-input decoder, the per-tick `ReplicationPublisher` and the receiver, against the engine-free `CoreAI.RbxApi.Instances` (`dev-docs/REPLICATION_CODEC.md`) |
+| [`ReplicationWireS2`](ReplicationWireS2/CoreAI.Portable.ReplicationWireS2.Tests.csproj) | spike S2: the remote codec's JSON against the binary codec on the same CFrame patches; it needs the Lua tier, so it stays apart from the codec's own suite |
+
+Run each with an artifacts path of its own, as `LuaTests/README.md` explains for the Lua tier, for example
+`dotnet test tools/portable/ReplicationWire/CoreAI.Portable.ReplicationWire.Tests.csproj -c Release --artifacts-path artifacts/portable-replication-wire`.
 
 The test project lists its sources file by file rather than by glob, so a new engine-free fixture must be added to `Tests/CoreAI.Portable.Tests.csproj` explicitly or it never runs in this leg. It compiles as C# 9 too (`LangVersion` 9.0, not `latest`): Unity compiles every linked test file as C# 9, so a newer language feature in one of them must break this build as it breaks the editor's.
 

@@ -102,8 +102,9 @@ installers register `camera` into the `vision` profile, which only the **Program
 
 Skill catalog for Programmer specifically (capability tiers gate what the Lua/Rbx surface can do —
 `LuaCapabilities` (`Assets/CoreAIMods/Runtime/LuaExecution/LuaCapabilities.cs`): `Read`,
-`Gameplay`, `WorldEdit`, `LogicOverride`, and the opt-in `Full` tier, which `LuaCapabilities.All`
-**excludes** by design — a hosting game must OR it in explicitly to grant reflection access):
+`Gameplay`, `WorldEdit`, `LogicOverride`, `Ui` (screens: `UxmlService` and the Roblox GUI classes), and the
+opt-in `Full` and `Ai` tiers, which `LuaCapabilities.All` **excludes** by design — a hosting game must OR
+`Full` in explicitly to grant reflection access, and `Ai` works only where the game turns AI from Lua on):
 
 - **"Lua Modding"** — the general mod-authoring API (hooks, timers, store, cross-mod events).
 - **"Rbx API"** — the Roblox-1:1 world-building surface (`Instance.new`, `game`/`workspace`,

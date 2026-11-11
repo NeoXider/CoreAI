@@ -21,6 +21,9 @@ the wheel zooms from 12.5 studs out to the player's `CameraMaxZoomDistance` and 
 (pointer locked to the centre), and a wall pulls it in. `player.CameraMode =
 Enum.CameraMode.LockFirstPerson` forces first person. In `Custom` your own `CFrame` writes are
 overwritten next frame — set `CameraType = Enum.CameraType.Scriptable` first, exactly as in Roblox.
+Close to first person the default camera hides the local character on this machine only, as Roblox does:
+it sets `LocalTransparencyModifier` (a local, never replicated BasePart property, drawn as
+`1 - (1 - Transparency) * (1 - LocalTransparencyModifier)`) on that character's parts; other characters stay drawn.
 
 ## Camera framing & controls — READ THIS before making a playable mod
 

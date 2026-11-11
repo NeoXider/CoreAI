@@ -69,8 +69,11 @@ namespace CoreAI.Mods.Rbx.Rendering
                 // WHY: Grass005 was a featureless mat — albedo variation 8.5 with a normal too weak
                 // to carve blades, so it read as flat green felt. Grass004 shows real blades; the
                 // tile drops to 4.5 studs because at 7 the blades fell below one screen pixel.
+                // WHY roughness x3.2: Grass004's roughness map averages 0.26, which rendered a lawn as
+                // wet glass: a sun glint across the field and glitter that shimmered with every camera
+                // step. Scaled, it averages 0.84.
                 CreatePackagedEntry(textureLoader, "Grass", 1280, "Grass004", 4.5f, 1.2f,
-                    0.7f, false, 0.45f, 0f)
+                    0.7f, false, 0.45f, 0f, 3.2f)
             };
         }
 
@@ -94,7 +97,7 @@ namespace CoreAI.Mods.Rbx.Rendering
         private static Entry CreatePackagedEntry(Func<string, Texture2D> textureLoader,
             string materialName, int materialValue, string textureStem, float tileWidthStuds,
             float normalStrength, float partColorInfluence, bool hasMetalness, float cavityStrength,
-            float metalAlbedoLift)
+            float metalAlbedoLift, float roughnessScale = 1f)
         {
             string prefix = "CoreAIRbxTextures/" + textureStem + "_1K-JPG_";
             Entry entry = new()
@@ -111,7 +114,7 @@ namespace CoreAI.Mods.Rbx.Rendering
                 TileWidthStuds = tileWidthStuds,
                 IntrinsicColor = Color.white,
                 PartColorInfluence = partColorInfluence,
-                RoughnessScale = 1f,
+                RoughnessScale = roughnessScale,
                 NormalStrength = normalStrength,
                 CavityStrength = cavityStrength,
                 MetalAlbedoLift = metalAlbedoLift

@@ -5,7 +5,7 @@ namespace CoreAI.Mods.Rbx.Instances
     /// subtree mirrors into the backing hierarchy) with Workspace registered as the physical
     /// world root, plus the services so Roblox-shaped paths resolve (roadmap §5.1.3):
     /// Lighting, ReplicatedStorage, ServerStorage, ServerScriptService, StarterPlayer, StarterGui,
-    /// UserInputService.
+    /// TextChatService, UserInputService.
     /// </summary>
     public static class DataModelBootstrap
     {
@@ -28,6 +28,7 @@ namespace CoreAI.Mods.Rbx.Instances
             CreateService(registry, game, "ServerScriptService");
             CreateService(registry, game, "StarterPlayer");
             CreateService(registry, game, "StarterGui");
+            CreateService(registry, game, "TextChatService");
             CreateService(registry, game, "Players");
             CreateService(registry, game, "UserInputService");
             CreateService(registry, game, "RunService");
@@ -114,6 +115,13 @@ namespace CoreAI.Mods.Rbx.Instances
             if (game.FindFirstChildOfClass("StarterGui") == null)
             {
                 CreateService(registry, game, "StarterGui");
+            }
+
+            // WHY: snapshots taken before the TextChatCommand slice have no TextChatService; restoring them must
+            // still yield a resolvable game:GetService("TextChatService").
+            if (game.FindFirstChildOfClass("TextChatService") == null)
+            {
+                CreateService(registry, game, "TextChatService");
             }
 
             // WHY: snapshots taken before the ScriptContext slice have no

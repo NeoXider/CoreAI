@@ -149,7 +149,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [TestCase("PhysicsService")]
         [TestCase("ProximityPromptService")]
         [TestCase("TeleportService")]
-        [TestCase("TextChatService")]
+        [TestCase("Chat")]
         [TestCase("BadgeService")]
         public void GetService_KnownRobloxService_ResolvesAsALoudStubNotAsUnknown(string serviceName)
         {

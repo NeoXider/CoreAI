@@ -105,7 +105,7 @@ MonoBehaviour:
     _tileWidthStuds: 4.5
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
-    _roughnessScale: 0.78
+    _roughnessScale: 3.2
     _normalStrength: 1.2
     _cavityStrength: 0.45
     _metalAlbedoLift: 0
@@ -393,7 +393,7 @@ MonoBehaviour:
     _tileWidthStuds: 5
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
-    _roughnessScale: 0.8
+    _roughnessScale: 1.6
     _normalStrength: 1.2
     _cavityStrength: 0.45
     _metalAlbedoLift: 0
@@ -409,7 +409,7 @@ MonoBehaviour:
     _tileWidthStuds: 16
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.7
-    _roughnessScale: 0.88
+    _roughnessScale: 1.6
     _normalStrength: 1.15
     _cavityStrength: 0.45
     _metalAlbedoLift: 0
@@ -441,7 +441,7 @@ MonoBehaviour:
     _tileWidthStuds: 7
     _intrinsicColor: {r: 1, g: 1, b: 1, a: 1}
     _partColorInfluence: 0.75
-    _roughnessScale: 0.9
+    _roughnessScale: 1.9
     _normalStrength: 1.05
     _cavityStrength: 0.35
     _metalAlbedoLift: 0

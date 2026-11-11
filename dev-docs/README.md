@@ -13,8 +13,8 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 - MVP8_ACCEPTANCE_MANIFEST.md — the frozen MVP8 Tier-A fixture manifest gate P8.5 cites
 - REPLICATION_PHASE0.md — the engine-free replication core as it exists after 7.39.0: what is built and tested registry-to-registry, what is not wired, the two named limits
 - REPLICATION_CODEC.md — the binary delta codec and the per-tick publisher core (MVP6 part 1): wire format, the spike S2 numbers (18.9 B per CFrame patch against 196.7 B as JSON), what is not wired yet
-- MVP4_SCRIPT_CONTEXTS_DESIGN.md — script contexts (Script / LocalScript / ModuleScript, `require`, run contexts): decisions SC-1..SC-19, the legacy mode for undeclared mods, package format 2, the build steps A1–C6
-- RUNTIME_UI_SKILL_SECTION.md, TERRAIN_SKILL_SECTION.md, AI_SERVICE_SKILL_SECTION.md — sections written by the feature authors for the Rbx API skill text (`UxmlService`, `workspace.Terrain`, `AIService` / `TextGenerator`); the source for the skill merge, kept until the merge is verified
+- MVP4_SCRIPT_CONTEXTS_DESIGN.md — script contexts (Script / LocalScript / ModuleScript, `require`, run contexts): decisions SC-1..SC-19, the legacy mode for undeclared mods, package format 2, the build steps A1–C6 (A1–A3 and B1 written on 2026-11-11)
+- SKILL_SELF_IMPROVEMENT_DESIGN.md — how a skill section could be corrected from observed failures: evidence, review gate, rollback, what is never automatic, open questions (design only)
 - RUNTIME_UI_LUA_SURFACE.md — the Lua surface over the runtime UXML/USS interpreter (`UxmlService`): members, capability, focus and hot-reload rules (P18)
 - MOD_INSTANCE_OWNERSHIP_PLAN.md — mod-owned instances + cleanup-on-unload design
 - MOD_SYSTEM_DESIGN_NOTES.md — the mod-panel 6 FPS investigation and the original mod-system phase plan (moved here from `Docs/CoreAIMods/mod-system.md`)
@@ -38,7 +38,7 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 - CONTEXT_MANAGEMENT_ROADMAP.md — planned context management design: token budget, rolling summaries, compaction (moved here from the Unity package docs)
 - TOKENS_PER_SEC_FIX_PLAN.md — tokens-per-second measurement fix plan; implemented 2026-07-01, retained as the reference for what was and was not adopted (moved here from `Docs/`)
 - WEBGL_SSE_STREAMING_HISTORY.md — the WebGL SSE streaming investigation and how the `fetch` bridge replaced it; history (moved here from `Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md` on 2026-10-15). The current behaviour is documented in `Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md`
-- MULTI_AGENT_ORCHESTRATION_V2_PLAN.md — sub-agent orchestration plan; not implemented, tracked as R9 in `TODO.md` (moved here from `TODO/MultiAgent_Orchestration_v2.0.md` on 2026-10-15)
+- MULTI_AGENT_ORCHESTRATION_V2_PLAN.md — sub-agent orchestration plan (moved here from `TODO/MultiAgent_Orchestration_v2.0.md` on 2026-10-15); written on 2026-11-11 as orchestrator mode (P14), wired into the chat and off by default, EditMode green in Unity; history per conversation and a model run are open (R9 in `TODO.md`). User docs: `Assets/CoreAiUnity/Docs/ORCHESTRATOR_MODE.md`
 
 ## Materials and graphics
 

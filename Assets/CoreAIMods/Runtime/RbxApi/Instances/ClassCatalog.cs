@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.Scripts;
+using CoreAI.Mods.Rbx.Instances.TextChat;
 
 namespace CoreAI.Mods.Rbx.Instances
 {
@@ -592,6 +593,15 @@ namespace CoreAI.Mods.Rbx.Instances
                 descriptor => new RbxRemoteFunction(descriptor)));
             catalog.Register(new ClassDescriptor("BindableEvent", "Instance", false, true, false,
                 descriptor => new RbxBindableEvent(descriptor)));
+            // WHY TextChatService a real service with only its commands part: the in-world chat already exists as
+            // CoreAI's chat, and TextChatCommand over its command registry is what scripts need first; the
+            // messaging half (channels, MessageReceived, bubbles) is the rest of P2 and stays loud stubs below.
+            catalog.Register(new ClassDescriptor("TextChatService", "Instance", false, false, true,
+                descriptor => new RbxTextChatService(descriptor)));
+            catalog.Register(new ClassDescriptor("TextChatCommand", "Instance", false, true, false,
+                descriptor => new RbxTextChatCommand(descriptor)));
+            catalog.Register(new ClassDescriptor("TextSource", "Instance", false, false, false,
+                descriptor => new RbxTextSource(descriptor)));
             catalog.Register(new ClassDescriptor("BindableFunction", "Instance", false, true, false,
                 descriptor => new RbxBindableFunction(descriptor)));
             catalog.Register(new ClassDescriptor("Player", "Instance", false, false, false,
@@ -718,6 +728,23 @@ namespace CoreAI.Mods.Rbx.Instances
             // seeing exactly what it saw before step B1.
             const string scriptMembers =
                 "a script's Enabled, RunContext and Source reach Lua with MVP4; manage the mod with manage_mods meanwhile";
+            const string chatMessages =
+                "the messaging half of TextChatService (channels, MessageReceived, bubbles) lands with P2; "
+                + "TextChatCommand works now, and a mod reaches the player through UxmlService or a ScreenGui";
+            catalog.RegisterKnownUnimplementedMembers("TextChatService",
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("MessageReceived", "P2", chatMessages),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("SendingMessage", "P2", chatMessages),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("OnIncomingMessage", "P2", chatMessages),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("OnBubbleAdded", "P2", chatMessages),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("OnChatWindowAdded", "P2", chatMessages),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("BubbleDisplayed", "P2", chatMessages),
+                RbxKnownUnimplementedMemberDescriptor.PlannedMethod("DisplayBubble", "P2", chatMessages),
+                RbxKnownUnimplementedMemberDescriptor.PlannedMethod("CanUserChatAsync", "P2", chatMessages),
+                RbxKnownUnimplementedMemberDescriptor.PlannedMethod("CanUsersChatAsync", "P2", chatMessages),
+                RbxKnownUnimplementedMemberDescriptor.PlannedMethod("CanUsersDirectChatAsync", "P2", chatMessages),
+                RbxKnownUnimplementedMemberDescriptor.PlannedMethod("GetChatGroupsAsync", "P2", chatMessages),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("ChatTranslationEnabled",
+                    "CoreAI's chat does not translate"));
             catalog.RegisterKnownUnimplementedMembers("BaseScript",
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty("Enabled", "MVP4", scriptMembers),
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty("Disabled", "MVP4", scriptMembers),
@@ -1399,7 +1426,6 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedClassDescriptor.Planned("SurfaceAppearance", "P10",
                     "use a MaterialVariant for a custom surface"),
                 RbxKnownUnimplementedClassDescriptor.Backlog("Highlight", effectsWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("SelectionBox", effectsWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Planned("Sound", "MVP17",
                     "play no audio from Lua until the audio rung lands"),
                 RbxKnownUnimplementedClassDescriptor.Planned("ParticleEmitter", "MVP17",

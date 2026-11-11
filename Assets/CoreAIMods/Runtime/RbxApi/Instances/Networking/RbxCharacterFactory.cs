@@ -1,11 +1,14 @@
 using System;
 using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Instances.CharacterRig;
 
 namespace CoreAI.Mods.Rbx.Instances.Networking
 {
     /// <summary>
-    /// Builds and replaces a player's character: the minimum Roblox shape of a Model holding a
-    /// Humanoid and a HumanoidRootPart, parented into the world.
+    /// Builds and replaces a player's character, parented into the world: the classic R6 body (a Model
+    /// with <c>HumanoidRootPart</c>, <c>Torso</c>, <c>Head</c>, <c>Right Arm</c>, <c>Left Arm</c>,
+    /// <c>Right Leg</c>, <c>Left Leg</c> and a <c>Humanoid</c>, PrimaryPart the root) when the world can seed
+    /// part state, otherwise the minimum Roblox shape of a Humanoid and a HumanoidRootPart.
     /// </summary>
     /// <remarks>
     /// WHY a factory rather than a method on <see cref="RbxPlayers"/>: loading a character needs the
@@ -13,9 +16,11 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
     /// to run from three places - a join with <c>CharacterAutoLoads</c>, an explicit
     /// <c>LoadCharacterAsync</c>, and a host that spawns a character itself.
     /// <para>
-    /// WHY the character carries no appearance, accessories or animation: those need a rig CoreAI
-    /// does not model, and every one of them is a loud stub on the Humanoid. What ships is what a
-    /// script can actually use - a Humanoid to damage and move, and a root part to position.
+    /// The body is real instances, so a script finds <c>character.Head</c> and recolours it like any Part;
+    /// <see cref="RbxCharacterRigs"/> animates it from the Humanoid, as it animates any Model with those
+    /// names. The root keeps the 2x2x1 collidable box the controls are tuned on and is invisible; the other
+    /// parts do not collide (see <see cref="RbxR6Rig.SeedFor"/>). Appearance loading, accessories, joints and
+    /// animation tracks stay loud stubs.
     /// </para>
     /// </remarks>
     public static class RbxCharacterFactory
@@ -67,6 +72,8 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             }
 
             string actorId = player.NetworkActorId;
+            IRbxCharacterPartSeeder partSeeder =
+                player.CharacterPartSeeder ?? (player.Parent as RbxPlayers)?.CharacterPartSeeder;
             RbxInstance character = registry.Create(
                 "Model",
                 ownerActorId: actorId,
@@ -95,7 +102,14 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 // its id (Roblox default when nothing was pushed — a 4x1x2 box at the origin), and
                 // that fires the moment `character.Parent = worldRoot` runs below. Seeding after
                 // that point would be too late; the box would already have materialized wrong.
+                RbxCFrame spawn = RbxCFrame.FromPosition(DefaultSpawnPosition);
+                partSeeder?.Seed(rootPart, RbxR6Rig.SeedFor(RbxR6Part.HumanoidRootPart, spawn));
                 player.RootPartSpawnSeeder?.Invoke(rootPart, RootPartSize, DefaultSpawnPosition);
+                if (partSeeder != null)
+                {
+                    BuildR6Body(registry, character, actorId, partSeeder, spawn);
+                    (character as RbxModel)?.SetPrimaryPart(rootPart);
+                }
 
                 RbxInstance humanoid = registry.Create(
                     "Humanoid",
@@ -172,6 +186,27 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             }
 
             return character;
+        }
+
+        /// <summary>
+        /// Adds the Torso, Head, arms and legs to a character that already holds its root part, each
+        /// seeded at its rest pose around <paramref name="rootCFrame"/> before the model enters the world.
+        /// </summary>
+        private static void BuildR6Body(InstanceRegistry registry, RbxInstance character, string actorId,
+            IRbxCharacterPartSeeder seeder, RbxCFrame rootCFrame)
+        {
+            for (int index = (int)RbxR6Part.Torso; index < RbxR6Rig.PartCount; index++)
+            {
+                RbxR6Part part = (RbxR6Part)index;
+                RbxInstance limb = registry.Create(
+                    "Part",
+                    ownerActorId: actorId,
+                    accessScope: InstanceAccessScope.Owned,
+                    isRuntimeInfrastructure: true);
+                limb.Name = RbxR6Rig.NameOf(part);
+                limb.Parent = character;
+                seeder.Seed(limb, RbxR6Rig.SeedFor(part, rootCFrame));
+            }
         }
 
         /// <summary>

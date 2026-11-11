@@ -42,8 +42,8 @@
   live tree-backed `Workspace`, `Lighting`, `ReplicatedStorage`, `ServerStorage`,
   `ServerScriptService`, `StarterPlayer`, `StarterGui`, `Players`, `HttpService`, `UserInputService`,
   `RunService`, `MaterialService`, `Debris`, `TweenService` and `CollectionService`, plus
-  `UxmlService` (section uxml) and `AIService` (answers only when the game turned on AI from Lua,
-  section ai). Placeholders: `DataStoreService` (MVP16), `ContextActionService` (MVP7),
+  `UxmlService` (section uxml), `TextChatService` (its `TextChatCommand`s, section chat) and `AIService`
+  (answers only when the game turned on AI from Lua, section ai). Placeholders: `DataStoreService` (MVP16), `ContextActionService` (MVP7),
   `SoundService` (MVP17), and backlog or unsupported Roblox services such as `Teams`,
   `PhysicsService`, `ReplicatedFirst`, `PathfindingService`, `MarketplaceService`, `TeleportService`
   and `BadgeService` (each error says which and gives a workaround). A placeholder's first member

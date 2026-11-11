@@ -20,7 +20,7 @@ namespace CoreAI.Tests.EditMode.RbxApi
                 ["Brick"] = (10f, 0.82f, 0.6f),
                 ["Cobblestone"] = (14f, 0.72f, 0.7f),
                 ["Metal"] = (3.5f, 0.68f, 0.45f),
-                ["Grass"] = (4.5f, 0.78f, 0.7f)
+                ["Grass"] = (4.5f, 3.2f, 0.7f)
             };
 
         [Test]
@@ -104,7 +104,9 @@ namespace CoreAI.Tests.EditMode.RbxApi
                 Assert.GreaterOrEqual(profile.NormalStrength, 0f, $"{name} normal strength");
                 Assert.LessOrEqual(profile.NormalStrength, 2f, $"{name} normal strength");
                 Assert.Greater(profile.RoughnessScale, 0f, $"{name} roughness scale");
-                Assert.LessOrEqual(profile.RoughnessScale, 2f, $"{name} roughness scale");
+                // WHY: up to 4, because a CC0 roughness map can average a quarter of the surface's real
+                // roughness (Grass004 averages 0.26 and needs 3.2 to read as a matte lawn).
+                Assert.LessOrEqual(profile.RoughnessScale, 4f, $"{name} roughness scale");
                 Assert.GreaterOrEqual(profile.PartColorInfluence, 0f, $"{name} part colour influence");
                 Assert.LessOrEqual(profile.PartColorInfluence, 1f, $"{name} part colour influence");
             }

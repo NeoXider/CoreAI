@@ -91,6 +91,13 @@ The mod-core + inter-mod API above is always present. Tiers gate the **game** bi
 - **Full** — `unity_*` generic reflection (get/set fields, call methods on ANY component). Host/singleplayer-only;
   never grant it to a networked client. Opt-in (**Enable Full Lua Access** on `CoreAiModsLifetimeScope`); NOT part
   of `All`.
+- **Ui** — screens from UXML and USS text (`game:GetService("UxmlService")`) and the Roblox GUI classes
+  (`ScreenGui`, `Frame`, `TextLabel`, ...; see
+  [RUNTIME_UI.md](../../Assets/CoreAiUnity/Docs/RUNTIME_UI.md)). Part of `All`; a host keeps mods off the screen
+  with `All & ~Ui`. A header that lists tiers must name `Ui` to get it.
+- **Ai** — `AIService` agents and `TextGenerator`
+  ([NPC_AGENTS.md](../../Assets/CoreAI/Docs/NPC_AGENTS.md)), only when the host game turns AI from Lua on
+  (`CoreAiLuaAiOptions.AllowAgentsFromLua`, off by default). NOT part of `All`.
 A binding absent from your tier simply doesn't exist in the sandbox (calling it errors).
 
 ## Roblox-style signals and scheduling

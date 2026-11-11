@@ -73,8 +73,10 @@ is a stub that raises an error naming the missing grant.
 | `WorldEdit` | `Instance.new` and every other Rbx API mutation — how a mod creates world objects. The classic `coreai_world_spawn`/`coreai_world_change`/`coreai_world_destroy` build functions are **disabled in the default composition** (each name is a stub that errors and points at the Rbx API); only a host that composes its own stack with `LuaCsModStackOptions.RegisterWorldEditBuildBindings = true` registers them |
 | `LogicOverride` | `logic_define/reset/list` |
 | `Full` | reflection (`unity_*`) — **opt-in, off by default** |
+| `Ui` | screens from UXML and USS text (`game:GetService("UxmlService")`) and the Roblox GUI classes (`ScreenGui`, `Frame`, `TextLabel`, ...); part of `All` |
+| `Ai` | `AIService` agents and `TextGenerator`, only when the host game turns AI from Lua on ([NPC_AGENTS.md](NPC_AGENTS.md)); **not part of `All`** |
 
-`LuaCapabilities.All` is every tier **except** `Full`. Full is granted only when the host explicitly
+`LuaCapabilities.All` is every tier **except** `Full` and `Ai`. Full is granted only when the host explicitly
 enables it (see the security note at the end).
 
 The mod APIs — `hooks_on`/`hooks_every`, `store_set`/`store_get`, `print`/`report`, `events_emit`,

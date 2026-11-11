@@ -29,6 +29,12 @@ namespace CoreAI.Tests.PlayMode.RbxApi
         private const int ShotWidth = 640;
         private const int ShotHeight = 360;
 
+        /// <summary>Rows of the grazing sea shot that hold only water: the horizon sits near row 175.</summary>
+        private const int SeaRows = 165;
+
+        /// <summary>The Grass roughness scale before the fix, kept as the glossy reference.</summary>
+        private const float GlossyGrassRoughnessScale = 0.78f;
+
         private readonly List<Object> _owned = new();
         private GameObject _host;
         private RbxTerrain _terrain;
@@ -135,53 +141,161 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             Material leaves = FindMaterial("LeafyGrass");
             Material water = FindMaterial("Water");
             TestContext.WriteLine("[TerrainLook] grass roughness scale " + grass.GetFloat("_RoughnessScale") +
+                                  ", leaves roughness scale " + leaves.GetFloat("_RoughnessScale") +
                                   ", leaves material colour " + leaves.GetColor("_MaterialColor") + ", water bump " +
                                   water.GetFloat("_BumpStrength") + ", water smoothness " + water.GetFloat("_Smoothness"));
 
-            // (a) the field against a low sun in front: glints and shimmer.
+            // (a) the field against a low sun in front, as shipped and with the roughness scale it had before.
             RenderSettings.sun.transform.rotation = Quaternion.Euler(15f, 170f, 0f);
-            Field("default", out float nearShimmer, out float farShimmer, out float nearDetail, out float farDetail);
-            float roughnessScale = grass.GetFloat("_RoughnessScale");
-            grass.SetFloat("_RoughnessScale", 3.2f);
-            Field("rougher", out float nearShimmerRough, out float farShimmerRough, out float nearDetailRough,
-                out float farDetailRough);
-            grass.SetFloat("_RoughnessScale", roughnessScale);
-            TestContext.WriteLine("[TerrainLook] field shimmer near " + nearShimmer + " -> " + nearShimmerRough + ", far " +
-                                  farShimmer + " -> " + farShimmerRough + "; high-frequency near " + nearDetail + " -> " +
-                                  nearDetailRough + ", far " + farDetail + " -> " + farDetailRough);
+            Field("shipped", out float nearShimmer, out float farShimmer, out float nearDetail, out float farDetail);
+            float shippedScale = grass.GetFloat("_RoughnessScale");
+            grass.SetFloat("_RoughnessScale", GlossyGrassRoughnessScale);
+            Field("glossy", out float nearShimmerGlossy, out float farShimmerGlossy, out float nearDetailGlossy,
+                out float farDetailGlossy);
+            grass.SetFloat("_RoughnessScale", shippedScale);
+            TestContext.WriteLine("[TerrainLook] field shimmer near " + nearShimmer + " (glossy " + nearShimmerGlossy +
+                                  "), far " + farShimmer + " (glossy " + farShimmerGlossy + "); high-frequency near " +
+                                  nearDetail + " (glossy " + nearDetailGlossy + "), far " + farDetail + " (glossy " +
+                                  farDetailGlossy + ")");
 
             // (b) the blocks with the sun behind the camera, so the faces that look at it are sunlit.
             RenderSettings.sun.transform.rotation = Quaternion.Euler(25f, 15f, 0f);
             Aim(new RbxVector3(0f, 6f, 8f), new RbxVector3(0f, 2f, -40f));
             RectInt leafFace = ProjectedRect(new RbxVector3(-15f, 1.5f, -19.9f), new RbxVector3(-9f, 6.5f, -19.9f));
             RectInt grassFace = ProjectedRect(new RbxVector3(9f, 1.5f, -19.9f), new RbxVector3(15f, 6.5f, -19.9f));
-            Color[] blocks = Shoot("terrain_blocks_default.png");
-            Color leafColor = leaves.GetColor("_MaterialColor");
-            leaves.SetColor("_MaterialColor", leafColor * 1.6f);
-            Color[] blocksBright = Shoot("terrain_blocks_leaves_x1.6.png");
-            leaves.SetColor("_MaterialColor", leafColor);
-            TestContext.WriteLine("[TerrainLook] sunlit faces: leaves " + Luminance(Mean(blocks, leafFace)) + " grass " +
-                                  Luminance(Mean(blocks, grassFace)) + " | leaves x1.6 " +
-                                  Luminance(Mean(blocksBright, leafFace)) + " | crops " + leafFace + " " + grassFace);
+            Color[] blocks = Shoot("terrain_blocks_sunlit.png");
             RenderSettings.sun.transform.rotation = Quaternion.Euler(25f, 195f, 0f);
             Color[] shaded = Shoot("terrain_blocks_shaded.png");
-            TestContext.WriteLine("[TerrainLook] shaded faces: leaves " + Luminance(Mean(shaded, leafFace)) + " grass " +
-                                  Luminance(Mean(shaded, grassFace)));
+            float sunlitLeaves = Luminance(Mean(blocks, leafFace));
+            float sunlitGrass = Luminance(Mean(blocks, grassFace));
+            float shadedLeaves = Luminance(Mean(shaded, leafFace));
+            float shadedGrass = Luminance(Mean(shaded, grassFace));
+            TestContext.WriteLine("[TerrainLook] sunlit faces: leaves " + sunlitLeaves + " grass " + sunlitGrass +
+                                  " | shaded faces: leaves " + shadedLeaves + " grass " + shadedGrass + " | crops " +
+                                  leafFace + " " + grassFace);
 
-            // (c) the sea over a sand floor from a grazing angle, with and without the wave normals.
+            // (c) the sea over a sand floor from a grazing angle; then the sky's ground hemisphere turned magenta,
+            // which only a reflection ray pointing below the horizon can pick up.
             RenderSettings.sun.transform.rotation = Quaternion.Euler(18f, 120f, 0f);
             Aim(new RbxVector3(0f, 2f, -230f), new RbxVector3(0f, 0f, -450f));
-            RectInt farSea = new(0, ShotHeight / 2 - 40, ShotWidth, 30);
-            RectInt nearSea = new(0, 0, ShotWidth, 60);
-            Color[] sea = Shoot("terrain_sea_grazing.png");
+            RectInt sea = new(0, 0, ShotWidth, SeaRows);
+            RectInt farSea = new(0, SeaRows - 30, ShotWidth, 30);
+            Color[] seaShot = Shoot("terrain_sea_grazing.png");
             float bump = water.GetFloat("_BumpStrength");
             water.SetFloat("_BumpStrength", 0f);
             Color[] flatSea = Shoot("terrain_sea_grazing_flat.png");
             water.SetFloat("_BumpStrength", bump);
-            TestContext.WriteLine("[TerrainLook] sea far band " + Mean(sea, farSea) + " near band " + Mean(sea, nearSea) +
-                                  " | flat water far " + Mean(flatSea, farSea) + " near " + Mean(flatSea, nearSea));
+            Color groundColor = profile.SkyGroundColor;
+            profile.SkyGroundColor = new Color(1f, 0f, 1f, 1f);
+            _applier.Apply(profile, GraphicsOptionsResolver.Resolve(GraphicsOptions.Default, GraphicsQualityPreset.High),
+                LookMode.Apply);
+            for (int frame = 0; frame < 4; frame++)
+            {
+                yield return null;
+            }
+
+            Color[] magentaGround = Shoot("terrain_sea_grazing_magenta_ground.png");
+            profile.SkyGroundColor = groundColor;
             RbxWaterTime.ClearOverride();
-            Assert.Greater(Luminance(Mean(sea, nearSea)), 0.02f, "the sea rendered");
+            float notBlue = Share(seaShot, sea, pixel => pixel.b - pixel.r < 0.08f);
+            float notBlueFar = Share(seaShot, farSea, pixel => pixel.b - pixel.r < 0.08f);
+            float magenta = Share(magentaGround, sea, pixel => pixel.r - pixel.g > 0.1f);
+            TestContext.WriteLine("[TerrainLook] sea grey-or-brown share " + notBlue + " (far band " + notBlueFar +
+                                  "), mean " + Mean(seaShot, sea) + " | flat water mean " + Mean(flatSea, sea) +
+                                  " | magenta share with a magenta sky ground " + magenta);
+
+            Assert.Less(nearShimmer, nearShimmerGlossy * 0.6f,
+                "grass as shipped glitters less when the camera moves than the glossy grass it replaced");
+            Assert.Less(nearShimmer, 0.015f, "a near lawn under a low sun barely changes when the camera moves");
+            Assert.Greater(sunlitLeaves, 0.15f, "a sunlit LeafyGrass face is not dark");
+            Assert.Less(magenta, 0.005f, "no wave reflects the sky's ground hemisphere");
+            Assert.Less(notBlue, 0.03f, "a sea seen from a grazing angle stays blue, without grey or brown blotches");
+        }
+
+        [UnityTest]
+        public IEnumerator AChunkOfThreeMaterials_DrawsEachWithItsOwn_WithTheProjectCatalog()
+        {
+            UsePackagedCatalogOnly(false);
+            yield return ChunkMaterialsAgainstSingleMaterialChunks("project");
+        }
+
+        [UnityTest]
+        public IEnumerator AChunkOfThreeMaterials_DrawsEachWithItsOwn_WithThePackagedCatalog()
+        {
+            yield return ChunkMaterialsAgainstSingleMaterialChunks("packaged");
+        }
+
+        /// <summary>
+        /// Lays WoodPlanks, Grass and Sand side by side in one chunk and the same three strips each alone in
+        /// a chunk of its own, then compares every strip of the shared chunk with its single-material twin
+        /// from straight above.
+        /// </summary>
+        private IEnumerator ChunkMaterialsAgainstSingleMaterialChunks(string label)
+        {
+            string[] names = { "WoodPlanks", "Grass", "Sand" };
+            float[] sharedLeft = { 4f, 24f, 44f };
+            float[] aloneLeft = { 132f, 212f, 276f };
+            for (int index = 0; index < names.Length; index++)
+            {
+                _terrain.FillBlock(RbxCFrame.FromPosition(sharedLeft[index] + 8f, 2f, 32f),
+                    new RbxVector3(16f, 4f, 56f), Slot(names[index]));
+                _terrain.FillBlock(RbxCFrame.FromPosition(aloneLeft[index] + 8f, 2f, 32f),
+                    new RbxVector3(16f, 4f, 56f), Slot(names[index]));
+            }
+
+            for (int frame = 0; frame < 600 && CountChunkRenderers() < 4; frame++)
+            {
+                yield return null;
+            }
+
+            yield return null;
+            RenderSettings.sun.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
+            _camera.orthographic = true;
+            _camera.orthographicSize = (float)(64d * RbxSpace.MetersPerStud * 0.5d);
+            Aim(new RbxVector3(160f, 60f, 32f), new RbxVector3(160f, 0f, 32.001f));
+            _camera.transform.rotation = Quaternion.LookRotation(Vector3.down, Vector3.forward);
+            Color[] shot = Shoot("terrain_chunk_materials_" + label + ".png");
+            List<string> lines = new();
+            float[] distances = new float[names.Length];
+            for (int index = 0; index < names.Length; index++)
+            {
+                Color shared = Mean(shot, StripCrop(sharedLeft[index]));
+                Color alone = Mean(shot, StripCrop(aloneLeft[index]));
+                distances[index] = Mathf.Abs(shared.r - alone.r) + Mathf.Abs(shared.g - alone.g) +
+                                   Mathf.Abs(shared.b - alone.b);
+                lines.Add(names[index] + " shared " + shared + " alone " + alone + " distance " + distances[index]);
+            }
+
+            TestContext.WriteLine("[TerrainLook] chunk materials (" + label + "): " + string.Join(" | ", lines));
+            for (int index = 0; index < names.Length; index++)
+            {
+                Assert.Less(distances[index], 0.08f, names[index] + " in a chunk shared with other materials must " +
+                                                     "draw like it does alone (" + label + " catalog)");
+            }
+
+            Color woodAlone = Mean(shot, StripCrop(aloneLeft[0]));
+            Color grassAlone = Mean(shot, StripCrop(aloneLeft[1]));
+            Assert.Greater(Mathf.Abs(woodAlone.r - grassAlone.r) + Mathf.Abs(woodAlone.g - grassAlone.g) +
+                           Mathf.Abs(woodAlone.b - grassAlone.b), 0.1f, "WoodPlanks and Grass are told apart");
+        }
+
+        private RectInt StripCrop(float leftStuds)
+        {
+            return ProjectedRect(new RbxVector3(leftStuds + 3f, 4f, 10f), new RbxVector3(leftStuds + 13f, 4f, 54f));
+        }
+
+        private int CountChunkRenderers()
+        {
+            int count = 0;
+            foreach (MeshRenderer chunk in _host.GetComponentsInChildren<MeshRenderer>())
+            {
+                if (chunk.enabled && chunk.sharedMaterials.Length > 0)
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         private void Field(string label, out float nearShimmer, out float farShimmer, out float nearDetail,
@@ -314,6 +428,25 @@ namespace CoreAI.Tests.PlayMode.RbxApi
                 Object.Destroy(linear);
                 Object.Destroy(png);
             }
+        }
+
+        private static float Share(Color[] shot, RectInt crop, System.Func<Color, bool> predicate)
+        {
+            int hits = 0;
+            int count = 0;
+            for (int y = crop.yMin; y < crop.yMax; y++)
+            {
+                for (int x = crop.xMin; x < crop.xMax; x++)
+                {
+                    count++;
+                    if (predicate(shot[y * ShotWidth + x]))
+                    {
+                        hits++;
+                    }
+                }
+            }
+
+            return count == 0 ? 0f : (float)hits / count;
         }
 
         private static float MeanAbsoluteDifference(Color[] first, Color[] second, RectInt crop)

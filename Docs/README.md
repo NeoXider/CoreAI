@@ -55,6 +55,7 @@ The Lua surface a mod builds worlds with, and the artifacts it produces:
 | Document | Purpose |
 |---|---|
 | [Assets/CoreAI/Docs/RBX_API.md](../Assets/CoreAI/Docs/RBX_API.md) | User-facing reference: `Instance.new`, datatypes, services, `BasePart.Material`/`MaterialVariant`, `MaterialService`, and `Part.Color`, saving/loading a world, the documented `RemoteFunction` timeout deviation. |
+| [CoreAIMods/PLAY_WORLD.md](CoreAIMods/PLAY_WORLD.md) | The one-click play world: `CoreAI/Setup/Create Play + Create World`, the default controls and camera, the chat commands (`/undo`, `/redo`, `/fly`), instant AI edits and what `/undo` covers and what refuses it. |
 | [CoreAIMods/WORLD_PACKAGE.md](CoreAIMods/WORLD_PACKAGE.md) | The `.world` package format, validation limits, manual slots vs. the autosave ring, the confirm/reject load flow, and runtime session replacement. |
 | [Assets/CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md](../Assets/CoreAIMods/Runtime/RbxApi/Unity/PROCEDURAL_MATERIALS.md) | The procedural shader catalog behind `Enum.Material`: it defines all 45 items and the magenta diagnostic fallback; the packaged texture catalog overrides thirty-six of them at runtime, and the other nine stay procedural. |
 | [Assets/CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md](../Assets/CoreAIMods/Runtime/RbxApi/Unity/TEXTURE_MATERIALS.md) | Catalog-driven texture materials: thirty-six packaged CC0 sets, project-local override catalog for any of the 45 items (ambientCG downloader, Quixel Bridge / Fab importer), projection and tint rules. |

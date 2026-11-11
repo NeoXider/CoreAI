@@ -162,7 +162,7 @@ namespace CoreAI.Tests.EditMode
         [Test]
         public void Store_Written_By_7_56_0_KeepsLoadingFromItsFolders()
         {
-            string root = NewRoot(40);
+            string root = NewRoot(0);
             string modFolder = Path.Combine(root, "Stores", "id-" + Sha256Hex(DemoStoreId), "id-" + Sha256Hex("welcome"));
             Directory.CreateDirectory(modFolder);
             File.WriteAllText(Path.Combine(modFolder, "manifest.json"), @"{
@@ -204,22 +204,23 @@ namespace CoreAI.Tests.EditMode
         public async Task WorldPackageStore_UnderALongRoot_NeverReportsAWriteItCannotReadBack()
         {
             string root = NewRoot(93);
+            string saves = Path.Combine(root, "CoreAI", "Saves");
             FileRbxWorldPackageStore store = new(
-                Path.Combine(root, "CoreAI", "Saves"),
+                saves,
                 persistenceSyncAsync: _ => UniTask.FromResult(true),
                 startupNamespace: DemoStoreId);
             RbxWorldPackagePayload payload = WorldPackageGuiWorld.WithHud("worldpkg-long-root")
                 .Capture(new DateTime(2026, 11, 11, 18, 0, 0, DateTimeKind.Utc));
 
             RbxWorldPackageWriteResult autosave = await store.CreateAutoAsync("execute_lua", payload);
-            RbxWorldPackageWriteResult startup = await store.SelectStartupAsync(
-                payload, RbxWorldStartupSourceKind.Manual, "long", default);
+            RbxWorldPackageWriteResult startup = await store.SelectStartupAsync(payload, "manual", "long");
 
             if (autosave.Success)
             {
                 IReadOnlyList<RbxAutoSaveInfo> autosaves = store.ListAutoSaves();
                 Assert.AreEqual(1, autosaves.Count);
-                Assert.IsNotNull(await store.LoadAutoAsync(autosaves[0].FileName));
+                Assert.IsNotNull(RbxWorldPackageSerializer.ReadPackage(
+                    File.ReadAllBytes(Path.Combine(saves, "Auto", autosaves[0].FileName))));
             }
             else
             {
@@ -228,7 +229,9 @@ namespace CoreAI.Tests.EditMode
 
             if (startup.Success)
             {
-                Assert.IsNotNull(await store.ReadStartupAsync(default));
+                string[] selected = Directory.GetFiles(store.StartupDirectoryForTests, "*.world");
+                Assert.AreEqual(1, selected.Length);
+                Assert.IsNotNull(RbxWorldPackageSerializer.ReadPackage(File.ReadAllBytes(selected[0])));
             }
             else
             {
@@ -236,12 +239,17 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
-        /// <summary>A fresh directory whose full path is exactly <paramref name="length"/> characters (or longer when the temporary folder is).</summary>
+        /// <summary>
+        /// A fresh directory whose full path is exactly <paramref name="length"/> characters, or a plain temporary one
+        /// for 0; ignores the test when the temporary folder itself is too long for a short root.
+        /// </summary>
         private string NewRoot(int length)
         {
             string parent = Path.Combine(Path.GetTempPath(), "CoreAI-Root-" + Guid.NewGuid().ToString("N").Substring(0, 8));
-            string root = parent.Length + 1 < length ? Path.Combine(parent, new string('r', length - parent.Length - 1)) : parent;
-            if (root.Length > length && length < 93)
+            string root = length > 0 && parent.Length + 1 < length
+                ? Path.Combine(parent, new string('r', length - parent.Length - 1))
+                : parent;
+            if (length > 0 && root.Length > length && length < 93)
             {
                 Assert.Ignore("the temporary folder '" + Path.GetTempPath() + "' is too long for a short-root twin");
             }

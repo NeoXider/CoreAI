@@ -27,7 +27,8 @@ Scene: `LuaModsDemo.unity`. No LLM is required; the demo shows the runtime used 
   frame and shows which formula is active: Lua override or C# default.
 - **`Lua and World Commands` child module** (`CoreAiLuaWorldModule`) owns the scene's prefab
   whitelist; the Lua access tier (no Full) and the isolated mod store (`storeId = lua-mods-demo`) are
-  set on the scene's `CoreAiModsLifetimeScope`.
+  set on the scene's `CoreAiModsLifetimeScope`. Every tier, `Ui` (screens) and `Ai` (AI from Lua) included,
+  is listed in [LUA_ACCESS_MODES.md](../../CoreAI/Docs/LUA_ACCESS_MODES.md).
 
 ## How to Use It
 

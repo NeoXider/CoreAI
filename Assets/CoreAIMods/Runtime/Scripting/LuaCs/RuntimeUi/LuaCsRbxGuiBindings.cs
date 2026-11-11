@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Adornments;
 using CoreAI.Mods.Rbx.Instances.RuntimeUi;
+using CoreAI.Mods.Rbx.Instances.TextChat;
 using Lua;
 using static CoreAI.Ai.LuaCs.LuaCsRbxLua;
 
@@ -14,7 +16,8 @@ namespace CoreAI.Ai.LuaCs
     /// <c>ScrollingFrame</c>, the <c>UI*</c> modifiers, <c>StarterGui</c> and <c>PlayerGui</c>. This layer only
     /// marshals values through one data-driven member table; the property rules live in the engine-free GUI
     /// classes and the drawing in <see cref="RbxGuiPresenter"/>. Creating a GUI object needs the <c>Ui</c>
-    /// capability, like a <c>UxmlService</c> screen.
+    /// capability, like a <c>UxmlService</c> screen. The same table answers the small classes outside the classic
+    /// dispatch: <c>TextChatService</c>, <c>TextChatCommand</c> and <c>TextSource</c>.
     /// </summary>
     internal static class LuaCsRbxGuiBindings
     {
@@ -28,7 +31,8 @@ namespace CoreAI.Ai.LuaCs
             UDim,
             UDim2,
             Vector2,
-            Enum
+            Enum,
+            Instance
         }
 
         private sealed class Property
@@ -68,6 +72,8 @@ namespace CoreAI.Ai.LuaCs
             public Action<RbxInstance, RbxUDim2> SetUDim2;
             public Func<RbxInstance, RbxVector2> GetVector2;
             public Action<RbxInstance, RbxVector2> SetVector2;
+            public Func<RbxInstance, RbxInstance> GetInstance;
+            public Action<RbxInstance, RbxInstance> SetInstance;
         }
 
         private static readonly Dictionary<string, Dictionary<string, Property>> Declared =
@@ -80,7 +86,8 @@ namespace CoreAI.Ai.LuaCs
         private static readonly (string ClassName, string Event)[] Events =
         {
             ("GuiObject", "MouseEnter"), ("GuiObject", "MouseLeave"), ("GuiButton", "MouseButton1Click"),
-            ("GuiButton", "Activated"), ("TextBox", "Focused"), ("TextBox", "FocusLost")
+            ("GuiButton", "Activated"), ("TextBox", "Focused"), ("TextBox", "FocusLost"),
+            ("TextChatCommand", "Triggered")
         };
 
         /// <summary>The methods the GUI classes answer, by declaring class.</summary>
@@ -142,12 +149,16 @@ namespace CoreAI.Ai.LuaCs
             DeclareScrolling();
             DeclareComponents();
             DeclareContainers();
+            DeclareTextChat();
+            DeclareAdornments();
         }
 
         /// <summary>True for the instances whose members this table answers.</summary>
         public static bool IsGuiInstance(RbxInstance instance)
         {
-            return instance is RbxGuiBase2d || instance is RbxUiBase || instance is RbxBasePlayerGui;
+            return instance is RbxGuiBase2d || instance is RbxUiBase || instance is RbxBasePlayerGui
+                   || instance is RbxTextChatCommand || instance is RbxTextChatService || instance is RbxTextSource
+                   || instance is RbxGuiBase3d;
         }
 
         /// <summary>
@@ -190,6 +201,9 @@ namespace CoreAI.Ai.LuaCs
                 case "FocusLost" when self is RbxTextBox lost:
                     value = LuaCsRbxDatatypeBindings.Wrap(lost.FocusLost, context);
                     return true;
+                case "Triggered" when self is RbxTextChatCommand command:
+                    value = LuaCsRbxDatatypeBindings.Wrap(command.Triggered, context);
+                    return true;
                 case "CaptureFocus" when self is RbxTextBox:
                     value = CaptureFocusFn;
                     return true;
@@ -226,7 +240,8 @@ namespace CoreAI.Ai.LuaCs
             {
                 throw RbxError.BadArgument(
                     "Unable to assign property " + key + ". Property is read only",
-                    "read " + self.ClassName + "." + key + " instead; the layout sets it");
+                    "read " + self.ClassName + "." + key + " instead; "
+                    + (self is RbxGuiBase2d ? "the layout sets it" : "scripts cannot set it"));
             }
 
             context.RequireWorldEditForWrite(self, key);
@@ -244,7 +259,8 @@ namespace CoreAI.Ai.LuaCs
                 return;
             }
 
-            if ((catalog.IsA(className, "GuiBase") || catalog.IsA(className, "UIBase"))
+            // WHY GuiBase2d and not GuiBase: a 3D adornment (SelectionBox) is drawn in the world, not on the UI layer.
+            if ((catalog.IsA(className, "GuiBase2d") || catalog.IsA(className, "UIBase"))
                 && (context.Capabilities & LuaCapabilities.Ui) == 0)
             {
                 throw RbxUiErrors.MissingCapability("Instance.new(\"" + className + "\")");
@@ -467,6 +483,8 @@ namespace CoreAI.Ai.LuaCs
                     return LuaCsRbxDatatypeBindings.Wrap(property.GetUDim2(self));
                 case Kind.Vector2:
                     return LuaCsRbxDatatypeBindings.Wrap(property.GetVector2(self));
+                case Kind.Instance:
+                    return context.WrapInstance(property.GetInstance(self));
                 case Kind.Enum:
                     RbxEnumRegistry enums = context.Bindings.Enums;
                     if (enums.TryGet(property.EnumName, out RbxEnum enumType)
@@ -523,6 +541,20 @@ namespace CoreAI.Ai.LuaCs
                     RbxEnumItem item = ReadAssignedEnumItem(value, context.Bindings.Enums, property.EnumName, owner,
                         property.Name);
                     property.SetInt(self, item.Value);
+                    return;
+                case Kind.Instance:
+                    if (value.Type == LuaValueType.Nil)
+                    {
+                        property.SetInstance(self, null);
+                        return;
+                    }
+
+                    if (!TryGetInstance(value, out LuaCsRbxInstanceProxy proxy))
+                    {
+                        throw PropertyAssignmentError(owner, property.Name, "an Instance or nil", value);
+                    }
+
+                    property.SetInstance(self, proxy.Instance);
                     return;
             }
         }
@@ -658,6 +690,8 @@ namespace CoreAI.Ai.LuaCs
                     return "UDim2";
                 case Kind.Vector2:
                     return "Vector2";
+                case Kind.Instance:
+                    return "Instance";
                 default:
                     return "EnumItem";
             }
@@ -741,6 +775,14 @@ namespace CoreAI.Ai.LuaCs
             Property property = Add(className, name, Kind.Vector2, readOnly: set == null);
             property.GetVector2 = get;
             property.SetVector2 = set;
+        }
+
+        private static void Reference(string className, string name, Func<RbxInstance, RbxInstance> get,
+            Action<RbxInstance, RbxInstance> set)
+        {
+            Property property = Add(className, name, Kind.Instance, readOnly: set == null);
+            property.GetInstance = get;
+            property.SetInstance = set;
         }
 
         private static void EnumItem(string className, string name, string enumName, Func<RbxInstance, int> get,
@@ -1005,6 +1047,41 @@ namespace CoreAI.Ai.LuaCs
                 (s, v) => ((RbxStarterGui)s).SetShowDevelopmentGui(v));
             EnumItem("StarterGui", "ScreenOrientation", "ScreenOrientation", s => ((RbxStarterGui)s).ScreenOrientation,
                 (s, v) => ((RbxStarterGui)s).SetScreenOrientation(v));
+        }
+
+        private static void DeclareAdornments()
+        {
+            Color("GuiBase3d", "Color3", s => ((RbxGuiBase3d)s).Color3, (s, v) => ((RbxGuiBase3d)s).Color3 = v);
+            Number("GuiBase3d", "Transparency", s => ((RbxGuiBase3d)s).Transparency,
+                (s, v) => ((RbxGuiBase3d)s).Transparency = (float)v);
+            Bool("GuiBase3d", "Visible", s => ((RbxGuiBase3d)s).Visible, (s, v) => ((RbxGuiBase3d)s).Visible = v);
+            Reference("InstanceAdornment", "Adornee", s => ((RbxInstanceAdornment)s).Adornee,
+                (s, v) => ((RbxInstanceAdornment)s).Adornee = v);
+            Number("SelectionBox", "LineThickness", s => ((RbxSelectionBox)s).LineThickness,
+                (s, v) => ((RbxSelectionBox)s).LineThickness = (float)v);
+            Color("SelectionBox", "SurfaceColor3", s => ((RbxSelectionBox)s).SurfaceColor3,
+                (s, v) => ((RbxSelectionBox)s).SurfaceColor3 = v);
+            Number("SelectionBox", "SurfaceTransparency", s => ((RbxSelectionBox)s).SurfaceTransparency,
+                (s, v) => ((RbxSelectionBox)s).SurfaceTransparency = (float)v);
+        }
+
+        private static void DeclareTextChat()
+        {
+            Text("TextChatCommand", "PrimaryAlias", s => ((RbxTextChatCommand)s).PrimaryAlias,
+                (s, v) => ((RbxTextChatCommand)s).PrimaryAlias = v);
+            Text("TextChatCommand", "SecondaryAlias", s => ((RbxTextChatCommand)s).SecondaryAlias,
+                (s, v) => ((RbxTextChatCommand)s).SecondaryAlias = v);
+            Bool("TextChatCommand", "Enabled", s => ((RbxTextChatCommand)s).Enabled,
+                (s, v) => ((RbxTextChatCommand)s).Enabled = v);
+            Bool("TextChatCommand", "AutocompleteVisible", s => ((RbxTextChatCommand)s).AutocompleteVisible,
+                (s, v) => ((RbxTextChatCommand)s).AutocompleteVisible = v);
+            Number("TextSource", "UserId", s => ((RbxTextSource)s).UserId, null);
+            Bool("TextSource", "CanSend", s => ((RbxTextSource)s).CanSend, (s, v) => ((RbxTextSource)s).CanSend = v);
+            // WHY read-only: TextChatService.yaml gives these three RobloxScriptSecurity or PluginSecurity writes.
+            EnumItem("TextChatService", "ChatVersion", "ChatVersion", s => ((RbxTextChatService)s).ChatVersion, null);
+            Bool("TextChatService", "CreateDefaultCommands", s => ((RbxTextChatService)s).CreateDefaultCommands, null);
+            Bool("TextChatService", "CreateDefaultTextChannels",
+                s => ((RbxTextChatService)s).CreateDefaultTextChannels, null);
         }
     }
 }

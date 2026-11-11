@@ -180,6 +180,18 @@ namespace CoreAI.Mods.Rbx.Instances
         void SetNoclip(bool noclip)
         {
         }
+
+        /// <summary>
+        /// Mirror <c>Humanoid.AutoRotate</c>: while true the motor turns the character to face the direction it
+        /// walks or flies in; false leaves its rotation to scripts.
+        /// </summary>
+        /// <remarks>
+        /// WHY a default that ignores it: added after the seam shipped, so a host motor that predates it keeps
+        /// compiling and keeps turning (or not) the way it always did.
+        /// </remarks>
+        void SetAutoRotate(bool autoRotate)
+        {
+        }
     }
 
     /// <summary>A motor for a world with no character: it stands still and never lands.</summary>
@@ -359,6 +371,7 @@ namespace CoreAI.Mods.Rbx.Instances
         private double _jumpPower = DefaultJumpPower;
         private double _jumpHeight = DefaultJumpHeight;
         private bool _useJumpPower = true;
+        private bool _autoRotate = true;
         private string _displayName = "";
         private bool _died;
         private RbxHumanoidState _state = RbxHumanoidState.Running;
@@ -528,6 +541,27 @@ namespace CoreAI.Mods.Rbx.Instances
         }
 
         /// <summary>
+        /// Mirror <c>Humanoid.AutoRotate</c> (default true): the character turns to face the direction it moves
+        /// in. False leaves the root part's rotation to scripts. Pushed to the motor
+        /// (<see cref="IRbxCharacterMotor.SetAutoRotate"/>) now and on every attach.
+        /// </summary>
+        public bool AutoRotate
+        {
+            get => _autoRotate;
+            set
+            {
+                if (_autoRotate == value)
+                {
+                    return;
+                }
+
+                _autoRotate = value;
+                _motor.SetAutoRotate(value);
+                NotifyPropertyChanged(nameof(AutoRotate));
+            }
+        }
+
+        /// <summary>
         /// Mirror <c>Humanoid.MoveDirection</c>: read-only, from the motor. The motor moves it
         /// continuously, so its change is sampled once per Heartbeat: a direction that differs from
         /// the last one reported by more than <see cref="MoveDirectionResolution"/> fires
@@ -573,6 +607,7 @@ namespace CoreAI.Mods.Rbx.Instances
             _motor = motor ?? NullRbxCharacterMotor.Instance;
             RootPart = rootPart;
             _motor.SetWalkSpeed(_walkSpeed);
+            _motor.SetAutoRotate(_autoRotate);
             if (_walkTarget.HasValue)
             {
                 _motor.MoveTo(_walkTarget);
@@ -844,7 +879,7 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>
         /// Clone carries the Humanoid's scripted state (R6.5): MaxHealth, Health, WalkSpeed,
-        /// JumpPower, JumpHeight, UseJumpPower and DisplayName. Silent, like every clone copy — no
+        /// JumpPower, JumpHeight, UseJumpPower, AutoRotate and DisplayName. Silent, like every clone copy — no
         /// Changed, no HealthChanged, no revision.
         /// </summary>
         /// <remarks>
@@ -871,8 +906,10 @@ namespace CoreAI.Mods.Rbx.Instances
             humanoidCopy._jumpPower = _jumpPower;
             humanoidCopy._jumpHeight = _jumpHeight;
             humanoidCopy._useJumpPower = _useJumpPower;
+            humanoidCopy._autoRotate = _autoRotate;
             humanoidCopy._displayName = _displayName;
             humanoidCopy._motor.SetWalkSpeed(humanoidCopy._walkSpeed);
+            humanoidCopy._motor.SetAutoRotate(humanoidCopy._autoRotate);
         }
 
         private void BindSignals(ModScheduler scheduler)

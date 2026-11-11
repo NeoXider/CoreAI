@@ -170,7 +170,8 @@ Shader "CoreAI/Rbx/Water"
                 surfaceData.smoothness = (half)saturate(_Smoothness);
                 surfaceData.normalTS = half3(0.0h, 0.0h, 1.0h);
                 surfaceData.emission = half3(0.0h, 0.0h, 0.0h);
-                surfaceData.occlusion = 1.0h;
+                // WHY zero: URP's own indirect light is replaced below, so it must not be added twice.
+                surfaceData.occlusion = 0.0h;
                 surfaceData.alpha = 1.0h;
 
                 InputData inputData = (InputData)0;
@@ -185,9 +186,23 @@ Shader "CoreAI/Rbx/Water"
                 inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
                 inputData.shadowMask = half4(1.0h, 1.0h, 1.0h, 1.0h);
 
-                // WHY: this is only the reflected part (sky, probes, sun glint); URP already weights the
-                // environment reflection by its own Fresnel term, so it is added, not blended.
+                // WHY: this is only the reflected part (sky, probes, sun glint); the environment term
+                // carries its own Fresnel weight, so it is added, not blended.
                 half3 surface = UniversalFragmentPBR(inputData, surfaceData).rgb;
+                BRDFData brdfData;
+                InitializeBRDFData(surfaceData, brdfData);
+                // WHY: a wave tilted towards a low camera reflects a ray that points below the horizon, and
+                // the sky cubemap answers it with the procedural sky's ground colour: a sea seen from a
+                // grazing angle turned into brown blotches ringed by the white horizon. Such a ray would hit
+                // the next wave, which mirrors the sky at a grazing angle, so it is lifted to the horizon.
+                // The Fresnel weight still uses the wave normal.
+                float3 reflectVector = reflect(-viewDirectionWS, normalWS);
+                reflectVector = SafeNormalize(reflectVector
+                    - min(dot(reflectVector, geometricNormalWS), 0.0) * geometricNormalWS);
+                half3 environment = GlossyEnvironmentReflection((half3)reflectVector, input.positionWS,
+                    brdfData.perceptualRoughness, 1.0h, inputData.normalizedScreenSpaceUV);
+                half environmentFresnel = Pow4(1.0h - saturate(dot(normalWS, (float3)viewDirectionWS)));
+                surface += EnvironmentBRDF(brdfData, inputData.bakedGI, environment, environmentFresnel);
                 half3 color;
                 half alpha;
 
