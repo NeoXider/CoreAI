@@ -2187,9 +2187,9 @@ against the providers.
     "a watchtower here" lands at the crosshair, then `/undo` (P3) takes it back.
   - **Villagers made by the mod**: the mod creates each villager as an agent through `AIService` (P12)
     with a name, a persona and its own memory; talking to one happens in the in-world chat and in a
-    bubble over its head. `/autopilot` hands the local Humanoid to the decision model (P13). The `Ai`
-    capability is switched on by this demo's preset; with no model configured the villagers stay silent
-    and say why.
+    bubble over its head. `/autopilot` hands the local Humanoid to the decision model (P13). The demo is
+    a game whose framework settings turn agents from Lua on; with no model configured the villagers stay
+    silent and say why.
   - **Procedural world**: the mod generates the terrain from a seed with `math.noise` — hills, a water
     level, sand at the shore, stone below, trees — in budgeted steps around the player through
     `Terrain:WriteVoxels`, so the first area appears at once and the rest streams in without a hitch;
@@ -2220,7 +2220,8 @@ against the providers.
   - Advancing `ClockTime` from noon to midnight darkens a masked ground crop, and a placed torch lights a
     masked wall crop at night (twin: with the torch removed the crop is dark).
   - A villager created by the mod answers the player by name, through a scripted model in PM and a real
-    one in MS; with the `Ai` capability off the same call is refused with a capability error (twin).
+    one in MS; with the framework setting off the same call is refused with an error naming the setting
+    (twin).
   - The G11 list and the smoke test name the scene; the WebGL capture runs at ≥30 fps on the reference
     machine (target, recorded).
 - **Reuses**: P1 (controls, fly, camera), P2 (chat and HUD), P3 (preset, `/undo`), P4 (Terrain), the
@@ -2940,8 +2941,9 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
 ### P12 — Gameplay LLM API and talking NPCs (L; stage 1 M) *(new 2026-11-11)*
 
 - **Order (2026-11-11, owner)**: both stages are M1. Agents are created from Lua, so the Block world's
-  villagers are made by its mod. The `Ai` capability that allows it is off by default for every game and
-  switched on by a game's preset; the Block world switches it on.
+  villagers are made by its mod. The switch is a framework setting of the host game, off by default.
+  When the game turns it on, agents from Lua work in every world of that game; a world has no switch of
+  its own. The Block world demo is a game that turns it on.
 - **Goal**: NPCs in the block world talk like people — they answer when addressed, remember the player,
   speak in the in-world chat feed and over their heads, and never stall the game. Stage 2 lets a mod call
   a model as game logic through Roblox's own `TextGenerator` shape, so a Roblox NPC script runs here.
@@ -3011,9 +3013,10 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
       unchanged.
     - **Agents from Lua**: `AIService:CreateAgent` takes a name, a persona, a memory scope, addressing
       rules and budgets, and returns an agent the mod talks to and listens to. It wraps the stage-1
-      `NpcAgent` block, so a villager is created entirely by a mod. The `Ai` capability is off by default
-      for every game; a game's preset switches it on, and a mod that asks for it without the switch gets
-      a capability error.
+      `NpcAgent` block, so a villager is created entirely by a mod. The switch lives in the framework
+      settings of the host game and is off by default; when it is on, every world of that game has
+      agents from Lua, with no per-world setting. With it off the call fails with an error that names
+      the setting.
     - CoreAI-only `AIService` for what Roblox has no shape for (agent with tools, decisions from P13,
       cancellation): the `Ai = 1<<5` capability bit excluded from `All`, origin tags `ai:<modId>` on
       anything an AI call creates, per-mod quotas and budget trips, flagged for the MVP13/MVP14 export

@@ -36,8 +36,8 @@ open work is filed in `TODO.md` under "Plan of record 2026-11-11".
    - play: P1 (controls, camera, fly) → P2 (in-world chat) → P4 (voxel Terrain) → P6 (the demo), with P3
      (the edit loop) alongside;
    - look: P7 (default look, Hub Graphics page) → P8 stage 1 (Plastic detail, water, glass);
-   - harness: P11 stage 1, then P12 (talking NPCs and agents created from Lua behind an opt-in `Ai`
-     capability) and P13 (decision models, local `d1-2B` through a `llama-server` sidecar);
+   - harness: P11 stage 1, then P12 (talking NPCs and agents created from Lua, behind a framework
+     setting of the host game that is off by default) and P13 (decision models, local `d1-2B` through a `llama-server` sidecar);
    - demo content: procedural generation, day and night, torches and mod-made villagers, which pull
      the day-cycle slice of P9 and the Luau math slice of MVP13 (`math.noise`) into M1;
    - interface: P18 — the interpreter and host first, the Lua surface after P1's input-focus port;

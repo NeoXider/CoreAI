@@ -291,11 +291,11 @@ UI from Lua (P18) and performance (P19):
 
 Block world content the owner asked for (P6, with slices of P9, P12 and MVP13):
 
-- [ ] **Agents from Lua behind an opt-in `Ai` capability (P12).** *Owner:* Rbx API + agents. *Plan:* a
-      design note fixes `AIService:CreateAgent` (name, persona, memory scope, addressing rules, budgets)
-      and the Roblox-shaped `TextGenerator`; `Ai` is off by default for every game and switched on by a
-      preset; the stage-1 `NpcAgent` block is the engine underneath; refusal without the capability has
-      its twin test.
+- [ ] **Agents from Lua behind a framework setting (P12).** *Owner:* Rbx API + agents. *Plan:* a design
+      note fixes `AIService:CreateAgent` (name, persona, memory scope, addressing rules, budgets) and the
+      Roblox-shaped `TextGenerator`; the switch is a framework setting of the host game, off by default,
+      and when it is on it applies to every world with no per-world switch; the stage-1 `NpcAgent` block
+      is the engine underneath; the refusal with the setting off has its twin test.
 - [ ] **Day-cycle slice of the Lighting API (P9).** *Owner:* Rbx API + rendering. *Plan:* `ClockTime`,
       `TimeOfDay`, `GeographicLatitude`, `Brightness`, `Ambient`, `OutdoorAmbient` over the P7 look
       applier, and `PointLight` with a documented light budget per tier; the rest of P9 stays M2.
